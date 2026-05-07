@@ -44,9 +44,13 @@
     // UMAP projection
     type Point = { id: string; x: number; y: number; cluster: number };
     let points = $state<Point[]>([]);
-    let clusters = $state<{ label: string; count: number; color: string }[]>([]);
+    let clusters = $state<{ id: number; label: string; count: number; color: string; previewPaths: string[] }[]>([]);
     let hoveredPoint = $state<Point | null>(null);
     let selectedPoint = $state<Point | null>(null);
+    let highlightedCluster = $state<number | null>(null);
+
+    // Thumbnail images for scatter
+    let thumbnailImages: Map<string, HTMLImageElement> = new Map();
 
     // Canvas interaction
     let canvas: HTMLCanvasElement;
@@ -222,6 +226,74 @@
         }
     }
 
+    function preloadThumbnails() {
+        thumbnailImages.clear();
+        for (const point of points) {
+            const img = imageMap.get(point.id);
+            if (!img?.thumbnail_path) continue;
+            const el = new Image();
+            el.src = convertFileSrc(img.thumbnail_path);
+            el.onload = () => {
+                thumbnailImages.set(point.id, el);
+                requestDraw();
+            };
+        }
+    }
+
+    function nameCluster(clusterPoints: Point[]): string {
+        const folderCounts: Map<string, number> = new Map();
+        for (const p of clusterPoints) {
+            const img = imageMap.get(p.id);
+            if (!img) continue;
+            const parts = img.path.split('/');
+            const folder = parts.length >= 2 ? parts[parts.length - 2] : 'unknown';
+            folderCounts.set(folder, (folderCounts.get(folder) || 0) + 1);
+        }
+        let best = 'cluster';
+        let bestCount = 0;
+        for (const [name, count] of folderCounts) {
+            if (count > bestCount) { best = name; bestCount = count; }
+        }
+        return best;
+    }
+
+    function getClusterPreviewPaths(clusterPoints: Point[]): string[] {
+        const paths: string[] = [];
+        for (const p of clusterPoints) {
+            if (paths.length >= 4) break;
+            const img = imageMap.get(p.id);
+            if (img?.thumbnail_path) {
+                paths.push(img.thumbnail_path);
+            }
+        }
+        return paths;
+    }
+
+    function focusCluster(clusterId: number) {
+        highlightedCluster = highlightedCluster === clusterId ? null : clusterId;
+        if (highlightedCluster !== null) {
+            // Pan/zoom to fit the cluster
+            const clusterPts = points.filter(p => p.cluster === clusterId);
+            if (clusterPts.length > 0) {
+                const xs = clusterPts.map(p => p.x);
+                const ys = clusterPts.map(p => p.y);
+                const minX = Math.min(...xs);
+                const maxX = Math.max(...xs);
+                const minY = Math.min(...ys);
+                const maxY = Math.max(...ys);
+                const rangeX = maxX - minX || 1;
+                const rangeY = maxY - minY || 1;
+                const padding = 80;
+                const scaleX = (canvasWidth - padding * 2) / rangeX;
+                const scaleY = (canvasHeight - padding * 2) / rangeY;
+                scale = Math.min(scaleX, scaleY);
+                panX = canvasWidth / 2 - ((minX + maxX) / 2) * scale;
+                panY = canvasHeight / 2 - ((minY + maxY) / 2) * scale;
+            }
+        }
+        requestDraw();
+    }
+
     async function loadProjection() {
         try {
             const modelName = selectedProvider === 'gemini' ? 'gemini-embedding-2' : undefined;
@@ -258,21 +330,26 @@
 
             points = newPoints;
 
-            // Build cluster info
-            const clusterCounts = new Map<number, number>();
+            // Build cluster info with named labels and preview thumbnails
+            const clusterGroups = new Map<number, Point[]>();
             for (const p of newPoints) {
-                clusterCounts.set(p.cluster, (clusterCounts.get(p.cluster) || 0) + 1);
+                if (!clusterGroups.has(p.cluster)) clusterGroups.set(p.cluster, []);
+                clusterGroups.get(p.cluster)!.push(p);
             }
-            clusters = Array.from(clusterCounts.entries())
-                .sort((a, b) => b[1] - a[1])
-                .map(([idx, count], i) => ({
-                    label: `Cluster ${idx + 1}`,
-                    count,
+            clusters = Array.from(clusterGroups.entries())
+                .sort((a, b) => b[1].length - a[1].length)
+                .map(([idx, pts]) => ({
+                    id: idx,
+                    label: nameCluster(pts),
+                    count: pts.length,
                     color: CLUSTER_COLORS[idx % CLUSTER_COLORS.length],
+                    previewPaths: getClusterPreviewPaths(pts),
                 }));
 
             // Auto-fit view
+            highlightedCluster = null;
             fitView();
+            preloadThumbnails();
             requestDraw();
         } catch (e) {
             console.error('Failed to load projection:', e);
@@ -362,35 +439,112 @@
 
         ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
+        // Compute thumbnail size based on zoom level
+        const baseThumbSize = Math.max(8, Math.min(60, 20 * Math.sqrt(scale)));
+        const useThumb = baseThumbSize >= 6;
+
         // Draw points
-        const radius = Math.max(3, Math.min(8, 6 / Math.sqrt(scale)));
+        const margin = baseThumbSize + 10;
         for (const p of points) {
             const [sx, sy] = worldToScreen(p.x, p.y);
-            if (sx < -20 || sx > canvasWidth + 20 || sy < -20 || sy > canvasHeight + 20) continue;
+            if (sx < -margin || sx > canvasWidth + margin || sy < -margin || sy > canvasHeight + margin) continue;
 
-            ctx.beginPath();
-            ctx.arc(sx, sy, radius, 0, Math.PI * 2);
             const color = CLUSTER_COLORS[p.cluster % CLUSTER_COLORS.length];
+            const isSelected = selectedPoint && selectedPoint.id === p.id;
+            const isHovered = hoveredPoint && hoveredPoint.id === p.id;
+            const isDimmed = highlightedCluster !== null && p.cluster !== highlightedCluster;
 
-            if (selectedPoint && selectedPoint.id === p.id) {
-                ctx.fillStyle = '#ffffff';
-                ctx.strokeStyle = color;
-                ctx.lineWidth = 2;
-                ctx.fill();
-                ctx.stroke();
-            } else if (hoveredPoint && hoveredPoint.id === p.id) {
-                ctx.fillStyle = color;
-                ctx.globalAlpha = 1;
-                ctx.fill();
-                ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = 1.5;
-                ctx.stroke();
-            } else {
-                ctx.fillStyle = color;
-                ctx.globalAlpha = 0.7;
-                ctx.fill();
+            ctx.save();
+
+            if (isDimmed) {
+                ctx.globalAlpha = 0.15;
+            } else if (!isSelected && !isHovered) {
+                ctx.globalAlpha = 0.85;
             }
-            ctx.globalAlpha = 1;
+
+            const thumbEl = useThumb ? thumbnailImages.get(p.id) : undefined;
+
+            if (thumbEl && thumbEl.complete && thumbEl.naturalWidth > 0) {
+                const thumbSize = baseThumbSize;
+                const half = thumbSize / 2;
+
+                // Border
+                if (isSelected) {
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 2.5;
+                    ctx.strokeRect(sx - half - 1, sy - half - 1, thumbSize + 2, thumbSize + 2);
+                } else if (isHovered) {
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 1.5;
+                    ctx.strokeRect(sx - half - 1, sy - half - 1, thumbSize + 2, thumbSize + 2);
+                } else {
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(sx - half, sy - half, thumbSize, thumbSize);
+                }
+
+                ctx.drawImage(thumbEl, sx - half, sy - half, thumbSize, thumbSize);
+            } else {
+                // Fallback to colored dot
+                const radius = Math.max(3, Math.min(8, 6 / Math.sqrt(scale)));
+                ctx.beginPath();
+                ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+                if (isSelected) {
+                    ctx.fillStyle = '#ffffff';
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 2;
+                    ctx.fill();
+                    ctx.stroke();
+                } else if (isHovered) {
+                    ctx.fillStyle = color;
+                    ctx.fill();
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                } else {
+                    ctx.fillStyle = color;
+                    ctx.fill();
+                }
+            }
+
+            ctx.restore();
+        }
+
+        // Draw cluster labels at centroid when zoomed out enough
+        if (highlightedCluster === null && scale < 5) {
+            ctx.save();
+            ctx.font = 'bold 11px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            for (const cluster of clusters) {
+                const clusterPts = points.filter(p => p.cluster === cluster.id);
+                if (clusterPts.length === 0) continue;
+                const cx = clusterPts.reduce((s, p) => s + p.x, 0) / clusterPts.length;
+                const cy = clusterPts.reduce((s, p) => s + p.y, 0) / clusterPts.length;
+                const [sx, sy] = worldToScreen(cx, cy);
+                // Background pill
+                const text = cluster.label;
+                const tw = ctx.measureText(text).width;
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                ctx.beginPath();
+                const pillX = sx - tw / 2 - 6;
+                const pillY = sy - baseThumbSize / 2 - 22;
+                const pillW = tw + 12;
+                const pillH = 18;
+                const r = 4;
+                ctx.moveTo(pillX + r, pillY);
+                ctx.lineTo(pillX + pillW - r, pillY);
+                ctx.quadraticCurveTo(pillX + pillW, pillY, pillX + pillW, pillY + r);
+                ctx.lineTo(pillX + pillW, pillY + pillH - r);
+                ctx.quadraticCurveTo(pillX + pillW, pillY + pillH, pillX + pillW - r, pillY + pillH);
+                ctx.lineTo(pillX + r, pillY + pillH);
+                ctx.quadraticCurveTo(pillX, pillY + pillH, pillX, pillY + pillH - r);
+                ctx.lineTo(pillX, pillY + r);
+                ctx.quadraticCurveTo(pillX, pillY, pillX + r, pillY);
+                ctx.fill();
+                ctx.fillStyle = cluster.color;
+                ctx.fillText(text, sx, pillY + 13);
+            }
+            ctx.restore();
         }
 
         // Draw hover tooltip
@@ -444,18 +598,17 @@
             return;
         }
 
-        // Hit test
+        // Hit test - use thumbnail size for hit area when thumbnails are visible
         const rect = canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
-        const hitRadius = Math.max(6, 10 / Math.sqrt(scale));
+        const thumbSize = Math.max(8, Math.min(60, 20 * Math.sqrt(scale)));
+        const hitHalf = Math.max(6, thumbSize / 2);
 
         let found: Point | null = null;
         for (const p of points) {
             const [sx, sy] = worldToScreen(p.x, p.y);
-            const dx = mx - sx;
-            const dy = my - sy;
-            if (dx * dx + dy * dy < hitRadius * hitRadius) {
+            if (Math.abs(mx - sx) < hitHalf && Math.abs(my - sy) < hitHalf) {
                 found = p;
                 break;
             }
@@ -657,16 +810,29 @@
         {#if clusters.length > 0}
             <div class="panel-section">
                 <div class="section-header">CLUSTERS</div>
-                <div class="cluster-item all">
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div class="cluster-item all" class:active={highlightedCluster === null} onclick={() => { highlightedCluster = null; fitView(); requestDraw(); }}>
                     <span class="cluster-dot" style="background: var(--text-secondary)"></span>
                     All Images
                     <span class="cluster-count">({points.length})</span>
                 </div>
                 {#each clusters as cluster}
-                    <div class="cluster-item">
-                        <span class="cluster-dot" style="background: {cluster.color}"></span>
-                        {cluster.label}
-                        <span class="cluster-count">({cluster.count})</span>
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <div class="cluster-item" class:active={highlightedCluster === cluster.id} onclick={() => focusCluster(cluster.id)}>
+                        <div class="cluster-info-row">
+                            <span class="cluster-dot" style="background: {cluster.color}"></span>
+                            <span class="cluster-name">{cluster.label}</span>
+                            <span class="cluster-count">({cluster.count})</span>
+                        </div>
+                        {#if cluster.previewPaths.length > 0}
+                            <div class="cluster-previews">
+                                {#each cluster.previewPaths.slice(0, 4) as preview}
+                                    <img src={convertFileSrc(preview)} class="cluster-thumb" alt="" />
+                                {/each}
+                            </div>
+                        {/if}
                     </div>
                 {/each}
             </div>
@@ -811,16 +977,36 @@
 
     .cluster-item {
         display: flex;
-        align-items: center;
-        gap: 6px;
+        flex-direction: column;
+        gap: 4px;
         font-size: 11px;
-        padding: 3px 0;
+        padding: 5px 4px;
         color: var(--text);
+        cursor: pointer;
+        border-radius: var(--radius);
+        transition: background 0.15s;
+    }
+
+    .cluster-item:hover {
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    .cluster-item.active {
+        background: rgba(122, 162, 247, 0.1);
     }
 
     .cluster-item.all {
+        flex-direction: row;
+        align-items: center;
+        gap: 6px;
         margin-bottom: 4px;
         font-weight: 500;
+    }
+
+    .cluster-info-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
     }
 
     .cluster-dot {
@@ -830,10 +1016,31 @@
         flex-shrink: 0;
     }
 
+    .cluster-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
     .cluster-count {
         color: var(--text-secondary);
         margin-left: auto;
         font-size: 10px;
+        flex-shrink: 0;
+    }
+
+    .cluster-previews {
+        display: flex;
+        gap: 2px;
+        margin-left: 14px;
+    }
+
+    .cluster-thumb {
+        width: 20px;
+        height: 20px;
+        object-fit: cover;
+        border-radius: 2px;
+        opacity: 0.85;
     }
 
     .selected-preview {
