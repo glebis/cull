@@ -21,22 +21,34 @@
 
     let rating = $derived(item.selection?.star_rating ?? 0);
     let decision = $derived(item.selection?.decision ?? 'undecided');
+    let filename = $derived(item.path.split('/').pop() ?? 'image');
+    let imgError = $state(false);
 
     let borderClass = $derived(
         focused ? 'focused' : selected ? 'selected' : ''
     );
+
+    function handleImgError() {
+        imgError = true;
+    }
 </script>
 
 <div
     class="thumb {borderClass}"
     style="width: {size}px; height: {size}px;"
-    role="button"
+    role="gridcell"
     tabindex="-1"
+    aria-label={filename}
+    aria-selected={selected}
     {onclick}
     {ondblclick}
     onkeydown={(e) => { if (e.key === 'Enter') onclick(); }}
 >
-    <img {src} alt="" loading="lazy" draggable="false" />
+    {#if imgError}
+        <div class="fallback-text">{filename}</div>
+    {:else}
+        <img {src} alt={filename} loading="lazy" draggable="false" onerror={handleImgError} />
+    {/if}
 
     {#if rating > 0}
         <div class="rating">
@@ -46,9 +58,9 @@
         </div>
     {/if}
 
-    {#if decision === 'accepted'}
+    {#if decision === 'accept'}
         <div class="badge accept">&#10003;</div>
-    {:else if decision === 'rejected'}
+    {:else if decision === 'reject'}
         <div class="badge reject">&#10007;</div>
     {/if}
 </div>
@@ -57,12 +69,15 @@
     .thumb {
         position: relative;
         border: 2px solid transparent;
-        border-radius: var(--radius);
+        border-radius: 0;
         overflow: hidden;
         cursor: pointer;
         background: var(--surface);
         transition: border-color 0.1s;
         flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
     .thumb.focused {
         border-color: var(--blue);
@@ -75,10 +90,18 @@
         box-shadow: 0 0 0 1px var(--green);
     }
     img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
         display: block;
+    }
+    .fallback-text {
+        font-size: 10px;
+        color: var(--text-secondary);
+        text-align: center;
+        word-break: break-all;
+        padding: 4px;
+        overflow: hidden;
     }
     .rating {
         position: absolute;

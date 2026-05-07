@@ -85,6 +85,8 @@
     class="grid-container"
     bind:this={containerEl}
     onscroll={onScroll}
+    role="grid"
+    aria-label={"Image grid, " + $images.length + " images"}
 >
     {#if $images.length === 0}
         <div class="empty">
@@ -94,7 +96,7 @@
         </div>
     {:else}
         <div class="grid-scroll" style="height: {totalHeight}px; position: relative;">
-            {#each visibleItems as vi (vi.item.image.id)}
+            {#each visibleItems.filter(vi => vi.item) as vi (vi.item.image.id)}
                 <div
                     class="grid-cell"
                     style="position: absolute; left: {vi.x}px; top: {vi.y}px; width: {size}px; height: {size}px;"

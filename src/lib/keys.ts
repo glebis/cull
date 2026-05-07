@@ -1,5 +1,5 @@
 import { get } from 'svelte/store';
-import { images, selectedIds, focusedIndex, thumbnailSize } from './stores';
+import { images, selectedIds, focusedIndex, thumbnailSize, statusHint } from './stores';
 import { setRating, setDecision } from './api';
 
 let waitingForStar = false;
@@ -27,11 +27,22 @@ function moveFocus(delta: number) {
 }
 
 function scrollFocusedIntoView() {
-    // Use requestAnimationFrame to let Svelte update first
     requestAnimationFrame(() => {
-        const focused = document.querySelector('.thumb.focused');
-        if (focused) {
-            focused.scrollIntoView({ block: 'nearest' });
+        const container = document.querySelector('.grid-container');
+        if (!container) return;
+        const idx = get(focusedIndex);
+        const size = get(thumbnailSize);
+        const gap = 4;
+        const cols = getColCount();
+        const cellSize = size + gap;
+        const row = Math.floor(idx / cols);
+        const itemTop = row * cellSize;
+        const itemBottom = itemTop + cellSize;
+
+        if (itemTop < container.scrollTop) {
+            container.scrollTop = itemTop;
+        } else if (itemBottom > container.scrollTop + container.clientHeight) {
+            container.scrollTop = itemBottom - container.clientHeight;
         }
     });
 }
@@ -116,8 +127,19 @@ export function handleKeydown(e: KeyboardEvent) {
     // Ignore if user is typing in an input
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
+    // Let native behavior happen for interactive elements (Space on buttons, etc.)
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (['BUTTON', 'A', 'SELECT'].includes(tag) && (e.key === ' ' || e.key === 'Enter')) return;
+
     if (waitingForStar) {
+        if (e.key === 'Escape') {
+            waitingForStar = false;
+            statusHint.set(null);
+            e.preventDefault();
+            return;
+        }
         waitingForStar = false;
+        statusHint.set(null);
         const n = parseInt(e.key);
         if (n >= 1 && n <= 5) {
             e.preventDefault();
@@ -127,6 +149,10 @@ export function handleKeydown(e: KeyboardEvent) {
     }
 
     const cols = getColCount();
+    const total = get(images).length;
+    const visibleRows = Math.max(1, Math.floor(
+        (document.querySelector('.grid-container')?.clientHeight ?? 600) / (get(thumbnailSize) + 4)
+    ));
 
     switch (e.key) {
         case 'h':
@@ -156,14 +182,23 @@ export function handleKeydown(e: KeyboardEvent) {
         case 's':
             e.preventDefault();
             waitingForStar = true;
+            statusHint.set('Rate: press 1-5');
+            break;
+        case '0':
+            e.preventDefault();
+            handleStarRating(0);
             break;
         case 'a':
             e.preventDefault();
-            handleDecision('accepted');
+            handleDecision('accept');
             break;
         case 'x':
             e.preventDefault();
-            handleDecision('rejected');
+            handleDecision('reject');
+            break;
+        case 'u':
+            e.preventDefault();
+            handleDecision('undecided');
             break;
         case '+':
         case '=':
@@ -173,6 +208,24 @@ export function handleKeydown(e: KeyboardEvent) {
         case '-':
             e.preventDefault();
             handleResize(-16);
+            break;
+        case 'Home':
+            e.preventDefault();
+            focusedIndex.set(0);
+            scrollFocusedIntoView();
+            break;
+        case 'End':
+            e.preventDefault();
+            if (total > 0) focusedIndex.set(total - 1);
+            scrollFocusedIntoView();
+            break;
+        case 'PageUp':
+            e.preventDefault();
+            moveFocus(-cols * visibleRows);
+            break;
+        case 'PageDown':
+            e.preventDefault();
+            moveFocus(cols * visibleRows);
             break;
     }
 }

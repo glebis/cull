@@ -5,7 +5,7 @@
     --surface: #0c0c12;
     --border: #1a1a2e;
     --text: #e0e0e0;
-    --text-secondary: #565f89;
+    --text-secondary: #7a7fa0;
     --green: #9ece6a;
     --blue: #7aa2f7;
     --orange: #e0af68;
@@ -28,6 +28,11 @@ html, body {
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
     user-select: none;
+}
+
+:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
 }
 
 ::-webkit-scrollbar { width: 6px; }

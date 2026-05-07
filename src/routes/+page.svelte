@@ -14,7 +14,7 @@
             const count = await getImageCount();
             totalCount.set(count);
             if (count > 0) {
-                const imgs = await listImages(10000, 0);
+                const imgs = await listImages(100000, 0);
                 images.set(imgs);
                 focusedIndex.set(0);
             }

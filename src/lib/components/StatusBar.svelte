@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { viewMode, totalCount, selectedCount } from '$lib/stores';
+    import { viewMode, totalCount, selectedCount, statusHint } from '$lib/stores';
 </script>
 
 <div class="statusbar">
@@ -11,13 +11,19 @@
             <span class="sep">|</span>
             <span class="selected">{$selectedCount} selected</span>
         {/if}
+        {#if $statusHint}
+            <span class="sep">|</span>
+            <span class="status-hint">{$statusHint}</span>
+        {/if}
     </div>
     <div class="right">
         <span class="hint">hjkl:nav</span>
         <span class="hint">space:select</span>
         <span class="hint">s+1-5:rate</span>
+        <span class="hint">0:clear</span>
         <span class="hint">a:accept</span>
         <span class="hint">x:reject</span>
+        <span class="hint">u:undecide</span>
         <span class="hint">+/-:size</span>
     </div>
 </div>
@@ -57,5 +63,9 @@
     .hint {
         color: var(--text-secondary);
         font-size: 10px;
+    }
+    .status-hint {
+        color: var(--orange);
+        font-weight: 700;
     }
 </style>

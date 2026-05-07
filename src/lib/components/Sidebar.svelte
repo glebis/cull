@@ -53,7 +53,7 @@
     async function refreshImages() {
         const count = await getImageCount();
         totalCount.set(count);
-        const imgs = await listImages(10000, 0);
+        const imgs = await listImages(100000, 0);
         images.set(imgs);
         focusedIndex.set(0);
     }
@@ -74,7 +74,7 @@
         <div class="section-empty">No projects yet</div>
     </div>
 
-    <div class="sidebar-footer">
+    <div class="sidebar-footer" aria-live="polite">
         {#if lastResult}
             <div class="import-result">{lastResult}</div>
         {/if}

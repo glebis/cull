@@ -11,6 +11,7 @@ export const viewMode = writable<ViewMode>('grid');
 export const thumbnailSize = writable<number>(160);
 
 export const selectedCount = derived(selectedIds, ($ids) => $ids.size);
+export const statusHint = writable<string | null>(null);
 
 export const focusedImage = derived(
     [images, focusedIndex],

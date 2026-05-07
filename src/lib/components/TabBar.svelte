@@ -44,6 +44,7 @@
             step="16"
             value={size}
             oninput={setSize}
+            aria-label="Thumbnail size"
         />
     </div>
 </div>
