@@ -71,6 +71,8 @@
     const CLUSTER_COLORS = [
         '#7aa2f7', '#9ece6a', '#e0af68', '#bb9af7', '#f7768e',
         '#73daca', '#ff9e64', '#2ac3de', '#c0caf5', '#a9b1d6',
+        '#41a6b5', '#c3e88d', '#fc5d7c', '#89b4fa', '#f5c2e7',
+        '#fab387', '#94e2d5', '#cba6f7',
     ];
 
     onMount(async () => {
@@ -310,14 +312,14 @@
             }
             imageMap = map;
 
-            // Run UMAP
+            // Run UMAP — tight clusters with clear separation
             const vectors = embeddings.map(([_, vec]) => vec);
-            const nNeighbors = Math.min(15, Math.max(2, Math.floor(vectors.length / 3)));
-            const umap = new UMAP({ nNeighbors, minDist: 0.3, nComponents: 2 });
+            const nNeighbors = Math.min(15, Math.max(2, Math.floor(vectors.length / 5)));
+            const umap = new UMAP({ nNeighbors, minDist: 0.05, spread: 1.5, nComponents: 2 });
             const projection = umap.fit(vectors);
 
-            // Simple k-means clustering on 2D projection
-            const k = Math.min(8, Math.max(2, Math.floor(Math.sqrt(projection.length / 2))));
+            // More clusters for richer structure
+            const k = Math.min(16, Math.max(3, Math.floor(Math.sqrt(projection.length))));
             const clusterLabels = kMeans(projection, k);
 
             // Build points
@@ -439,11 +441,10 @@
 
         ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-        // Compute thumbnail size based on zoom and point count
-        // With many points, keep thumbnails small to avoid overlap
-        const pointDensityFactor = Math.max(1, Math.sqrt(points.length / 20));
-        const baseThumbSize = Math.max(6, Math.min(50, (12 * Math.sqrt(scale)) / pointDensityFactor));
-        const useThumb = baseThumbSize >= 10;
+        // Thumbnail size: small at overview, grows when zoomed in
+        const pointDensityFactor = Math.max(1, Math.sqrt(points.length / 10));
+        const baseThumbSize = Math.max(4, Math.min(48, (8 * Math.sqrt(scale)) / pointDensityFactor));
+        const useThumb = baseThumbSize >= 8;
 
         // Draw points
         const margin = baseThumbSize + 10;
