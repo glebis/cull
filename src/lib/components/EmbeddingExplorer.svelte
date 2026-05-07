@@ -3,7 +3,7 @@
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { UMAP } from 'umap-js';
-    import { images, focusedIndex, viewMode } from '$lib/stores';
+    import { images, focusedIndex, viewMode, zenMode } from '$lib/stores';
     import { openUrl } from '@tauri-apps/plugin-opener';
     import {
         isModelAvailable,
@@ -439,6 +439,8 @@
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
         // Thumbnail size: small at overview, grows when zoomed in
@@ -446,7 +448,7 @@
         const baseThumbSize = Math.max(4, Math.min(48, (8 * Math.sqrt(scale)) / pointDensityFactor));
         const useThumb = baseThumbSize >= 8;
 
-        // Draw points
+        // Draw points — clean thumbnails, no borders, no transparency
         const margin = baseThumbSize + 10;
         for (const p of points) {
             const [sx, sy] = worldToScreen(p.x, p.y);
@@ -455,15 +457,6 @@
             const color = CLUSTER_COLORS[p.cluster % CLUSTER_COLORS.length];
             const isSelected = selectedPoint && selectedPoint.id === p.id;
             const isHovered = hoveredPoint && hoveredPoint.id === p.id;
-            const isDimmed = highlightedCluster !== null && p.cluster !== highlightedCluster;
-
-            ctx.save();
-
-            if (isDimmed) {
-                ctx.globalAlpha = 0.15;
-            } else if (!isSelected && !isHovered) {
-                ctx.globalAlpha = 0.85;
-            }
 
             const thumbEl = useThumb ? thumbnailImages.get(p.id) : undefined;
 
@@ -471,46 +464,28 @@
                 const thumbSize = baseThumbSize;
                 const half = thumbSize / 2;
 
-                // Border
-                if (isSelected) {
+                ctx.drawImage(thumbEl, sx - half, sy - half, thumbSize, thumbSize);
+
+                // Only highlight selected/hovered — thin white outline
+                if (isSelected || isHovered) {
                     ctx.strokeStyle = '#ffffff';
-                    ctx.lineWidth = 2.5;
-                    ctx.strokeRect(sx - half - 1, sy - half - 1, thumbSize + 2, thumbSize + 2);
-                } else if (isHovered) {
-                    ctx.strokeStyle = '#ffffff';
-                    ctx.lineWidth = 1.5;
-                    ctx.strokeRect(sx - half - 1, sy - half - 1, thumbSize + 2, thumbSize + 2);
-                } else {
-                    ctx.strokeStyle = color;
-                    ctx.lineWidth = 1;
+                    ctx.lineWidth = isSelected ? 2 : 1;
                     ctx.strokeRect(sx - half, sy - half, thumbSize, thumbSize);
                 }
-
-                ctx.drawImage(thumbEl, sx - half, sy - half, thumbSize, thumbSize);
             } else {
-                // Fallback to colored dot
-                const radius = Math.max(3, Math.min(8, 6 / Math.sqrt(scale)));
+                // Colored dot fallback
+                const radius = Math.max(2, Math.min(5, 4 / Math.sqrt(scale)));
+                ctx.fillStyle = color;
                 ctx.beginPath();
                 ctx.arc(sx, sy, radius, 0, Math.PI * 2);
-                if (isSelected) {
-                    ctx.fillStyle = '#ffffff';
-                    ctx.strokeStyle = color;
-                    ctx.lineWidth = 2;
-                    ctx.fill();
-                    ctx.stroke();
-                } else if (isHovered) {
-                    ctx.fillStyle = color;
-                    ctx.fill();
+                ctx.fill();
+
+                if (isSelected || isHovered) {
                     ctx.strokeStyle = '#ffffff';
-                    ctx.lineWidth = 1.5;
+                    ctx.lineWidth = 1;
                     ctx.stroke();
-                } else {
-                    ctx.fillStyle = color;
-                    ctx.fill();
                 }
             }
-
-            ctx.restore();
         }
 
         // Draw cluster labels at centroid when zoomed out enough
@@ -660,8 +635,15 @@
                 canvasWidth = entry.contentRect.width;
                 canvasHeight = entry.contentRect.height;
                 if (canvas) {
-                    canvas.width = canvasWidth;
-                    canvas.height = canvasHeight;
+                    const dpr = window.devicePixelRatio || 1;
+                    canvas.width = canvasWidth * dpr;
+                    canvas.height = canvasHeight * dpr;
+                    canvas.style.width = canvasWidth + 'px';
+                    canvas.style.height = canvasHeight + 'px';
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                    }
                 }
                 if (points.length > 0) {
                     fitView();
@@ -676,7 +658,8 @@
     }
 </script>
 
-<div class="embedding-explorer">
+<div class="embedding-explorer" class:zen={$zenMode}>
+    {#if !$zenMode}
     <div class="left-panel">
         <div class="panel-section">
             <div class="section-header-row">
@@ -862,6 +845,7 @@
             </div>
         {/if}
     </div>
+    {/if}
 
     <div class="right-panel" use:handleResize>
         {#if points.length === 0}
@@ -901,6 +885,9 @@
         display: flex;
         height: 100%;
         overflow: hidden;
+    }
+    .embedding-explorer.zen .right-panel {
+        width: 100%;
     }
 
     .left-panel {
