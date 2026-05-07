@@ -2,14 +2,14 @@
     import { viewMode, thumbnailSize } from '$lib/stores';
     import type { ViewMode } from '$lib/stores';
 
-    const tabs: { id: ViewMode; label: string; enabled: boolean }[] = [
-        { id: 'grid', label: 'Grid', enabled: true },
-        { id: 'compare', label: 'Compare', enabled: false },
-        { id: 'loupe', label: 'Loupe', enabled: false },
-        { id: 'canvas', label: 'Canvas', enabled: false },
-        { id: 'lineage', label: 'Lineage', enabled: false },
-        { id: 'embeddings', label: 'Embeddings', enabled: false },
-        { id: 'export', label: 'Export', enabled: false },
+    const tabs: { id: ViewMode; label: string; key: string }[] = [
+        { id: 'grid', label: 'Grid', key: '1' },
+        { id: 'compare', label: 'Compare', key: '2' },
+        { id: 'loupe', label: 'Loupe', key: '3' },
+        { id: 'canvas', label: 'Canvas', key: '4' },
+        { id: 'lineage', label: 'Lineage', key: '5' },
+        { id: 'embeddings', label: 'Embeddings', key: '6' },
+        { id: 'export', label: 'Export', key: '7' },
     ];
 
     let size = $state(160);
@@ -28,10 +28,9 @@
             <button
                 class="tab"
                 class:active={$viewMode === tab.id}
-                disabled={!tab.enabled}
-                onclick={() => tab.enabled && viewMode.set(tab.id)}
+                onclick={() => viewMode.set(tab.id)}
             >
-                {tab.label}
+                <span class="tab-key">{tab.key}</span>{tab.label}
             </button>
         {/each}
     </div>
@@ -83,9 +82,14 @@
         color: var(--green);
         background: rgba(158, 206, 106, 0.1);
     }
-    .tab:disabled {
-        opacity: 0.3;
-        cursor: not-allowed;
+    .tab-key {
+        color: var(--text-secondary);
+        font-size: 10px;
+        margin-right: 4px;
+        opacity: 0.5;
+    }
+    .tab.active .tab-key {
+        color: var(--green);
     }
     .slider-group {
         display: flex;

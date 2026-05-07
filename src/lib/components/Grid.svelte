@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { images, selectedIds, focusedIndex, thumbnailSize } from '$lib/stores';
+    import { images, selectedIds, focusedIndex, thumbnailSize, viewMode } from '$lib/stores';
     import Thumbnail from './Thumbnail.svelte';
 
     const GAP = 4;
@@ -55,17 +55,8 @@
     }
 
     function handleDblClick(index: number) {
-        const img = $images[index];
-        if (!img) return;
-        selectedIds.update(ids => {
-            const next = new Set(ids);
-            if (next.has(img.image.id)) {
-                next.delete(img.image.id);
-            } else {
-                next.add(img.image.id);
-            }
-            return next;
-        });
+        focusedIndex.set(index);
+        viewMode.set('loupe');
     }
 
     $effect(() => {

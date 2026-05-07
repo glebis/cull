@@ -1,12 +1,24 @@
 import { get } from 'svelte/store';
-import { images, selectedIds, focusedIndex, thumbnailSize, statusHint } from './stores';
+import {
+    images, selectedIds, focusedIndex, thumbnailSize, statusHint, viewMode,
+    compareActiveSide, loupeScale, loupePanX, loupePanY,
+} from './stores';
+import type { ViewMode } from './stores';
 import { setRating, setDecision } from './api';
 
 let waitingForStar = false;
 
+const VIEW_MODE_KEYS: Record<string, ViewMode> = {
+    '1': 'grid',
+    '2': 'compare',
+    '3': 'loupe',
+    '4': 'canvas',
+    '5': 'lineage',
+    '6': 'embeddings',
+    '7': 'export',
+};
+
 function getColCount(): number {
-    // Approximate cols from container width and thumbnail size.
-    // We read from the DOM to stay in sync with Grid.
     const container = document.querySelector('.grid-container');
     if (!container) return 4;
     const size = get(thumbnailSize);
@@ -63,14 +75,13 @@ function toggleSelect() {
     });
 }
 
-async function handleStarRating(n: number) {
+export async function handleStarRating(n: number, imageIndex?: number) {
     const imgs = get(images);
-    const idx = get(focusedIndex);
+    const idx = imageIndex ?? get(focusedIndex);
     const img = imgs[idx];
     if (!img) return;
     try {
         await setRating(img.image.id, n);
-        // Update local state
         images.update(all => {
             const copy = [...all];
             const item = { ...copy[idx] };
@@ -89,9 +100,9 @@ async function handleStarRating(n: number) {
     }
 }
 
-async function handleDecision(decision: string) {
+export async function handleDecision(decision: string, imageIndex?: number) {
     const imgs = get(images);
-    const idx = get(focusedIndex);
+    const idx = imageIndex ?? get(focusedIndex);
     const img = imgs[idx];
     if (!img) return;
     try {
@@ -123,14 +134,63 @@ function handleResize(delta: number) {
     });
 }
 
+// ---- Compare helpers ----
+
+function getCompareActiveIndex(): number {
+    const imgs = get(images);
+    const sel = get(selectedIds);
+    const idx = get(focusedIndex);
+    const side = get(compareActiveSide);
+
+    if (sel.size >= 2) {
+        const selArr = Array.from(sel);
+        const targetId = selArr[side] ?? selArr[0];
+        const found = imgs.findIndex(i => i.image.id === targetId);
+        return found >= 0 ? found : idx;
+    }
+    return idx + side;
+}
+
+function compareNextPair() {
+    const imgs = get(images);
+    const idx = get(focusedIndex);
+    const next = Math.min(idx + 2, Math.max(0, imgs.length - 2));
+    focusedIndex.set(next);
+    selectedIds.set(new Set());
+    compareActiveSide.set(0);
+}
+
+// ---- Loupe helpers ----
+
+function resetLoupeZoom() {
+    loupeScale.set(1);
+    loupePanX.set(0);
+    loupePanY.set(0);
+}
+
+function moveLoupeFocus(delta: number) {
+    const total = get(images).length;
+    if (total === 0) return;
+    focusedIndex.update(i => {
+        let next = i + delta;
+        if (next < 0) next = 0;
+        if (next >= total) next = total - 1;
+        return next;
+    });
+    resetLoupeZoom();
+}
+
+// ---- Main handler ----
+
 export function handleKeydown(e: KeyboardEvent) {
-    // Ignore if user is typing in an input
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-    // Let native behavior happen for interactive elements (Space on buttons, etc.)
     const tag = (e.target as HTMLElement)?.tagName;
     if (['BUTTON', 'A', 'SELECT'].includes(tag) && (e.key === ' ' || e.key === 'Enter')) return;
 
+    const mode = get(viewMode);
+
+    // Star rating chord (works in all modes)
     if (waitingForStar) {
         if (e.key === 'Escape') {
             waitingForStar = false;
@@ -143,11 +203,36 @@ export function handleKeydown(e: KeyboardEvent) {
         const n = parseInt(e.key);
         if (n >= 1 && n <= 5) {
             e.preventDefault();
-            handleStarRating(n);
+            if (mode === 'compare') {
+                handleStarRating(n, getCompareActiveIndex());
+            } else {
+                handleStarRating(n);
+            }
             return;
         }
     }
 
+    // View mode switching with number keys (1-7)
+    if (VIEW_MODE_KEYS[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        viewMode.set(VIEW_MODE_KEYS[e.key]);
+        return;
+    }
+
+    switch (mode) {
+        case 'grid':
+            handleGridKeys(e);
+            break;
+        case 'compare':
+            handleCompareKeys(e);
+            break;
+        case 'loupe':
+            handleLoupeKeys(e);
+            break;
+    }
+}
+
+function handleGridKeys(e: KeyboardEvent) {
     const cols = getColCount();
     const total = get(images).length;
     const visibleRows = Math.max(1, Math.floor(
@@ -226,6 +311,125 @@ export function handleKeydown(e: KeyboardEvent) {
         case 'PageDown':
             e.preventDefault();
             moveFocus(cols * visibleRows);
+            break;
+        case 'Enter':
+            e.preventDefault();
+            viewMode.set('loupe');
+            break;
+    }
+}
+
+function handleCompareKeys(e: KeyboardEvent) {
+    switch (e.key) {
+        case 'h':
+        case 'ArrowLeft':
+            e.preventDefault();
+            compareActiveSide.set(0);
+            break;
+        case 'l':
+        case 'ArrowRight':
+            e.preventDefault();
+            compareActiveSide.set(1);
+            break;
+        case 'Tab':
+            e.preventDefault();
+            compareNextPair();
+            break;
+        case 'Enter':
+            e.preventDefault();
+            handleDecision('accept', getCompareActiveIndex());
+            break;
+        case 'x':
+            e.preventDefault();
+            handleDecision('reject', getCompareActiveIndex());
+            break;
+        case 'a':
+            e.preventDefault();
+            handleDecision('accept', getCompareActiveIndex());
+            break;
+        case 's':
+            e.preventDefault();
+            waitingForStar = true;
+            statusHint.set('Rate: press 1-5');
+            break;
+        case '0':
+            e.preventDefault();
+            handleStarRating(0, getCompareActiveIndex());
+            break;
+        case 'u':
+            e.preventDefault();
+            handleDecision('undecided', getCompareActiveIndex());
+            break;
+        case 'Escape':
+            e.preventDefault();
+            viewMode.set('grid');
+            break;
+    }
+}
+
+function handleLoupeKeys(e: KeyboardEvent) {
+    switch (e.key) {
+        case 'h':
+        case 'ArrowLeft':
+            e.preventDefault();
+            moveLoupeFocus(-1);
+            break;
+        case 'l':
+        case 'ArrowRight':
+            e.preventDefault();
+            moveLoupeFocus(1);
+            break;
+        case 'k':
+        case 'ArrowUp':
+            e.preventDefault();
+            moveLoupeFocus(-1);
+            break;
+        case 'j':
+        case 'ArrowDown':
+            e.preventDefault();
+            moveLoupeFocus(1);
+            break;
+        case '+':
+        case '=':
+            e.preventDefault();
+            loupeScale.update(s => Math.min(20, s * 1.25));
+            break;
+        case '-':
+            e.preventDefault();
+            loupeScale.update(s => {
+                const next = Math.max(0.1, s / 1.25);
+                if (next <= 1) { loupePanX.set(0); loupePanY.set(0); }
+                return next;
+            });
+            break;
+        case 's':
+            e.preventDefault();
+            waitingForStar = true;
+            statusHint.set('Rate: press 1-5');
+            break;
+        case '0':
+            e.preventDefault();
+            handleStarRating(0);
+            break;
+        case 'a':
+            e.preventDefault();
+            handleDecision('accept');
+            break;
+        case 'x':
+            e.preventDefault();
+            handleDecision('reject');
+            break;
+        case 'u':
+            e.preventDefault();
+            handleDecision('undecided');
+            break;
+        case 'Escape':
+            e.preventDefault();
+            viewMode.set('grid');
+            break;
+        case 'Home':
+            e.preventDefault();
+            resetLoupeZoom();
             break;
     }
 }

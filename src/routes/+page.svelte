@@ -4,8 +4,10 @@
     import Sidebar from '$lib/components/Sidebar.svelte';
     import StatusBar from '$lib/components/StatusBar.svelte';
     import Grid from '$lib/components/Grid.svelte';
+    import Compare from '$lib/components/Compare.svelte';
+    import Loupe from '$lib/components/Loupe.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex } from '$lib/stores';
+    import { totalCount, images, focusedIndex, viewMode } from '$lib/stores';
     import { getImageCount, listImages } from '$lib/api';
     import { onMount } from 'svelte';
 
@@ -29,7 +31,18 @@
 <div class="app-shell">
     <TabBar />
     <Sidebar />
-    <Grid />
+    {#if $viewMode === 'grid'}
+        <Grid />
+    {:else if $viewMode === 'compare'}
+        <Compare />
+    {:else if $viewMode === 'loupe'}
+        <Loupe />
+    {:else}
+        <div class="placeholder">
+            <span class="placeholder-label">{$viewMode}</span>
+            <span class="placeholder-text">Coming soon</span>
+        </div>
+    {/if}
     <StatusBar />
 </div>
 
@@ -45,5 +58,24 @@
         height: 100vh;
         width: 100vw;
         background: var(--bg);
+    }
+    .placeholder {
+        grid-area: main;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        color: var(--text-secondary);
+    }
+    .placeholder-label {
+        text-transform: uppercase;
+        font-size: 14px;
+        color: var(--text-secondary);
+        font-weight: 700;
+    }
+    .placeholder-text {
+        font-size: 12px;
+        opacity: 0.5;
     }
 </style>
