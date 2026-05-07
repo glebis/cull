@@ -1,8 +1,8 @@
 <script lang="ts">
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, images, focusedIndex, folders, activeFolder, minSizeFilter } from '$lib/stores';
-    import { importFolder as apiImportFolder, listImages, listImagesByFolder, listImagesFiltered, getImageCount, listFolders, deleteFolder as apiDeleteFolder } from '$lib/api';
+    import { totalCount, images, focusedIndex, folders, activeFolder, minSizeFilter, collections, activeCollection, collectMode, collectModeTarget } from '$lib/stores';
+    import { importFolder as apiImportFolder, listImages, listImagesByFolder, listImagesFiltered, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, listCollectionImages, deleteCollectionApi } from '$lib/api';
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
 
@@ -18,6 +18,12 @@
         } catch (e) {
             console.error('Failed to load folders:', e);
         }
+        try {
+            const c = await listCollections();
+            collections.set(c);
+        } catch (e) {
+            console.error('Failed to load collections:', e);
+        }
     });
 
     function folderName(path: string): string {
@@ -27,6 +33,7 @@
 
     async function selectFolder(folder: string | null) {
         activeFolder.set(folder);
+        activeCollection.set(null);
         try {
             if (folder === null) {
                 const imgs = await listImages(100000, 0);
@@ -38,6 +45,48 @@
             focusedIndex.set(0);
         } catch (e) {
             console.error('Failed to load images for folder:', e);
+        }
+    }
+
+    async function selectCollection(collectionId: string) {
+        activeCollection.set(collectionId);
+        activeFolder.set(null);
+        try {
+            const imgs = await listCollectionImages(collectionId);
+            images.set(imgs);
+            focusedIndex.set(0);
+        } catch (e) {
+            console.error('Failed to load collection images:', e);
+        }
+    }
+
+    async function handleNewCollection() {
+        const name = window.prompt('Collection name:');
+        if (!name || !name.trim()) return;
+        try {
+            await createCollection(name.trim());
+            const c = await listCollections();
+            collections.set(c);
+        } catch (e) {
+            console.error('Failed to create collection:', e);
+        }
+    }
+
+    async function handleDeleteCollection(event: Event, collectionId: string, collectionName: string) {
+        event.stopPropagation();
+        if (!window.confirm(`Delete collection "${collectionName}"?`)) return;
+        try {
+            await deleteCollectionApi(collectionId);
+            if (get(activeCollection) === collectionId) {
+                activeCollection.set(null);
+                const imgs = await listImages(100000, 0);
+                images.set(imgs);
+                focusedIndex.set(0);
+            }
+            const c = await listCollections();
+            collections.set(c);
+        } catch (e) {
+            console.error('Failed to delete collection:', e);
         }
     }
 
@@ -167,8 +216,27 @@
     </div>
 
     <div class="section">
-        <div class="section-header">PROJECTS</div>
-        <div class="section-empty">No projects yet</div>
+        <div class="section-header">
+            COLLECTIONS
+            <button class="new-collection-btn" onclick={handleNewCollection} title="New Collection">+</button>
+        </div>
+        {#if $collectMode && $collectModeTarget}
+            <div class="collect-indicator">Collecting into: {$collections.find(c => c[0] === $collectModeTarget)?.[1] ?? '...'}</div>
+        {/if}
+        {#if $collections.length === 0}
+            <div class="section-empty">No collections yet</div>
+        {:else}
+            {#each $collections as [id, name, count]}
+                <div class="folder-row" class:active={$activeCollection === id}>
+                    <button class="section-item" onclick={() => selectCollection(id)}>
+                        <span class="icon">&#9671;</span>
+                        {name}
+                        <span class="count">({count})</span>
+                    </button>
+                    <button class="delete-btn" onclick={(e: Event) => handleDeleteCollection(e, id, name)} title="Delete collection">&times;</button>
+                </div>
+            {/each}
+        {/if}
     </div>
 
     <div class="sidebar-footer" aria-live="polite">
@@ -200,6 +268,8 @@
         color: var(--text-secondary);
         letter-spacing: 0.1em;
         margin-bottom: 6px;
+        display: flex;
+        align-items: center;
     }
     .section-item {
         font-size: 12px;
@@ -304,6 +374,27 @@
         background: rgba(122, 162, 247, 0.15);
         color: var(--blue);
         border-color: var(--blue);
+    }
+    .new-collection-btn {
+        margin-left: auto;
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 700;
+        padding: 0 2px;
+        line-height: 1;
+        font-family: inherit;
+    }
+    .new-collection-btn:hover {
+        color: var(--blue);
+    }
+    .collect-indicator {
+        font-size: 10px;
+        color: var(--green, #9ece6a);
+        padding: 2px 8px 4px;
+        font-style: italic;
     }
     .section-empty {
         font-size: 11px;

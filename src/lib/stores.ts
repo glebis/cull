@@ -38,6 +38,12 @@ export const folders = writable<[string, number][]>([]);
 export const activeFolder = writable<string | null>(null);
 export const minSizeFilter = writable<number>(0);
 
+// Collections
+export const collections = writable<[string, string, number][]>([]); // [id, name, count]
+export const activeCollection = writable<string | null>(null);
+export const collectMode = writable<boolean>(false);
+export const collectModeTarget = writable<string | null>(null); // collection id being collected into
+
 export const focusedImage = derived(
     [images, focusedIndex],
     ([$images, $idx]) => $images[$idx] ?? null

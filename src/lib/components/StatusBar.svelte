@@ -1,10 +1,24 @@
 <script lang="ts">
-    import { viewMode, totalCount, selectedCount, statusHint, gridPreset, GRID_PRESETS } from '$lib/stores';
+    import { viewMode, totalCount, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections } from '$lib/stores';
+    import { derived } from 'svelte/store';
+
+    const collectionName = derived(
+        [activeCollection, collections],
+        ([$id, $cols]) => {
+            if (!$id) return null;
+            const found = $cols.find(c => c[0] === $id);
+            return found ? found[1] : null;
+        }
+    );
 </script>
 
 <div class="statusbar">
     <div class="left">
         <span class="mode">{$viewMode}</span>
+        {#if $collectionName}
+            <span class="sep">|</span>
+            <span class="collection-name">{$collectionName}</span>
+        {/if}
         <span class="sep">|</span>
         <span>{$totalCount} images</span>
         {#if $selectedCount > 0}
@@ -28,6 +42,8 @@
         <span class="hint">a:accept</span>
         <span class="hint">x:reject</span>
         <span class="hint">u:undecide</span>
+        <span class="hint">c:collect</span>
+        <span class="hint">b:batch</span>
         <span class="hint">+/-:size</span>
     </div>
 </div>
@@ -75,5 +91,9 @@
     .status-hint {
         color: var(--orange);
         font-weight: 700;
+    }
+    .collection-name {
+        color: var(--blue);
+        font-weight: 600;
     }
 </style>

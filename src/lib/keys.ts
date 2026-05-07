@@ -3,9 +3,10 @@ import {
     images, selectedIds, focusedIndex, thumbnailSize, statusHint, viewMode,
     compareActiveSide, loupeScale, loupePanX, loupePanY,
     sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode,
+    collections, collectMode, collectModeTarget, activeCollection,
 } from './stores';
 import type { ViewMode } from './stores';
-import { setRating, setDecision } from './api';
+import { setRating, setDecision, createCollection, addToCollection, listCollections, listCollectionImages } from './api';
 
 let waitingForStar = false;
 
@@ -292,7 +293,11 @@ function handleGridKeys(e: KeyboardEvent) {
             break;
         case ' ':
             e.preventDefault();
-            toggleSelect();
+            if (get(collectMode)) {
+                handleCollectModeAdd();
+            } else {
+                toggleSelect();
+            }
             break;
         case 's':
             e.preventDefault();
@@ -360,6 +365,125 @@ function handleGridKeys(e: KeyboardEvent) {
                 return next;
             });
             break;
+        case 'c':
+            e.preventDefault();
+            handleCreateCollectionFromSelected(false);
+            break;
+        case 'C':
+            e.preventDefault();
+            handleCreateCollectionFromSelected(true);
+            break;
+        case 'b':
+            e.preventDefault();
+            handleToggleCollectMode();
+            break;
+    }
+}
+
+async function handleCreateCollectionFromSelected(inverse: boolean) {
+    const imgs = get(images);
+    const sel = get(selectedIds);
+
+    let imageIds: string[];
+    if (inverse) {
+        imageIds = imgs.filter(i => !sel.has(i.image.id)).map(i => i.image.id);
+    } else {
+        imageIds = imgs.filter(i => sel.has(i.image.id)).map(i => i.image.id);
+    }
+
+    if (imageIds.length === 0) {
+        statusHint.set(inverse ? 'No unselected images' : 'Select images first');
+        setTimeout(() => statusHint.set(null), 2000);
+        return;
+    }
+
+    const name = window.prompt(`Collection name (${imageIds.length} images):`);
+    if (!name || !name.trim()) return;
+
+    try {
+        const id = await createCollection(name.trim());
+        await addToCollection(id, imageIds);
+        const c = await listCollections();
+        collections.set(c);
+        statusHint.set(`Created "${name.trim()}" with ${imageIds.length} images`);
+        setTimeout(() => statusHint.set(null), 2000);
+    } catch (err) {
+        console.error('Failed to create collection:', err);
+    }
+}
+
+async function handleToggleCollectMode() {
+    const current = get(collectMode);
+    if (current) {
+        // Exit collect mode
+        collectMode.set(false);
+        collectModeTarget.set(null);
+        statusHint.set(null);
+        return;
+    }
+
+    // Enter collect mode: pick or create a collection
+    const cols = get(collections);
+    let targetId: string | null = null;
+
+    if (cols.length > 0) {
+        const options = cols.map((c, i) => `${i + 1}. ${c[1]}`).join('\n');
+        const choice = window.prompt(`Pick collection (number) or type a new name:\n${options}`);
+        if (!choice || !choice.trim()) return;
+        const num = parseInt(choice.trim());
+        if (!isNaN(num) && num >= 1 && num <= cols.length) {
+            targetId = cols[num - 1][0];
+        } else {
+            // Create new
+            try {
+                targetId = await createCollection(choice.trim());
+                const c = await listCollections();
+                collections.set(c);
+            } catch (err) {
+                console.error('Failed to create collection:', err);
+                return;
+            }
+        }
+    } else {
+        const name = window.prompt('No collections yet. Name for new collection:');
+        if (!name || !name.trim()) return;
+        try {
+            targetId = await createCollection(name.trim());
+            const c = await listCollections();
+            collections.set(c);
+        } catch (err) {
+            console.error('Failed to create collection:', err);
+            return;
+        }
+    }
+
+    collectMode.set(true);
+    collectModeTarget.set(targetId);
+    const colName = get(collections).find(c => c[0] === targetId)?.[1] ?? '';
+    statusHint.set(`Collect mode: Space to add, B to exit [${colName}]`);
+}
+
+async function handleCollectModeAdd() {
+    const target = get(collectModeTarget);
+    if (!target) return;
+
+    const imgs = get(images);
+    const idx = get(focusedIndex);
+    const img = imgs[idx];
+    if (!img) return;
+
+    try {
+        await addToCollection(target, [img.image.id]);
+        const c = await listCollections();
+        collections.set(c);
+        // If we're viewing this collection, refresh
+        if (get(activeCollection) === target) {
+            const updated = await listCollectionImages(target);
+            images.set(updated);
+        }
+        statusHint.set(`Added to collection. Space for next, B to exit`);
+    } catch (err) {
+        console.error('Failed to add to collection:', err);
     }
 }
 

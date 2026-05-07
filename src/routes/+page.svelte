@@ -7,8 +7,8 @@
     import Compare from '$lib/components/Compare.svelte';
     import Loupe from '$lib/components/Loupe.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter } from '$lib/stores';
-    import { getImageCount, listImages, listImagesByFolder, listImagesFiltered } from '$lib/api';
+    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections } from '$lib/stores';
+    import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { onMount } from 'svelte';
 
@@ -18,6 +18,13 @@
     async function loadImages() {
         const count = await getImageCount();
         totalCount.set(count);
+        const collection = $activeCollection;
+        if (collection !== null) {
+            const imgs = await listCollectionImages(collection);
+            images.set(imgs);
+            focusedIndex.set(0);
+            return;
+        }
         if (count > 0) {
             const folder = $activeFolder;
             const minSize = $minSizeFilter;

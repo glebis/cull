@@ -80,6 +80,26 @@ export async function listImagesFiltered(minWidth: number | null, minHeight: num
     return invoke('list_images_filtered', { minWidth, minHeight, limit, offset });
 }
 
+export async function createCollection(name: string): Promise<string> {
+    return invoke('create_collection', { name });
+}
+
+export async function listCollections(): Promise<[string, string, number][]> {
+    return invoke('list_collections');
+}
+
+export async function addToCollection(collectionId: string, imageIds: string[]): Promise<void> {
+    return invoke('add_to_collection', { collectionId, imageIds });
+}
+
+export async function listCollectionImages(collectionId: string): Promise<ImageWithFile[]> {
+    return invoke('list_collection_images', { collectionId });
+}
+
+export async function deleteCollectionApi(collectionId: string): Promise<void> {
+    return invoke('delete_collection', { collectionId });
+}
+
 export async function openWithParams(params: {
     path?: string;
     paths?: string[];
