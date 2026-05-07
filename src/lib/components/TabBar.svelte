@@ -69,21 +69,20 @@
     .tab {
         background: none;
         border: none;
+        border-bottom: 2px solid transparent;
         color: var(--text-secondary);
         font-family: var(--font);
         font-size: 12px;
-        padding: 4px 12px;
+        padding: 8px 12px 6px;
         cursor: pointer;
-        border-radius: var(--radius);
         transition: all 0.15s;
     }
     .tab:hover:not(:disabled) {
         color: var(--text);
-        background: var(--border);
     }
     .tab.active {
         color: var(--green);
-        background: rgba(158, 206, 106, 0.1);
+        border-bottom-color: var(--green);
     }
     .tab-key {
         color: var(--text-secondary);

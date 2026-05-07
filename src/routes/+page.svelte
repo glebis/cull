@@ -28,9 +28,12 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="app-shell">
+{@const immersive = $viewMode === 'loupe' || $viewMode === 'compare'}
+<div class="app-shell" class:immersive>
     <TabBar />
-    <Sidebar />
+    {#if !immersive}
+        <Sidebar />
+    {/if}
     {#if $viewMode === 'grid'}
         <Grid />
     {:else if $viewMode === 'compare'}
@@ -58,6 +61,13 @@
         height: 100vh;
         width: 100vw;
         background: var(--bg);
+    }
+    .app-shell.immersive {
+        grid-template-areas:
+            "tabbar"
+            "main"
+            "statusbar";
+        grid-template-columns: 1fr;
     }
     .placeholder {
         grid-area: main;
