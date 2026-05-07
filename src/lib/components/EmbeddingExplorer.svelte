@@ -283,7 +283,7 @@
                 const maxY = Math.max(...ys);
                 const rangeX = maxX - minX || 1;
                 const rangeY = maxY - minY || 1;
-                const padding = 80;
+                const padding = 120;
                 const scaleX = (canvasWidth - padding * 2) / rangeX;
                 const scaleY = (canvasHeight - padding * 2) / rangeY;
                 scale = Math.min(scaleX, scaleY);
@@ -313,7 +313,7 @@
             // Run UMAP
             const vectors = embeddings.map(([_, vec]) => vec);
             const nNeighbors = Math.min(15, Math.max(2, Math.floor(vectors.length / 3)));
-            const umap = new UMAP({ nNeighbors, minDist: 0.1, nComponents: 2 });
+            const umap = new UMAP({ nNeighbors, minDist: 0.3, nComponents: 2 });
             const projection = umap.fit(vectors);
 
             // Simple k-means clustering on 2D projection
@@ -439,9 +439,11 @@
 
         ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-        // Compute thumbnail size based on zoom level
-        const baseThumbSize = Math.max(8, Math.min(60, 20 * Math.sqrt(scale)));
-        const useThumb = baseThumbSize >= 6;
+        // Compute thumbnail size based on zoom and point count
+        // With many points, keep thumbnails small to avoid overlap
+        const pointDensityFactor = Math.max(1, Math.sqrt(points.length / 20));
+        const baseThumbSize = Math.max(6, Math.min(50, (12 * Math.sqrt(scale)) / pointDensityFactor));
+        const useThumb = baseThumbSize >= 10;
 
         // Draw points
         const margin = baseThumbSize + 10;
