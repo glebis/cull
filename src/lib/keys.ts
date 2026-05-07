@@ -2,6 +2,7 @@ import { get } from 'svelte/store';
 import {
     images, selectedIds, focusedIndex, thumbnailSize, statusHint, viewMode,
     compareActiveSide, loupeScale, loupePanX, loupePanY,
+    sidebarVisible,
 } from './stores';
 import type { ViewMode } from './stores';
 import { setRating, setDecision } from './api';
@@ -212,6 +213,13 @@ export function handleKeydown(e: KeyboardEvent) {
         }
     }
 
+    // Cmd+B toggles sidebar
+    if (e.metaKey && e.key === 'b') {
+        e.preventDefault();
+        sidebarVisible.update(v => !v);
+        return;
+    }
+
     // View mode switching with number keys (1-7)
     if (VIEW_MODE_KEYS[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
@@ -315,6 +323,10 @@ function handleGridKeys(e: KeyboardEvent) {
         case 'Enter':
             e.preventDefault();
             viewMode.set('loupe');
+            break;
+        case '\\':
+            e.preventDefault();
+            sidebarVisible.update(v => !v);
             break;
     }
 }

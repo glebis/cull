@@ -7,11 +7,12 @@
     import Compare from '$lib/components/Compare.svelte';
     import Loupe from '$lib/components/Loupe.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, viewMode } from '$lib/stores';
+    import { totalCount, images, focusedIndex, viewMode, sidebarVisible } from '$lib/stores';
     import { getImageCount, listImages } from '$lib/api';
     import { onMount } from 'svelte';
 
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
+    let noSidebar = $derived(immersive || !$sidebarVisible);
 
     onMount(async () => {
         try {
@@ -30,9 +31,9 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="app-shell" class:immersive>
+<div class="app-shell" class:no-sidebar={noSidebar}>
     <TabBar />
-    {#if !immersive}
+    {#if !noSidebar}
         <Sidebar />
     {/if}
     {#if $viewMode === 'grid'}
@@ -63,7 +64,7 @@
         width: 100vw;
         background: var(--bg);
     }
-    .app-shell.immersive {
+    .app-shell.no-sidebar {
         grid-template-areas:
             "tabbar"
             "main"
