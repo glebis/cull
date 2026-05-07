@@ -11,7 +11,11 @@
     import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections } from '$lib/stores';
     import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
+    import { initMenu } from '$lib/menu';
+    import { listen } from '@tauri-apps/api/event';
     import { onMount } from 'svelte';
+
+    let dragOver = $state(false);
 
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
     let noSidebar = $derived(immersive || !$sidebarVisible);
@@ -49,6 +53,11 @@
     onMount(() => {
         loadImages().catch(e => console.error('Failed to load images on mount:', e));
         initDeepLink().catch(e => console.error('Failed to init deep link:', e));
+        initMenu().catch(e => console.error('Failed to init menu:', e));
+
+        const dragUnlisten = listen<boolean>('drag-hover', (event) => {
+            dragOver = event.payload;
+        });
 
         let first = true;
         const unsub = minSizeFilter.subscribe(() => {
@@ -56,7 +65,10 @@
             loadImages().catch(e => console.error('Failed to reload images with filter:', e));
         });
 
-        return unsub;
+        return () => {
+            unsub();
+            dragUnlisten.then(fn => fn());
+        };
     });
 </script>
 
@@ -85,6 +97,12 @@
     {/if}
     {#if !$zenMode}
         <StatusBar />
+    {/if}
+
+    {#if dragOver}
+        <div class="drop-overlay">
+            <div class="drop-label">Drop to import</div>
+        </div>
     {/if}
 </div>
 
@@ -131,5 +149,23 @@
     .placeholder-text {
         font-size: 12px;
         opacity: 0.5;
+    }
+    .drop-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        border: 3px solid var(--accent, #4a9eff);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        pointer-events: none;
+    }
+    .drop-label {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--accent, #4a9eff);
+        text-transform: uppercase;
+        letter-spacing: 2px;
     }
 </style>

@@ -43,6 +43,98 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["jpg", "jpeg"],
+        "mimeType": "image/jpeg",
+        "description": "JPEG Image"
+      },
+      {
+        "ext": ["png"],
+        "mimeType": "image/png",
+        "description": "PNG Image"
+      },
+      {
+        "ext": ["gif"],
+        "mimeType": "image/gif",
+        "description": "GIF Image"
+      },
+      {
+        "ext": ["webp"],
+        "mimeType": "image/webp",
+        "description": "WebP Image"
+      },
+      {
+        "ext": ["bmp"],
+        "mimeType": "image/bmp",
+        "description": "BMP Image"
+      },
+      {
+        "ext": ["tiff", "tif"],
+        "mimeType": "image/tiff",
+        "description": "TIFF Image"
+      },
+      {
+        "ext": ["heic", "heif"],
+        "mimeType": "image/heic",
+        "description": "HEIC Image"
+      },
+      {
+        "ext": ["avif"],
+        "mimeType": "image/avif",
+        "description": "AVIF Image"
+      },
+      {
+        "ext": ["svg"],
+        "mimeType": "image/svg+xml",
+        "description": "SVG Image"
+      },
+      {
+        "ext": ["ico"],
+        "mimeType": "image/x-icon",
+        "description": "Icon Image"
+      },
+      {
+        "ext": ["cr2", "cr3"],
+        "mimeType": "image/x-canon-cr2",
+        "description": "Canon RAW Image"
+      },
+      {
+        "ext": ["nef"],
+        "mimeType": "image/x-nikon-nef",
+        "description": "Nikon RAW Image"
+      },
+      {
+        "ext": ["arw"],
+        "mimeType": "image/x-sony-arw",
+        "description": "Sony RAW Image"
+      },
+      {
+        "ext": ["dng"],
+        "mimeType": "image/x-adobe-dng",
+        "description": "Adobe DNG Image"
+      },
+      {
+        "ext": ["orf"],
+        "mimeType": "image/x-olympus-orf",
+        "description": "Olympus RAW Image"
+      },
+      {
+        "ext": ["raf"],
+        "mimeType": "image/x-fuji-raf",
+        "description": "Fuji RAW Image"
+      },
+      {
+        "ext": ["rw2"],
+        "mimeType": "image/x-panasonic-rw2",
+        "description": "Panasonic RAW Image"
+      },
+      {
+        "ext": ["psd"],
+        "mimeType": "image/vnd.adobe.photoshop",
+        "description": "Photoshop Document"
+      }
     ]
   }
 }

@@ -1,5 +1,6 @@
 mod commands;
 mod db_core;
+mod menu;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -15,12 +16,36 @@ pub struct AppState {
     pub embedding_engine: Mutex<EmbeddingEngine>,
 }
 
+const IMAGE_EXTENSIONS: &[&str] = &[
+    "jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif",
+    "heic", "heif", "avif", "svg", "ico",
+    "cr2", "cr3", "nef", "arw", "dng", "orf", "raf", "rw2", "psd",
+];
+
+fn is_image_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_focus();
+            }
+            for arg in &args {
+                if arg.starts_with("imageview://") {
+                    let params = parse_deep_link(arg);
+                    let _ = app.emit("open-with-params", params);
+                }
+            }
+        }))
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()
                 .map_err(|e| format!("failed to get app data dir: {}", e))?;
@@ -48,6 +73,15 @@ pub fn run() {
             let embedding_engine = Mutex::new(EmbeddingEngine::new(&model_dir));
 
             app.manage(AppState { db, app_data_dir, embedding_engine });
+
+            // Set up native menu bar
+            let handle = app.handle();
+            let app_menu = menu::create_menu(handle)?;
+            app.set_menu(app_menu)?;
+            let menu_handle = app.handle().clone();
+            app.on_menu_event(move |_app, event| {
+                menu::handle_menu_event(&menu_handle, &event);
+            });
 
             // Handle deep link URLs that launched the app
             #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
@@ -94,7 +128,122 @@ pub fn run() {
             commands::embeddings::get_api_key,
             commands::embeddings::validate_api_key,
             commands::embeddings::generate_gemini_embeddings,
+            commands::window::create_window,
+            commands::window::list_windows,
+            commands::window::rename_window,
+            commands::window::send_to_window,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Handle files opened via Finder "Open With"
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = &event {
+                let file_paths: Vec<String> = urls
+                    .iter()
+                    .filter_map(|url| {
+                        if url.scheme() == "file" {
+                            url.to_file_path().ok().map(|p| p.to_string_lossy().into_owned())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                if !file_paths.is_empty() {
+                    let params = crate::commands::deeplink::OpenParams {
+                        path: if file_paths.len() == 1 { Some(file_paths[0].clone()) } else { None },
+                        paths: if file_paths.len() > 1 { Some(file_paths) } else { None },
+                        folder: None,
+                        view: Some("loupe".to_string()),
+                        size: None,
+                        zoom: None,
+                        fullscreen: None,
+                        focus: None,
+                        gap: None,
+                    };
+                    let _ = app.emit("open-with-params", params);
+                }
+
+                for url in urls {
+                    if url.scheme() == "imageview" {
+                        let params = parse_deep_link(url.as_str());
+                        let _ = app.emit("open-with-params", params);
+                    }
+                }
+            }
+
+            // Handle drag-and-drop from Finder
+            if let tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::DragDrop(ref drag_event), .. } = event {
+                match drag_event {
+                    tauri::DragDropEvent::Enter { paths, .. } => {
+                        let has_images = paths.iter().any(|p| is_image_path(p));
+                        let has_dirs = paths.iter().any(|p| p.is_dir());
+                        if has_images || has_dirs {
+                            let _ = app.emit("drag-hover", true);
+                        }
+                    }
+                    tauri::DragDropEvent::Leave => {
+                        let _ = app.emit("drag-hover", false);
+                    }
+                    tauri::DragDropEvent::Drop { paths, .. } => {
+                        let _ = app.emit("drag-hover", false);
+
+                        let dirs: Vec<&PathBuf> = paths.iter().filter(|p| p.is_dir()).collect();
+                        let files: Vec<String> = paths.iter()
+                            .filter(|p| !p.is_dir() && is_image_path(p))
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .collect();
+
+                        if dirs.len() == 1 && files.is_empty() {
+                            let params = crate::commands::deeplink::OpenParams {
+                                path: None,
+                                paths: None,
+                                folder: Some(dirs[0].to_string_lossy().into_owned()),
+                                view: Some("grid".to_string()),
+                                size: None,
+                                zoom: None,
+                                fullscreen: None,
+                                focus: None,
+                                gap: None,
+                            };
+                            let _ = app.emit("open-with-params", params);
+                        } else if !files.is_empty() {
+                            let params = crate::commands::deeplink::OpenParams {
+                                path: if files.len() == 1 { Some(files[0].clone()) } else { None },
+                                paths: if files.len() > 1 { Some(files.clone()) } else { None },
+                                folder: None,
+                                view: Some(if files.len() == 1 { "loupe" } else { "grid" }.to_string()),
+                                size: None,
+                                zoom: None,
+                                fullscreen: None,
+                                focus: None,
+                                gap: None,
+                            };
+                            let _ = app.emit("open-with-params", params);
+                        }
+
+                        for dir in &dirs {
+                            if !files.is_empty() || dirs.len() > 1 {
+                                let params = crate::commands::deeplink::OpenParams {
+                                    path: None,
+                                    paths: None,
+                                    folder: Some(dir.to_string_lossy().into_owned()),
+                                    view: None,
+                                    size: None,
+                                    zoom: None,
+                                    fullscreen: None,
+                                    focus: None,
+                                    gap: None,
+                                };
+                                let _ = app.emit("open-with-params", params);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            drop(event);
+        });
 }

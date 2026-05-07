@@ -36,4 +36,5 @@ reqwest = { version = "0.12", features = ["stream", "json"] }
 futures-util = "0.3"
 base64 = "0.22"
 tokio = { version = "1", features = ["time"] }
+tauri-plugin-single-instance = "2"
 

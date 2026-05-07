@@ -1,33 +1,147 @@
 # ImageView
 
-Agent-friendly AI image viewer for macOS.
+Agent-friendly AI image viewer for macOS. Built to replace Preview.app for power users.
 
-Terminal-inspired, keyboard-first image viewer built for AI-generated image workflows. Handles batch review, comparison, curation, iteration, and export of hundreds to tens of thousands of images. Full bidirectional agent integration via MCP.
+Terminal-inspired, keyboard-first image viewer for AI-generated image workflows. Handles batch review, comparison, curation, iteration, and export of hundreds to tens of thousands of images. Full bidirectional agent integration via MCP, CLI, and URL scheme.
 
-## Features
+## What's Different
 
-- **7 view modes** — Grid, Compare, Loupe, Canvas, Lineage, Embedding Explorer, Export
 - **Keyboard-first** — vim-style navigation, every action reachable without mouse
-- **Agent integration** — MCP server for bidirectional communication with Claude Code and other agents
-- **Smart library** — SQLite-backed with SHA-256 dedup, project-scoped curation, iteration tracking
-- **Object detection** — YOLO via ONNX Runtime, auto-tagging on import
-- **Embedding search** — CLIP embeddings, semantic similarity, UMAP visualization
-- **Export anything** — WYSIWYG export of any view state as PNG/PDF/SVG contact sheets, film strips, comparison panels
+- **AI-native** — CLIP embeddings, UMAP visualization, semantic search, YOLO detection
+- **Agent-friendly** — every GUI operation has a CLI equivalent; composable pipelines via stdin/stdout
+- **macOS-integrated** — Open With, drag-and-drop, Quick Look, Share sheet, Services menu
+- **Non-destructive** — SQLite library with SHA-256 dedup; originals are never modified
 
 ## Tech Stack
 
-Tauri 2 + Rust + Svelte + SQLite + ONNX Runtime
+Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 
-## Quick Start
+## Current Status (v0.1.0)
+
+### Implemented
+
+| Feature | Status |
+|---------|--------|
+| Grid view with 4 thumbnail presets (80-400px) | Done |
+| Loupe view with zoom/pan (up to 20x) | Done |
+| Compare view (side-by-side pairs) | Done |
+| Embedding Explorer (UMAP 2D scatter + k-means clustering) | Done |
+| Zen mode (fullscreen, hides all chrome) | Done |
+| Vim-style keyboard navigation (hjkl, arrows, Home/End, PgUp/PgDn) | Done |
+| Star ratings (1-5), accept/reject/undecide curation | Done |
+| Color labels (schema ready, UI pending) | Partial |
+| SQLite library with SHA-256 dedup | Done |
+| Recursive folder import | Done |
+| Thumbnail generation (Lanczos3) | Done |
+| Folder and size filtering | Done |
+| Collections (create, add, list, delete, collect-mode) | Done |
+| CLIP ViT-B/32 embeddings via ONNX Runtime | Done |
+| Gemini Embedding 2 via API | Done |
+| Cosine similarity search | Done |
+| UMAP visualization with auto-clustering | Done |
+| Deep link URL scheme (`imageview://`) | Done |
+| Native macOS menu bar (File/Edit/View/Window/Help) | Done |
+| Drag-and-drop from Finder | Done |
+| File type associations (Open With in Finder) | Done |
+| Single-instance with deep link forwarding | Done |
+| Multi-window support | Done |
+| Dark terminal aesthetic | Done |
+
+### Supported Formats
+
+Currently: **JPEG, PNG, WebP, GIF**
+
+Planned: HEIC/HEIF, TIFF, BMP, SVG, AVIF, JPEG XL, RAW (CR2, CR3, NEF, ARW, DNG, ORF, RAF, RW2)
+
+## Roadmap
+
+### P0 — Must-have for daily driver
+
+- [x] **File type associations** — CFBundleDocumentTypes so app appears in Finder "Open With"
+- [x] **Drag and drop from Finder** — drop files/folders onto the window to import
+- [x] **Native macOS menu bar** — File > Open, Open Folder, Edit, View, Window, Help
+- [ ] **Broad format support** — HEIC, TIFF, BMP, SVG, AVIF, JPEG XL, RAW formats
+- [ ] **Model download UX** — progress bar, pause/resume, manual download option
+
+### P1 — Power user features
+
+**OS Integration:**
+- [ ] Quick Look extension (Spacebar preview in Finder)
+- [ ] Share sheet (outbound sharing to other apps)
+- [ ] Reveal in Finder
+- [ ] URL scheme expansion (action verbs: import, export, search, contact-sheet)
+
+**Viewing & Metadata:**
+- [ ] EXIF/IPTC/XMP metadata display panel
+- [ ] Histogram with per-channel RGB and clipping warnings
+- [ ] CLIP text-to-image search
+- [ ] Semantic similarity search (find visually similar images)
+- [ ] AI generation metadata parsing (prompt, seed, model from PNG/EXIF)
+
+**Automation & CLI:**
+- [ ] CLI tool — headless access to import, search, export, detect, rate, convert
+- [ ] MCP server (stdio) — expose all functionality to agents
+- [ ] Batch operations pipeline — composable resize, convert, rename, watermark, export
+- [ ] Contact sheet export — configurable grid with labels, ratings, metadata
+
+**AI & Detection:**
+- [ ] YOLO object detection via ONNX Runtime — auto-tagging on import
+- [ ] Florence-2 integration — zero-shot detection + captioning
+- [ ] Multi-model embedding support (Google, Ollama, OpenAI, local ONNX)
+
+**Embedding Explorer:**
+- [ ] Scope to current filter/folder/collection
+- [ ] UMAP in web worker (avoid UI freeze at 10K+ images)
+- [ ] Nearest-neighbor panel with similarity scores
+- [ ] Lasso/rectangle selection to create collections
+- [ ] Clickable clusters with representative thumbnails
+- [ ] Cluster auto-naming
+
+**Export:**
+- [ ] Collection export with format conversion and naming templates
+- [ ] WYSIWYG export — capture any view state as PNG/PDF
+
+### P2 — Full platform
+
+- [ ] Services menu integration ("Open in ImageView" system-wide)
+- [ ] AppleScript / Apple Events support
+- [ ] Color management (ICC profiles, monitor matching)
+- [ ] Print support with layout options
+- [ ] Global keyboard shortcuts (system-wide hotkeys)
+- [ ] Canvas view — infinite spatial canvas with freeform placement
+- [ ] Lineage view — iteration tree with prompt diffs
+- [ ] InsightFace — face detection and grouping by person
+- [ ] PaddleOCR — text extraction for search
+- [ ] DINOv2 embeddings (alternative to CLIP)
+- [ ] Color palette extraction (k-means dominant colors)
+- [ ] In-app inpainting (select region, type prompt, call API)
+- [ ] Perceptual hashing for near-duplicate detection
+- [ ] Basic image stats on import (aspect ratio, transparency, bit depth)
+
+## CLI (Planned)
+
+Every GUI operation will have a CLI equivalent:
+
+```bash
+imageview ~/photos                              # open folder in GUI
+imageview contact-sheet ./shoot --columns 6     # generate contact sheet
+imageview search "sunset landscape" --top 20    # semantic search
+imageview similar photo.jpg --top 10            # find visually similar
+imageview export favorites --format webp        # batch export collection
+imageview metadata photo.jpg                    # dump EXIF as JSON
+find . -name "*.png" | imageview pipe --resize 800x0 --format webp
+```
+
+See [docs/cli-and-url-scheme.md](docs/cli-and-url-scheme.md) for the full specification.
+
+## URL Scheme
 
 ```
-git clone https://github.com/gastownhall/imageview.git
-cd imageview
-npm install
-npm run tauri dev
+imageview://open?path=/path/to/image.jpg&view=loupe
+imageview://import?folder=/path/to/photos&recursive=true
+imageview://search?q=sunset+landscape&view=grid
+imageview://contact-sheet?folder=./photos&columns=4&output=/tmp/sheet.png
 ```
-
-Prerequisites: Rust 1.78+, Node.js 20+
 
 ## Keyboard Shortcuts
 
@@ -41,30 +155,47 @@ Prerequisites: Rust 1.78+, Node.js 20+
 | `PageUp` / `PageDown` | Jump by visible rows |
 | `Space` | Toggle select |
 | `+` / `-` | Adjust thumbnail size |
+| `g` | Cycle grid presets |
+| `f` | Fullscreen (Loupe) |
+| `\` or `Cmd+B` | Toggle sidebar |
 
-### Actions
+### View Modes
+
+| Key | View |
+|-----|------|
+| `1` | Grid |
+| `2` | Compare |
+| `3` | Loupe |
+| `4` | Canvas |
+| `5` | Lineage |
+| `6` | Embedding Explorer |
+| `7` | Export |
+
+### Curation
 
 | Key | Action |
 |-----|--------|
 | `s` then `1-5` | Star rating |
 | `0` | Clear rating |
-| `a` / `x` | Accept / reject |
-| `u` | Clear decision (undecide) |
-| `Escape` | Cancel pending action |
+| `a` / `x` / `u` | Accept / reject / undecide |
+| `b` | Collect mode (add to collection) |
 
-## Roadmap
+## Quick Start
 
-- [x] Phase 1 — Grid view, import, keyboard navigation, dark terminal theme
-- [ ] Phase 2 — Compare, Loupe, Canvas, Lineage views
-- [ ] Phase 3 — ONNX + CLIP + YOLO + Embedding Explorer
-- [ ] Phase 4 — MCP server, CLI, AppleScript, global shortcuts
-- [ ] Phase 5 — Image generation integration, WYSIWYG export
+```bash
+git clone https://github.com/gastownhall/imageview.git
+cd imageview
+npm install
+npm run tauri dev
+```
+
+Prerequisites: Rust 1.78+, Node.js 20+
 
 ## Design
 
 Dark terminal aesthetic. Monospace typography. 8px spacing grid. No decorative elements.
 
-See `docs/superpowers/specs/2026-05-06-imageview-design.md` for the full design spec.
+See `docs/design-system.md` for the full design spec.
 
 ## License
 

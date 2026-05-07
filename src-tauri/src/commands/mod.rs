@@ -4,3 +4,4 @@ pub mod embeddings;
 pub mod import;
 pub mod library;
 pub mod selection;
+pub mod window;
