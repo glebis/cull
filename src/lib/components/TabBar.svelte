@@ -2,14 +2,14 @@
     import { viewMode, thumbnailSize } from '$lib/stores';
     import type { ViewMode } from '$lib/stores';
 
-    const tabs: { id: ViewMode; label: string; key: string }[] = [
-        { id: 'grid', label: 'Grid', key: '1' },
-        { id: 'compare', label: 'Compare', key: '2' },
-        { id: 'loupe', label: 'Loupe', key: '3' },
-        { id: 'canvas', label: 'Canvas', key: '4' },
-        { id: 'lineage', label: 'Lineage', key: '5' },
-        { id: 'embeddings', label: 'Embeddings', key: '6' },
-        { id: 'export', label: 'Export', key: '7' },
+    const tabs: { id: ViewMode; label: string; key: string; icon: string }[] = [
+        { id: 'grid', label: 'Grid', key: '1', icon: '⊞' },
+        { id: 'compare', label: 'Compare', key: '2', icon: '⊟' },
+        { id: 'loupe', label: 'Loupe', key: '3', icon: '◎' },
+        { id: 'canvas', label: 'Canvas', key: '4', icon: '◧' },
+        { id: 'lineage', label: 'Lineage', key: '5', icon: '⑃' },
+        { id: 'embeddings', label: 'Embeddings', key: '6', icon: '◌' },
+        { id: 'export', label: 'Export', key: '7', icon: '⤓' },
     ];
 
     let size = $state(160);
@@ -30,7 +30,7 @@
                 class:active={$viewMode === tab.id}
                 onclick={() => viewMode.set(tab.id)}
             >
-                <span class="tab-key">{tab.key}</span>{tab.label}
+                <span class="tab-icon">{tab.icon}</span><span class="tab-key">{tab.key}</span>{tab.label}
             </button>
         {/each}
     </div>
@@ -89,14 +89,23 @@
         color: var(--green);
         border-bottom-color: var(--green);
     }
+    .tab-icon {
+        margin-right: 4px;
+        font-size: 13px;
+        opacity: 0.6;
+    }
+    .tab.active .tab-icon {
+        opacity: 1;
+    }
     .tab-key {
         color: var(--text-secondary);
         font-size: 10px;
-        margin-right: 4px;
-        opacity: 0.5;
+        margin-right: 3px;
+        opacity: 0.4;
     }
     .tab.active .tab-key {
         color: var(--green);
+        opacity: 0.6;
     }
     .slider-group {
         display: flex;
