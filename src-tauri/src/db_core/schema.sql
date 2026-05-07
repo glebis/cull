@@ -42,11 +42,11 @@ CREATE TABLE IF NOT EXISTS image_projects (
 
 CREATE TABLE IF NOT EXISTS selections (
     image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
-    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL DEFAULT '__global__',
     star_rating INTEGER CHECK (star_rating BETWEEN 0 AND 5),
     color_label TEXT CHECK (color_label IN ('red', 'green', 'blue', 'yellow', NULL)),
     decision TEXT CHECK (decision IN ('accept', 'reject', 'undecided')) DEFAULT 'undecided',
-    PRIMARY KEY (image_id, COALESCE(project_id, '__global__'))
+    PRIMARY KEY (image_id, project_id)
 );
 
 -- Indexes

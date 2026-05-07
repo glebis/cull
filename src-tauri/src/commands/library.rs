@@ -1,7 +1,7 @@
 use tauri::State;
 use crate::AppState;
-use crate::core::models::ImageWithFile;
-use crate::core::thumbnails;
+use crate::db_core::models::ImageWithFile;
+use crate::db_core::thumbnails;
 
 #[tauri::command]
 pub async fn list_images(

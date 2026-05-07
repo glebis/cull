@@ -75,7 +75,7 @@ impl Database {
                     s.star_rating, s.color_label, s.decision
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
-             LEFT JOIN selections s ON s.image_id = i.id AND s.project_id IS NULL
+             LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
              GROUP BY i.id
              ORDER BY i.imported_at DESC
              LIMIT ?1 OFFSET ?2"
@@ -114,8 +114,8 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO selections (image_id, project_id, star_rating, decision)
-             VALUES (?1, NULL, ?2, 'undecided')
-             ON CONFLICT(image_id, COALESCE(project_id, '__global__'))
+             VALUES (?1, '__global__', ?2, 'undecided')
+             ON CONFLICT(image_id, project_id)
              DO UPDATE SET star_rating = ?2",
             params![image_id, rating],
         )?;
@@ -126,8 +126,8 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO selections (image_id, project_id, decision)
-             VALUES (?1, NULL, ?2)
-             ON CONFLICT(image_id, COALESCE(project_id, '__global__'))
+             VALUES (?1, '__global__', ?2)
+             ON CONFLICT(image_id, project_id)
              DO UPDATE SET decision = ?2",
             params![image_id, decision],
         )?;
