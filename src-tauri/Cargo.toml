@@ -28,4 +28,5 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 walkdir = "2"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
+tauri-plugin-dialog = "2.7.1"
 
