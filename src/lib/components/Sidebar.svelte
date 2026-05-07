@@ -1,9 +1,12 @@
 <script lang="ts">
     import { open } from '@tauri-apps/plugin-dialog';
+    import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { totalCount, images, focusedIndex } from '$lib/stores';
     import { importFolder as apiImportFolder, listImages, getImageCount } from '$lib/api';
 
     let importing = $state(false);
+    let importCurrent = $state(0);
+    let importTotal = $state(0);
     let lastResult = $state('');
 
     async function handleImportFolder() {
@@ -11,7 +14,27 @@
         if (!selected) return;
 
         importing = true;
+        importCurrent = 0;
+        importTotal = 0;
         lastResult = '';
+
+        // Listen for progress events
+        let lastRefresh = 0;
+        const unlisten: UnlistenFn = await listen<{ current: number; total: number; filename: string }>(
+            'import-progress',
+            async (event) => {
+                importCurrent = event.payload.current;
+                importTotal = event.payload.total;
+
+                // Refresh image count every 20 imports
+                if (importCurrent - lastRefresh >= 20) {
+                    lastRefresh = importCurrent;
+                    const count = await getImageCount();
+                    totalCount.set(count);
+                }
+            }
+        );
+
         try {
             const result = await apiImportFolder(selected as string);
             lastResult = `+${result.imported} imported, ${result.skipped} skipped`;
@@ -22,6 +45,7 @@
         } catch (e) {
             lastResult = `Error: ${e}`;
         } finally {
+            unlisten();
             importing = false;
         }
     }
@@ -55,7 +79,7 @@
             <div class="import-result">{lastResult}</div>
         {/if}
         <button class="import-btn" onclick={handleImportFolder} disabled={importing}>
-            {importing ? 'Importing...' : '+ Import Folder'}
+            {importing ? (importTotal > 0 ? `Importing ${importCurrent}/${importTotal}...` : 'Scanning...') : '+ Import Folder'}
         </button>
     </div>
 </div>
