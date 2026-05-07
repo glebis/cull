@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { images, selectedIds, focusedIndex, thumbnailSize, viewMode, gridGap } from '$lib/stores';
+    import { images, selectedIds, focusedIndex, thumbnailSize, viewMode, gridGap, navigateTo } from '$lib/stores';
     import Thumbnail from './Thumbnail.svelte';
 
     let containerEl: HTMLDivElement | undefined = $state(undefined);
@@ -57,7 +57,7 @@
 
     function handleDblClick(index: number) {
         focusedIndex.set(index);
-        viewMode.set('loupe');
+        navigateTo('loupe');
     }
 
     $effect(() => {

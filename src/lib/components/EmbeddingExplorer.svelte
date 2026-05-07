@@ -3,7 +3,7 @@
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { UMAP } from 'umap-js';
-    import { images, focusedIndex, viewMode, zenMode } from '$lib/stores';
+    import { images, focusedIndex, viewMode, zenMode, navigateTo } from '$lib/stores';
     import { openUrl } from '@tauri-apps/plugin-opener';
     import {
         isModelAvailable,
@@ -646,7 +646,7 @@
             const idx = $images.findIndex(img => img.image.id === selectedPoint!.id);
             if (idx >= 0) {
                 focusedIndex.set(idx);
-                viewMode.set('loupe');
+                navigateTo('loupe');
             }
         }
     }
@@ -656,7 +656,7 @@
         const idx = $images.findIndex(img => img.image.id === hoveredPoint!.id);
         if (idx >= 0) {
             focusedIndex.set(idx);
-            viewMode.set('loupe');
+            navigateTo('loupe');
         }
     }
 

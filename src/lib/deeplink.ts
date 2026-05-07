@@ -8,6 +8,9 @@ import {
     gridGap,
     loupeScale,
     activeFolder,
+    windowName,
+    windowLabel,
+    navigateTo,
     type ViewMode,
 } from './stores';
 import { importFolder, importFiles, listImagesByFolder, listImages } from './api';
@@ -26,10 +29,10 @@ interface OpenParams {
 
 const VALID_VIEWS: ViewMode[] = ['grid', 'compare', 'loupe', 'canvas', 'lineage', 'embeddings', 'export'];
 
-async function handleParams(params: OpenParams) {
+export async function handleParams(params: OpenParams) {
     // Set view mode
     if (params.view && VALID_VIEWS.includes(params.view as ViewMode)) {
-        viewMode.set(params.view as ViewMode);
+        navigateTo(params.view as ViewMode);
     }
 
     // Set thumbnail size
@@ -103,7 +106,7 @@ async function handleParams(params: OpenParams) {
     }
 }
 
-function parseDeepLinkUrl(url: string): OpenParams {
+export function parseDeepLinkUrl(url: string): OpenParams {
     try {
         const parsed = new URL(url);
         const p = parsed.searchParams;
@@ -126,7 +129,7 @@ function parseDeepLinkUrl(url: string): OpenParams {
     }
 }
 
-function inferViewFromAction(action: string): string | null {
+export function inferViewFromAction(action: string): string | null {
     if (['grid', 'loupe', 'compare'].includes(action)) {
         return action;
     }
@@ -134,6 +137,12 @@ function inferViewFromAction(action: string): string | null {
 }
 
 export async function initDeepLink() {
+    // Listen for window name assignment from Rust
+    await listen<{ label: string; name: string }>('set-window-name', (event) => {
+        windowLabel.set(event.payload.label);
+        windowName.set(event.payload.name);
+    });
+
     // Listen for open-with-params events (from Rust deep link handler + open_with_params command)
     await listen<OpenParams>('open-with-params', (event) => {
         handleParams(event.payload);

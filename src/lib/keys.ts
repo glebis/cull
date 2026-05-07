@@ -4,6 +4,7 @@ import {
     compareActiveSide, loupeScale, loupePanX, loupePanY,
     sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode,
     collections, collectMode, collectModeTarget, activeCollection,
+    navigateTo, navigateBack,
 } from './stores';
 import type { ViewMode } from './stores';
 import { setRating, setDecision, createCollection, addToCollection, listCollections, listCollectionImages } from './api';
@@ -246,7 +247,7 @@ export function handleKeydown(e: KeyboardEvent) {
     // View mode switching with number keys (1-7)
     if (VIEW_MODE_KEYS[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
-        viewMode.set(VIEW_MODE_KEYS[e.key]);
+        navigateTo(VIEW_MODE_KEYS[e.key]);
         return;
     }
 
@@ -349,7 +350,7 @@ function handleGridKeys(e: KeyboardEvent) {
             break;
         case 'Enter':
             e.preventDefault();
-            viewMode.set('loupe');
+            navigateTo('loupe');
             break;
         case '\\':
             e.preventDefault();
@@ -540,7 +541,7 @@ function handleCompareKeys(e: KeyboardEvent) {
             break;
         case 'Escape':
             e.preventDefault();
-            viewMode.set('grid');
+            navigateBack() || navigateTo('grid');
             break;
     }
 }
@@ -603,7 +604,7 @@ function handleLoupeKeys(e: KeyboardEvent) {
             break;
         case 'Escape':
             e.preventDefault();
-            viewMode.set('grid');
+            navigateBack() || navigateTo('grid');
             break;
         case 'Home':
             e.preventDefault();

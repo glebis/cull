@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { viewMode, thumbnailSize } from '$lib/stores';
+    import { viewMode, thumbnailSize, windowName, navigateTo } from '$lib/stores';
     import type { ViewMode } from '$lib/stores';
 
     const tabs: { id: ViewMode; label: string; key: string; icon: string }[] = [
@@ -23,12 +23,15 @@
 </script>
 
 <div class="tabbar">
+    {#if $windowName && $windowName !== 'ImageView'}
+        <span class="window-name">{$windowName}</span>
+    {/if}
     <div class="tabs">
         {#each tabs as tab}
             <button
                 class="tab"
                 class:active={$viewMode === tab.id}
-                onclick={() => viewMode.set(tab.id)}
+                onclick={() => navigateTo(tab.id)}
             >
                 <span class="tab-icon">{tab.icon}</span><span class="tab-key">{tab.key}</span>{tab.label}
             </button>
@@ -65,6 +68,15 @@
         padding-left: 78px;
         grid-area: tabbar;
         -webkit-app-region: drag;
+    }
+    .window-name {
+        font-size: 11px;
+        color: var(--text-secondary);
+        margin-right: 8px;
+        padding-right: 8px;
+        border-right: 1px solid var(--border);
+        white-space: nowrap;
+        -webkit-app-region: no-drag;
     }
     .tabs {
         display: flex;

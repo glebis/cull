@@ -1,7 +1,7 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { revealItemInDir } from '@tauri-apps/plugin-opener';
-    import { images, focusedIndex, statusHint, loupeScale, loupePanX, loupePanY } from '$lib/stores';
+    import { images, focusedIndex, statusHint, loupeScale, loupePanX, loupePanY, navigateBack } from '$lib/stores';
 
     let dragging = $state(false);
     let dragStartX = $state(0);
@@ -68,11 +68,7 @@
     }
 
     function handleDblClick() {
-        if (document.fullscreenElement) {
-            document.exitFullscreen();
-        } else {
-            document.documentElement.requestFullscreen();
-        }
+        navigateBack();
     }
 
     let contextMenuVisible = $state(false);

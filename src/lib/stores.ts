@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import type { ImageWithFile } from './api';
 
 export type ViewMode = 'grid' | 'compare' | 'loupe' | 'canvas' | 'lineage' | 'embeddings' | 'export';
@@ -8,6 +8,31 @@ export const selectedIds = writable<Set<string>>(new Set());
 export const focusedIndex = writable<number>(0);
 export const totalCount = writable<number>(0);
 export const viewMode = writable<ViewMode>('grid');
+
+// Navigation history stack
+export const viewHistory = writable<{ mode: ViewMode; focusedIndex: number }[]>([]);
+
+export function navigateTo(mode: ViewMode) {
+    const currentMode = get(viewMode);
+    if (currentMode === mode) return;
+    viewHistory.update(h => [...h, { mode: currentMode, focusedIndex: get(focusedIndex) }]);
+    viewMode.set(mode);
+}
+
+export function navigateBack(): boolean {
+    const history = get(viewHistory);
+    if (history.length === 0) return false;
+    const prev = history[history.length - 1];
+    viewHistory.update(h => h.slice(0, -1));
+    viewMode.set(prev.mode);
+    focusedIndex.set(prev.focusedIndex);
+    return true;
+}
+
+// Window identity
+export const windowName = writable<string>('ImageView');
+export const windowLabel = writable<string>('main');
+
 export const thumbnailSize = writable<number>(160);
 
 export const selectedCount = derived(selectedIds, ($ids) => $ids.size);
