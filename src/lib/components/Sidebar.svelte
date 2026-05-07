@@ -2,7 +2,7 @@
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { totalCount, images, focusedIndex, folders, activeFolder } from '$lib/stores';
-    import { importFolder as apiImportFolder, listImages, listImagesByFolder, getImageCount, listFolders } from '$lib/api';
+    import { importFolder as apiImportFolder, listImages, listImagesByFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder } from '$lib/api';
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
 
@@ -38,6 +38,22 @@
             focusedIndex.set(0);
         } catch (e) {
             console.error('Failed to load images for folder:', e);
+        }
+    }
+
+    async function handleDeleteFolder(event: Event, folder: string) {
+        event.stopPropagation();
+        const name = folderName(folder);
+        if (!window.confirm(`Delete folder "${name}" and its unique images from library?`)) return;
+        try {
+            const count = await apiDeleteFolder(folder);
+            lastResult = `Removed ${count} images from "${name}"`;
+            if (get(activeFolder) === folder) {
+                activeFolder.set(null);
+            }
+            await refreshImages();
+        } catch (e) {
+            lastResult = `Error: ${e}`;
         }
     }
 
@@ -111,11 +127,14 @@
             <span class="count">({$totalCount})</span>
         </button>
         {#each $folders as [path, count]}
-            <button class="section-item" class:active={$activeFolder === path} onclick={() => selectFolder(path)}>
-                <span class="icon">&#9656;</span>
-                {folderName(path)}
-                <span class="count">({count})</span>
-            </button>
+            <div class="folder-row" class:active={$activeFolder === path}>
+                <button class="section-item" onclick={() => selectFolder(path)}>
+                    <span class="icon">&#9656;</span>
+                    {folderName(path)}
+                    <span class="count">({count})</span>
+                </button>
+                <button class="delete-btn" onclick={(e: Event) => handleDeleteFolder(e, path)} title="Remove folder">&times;</button>
+            </div>
         {/each}
     </div>
 
@@ -186,6 +205,46 @@
         color: var(--text-secondary);
         margin-left: auto;
         font-size: 11px;
+    }
+    .folder-row {
+        display: flex;
+        align-items: center;
+        border-radius: var(--radius);
+    }
+    .folder-row:hover {
+        background: var(--border);
+    }
+    .folder-row.active {
+        background: rgba(122, 162, 247, 0.1);
+    }
+    .folder-row.active .section-item {
+        color: var(--blue);
+    }
+    .folder-row .section-item:hover {
+        background: none;
+    }
+    .folder-row .section-item {
+        flex: 1;
+        min-width: 0;
+    }
+    .delete-btn {
+        display: none;
+        margin-right: 4px;
+        font-size: 14px;
+        line-height: 1;
+        color: var(--text-secondary);
+        cursor: pointer;
+        flex-shrink: 0;
+        background: none;
+        border: none;
+        padding: 2px 4px;
+        font-family: inherit;
+    }
+    .folder-row:hover .delete-btn {
+        display: inline;
+    }
+    .delete-btn:hover {
+        color: var(--red, #f7768e);
     }
     .section-empty {
         font-size: 11px;

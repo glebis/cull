@@ -48,6 +48,14 @@ pub async fn list_images(
 }
 
 #[tauri::command]
+pub async fn delete_folder(
+    state: State<'_, AppState>,
+    folder: String,
+) -> Result<u32, String> {
+    state.db.delete_images_by_folder(&folder).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn get_image_count(state: State<'_, AppState>) -> Result<u32, String> {
     state.db.image_count().map_err(|e| e.to_string())
 }

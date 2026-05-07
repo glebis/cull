@@ -202,6 +202,39 @@ impl Database {
         rows.collect::<Result<Vec<_>>>()
     }
 
+    pub fn delete_images_by_folder(&self, folder: &str) -> Result<u32> {
+        let conn = self.conn.lock().unwrap();
+        let pattern = format!("{}/%", folder);
+
+        // Get image IDs that ONLY exist in this folder (no other paths)
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT f.image_id FROM image_files f
+             WHERE f.path LIKE ?1 AND f.missing_at IS NULL
+             AND f.image_id NOT IN (
+                 SELECT image_id FROM image_files
+                 WHERE path NOT LIKE ?1 AND missing_at IS NULL
+             )"
+        )?;
+        let image_ids: Vec<String> = stmt.query_map(params![pattern], |row| {
+            row.get(0)
+        })?.filter_map(|r| r.ok()).collect();
+
+        let count = image_ids.len() as u32;
+
+        // Delete the images (CASCADE will handle image_files, selections, etc.)
+        for id in &image_ids {
+            conn.execute("DELETE FROM images WHERE id = ?1", params![id])?;
+        }
+
+        // Also delete file records from this folder for images that still exist elsewhere
+        conn.execute(
+            "DELETE FROM image_files WHERE path LIKE ?1",
+            params![pattern],
+        )?;
+
+        Ok(count)
+    }
+
     pub fn image_count(&self) -> Result<u32> {
         let conn = self.conn.lock().unwrap();
         conn.query_row("SELECT COUNT(*) FROM images", [], |row| row.get(0))

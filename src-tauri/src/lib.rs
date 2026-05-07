@@ -51,6 +51,7 @@ pub fn run() {
             commands::library::get_iteration_siblings,
             commands::library::list_folders,
             commands::library::list_images_by_folder,
+            commands::library::delete_folder,
             commands::selection::set_rating,
             commands::selection::set_decision,
         ])
