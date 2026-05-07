@@ -73,6 +73,11 @@ pub fn run() {
             commands::selection::set_rating,
             commands::selection::set_decision,
             commands::deeplink::open_with_params,
+            commands::collections::create_collection,
+            commands::collections::list_collections,
+            commands::collections::add_to_collection,
+            commands::collections::list_collection_images,
+            commands::collections::delete_collection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

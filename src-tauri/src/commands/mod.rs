@@ -1,3 +1,4 @@
+pub mod collections;
 pub mod deeplink;
 pub mod import;
 pub mod library;

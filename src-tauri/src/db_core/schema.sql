@@ -63,6 +63,16 @@ CREATE TABLE IF NOT EXISTS iterations (
     created_at TEXT NOT NULL
 );
 
+-- Collections (ordered image sets using existing projects table)
+CREATE TABLE IF NOT EXISTS collection_items (
+    collection_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (collection_id, image_id)
+);
+
+CREATE INDEX IF NOT EXISTS collection_items_pos_idx ON collection_items(collection_id, position);
+
 -- Indexes
 CREATE UNIQUE INDEX IF NOT EXISTS images_sha256_uq ON images(sha256_hash);
 CREATE INDEX IF NOT EXISTS image_files_path_idx ON image_files(path);
