@@ -161,6 +161,14 @@ function compareNextPair() {
     compareActiveSide.set(0);
 }
 
+function comparePrevPair() {
+    const idx = get(focusedIndex);
+    const prev = Math.max(0, idx - 2);
+    focusedIndex.set(prev);
+    selectedIds.set(new Set());
+    compareActiveSide.set(0);
+}
+
 // ---- Loupe helpers ----
 
 function resetLoupeZoom() {
@@ -366,6 +374,16 @@ function handleCompareKeys(e: KeyboardEvent) {
         case 'ArrowRight':
             e.preventDefault();
             compareActiveSide.set(1);
+            break;
+        case 'j':
+        case 'ArrowDown':
+            e.preventDefault();
+            compareNextPair();
+            break;
+        case 'k':
+        case 'ArrowUp':
+            e.preventDefault();
+            comparePrevPair();
             break;
         case 'Tab':
             e.preventDefault();
