@@ -431,5 +431,17 @@ function handleLoupeKeys(e: KeyboardEvent) {
             e.preventDefault();
             resetLoupeZoom();
             break;
+        case 'f':
+            e.preventDefault();
+            toggleFullscreen();
+            break;
+    }
+}
+
+function toggleFullscreen() {
+    if (document.fullscreenElement) {
+        document.exitFullscreen();
+    } else {
+        document.documentElement.requestFullscreen();
     }
 }

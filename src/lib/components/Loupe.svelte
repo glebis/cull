@@ -65,6 +65,14 @@
     function handleMouseUp() {
         dragging = false;
     }
+
+    function handleDblClick() {
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+        } else {
+            document.documentElement.requestFullscreen();
+        }
+    }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -75,6 +83,7 @@
     onmousemove={handleMouseMove}
     onmouseup={handleMouseUp}
     onmouseleave={handleMouseUp}
+    ondblclick={handleDblClick}
     class:dragging
     class:zoomed={$loupeScale > 1}
 >
