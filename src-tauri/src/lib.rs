@@ -90,6 +90,10 @@ pub fn run() {
             commands::embeddings::download_clip_model,
             commands::embeddings::is_model_available,
             commands::embeddings::get_embedding_count,
+            commands::embeddings::set_api_key,
+            commands::embeddings::get_api_key,
+            commands::embeddings::validate_api_key,
+            commands::embeddings::generate_gemini_embeddings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

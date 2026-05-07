@@ -1927,6 +1927,7 @@ dependencies = [
 name = "imageview"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "futures-util",
  "image",
@@ -1942,6 +1943,7 @@ dependencies = [
  "tauri-plugin-deep-link",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
+ "tokio",
  "uuid",
  "walkdir",
 ]

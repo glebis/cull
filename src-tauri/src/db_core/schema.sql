@@ -86,6 +86,12 @@ CREATE TABLE IF NOT EXISTS embeddings (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS embeddings_image_model_uq ON embeddings(image_id, model_name);
 
+-- App Settings
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 -- Indexes
 CREATE UNIQUE INDEX IF NOT EXISTS images_sha256_uq ON images(sha256_hash);
 CREATE INDEX IF NOT EXISTS image_files_path_idx ON image_files(path);
