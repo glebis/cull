@@ -22,6 +22,11 @@
     let embeddingCount = $state(0);
     let totalImages = $state(0);
 
+    // Download progress
+    let downloadProgress = $state({ downloaded: 0, total: 0, status: '' });
+    let downloadStartTime = $state(0);
+    let downloadSpeed = $state('');
+
     // UMAP projection
     type Point = { id: string; x: number; y: number; cluster: number };
     let points = $state<Point[]>([]);
@@ -75,14 +80,40 @@
         }
     }
 
+    function formatBytes(bytes: number): string {
+        if (bytes === 0) return '0 B';
+        const mb = bytes / (1024 * 1024);
+        if (mb >= 1) return `${mb.toFixed(0)} MB`;
+        const kb = bytes / 1024;
+        return `${kb.toFixed(0)} KB`;
+    }
+
     async function handleDownload() {
         downloading = true;
+        downloadProgress = { downloaded: 0, total: 0, status: 'downloading' };
+        downloadStartTime = Date.now();
+        downloadSpeed = '';
+
+        const unlisten: UnlistenFn = await listen<{ downloaded: number; total: number; status: string }>(
+            'model-download-progress',
+            (event) => {
+                downloadProgress = event.payload;
+                // Calculate speed
+                const elapsed = (Date.now() - downloadStartTime) / 1000;
+                if (elapsed > 0 && event.payload.downloaded > 0) {
+                    const bytesPerSec = event.payload.downloaded / elapsed;
+                    downloadSpeed = `${formatBytes(bytesPerSec)}/s`;
+                }
+            }
+        );
+
         try {
             await downloadClipModel();
             modelAvailable = true;
         } catch (e) {
             console.error('Download failed:', e);
         } finally {
+            unlisten();
             downloading = false;
         }
     }
@@ -415,14 +446,47 @@
         <div class="panel-section">
             <div class="section-header">MODEL</div>
             <div class="model-info">CLIP ViT-B/32</div>
-            <div class="model-detail">512-dim &rarr; 2D UMAP</div>
+            <div class="model-detail">
+                {#if !modelAvailable}
+                    Model not downloaded
+                {:else}
+                    {embeddingCount}/{$images.length} images
+                {/if}
+            </div>
         </div>
 
         {#if !modelAvailable}
             <div class="panel-section">
-                <button class="action-btn" onclick={handleDownload} disabled={downloading}>
-                    {downloading ? 'Downloading...' : 'Download Model (~350MB)'}
-                </button>
+                {#if downloading}
+                    <div class="download-progress">
+                        <div class="progress-text">
+                            {#if downloadProgress.total > 0}
+                                Downloading: {formatBytes(downloadProgress.downloaded)} / {formatBytes(downloadProgress.total)}
+                                ({Math.round((downloadProgress.downloaded / downloadProgress.total) * 100)}%)
+                            {:else}
+                                Downloading...
+                            {/if}
+                        </div>
+                        <div class="progress-bar-track">
+                            <div
+                                class="progress-bar-fill"
+                                style="width: {downloadProgress.total > 0 ? (downloadProgress.downloaded / downloadProgress.total) * 100 : 0}%"
+                            ></div>
+                        </div>
+                        {#if downloadSpeed}
+                            <div class="progress-speed">{downloadSpeed}</div>
+                        {/if}
+                    </div>
+                {:else}
+                    <button class="action-btn" onclick={handleDownload}>
+                        Download Model (~350MB)
+                    </button>
+                {/if}
+                <div class="manual-download">
+                    <div class="section-header" style="margin-top: 10px">MANUAL DOWNLOAD</div>
+                    <pre class="manual-cmd">curl -L -o ~/.../models/clip-vit-b32-vision.onnx \
+  https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx</pre>
+                </div>
             </div>
         {:else}
             <div class="panel-section">
@@ -699,5 +763,55 @@
         opacity: 0.6;
         max-width: 280px;
         text-align: center;
+    }
+
+    .download-progress {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .progress-text {
+        font-size: 10px;
+        color: var(--text);
+    }
+
+    .progress-bar-track {
+        width: 100%;
+        height: 6px;
+        background: var(--border);
+        border-radius: 3px;
+        overflow: hidden;
+    }
+
+    .progress-bar-fill {
+        height: 100%;
+        background: var(--blue);
+        border-radius: 3px;
+        transition: width 0.2s ease;
+    }
+
+    .progress-speed {
+        font-size: 9px;
+        color: var(--text-secondary);
+        text-align: right;
+    }
+
+    .manual-download {
+        margin-top: 4px;
+    }
+
+    .manual-cmd {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
+        color: var(--text-secondary);
+        background: rgba(0, 0, 0, 0.3);
+        padding: 6px;
+        border-radius: var(--radius);
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-all;
+        line-height: 1.4;
+        margin: 0;
     }
 </style>
