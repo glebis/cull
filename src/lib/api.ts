@@ -79,3 +79,17 @@ export async function deleteFolder(folder: string): Promise<number> {
 export async function listImagesFiltered(minWidth: number | null, minHeight: number | null, limit: number, offset: number): Promise<ImageWithFile[]> {
     return invoke('list_images_filtered', { minWidth, minHeight, limit, offset });
 }
+
+export async function openWithParams(params: {
+    path?: string;
+    paths?: string[];
+    folder?: string;
+    view?: string;
+    size?: number;
+    zoom?: number;
+    fullscreen?: boolean;
+    focus?: number;
+    gap?: number;
+}): Promise<void> {
+    return invoke('open_with_params', params);
+}

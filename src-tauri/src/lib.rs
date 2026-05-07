@@ -2,9 +2,10 @@ mod commands;
 mod db_core;
 
 use std::path::PathBuf;
-use tauri::Manager;
+use tauri::{Manager, Emitter, Listener};
 use tauri_plugin_dialog::DialogExt;
 use crate::db_core::db::Database;
+use crate::commands::deeplink::parse_deep_link;
 
 pub struct AppState {
     pub db: Database,
@@ -16,6 +17,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()
                 .map_err(|e| format!("failed to get app data dir: {}", e))?;
@@ -40,6 +42,21 @@ pub fn run() {
             };
 
             app.manage(AppState { db, app_data_dir });
+
+            // Handle deep link URLs that launched the app
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+            {
+                let handle = app.handle().clone();
+                app.listen("deep-link://new-url", move |event: tauri::Event| {
+                    if let Ok(urls) = serde_json::from_str::<Vec<String>>(event.payload()) {
+                        for url in urls {
+                            let params = parse_deep_link(&url);
+                            let _ = handle.emit("open-with-params", params);
+                        }
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -55,6 +72,7 @@ pub fn run() {
             commands::library::list_images_filtered,
             commands::selection::set_rating,
             commands::selection::set_decision,
+            commands::deeplink::open_with_params,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

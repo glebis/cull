@@ -9,6 +9,7 @@
     import { handleKeydown } from '$lib/keys';
     import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter } from '$lib/stores';
     import { getImageCount, listImages, listImagesByFolder, listImagesFiltered } from '$lib/api';
+    import { initDeepLink } from '$lib/deeplink';
     import { onMount } from 'svelte';
 
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
@@ -39,6 +40,7 @@
 
     onMount(() => {
         loadImages().catch(e => console.error('Failed to load images on mount:', e));
+        initDeepLink().catch(e => console.error('Failed to init deep link:', e));
 
         let first = true;
         const unsub = minSizeFilter.subscribe(() => {
