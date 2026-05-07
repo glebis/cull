@@ -7,7 +7,7 @@
     import Compare from '$lib/components/Compare.svelte';
     import Loupe from '$lib/components/Loupe.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, viewMode, sidebarVisible } from '$lib/stores';
+    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode } from '$lib/stores';
     import { getImageCount, listImages } from '$lib/api';
     import { onMount } from 'svelte';
 
@@ -31,9 +31,11 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="app-shell" class:no-sidebar={noSidebar}>
-    <TabBar />
-    {#if !noSidebar}
+<div class="app-shell" class:no-sidebar={noSidebar} class:zen={$zenMode}>
+    {#if !$zenMode}
+        <TabBar />
+    {/if}
+    {#if !noSidebar && !$zenMode}
         <Sidebar />
     {/if}
     {#if $viewMode === 'grid'}
@@ -48,7 +50,9 @@
             <span class="placeholder-text">Coming soon</span>
         </div>
     {/if}
-    <StatusBar />
+    {#if !$zenMode}
+        <StatusBar />
+    {/if}
 </div>
 
 <style>
@@ -69,6 +73,11 @@
             "tabbar"
             "main"
             "statusbar";
+        grid-template-columns: 1fr;
+    }
+    .app-shell.zen {
+        grid-template-areas: "main";
+        grid-template-rows: 1fr;
         grid-template-columns: 1fr;
     }
     .placeholder {

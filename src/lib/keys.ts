@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import {
     images, selectedIds, focusedIndex, thumbnailSize, statusHint, viewMode,
     compareActiveSide, loupeScale, loupePanX, loupePanY,
-    sidebarVisible, gridPreset, gridGap, GRID_PRESETS,
+    sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode,
 } from './stores';
 import type { ViewMode } from './stores';
 import { setRating, setDecision } from './api';
@@ -211,6 +211,20 @@ export function handleKeydown(e: KeyboardEvent) {
             }
             return;
         }
+    }
+
+    // Shift+. (>) toggles zen mode
+    if (e.key === '>' || (e.shiftKey && e.key === '.')) {
+        e.preventDefault();
+        zenMode.update(v => !v);
+        return;
+    }
+
+    // Escape exits zen mode (in addition to other escape behaviors)
+    if (e.key === 'Escape' && get(zenMode)) {
+        e.preventDefault();
+        zenMode.set(false);
+        return;
     }
 
     // Cmd+B toggles sidebar

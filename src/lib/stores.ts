@@ -25,6 +25,8 @@ export const GRID_PRESETS = [
 export const gridPreset = writable<number>(1);
 export const gridGap = writable<number>(4);
 
+export const zenMode = writable<boolean>(false);
+
 export const compareImages = writable<ImageWithFile[]>([]);
 export const compareIndex = writable<number>(0);
 export const compareActiveSide = writable<0 | 1>(0);
