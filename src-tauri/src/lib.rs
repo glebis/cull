@@ -47,6 +47,8 @@ pub fn run() {
             commands::import::import_files,
             commands::library::list_images,
             commands::library::get_image_count,
+            commands::library::get_images_by_ids,
+            commands::library::get_iteration_siblings,
             commands::selection::set_rating,
             commands::selection::set_decision,
         ])
