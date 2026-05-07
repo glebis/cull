@@ -57,11 +57,14 @@
         align-items: center;
         justify-content: space-between;
         padding: 0 var(--spacing);
+        padding-left: 78px;
         grid-area: tabbar;
+        -webkit-app-region: drag;
     }
     .tabs {
         display: flex;
         gap: 2px;
+        -webkit-app-region: no-drag;
     }
     .tab {
         background: none;
@@ -95,6 +98,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
+        -webkit-app-region: no-drag;
     }
     .slider-label {
         color: var(--text-secondary);

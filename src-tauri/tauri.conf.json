@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "imageview",
-        "width": 800,
-        "height": 600
+        "title": "ImageView",
+        "width": 1200,
+        "height": 800,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {
