@@ -347,6 +347,63 @@ impl Database {
         Ok(())
     }
 
+    // ---- Embedding methods ----
+
+    pub fn store_embedding(&self, image_id: &str, model_name: &str, vector: &[f32]) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let bytes: Vec<u8> = vector.iter().flat_map(|f| f.to_le_bytes()).collect();
+        conn.execute(
+            "INSERT OR REPLACE INTO embeddings (id, image_id, model_name, vector, dims, dtype, normalized, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'float32', 1, ?6)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                image_id,
+                model_name,
+                bytes,
+                vector.len() as u32,
+                chrono::Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_all_embeddings(&self, model_name: &str) -> Result<Vec<(String, Vec<f32>)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT image_id, vector, dims FROM embeddings WHERE model_name = ?1"
+        )?;
+        let rows = stmt.query_map(params![model_name], |row| {
+            let image_id: String = row.get(0)?;
+            let bytes: Vec<u8> = row.get(1)?;
+            let _dims: u32 = row.get(2)?;
+            let vector: Vec<f32> = bytes.chunks(4)
+                .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                .collect();
+            Ok((image_id, vector))
+        })?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
+    pub fn find_similar(&self, vector: &[f32], model_name: &str, top_k: usize) -> Result<Vec<(String, f32)>> {
+        let all = self.get_all_embeddings(model_name)?;
+        let mut scores: Vec<(String, f32)> = all.iter().map(|(id, emb)| {
+            let score = cosine_similarity(vector, emb);
+            (id.clone(), score)
+        }).collect();
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores.truncate(top_k);
+        Ok(scores)
+    }
+
+    pub fn embedding_count(&self, model_name: &str) -> Result<u32> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM embeddings WHERE model_name = ?1",
+            params![model_name],
+            |row| row.get(0),
+        )
+    }
+
     pub fn remove_from_collection(&self, collection_id: &str, image_id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -486,6 +543,14 @@ impl Database {
         })?;
         rows.collect::<Result<Vec<_>>>()
     }
+}
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() { return 0.0; }
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm_a == 0.0 || norm_b == 0.0 { 0.0 } else { dot / (norm_a * norm_b) }
 }
 
 #[cfg(test)]

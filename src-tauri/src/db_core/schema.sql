@@ -73,6 +73,19 @@ CREATE TABLE IF NOT EXISTS collection_items (
 
 CREATE INDEX IF NOT EXISTS collection_items_pos_idx ON collection_items(collection_id, position);
 
+-- Embeddings
+CREATE TABLE IF NOT EXISTS embeddings (
+    id TEXT PRIMARY KEY,
+    image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    model_name TEXT NOT NULL,
+    vector BLOB NOT NULL,
+    dims INTEGER NOT NULL,
+    dtype TEXT NOT NULL DEFAULT 'float32',
+    normalized INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS embeddings_image_model_uq ON embeddings(image_id, model_name);
+
 -- Indexes
 CREATE UNIQUE INDEX IF NOT EXISTS images_sha256_uq ON images(sha256_hash);
 CREATE INDEX IF NOT EXISTS image_files_path_idx ON image_files(path);
