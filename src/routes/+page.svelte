@@ -7,31 +7,46 @@
     import Compare from '$lib/components/Compare.svelte';
     import Loupe from '$lib/components/Loupe.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder } from '$lib/stores';
-    import { getImageCount, listImages, listImagesByFolder } from '$lib/api';
+    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter } from '$lib/stores';
+    import { getImageCount, listImages, listImagesByFolder, listImagesFiltered } from '$lib/api';
     import { onMount } from 'svelte';
 
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
     let noSidebar = $derived(immersive || !$sidebarVisible);
 
-    onMount(async () => {
-        try {
-            const count = await getImageCount();
-            totalCount.set(count);
-            if (count > 0) {
-                const folder = $activeFolder;
-                let imgs;
-                if (folder === null) {
-                    imgs = await listImages(100000, 0);
-                } else {
-                    imgs = await listImagesByFolder(folder, 100000, 0);
+    async function loadImages() {
+        const count = await getImageCount();
+        totalCount.set(count);
+        if (count > 0) {
+            const folder = $activeFolder;
+            const minSize = $minSizeFilter;
+            let imgs;
+            if (folder !== null) {
+                imgs = await listImagesByFolder(folder, 100000, 0);
+                // Client-side size filter when combined with folder
+                if (minSize > 0) {
+                    imgs = imgs.filter(img => img.image.width >= minSize && img.image.height >= minSize);
                 }
-                images.set(imgs);
-                focusedIndex.set(0);
+            } else if (minSize > 0) {
+                imgs = await listImagesFiltered(minSize, minSize, 100000, 0);
+            } else {
+                imgs = await listImages(100000, 0);
             }
-        } catch (e) {
-            console.error('Failed to load images on mount:', e);
+            images.set(imgs);
+            focusedIndex.set(0);
         }
+    }
+
+    onMount(() => {
+        loadImages().catch(e => console.error('Failed to load images on mount:', e));
+
+        let first = true;
+        const unsub = minSizeFilter.subscribe(() => {
+            if (first) { first = false; return; }
+            loadImages().catch(e => console.error('Failed to reload images with filter:', e));
+        });
+
+        return unsub;
     });
 </script>
 

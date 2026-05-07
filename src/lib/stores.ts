@@ -36,6 +36,7 @@ export const loupePanY = writable<number>(0);
 
 export const folders = writable<[string, number][]>([]);
 export const activeFolder = writable<string | null>(null);
+export const minSizeFilter = writable<number>(0);
 
 export const focusedImage = derived(
     [images, focusedIndex],

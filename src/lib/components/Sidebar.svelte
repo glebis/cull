@@ -1,8 +1,8 @@
 <script lang="ts">
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, images, focusedIndex, folders, activeFolder } from '$lib/stores';
-    import { importFolder as apiImportFolder, listImages, listImagesByFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder } from '$lib/api';
+    import { totalCount, images, focusedIndex, folders, activeFolder, minSizeFilter } from '$lib/stores';
+    import { importFolder as apiImportFolder, listImages, listImagesByFolder, listImagesFiltered, getImageCount, listFolders, deleteFolder as apiDeleteFolder } from '$lib/api';
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
 
@@ -55,6 +55,18 @@
         } catch (e) {
             lastResult = `Error: ${e}`;
         }
+    }
+
+    const SIZE_PRESETS = [
+        { label: 'All', value: 0 },
+        { label: '>64', value: 64 },
+        { label: '>256', value: 256 },
+        { label: '>512', value: 512 },
+        { label: '>1024', value: 1024 },
+    ];
+
+    function handleSizeFilter(value: number) {
+        minSizeFilter.set(value);
     }
 
     async function handleImportFolder() {
@@ -136,6 +148,22 @@
                 <button class="delete-btn" onclick={(e: Event) => handleDeleteFolder(e, path)} title="Remove folder">&times;</button>
             </div>
         {/each}
+    </div>
+
+    <div class="section">
+        <div class="section-header">FILTERS</div>
+        <div class="filter-row">
+            <span class="filter-label">Min size</span>
+            <div class="filter-presets">
+                {#each SIZE_PRESETS as preset}
+                    <button
+                        class="preset-btn"
+                        class:active={$minSizeFilter === preset.value}
+                        onclick={() => handleSizeFilter(preset.value)}
+                    >{preset.label}</button>
+                {/each}
+            </div>
+        </div>
     </div>
 
     <div class="section">
@@ -245,6 +273,37 @@
     }
     .delete-btn:hover {
         color: var(--red, #f7768e);
+    }
+    .filter-row {
+        padding: 4px 8px;
+    }
+    .filter-label {
+        font-size: 11px;
+        color: var(--text-secondary);
+        display: block;
+        margin-bottom: 4px;
+    }
+    .filter-presets {
+        display: flex;
+        gap: 2px;
+    }
+    .preset-btn {
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        background: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-family: inherit;
+    }
+    .preset-btn:hover {
+        background: var(--border);
+    }
+    .preset-btn.active {
+        background: rgba(122, 162, 247, 0.15);
+        color: var(--blue);
+        border-color: var(--blue);
     }
     .section-empty {
         font-size: 11px;

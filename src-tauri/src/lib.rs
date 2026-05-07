@@ -52,6 +52,7 @@ pub fn run() {
             commands::library::list_folders,
             commands::library::list_images_by_folder,
             commands::library::delete_folder,
+            commands::library::list_images_filtered,
             commands::selection::set_rating,
             commands::selection::set_decision,
         ])

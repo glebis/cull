@@ -76,3 +76,6 @@ export async function deleteFolder(folder: string): Promise<number> {
     return invoke('delete_folder', { folder });
 }
 
+export async function listImagesFiltered(minWidth: number | null, minHeight: number | null, limit: number, offset: number): Promise<ImageWithFile[]> {
+    return invoke('list_images_filtered', { minWidth, minHeight, limit, offset });
+}
