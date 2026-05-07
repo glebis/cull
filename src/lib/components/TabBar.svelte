@@ -34,18 +34,23 @@
             </button>
         {/each}
     </div>
-    <div class="slider-group">
-        <span class="slider-label">{size}px</span>
-        <input
-            type="range"
-            min="80"
-            max="400"
-            step="16"
-            value={size}
-            oninput={setSize}
-            aria-label="Thumbnail size"
-        />
-    </div>
+    {#if $viewMode === 'grid'}
+        <div class="slider-group">
+            <span class="slider-icon">▪▪</span>
+            <div class="slider-track">
+                <input
+                    type="range"
+                    min="80"
+                    max="400"
+                    step="16"
+                    value={size}
+                    oninput={setSize}
+                    aria-label="Thumbnail size"
+                />
+            </div>
+            <span class="slider-icon">▪</span>
+        </div>
+    {/if}
 </div>
 
 <style>
@@ -96,18 +101,40 @@
     .slider-group {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         -webkit-app-region: no-drag;
     }
-    .slider-label {
+    .slider-icon {
         color: var(--text-secondary);
-        font-size: 11px;
-        min-width: 42px;
-        text-align: right;
+        font-size: 8px;
+        opacity: 0.5;
+        letter-spacing: 1px;
+    }
+    .slider-track {
+        width: 80px;
+        display: flex;
+        align-items: center;
     }
     input[type="range"] {
-        width: 100px;
-        accent-color: var(--blue);
-        height: 4px;
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 2px;
+        background: var(--border);
+        border-radius: 1px;
+        outline: none;
+        cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--blue);
+        cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb:hover {
+        background: var(--green);
     }
 </style>
