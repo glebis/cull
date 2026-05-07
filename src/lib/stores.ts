@@ -15,6 +15,16 @@ export const statusHint = writable<string | null>(null);
 
 export const sidebarVisible = writable<boolean>(true);
 
+export const GRID_PRESETS = [
+    { name: 'compact', size: 80, gap: 2 },
+    { name: 'normal', size: 160, gap: 4 },
+    { name: 'large', size: 280, gap: 8 },
+    { name: 'xl', size: 400, gap: 12 },
+];
+
+export const gridPreset = writable<number>(1);
+export const gridGap = writable<number>(4);
+
 export const compareImages = writable<ImageWithFile[]>([]);
 export const compareIndex = writable<number>(0);
 export const compareActiveSide = writable<0 | 1>(0);

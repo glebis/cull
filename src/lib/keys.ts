@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import {
     images, selectedIds, focusedIndex, thumbnailSize, statusHint, viewMode,
     compareActiveSide, loupeScale, loupePanX, loupePanY,
-    sidebarVisible,
+    sidebarVisible, gridPreset, gridGap, GRID_PRESETS,
 } from './stores';
 import type { ViewMode } from './stores';
 import { setRating, setDecision } from './api';
@@ -23,7 +23,7 @@ function getColCount(): number {
     const container = document.querySelector('.grid-container');
     if (!container) return 4;
     const size = get(thumbnailSize);
-    const gap = 4;
+    const gap = get(gridGap);
     return Math.max(1, Math.floor((container.clientWidth + gap) / (size + gap)));
 }
 
@@ -45,7 +45,7 @@ function scrollFocusedIntoView() {
         if (!container) return;
         const idx = get(focusedIndex);
         const size = get(thumbnailSize);
-        const gap = 4;
+        const gap = get(gridGap);
         const cols = getColCount();
         const cellSize = size + gap;
         const row = Math.floor(idx / cols);
@@ -244,7 +244,7 @@ function handleGridKeys(e: KeyboardEvent) {
     const cols = getColCount();
     const total = get(images).length;
     const visibleRows = Math.max(1, Math.floor(
-        (document.querySelector('.grid-container')?.clientHeight ?? 600) / (get(thumbnailSize) + 4)
+        (document.querySelector('.grid-container')?.clientHeight ?? 600) / (get(thumbnailSize) + get(gridGap))
     ));
 
     switch (e.key) {
@@ -327,6 +327,16 @@ function handleGridKeys(e: KeyboardEvent) {
         case '\\':
             e.preventDefault();
             sidebarVisible.update(v => !v);
+            break;
+        case 'g':
+            e.preventDefault();
+            gridPreset.update(p => {
+                const next = (p + 1) % GRID_PRESETS.length;
+                const preset = GRID_PRESETS[next];
+                thumbnailSize.set(preset.size);
+                gridGap.set(preset.gap);
+                return next;
+            });
             break;
     }
 }

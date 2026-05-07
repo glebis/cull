@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { viewMode, totalCount, selectedCount, statusHint } from '$lib/stores';
+    import { viewMode, totalCount, selectedCount, statusHint, gridPreset, GRID_PRESETS } from '$lib/stores';
 </script>
 
 <div class="statusbar">
@@ -10,6 +10,10 @@
         {#if $selectedCount > 0}
             <span class="sep">|</span>
             <span class="selected">{$selectedCount} selected</span>
+        {/if}
+        {#if $viewMode === 'grid'}
+            <span class="sep">|</span>
+            <span class="preset">{GRID_PRESETS[$gridPreset].name}</span>
         {/if}
         {#if $statusHint}
             <span class="sep">|</span>
@@ -61,6 +65,10 @@
         gap: 12px;
     }
     .hint {
+        color: var(--text-secondary);
+        font-size: 10px;
+    }
+    .preset {
         color: var(--text-secondary);
         font-size: 10px;
     }

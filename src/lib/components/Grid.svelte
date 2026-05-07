@@ -1,8 +1,6 @@
 <script lang="ts">
-    import { images, selectedIds, focusedIndex, thumbnailSize, viewMode } from '$lib/stores';
+    import { images, selectedIds, focusedIndex, thumbnailSize, viewMode, gridGap } from '$lib/stores';
     import Thumbnail from './Thumbnail.svelte';
-
-    const GAP = 4;
 
     let containerEl: HTMLDivElement | undefined = $state(undefined);
     let containerWidth = $state(800);
@@ -12,8 +10,11 @@
     let size = $state(160);
     thumbnailSize.subscribe(v => size = v);
 
-    let cols = $derived(Math.max(1, Math.floor((containerWidth + GAP) / (size + GAP))));
-    let cellSize = $derived(size + GAP);
+    let gap = $state(4);
+    gridGap.subscribe(v => gap = v);
+
+    let cols = $derived(Math.max(1, Math.floor((containerWidth + gap) / (size + gap))));
+    let cellSize = $derived(size + gap);
     let rows = $derived(Math.ceil($images.length / cols));
     let totalHeight = $derived(rows * cellSize);
 
