@@ -63,3 +63,11 @@ export async function getImagesByIds(imageIds: string[]): Promise<ImageWithFile[
 export async function getIterationSiblings(parentId: string): Promise<ImageWithFile[]> {
     return invoke<ImageWithFile[]>('get_iteration_siblings', { parentId });
 }
+
+export async function listFolders(): Promise<[string, number][]> {
+    return invoke('list_folders');
+}
+
+export async function listImagesByFolder(folder: string, limit: number, offset: number): Promise<ImageWithFile[]> {
+    return invoke('list_images_by_folder', { folder, limit, offset });
+}

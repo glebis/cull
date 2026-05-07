@@ -134,6 +134,74 @@ impl Database {
         Ok(())
     }
 
+    pub fn list_folders(&self) -> Result<Vec<(String, u32)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT f.path, f.image_id FROM image_files f WHERE f.missing_at IS NULL"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        let mut folder_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        for row in rows {
+            let (path, _) = row?;
+            if let Some(parent) = std::path::Path::new(&path).parent() {
+                let folder = parent.to_string_lossy().to_string();
+                *folder_counts.entry(folder).or_insert(0) += 1;
+            }
+        }
+
+        let mut result: Vec<(String, u32)> = folder_counts.into_iter().collect();
+        result.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(result)
+    }
+
+    pub fn list_images_by_folder(&self, folder: &str, limit: u32, offset: u32) -> Result<Vec<ImageWithFile>> {
+        let conn = self.conn.lock().unwrap();
+        let pattern = format!("{}/%", folder);
+        let mut stmt = conn.prepare(
+            "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
+                    i.created_at, i.imported_at, f.path,
+                    s.star_rating, s.color_label, s.decision
+             FROM images i
+             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+             LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             WHERE f.path LIKE ?1
+             GROUP BY i.id
+             ORDER BY i.imported_at DESC
+             LIMIT ?2 OFFSET ?3"
+        )?;
+        let rows = stmt.query_map(params![pattern, limit, offset], |row| {
+            let star: Option<u8> = row.get(9)?;
+            let color: Option<String> = row.get(10)?;
+            let decision: Option<String> = row.get(11)?;
+            let selection = decision.map(|d| Selection {
+                image_id: row.get(0).unwrap(),
+                project_id: None,
+                star_rating: star,
+                color_label: color,
+                decision: d,
+            });
+            Ok(ImageWithFile {
+                image: Image {
+                    id: row.get(0)?,
+                    sha256_hash: row.get(1)?,
+                    width: row.get(2)?,
+                    height: row.get(3)?,
+                    format: row.get(4)?,
+                    file_size: row.get(5)?,
+                    created_at: row.get(6)?,
+                    imported_at: row.get(7)?,
+                },
+                path: row.get(8)?,
+                thumbnail_path: None,
+                selection,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
     pub fn image_count(&self) -> Result<u32> {
         let conn = self.conn.lock().unwrap();
         conn.query_row("SELECT COUNT(*) FROM images", [], |row| row.get(0))

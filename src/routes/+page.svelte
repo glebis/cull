@@ -7,8 +7,8 @@
     import Compare from '$lib/components/Compare.svelte';
     import Loupe from '$lib/components/Loupe.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode } from '$lib/stores';
-    import { getImageCount, listImages } from '$lib/api';
+    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder } from '$lib/stores';
+    import { getImageCount, listImages, listImagesByFolder } from '$lib/api';
     import { onMount } from 'svelte';
 
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
@@ -19,7 +19,13 @@
             const count = await getImageCount();
             totalCount.set(count);
             if (count > 0) {
-                const imgs = await listImages(100000, 0);
+                const folder = $activeFolder;
+                let imgs;
+                if (folder === null) {
+                    imgs = await listImages(100000, 0);
+                } else {
+                    imgs = await listImagesByFolder(folder, 100000, 0);
+                }
                 images.set(imgs);
                 focusedIndex.set(0);
             }

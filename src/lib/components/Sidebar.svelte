@@ -1,13 +1,45 @@
 <script lang="ts">
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, images, focusedIndex } from '$lib/stores';
-    import { importFolder as apiImportFolder, listImages, getImageCount } from '$lib/api';
+    import { totalCount, images, focusedIndex, folders, activeFolder } from '$lib/stores';
+    import { importFolder as apiImportFolder, listImages, listImagesByFolder, getImageCount, listFolders } from '$lib/api';
+    import { onMount } from 'svelte';
+    import { get } from 'svelte/store';
 
     let importing = $state(false);
     let importCurrent = $state(0);
     let importTotal = $state(0);
     let lastResult = $state('');
+
+    onMount(async () => {
+        try {
+            const f = await listFolders();
+            folders.set(f);
+        } catch (e) {
+            console.error('Failed to load folders:', e);
+        }
+    });
+
+    function folderName(path: string): string {
+        const parts = path.split('/');
+        return parts[parts.length - 1] || path;
+    }
+
+    async function selectFolder(folder: string | null) {
+        activeFolder.set(folder);
+        try {
+            if (folder === null) {
+                const imgs = await listImages(100000, 0);
+                images.set(imgs);
+            } else {
+                const imgs = await listImagesByFolder(folder, 100000, 0);
+                images.set(imgs);
+            }
+            focusedIndex.set(0);
+        } catch (e) {
+            console.error('Failed to load images for folder:', e);
+        }
+    }
 
     async function handleImportFolder() {
         const selected = await open({ directory: true, multiple: false });
@@ -53,20 +85,38 @@
     async function refreshImages() {
         const count = await getImageCount();
         totalCount.set(count);
-        const imgs = await listImages(100000, 0);
-        images.set(imgs);
+        const currentFolder = get(activeFolder);
+        if (currentFolder === null) {
+            const imgs = await listImages(100000, 0);
+            images.set(imgs);
+        } else {
+            const imgs = await listImagesByFolder(currentFolder, 100000, 0);
+            images.set(imgs);
+        }
         focusedIndex.set(0);
+        // Refresh folders too
+        try {
+            const f = await listFolders();
+            folders.set(f);
+        } catch (_) {}
     }
 </script>
 
 <div class="sidebar">
     <div class="section">
         <div class="section-header">LIBRARY</div>
-        <div class="section-item active">
+        <button class="section-item" class:active={$activeFolder === null} onclick={() => selectFolder(null)}>
             <span class="icon">&#9632;</span>
             All Images
             <span class="count">({$totalCount})</span>
-        </div>
+        </button>
+        {#each $folders as [path, count]}
+            <button class="section-item" class:active={$activeFolder === path} onclick={() => selectFolder(path)}>
+                <span class="icon">&#9656;</span>
+                {folderName(path)}
+                <span class="count">({count})</span>
+            </button>
+        {/each}
     </div>
 
     <div class="section">
@@ -112,6 +162,15 @@
         display: flex;
         align-items: center;
         gap: 6px;
+        width: 100%;
+        background: none;
+        border: none;
+        color: inherit;
+        font-family: inherit;
+        text-align: left;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .section-item:hover {
         background: var(--border);
