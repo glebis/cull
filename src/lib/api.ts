@@ -113,16 +113,32 @@ export async function generateEmbeddings(imageIds: string[]): Promise<number> {
     return invoke('generate_embeddings', { imageIds });
 }
 
-export async function getAllEmbeddings(): Promise<[string, number[]][]> {
-    return invoke('get_all_embeddings');
+export async function getAllEmbeddings(model?: string): Promise<[string, number[]][]> {
+    return invoke('get_all_embeddings', { model: model ?? null });
 }
 
-export async function findSimilarImages(imageId: string, topK: number): Promise<[string, number][]> {
-    return invoke('find_similar_images', { imageId, topK });
+export async function findSimilarImages(imageId: string, topK: number, model?: string): Promise<[string, number][]> {
+    return invoke('find_similar_images', { imageId, topK, model: model ?? null });
 }
 
-export async function getEmbeddingCount(): Promise<number> {
-    return invoke('get_embedding_count');
+export async function getEmbeddingCount(model?: string): Promise<number> {
+    return invoke('get_embedding_count', { model: model ?? null });
+}
+
+export async function setApiKey(provider: string, key: string): Promise<void> {
+    return invoke('set_api_key', { provider, key });
+}
+
+export async function getApiKey(provider: string): Promise<string | null> {
+    return invoke('get_api_key', { provider });
+}
+
+export async function validateApiKey(provider: string, key: string): Promise<boolean> {
+    return invoke('validate_api_key', { provider, key });
+}
+
+export async function generateGeminiEmbeddings(imageIds: string[]): Promise<number> {
+    return invoke('generate_gemini_embeddings', { imageIds });
 }
 
 export async function openWithParams(params: {

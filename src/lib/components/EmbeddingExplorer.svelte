@@ -4,6 +4,7 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { UMAP } from 'umap-js';
     import { images, focusedIndex, viewMode } from '$lib/stores';
+    import { openUrl } from '@tauri-apps/plugin-opener';
     import {
         isModelAvailable,
         downloadClipModel,
@@ -11,6 +12,10 @@
         getAllEmbeddings,
         getEmbeddingCount,
         listImages,
+        getApiKey,
+        setApiKey,
+        validateApiKey,
+        generateGeminiEmbeddings,
     } from '$lib/api';
     import type { ImageWithFile } from '$lib/api';
 
@@ -21,6 +26,15 @@
     let genProgress = $state({ current: 0, total: 0 });
     let embeddingCount = $state(0);
     let totalImages = $state(0);
+
+    // Provider config
+    type Provider = 'clip' | 'gemini';
+    let selectedProvider = $state<Provider>('clip');
+    let configOpen = $state(false);
+    let apiKey = $state('');
+    let keyValid = $state<boolean | null>(null);
+    let validating = $state(false);
+    let geminiEmbeddingCount = $state(0);
 
     // Download progress
     let downloadProgress = $state({ downloaded: 0, total: 0, status: '' });
@@ -58,6 +72,7 @@
     onMount(async () => {
         await checkModel();
         await loadEmbeddingState();
+        await loadApiKeyState();
     });
 
     async function checkModel() {
@@ -78,6 +93,69 @@
         } catch (e) {
             console.error('Failed to load embedding state:', e);
         }
+    }
+
+    async function loadApiKeyState() {
+        try {
+            const key = await getApiKey('google');
+            if (key) {
+                apiKey = key;
+                keyValid = true; // assume valid if stored
+                geminiEmbeddingCount = await getEmbeddingCount('gemini-embedding-2');
+            }
+        } catch (e) {
+            console.error('Failed to load API key state:', e);
+        }
+    }
+
+    async function handleSaveApiKey() {
+        if (!apiKey.trim()) {
+            keyValid = null;
+            return;
+        }
+        validating = true;
+        try {
+            const valid = await validateApiKey('google', apiKey.trim());
+            keyValid = valid;
+            if (valid) {
+                await setApiKey('google', apiKey.trim());
+            }
+        } catch (e) {
+            keyValid = false;
+            console.error('Validation failed:', e);
+        } finally {
+            validating = false;
+        }
+    }
+
+    async function handleGenerateGemini() {
+        generating = true;
+        genProgress = { current: 0, total: 0 };
+
+        const unlisten: UnlistenFn = await listen<{ current: number; total: number; provider: string }>(
+            'embedding-progress',
+            (event) => {
+                genProgress = event.payload;
+            }
+        );
+
+        try {
+            const imageIds = $images.map(img => img.image.id);
+            const count = await generateGeminiEmbeddings(imageIds);
+            geminiEmbeddingCount = await getEmbeddingCount('gemini-embedding-2');
+            if (geminiEmbeddingCount > 0) {
+                await loadProjection();
+            }
+        } catch (e) {
+            console.error('Gemini generate failed:', e);
+        } finally {
+            unlisten();
+            generating = false;
+        }
+    }
+
+    function openApiKeyPage() {
+        openUrl('https://aistudio.google.com/apikey');
     }
 
     function formatBytes(bytes: number): string {
@@ -146,7 +224,8 @@
 
     async function loadProjection() {
         try {
-            const embeddings = await getAllEmbeddings();
+            const modelName = selectedProvider === 'gemini' ? 'gemini-embedding-2' : undefined;
+            const embeddings = await getAllEmbeddings(modelName);
             if (embeddings.length < 2) {
                 points = [];
                 return;
@@ -444,50 +523,113 @@
 <div class="embedding-explorer">
     <div class="left-panel">
         <div class="panel-section">
-            <div class="section-header">MODEL</div>
-            <div class="model-info">CLIP ViT-B/32</div>
+            <div class="section-header-row">
+                <div class="section-header">PROVIDER</div>
+                <button class="gear-btn" onclick={() => configOpen = !configOpen} title="Settings">
+                    &#9881;
+                </button>
+            </div>
+            <select class="provider-select" bind:value={selectedProvider} onchange={() => loadProjection()}>
+                <option value="clip">CLIP ViT-B/32 (local)</option>
+                <option value="gemini">Gemini Embedding 2 (API)</option>
+            </select>
             <div class="model-detail">
-                {#if !modelAvailable}
-                    Model not downloaded
+                {#if selectedProvider === 'clip'}
+                    {#if !modelAvailable}
+                        Model not downloaded
+                    {:else}
+                        {embeddingCount}/{$images.length} images
+                    {/if}
                 {:else}
-                    {embeddingCount}/{$images.length} images
+                    {geminiEmbeddingCount}/{$images.length} images
                 {/if}
             </div>
         </div>
 
-        {#if !modelAvailable}
-            <div class="panel-section">
-                {#if downloading}
-                    <div class="download-progress">
-                        <div class="progress-text">
-                            {#if downloadProgress.total > 0}
-                                Downloading: {formatBytes(downloadProgress.downloaded)} / {formatBytes(downloadProgress.total)}
-                                ({Math.round((downloadProgress.downloaded / downloadProgress.total) * 100)}%)
-                            {:else}
-                                Downloading...
-                            {/if}
-                        </div>
-                        <div class="progress-bar-track">
-                            <div
-                                class="progress-bar-fill"
-                                style="width: {downloadProgress.total > 0 ? (downloadProgress.downloaded / downloadProgress.total) * 100 : 0}%"
-                            ></div>
-                        </div>
-                        {#if downloadSpeed}
-                            <div class="progress-speed">{downloadSpeed}</div>
-                        {/if}
-                    </div>
-                {:else}
-                    <button class="action-btn" onclick={handleDownload}>
-                        Download Model (~350MB)
+        {#if configOpen}
+            <div class="panel-section config-section">
+                <div class="section-header">GEMINI API KEY</div>
+                <div class="api-key-row">
+                    <input
+                        type="password"
+                        placeholder="AIza..."
+                        bind:value={apiKey}
+                        class="api-input"
+                        onblur={handleSaveApiKey}
+                    />
+                    <button class="link-btn" onclick={openApiKeyPage}>
+                        Get Key &rarr;
                     </button>
-                {/if}
-                <div class="manual-download">
-                    <div class="section-header" style="margin-top: 10px">MANUAL DOWNLOAD</div>
-                    <pre class="manual-cmd">curl -L -o ~/.../models/clip-vit-b32-vision.onnx \
-  https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx</pre>
+                </div>
+                <div class="key-status" class:valid={keyValid === true} class:invalid={keyValid === false}>
+                    {#if validating}
+                        Validating...
+                    {:else if keyValid === true}
+                        &#9679; Connected
+                    {:else if keyValid === false}
+                        &#9675; Invalid key
+                    {:else}
+                        &#9675; No key set
+                    {/if}
                 </div>
             </div>
+        {/if}
+
+        {#if selectedProvider === 'clip'}
+            {#if !modelAvailable}
+                <div class="panel-section">
+                    {#if downloading}
+                        <div class="download-progress">
+                            <div class="progress-text">
+                                {#if downloadProgress.total > 0}
+                                    Downloading: {formatBytes(downloadProgress.downloaded)} / {formatBytes(downloadProgress.total)}
+                                    ({Math.round((downloadProgress.downloaded / downloadProgress.total) * 100)}%)
+                                {:else}
+                                    Downloading...
+                                {/if}
+                            </div>
+                            <div class="progress-bar-track">
+                                <div
+                                    class="progress-bar-fill"
+                                    style="width: {downloadProgress.total > 0 ? (downloadProgress.downloaded / downloadProgress.total) * 100 : 0}%"
+                                ></div>
+                            </div>
+                            {#if downloadSpeed}
+                                <div class="progress-speed">{downloadSpeed}</div>
+                            {/if}
+                        </div>
+                    {:else}
+                        <button class="action-btn" onclick={handleDownload}>
+                            Download Model (~350MB)
+                        </button>
+                    {/if}
+                    <div class="manual-download">
+                        <div class="section-header" style="margin-top: 10px">MANUAL DOWNLOAD</div>
+                        <pre class="manual-cmd">curl -L -o ~/.../models/clip-vit-b32-vision.onnx \
+  https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx</pre>
+                    </div>
+                </div>
+            {:else}
+                <div class="panel-section">
+                    <div class="stat-row">
+                        <span class="stat-label">Images</span>
+                        <span class="stat-value">{$images.length}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Embeddings</span>
+                        <span class="stat-value">{embeddingCount}</span>
+                    </div>
+                    <button class="action-btn" onclick={handleGenerate} disabled={generating}>
+                        {#if generating}
+                            Generating {genProgress.current}/{genProgress.total}...
+                        {:else if embeddingCount < $images.length}
+                            Generate Embeddings ({$images.length - embeddingCount} remaining)
+                        {:else}
+                            Regenerate All
+                        {/if}
+                    </button>
+                </div>
+            {/if}
         {:else}
             <div class="panel-section">
                 <div class="stat-row">
@@ -496,13 +638,15 @@
                 </div>
                 <div class="stat-row">
                     <span class="stat-label">Embeddings</span>
-                    <span class="stat-value">{embeddingCount}</span>
+                    <span class="stat-value">{geminiEmbeddingCount}</span>
                 </div>
-                <button class="action-btn" onclick={handleGenerate} disabled={generating}>
+                <button class="action-btn" onclick={handleGenerateGemini} disabled={generating || keyValid !== true}>
                     {#if generating}
                         Generating {genProgress.current}/{genProgress.total}...
-                    {:else if embeddingCount < $images.length}
-                        Generate Embeddings ({$images.length - embeddingCount} remaining)
+                    {:else if keyValid !== true}
+                        Set API Key First
+                    {:else if geminiEmbeddingCount < $images.length}
+                        Generate Embeddings ({$images.length - geminiEmbeddingCount} remaining)
                     {:else}
                         Regenerate All
                     {/if}
@@ -612,12 +756,6 @@
         color: var(--text-secondary);
         letter-spacing: 0.1em;
         margin-bottom: 8px;
-    }
-
-    .model-info {
-        font-size: 12px;
-        color: var(--blue);
-        font-weight: 500;
     }
 
     .model-detail {
@@ -813,5 +951,108 @@
         word-break: break-all;
         line-height: 1.4;
         margin: 0;
+    }
+
+    .section-header-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+    }
+
+    .section-header-row .section-header {
+        margin-bottom: 0;
+    }
+
+    .gear-btn {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 14px;
+        padding: 0 2px;
+        line-height: 1;
+        transition: color 0.15s;
+    }
+
+    .gear-btn:hover {
+        color: var(--text);
+    }
+
+    .provider-select {
+        width: 100%;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        font-family: var(--font);
+        font-size: 11px;
+        padding: 4px 6px;
+        border-radius: var(--radius);
+        cursor: pointer;
+    }
+
+    .provider-select:focus {
+        outline: none;
+        border-color: var(--blue);
+    }
+
+    .config-section {
+        background: rgba(0, 0, 0, 0.15);
+    }
+
+    .api-key-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+    }
+
+    .api-input {
+        flex: 1;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        font-family: var(--font);
+        font-size: 11px;
+        padding: 4px 6px;
+        border-radius: var(--radius);
+    }
+
+    .api-input:focus {
+        outline: none;
+        border-color: var(--blue);
+    }
+
+    .api-input::placeholder {
+        color: var(--text-secondary);
+        opacity: 0.5;
+    }
+
+    .link-btn {
+        background: none;
+        border: none;
+        color: var(--blue);
+        font-family: var(--font);
+        font-size: 10px;
+        cursor: pointer;
+        white-space: nowrap;
+        padding: 0;
+    }
+
+    .link-btn:hover {
+        text-decoration: underline;
+    }
+
+    .key-status {
+        font-size: 10px;
+        color: var(--text-secondary);
+        margin-top: 4px;
+    }
+
+    .key-status.valid {
+        color: #9ece6a;
+    }
+
+    .key-status.invalid {
+        color: #f7768e;
     }
 </style>
