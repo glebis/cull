@@ -6,6 +6,7 @@
     import Grid from '$lib/components/Grid.svelte';
     import Compare from '$lib/components/Compare.svelte';
     import Loupe from '$lib/components/Loupe.svelte';
+    import EmbeddingExplorer from '$lib/components/EmbeddingExplorer.svelte';
     import { handleKeydown } from '$lib/keys';
     import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections } from '$lib/stores';
     import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages } from '$lib/api';
@@ -74,6 +75,8 @@
         <Compare />
     {:else if $viewMode === 'loupe'}
         <Loupe />
+    {:else if $viewMode === 'embeddings'}
+        <EmbeddingExplorer />
     {:else}
         <div class="placeholder">
             <span class="placeholder-label">{$viewMode}</span>

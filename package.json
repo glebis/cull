@@ -17,6 +17,7 @@
     "@tauri-apps/plugin-deep-link": "^2.4.9",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-opener": "^2",
+    "umap-js": "^1.4.0",
     "virtua": "^0.49.1"
   },
   "devDependencies": {

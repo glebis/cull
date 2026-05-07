@@ -100,6 +100,31 @@ export async function deleteCollectionApi(collectionId: string): Promise<void> {
     return invoke('delete_collection', { collectionId });
 }
 
+// Embedding commands
+export async function downloadClipModel(): Promise<string> {
+    return invoke('download_clip_model');
+}
+
+export async function isModelAvailable(): Promise<boolean> {
+    return invoke('is_model_available');
+}
+
+export async function generateEmbeddings(imageIds: string[]): Promise<number> {
+    return invoke('generate_embeddings', { imageIds });
+}
+
+export async function getAllEmbeddings(): Promise<[string, number[]][]> {
+    return invoke('get_all_embeddings');
+}
+
+export async function findSimilarImages(imageId: string, topK: number): Promise<[string, number][]> {
+    return invoke('find_similar_images', { imageId, topK });
+}
+
+export async function getEmbeddingCount(): Promise<number> {
+    return invoke('get_embedding_count');
+}
+
 export async function openWithParams(params: {
     path?: string;
     paths?: string[];
