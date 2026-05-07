@@ -55,3 +55,11 @@ export async function setRating(imageId: string, rating: number): Promise<void> 
 export async function setDecision(imageId: string, decision: string): Promise<void> {
     return invoke<void>('set_decision', { imageId, decision });
 }
+
+export async function getImagesByIds(imageIds: string[]): Promise<ImageWithFile[]> {
+    return invoke<ImageWithFile[]>('get_images_by_ids', { imageIds });
+}
+
+export async function getIterationSiblings(parentId: string): Promise<ImageWithFile[]> {
+    return invoke<ImageWithFile[]>('get_iteration_siblings', { parentId });
+}
