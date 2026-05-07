@@ -49,12 +49,29 @@ CREATE TABLE IF NOT EXISTS selections (
     PRIMARY KEY (image_id, project_id)
 );
 
+-- Iterations
+CREATE TABLE IF NOT EXISTS iterations (
+    id TEXT PRIMARY KEY,
+    parent_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    child_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    prompt TEXT,
+    negative_prompt TEXT,
+    region_id TEXT,
+    seed INTEGER,
+    model_used TEXT,
+    params_json TEXT,
+    created_at TEXT NOT NULL
+);
+
 -- Indexes
 CREATE UNIQUE INDEX IF NOT EXISTS images_sha256_uq ON images(sha256_hash);
 CREATE INDEX IF NOT EXISTS image_files_path_idx ON image_files(path);
 CREATE INDEX IF NOT EXISTS image_files_image_idx ON image_files(image_id);
 CREATE INDEX IF NOT EXISTS images_imported_idx ON images(imported_at);
 CREATE INDEX IF NOT EXISTS image_projects_project_idx ON image_projects(project_id, image_id);
+
+CREATE INDEX IF NOT EXISTS iterations_parent_idx ON iterations(parent_id);
+CREATE INDEX IF NOT EXISTS iterations_child_idx ON iterations(child_id);
 
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
