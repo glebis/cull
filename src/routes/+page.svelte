@@ -11,6 +11,8 @@
     import { getImageCount, listImages } from '$lib/api';
     import { onMount } from 'svelte';
 
+    let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
+
     onMount(async () => {
         try {
             const count = await getImageCount();
@@ -28,7 +30,6 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-{@const immersive = $viewMode === 'loupe' || $viewMode === 'compare'}
 <div class="app-shell" class:immersive>
     <TabBar />
     {#if !immersive}
