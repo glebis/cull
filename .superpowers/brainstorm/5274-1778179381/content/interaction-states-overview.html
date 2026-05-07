@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Embedding Explorer — Interaction States</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; color: #e0e0e0; font-family: 'JetBrains Mono', 'SF Mono', monospace; }
+
+  .header {
+    padding: 24px 32px 16px;
+    border-bottom: 1px solid #1a1a2e;
+  }
+  .header h1 { font-size: 20px; font-weight: 600; color: #c0caf5; margin-bottom: 4px; }
+  .header p { font-size: 12px; color: #565f89; }
+
+  .states-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    padding: 24px 32px;
+  }
+
+  .state-card {
+    background: #13131d;
+    border: 1px solid #1a1a2e;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .state-card.active { border-color: #7aa2f7; }
+
+  .state-label {
+    padding: 12px 16px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #565f89;
+    border-bottom: 1px solid #1a1a2e;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .state-label .num {
+    background: #7aa2f7;
+    color: #0a0a0f;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700;
+    font-size: 10px;
+  }
+
+  .canvas-mock {
+    position: relative;
+    height: 320px;
+    background: #0d0d14;
+    overflow: hidden;
+  }
+
+  /* Points */
+  .point {
+    position: absolute;
+    border-radius: 3px;
+    transition: all 0.2s;
+  }
+  .point.dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+  }
+  .point.thumb {
+    width: 32px; height: 32px;
+    background-size: cover;
+    background-position: center;
+  }
+  .point.thumb-lg {
+    width: 48px; height: 48px;
+    background-size: cover;
+    background-position: center;
+  }
+
+  /* Cluster colors */
+  .c0 { background: #7aa2f7; }
+  .c1 { background: #9ece6a; }
+  .c2 { background: #e0af68; }
+  .c3 { background: #bb9af7; }
+  .c4 { background: #f7768e; }
+
+  /* Dimmed state */
+  .dimmed { opacity: 0.18; }
+  .semi-dimmed { opacity: 0.45; }
+
+  /* Selected ring */
+  .selected-ring {
+    box-shadow: 0 0 0 3px #7aa2f7, 0 0 12px rgba(122, 162, 247, 0.4);
+    z-index: 10;
+  }
+  .hovered-ring {
+    box-shadow: 0 0 0 1px #ffffff88;
+  }
+
+  /* Neighbor lines */
+  .neighbor-line {
+    position: absolute;
+    height: 1px;
+    transform-origin: left center;
+    z-index: 5;
+  }
+
+  /* Cluster hull */
+  .cluster-hull {
+    position: absolute;
+    border: 2px solid;
+    border-radius: 40%;
+    opacity: 0.3;
+  }
+  .cluster-hull.focused {
+    opacity: 0.6;
+    background: rgba(122, 162, 247, 0.05);
+  }
+
+  /* Cluster label */
+  .cluster-label {
+    position: absolute;
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    background: rgba(0,0,0,0.6);
+    white-space: nowrap;
+  }
+
+  /* Detail panel overlay */
+  .detail-panel {
+    position: absolute;
+    right: 8px;
+    top: 8px;
+    bottom: 8px;
+    width: 180px;
+    background: rgba(19, 19, 29, 0.95);
+    border: 1px solid #1a1a2e;
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 10px;
+    z-index: 20;
+  }
+  .detail-preview {
+    width: 100%;
+    height: 80px;
+    background: #2a2a3e;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #565f89;
+    font-size: 9px;
+  }
+  .detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+    color: #a0a0b0;
+  }
+  .detail-row .label { color: #565f89; }
+  .detail-row .value { color: #c0caf5; }
+
+  .neighbor-strip {
+    display: flex;
+    gap: 4px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #1a1a2e;
+  }
+  .neighbor-thumb {
+    width: 28px; height: 28px;
+    background: #2a2a3e;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 7px;
+    color: #565f89;
+  }
+  .neighbor-thumb.primary { border: 1px solid #7aa2f7; }
+
+  /* Compare grid */
+  .compare-overlay {
+    position: absolute;
+    left: 8px;
+    top: 8px;
+    bottom: 8px;
+    right: 8px;
+    background: rgba(10, 10, 15, 0.92);
+    border-radius: 6px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    padding: 12px;
+    z-index: 20;
+  }
+  .compare-item {
+    background: #1a1a2e;
+    border-radius: 4px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+  }
+  .compare-item.winner {
+    border: 1px solid #9ece6a;
+  }
+  .compare-item .thumb-placeholder {
+    width: 60px; height: 60px;
+    background: #2a2a3e;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #565f89;
+    font-size: 8px;
+  }
+  .compare-item .meta {
+    font-size: 8px;
+    color: #565f89;
+    text-align: center;
+  }
+  .compare-item .score {
+    font-size: 10px;
+    color: #9ece6a;
+    font-weight: 600;
+  }
+  .compare-item .actions {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+  }
+  .compare-item .actions button {
+    font-size: 7px;
+    padding: 2px 6px;
+    border: 1px solid #333;
+    background: none;
+    color: #a0a0b0;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .compare-item .actions button.pick { border-color: #9ece6a; color: #9ece6a; }
+  .compare-item .actions button.reject { border-color: #f7768e; color: #f7768e; }
+
+  /* Breadcrumb */
+  .breadcrumb {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    font-size: 9px;
+    color: #565f89;
+    z-index: 25;
+    background: rgba(0,0,0,0.6);
+    padding: 4px 8px;
+    border-radius: 3px;
+  }
+  .breadcrumb span { color: #7aa2f7; cursor: pointer; }
+
+  .state-desc {
+    padding: 12px 16px;
+    font-size: 11px;
+    color: #787c99;
+    line-height: 1.5;
+    border-top: 1px solid #1a1a2e;
+  }
+  .state-desc strong { color: #c0caf5; }
+
+  /* Density contour */
+  .density-contour {
+    position: absolute;
+    border-radius: 50%;
+    border: 1px solid rgba(122, 162, 247, 0.08);
+    background: radial-gradient(ellipse, rgba(122, 162, 247, 0.03), transparent);
+  }
+
+  /* Halo */
+  .neighbor-halo {
+    position: absolute;
+    border-radius: 50%;
+    border: 1px dashed rgba(122, 162, 247, 0.3);
+  }
+
+  .legend {
+    padding: 16px 32px;
+    display: flex;
+    gap: 24px;
+    font-size: 10px;
+    color: #565f89;
+    border-top: 1px solid #1a1a2e;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .legend-swatch {
+    width: 10px; height: 10px;
+    border-radius: 2px;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Embedding Explorer — Interaction States</h1>
+  <p>Progressive disclosure: overview → cluster → selection → comparison</p>
+</div>
+
+<div class="states-grid">
+
+  <!-- STATE 1: Overview -->
+  <div class="state-card">
+    <div class="state-label">
+      <span>Overview — All Points</span>
+      <span class="num">1</span>
+    </div>
+    <div class="canvas-mock">
+      <!-- Density contours -->
+      <div class="density-contour" style="left: 30px; top: 40px; width: 160px; height: 120px;"></div>
+      <div class="density-contour" style="left: 200px; top: 150px; width: 120px; height: 100px;"></div>
+      <div class="density-contour" style="left: 100px; top: 200px; width: 140px; height: 90px;"></div>
+
+      <!-- Cluster labels -->
+      <div class="cluster-label" style="left: 70px; top: 55px; color: #7aa2f7;">Landscapes</div>
+      <div class="cluster-label" style="left: 220px; top: 165px; color: #9ece6a;">Portraits</div>
+      <div class="cluster-label" style="left: 130px; top: 215px; color: #e0af68;">Architecture</div>
+
+      <!-- Blue cluster (Landscapes) -->
+      <div class="point dot c0" style="left: 50px; top: 80px;"></div>
+      <div class="point dot c0" style="left: 75px; top: 95px;"></div>
+      <div class="point dot c0" style="left: 90px; top: 75px;"></div>
+      <div class="point dot c0" style="left: 110px; top: 100px;"></div>
+      <div class="point dot c0" style="left: 65px; top: 110px;"></div>
+      <div class="point dot c0" style="left: 130px; top: 85px;"></div>
+      <div class="point dot c0" style="left: 100px; top: 120px;"></div>
+      <div class="point dot c0" style="left: 145px; top: 105px;"></div>
+      <div class="point dot c0" style="left: 80px; top: 130px;"></div>
+      <div class="point dot c0" style="left: 155px; top: 120px;"></div>
+
+      <!-- Green cluster (Portraits) -->
+      <div class="point dot c1" style="left: 220px; top: 190px;"></div>
+      <div class="point dot c1" style="left: 240px; top: 205px;"></div>
+      <div class="point dot c1" style="left: 260px; top: 185px;"></div>
+      <div class="point dot c1" style="left: 235px; top: 220px;"></div>
+      <div class="point dot c1" style="left: 275px; top: 200px;"></div>
+      <div class="point dot c1" style="left: 250px; top: 225px;"></div>
+      <div class="point dot c1" style="left: 210px; top: 210px;"></div>
+      <div class="point dot c1" style="left: 290px; top: 215px;"></div>
+
+      <!-- Orange cluster (Architecture) -->
+      <div class="point dot c2" style="left: 130px; top: 240px;"></div>
+      <div class="point dot c2" style="left: 150px; top: 255px;"></div>
+      <div class="point dot c2" style="left: 170px; top: 240px;"></div>
+      <div class="point dot c2" style="left: 145px; top: 270px;"></div>
+      <div class="point dot c2" style="left: 190px; top: 255px;"></div>
+      <div class="point dot c2" style="left: 160px; top: 280px;"></div>
+      <div class="point dot c2" style="left: 200px; top: 270px;"></div>
+
+      <!-- Scattered outliers -->
+      <div class="point dot c3" style="left: 310px; top: 70px;"></div>
+      <div class="point dot c4" style="left: 320px; top: 130px;"></div>
+      <div class="point dot c3" style="left: 40px; top: 260px;"></div>
+    </div>
+    <div class="state-desc">
+      <strong>Hover:</strong> thumbnail + filename + rating<br>
+      <strong>Visible:</strong> density contours, cluster labels, colored dots<br>
+      <strong>Action:</strong> click cluster label, click point, lasso select
+    </div>
+  </div>
+
+  <!-- STATE 2: Cluster Focus -->
+  <div class="state-card">
+    <div class="state-label">
+      <span>Cluster Focus — Landscapes</span>
+      <span class="num">2</span>
+    </div>
+    <div class="canvas-mock">
+      <!-- Focused cluster hull -->
+      <div class="cluster-hull focused" style="left: 25px; top: 50px; width: 200px; height: 120px; border-color: #7aa2f7;"></div>
+
+      <!-- Cluster label - bright -->
+      <div class="cluster-label" style="left: 70px; top: 55px; color: #7aa2f7; background: rgba(122,162,247,0.15);">Landscapes · 10 images</div>
+
+      <!-- Blue cluster - BRIGHT -->
+      <div class="point thumb c0" style="left: 40px; top: 80px; background: linear-gradient(135deg, #2a4a6a, #1a3a5a);"></div>
+      <div class="point thumb c0" style="left: 80px; top: 90px; background: linear-gradient(135deg, #3a5a7a, #2a4a6a);"></div>
+      <div class="point thumb c0" style="left: 120px; top: 75px; background: linear-gradient(135deg, #4a6a8a, #3a5a7a);"></div>
+      <div class="point thumb c0" style="left: 55px; top: 120px; background: linear-gradient(135deg, #2a5a4a, #1a4a3a);"></div>
+      <div class="point thumb c0" style="left: 100px; top: 110px; background: linear-gradient(135deg, #3a6a5a, #2a5a4a);"></div>
+      <div class="point thumb c0" style="left: 140px; top: 100px; background: linear-gradient(135deg, #4a7a6a, #3a6a5a);"></div>
+      <div class="point thumb c0" style="left: 160px; top: 120px; background: linear-gradient(135deg, #5a8a7a, #4a7a6a);"></div>
+      <div class="point thumb c0" style="left: 70px; top: 140px; background: linear-gradient(135deg, #3a5a4a, #2a4a3a);"></div>
+
+      <!-- Dimmed green cluster -->
+      <div class="point dot c1 dimmed" style="left: 240px; top: 190px;"></div>
+      <div class="point dot c1 dimmed" style="left: 260px; top: 205px;"></div>
+      <div class="point dot c1 dimmed" style="left: 280px; top: 185px;"></div>
+      <div class="point dot c1 dimmed" style="left: 255px; top: 220px;"></div>
+      <div class="point dot c1 dimmed" style="left: 295px; top: 200px;"></div>
+
+      <!-- Dimmed orange cluster -->
+      <div class="point dot c2 dimmed" style="left: 150px; top: 240px;"></div>
+      <div class="point dot c2 dimmed" style="left: 170px; top: 255px;"></div>
+      <div class="point dot c2 dimmed" style="left: 190px; top: 240px;"></div>
+      <div class="point dot c2 dimmed" style="left: 165px; top: 270px;"></div>
+
+      <!-- Dimmed labels -->
+      <div class="cluster-label dimmed" style="left: 240px; top: 175px; color: #9ece6a;">Portraits</div>
+      <div class="cluster-label dimmed" style="left: 150px; top: 228px; color: #e0af68;">Architecture</div>
+    </div>
+    <div class="state-desc">
+      <strong>Dimming:</strong> non-cluster points at 18% opacity<br>
+      <strong>Panel:</strong> cluster summary, representatives, count, date range<br>
+      <strong>Hull:</strong> soft outline around focused cluster
+    </div>
+  </div>
+
+  <!-- STATE 3: Single Selection + Neighbors -->
+  <div class="state-card active">
+    <div class="state-label">
+      <span>Single Selection + Neighbors</span>
+      <span class="num">3</span>
+    </div>
+    <div class="canvas-mock">
+      <!-- SVG for neighbor lines -->
+      <svg style="position: absolute; inset: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none;">
+        <line x1="120" y1="100" x2="80" y2="90" stroke="#7aa2f7" stroke-width="1.5" opacity="0.7"/>
+        <line x1="120" y1="100" x2="155" y2="85" stroke="#7aa2f7" stroke-width="1.2" opacity="0.5"/>
+        <line x1="120" y1="100" x2="95" y2="120" stroke="#7aa2f7" stroke-width="1" opacity="0.4"/>
+        <line x1="120" y1="100" x2="140" y2="125" stroke="#7aa2f7" stroke-width="0.8" opacity="0.3"/>
+        <line x1="120" y1="100" x2="60" y2="115" stroke="#7aa2f7" stroke-width="0.8" opacity="0.25"/>
+      </svg>
+
+      <!-- Neighbor halo -->
+      <div class="neighbor-halo" style="left: 50px; top: 45px; width: 170px; height: 120px;"></div>
+
+      <!-- Selected point - BRIGHT -->
+      <div class="point thumb-lg selected-ring" style="left: 96px; top: 76px; background: linear-gradient(135deg, #4a6a8a, #3a5a7a);"></div>
+
+      <!-- Neighbors - semi bright with halos -->
+      <div class="point thumb hovered-ring" style="left: 64px; top: 74px; background: linear-gradient(135deg, #2a4a6a, #1a3a5a);"></div>
+      <div class="point thumb hovered-ring" style="left: 139px; top: 69px; background: linear-gradient(135deg, #3a5a7a, #2a4a6a);"></div>
+      <div class="point thumb" style="left: 79px; top: 104px; background: linear-gradient(135deg, #2a5a4a, #1a4a3a); opacity: 0.8;"></div>
+      <div class="point thumb" style="left: 124px; top: 109px; background: linear-gradient(135deg, #3a6a5a, #2a5a4a); opacity: 0.7;"></div>
+      <div class="point thumb" style="left: 44px; top: 99px; background: linear-gradient(135deg, #3a5a4a, #2a4a3a); opacity: 0.6;"></div>
+
+      <!-- Dimmed everything else -->
+      <div class="point dot c0 dimmed" style="left: 160px; top: 130px;"></div>
+      <div class="point dot c1 dimmed" style="left: 240px; top: 190px;"></div>
+      <div class="point dot c1 dimmed" style="left: 260px; top: 205px;"></div>
+      <div class="point dot c1 dimmed" style="left: 280px; top: 185px;"></div>
+      <div class="point dot c2 dimmed" style="left: 150px; top: 240px;"></div>
+      <div class="point dot c2 dimmed" style="left: 170px; top: 255px;"></div>
+      <div class="point dot c3 dimmed" style="left: 310px; top: 70px;"></div>
+
+      <!-- Detail panel -->
+      <div class="detail-panel">
+        <div class="detail-preview">IMG_4821.ARW<br><span style="font-size: 7px; color: #7aa2f7;">★★★★</span></div>
+        <div class="detail-row"><span class="label">Cluster</span><span class="value" style="color: #7aa2f7;">Landscapes</span></div>
+        <div class="detail-row"><span class="label">Size</span><span class="value">6000×4000</span></div>
+        <div class="detail-row"><span class="label">Camera</span><span class="value">α7 III</span></div>
+        <div class="detail-row"><span class="label">Lens</span><span class="value">24-70 f/2.8</span></div>
+        <div class="detail-row"><span class="label">ISO</span><span class="value">400</span></div>
+        <div class="detail-row"><span class="label">Aperture</span><span class="value">f/8</span></div>
+        <div style="margin-top: 6px; font-size: 9px; color: #565f89; text-transform: uppercase; letter-spacing: 1px;">Similar (5)</div>
+        <div class="neighbor-strip">
+          <div class="neighbor-thumb primary">1</div>
+          <div class="neighbor-thumb">2</div>
+          <div class="neighbor-thumb">3</div>
+          <div class="neighbor-thumb">4</div>
+          <div class="neighbor-thumb">5</div>
+        </div>
+      </div>
+    </div>
+    <div class="state-desc">
+      <strong>Lines:</strong> top 5 neighbors, opacity = similarity<br>
+      <strong>Panel:</strong> preview, EXIF, cluster, neighbor strip<br>
+      <strong>Dbl-click:</strong> opens Loupe view
+    </div>
+  </div>
+
+  <!-- STATE 4: Comparison -->
+  <div class="state-card">
+    <div class="state-label">
+      <span>Comparison — Similar Shots</span>
+      <span class="num">4</span>
+    </div>
+    <div class="canvas-mock">
+      <div class="breadcrumb">
+        <span>All</span> › <span>Landscapes</span> › IMG_4821 › Compare
+      </div>
+      <div class="compare-overlay">
+        <div class="compare-item winner">
+          <div class="thumb-placeholder" style="border: 1px solid #9ece6a;">Selected</div>
+          <div class="meta">IMG_4821.ARW</div>
+          <div class="score">★★★★</div>
+          <div class="meta">f/8 · ISO 400 · sharp</div>
+          <div class="actions">
+            <button class="pick">✓ Pick</button>
+          </div>
+        </div>
+        <div class="compare-item">
+          <div class="thumb-placeholder">96% sim</div>
+          <div class="meta">IMG_4822.ARW</div>
+          <div class="score" style="color: #e0af68;">★★★</div>
+          <div class="meta">f/8 · ISO 400 · slight blur</div>
+          <div class="actions">
+            <button class="reject">✗ Reject</button>
+          </div>
+        </div>
+        <div class="compare-item">
+          <div class="thumb-placeholder">91% sim</div>
+          <div class="meta">IMG_4820.ARW</div>
+          <div class="score" style="color: #e0af68;">★★★</div>
+          <div class="meta">f/5.6 · ISO 800 · noisier</div>
+          <div class="actions">
+            <button class="reject">✗ Reject</button>
+          </div>
+        </div>
+        <div class="compare-item">
+          <div class="thumb-placeholder">87% sim</div>
+          <div class="meta">IMG_4819.ARW</div>
+          <div class="score" style="color: #565f89;">★★</div>
+          <div class="meta">f/4 · ISO 1600 · cropped</div>
+          <div class="actions">
+            <button class="reject">✗ Reject</button>
+          </div>
+        </div>
+        <div class="compare-item">
+          <div class="thumb-placeholder">82% sim</div>
+          <div class="meta">IMG_4825.ARW</div>
+          <div class="score" style="color: #565f89;">★★</div>
+          <div class="meta">f/11 · ISO 200 · dark</div>
+          <div class="actions">
+            <button class="reject">✗ Reject</button>
+          </div>
+        </div>
+        <div class="compare-item">
+          <div class="thumb-placeholder">78% sim</div>
+          <div class="meta">IMG_4818.ARW</div>
+          <div class="score" style="color: #565f89;">★</div>
+          <div class="meta">f/2.8 · ISO 3200 · OOF</div>
+          <div class="actions">
+            <button class="reject">✗ Reject</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="state-desc">
+      <strong>Layout:</strong> selected + top neighbors in comparison grid<br>
+      <strong>Metrics:</strong> similarity %, EXIF diff, sharpness, rating<br>
+      <strong>Actions:</strong> pick winner, reject rest, stack as burst
+    </div>
+  </div>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-swatch" style="background: #7aa2f7;"></div> Landscapes</div>
+  <div class="legend-item"><div class="legend-swatch" style="background: #9ece6a;"></div> Portraits</div>
+  <div class="legend-item"><div class="legend-swatch" style="background: #e0af68;"></div> Architecture</div>
+  <div class="legend-item"><div class="legend-swatch" style="background: #bb9af7;"></div> Macro</div>
+  <div class="legend-item"><div class="legend-swatch" style="background: #f7768e;"></div> Street</div>
+  <div class="legend-item" style="margin-left: auto; color: #7aa2f7;">Click → Zoom In &nbsp;|&nbsp; Double-click → Loupe</div>
+</div>
+
+</body>
+</html>

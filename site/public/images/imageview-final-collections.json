@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-05-07T16:09:45.985040",
+  "prompt": "A pixel-perfect macOS application window mockup for a 'Collections' view of an AI image viewer called 'ImageView'. Background #08080c. All monospace text. TOP BAR: traffic lights, centered tabs with 'grid' having green underline. The sidebar is visible (220px, #0c0c12 background). LEFT SIDEBAR shows: 'COLLECTIONS' header in tiny uppercase gray, then a list: '\u25be Hero Images (12)' highlighted in blue, '  Brand Icons (48)', '  Landscapes Best (23)'. Below: 'EXPORT' section with 'preset: web-ready' and a green button '\u25b8 Export Collection'. MAIN AREA: a reorderable grid of 12 curated AI portrait images. Each image has a small index number in the top-left corner (01, 02, 03...) in monospace green text. One image is being dragged \u2014 it's slightly elevated with a subtle shadow, and a green insertion indicator line shows where it will drop. The images are high-quality diverse portraits. BOTTOM STATUS BAR: 'COLLECTION: Hero Images | 12 images | drag to reorder | [\u2318E] export'. Terminal aesthetic, monospace, dark theme.",
+  "preset": null,
+  "platform": null,
+  "thinking": "medium",
+  "quality": "high",
+  "provider": "openai",
+  "n": 1,
+  "seed": null,
+  "output": "site/public/images/imageview-final-collections.png",
+  "project": null,
+  "estimated_cost": 0.32
+}

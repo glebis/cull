@@ -1,5 +1,6 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
+    import { revealItemInDir } from '@tauri-apps/plugin-opener';
     import { images, focusedIndex, statusHint, loupeScale, loupePanX, loupePanY } from '$lib/stores';
 
     let dragging = $state(false);
@@ -73,6 +74,33 @@
             document.documentElement.requestFullscreen();
         }
     }
+
+    let contextMenuVisible = $state(false);
+    let contextMenuX = $state(0);
+    let contextMenuY = $state(0);
+
+    function handleContextMenu(e: MouseEvent) {
+        if (!image) return;
+        e.preventDefault();
+        contextMenuX = e.clientX;
+        contextMenuY = e.clientY;
+        contextMenuVisible = true;
+
+        function closeMenu() {
+            contextMenuVisible = false;
+            window.removeEventListener('click', closeMenu);
+            window.removeEventListener('contextmenu', closeMenu);
+        }
+        setTimeout(() => {
+            window.addEventListener('click', closeMenu);
+            window.addEventListener('contextmenu', closeMenu);
+        });
+    }
+
+    function revealInFinder() {
+        contextMenuVisible = false;
+        if (image) revealItemInDir(image.path);
+    }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -84,6 +112,7 @@
     onmouseup={handleMouseUp}
     onmouseleave={handleMouseUp}
     ondblclick={handleDblClick}
+    oncontextmenu={handleContextMenu}
     class:dragging
     class:zoomed={$loupeScale > 1}
 >
@@ -123,6 +152,18 @@
             <span class="zoom">{Math.round($loupeScale * 100)}%</span>
         {/if}
     </div>
+
+    {#if contextMenuVisible}
+        <div
+            class="context-menu"
+            style="left: {contextMenuX}px; top: {contextMenuY}px;"
+            role="menu"
+        >
+            <button class="context-menu-item" onclick={revealInFinder} role="menuitem">
+                Reveal in Finder
+            </button>
+        </div>
+    {/if}
 </div>
 
 <style>
@@ -196,5 +237,30 @@
     }
     .zoom {
         color: var(--blue);
+    }
+    .context-menu {
+        position: fixed;
+        z-index: 9999;
+        background: var(--surface, #2a2a2e);
+        border: 1px solid var(--border, #444);
+        border-radius: 4px;
+        padding: 4px 0;
+        min-width: 160px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+    .context-menu-item {
+        display: block;
+        width: 100%;
+        padding: 6px 12px;
+        background: none;
+        border: none;
+        color: var(--text, #eee);
+        font-size: 12px;
+        text-align: left;
+        cursor: pointer;
+    }
+    .context-menu-item:hover {
+        background: var(--blue, #3b82f6);
+        color: #fff;
     }
 </style>

@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-05-07T19:41:47.997904",
+  "prompt": "A close-up UI mockup of an API key configuration section in a dark terminal-style app. Background #0c0c12, monospace font. Shows: 'GOOGLE API KEY' label in tiny uppercase gray. Below it, an input field with dark background #08080c, 1px border #1a1a2e, showing 'AIza\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' in monospace. To the right of the input field, a small link text 'Get API Key \u2192' in blue #7aa2f7 that would open a browser. Below the input, tiny gray text: 'Required for Gemini Embedding 2. Free tier: 1500 req/day'. Below that, a green status indicator: '\u25cf Connected' or a red one '\u25cb Invalid key'. The whole thing is compact \u2014 about 220px wide, fitting in a sidebar panel. No decorative elements, pure terminal aesthetic.",
+  "preset": null,
+  "platform": null,
+  "thinking": "off",
+  "quality": "low",
+  "provider": "openai",
+  "n": 1,
+  "seed": null,
+  "output": "/Users/glebkalinin/ai_projects/claude-code-lab/20260502-obsidian/imageview/site/public/images/imageview-mockup-api-key.png",
+  "project": null,
+  "estimated_cost": 0.006
+}

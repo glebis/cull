@@ -1,5 +1,6 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
+    import { revealItemInDir } from '@tauri-apps/plugin-opener';
     import { images, selectedIds, focusedIndex, statusHint, compareActiveSide } from '$lib/stores';
     import type { ImageWithFile } from '$lib/api';
 
@@ -45,6 +46,35 @@
     function decisionLabel(img: ImageWithFile | null): string {
         return img?.selection?.decision ?? 'undecided';
     }
+
+    let contextMenuVisible = $state(false);
+    let contextMenuX = $state(0);
+    let contextMenuY = $state(0);
+    let contextMenuPath = $state('');
+
+    function handleContextMenu(e: MouseEvent, img: ImageWithFile | null) {
+        if (!img) return;
+        e.preventDefault();
+        contextMenuX = e.clientX;
+        contextMenuY = e.clientY;
+        contextMenuPath = img.path;
+        contextMenuVisible = true;
+
+        function closeMenu() {
+            contextMenuVisible = false;
+            window.removeEventListener('click', closeMenu);
+            window.removeEventListener('contextmenu', closeMenu);
+        }
+        setTimeout(() => {
+            window.addEventListener('click', closeMenu);
+            window.addEventListener('contextmenu', closeMenu);
+        });
+    }
+
+    function revealInFinder() {
+        contextMenuVisible = false;
+        if (contextMenuPath) revealItemInDir(contextMenuPath);
+    }
 </script>
 
 <div class="compare-container">
@@ -52,6 +82,7 @@
         class="panel"
         class:active={$compareActiveSide === 0}
         onclick={() => compareActiveSide.set(0)}
+        oncontextmenu={(e) => handleContextMenu(e, leftImage)}
         role="button"
         tabindex="0"
         onkeydown={() => {}}
@@ -84,6 +115,7 @@
         class="panel"
         class:active={$compareActiveSide === 1}
         onclick={() => compareActiveSide.set(1)}
+        oncontextmenu={(e) => handleContextMenu(e, rightImage)}
         role="button"
         tabindex="0"
         onkeydown={() => {}}
@@ -109,6 +141,18 @@
             <div class="empty-panel">No image</div>
         {/if}
     </div>
+
+    {#if contextMenuVisible}
+        <div
+            class="context-menu"
+            style="left: {contextMenuX}px; top: {contextMenuY}px;"
+            role="menu"
+        >
+            <button class="context-menu-item" onclick={revealInFinder} role="menuitem">
+                Reveal in Finder
+            </button>
+        </div>
+    {/if}
 </div>
 
 <style>
@@ -192,5 +236,30 @@
         justify-content: center;
         color: var(--text-secondary);
         font-size: 12px;
+    }
+    .context-menu {
+        position: fixed;
+        z-index: 9999;
+        background: var(--surface, #2a2a2e);
+        border: 1px solid var(--border, #444);
+        border-radius: 4px;
+        padding: 4px 0;
+        min-width: 160px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+    .context-menu-item {
+        display: block;
+        width: 100%;
+        padding: 6px 12px;
+        background: none;
+        border: none;
+        color: var(--text, #eee);
+        font-size: 12px;
+        text-align: left;
+        cursor: pointer;
+    }
+    .context-menu-item:hover {
+        background: var(--blue, #3b82f6);
+        color: #fff;
     }
 </style>

@@ -611,12 +611,34 @@
 
     function handlePointClick(point: Point) {
         selectedPoint = point;
-        // Find and focus in grid
         const idx = $images.findIndex(img => img.image.id === point.id);
         if (idx >= 0) {
             focusedIndex.set(idx);
         }
-        requestDraw();
+        zoomToPoint(point);
+    }
+
+    function zoomToPoint(point: Point) {
+        const targetScale = Math.max(scale * 2.5, 800);
+        const targetPanX = canvasWidth / 2 - point.x * targetScale;
+        const targetPanY = canvasHeight / 2 - point.y * targetScale;
+
+        const startScale = scale;
+        const startPanX = panX;
+        const startPanY = panY;
+        const duration = 300;
+        const startTime = performance.now();
+
+        function animate(now: number) {
+            const t = Math.min((now - startTime) / duration, 1);
+            const ease = 1 - (1 - t) * (1 - t);
+            scale = startScale + (targetScale - startScale) * ease;
+            panX = startPanX + (targetPanX - startPanX) * ease;
+            panY = startPanY + (targetPanY - startPanY) * ease;
+            requestDraw();
+            if (t < 1) requestAnimationFrame(animate);
+        }
+        requestAnimationFrame(animate);
     }
 
     function handleFocusInGrid() {
@@ -626,6 +648,15 @@
                 focusedIndex.set(idx);
                 viewMode.set('loupe');
             }
+        }
+    }
+
+    function handleCanvasDblClick(e: MouseEvent) {
+        if (!hoveredPoint) return;
+        const idx = $images.findIndex(img => img.image.id === hoveredPoint!.id);
+        if (idx >= 0) {
+            focusedIndex.set(idx);
+            viewMode.set('loupe');
         }
     }
 
@@ -872,6 +903,7 @@
             onmousedown={handleMouseDown}
             onmousemove={handleMouseMove}
             onmouseup={handleMouseUp}
+            ondblclick={handleCanvasDblClick}
             onmouseleave={() => { dragging = false; hoveredPoint = null; requestDraw(); }}
             class:hidden={points.length === 0}
             style="cursor: grab"

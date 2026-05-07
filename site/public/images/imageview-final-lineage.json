@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-05-07T16:10:37.566781",
+  "prompt": "A pixel-perfect macOS application window mockup for the 'Lineage' view of an AI image viewer called 'ImageView'. Background #08080c. All monospace text. TOP BAR: traffic lights, centered tabs with 'lineage' having green #9ece6a underline. MAIN AREA: an iteration tree visualization. At the left, a single original AI-generated cityscape image (the root). From it, three thin gray arrows branch right to three variant images (children), each slightly different. From one of those children, two more arrows branch to two sub-variants (grandchildren). Each image is shown as a small thumbnail (about 120px) with its filename below in monospace. The currently selected image has a blue border. Next to each image, tiny monospace text shows the prompt diff: '+add flying cars', '+sunset lighting'. The tree flows left-to-right like a git commit graph. Nodes connected by thin gray #1a1a2e lines with small dots. BOTTOM STATUS BAR: 'LINEAGE | root: cityscape_v1.png | depth: 3 | 6 variants | [Enter] open [Tab] next branch'. Terminal aesthetic.",
+  "preset": null,
+  "platform": null,
+  "thinking": "medium",
+  "quality": "high",
+  "provider": "openai",
+  "n": 1,
+  "seed": null,
+  "output": "site/public/images/imageview-final-lineage.png",
+  "project": null,
+  "estimated_cost": 0.32
+}

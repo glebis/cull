@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-05-07T18:52:39.750994",
+  "prompt": "A pixel-perfect macOS application window mockup for the 'Embeddings' settings panel of an AI image viewer called 'ImageView'. Background #08080c. All monospace text. TOP BAR: traffic lights, tabs with 'embeddings' having green underline. LEFT PANEL (30%, #0c0c12): At top, a section 'MODEL' with a dropdown showing 'CLIP ViT-B/32 (local)' with options visible: 'Google Multimodal', 'Ollama (llava)', 'OpenAI CLIP', 'Custom ONNX'. Below that, 'STATUS' section showing a download progress bar: a thin green bar at 67% with '234 MB / 348 MB \u00b7 2.1 MB/s \u00b7 ~54s remaining' in monospace below it. Two buttons side by side: '\u23f8 Pause' and '\u2715 Cancel' in monospace. Below that, 'API SETTINGS' section with input fields: 'Google API Key: sk-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' and 'Ollama URL: http://localhost:11434'. Below that 'EMBEDDINGS' section: '87 / 145 images processed' with a green progress bar and 'Generate Remaining' and 'Regenerate All' buttons. RIGHT PANEL (70%): UMAP scatter plot with colored dot clusters on black. Terminal aesthetic, monospace, dark theme. Bottom status bar: 'EMBEDDINGS | CLIP ViT-B/32 | 87/145 images | downloading model...' in green and gray.",
+  "preset": null,
+  "platform": null,
+  "thinking": "medium",
+  "quality": "high",
+  "provider": "openai",
+  "n": 1,
+  "seed": null,
+  "output": "/Users/glebkalinin/ai_projects/claude-code-lab/20260502-obsidian/imageview/site/public/images/imageview-mockup-embeddings-settings.png",
+  "project": null,
+  "estimated_cost": 0.32
+}

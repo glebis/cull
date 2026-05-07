@@ -10,6 +10,45 @@
     let importCurrent = $state(0);
     let importTotal = $state(0);
     let lastResult = $state('');
+    let foldersExpanded = $state(true);
+
+    interface DisplayFolder {
+        name: string;
+        disambig: string; // parent context shown when names collide
+        fullPath: string;
+        count: number;
+    }
+
+    // Build a flat, disambiguated folder list
+    function buildDisplayFolders(flatFolders: [string, number][]): DisplayFolder[] {
+        const result: DisplayFolder[] = flatFolders.map(([fullPath, count]) => {
+            const parts = fullPath.split('/').filter(p => p.length > 0);
+            const name = parts[parts.length - 1] || fullPath;
+            return { name, disambig: '', fullPath, count };
+        });
+
+        // Find duplicate names and add parent path to disambiguate
+        const byName = new Map<string, DisplayFolder[]>();
+        for (const f of result) {
+            const group = byName.get(f.name) || [];
+            group.push(f);
+            byName.set(f.name, group);
+        }
+        for (const [, group] of byName) {
+            if (group.length <= 1) continue;
+            for (const f of group) {
+                const parts = f.fullPath.split('/').filter(p => p.length > 0);
+                // Show up to 2 parent segments for context
+                const contextParts = parts.slice(Math.max(0, parts.length - 3), parts.length - 1);
+                f.disambig = contextParts.join('/');
+            }
+        }
+
+        result.sort((a, b) => a.name.localeCompare(b.name));
+        return result;
+    }
+
+    let displayFolders = $derived(buildDisplayFolders($folders));
 
     onMount(async () => {
         try {
@@ -182,21 +221,37 @@
 <div class="sidebar">
     <div class="section">
         <div class="section-header">LIBRARY</div>
-        <button class="section-item" class:active={$activeFolder === null} onclick={() => selectFolder(null)}>
+        <button class="section-item" class:active={$activeFolder === null && $activeCollection === null} onclick={() => selectFolder(null)}>
             <span class="icon">&#9632;</span>
             All Images
             <span class="count">({$totalCount})</span>
         </button>
-        {#each $folders as [path, count]}
-            <div class="folder-row" class:active={$activeFolder === path}>
-                <button class="section-item" onclick={() => selectFolder(path)}>
-                    <span class="icon">&#9656;</span>
-                    {folderName(path)}
-                    <span class="count">({count})</span>
-                </button>
-                <button class="delete-btn" onclick={(e: Event) => handleDeleteFolder(e, path)} title="Remove folder">&times;</button>
-            </div>
-        {/each}
+
+        {#if displayFolders.length > 0}
+            <button class="folders-toggle" onclick={() => foldersExpanded = !foldersExpanded}>
+                <span class="toggle-arrow">{foldersExpanded ? '▾' : '▸'}</span>
+                <span class="folders-toggle-label">Folders</span>
+                <span class="count">({displayFolders.length})</span>
+            </button>
+
+            {#if foldersExpanded}
+                {#each displayFolders as folder}
+                    <div class="folder-row" class:active={$activeFolder === folder.fullPath}>
+                        <button class="section-item" onclick={() => selectFolder(folder.fullPath)} title={folder.fullPath}>
+                            <span class="icon">&#9656;</span>
+                            <span class="folder-label">
+                                {folder.name}
+                                {#if folder.disambig}
+                                    <span class="folder-disambig">{folder.disambig}</span>
+                                {/if}
+                            </span>
+                            <span class="count">({folder.count})</span>
+                        </button>
+                        <button class="delete-btn" onclick={(e: Event) => handleDeleteFolder(e, folder.fullPath)} title="Remove folder">&times;</button>
+                    </div>
+                {/each}
+            {/if}
+        {/if}
     </div>
 
     <div class="section">
@@ -343,6 +398,50 @@
     }
     .delete-btn:hover {
         color: var(--red, #f7768e);
+    }
+    .folders-toggle {
+        font-size: 11px;
+        padding: 4px 8px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        width: 100%;
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        font-family: inherit;
+        text-align: left;
+        margin-top: 4px;
+    }
+    .folders-toggle:hover {
+        color: var(--text-primary, #cdd6f4);
+    }
+    .toggle-arrow {
+        font-size: 8px;
+        width: 10px;
+        text-align: center;
+    }
+    .folders-toggle-label {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+    }
+    .folder-label {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        overflow: hidden;
+    }
+    .folder-disambig {
+        font-size: 9px;
+        color: var(--text-secondary);
+        opacity: 0.5;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        line-height: 1.2;
     }
     .filter-row {
         padding: 4px 8px;
