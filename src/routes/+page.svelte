@@ -7,6 +7,8 @@
     import Compare from '$lib/components/Compare.svelte';
     import Loupe from '$lib/components/Loupe.svelte';
     import EmbeddingExplorer from '$lib/components/EmbeddingExplorer.svelte';
+    import UpdateBanner from '$lib/components/UpdateBanner.svelte';
+    import CommandBar from '$lib/components/CommandBar.svelte';
     import { handleKeydown } from '$lib/keys';
     import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections } from '$lib/stores';
     import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages } from '$lib/api';
@@ -74,6 +76,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
+<UpdateBanner />
 <div class="app-shell" class:no-sidebar={noSidebar} class:zen={$zenMode}>
     {#if !$zenMode}
         <TabBar />
@@ -82,7 +85,12 @@
         <Sidebar />
     {/if}
     {#if $viewMode === 'grid'}
-        <Grid />
+        <div class="main-with-commandbar">
+            <div class="command-bar-area">
+                <CommandBar />
+            </div>
+            <Grid />
+        </div>
     {:else if $viewMode === 'compare'}
         <Compare />
     {:else if $viewMode === 'loupe'}
@@ -167,5 +175,20 @@
         color: var(--accent, #4a9eff);
         text-transform: uppercase;
         letter-spacing: 2px;
+    }
+    .main-with-commandbar {
+        grid-area: main;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    .main-with-commandbar :global(.grid-container) {
+        grid-area: unset;
+        flex: 1;
+        min-height: 0;
+    }
+    .command-bar-area {
+        padding: 8px 12px 0;
+        flex-shrink: 0;
     }
 </style>
