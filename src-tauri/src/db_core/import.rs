@@ -7,6 +7,7 @@ use uuid::Uuid;
 use super::db::Database;
 use super::models::*;
 use super::thumbnails;
+use super::source_detection::{detect_source, read_png_text_chunks};
 
 pub struct ImportResult {
     pub imported: u32,
@@ -65,6 +66,36 @@ pub fn import_file(
     };
 
     db.insert_image(&image).map_err(|e| e.to_string())?;
+
+    let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let png_chunks = if ext == "png" {
+        read_png_text_chunks(file_path).unwrap_or_default()
+    } else {
+        vec![]
+    };
+    let detection = detect_source(filename, &png_chunks);
+
+    let aspect_ratio = width as f64 / height.max(1) as f64;
+    let orientation = if (aspect_ratio - 1.0).abs() < 0.05 {
+        "square"
+    } else if aspect_ratio > 1.0 {
+        "landscape"
+    } else {
+        "portrait"
+    };
+    let megapixels = (width as f64 * height as f64) / 1_000_000.0;
+
+    db.update_source_detection(
+        &image_id,
+        detection.source_label.as_deref(),
+        detection.confidence,
+        &detection.to_evidence_json(),
+        detection.is_ai_generated,
+        detection.ai_prompt.as_deref(),
+        aspect_ratio,
+        orientation,
+        megapixels,
+    ).map_err(|e| e.to_string())?;
 
     let file_record = ImageFile {
         id: Uuid::new_v4().to_string(),

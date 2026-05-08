@@ -863,6 +863,70 @@ impl Database {
         })?;
         rows.collect::<Result<Vec<_>>>()
     }
+
+    pub fn update_source_detection(
+        &self,
+        image_id: &str,
+        source_label: Option<&str>,
+        source_confidence: f64,
+        source_evidence_json: &str,
+        is_ai_generated: Option<bool>,
+        ai_prompt: Option<&str>,
+        aspect_ratio: f64,
+        orientation: &str,
+        megapixels: f64,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE images SET source_label = ?2, source_confidence = ?3,
+             source_evidence_json = ?4, is_ai_generated = ?5, ai_prompt = ?6,
+             aspect_ratio = ?7, orientation = ?8, megapixels = ?9,
+             source_detected_at = datetime('now'), source_detector_version = '1.0'
+             WHERE id = ?1",
+            params![
+                image_id,
+                source_label,
+                source_confidence,
+                source_evidence_json,
+                is_ai_generated.map(|b| b as i32),
+                ai_prompt,
+                aspect_ratio,
+                orientation,
+                megapixels,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn backfill_image_metadata(&self) -> Result<u32> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, width, height FROM images WHERE orientation IS NULL"
+        )?;
+        let rows: Vec<(String, u32, u32)> = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?.filter_map(|r| r.ok()).collect();
+        drop(stmt);
+
+        let mut count = 0u32;
+        for (id, width, height) in &rows {
+            let aspect_ratio = *width as f64 / (*height).max(1) as f64;
+            let orientation = if (aspect_ratio - 1.0).abs() < 0.05 {
+                "square"
+            } else if aspect_ratio > 1.0 {
+                "landscape"
+            } else {
+                "portrait"
+            };
+            let megapixels = (*width as f64 * *height as f64) / 1_000_000.0;
+            conn.execute(
+                "UPDATE images SET aspect_ratio = ?2, orientation = ?3, megapixels = ?4 WHERE id = ?1",
+                params![id, aspect_ratio, orientation, megapixels],
+            )?;
+            count += 1;
+        }
+        Ok(count)
+    }
 }
 
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {

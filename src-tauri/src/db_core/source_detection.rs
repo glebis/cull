@@ -196,6 +196,24 @@ pub fn combine_detection_results(results: Vec<SourceDetectionResult>) -> SourceD
     }
 }
 
+pub fn read_png_text_chunks(path: &std::path::Path) -> std::result::Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
+    let file = std::fs::File::open(path)?;
+    let decoder = png::Decoder::new(file);
+    let reader = decoder.read_info()?;
+    let info = reader.info();
+
+    let mut chunks = vec![];
+    for text in &info.uncompressed_latin1_text {
+        chunks.push((text.keyword.clone(), text.text.clone()));
+    }
+    for text in &info.utf8_text {
+        if let Ok(decoded) = text.get_text() {
+            chunks.push((text.keyword.clone(), decoded));
+        }
+    }
+    Ok(chunks)
+}
+
 pub fn detect_source(filename: &str, png_text_chunks: &[(String, String)]) -> SourceDetectionResult {
     let filename_result = detect_from_filename(filename);
     let png_result = detect_from_png_text_chunks(png_text_chunks);
