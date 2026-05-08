@@ -1,7 +1,9 @@
 pub mod collections;
 pub mod deeplink;
+pub mod detection;
 pub mod embeddings;
 pub mod import;
 pub mod library;
 pub mod selection;
+pub mod smart_collections;
 pub mod window;

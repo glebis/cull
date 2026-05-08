@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use tauri::{Manager, Emitter, Listener};
 use tauri_plugin_dialog::DialogExt;
 use crate::db_core::db::Database;
+use crate::db_core::detection::DetectionEngine;
 use crate::db_core::embeddings::EmbeddingEngine;
 use crate::commands::deeplink::parse_deep_link;
 
@@ -14,6 +15,8 @@ pub struct AppState {
     pub db: Database,
     pub app_data_dir: PathBuf,
     pub embedding_engine: Mutex<EmbeddingEngine>,
+    pub detection_engine: Mutex<DetectionEngine>,
+    pub safety_engine: Mutex<DetectionEngine>,
 }
 
 const IMAGE_EXTENSIONS: &[&str] = &[
@@ -35,6 +38,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_focus();
@@ -71,8 +76,10 @@ pub fn run() {
 
             let model_dir = app_data_dir.join("models");
             let embedding_engine = Mutex::new(EmbeddingEngine::new(&model_dir));
+            let detection_engine = Mutex::new(DetectionEngine::new_yolo(&model_dir));
+            let safety_engine = Mutex::new(DetectionEngine::new_nudenet(&model_dir));
 
-            app.manage(AppState { db, app_data_dir, embedding_engine });
+            app.manage(AppState { db, app_data_dir, embedding_engine, detection_engine, safety_engine });
 
             // Set up native menu bar
             let handle = app.handle();
@@ -132,6 +139,21 @@ pub fn run() {
             commands::window::list_windows,
             commands::window::rename_window,
             commands::window::send_to_window,
+            commands::detection::download_yolo_model,
+            commands::detection::download_nudenet_model,
+            commands::detection::detect_objects,
+            commands::detection::detect_nsfw,
+            commands::detection::get_detections,
+            commands::detection::search_by_detected_class,
+            commands::detection::is_yolo_available,
+            commands::detection::is_nudenet_available,
+            commands::detection::get_detection_count,
+            commands::smart_collections::create_smart_collection,
+            commands::smart_collections::list_smart_collections,
+            commands::smart_collections::evaluate_smart_collection,
+            commands::smart_collections::delete_smart_collection,
+            commands::smart_collections::update_smart_collection,
+            commands::smart_collections::parse_nl_query,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
