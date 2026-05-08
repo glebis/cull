@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
-import type { ImageWithFile } from './api';
+import type { ImageWithFile, SmartCollection } from './api';
 
 export type ViewMode = 'grid' | 'compare' | 'loupe' | 'canvas' | 'lineage' | 'embeddings' | 'export';
 
@@ -68,6 +68,10 @@ export const collections = writable<[string, string, number][]>([]); // [id, nam
 export const activeCollection = writable<string | null>(null);
 export const collectMode = writable<boolean>(false);
 export const collectModeTarget = writable<string | null>(null); // collection id being collected into
+
+// Smart Collections
+export const smartCollections = writable<SmartCollection[]>([]);
+export const activeSmartCollection = writable<SmartCollection | null>(null);
 
 export const focusedImage = derived(
     [images, focusedIndex],

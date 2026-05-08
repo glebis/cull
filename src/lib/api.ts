@@ -32,6 +32,41 @@ export interface ImportResponse {
     errors: string[];
 }
 
+// Smart Collections types
+
+export interface FilterGroup {
+    type: 'group';
+    op: 'and' | 'or';
+    children: FilterNode[];
+}
+
+export interface FilterNot {
+    type: 'not';
+    child: FilterNode;
+}
+
+export interface FilterRule {
+    type: 'rule';
+    field: string;
+    op: string;
+    value: any;
+}
+
+export type FilterNode = FilterGroup | FilterNot | FilterRule;
+
+export interface SmartCollection {
+    id: string;
+    name: string;
+    description: string | null;
+    collection_type: string;
+    filter_json: string | null;
+    nl_query: string | null;
+    is_preset: boolean;
+    sort_order: number;
+    created_at: string;
+    image_count: number | null;
+}
+
 export async function listImages(limit: number, offset: number): Promise<ImageWithFile[]> {
     return invoke<ImageWithFile[]>('list_images', { limit, offset });
 }
@@ -100,6 +135,41 @@ export async function deleteCollectionApi(collectionId: string): Promise<void> {
     return invoke('delete_collection', { collectionId });
 }
 
+// Smart Collection commands
+
+export async function listSmartCollections(): Promise<SmartCollection[]> {
+    return invoke('list_smart_collections');
+}
+
+export async function createSmartCollection(
+    name: string,
+    filterJson: string,
+    nlQuery?: string,
+): Promise<string> {
+    return invoke('create_smart_collection', { name, filterJson, nlQuery });
+}
+
+export async function evaluateSmartCollection(filterJson: string): Promise<ImageWithFile[]> {
+    return invoke('evaluate_smart_collection', { filterJson });
+}
+
+export async function deleteSmartCollectionApi(id: string): Promise<void> {
+    return invoke('delete_smart_collection', { id });
+}
+
+export async function updateSmartCollectionApi(
+    id: string,
+    name: string,
+    filterJson: string,
+    nlQuery?: string,
+): Promise<void> {
+    return invoke('update_smart_collection', { id, name, filterJson, nlQuery });
+}
+
+export async function parseNlQuery(query: string): Promise<string> {
+    return invoke('parse_nl_query', { query });
+}
+
 // Embedding commands
 export async function downloadClipModel(): Promise<string> {
     return invoke('download_clip_model');
@@ -139,6 +209,52 @@ export async function validateApiKey(provider: string, key: string): Promise<boo
 
 export async function generateGeminiEmbeddings(imageIds: string[]): Promise<number> {
     return invoke('generate_gemini_embeddings', { imageIds });
+}
+
+// Detection commands (YOLO + NudeNet)
+export interface Detection {
+    class_name: string;
+    confidence: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+export async function downloadYoloModel(variant: string): Promise<string> {
+    return invoke('download_yolo_model', { variant });
+}
+
+export async function downloadNudenetModel(): Promise<string> {
+    return invoke('download_nudenet_model');
+}
+
+export async function detectObjects(imageIds: string[], variant?: string): Promise<number> {
+    return invoke('detect_objects', { imageIds, variant: variant ?? null });
+}
+
+export async function detectNsfw(imageIds: string[]): Promise<number> {
+    return invoke('detect_nsfw', { imageIds });
+}
+
+export async function getDetections(imageId: string, model?: string): Promise<Detection[]> {
+    return invoke('get_detections', { imageId, model: model ?? null });
+}
+
+export async function searchByDetectedClass(className: string, limit?: number): Promise<[string, number][]> {
+    return invoke('search_by_detected_class', { className, limit: limit ?? 100 });
+}
+
+export async function isYoloAvailable(variant?: string): Promise<boolean> {
+    return invoke('is_yolo_available', { variant: variant ?? null });
+}
+
+export async function isNudenetAvailable(): Promise<boolean> {
+    return invoke('is_nudenet_available');
+}
+
+export async function getDetectionCount(model: string): Promise<number> {
+    return invoke('get_detection_count', { model });
 }
 
 export async function openWithParams(params: {
