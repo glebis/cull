@@ -320,6 +320,7 @@ impl Database {
             "SELECT p.id, p.name, COUNT(ci.image_id) as cnt
              FROM projects p
              LEFT JOIN collection_items ci ON ci.collection_id = p.id
+             WHERE (p.collection_type IS NULL OR p.collection_type = 'manual')
              GROUP BY p.id
              ORDER BY p.created_at DESC"
         )?;
@@ -692,6 +693,68 @@ impl Database {
             params![model_name],
             |row| row.get::<_, u32>(0),
         )
+    }
+
+    pub fn create_smart_collection(
+        &self,
+        name: &str,
+        filter_json: &str,
+        nl_query: Option<&str>,
+        is_preset: bool,
+    ) -> Result<String> {
+        let conn = self.conn.lock().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO projects (id, name, collection_type, filter_json, nl_query, is_preset, created_at)
+             VALUES (?1, ?2, 'smart', ?3, ?4, ?5, datetime('now'))",
+            rusqlite::params![id, name, filter_json, nl_query, is_preset as i32],
+        )?;
+        Ok(id)
+    }
+
+    pub fn list_smart_collections(&self) -> Result<Vec<SmartCollection>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, collection_type, filter_json, nl_query,
+                    is_preset, sort_order, created_at
+             FROM projects
+             WHERE collection_type = 'smart'
+             ORDER BY sort_order ASC, created_at DESC"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(SmartCollection {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                collection_type: row.get(3)?,
+                filter_json: row.get(4)?,
+                nl_query: row.get(5)?,
+                is_preset: row.get::<_, i32>(6)? != 0,
+                sort_order: row.get(7)?,
+                created_at: row.get(8)?,
+                image_count: None,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
+    pub fn delete_smart_collection(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM projects WHERE id = ?1 AND collection_type = 'smart' AND is_preset = 0",
+            [id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_smart_collection(&self, id: &str, name: &str, filter_json: &str, nl_query: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE projects SET name = ?2, filter_json = ?3, nl_query = ?4
+             WHERE id = ?1 AND collection_type = 'smart'",
+            rusqlite::params![id, name, filter_json, nl_query],
+        )?;
+        Ok(())
     }
 
     pub fn evaluate_smart_collection(&self, filter_json: &str) -> Result<Vec<ImageWithFile>> {
