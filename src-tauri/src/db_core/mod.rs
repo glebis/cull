@@ -6,4 +6,5 @@ pub mod import;
 pub mod models;
 pub mod smart_collections;
 pub mod source_detection;
+pub mod nl_parser;
 pub mod thumbnails;
