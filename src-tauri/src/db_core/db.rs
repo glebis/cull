@@ -22,6 +22,7 @@ impl Database {
         conn.execute_batch(schema)?;
         drop(conn);
         self.migrate_smart_collections()?;
+        self.seed_preset_collections()?;
         Ok(())
     }
 
@@ -66,6 +67,56 @@ impl Database {
                 Err(e) if e.to_string().contains("duplicate column") => {},
                 Err(e) => return Err(e),
             }
+        }
+
+        Ok(())
+    }
+
+    fn seed_preset_collections(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+
+        let existing: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM projects WHERE is_preset = 1",
+            [],
+            |row| row.get(0),
+        )?;
+
+        if existing > 0 {
+            return Ok(());
+        }
+
+        let presets: Vec<(&str, &str, i32)> = vec![
+            ("5 Stars", r#"{"type":"rule","field":"rating","op":"eq","value":5.0}"#, 1),
+            ("4 Stars+", r#"{"type":"rule","field":"rating","op":"gte","value":4.0}"#, 2),
+            ("Picks", r#"{"type":"rule","field":"decision","op":"eq","value":"accept"}"#, 3),
+            ("Rejects", r#"{"type":"rule","field":"decision","op":"eq","value":"reject"}"#, 4),
+            ("Unrated", r#"{"type":"group","op":"and","children":[{"type":"rule","field":"rating","op":"eq","value":0.0},{"type":"rule","field":"decision","op":"eq","value":"undecided"}]}"#, 5),
+            ("Recent Imports", r#"{"type":"rule","field":"imported_at","op":"last_n_days","value":7.0}"#, 6),
+            ("Imported Today", r#"{"type":"rule","field":"imported_at","op":"last_n_days","value":1.0}"#, 7),
+            ("This Week", r#"{"type":"rule","field":"imported_at","op":"this_week","value":true}"#, 8),
+            ("This Month", r#"{"type":"rule","field":"imported_at","op":"this_month","value":true}"#, 9),
+            ("Landscape", r#"{"type":"rule","field":"orientation","op":"eq","value":"landscape"}"#, 10),
+            ("Portrait", r#"{"type":"rule","field":"orientation","op":"eq","value":"portrait"}"#, 11),
+            ("Square", r#"{"type":"rule","field":"orientation","op":"eq","value":"square"}"#, 12),
+            ("Panoramic", r#"{"type":"rule","field":"aspect_ratio","op":"gt","value":2.0}"#, 13),
+            ("PNG", r#"{"type":"rule","field":"format","op":"eq","value":"png"}"#, 14),
+            ("WebP", r#"{"type":"rule","field":"format","op":"eq","value":"webp"}"#, 15),
+            ("Large (>4K)", r#"{"type":"rule","field":"width","op":"gte","value":3840.0}"#, 16),
+            ("Small (<1024px)", r#"{"type":"rule","field":"width","op":"lt","value":1024.0}"#, 17),
+            ("AI Generated", r#"{"type":"rule","field":"is_ai_generated","op":"eq","value":true}"#, 18),
+            ("Red Label", r#"{"type":"rule","field":"color_label","op":"eq","value":"red"}"#, 19),
+            ("Green Label", r#"{"type":"rule","field":"color_label","op":"eq","value":"green"}"#, 20),
+            ("Blue Label", r#"{"type":"rule","field":"color_label","op":"eq","value":"blue"}"#, 21),
+            ("Yellow Label", r#"{"type":"rule","field":"color_label","op":"eq","value":"yellow"}"#, 22),
+        ];
+
+        for (name, filter, order) in presets {
+            let id = uuid::Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO projects (id, name, collection_type, filter_json, is_preset, sort_order, created_at)
+                 VALUES (?1, ?2, 'smart', ?3, 1, ?4, datetime('now'))",
+                params![id, name, filter, order],
+            )?;
         }
 
         Ok(())
