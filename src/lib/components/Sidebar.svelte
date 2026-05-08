@@ -1,8 +1,9 @@
 <script lang="ts">
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, images, focusedIndex, folders, activeFolder, minSizeFilter, collections, activeCollection, collectMode, collectModeTarget } from '$lib/stores';
-    import { importFolder as apiImportFolder, listImages, listImagesByFolder, listImagesFiltered, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, listCollectionImages, deleteCollectionApi } from '$lib/api';
+    import { totalCount, images, focusedIndex, folders, activeFolder, minSizeFilter, collections, activeCollection, collectMode, collectModeTarget, smartCollections, activeSmartCollection } from '$lib/stores';
+    import { importFolder as apiImportFolder, listImages, listImagesByFolder, listImagesFiltered, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, listCollectionImages, deleteCollectionApi, listSmartCollections, evaluateSmartCollection } from '$lib/api';
+    import type { SmartCollection } from '$lib/api';
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
 
@@ -63,6 +64,12 @@
         } catch (e) {
             console.error('Failed to load collections:', e);
         }
+        try {
+            const sc = await listSmartCollections();
+            smartCollections.set(sc);
+        } catch (e) {
+            console.error('Failed to load smart collections:', e);
+        }
     });
 
     function folderName(path: string): string {
@@ -70,9 +77,25 @@
         return parts[parts.length - 1] || path;
     }
 
+    async function selectSmartCollection(sc: SmartCollection) {
+        activeSmartCollection.set(sc);
+        activeFolder.set(null);
+        activeCollection.set(null);
+        if (sc.filter_json) {
+            try {
+                const results = await evaluateSmartCollection(sc.filter_json);
+                images.set(results);
+                focusedIndex.set(0);
+            } catch (e) {
+                console.error('Failed to evaluate smart collection:', e);
+            }
+        }
+    }
+
     async function selectFolder(folder: string | null) {
         activeFolder.set(folder);
         activeCollection.set(null);
+        activeSmartCollection.set(null);
         try {
             if (folder === null) {
                 const imgs = await listImages(100000, 0);
@@ -90,6 +113,7 @@
     async function selectCollection(collectionId: string) {
         activeCollection.set(collectionId);
         activeFolder.set(null);
+        activeSmartCollection.set(null);
         try {
             const imgs = await listCollectionImages(collectionId);
             images.set(imgs);
@@ -221,7 +245,7 @@
 <div class="sidebar">
     <div class="section">
         <div class="section-header">LIBRARY</div>
-        <button class="section-item" class:active={$activeFolder === null && $activeCollection === null} onclick={() => selectFolder(null)}>
+        <button class="section-item" class:active={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null} onclick={() => selectFolder(null)}>
             <span class="icon">&#9632;</span>
             All Images
             <span class="count">({$totalCount})</span>
@@ -269,6 +293,20 @@
             </div>
         </div>
     </div>
+
+    {#if $smartCollections.length > 0}
+    <div class="section">
+        <div class="section-header">SMART</div>
+        {#each $smartCollections as sc}
+            <button class="section-item"
+                class:active={$activeSmartCollection?.id === sc.id}
+                onclick={() => selectSmartCollection(sc)}>
+                <span class="icon">&#9733;</span>
+                {sc.name}
+            </button>
+        {/each}
+    </div>
+    {/if}
 
     <div class="section">
         <div class="section-header">
