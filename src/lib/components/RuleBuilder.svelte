@@ -81,15 +81,205 @@
 </div>
 
 <style>
-    .rule-builder { display: flex; flex-direction: column; gap: 6px; }
-    .match-toggle { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-    .match-label { font-size: 13px; color: var(--muted, #757575); }
-    .match-select { padding: 2px 8px; border-radius: 4px; border: 1px solid var(--accent, #4a9eed); font-size: 13px; color: var(--accent, #4a9eed); }
-    .rule-row { display: flex; align-items: center; gap: 6px; }
-    .field-select { padding: 4px 8px; border-radius: 6px; background: #d0bfff; border: 1px solid #8b5cf6; font-size: 13px; }
-    .op-select { padding: 4px 8px; border-radius: 6px; background: #fff; border: 1px solid #ccc; font-size: 13px; }
-    .value-input { padding: 4px 8px; border-radius: 6px; background: #fff; border: 1px solid #ccc; font-size: 13px; width: 120px; }
-    .not-badge { padding: 2px 6px; border-radius: 4px; background: #ffc9c9; border: 1px solid #ef4444; font-size: 11px; font-weight: bold; color: #dc2626; }
-    .remove-rule { background: none; border: none; color: #999; cursor: pointer; font-size: 16px; }
-    .add-rule { background: none; border: 1px dashed var(--accent, #4a9eed); border-radius: 6px; color: var(--accent, #4a9eed); padding: 4px 12px; cursor: pointer; font-size: 13px; width: fit-content; }
+    .rule-builder {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .match-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 4px;
+    }
+
+    .match-label {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    .match-select {
+        appearance: none;
+        height: 30px;
+        padding: 0 28px 0 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), var(--surface);
+        background-image: linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%),
+            linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%),
+            linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015));
+        background-position: calc(100% - 12px) 13px, calc(100% - 7px) 13px, 0 0;
+        background-size: 5px 5px, 5px 5px, 100% 100%;
+        background-repeat: no-repeat;
+        background-color: var(--surface);
+        color: var(--blue);
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: border-color 120ms, background-color 120ms;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+
+    .match-select:hover {
+        border-color: rgba(122, 162, 247, 0.4);
+    }
+
+    .match-select:focus {
+        outline: none;
+        border-color: var(--blue);
+        box-shadow: 0 0 0 1px var(--blue), 0 0 0 4px rgba(122, 162, 247, 0.12);
+    }
+
+    .rule-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .field-select,
+    .op-select {
+        appearance: none;
+        height: 36px;
+        padding: 0 28px 0 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), var(--surface);
+        background-image: linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%),
+            linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%),
+            linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015));
+        background-position: calc(100% - 12px) 15px, calc(100% - 7px) 15px, 0 0;
+        background-size: 5px 5px, 5px 5px, 100% 100%;
+        background-repeat: no-repeat;
+        background-color: var(--surface);
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+        transition: border-color 120ms, background-color 120ms;
+    }
+
+    .field-select {
+        color: var(--purple);
+        border-color: rgba(187, 154, 247, 0.3);
+    }
+
+    .field-select:hover {
+        border-color: rgba(187, 154, 247, 0.5);
+        background-color: rgba(187, 154, 247, 0.06);
+    }
+
+    .op-select:hover {
+        border-color: var(--border);
+        background-color: rgba(255, 255, 255, 0.03);
+    }
+
+    .field-select:focus,
+    .op-select:focus {
+        outline: none;
+        border-color: var(--blue);
+        box-shadow: 0 0 0 1px var(--blue), 0 0 0 4px rgba(122, 162, 247, 0.12);
+    }
+
+    .value-input {
+        height: 36px;
+        padding: 0 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), var(--surface);
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 500;
+        width: 140px;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+        transition: border-color 120ms;
+    }
+
+    .value-input::placeholder {
+        color: var(--text-secondary);
+        opacity: 0.5;
+    }
+
+    .value-input:hover {
+        border-color: rgba(255, 255, 255, 0.12);
+    }
+
+    .value-input:focus {
+        outline: none;
+        border-color: var(--blue);
+        box-shadow: 0 0 0 1px var(--blue), 0 0 0 4px rgba(122, 162, 247, 0.12);
+    }
+
+    .not-badge {
+        height: 26px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(224, 175, 104, 0.35);
+        background: rgba(224, 175, 104, 0.1);
+        color: var(--orange);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        font-family: var(--font);
+    }
+
+    .remove-rule {
+        width: 36px;
+        height: 36px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 14px;
+        transition: color 120ms, border-color 120ms, background 120ms, transform 80ms;
+    }
+
+    .remove-rule:hover {
+        color: var(--red);
+        border-color: rgba(247, 118, 142, 0.4);
+        background: rgba(247, 118, 142, 0.08);
+    }
+
+    .remove-rule:active {
+        transform: translateY(1px);
+    }
+
+    .add-rule {
+        height: 36px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 16px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), var(--surface);
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        width: fit-content;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+        transition: border-color 120ms, background-color 120ms, transform 80ms;
+    }
+
+    .add-rule:hover {
+        border-color: rgba(255, 255, 255, 0.12);
+        background-color: rgba(255, 255, 255, 0.03);
+    }
+
+    .add-rule:active {
+        transform: translateY(1px);
+    }
 </style>

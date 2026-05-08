@@ -78,15 +78,129 @@
 </div>
 
 <style>
-    .command-bar-wrapper { display: flex; flex-direction: column; gap: 0; }
-    .command-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 2px solid var(--accent, #4a9eed); border-radius: 8px; background: var(--bg, #fff); }
-    .command-icon { color: var(--accent, #4a9eed); font-size: 18px; font-weight: bold; }
-    .command-input { flex: 1; border: none; outline: none; font-size: 16px; background: transparent; color: inherit; }
-    .clear-btn { background: none; border: none; color: #999; cursor: pointer; font-size: 18px; padding: 0 4px; }
-    .parsed-rules { padding: 12px; background: var(--surface, #fafafa); border: 1px solid var(--border, #e0e0e0); border-radius: 0 0 8px 8px; border-top: none; }
-    .rules-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-    .parsed-label { color: var(--muted, #757575); font-size: 14px; }
-    .rules-actions { display: flex; align-items: center; gap: 8px; }
-    .match-count { color: var(--muted, #757575); font-size: 14px; }
-    .apply-btn { padding: 4px 12px; border-radius: 6px; border: 1px solid var(--accent, #4a9eed); background: var(--accent, #4a9eed); color: #fff; cursor: pointer; font-size: 13px; }
+    .command-bar-wrapper {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .command-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 48px;
+        padding: 0 16px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)), var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        transition: border-color 120ms ease, box-shadow 120ms ease;
+    }
+
+    .command-bar:focus-within {
+        border-color: var(--blue);
+        box-shadow: 0 0 0 1px var(--blue), 0 0 0 4px rgba(122, 162, 247, 0.12);
+    }
+
+    .command-icon {
+        color: var(--text-secondary);
+        font-size: 16px;
+        font-weight: 600;
+        opacity: 0.8;
+        flex-shrink: 0;
+    }
+
+    .command-input {
+        flex: 1;
+        min-width: 0;
+        height: 46px;
+        border: 0;
+        outline: none;
+        background: transparent;
+        color: var(--text);
+        font-family: var(--font);
+        font-size: 14px;
+        letter-spacing: -0.01em;
+    }
+
+    .command-input::placeholder {
+        color: var(--text-secondary);
+        opacity: 0.6;
+    }
+
+    .clear-btn {
+        width: 28px;
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 14px;
+        transition: color 120ms, border-color 120ms, background 120ms;
+    }
+
+    .clear-btn:hover {
+        color: var(--red);
+        border-color: rgba(247, 118, 142, 0.4);
+        background: rgba(247, 118, 142, 0.08);
+    }
+
+    .parsed-rules {
+        padding: 16px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0.008)), var(--surface);
+        border: 1px solid var(--border);
+        border-top: none;
+        border-radius: 0 0 8px 8px;
+    }
+
+    .rules-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+
+    .parsed-label {
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    .rules-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .match-count {
+        color: var(--text-secondary);
+        font-family: var(--font);
+        font-size: 12px;
+    }
+
+    .apply-btn {
+        height: 32px;
+        padding: 0 16px;
+        border-radius: 6px;
+        border: 1px solid var(--blue);
+        background: linear-gradient(180deg, rgba(122,162,247,0.2), rgba(122,162,247,0.1));
+        color: var(--blue);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        transition: background 120ms, color 120ms, transform 80ms;
+    }
+
+    .apply-btn:hover {
+        background: linear-gradient(180deg, rgba(122,162,247,0.3), rgba(122,162,247,0.15));
+        color: #8fb3ff;
+    }
+
+    .apply-btn:active {
+        transform: translateY(1px);
+    }
 </style>
