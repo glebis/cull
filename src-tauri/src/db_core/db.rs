@@ -2,6 +2,7 @@ use rusqlite::{Connection, Result, params};
 use std::path::Path;
 use std::sync::Mutex;
 use super::models::*;
+use super::smart_collections::{FilterNode, SmartCollection};
 
 pub struct Database {
     conn: Mutex<Connection>,
@@ -691,6 +692,62 @@ impl Database {
             params![model_name],
             |row| row.get::<_, u32>(0),
         )
+    }
+
+    pub fn evaluate_smart_collection(&self, filter_json: &str) -> Result<Vec<ImageWithFile>> {
+        let filter: FilterNode = serde_json::from_str(filter_json)
+            .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+
+        let (where_clause, params) = filter.to_sql_clause()
+            .map_err(|e| rusqlite::Error::InvalidParameterName(e))?;
+
+        let conn = self.conn.lock().unwrap();
+        let sql = format!(
+            "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
+                    i.created_at, i.imported_at, f.path,
+                    s.star_rating, s.color_label, s.decision
+             FROM images i
+             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+             LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             WHERE ({})
+             GROUP BY i.id
+             ORDER BY i.imported_at DESC",
+            where_clause
+        );
+
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter()
+            .map(|p| p as &dyn rusqlite::types::ToSql)
+            .collect();
+
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(param_refs.as_slice(), |row| {
+            let star: Option<u8> = row.get(9)?;
+            let color: Option<String> = row.get(10)?;
+            let decision: Option<String> = row.get(11)?;
+            let selection = decision.map(|d| Selection {
+                image_id: row.get(0).unwrap(),
+                project_id: None,
+                star_rating: star,
+                color_label: color,
+                decision: d,
+            });
+            Ok(ImageWithFile {
+                image: Image {
+                    id: row.get(0)?,
+                    sha256_hash: row.get(1)?,
+                    width: row.get(2)?,
+                    height: row.get(3)?,
+                    format: row.get(4)?,
+                    file_size: row.get(5)?,
+                    created_at: row.get(6)?,
+                    imported_at: row.get(7)?,
+                },
+                path: row.get(8)?,
+                thumbnail_path: None,
+                selection,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>>>()
     }
 }
 
