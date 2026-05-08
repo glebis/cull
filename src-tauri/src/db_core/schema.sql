@@ -10,6 +10,12 @@ CREATE TABLE IF NOT EXISTS images (
     imported_at TEXT NOT NULL
 );
 
+-- Source detection evidence (added to images table via migration in db.rs)
+-- source_label TEXT, source_confidence REAL, source_evidence_json TEXT,
+-- source_detected_at TEXT, source_detector_version TEXT,
+-- is_ai_generated INTEGER, ai_prompt TEXT, aspect_ratio REAL,
+-- orientation TEXT, original_date TEXT, megapixels REAL
+
 CREATE TABLE IF NOT EXISTS image_files (
     id TEXT PRIMARY KEY,
     image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
@@ -101,6 +107,23 @@ CREATE INDEX IF NOT EXISTS image_projects_project_idx ON image_projects(project_
 
 CREATE INDEX IF NOT EXISTS iterations_parent_idx ON iterations(parent_id);
 CREATE INDEX IF NOT EXISTS iterations_child_idx ON iterations(child_id);
+
+-- Detections (YOLO object detection + NudeNet content safety)
+CREATE TABLE IF NOT EXISTS detections (
+    id TEXT PRIMARY KEY,
+    image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    model_name TEXT NOT NULL,
+    class_name TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    x REAL NOT NULL,
+    y REAL NOT NULL,
+    width REAL NOT NULL,
+    height REAL NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_detections_image ON detections(image_id);
+CREATE INDEX IF NOT EXISTS idx_detections_class ON detections(class_name);
+CREATE INDEX IF NOT EXISTS idx_detections_model ON detections(model_name);
 
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;

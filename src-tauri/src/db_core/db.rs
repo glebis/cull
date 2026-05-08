@@ -19,6 +19,54 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let schema = include_str!("schema.sql");
         conn.execute_batch(schema)?;
+        drop(conn);
+        self.migrate_smart_collections()?;
+        Ok(())
+    }
+
+    fn migrate_smart_collections(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+
+        let columns = vec![
+            ("source_label", "TEXT"),
+            ("source_confidence", "REAL"),
+            ("source_evidence_json", "TEXT"),
+            ("source_detected_at", "TEXT"),
+            ("source_detector_version", "TEXT"),
+            ("is_ai_generated", "INTEGER"),
+            ("ai_prompt", "TEXT"),
+            ("aspect_ratio", "REAL"),
+            ("orientation", "TEXT"),
+            ("original_date", "TEXT"),
+            ("megapixels", "REAL"),
+        ];
+
+        for (name, typ) in &columns {
+            let sql = format!("ALTER TABLE images ADD COLUMN {} {}", name, typ);
+            match conn.execute(&sql, []) {
+                Ok(_) => {},
+                Err(e) if e.to_string().contains("duplicate column") => {},
+                Err(e) => return Err(e),
+            }
+        }
+
+        let project_columns = vec![
+            ("collection_type", "TEXT DEFAULT 'manual'"),
+            ("filter_json", "TEXT"),
+            ("nl_query", "TEXT"),
+            ("is_preset", "INTEGER DEFAULT 0"),
+            ("sort_order", "INTEGER DEFAULT 0"),
+        ];
+
+        for (name, typ) in &project_columns {
+            let sql = format!("ALTER TABLE projects ADD COLUMN {} {}", name, typ);
+            match conn.execute(&sql, []) {
+                Ok(_) => {},
+                Err(e) if e.to_string().contains("duplicate column") => {},
+                Err(e) => return Err(e),
+            }
+        }
+
         Ok(())
     }
 
@@ -563,6 +611,86 @@ impl Database {
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
+    }
+
+    // ---- Detection methods ----
+
+    pub fn store_detections(&self, image_id: &str, model_name: &str, detections: &[super::detection::Detection]) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        // Clear previous detections for this image+model
+        conn.execute(
+            "DELETE FROM detections WHERE image_id = ?1 AND model_name = ?2",
+            params![image_id, model_name],
+        )?;
+        for det in detections {
+            conn.execute(
+                "INSERT INTO detections (id, image_id, model_name, class_name, confidence, x, y, width, height, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    image_id,
+                    model_name,
+                    det.class_name,
+                    det.confidence,
+                    det.x,
+                    det.y,
+                    det.width,
+                    det.height,
+                    chrono::Utc::now().to_rfc3339(),
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn get_detections(&self, image_id: &str, model_name: Option<&str>) -> Result<Vec<super::detection::Detection>> {
+        let conn = self.conn.lock().unwrap();
+        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(mn) = model_name {
+            (
+                "SELECT class_name, confidence, x, y, width, height FROM detections WHERE image_id = ?1 AND model_name = ?2 ORDER BY confidence DESC".to_string(),
+                vec![Box::new(image_id.to_string()), Box::new(mn.to_string())],
+            )
+        } else {
+            (
+                "SELECT class_name, confidence, x, y, width, height FROM detections WHERE image_id = ?1 ORDER BY confidence DESC".to_string(),
+                vec![Box::new(image_id.to_string())],
+            )
+        };
+        let mut stmt = conn.prepare(&sql)?;
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let rows = stmt.query_map(params_refs.as_slice(), |row| {
+            Ok(super::detection::Detection {
+                class_name: row.get(0)?,
+                confidence: row.get(1)?,
+                x: row.get(2)?,
+                y: row.get(3)?,
+                width: row.get(4)?,
+                height: row.get(5)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
+    pub fn search_by_class(&self, class_name: &str, limit: u32) -> Result<Vec<(String, f32)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT image_id, MAX(confidence) as max_conf
+             FROM detections WHERE class_name = ?1
+             GROUP BY image_id ORDER BY max_conf DESC LIMIT ?2"
+        )?;
+        let rows = stmt.query_map(params![class_name, limit], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, f32>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
+    pub fn detection_count(&self, model_name: &str) -> Result<u32> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(DISTINCT image_id) FROM detections WHERE model_name = ?1",
+            params![model_name],
+            |row| row.get::<_, u32>(0),
+        )
     }
 }
 
