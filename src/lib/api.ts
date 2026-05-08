@@ -170,6 +170,10 @@ export async function parseNlQuery(query: string): Promise<string> {
     return invoke('parse_nl_query', { query });
 }
 
+export async function backfillImageMetadata(): Promise<number> {
+    return invoke('backfill_image_metadata');
+}
+
 // Embedding commands
 export async function downloadClipModel(): Promise<string> {
     return invoke('download_clip_model');

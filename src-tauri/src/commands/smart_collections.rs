@@ -58,3 +58,11 @@ pub async fn parse_nl_query(query: String) -> Result<String, String> {
     let filter = parse_query(&query);
     serde_json::to_string(&filter).map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn backfill_image_metadata(
+    state: State<'_, AppState>,
+) -> Result<u32, String> {
+    state.db.backfill_image_metadata()
+        .map_err(|e| e.to_string())
+}

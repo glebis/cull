@@ -154,6 +154,7 @@ pub fn run() {
             commands::smart_collections::delete_smart_collection,
             commands::smart_collections::update_smart_collection,
             commands::smart_collections::parse_nl_query,
+            commands::smart_collections::backfill_image_metadata,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
