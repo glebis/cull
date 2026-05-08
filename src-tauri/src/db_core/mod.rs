@@ -1,6 +1,9 @@
 pub mod db;
+pub mod detection;
 pub mod embeddings;
 pub mod gemini;
 pub mod import;
 pub mod models;
+pub mod smart_collections;
+pub mod source_detection;
 pub mod thumbnails;
