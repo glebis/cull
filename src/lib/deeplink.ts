@@ -1,5 +1,6 @@
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { listen } from '@tauri-apps/api/event';
+import { get } from 'svelte/store';
 import {
     viewMode,
     thumbnailSize,
@@ -13,9 +14,14 @@ import {
     windowLabel,
     navigateTo,
     showToast,
+    importBatchFilter,
+    importBatchImageIds,
+    pinnedCollection,
+    activeCollection,
+    collections,
     type ViewMode,
 } from './stores';
-import { importFolder, importFiles, listImagesByFolder, listImages } from './api';
+import { importFolder, importFiles, listImagesByFolder, listImages, addToCollection, listCollections, getBatchImages } from './api';
 
 interface OpenParams {
     path?: string | null;
@@ -32,6 +38,7 @@ interface OpenParams {
 const VALID_VIEWS: ViewMode[] = ['grid', 'compare', 'loupe', 'canvas', 'lineage', 'embeddings', 'export'];
 
 export async function handleParams(params: OpenParams) {
+    console.log('[deep-link] handleParams called:', JSON.stringify(params));
     // Set view mode
     if (params.view && VALID_VIEWS.includes(params.view as ViewMode)) {
         navigateTo(params.view as ViewMode);
@@ -79,14 +86,20 @@ export async function handleParams(params: OpenParams) {
     // Handle single path import
     if (params.path) {
         try {
-            await importFiles([params.path]);
+            const result = await importFiles([params.path]);
+            const pinned = get(pinnedCollection);
+
+            if (pinned && result.image_ids.length > 0) {
+                await addToCollection(pinned, result.image_ids);
+                const c = await listCollections();
+                collections.set(c);
+                showToast(`Image added to active collection`, { type: 'success', duration: 5000 });
+            }
+
             const allImgs = await listImages(100000, 0);
             images.set(allImgs);
-            // Focus the imported image
             const idx = allImgs.findIndex((img) => img.path === params.path);
-            if (idx >= 0) {
-                focusedIndex.set(idx);
-            }
+            if (idx >= 0) focusedIndex.set(idx);
         } catch (e) {
             console.error('Deep link: failed to import path', e);
         }
@@ -95,10 +108,38 @@ export async function handleParams(params: OpenParams) {
     // Handle multiple paths
     if (params.paths && params.paths.length > 0) {
         try {
-            await importFiles(params.paths);
-            const allImgs = await listImages(100000, 0);
-            images.set(allImgs);
-            focusedIndex.set(0);
+            const result = await importFiles(params.paths);
+            const pinned = get(pinnedCollection);
+
+            if (pinned && result.image_ids.length > 0) {
+                // Active collection exists — append silently
+                await addToCollection(pinned, result.image_ids);
+                const c = await listCollections();
+                collections.set(c);
+
+                // Reload collection images
+                const { listCollectionImages } = await import('./api');
+                const imgs = await listCollectionImages(pinned);
+                images.set(imgs);
+                focusedIndex.set(Math.max(0, imgs.length - result.image_ids.length));
+
+                const collName = c.find(([id]) => id === pinned)?.[1] ?? 'collection';
+                showToast(`${result.imported} images added to "${collName}"`, {
+                    type: 'success',
+                    duration: 8000,
+                });
+            } else if (result.batch_id) {
+                // No active collection — filter to batch
+                const batchImgs = await getBatchImages(result.batch_id);
+                images.set(batchImgs);
+                importBatchFilter.set(result.batch_id);
+                importBatchImageIds.set(result.image_ids);
+                focusedIndex.set(0);
+            } else {
+                const allImgs = await listImages(100000, 0);
+                images.set(allImgs);
+                focusedIndex.set(0);
+            }
         } catch (e) {
             console.error('Deep link: failed to import paths', e);
         }
@@ -149,6 +190,22 @@ export function inferViewFromAction(action: string): string | null {
     return null;
 }
 
+let lastHandledKey = '';
+let lastHandledAt = 0;
+
+function deduplicatedHandleParams(params: OpenParams, source: string) {
+    const key = JSON.stringify(params);
+    const now = Date.now();
+    if (key === lastHandledKey && now - lastHandledAt < 2000) {
+        console.log(`[deep-link] Skipping duplicate from ${source}`);
+        return;
+    }
+    lastHandledKey = key;
+    lastHandledAt = now;
+    console.log(`[deep-link] Handling from ${source}:`, key);
+    handleParams(params);
+}
+
 export async function initDeepLink() {
     // Listen for window name assignment from Rust
     await listen<{ label: string; name: string }>('set-window-name', (event) => {
@@ -158,7 +215,7 @@ export async function initDeepLink() {
 
     // Listen for open-with-params events (from Rust deep link handler + open_with_params command)
     await listen<OpenParams>('open-with-params', (event) => {
-        handleParams(event.payload);
+        deduplicatedHandleParams(event.payload, 'open-with-params');
     });
 
     // Listen for deep link URLs opened while app is running (macOS)
@@ -166,7 +223,7 @@ export async function initDeepLink() {
         await onOpenUrl((urls) => {
             for (const url of urls) {
                 const params = parseDeepLinkUrl(url);
-                handleParams(params);
+                deduplicatedHandleParams(params, 'onOpenUrl');
             }
         });
     } catch (e) {
@@ -179,7 +236,7 @@ export async function initDeepLink() {
         if (current && current.length > 0) {
             for (const url of current) {
                 const params = parseDeepLinkUrl(url);
-                handleParams(params);
+                deduplicatedHandleParams(params, 'getCurrent');
             }
         }
     } catch (e) {

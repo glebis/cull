@@ -109,11 +109,13 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            eprintln!("[single-instance] Second instance args: {:?}", args);
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_focus();
             }
             for arg in &args {
                 if arg.starts_with("imageview://") {
+                    eprintln!("[single-instance] Forwarding deep link: {}", arg);
                     let params = parse_deep_link(arg);
                     let _ = app.emit("open-with-params", params);
                 }
@@ -194,8 +196,10 @@ pub fn run() {
             {
                 let handle = app.handle().clone();
                 app.listen("deep-link://new-url", move |event: tauri::Event| {
+                    eprintln!("[deep-link] Rust received deep-link://new-url: {}", event.payload());
                     if let Ok(urls) = serde_json::from_str::<Vec<String>>(event.payload()) {
                         for url in urls {
+                            eprintln!("[deep-link] Processing URL: {}", url);
                             let params = parse_deep_link(&url);
                             let _ = handle.emit("open-with-params", params);
                         }
