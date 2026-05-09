@@ -10,6 +10,7 @@ use tauri_plugin_dialog::DialogExt;
 use crate::db_core::db::Database;
 use crate::db_core::detection::DetectionEngine;
 use crate::db_core::embeddings::EmbeddingEngine;
+use crate::db_core::secrets::{SecretStore, KeychainStore};
 use crate::commands::deeplink::parse_deep_link;
 
 pub struct AppState {
@@ -18,6 +19,7 @@ pub struct AppState {
     pub embedding_engine: Mutex<EmbeddingEngine>,
     pub detection_engine: Mutex<DetectionEngine>,
     pub safety_engine: Mutex<DetectionEngine>,
+    pub secrets: Box<dyn SecretStore>,
 }
 
 const IMAGE_EXTENSIONS: &[&str] = &[
@@ -80,7 +82,8 @@ pub fn run() {
             let detection_engine = Mutex::new(DetectionEngine::new_yolo(&model_dir));
             let safety_engine = Mutex::new(DetectionEngine::new_nudenet(&model_dir));
 
-            app.manage(AppState { db, app_data_dir, embedding_engine, detection_engine, safety_engine });
+            let secrets = Box::new(KeychainStore::new("imageview"));
+            app.manage(AppState { db, app_data_dir, embedding_engine, detection_engine, safety_engine, secrets });
 
             // Set up native menu bar
             let handle = app.handle();

@@ -40,6 +40,7 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 regex = "1"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 png = "0.17"
 printpdf = "0.7"
 

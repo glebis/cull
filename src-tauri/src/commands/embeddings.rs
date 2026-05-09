@@ -148,14 +148,14 @@ pub async fn get_embedding_count(state: State<'_, AppState>, model: Option<Strin
 
 #[tauri::command]
 pub async fn set_api_key(state: State<'_, AppState>, provider: String, key: String) -> Result<(), String> {
-    let setting_key = format!("api_key_{}", provider);
-    state.db.set_setting(&setting_key, &key).map_err(|e| e.to_string())
+    let secret_key = format!("api_key_{}", provider);
+    state.secrets.set(&secret_key, &key)
 }
 
 #[tauri::command]
 pub async fn get_api_key(state: State<'_, AppState>, provider: String) -> Result<Option<String>, String> {
-    let setting_key = format!("api_key_{}", provider);
-    state.db.get_setting(&setting_key).map_err(|e| e.to_string())
+    let secret_key = format!("api_key_{}", provider);
+    state.secrets.get(&secret_key)
 }
 
 #[tauri::command]
@@ -178,8 +178,7 @@ pub async fn generate_gemini_embeddings(
     state: State<'_, AppState>,
     image_ids: Vec<String>,
 ) -> Result<u32, String> {
-    let api_key = state.db.get_setting("api_key_google")
-        .map_err(|e| e.to_string())?
+    let api_key = state.secrets.get("api_key_google")?
         .ok_or("Google API key not set")?;
 
     let provider = GeminiEmbeddingProvider::new(&api_key);
