@@ -1,9 +1,11 @@
+mod cli;
 mod commands;
 mod db_core;
 mod export;
 mod mcp;
 mod menu;
 mod services;
+mod tray;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -39,6 +41,9 @@ fn is_image_path(path: &std::path::Path) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let args = <cli::CliArgs as clap::Parser>::parse();
+    let start_hidden = args.tray;
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -56,7 +61,7 @@ pub fn run() {
                 }
             }
         }))
-        .setup(|app| {
+        .setup(move |app| {
             let app_data_dir = app.path().app_data_dir()
                 .map_err(|e| format!("failed to get app data dir: {}", e))?;
             std::fs::create_dir_all(&app_data_dir)
@@ -98,6 +103,16 @@ pub fn run() {
 
             // Start MCP socket server
             mcp::server::start_mcp_server(app.handle().clone());
+
+            // Set up system tray
+            tray::setup_tray(app.handle())?;
+
+            // Hide window if --tray mode
+            if start_hidden {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+            }
 
             // Handle deep link URLs that launched the app
             #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
@@ -197,6 +212,29 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            // Handle close-to-tray
+            if let tauri::RunEvent::WindowEvent {
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                label,
+                ..
+            } = &event {
+                if label == "main" {
+                    let close_to_tray = app.state::<AppState>().db
+                        .get_setting("close_to_tray")
+                        .ok()
+                        .flatten()
+                        .map(|v| v == "true")
+                        .unwrap_or(true);
+
+                    if close_to_tray {
+                        api.prevent_close();
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.hide();
+                        }
+                    }
+                }
+            }
+
             // Handle files opened via Finder "Open With"
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = &event {
