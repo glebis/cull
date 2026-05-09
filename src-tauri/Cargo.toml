@@ -43,4 +43,5 @@ regex = "1"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 png = "0.17"
 printpdf = "0.7"
+thiserror = "1"
 

@@ -1,7 +1,9 @@
 mod commands;
 mod db_core;
 mod export;
+mod mcp;
 mod menu;
+mod services;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
