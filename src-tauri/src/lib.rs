@@ -178,6 +178,16 @@ pub fn run() {
             commands::export::get_export_asset,
             commands::export::save_export_image,
             commands::export::assemble_export_pdf,
+            commands::lineage::list_lineage_groups,
+            commands::lineage::get_lineage_group_images,
+            commands::lineage::create_lineage_group_manual,
+            commands::lineage::rename_lineage_group,
+            commands::lineage::merge_lineage_groups,
+            commands::lineage::dissolve_lineage_group,
+            commands::lineage::add_to_lineage_group,
+            commands::lineage::remove_from_lineage_group,
+            commands::lineage::get_batch_images,
+            commands::lineage::scan_lineage,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

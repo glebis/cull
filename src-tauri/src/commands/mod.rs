@@ -5,6 +5,7 @@ pub mod embeddings;
 pub mod export;
 pub mod import;
 pub mod library;
+pub mod lineage;
 pub mod selection;
 pub mod smart_collections;
 pub mod vision;

@@ -7,6 +7,8 @@ pub struct ImportResponse {
     pub imported: u32,
     pub skipped: u32,
     pub errors: Vec<String>,
+    pub batch_id: Option<String>,
+    pub image_ids: Vec<String>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -72,6 +74,20 @@ pub async fn import_folder(
         }
     }
 
+    let batch_id = if !new_image_ids.is_empty() {
+        let batch = db.create_import_batch("folder", new_image_ids.len() as u32, None)
+            .map_err(|e| e.to_string())?;
+        for id in &new_image_ids {
+            let _ = db.set_image_batch(id, &batch);
+        }
+        let _ = db.detect_lineage_for_batch(&new_image_ids);
+        Some(batch)
+    } else {
+        None
+    };
+
+    let image_ids_out = new_image_ids.clone();
+
     if !new_image_ids.is_empty() {
         run_post_import_detection(app.clone(), new_image_ids);
     }
@@ -80,6 +96,8 @@ pub async fn import_folder(
         imported,
         skipped,
         errors,
+        batch_id,
+        image_ids: image_ids_out,
     })
 }
 
@@ -108,11 +126,25 @@ pub async fn import_files(
         }
     }
 
+    let batch_id = if !new_image_ids.is_empty() {
+        let batch = db.create_import_batch("cli", new_image_ids.len() as u32, None)
+            .map_err(|e| e.to_string())?;
+        for id in &new_image_ids {
+            let _ = db.set_image_batch(id, &batch);
+        }
+        let _ = db.detect_lineage_for_batch(&new_image_ids);
+        Some(batch)
+    } else {
+        None
+    };
+
+    let image_ids_out = new_image_ids.clone();
+
     if !new_image_ids.is_empty() {
         run_post_import_detection(app, new_image_ids);
     }
 
-    Ok(ImportResponse { imported, skipped, errors })
+    Ok(ImportResponse { imported, skipped, errors, batch_id, image_ids: image_ids_out })
 }
 
 #[derive(Clone, serde::Serialize)]
