@@ -12,8 +12,8 @@
     import Export from '$lib/components/Export.svelte';
     import Toast from '$lib/components/Toast.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections } from '$lib/stores';
-    import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages } from '$lib/api';
+    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections, showToast } from '$lib/stores';
+    import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages, trashImages, deleteImagesPermanently } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
     import { listen } from '@tauri-apps/api/event';
@@ -54,6 +54,37 @@
         }
     }
 
+    async function handleTrash() {
+        const imgs = $images;
+        const idx = $focusedIndex;
+        const img = imgs[idx];
+        if (!img) return;
+        const count = await trashImages([img.image.id]);
+        if (count > 0) {
+            const name = img.path.split('/').pop() ?? '';
+            showToast(`Moved to Trash`, { detail: name, type: 'info', duration: 5000 });
+            images.update(list => list.filter((_, i) => i !== idx));
+            focusedIndex.update(i => Math.min(i, $images.length - 1));
+            totalCount.update(c => c - 1);
+        }
+    }
+
+    async function handlePermanentDelete() {
+        const imgs = $images;
+        const idx = $focusedIndex;
+        const img = imgs[idx];
+        if (!img) return;
+        const name = img.path.split('/').pop() ?? '';
+        if (!confirm(`Permanently delete "${name}"? This cannot be undone.`)) return;
+        const count = await deleteImagesPermanently([img.image.id]);
+        if (count > 0) {
+            showToast(`Deleted permanently`, { detail: name, type: 'warning', duration: 5000 });
+            images.update(list => list.filter((_, i) => i !== idx));
+            focusedIndex.update(i => Math.min(i, $images.length - 1));
+            totalCount.update(c => c - 1);
+        }
+    }
+
     onMount(() => {
         loadImages().catch(e => console.error('Failed to load images on mount:', e));
         initDeepLink().catch(e => console.error('Failed to init deep link:', e));
@@ -62,6 +93,9 @@
         const dragUnlisten = listen<boolean>('drag-hover', (event) => {
             dragOver = event.payload;
         });
+
+        window.addEventListener('trash-focused-image', handleTrash);
+        window.addEventListener('delete-focused-image', handlePermanentDelete);
 
         let first = true;
         const unsub = minSizeFilter.subscribe(() => {
@@ -72,6 +106,8 @@
         return () => {
             unsub();
             dragUnlisten.then(fn => fn());
+            window.removeEventListener('trash-focused-image', handleTrash);
+            window.removeEventListener('delete-focused-image', handlePermanentDelete);
         };
     });
 </script>

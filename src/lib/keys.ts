@@ -141,6 +141,20 @@ function handleResize(delta: number) {
 
 // ---- Compare helpers ----
 
+function getCompareActiveIndexForSide(side: 0 | 1): number {
+    const imgs = get(images);
+    const sel = get(selectedIds);
+    const idx = get(focusedIndex);
+
+    if (sel.size >= 2) {
+        const selArr = Array.from(sel);
+        const targetId = selArr[side] ?? selArr[0];
+        const found = imgs.findIndex(i => i.image.id === targetId);
+        return found >= 0 ? found : idx;
+    }
+    return idx + side;
+}
+
 function getCompareActiveIndex(): number {
     const imgs = get(images);
     const sel = get(selectedIds);
@@ -229,6 +243,9 @@ export function handleKeydown(e: KeyboardEvent) {
     if (e.key === '>' || (e.shiftKey && e.key === '.')) {
         e.preventDefault();
         zenMode.update(v => !v);
+        if (mode === 'loupe') {
+            window.dispatchEvent(new CustomEvent('toggle-loupe-overlays'));
+        }
         return;
     }
 
@@ -264,10 +281,22 @@ export function handleKeydown(e: KeyboardEvent) {
         return;
     }
 
-    // View mode switching with number keys (1-7)
-    if (VIEW_MODE_KEYS[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    // View mode switching with Cmd+number (⌘1-7)
+    if (VIEW_MODE_KEYS[e.key] && e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         navigateTo(VIEW_MODE_KEYS[e.key]);
+        return;
+    }
+
+    // Delete: Backspace → trash, Cmd+Backspace → permanent delete
+    if (e.key === 'Backspace' && !e.metaKey) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('trash-focused-image'));
+        return;
+    }
+    if (e.key === 'Backspace' && e.metaKey) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('delete-focused-image'));
         return;
     }
 
@@ -508,6 +537,36 @@ async function handleCollectModeAdd() {
     }
 }
 
+function compareSwapFocusedImage(direction: 1 | -1) {
+    const imgs = get(images);
+    const side = get(compareActiveSide);
+    const sel = get(selectedIds);
+    const idx = get(focusedIndex);
+
+    if (sel.size >= 2) {
+        const selArr = Array.from(sel);
+        const targetId = selArr[side];
+        const currentIdx = imgs.findIndex(i => i.image.id === targetId);
+        const newIdx = Math.max(0, Math.min(imgs.length - 1, currentIdx + direction));
+        const newId = imgs[newIdx]?.image.id;
+        if (newId && newId !== selArr[1 - side]) {
+            selArr[side] = newId;
+            selectedIds.set(new Set(selArr));
+        }
+    } else {
+        if (side === 0) {
+            const newIdx = Math.max(0, idx + direction);
+            if (newIdx !== idx + 1) focusedIndex.set(newIdx);
+        } else {
+            const rightIdx = idx + 1 + direction;
+            if (rightIdx >= 0 && rightIdx < imgs.length && rightIdx !== idx) {
+                const newFocused = Math.min(rightIdx - 1, imgs.length - 2);
+                focusedIndex.set(Math.max(0, newFocused));
+            }
+        }
+    }
+}
+
 function handleCompareKeys(e: KeyboardEvent) {
     switch (e.key) {
         case 'h':
@@ -523,16 +582,28 @@ function handleCompareKeys(e: KeyboardEvent) {
         case 'j':
         case 'ArrowDown':
             e.preventDefault();
-            compareNextPair();
+            compareSwapFocusedImage(1);
             break;
         case 'k':
         case 'ArrowUp':
             e.preventDefault();
-            comparePrevPair();
+            compareSwapFocusedImage(-1);
             break;
         case 'Tab':
             e.preventDefault();
-            compareNextPair();
+            compareActiveSide.update(s => (s === 0 ? 1 : 0) as 0 | 1);
+            break;
+        case '1':
+            // Accept left, reject right
+            e.preventDefault();
+            handleDecision('accept', getCompareActiveIndexForSide(0));
+            handleDecision('reject', getCompareActiveIndexForSide(1));
+            break;
+        case '2':
+            // Accept right, reject left
+            e.preventDefault();
+            handleDecision('accept', getCompareActiveIndexForSide(1));
+            handleDecision('reject', getCompareActiveIndexForSide(0));
             break;
         case 'Enter':
             e.preventDefault();
@@ -650,13 +721,6 @@ function handleLoupeKeys(e: KeyboardEvent) {
             break;
     }
 
-    // Shift+. hides all overlays
-    if (e.key === '>' || (e.shiftKey && e.key === '.')) {
-        e.preventDefault();
-        // Toggle hideOverlays by dispatching a custom event the Loupe listens to
-        window.dispatchEvent(new CustomEvent('toggle-loupe-overlays'));
-        return;
-    }
 }
 
 function toggleFullscreen() {

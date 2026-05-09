@@ -578,6 +578,7 @@
                 onclick={() => selectSmartCollection(sc)}>
                 <span class="icon">&#9733;</span>
                 {sc.name}
+                <span class="count">({sc.image_count ?? 0})</span>
             </button>
         {/each}
     </div>

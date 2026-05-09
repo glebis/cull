@@ -2,12 +2,29 @@
     import { images, selectedIds, showToast } from '$lib/stores';
     import { createExportManifest, listExportPresets, getExportAsset } from '$lib/export-api';
     import type { ExportManifest, PresetInfo, ExportTarget } from '$lib/export-types';
-    import { convertFileSrc } from '@tauri-apps/api/core';
-    import { invoke } from '@tauri-apps/api/core';
+    import { convertFileSrc as tauriConvertFileSrc } from '@tauri-apps/api/core';
+    import { invoke as tauriInvoke } from '@tauri-apps/api/core';
     import { toPng } from 'html-to-image';
     import ExportSlideBleed from './ExportSlideBleed.svelte';
     import ExportSlideEditorial from './ExportSlideEditorial.svelte';
     import ExportSlideTerminal from './ExportSlideTerminal.svelte';
+
+    function isTauri(): boolean {
+        return typeof window !== 'undefined' && '__TAURI__' in window;
+    }
+
+    function convertFileSrc(path: string): string {
+        if (isTauri()) return tauriConvertFileSrc(path);
+        const idMatch = path.match(/export-(img-\d+)\.png/);
+        const seed = idMatch?.[1] ?? path;
+        return `https://picsum.photos/seed/${seed}/1920/1080`;
+    }
+
+    async function invoke<T>(cmd: string, args?: any): Promise<T> {
+        if (isTauri()) return tauriInvoke<T>(cmd, args);
+        const { invoke: mockInvoke } = await import('$lib/tauri-mock');
+        return mockInvoke<T>(cmd, args);
+    }
 
     let manifest: ExportManifest | null = $state(null);
     let presets: PresetInfo[] = $state([]);

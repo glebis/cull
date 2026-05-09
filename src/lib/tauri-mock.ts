@@ -1,7 +1,3 @@
-function isTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI__' in window;
-}
-
 const MOCK_SMART_COLLECTIONS = [
   { id: 'preset-1', name: '5 Stars', description: null, collection_type: 'smart', filter_json: '{"type":"rule","field":"rating","op":"eq","value":5.0}', nl_query: null, is_preset: true, sort_order: 1, created_at: '2026-01-01', image_count: 124 },
   { id: 'preset-2', name: '4 Stars+', description: null, collection_type: 'smart', filter_json: '{"type":"rule","field":"rating","op":"gte","value":4.0}', nl_query: null, is_preset: true, sort_order: 2, created_at: '2026-01-01', image_count: 389 },
@@ -53,7 +49,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       description: null,
       collection_type: 'smart',
       filter_json: args.filterJson,
-      nl_query: args.nlQuery ?? null,
+      nl_query: args.nlQuery ?? null as any,
       is_preset: false,
       sort_order: 100 + userCollections.length,
       created_at: new Date().toISOString(),
@@ -97,6 +93,70 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     return JSON.stringify({ type: 'group', op: 'and', children: rules });
   },
 
+  list_export_presets: () => [
+    { id: 'ig_carousel', platform: 'Instagram', format: 'Carousel', width: 1080, height: 1080, mime: 'image/png' },
+    { id: 'ig_story', platform: 'Instagram', format: 'Story', width: 1080, height: 1920, mime: 'image/png' },
+    { id: 'twitter_post', platform: 'Twitter', format: 'Post', width: 1200, height: 675, mime: 'image/png' },
+    { id: 'a4_pdf', platform: 'Print', format: 'A4 PDF', width: 2480, height: 3508, mime: 'application/pdf' },
+  ],
+
+  create_export_manifest: (_: any, args: { imageIds: string[]; targetPresets: string[]; template?: string }) => {
+    const presetMap: Record<string, any> = {
+      ig_carousel: { id: 'ig_carousel', platform: 'Instagram', format: 'Carousel', width: 1080, height: 1080, mime: 'image/png' },
+      ig_story: { id: 'ig_story', platform: 'Instagram', format: 'Story', width: 1080, height: 1920, mime: 'image/png' },
+      twitter_post: { id: 'twitter_post', platform: 'Twitter', format: 'Post', width: 1200, height: 675, mime: 'image/png' },
+      a4_pdf: { id: 'a4_pdf', platform: 'Print', format: 'A4 PDF', width: 2480, height: 3508, mime: 'application/pdf' },
+    };
+    const presetId = args.targetPresets[0] ?? 'ig_carousel';
+    const target = presetMap[presetId] ?? presetMap.ig_carousel;
+    const tmpl = args.template ?? 'bleed';
+    return {
+      kind: 'export_manifest',
+      schema_version: 1,
+      id: `manifest-${Date.now()}`,
+      title: 'Mock Export',
+      locale: 'en',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      source: { app: 'imageview', collection_id: null, image_ids: args.imageIds },
+      defaults: {
+        template: tmpl,
+        fonts: { serif: 'Georgia', mono: 'JetBrains Mono' },
+        colors: { preset: 'dark', background: '#08080c', foreground: '#e0e0e0', accent: '#7aa2f7' },
+        safe_area: { top: 40, right: 40, bottom: 40, left: 40 },
+      },
+      targets: [target],
+      slides: args.imageIds.map((id: string, i: number) => ({
+        id: `slide-${i}`,
+        template: tmpl,
+        image: { asset_id: `asset-${id}`, fit: 'cover' as const },
+        text: { headline: '', body: '', caption: `Image ${i + 1}` },
+        overlay: { position: 'bottom', scrim: { type: 'linear', direction: 'to top', from: 'rgba(0,0,0,0.6)', to: 'transparent' }, text_color: '#ffffff' },
+        metadata: { tags: [], alt: `Image ${i + 1}` },
+      })),
+      assets: args.imageIds.map((id: string) => ({
+        id: `asset-${id}`,
+        kind: 'source' as const,
+        uri: `imageview://image/${id}`,
+        mime: 'image/png',
+        width: 1920,
+        height: 1080,
+      })),
+      agent_tasks: [],
+      agent_hints: { tone: 'neutral', allow_generated_images: false, language: 'en' },
+      agent_contract: { mutable_paths: [], append_only: [], immutable_paths: [] },
+    };
+  },
+
+  get_export_asset: (_: any, args: { uri: string }) => {
+    const idMatch = args.uri.match(/imageview:\/\/image\/(.+)/);
+    const id = idMatch?.[1] ?? 'unknown';
+    return { path: `/mock/export-${id}.png`, mime: 'image/png', width: 1920, height: 1080 };
+  },
+
+  save_export_image: () => '/mock/exported-slide.png',
+  assemble_export_pdf: () => '/mock/exported.pdf',
+
   backfill_image_metadata: () => 0,
   list_images: () => Array.from({ length: 20 }, (_, i) => makeMockImage(i)),
   get_image_count: () => 20,
@@ -108,11 +168,6 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
 };
 
 export async function invoke<T>(cmd: string, args?: any): Promise<T> {
-  if (isTauri()) {
-    const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
-    return tauriInvoke<T>(cmd, args);
-  }
-
   const handler = MOCK_HANDLERS[cmd];
   if (handler) {
     await new Promise(r => setTimeout(r, 50 + Math.random() * 100));

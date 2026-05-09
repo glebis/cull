@@ -118,3 +118,68 @@ pub async fn get_iteration_siblings(
 
     Ok(images)
 }
+
+#[tauri::command]
+pub async fn trash_images(
+    state: State<'_, AppState>,
+    image_ids: Vec<String>,
+) -> Result<u32, String> {
+    let mut trashed = 0u32;
+    for image_id in &image_ids {
+        let id_refs: Vec<&str> = vec![image_id.as_str()];
+        let found = state.db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
+        if let Some(img) = found.first() {
+            #[cfg(target_os = "macos")]
+            {
+                let status = std::process::Command::new("osascript")
+                    .args(["-e", &format!(
+                        "tell application \"Finder\" to delete POSIX file \"{}\"",
+                        img.path.replace('"', "\\\"")
+                    )])
+                    .output();
+                if let Ok(output) = status {
+                    if output.status.success() {
+                        trashed += 1;
+                    }
+                }
+            }
+        }
+    }
+    Ok(trashed)
+}
+
+#[tauri::command]
+pub async fn delete_images_permanently(
+    state: State<'_, AppState>,
+    image_ids: Vec<String>,
+) -> Result<u32, String> {
+    let mut deleted = 0u32;
+    for image_id in &image_ids {
+        let id_refs: Vec<&str> = vec![image_id.as_str()];
+        let found = state.db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
+        if let Some(img) = found.first() {
+            let path = std::path::Path::new(&img.path);
+            if path.exists() && std::fs::remove_file(path).is_ok() {
+                deleted += 1;
+            }
+        }
+    }
+    Ok(deleted)
+}
+
+#[tauri::command]
+pub async fn get_app_setting(
+    state: State<'_, AppState>,
+    key: String,
+) -> Result<Option<String>, String> {
+    state.db.get_setting(&key).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_app_setting(
+    state: State<'_, AppState>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    state.db.set_setting(&key, &value).map_err(|e| e.to_string())
+}

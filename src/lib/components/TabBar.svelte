@@ -3,13 +3,13 @@
     import type { ViewMode } from '$lib/stores';
 
     const tabs: { id: ViewMode; label: string; key: string; icon: string }[] = [
-        { id: 'grid', label: 'Grid', key: '1', icon: '⊞' },
-        { id: 'compare', label: 'Compare', key: '2', icon: '⊟' },
-        { id: 'loupe', label: 'Loupe', key: '3', icon: '◎' },
-        { id: 'canvas', label: 'Canvas', key: '4', icon: '◧' },
-        { id: 'lineage', label: 'Lineage', key: '5', icon: '⑃' },
-        { id: 'embeddings', label: 'Embeddings', key: '6', icon: '◌' },
-        { id: 'export', label: 'Export', key: '7', icon: '⤓' },
+        { id: 'grid', label: 'Grid', key: '⌘1', icon: '⊞' },
+        { id: 'compare', label: 'Compare', key: '⌘2', icon: '⇔' },
+        { id: 'loupe', label: 'Loupe', key: '⌘3', icon: '◎' },
+        { id: 'canvas', label: 'Canvas', key: '⌘4', icon: '▦' },
+        { id: 'lineage', label: 'Lineage', key: '⌘5', icon: '⎇' },
+        { id: 'embeddings', label: 'Embeddings', key: '⌘6', icon: '⁘' },
+        { id: 'export', label: 'Export', key: '⌘7', icon: '⤓' },
     ];
 
     let size = $state(160);
@@ -33,7 +33,7 @@
                 class:active={$viewMode === tab.id}
                 onclick={() => navigateTo(tab.id)}
             >
-                <span class="tab-icon">{tab.icon}</span><span class="tab-key">{tab.key}</span>{tab.label}
+                <span class="tab-icon">{tab.icon}</span>{tab.label}<span class="tab-key">{tab.key}</span>
             </button>
         {/each}
     </div>
@@ -111,13 +111,16 @@
     }
     .tab-key {
         color: var(--text-secondary);
-        font-size: 10px;
-        margin-right: 3px;
-        opacity: 0.4;
+        font-size: 9px;
+        margin-left: 4px;
+        opacity: 0.25;
+    }
+    .tab:hover .tab-key {
+        opacity: 0.5;
     }
     .tab.active .tab-key {
         color: var(--green);
-        opacity: 0.6;
+        opacity: 0.35;
     }
     .slider-group {
         display: flex;

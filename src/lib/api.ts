@@ -1,4 +1,16 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke as tauriInvoke } from '@tauri-apps/api/core';
+
+function isTauri(): boolean {
+    return typeof window !== 'undefined' && '__TAURI__' in window;
+}
+
+async function invoke<T>(cmd: string, args?: any): Promise<T> {
+    if (isTauri()) {
+        return tauriInvoke<T>(cmd, args);
+    }
+    const { invoke: mockInvoke } = await import('./tauri-mock');
+    return mockInvoke<T>(cmd, args);
+}
 
 export interface Image {
     id: string;
@@ -302,4 +314,22 @@ export async function getVisionMetadata(imageId: string): Promise<[string, strin
 
 export async function getVisionCount(source?: string): Promise<number> {
     return invoke('get_vision_count', { source: source ?? null });
+}
+
+// Delete commands
+export async function trashImages(imageIds: string[]): Promise<number> {
+    return invoke('trash_images', { imageIds });
+}
+
+export async function deleteImagesPermanently(imageIds: string[]): Promise<number> {
+    return invoke('delete_images_permanently', { imageIds });
+}
+
+// Settings
+export async function getAppSetting(key: string): Promise<string | null> {
+    return invoke('get_app_setting', { key });
+}
+
+export async function setAppSetting(key: string, value: string): Promise<void> {
+    return invoke('set_app_setting', { key, value });
 }

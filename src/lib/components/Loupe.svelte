@@ -1,6 +1,7 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { revealItemInDir } from '@tauri-apps/plugin-opener';
+    import { onMount } from 'svelte';
     import { images, focusedIndex, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode } from '$lib/stores';
     import { getDetections, getVisionMetadata } from '$lib/api';
     import type { Detection } from '$lib/api';
@@ -26,6 +27,12 @@
     let imgEl: HTMLImageElement | undefined = $state();
     let visionMeta = $state<[string, string, string][]>([]);
     let hideOverlays = $state(false);
+
+    onMount(() => {
+        function toggleOverlays() { hideOverlays = !hideOverlays; }
+        window.addEventListener('toggle-loupe-overlays', toggleOverlays);
+        return () => window.removeEventListener('toggle-loupe-overlays', toggleOverlays);
+    });
 
     $effect(() => {
         const id = image?.image.id;
@@ -310,8 +317,8 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        max-width: 100%;
-        max-height: 100%;
+        width: 100%;
+        height: 100%;
     }
     img {
         max-width: 100%;

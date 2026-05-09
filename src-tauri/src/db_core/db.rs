@@ -805,7 +805,7 @@ impl Database {
              WHERE collection_type = 'smart'
              ORDER BY sort_order ASC, created_at DESC"
         )?;
-        let rows = stmt.query_map([], |row| {
+        let mut collections: Vec<SmartCollection> = stmt.query_map([], |row| {
             Ok(SmartCollection {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -818,8 +818,32 @@ impl Database {
                 created_at: row.get(8)?,
                 image_count: None,
             })
-        })?;
-        rows.collect::<Result<Vec<_>>>()
+        })?.collect::<Result<Vec<_>>>()?;
+
+        for sc in &mut collections {
+            if let Some(ref filter_json) = sc.filter_json {
+                if let Ok(filter) = serde_json::from_str::<FilterNode>(filter_json) {
+                    if let Ok((where_clause, params)) = filter.to_sql_clause() {
+                        let sql = format!(
+                            "SELECT COUNT(DISTINCT i.id)
+                             FROM images i
+                             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+                             LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+                             WHERE ({})",
+                            where_clause
+                        );
+                        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter()
+                            .map(|p| p as &dyn rusqlite::types::ToSql)
+                            .collect();
+                        if let Ok(count) = conn.query_row(&sql, param_refs.as_slice(), |row| row.get::<_, i64>(0)) {
+                            sc.image_count = Some(count);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(collections)
     }
 
     pub fn delete_smart_collection(&self, id: &str) -> Result<()> {
