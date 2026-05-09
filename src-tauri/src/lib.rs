@@ -1,5 +1,6 @@
 mod commands;
 mod db_core;
+mod export;
 mod menu;
 
 use std::path::PathBuf;
@@ -109,6 +110,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::import::import_folder,
             commands::import::import_files,
+            commands::import::regenerate_thumbnails,
             commands::library::list_images,
             commands::library::get_image_count,
             commands::library::get_images_by_ids,
@@ -155,6 +157,12 @@ pub fn run() {
             commands::smart_collections::update_smart_collection,
             commands::smart_collections::parse_nl_query,
             commands::smart_collections::backfill_image_metadata,
+            commands::vision::check_ollama,
+            commands::vision::set_ollama_config,
+            commands::vision::get_ollama_config,
+            commands::vision::analyze_images,
+            commands::vision::get_vision_metadata,
+            commands::vision::get_vision_count,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
