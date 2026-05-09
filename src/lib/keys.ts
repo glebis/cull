@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import {
     images, selectedIds, focusedIndex, thumbnailSize, statusHint, viewMode,
-    compareActiveSide, loupeScale, loupePanX, loupePanY,
+    compareActiveSide, compareImages, loupeScale, loupePanX, loupePanY,
     sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode,
     collections, collectMode, collectModeTarget, activeCollection,
     showDetectionBoxes, showDetectionInspector, nsfwMode,
@@ -634,6 +634,28 @@ function handleLoupeKeys(e: KeyboardEvent) {
             e.preventDefault();
             toggleFullscreen();
             break;
+        case 'c':
+            // Compare current + next image
+            e.preventDefault();
+            {
+                const imgs = get(images);
+                const idx = get(focusedIndex);
+                const current = imgs[idx];
+                const next = imgs[idx + 1] ?? imgs[0];
+                if (current && next) {
+                    compareImages.set([current, next]);
+                    navigateTo('compare');
+                }
+            }
+            break;
+    }
+
+    // Shift+. hides all overlays
+    if (e.key === '>' || (e.shiftKey && e.key === '.')) {
+        e.preventDefault();
+        // Toggle hideOverlays by dispatching a custom event the Loupe listens to
+        window.dispatchEvent(new CustomEvent('toggle-loupe-overlays'));
+        return;
     }
 }
 
