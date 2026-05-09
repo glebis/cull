@@ -1,5 +1,7 @@
-use std::net::SocketAddr;
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::body::Incoming;
@@ -9,11 +11,55 @@ use rmcp::transport::streamable_http_server::{
     session::local::LocalSessionManager,
 };
 use tauri::Manager;
+use tokio::sync::Mutex;
 
 use crate::AppState;
 use crate::services::{ServiceContext, tokens};
 use super::auth::AuthContext;
 use super::tools::ImageViewMcp;
+
+struct RateLimiter {
+    failures: HashMap<IpAddr, (u32, Instant)>,
+    max_failures: u32,
+    lockout_duration: Duration,
+}
+
+impl RateLimiter {
+    fn new(max_failures: u32, lockout_duration: Duration) -> Self {
+        Self {
+            failures: HashMap::new(),
+            max_failures,
+            lockout_duration,
+        }
+    }
+
+    fn is_locked_out(&self, ip: &IpAddr) -> bool {
+        if let Some((count, first_failure)) = self.failures.get(ip) {
+            if *count >= self.max_failures {
+                return first_failure.elapsed() < self.lockout_duration;
+            }
+        }
+        false
+    }
+
+    fn record_failure(&mut self, ip: IpAddr) {
+        let entry = self.failures.entry(ip).or_insert((0, Instant::now()));
+        if entry.1.elapsed() >= self.lockout_duration {
+            *entry = (1, Instant::now());
+        } else {
+            entry.0 += 1;
+        }
+    }
+
+    fn record_success(&mut self, ip: &IpAddr) {
+        self.failures.remove(ip);
+    }
+
+    fn cleanup(&mut self) {
+        let cutoff = self.lockout_duration;
+        self.failures.retain(|_, (_, first)| first.elapsed() < cutoff);
+    }
+}
 
 pub fn start_http_server(
     app_handle: tauri::AppHandle,
@@ -34,6 +80,10 @@ async fn run_http_server(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
 
+    let rate_limiter = Arc::new(Mutex::new(
+        RateLimiter::new(10, Duration::from_secs(15 * 60))
+    ));
+
     let listener = tokio::net::TcpListener::bind(addr).await?;
     eprintln!("MCP HTTP server listening on {}", addr);
 
@@ -41,11 +91,29 @@ async fn run_http_server(
         let (stream, remote_addr) = listener.accept().await?;
         let io = TokioIo::new(stream);
         let auth_handle = app_handle.clone();
+        let limiter = rate_limiter.clone();
 
         tokio::spawn(async move {
             let service = hyper::service::service_fn(move |req: hyper::Request<Incoming>| {
                 let auth_handle = auth_handle.clone();
+                let limiter = limiter.clone();
+                let remote_ip = remote_addr.ip();
                 async move {
+                    // Check rate limit
+                    {
+                        let mut rl = limiter.lock().await;
+                        rl.cleanup();
+                        if rl.is_locked_out(&remote_ip) {
+                            return Ok::<_, std::convert::Infallible>(
+                                hyper::Response::builder()
+                                    .status(429)
+                                    .header("Retry-After", "900")
+                                    .body(Full::new(Bytes::from("Too Many Requests: account locked for 15 minutes")))
+                                    .unwrap()
+                            );
+                        }
+                    }
+
                     // Extract and validate bearer token
                     let auth_header = req.headers()
                         .get(http::header::AUTHORIZATION)
@@ -55,7 +123,8 @@ async fn run_http_server(
                     let bearer = match auth_header {
                         Some(ref h) if h.starts_with("Bearer ") => &h[7..],
                         _ => {
-                            return Ok::<_, std::convert::Infallible>(
+                            limiter.lock().await.record_failure(remote_ip);
+                            return Ok(
                                 hyper::Response::builder()
                                     .status(401)
                                     .header("WWW-Authenticate", "Bearer")
@@ -70,6 +139,7 @@ async fn run_http_server(
                     let token = match tokens::validate_token(&ctx, bearer) {
                         Ok(Some(t)) => t,
                         Ok(None) => {
+                            limiter.lock().await.record_failure(remote_ip);
                             return Ok(
                                 hyper::Response::builder()
                                     .status(401)
@@ -88,6 +158,8 @@ async fn run_http_server(
                             );
                         }
                     };
+
+                    limiter.lock().await.record_success(&remote_ip);
 
                     eprintln!("MCP HTTP: authenticated as '{}' (role: {}) from {}", token.name, token.role, remote_addr);
 
@@ -128,6 +200,9 @@ async fn run_http_server(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
     #[test]
     fn test_bearer_extraction() {
         let header = "Bearer tok_abc123secret456";
@@ -140,5 +215,63 @@ mod tests {
     fn test_missing_bearer_prefix() {
         let header = "Basic dXNlcjpwYXNz";
         assert!(!header.starts_with("Bearer "));
+    }
+
+    #[test]
+    fn test_rate_limiter_allows_under_limit() {
+        let mut rl = RateLimiter::new(10, Duration::from_secs(900));
+        let ip = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        for _ in 0..9 {
+            rl.record_failure(ip);
+        }
+        assert!(!rl.is_locked_out(&ip));
+    }
+
+    #[test]
+    fn test_rate_limiter_blocks_at_limit() {
+        let mut rl = RateLimiter::new(10, Duration::from_secs(900));
+        let ip = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        for _ in 0..10 {
+            rl.record_failure(ip);
+        }
+        assert!(rl.is_locked_out(&ip));
+    }
+
+    #[test]
+    fn test_rate_limiter_clears_on_success() {
+        let mut rl = RateLimiter::new(10, Duration::from_secs(900));
+        let ip = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        for _ in 0..9 {
+            rl.record_failure(ip);
+        }
+        rl.record_success(&ip);
+        assert!(!rl.is_locked_out(&ip));
+        // Re-failing should start from 0
+        for _ in 0..9 {
+            rl.record_failure(ip);
+        }
+        assert!(!rl.is_locked_out(&ip));
+    }
+
+    #[test]
+    fn test_rate_limiter_different_ips_independent() {
+        let mut rl = RateLimiter::new(10, Duration::from_secs(900));
+        let ip1 = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let ip2 = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2));
+        for _ in 0..10 {
+            rl.record_failure(ip1);
+        }
+        assert!(rl.is_locked_out(&ip1));
+        assert!(!rl.is_locked_out(&ip2));
+    }
+
+    #[test]
+    fn test_rate_limiter_cleanup_removes_expired() {
+        let mut rl = RateLimiter::new(10, Duration::from_secs(0));
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        rl.record_failure(ip);
+        std::thread::sleep(Duration::from_millis(10));
+        rl.cleanup();
+        assert!(rl.failures.is_empty());
     }
 }
