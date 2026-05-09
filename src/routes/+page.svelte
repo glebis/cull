@@ -9,6 +9,8 @@
     import EmbeddingExplorer from '$lib/components/EmbeddingExplorer.svelte';
     import UpdateBanner from '$lib/components/UpdateBanner.svelte';
     import CommandBar from '$lib/components/CommandBar.svelte';
+    import Export from '$lib/components/Export.svelte';
+    import Toast from '$lib/components/Toast.svelte';
     import { handleKeydown } from '$lib/keys';
     import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections } from '$lib/stores';
     import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages } from '$lib/api';
@@ -97,6 +99,8 @@
         <Loupe />
     {:else if $viewMode === 'embeddings'}
         <EmbeddingExplorer />
+    {:else if $viewMode === 'export'}
+        <Export />
     {:else}
         <div class="placeholder">
             <span class="placeholder-label">{$viewMode}</span>
@@ -106,6 +110,8 @@
     {#if !$zenMode}
         <StatusBar />
     {/if}
+
+    <Toast />
 
     {#if dragOver}
         <div class="drop-overlay">

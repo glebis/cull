@@ -3,6 +3,8 @@ use crate::AppState;
 use crate::export::manifest::*;
 use crate::export::presets;
 use crate::export::validate;
+use crate::export::pdf;
+use base64::Engine;
 use crate::export::patch::{self, JsonPatch, PatchResult};
 
 #[derive(serde::Serialize)]
@@ -214,4 +216,48 @@ pub async fn get_export_asset(
             })
         }
     }
+}
+
+#[tauri::command]
+pub async fn save_export_image(
+    state: State<'_, AppState>,
+    base64_data: String,
+    slide_id: String,
+    target_id: String,
+    manifest_id: String,
+) -> Result<String, String> {
+    let export_dir = state.app_data_dir.join("exports").join(&manifest_id).join(&target_id);
+    std::fs::create_dir_all(&export_dir)
+        .map_err(|e| format!("Failed to create export dir: {}", e))?;
+
+    let filename = format!("{}.png", slide_id);
+    let path = export_dir.join(&filename);
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&base64_data)
+        .map_err(|e| format!("Failed to decode base64: {}", e))?;
+
+    std::fs::write(&path, &bytes)
+        .map_err(|e| format!("Failed to write image: {}", e))?;
+
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn assemble_export_pdf(
+    state: State<'_, AppState>,
+    image_paths: Vec<String>,
+    width_px: u32,
+    height_px: u32,
+    manifest_id: String,
+    target_id: String,
+) -> Result<String, String> {
+    let export_dir = state.app_data_dir.join("exports").join(&manifest_id).join(&target_id);
+    std::fs::create_dir_all(&export_dir)
+        .map_err(|e| format!("Failed to create export dir: {}", e))?;
+
+    let output_path = export_dir.join("carousel.pdf");
+    let output_str = output_path.to_string_lossy().to_string();
+
+    pdf::assemble_pdf(&image_paths, width_px, height_px, &output_str)
 }

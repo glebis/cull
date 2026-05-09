@@ -168,6 +168,8 @@ pub fn run() {
             commands::export::apply_export_patches,
             commands::export::list_export_presets,
             commands::export::get_export_asset,
+            commands::export::save_export_image,
+            commands::export::assemble_export_pdf,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
