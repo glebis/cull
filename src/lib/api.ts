@@ -24,6 +24,7 @@ export interface ImageWithFile {
     path: string;
     thumbnail_path: string | null;
     selection: Selection | null;
+    source_label: string | null;
 }
 
 export interface ImportResponse {

@@ -23,6 +23,18 @@
     let rating = $derived(item.selection?.star_rating ?? 0);
     let decision = $derived(item.selection?.decision ?? 'undecided');
     let filename = $derived(item.path.split('/').pop() ?? 'image');
+
+    const SOURCE_LABELS: Record<string, string> = {
+        gpt_image_2: 'GPT',
+        dalle_3: 'DALL-E',
+        dalle: 'DALL-E',
+        openai: 'OpenAI',
+        stable_diffusion: 'SD',
+        comfyui: 'ComfyUI',
+        midjourney: 'MJ',
+        nanobanana: 'NB',
+    };
+    let sourceTag = $derived(item.source_label ? SOURCE_LABELS[item.source_label] ?? item.source_label : null);
     let imgError = $state(false);
 
     let borderClass = $derived(
@@ -86,6 +98,10 @@
                 <span class="star">&#9733;</span>
             {/each}
         </div>
+    {/if}
+
+    {#if sourceTag}
+        <div class="source-tag">{sourceTag}</div>
     {/if}
 
     {#if decision === 'accept'}
@@ -165,6 +181,20 @@
         color: var(--orange);
         font-size: 10px;
         text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+    }
+    .source-tag {
+        position: absolute;
+        top: 4px;
+        left: 4px;
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        padding: 1px 5px;
+        border-radius: 3px;
+        background: rgba(0, 0, 0, 0.65);
+        color: var(--purple, #bb9af7);
+        backdrop-filter: blur(4px);
+        line-height: 1.4;
     }
     .badge {
         position: absolute;

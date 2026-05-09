@@ -5,7 +5,7 @@ use super::models::*;
 use super::smart_collections::{FilterNode, SmartCollection};
 
 pub struct Database {
-    conn: Mutex<Connection>,
+    pub(crate) conn: Mutex<Connection>,
 }
 
 impl Database {
@@ -23,6 +23,7 @@ impl Database {
         drop(conn);
         self.migrate_smart_collections()?;
         self.seed_preset_collections()?;
+        self.migrate_lineage_tables()?;
         Ok(())
     }
 
@@ -122,6 +123,40 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_lineage_tables(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS lineage_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                created_at TEXT NOT NULL,
+                detection_method TEXT,
+                detection_score REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS import_batches (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                source TEXT,
+                image_count INTEGER,
+                collection_id TEXT
+            );"
+        )?;
+
+        let image_columns = vec![
+            ("lineage_group_id", "TEXT REFERENCES lineage_groups(id)"),
+            ("lineage_order", "INTEGER DEFAULT 0"),
+            ("import_batch_id", "TEXT"),
+        ];
+        for (name, typ) in &image_columns {
+            let sql = format!("ALTER TABLE images ADD COLUMN {} {}", name, typ);
+            let _ = conn.execute(&sql, []);
+        }
+
+        Ok(())
+    }
+
     pub fn insert_image(&self, image: &Image) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -172,7 +207,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision
+                    s.star_rating, s.color_label, s.decision, i.source_label
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -205,6 +240,7 @@ impl Database {
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
+                source_label: row.get(12)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -263,7 +299,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision
+                    s.star_rating, s.color_label, s.decision, i.source_label
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -297,6 +333,7 @@ impl Database {
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
+                source_label: row.get(12)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -307,7 +344,7 @@ impl Database {
         let mut sql = String::from(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision
+                    s.star_rating, s.color_label, s.decision, i.source_label
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -347,6 +384,7 @@ impl Database {
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
+                source_label: row.get(12)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -402,7 +440,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision
+                    s.star_rating, s.color_label, s.decision, i.source_label
              FROM collection_items ci
              JOIN images i ON i.id = ci.image_id
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
@@ -436,6 +474,7 @@ impl Database {
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
+                source_label: row.get(12)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -615,7 +654,7 @@ impl Database {
         let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision
+                    s.star_rating, s.color_label, s.decision, i.source_label
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -650,6 +689,7 @@ impl Database {
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
+                source_label: row.get(12)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -660,7 +700,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision
+                    s.star_rating, s.color_label, s.decision, i.source_label
              FROM iterations it
              JOIN images i ON i.id = it.child_id
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
@@ -694,6 +734,7 @@ impl Database {
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
+                source_label: row.get(12)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -876,7 +917,7 @@ impl Database {
         let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision
+                    s.star_rating, s.color_label, s.decision, i.source_label
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -916,6 +957,7 @@ impl Database {
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
+                source_label: row.get(12)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()

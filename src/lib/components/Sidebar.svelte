@@ -1,8 +1,8 @@
 <script lang="ts">
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, images, focusedIndex, folders, activeFolder, minSizeFilter, collections, activeCollection, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast } from '$lib/stores';
-    import { importFolder as apiImportFolder, listImages, listImagesByFolder, listImagesFiltered, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, listCollectionImages, deleteCollectionApi, listSmartCollections, evaluateSmartCollection, isYoloAvailable, isNudenetAvailable, downloadYoloModel, downloadNudenetModel, getDetectionCount, searchByDetectedClass, detectObjects, detectNsfw, getImagesByIds, regenerateThumbnails, checkOllama, analyzeImages, getVisionCount } from '$lib/api';
+    import { totalCount, images, focusedIndex, folders, activeFolder, minSizeFilter, collections, activeCollection, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection } from '$lib/stores';
+    import { importFolder as apiImportFolder, listImages, listImagesByFolder, listImagesFiltered, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, listCollectionImages, deleteCollectionApi, listSmartCollections, evaluateSmartCollection, isYoloAvailable, isNudenetAvailable, downloadYoloModel, downloadNudenetModel, getDetectionCount, searchByDetectedClass, detectObjects, detectNsfw, getImagesByIds, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount } from '$lib/api';
     import type { SmartCollection } from '$lib/api';
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
@@ -13,6 +13,7 @@
     let lastResult = $state('');
     let regenerating = $state(false);
     let regenProgress = $state({ current: 0, total: 0 });
+    let rescanning = $state(false);
     let foldersExpanded = $state(true);
 
     interface DisplayFolder {
@@ -78,6 +79,16 @@
     function folderName(path: string): string {
         const parts = path.split('/');
         return parts[parts.length - 1] || path;
+    }
+
+    function pinCollection(collectionId: string) {
+        pinnedCollection.set(collectionId);
+        showToast('Collection pinned — new imports will be added here', { type: 'info', duration: 5000 });
+    }
+
+    function unpinCollection() {
+        pinnedCollection.set(null);
+        showToast('Collection unpinned', { type: 'info', duration: 3000 });
     }
 
     async function selectSmartCollection(sc: SmartCollection) {
@@ -182,6 +193,18 @@
 
     function handleSizeFilter(value: number) {
         minSizeFilter.set(value);
+    }
+
+    async function handleRescan() {
+        rescanning = true;
+        try {
+            const count = await rescanSources();
+            lastResult = `Detected sources for ${count} images`;
+        } catch (e) {
+            lastResult = `Rescan error: ${e}`;
+        } finally {
+            rescanning = false;
+        }
     }
 
     async function handleRegenerateThumbnails() {
@@ -589,6 +612,14 @@
             COLLECTIONS
             <button class="new-collection-btn" onclick={handleNewCollection} title="New Collection">+</button>
         </div>
+        {#if $pinnedCollection}
+            {@const pinnedName = $collections.find(([id]) => id === $pinnedCollection)?.[1] ?? 'Unknown'}
+            <div class="pinned-indicator">
+                <span class="pin-icon">📌</span>
+                <span class="pin-name">{pinnedName}</span>
+                <button class="pin-action" onclick={unpinCollection}>Unpin</button>
+            </div>
+        {/if}
         {#if $collectMode && $collectModeTarget}
             <div class="collect-indicator">Collecting into: {$collections.find(c => c[0] === $collectModeTarget)?.[1] ?? '...'}</div>
         {/if}
@@ -601,6 +632,14 @@
                         <span class="icon">&#9671;</span>
                         {name}
                         <span class="count">({count})</span>
+                    </button>
+                    <button
+                        class="pin-btn"
+                        class:active={$pinnedCollection === id}
+                        onclick={(e: Event) => { e.stopPropagation(); $pinnedCollection === id ? unpinCollection() : pinCollection(id); }}
+                        title={$pinnedCollection === id ? 'Unpin' : 'Pin as active'}
+                    >
+                        {$pinnedCollection === id ? '📌' : '📎'}
                     </button>
                     <button class="delete-btn" onclick={(e: Event) => handleDeleteCollection(e, id, name)} title="Delete collection">&times;</button>
                 </div>
@@ -617,6 +656,9 @@
         </button>
         <button class="import-btn secondary" onclick={handleRegenerateThumbnails} disabled={importing || regenerating}>
             {regenerating ? `Thumbnails ${regenProgress.current}/${regenProgress.total}...` : 'Regenerate Thumbnails'}
+        </button>
+        <button class="import-btn secondary" onclick={handleRescan} disabled={importing || regenerating || rescanning}>
+            {rescanning ? 'Scanning sources...' : 'Rescan Sources'}
         </button>
     </div>
 </div>
@@ -971,4 +1013,35 @@
     .class-tag {
         color: var(--purple, #bb9af7);
     }
+    .pinned-indicator {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        margin: 4px 8px;
+        background: var(--bg-elevated, #2a2a3e);
+        border-radius: 6px;
+        border: 1px solid var(--accent, #8cc63f);
+        font-size: 12px;
+    }
+    .pin-icon { font-size: 14px; }
+    .pin-name { color: var(--text-primary, #eee); flex: 1; }
+    .pin-action {
+        background: none;
+        border: none;
+        color: var(--text-secondary, #888);
+        cursor: pointer;
+        font-size: 11px;
+        font-family: inherit;
+    }
+    .pin-action:hover { color: var(--text-primary, #eee); }
+    .pin-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 11px;
+        opacity: 0.4;
+        padding: 0 4px;
+    }
+    .pin-btn:hover, .pin-btn.active { opacity: 1; }
 </style>

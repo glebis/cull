@@ -443,18 +443,3 @@ mod tests {
         assert!(params_contain(&params, "dalle"), "params: {:?}", params);
     }
 }
-
-#[cfg(test)]
-mod debug_tests {
-    use super::*;
-
-    #[test]
-    fn debug_gpt_image_parse() {
-        let result = parse_query("gpt image 2");
-        let json = serde_json::to_string_pretty(&result).unwrap();
-        eprintln!("Filter JSON: {}", json);
-        let (sql, params) = result.to_sql_clause().unwrap();
-        eprintln!("SQL: {}", sql);
-        eprintln!("Params: {:?}", params);
-    }
-}

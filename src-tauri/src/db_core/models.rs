@@ -36,4 +36,5 @@ pub struct ImageWithFile {
     pub path: String,
     pub thumbnail_path: Option<String>,
     pub selection: Option<Selection>,
+    pub source_label: Option<String>,
 }

@@ -20,6 +20,18 @@
     let rating = $derived(image?.selection?.star_rating ?? 0);
     let decision = $derived(image?.selection?.decision ?? 'undecided');
 
+    const SOURCE_DISPLAY: Record<string, string> = {
+        gpt_image_2: 'GPT-image-2',
+        dalle_3: 'DALL-E 3',
+        dalle: 'DALL-E',
+        openai: 'OpenAI',
+        stable_diffusion: 'Stable Diffusion',
+        comfyui: 'ComfyUI',
+        midjourney: 'Midjourney',
+        nanobanana: 'Nanobanana',
+    };
+    let sourceDisplay = $derived(image?.source_label ? SOURCE_DISPLAY[image.source_label] ?? image.source_label : null);
+
     let detections = $state<Detection[]>([]);
     let nsfwDetections = $state<Detection[]>([]);
     let isNsfw = $derived(nsfwDetections.length > 0);
@@ -213,6 +225,10 @@
         <span class="dim">{dimensions}</span>
         <span class="sep">|</span>
         <span class="fmt">{format}</span>
+        {#if sourceDisplay}
+            <span class="sep">|</span>
+            <span class="source">{sourceDisplay}</span>
+        {/if}
         {#if rating > 0}
             <span class="sep">|</span>
             <span class="rating">
@@ -359,6 +375,9 @@
     }
     .dim, .fmt {
         color: var(--text-secondary);
+    }
+    .source {
+        color: var(--purple, #bb9af7);
     }
     .rating {
         display: flex;
