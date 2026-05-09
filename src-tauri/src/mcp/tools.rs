@@ -55,6 +55,38 @@ impl ImageViewMcp {
             .map(|(img, _)| img)
             .collect()
     }
+
+    fn check_image_id_scope(&self, image_id: &str) -> Result<bool, String> {
+        let scope = self.token_scope();
+        if scope.is_none() {
+            return Ok(true);
+        }
+        let state = self.app_handle.state::<AppState>();
+        let id_refs = vec![image_id];
+        match state.db.get_images_by_ids(&id_refs) {
+            Ok(images) => match images.first() {
+                Some(img) => Ok(tokens::image_in_scope(&scope, &img.path, &[])),
+                None => Ok(false),
+            },
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    fn is_remote(&self) -> bool {
+        !matches!(self.auth, AuthContext::Local)
+    }
+
+    fn maybe_redact_path(&self, path: &str) -> serde_json::Value {
+        if self.is_remote() {
+            let filename = std::path::Path::new(path)
+                .file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_else(|| "[redacted]".to_string());
+            serde_json::Value::String(filename)
+        } else {
+            serde_json::Value::String(path.to_string())
+        }
+    }
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -192,7 +224,7 @@ impl ImageViewMcp {
                     .map(|img| {
                     serde_json::json!({
                         "id": img.image.id,
-                        "path": img.path,
+                        "path": self.maybe_redact_path(&img.path),
                         "width": img.image.width,
                         "height": img.image.height,
                         "format": img.image.format,
@@ -220,7 +252,7 @@ impl ImageViewMcp {
                     }
                     serde_json::json!({
                         "id": img.image.id,
-                        "path": img.path,
+                        "path": self.maybe_redact_path(&img.path),
                         "width": img.image.width,
                         "height": img.image.height,
                         "format": img.image.format,
@@ -285,7 +317,7 @@ impl ImageViewMcp {
                     .map(|img| {
                     serde_json::json!({
                         "id": img.image.id,
-                        "path": img.path,
+                        "path": self.maybe_redact_path(&img.path),
                         "width": img.image.width,
                         "height": img.image.height,
                         "format": img.image.format,
@@ -370,12 +402,15 @@ impl ImageViewMcp {
     #[tool(description = "List images in a collection with full metadata")]
     fn list_collection_images(&self, Parameters(params): Parameters<CollectionIdParams>) -> String {
         let state = self.app_handle.state::<AppState>();
+        let scope = self.token_scope();
         match state.db.list_collection_images(&params.collection_id) {
             Ok(images) => {
-                let result: Vec<serde_json::Value> = images.iter().map(|img| {
+                let result: Vec<serde_json::Value> = images.iter()
+                    .filter(|img| tokens::image_in_scope(&scope, &img.path, &[]))
+                    .map(|img| {
                     serde_json::json!({
                         "id": img.image.id,
-                        "path": img.path,
+                        "path": self.maybe_redact_path(&img.path),
                         "width": img.image.width,
                         "height": img.image.height,
                         "format": img.image.format,
@@ -412,8 +447,13 @@ impl ImageViewMcp {
 
     #[tool(description = "Find visually similar images using CLIP embeddings. Requires embeddings to be generated first.")]
     fn find_similar(&self, Parameters(params): Parameters<FindSimilarParams>) -> String {
+        match self.check_image_id_scope(&params.image_id) {
+            Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
+            Err(e) => return format!("Error: {}", e),
+            _ => {}
+        }
         let state = self.app_handle.state::<AppState>();
-        let top_k = params.limit.unwrap_or(10) as usize;
+        let top_k = params.limit.unwrap_or(10).min(100) as usize;
 
         let all = match state.db.get_all_embeddings("clip-vit-b32") {
             Ok(a) => a,
@@ -423,11 +463,16 @@ impl ImageViewMcp {
             Some(q) => q,
             None => return format!("Error: Image '{}' has no embedding. Run generate_embeddings first.", params.image_id),
         };
-        match state.db.find_similar(&query.1, "clip-vit-b32", top_k) {
+        match state.db.find_similar(&query.1, "clip-vit-b32", top_k * 2) {
             Ok(results) => {
-                let r: Vec<serde_json::Value> = results.iter().map(|(id, score)| {
-                    serde_json::json!({"image_id": id, "similarity": score})
-                }).collect();
+                let r: Vec<serde_json::Value> = results.iter()
+                    .filter(|(id, _)| {
+                        self.check_image_id_scope(id).unwrap_or(false)
+                    })
+                    .take(top_k)
+                    .map(|(id, score)| {
+                        serde_json::json!({"image_id": id, "similarity": score})
+                    }).collect();
                 serde_json::to_string(&r).unwrap_or_else(|_| "[]".to_string())
             }
             Err(e) => format!("Error: {}", e),
@@ -437,12 +482,15 @@ impl ImageViewMcp {
     #[tool(description = "Search for images containing a detected object class (e.g. 'person', 'car', 'dog'). Requires object detection to have been run.")]
     fn search_by_object(&self, Parameters(params): Parameters<SearchByObjectParams>) -> String {
         let state = self.app_handle.state::<AppState>();
-        let limit = params.limit.unwrap_or(50);
-        match state.db.search_by_class(&params.class_name, limit) {
+        let limit = params.limit.unwrap_or(50).min(100);
+        match state.db.search_by_class(&params.class_name, limit * 2) {
             Ok(results) => {
-                let r: Vec<serde_json::Value> = results.iter().map(|(id, confidence)| {
-                    serde_json::json!({"image_id": id, "confidence": confidence})
-                }).collect();
+                let r: Vec<serde_json::Value> = results.iter()
+                    .filter(|(id, _)| self.check_image_id_scope(id).unwrap_or(false))
+                    .take(limit as usize)
+                    .map(|(id, confidence)| {
+                        serde_json::json!({"image_id": id, "confidence": confidence})
+                    }).collect();
                 serde_json::to_string(&r).unwrap_or_else(|_| "[]".to_string())
             }
             Err(e) => format!("Error: {}", e),
@@ -451,6 +499,11 @@ impl ImageViewMcp {
 
     #[tool(description = "Get object detections for an image (bounding boxes, classes, confidence scores)")]
     fn get_detections(&self, Parameters(params): Parameters<ImageIdParams>) -> String {
+        match self.check_image_id_scope(&params.image_id) {
+            Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
+            Err(e) => return format!("Error: {}", e),
+            _ => {}
+        }
         let state = self.app_handle.state::<AppState>();
         match state.db.get_detections(&params.image_id, None) {
             Ok(detections) => serde_json::to_string(&detections).unwrap_or_else(|_| "[]".to_string()),
@@ -460,6 +513,11 @@ impl ImageViewMcp {
 
     #[tool(description = "Get AI vision descriptions for an image (generated by Ollama vision models)")]
     fn get_vision_metadata(&self, Parameters(params): Parameters<ImageIdParams>) -> String {
+        match self.check_image_id_scope(&params.image_id) {
+            Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
+            Err(e) => return format!("Error: {}", e),
+            _ => {}
+        }
         let state = self.app_handle.state::<AppState>();
         match state.db.get_vision_metadata(&params.image_id) {
             Ok(fields) => {
@@ -476,6 +534,11 @@ impl ImageViewMcp {
 
     #[tool(description = "Open an image in the loupe (fullscreen detail) view on the local app")]
     fn show_image(&self, Parameters(params): Parameters<ShowImageParams>) -> String {
+        match self.check_image_id_scope(&params.image_id) {
+            Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
+            Err(e) => return format!("Error: {}", e),
+            _ => {}
+        }
         use tauri::Emitter;
         let params_json = serde_json::json!({
             "focus": params.image_id,
