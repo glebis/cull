@@ -34,34 +34,16 @@ async fn run_http_server(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
 
-    let handle = app_handle.clone();
-    let config = StreamableHttpServerConfig::default()
-        .with_stateful_mode(false)
-        .with_json_response(true);
-
-    let session_manager = Arc::new(LocalSessionManager::default());
-
-    let mcp_service = StreamableHttpService::new(
-        move || Ok(ImageViewMcp::new(handle.clone())),
-        session_manager,
-        config,
-    );
-
-    let app_handle_auth = app_handle.clone();
-    let mcp_service = Arc::new(tokio::sync::Mutex::new(mcp_service));
-
     let listener = tokio::net::TcpListener::bind(addr).await?;
     eprintln!("MCP HTTP server listening on {}", addr);
 
     loop {
         let (stream, remote_addr) = listener.accept().await?;
         let io = TokioIo::new(stream);
-        let mcp = mcp_service.clone();
-        let auth_handle = app_handle_auth.clone();
+        let auth_handle = app_handle.clone();
 
         tokio::spawn(async move {
             let service = hyper::service::service_fn(move |req: hyper::Request<Incoming>| {
-                let mcp = mcp.clone();
                 let auth_handle = auth_handle.clone();
                 async move {
                     // Extract and validate bearer token
@@ -109,10 +91,20 @@ async fn run_http_server(
 
                     eprintln!("MCP HTTP: authenticated as '{}' (role: {}) from {}", token.name, token.role, remote_addr);
 
-                    // Forward to rmcp StreamableHttpService
-                    let mut svc = mcp.lock().await;
-                    let response = tower_service::Service::call(&mut *svc, req);
-                    let resp = response.await.unwrap();
+                    // Create per-request MCP service with the validated token's auth context
+                    let auth = AuthContext::Authenticated(token);
+                    let handle_for_mcp = auth_handle.clone();
+                    let config = StreamableHttpServerConfig::default()
+                        .with_stateful_mode(false)
+                        .with_json_response(true);
+                    let session_manager = Arc::new(LocalSessionManager::default());
+                    let mut mcp_service = StreamableHttpService::new(
+                        move || Ok(ImageViewMcp::with_auth(handle_for_mcp.clone(), auth.clone())),
+                        session_manager,
+                        config,
+                    );
+
+                    let resp = tower_service::Service::call(&mut mcp_service, req).await.unwrap();
 
                     // Convert BoxBody response to Full<Bytes>
                     use http_body_util::BodyExt;
