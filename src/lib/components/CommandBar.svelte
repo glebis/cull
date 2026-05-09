@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { parseNlQuery, evaluateSmartCollection } from '$lib/api';
-    import { images } from '$lib/stores';
+    import { parseNlQuery, evaluateSmartCollection, createSmartCollection, listSmartCollections } from '$lib/api';
+    import { images, smartCollections, activeSmartCollection, activeFolder, activeCollection } from '$lib/stores';
     import type { FilterNode } from '$lib/api';
     import RuleBuilder from './RuleBuilder.svelte';
 
@@ -10,17 +10,36 @@
     let showRules = $state(false);
     let applied = $state(false);
 
+    let saving = $state(false);
+    let collectionName = $state('');
+    let savedMessage = $state('');
+    let savedTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    function generateName(q: string): string {
+        return q.trim()
+            .split(/\s+/)
+            .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(' ')
+            .replace(/\bMidjourney\b/i, 'MJ')
+            .replace(/\bStable Diffusion\b/i, 'SD')
+            .replace(/\bOr More\b/i, '+')
+            .replace(/\bAnd Above\b/i, '+')
+            .replace(/\bStars?\b/i, 'Stars');
+    }
+
     async function handleParse() {
         if (!query.trim()) {
             parsedFilter = null;
             showRules = false;
             applied = false;
+            saving = false;
             return;
         }
         const filterJson = await parseNlQuery(query);
         parsedFilter = JSON.parse(filterJson);
         showRules = true;
         applied = false;
+        saving = false;
     }
 
     async function handleApply() {
@@ -33,7 +52,13 @@
     }
 
     function handleKeydown(e: KeyboardEvent) {
-        if (e.key === 'Enter') handleParse();
+        if (e.key === 'Enter') {
+            if (saving) {
+                handleSaveConfirm();
+            } else {
+                handleParse();
+            }
+        }
     }
 
     function handleClear() {
@@ -41,39 +66,113 @@
         parsedFilter = null;
         showRules = false;
         applied = false;
+        saving = false;
+        savedMessage = '';
+    }
+
+    function handleSaveStart() {
+        collectionName = generateName(query);
+        saving = true;
+    }
+
+    function handleSaveCancel() {
+        saving = false;
+    }
+
+    async function handleSaveConfirm() {
+        if (!parsedFilter || !collectionName.trim()) return;
+        const filterJson = JSON.stringify(parsedFilter);
+        try {
+            await createSmartCollection(collectionName.trim(), filterJson, query);
+            const updated = await listSmartCollections();
+            $smartCollections = updated;
+
+            const saved = updated.find(sc => sc.name === collectionName.trim());
+            if (saved) {
+                $activeSmartCollection = saved;
+                $activeFolder = null;
+                $activeCollection = null;
+            }
+
+            savedMessage = `Saved as "${collectionName.trim()}" — ${matchCount} images`;
+            saving = false;
+            showRules = false;
+            query = '';
+            parsedFilter = null;
+            applied = false;
+
+            if (savedTimeout) clearTimeout(savedTimeout);
+            savedTimeout = setTimeout(() => { savedMessage = ''; }, 3000);
+        } catch (e) {
+            console.error('Failed to save collection:', e);
+        }
+    }
+
+    function handleNameKeydown(e: KeyboardEvent) {
+        if (e.key === 'Enter') handleSaveConfirm();
+        if (e.key === 'Escape') handleSaveCancel();
     }
 </script>
 
 <div class="command-bar-wrapper">
-    <div class="command-bar">
-        <span class="command-icon">/</span>
-        <input
-            type="text"
-            bind:value={query}
-            onkeydown={handleKeydown}
-            placeholder="landscape midjourney 4 stars or more..."
-            class="command-input"
-        />
-        {#if query}
-            <button class="clear-btn" onclick={handleClear}>&times;</button>
-        {/if}
-    </div>
-
-    {#if showRules && parsedFilter}
-        <div class="parsed-rules">
-            <div class="rules-header">
-                <span class="parsed-label">Parsed as:</span>
-                <div class="rules-actions">
-                    {#if applied}
-                        <span class="match-count">{matchCount} images</span>
-                    {/if}
-                    <button class="apply-btn" onclick={handleApply}>
-                        {applied ? 'Refresh' : 'Apply'}
-                    </button>
-                </div>
-            </div>
-            <RuleBuilder filter={parsedFilter} />
+    {#if savedMessage}
+        <div class="saved-toast">
+            <span class="saved-icon">&#10003;</span>
+            {savedMessage}
         </div>
+    {/if}
+
+    {#if !savedMessage}
+        <div class="command-bar">
+            <span class="command-icon">/</span>
+            <input
+                type="text"
+                bind:value={query}
+                onkeydown={handleKeydown}
+                placeholder="landscape midjourney 4 stars or more..."
+                class="command-input"
+            />
+            {#if query}
+                <button class="clear-btn" onclick={handleClear}>&times;</button>
+            {/if}
+        </div>
+
+        {#if saving}
+            <div class="name-bar">
+                <span class="name-label">Name</span>
+                <input
+                    type="text"
+                    bind:value={collectionName}
+                    onkeydown={handleNameKeydown}
+                    class="name-input"
+                    autofocus
+                />
+                <button class="save-confirm-btn" onclick={handleSaveConfirm}>Save</button>
+                <button class="save-cancel-btn" onclick={handleSaveCancel}>Cancel</button>
+            </div>
+        {/if}
+
+        {#if showRules && parsedFilter}
+            <div class="parsed-rules" class:dimmed={saving}>
+                <div class="rules-header">
+                    <span class="parsed-label">Parsed as:</span>
+                    <div class="rules-actions">
+                        {#if applied}
+                            <span class="match-count">{matchCount} images</span>
+                        {/if}
+                        <button class="apply-btn" onclick={handleApply}>
+                            {applied ? 'Refresh' : 'Apply'}
+                        </button>
+                        {#if applied && !saving}
+                            <button class="save-btn" onclick={handleSaveStart}>
+                                Save Collection
+                            </button>
+                        {/if}
+                    </div>
+                </div>
+                <RuleBuilder filter={parsedFilter} />
+            </div>
+        {/if}
     {/if}
 </div>
 
@@ -202,5 +301,119 @@
 
     .apply-btn:active {
         transform: translateY(1px);
+    }
+
+    .save-btn {
+        height: 32px;
+        padding: 0 16px;
+        border-radius: 6px;
+        border: 1px solid var(--green);
+        background: linear-gradient(180deg, rgba(158,206,106,0.2), rgba(158,206,106,0.1));
+        color: var(--green);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        transition: background 120ms, color 120ms, transform 80ms;
+    }
+
+    .save-btn:hover {
+        background: linear-gradient(180deg, rgba(158,206,106,0.3), rgba(158,206,106,0.15));
+    }
+
+    .save-btn:active {
+        transform: translateY(1px);
+    }
+
+    .name-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        background: linear-gradient(180deg, rgba(158,206,106,0.06), rgba(158,206,106,0.02)), var(--surface);
+        border: 1px solid rgba(158,206,106,0.3);
+        border-top: none;
+        border-radius: 0 0 8px 8px;
+    }
+
+    .name-label {
+        font-size: 11px;
+        color: var(--green);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+
+    .name-input {
+        flex: 1;
+        background: none;
+        border: none;
+        color: var(--text);
+        font-family: var(--font);
+        font-size: 14px;
+        font-weight: 500;
+        outline: none;
+    }
+
+    .save-confirm-btn {
+        height: 28px;
+        padding: 0 14px;
+        border-radius: 6px;
+        border: 1px solid var(--green);
+        background: linear-gradient(180deg, rgba(158,206,106,0.2), rgba(158,206,106,0.1));
+        color: var(--green);
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 500;
+        transition: background 120ms, transform 80ms;
+    }
+
+    .save-confirm-btn:hover {
+        background: linear-gradient(180deg, rgba(158,206,106,0.3), rgba(158,206,106,0.15));
+    }
+
+    .save-cancel-btn {
+        height: 28px;
+        padding: 0 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 12px;
+        transition: border-color 120ms, color 120ms;
+    }
+
+    .save-cancel-btn:hover {
+        border-color: rgba(255,255,255,0.12);
+        color: var(--text);
+    }
+
+    .dimmed {
+        opacity: 0.5;
+        pointer-events: none;
+    }
+
+    .saved-toast {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 16px;
+        background: linear-gradient(180deg, rgba(158,206,106,0.1), rgba(158,206,106,0.04)), var(--surface);
+        border: 1px solid rgba(158,206,106,0.3);
+        border-radius: 8px;
+        color: var(--green);
+        font-size: 13px;
+        font-weight: 500;
+        animation: toast-in 200ms ease-out;
+    }
+
+    .saved-icon {
+        font-size: 16px;
+    }
+
+    @keyframes toast-in {
+        from { opacity: 0; transform: translateY(-4px); }
+        to { opacity: 1; transform: translateY(0); }
     }
 </style>
