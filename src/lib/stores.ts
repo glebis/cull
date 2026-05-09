@@ -122,6 +122,9 @@ export function showToast(message: string, opts?: { detail?: string; type?: Toas
     }, toast.duration);
 }
 
+// Settings panel
+export const settingsOpen = writable<boolean>(false);
+
 export const focusedImage = derived(
     [images, focusedIndex],
     ([$images, $idx]) => $images[$idx] ?? null

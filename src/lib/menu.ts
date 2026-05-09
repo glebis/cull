@@ -10,6 +10,7 @@ import {
     activeFolder,
     selectedIds,
     loupeScale,
+    settingsOpen,
     type ViewMode,
 } from './stores';
 
@@ -93,7 +94,7 @@ function handleMenuAction(action: string) {
             loupeScale.set(1);
             break;
         case 'settings':
-            // Settings panel not yet implemented
+            settingsOpen.update(v => !v);
             break;
         case 'help':
             // Help not yet implemented

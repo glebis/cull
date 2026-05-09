@@ -378,3 +378,38 @@ export async function getBatchImages(batchId: string): Promise<ImageWithFile[]> 
 export async function scanLineage(): Promise<number> {
     return invoke('scan_lineage');
 }
+
+// MCP Token Management
+
+export interface McpToken {
+    id: string;
+    name: string;
+    role: string;
+    scope_json: string | null;
+    created_at: string;
+    expires_at: string | null;
+    last_used_at: string | null;
+    revoked: boolean;
+}
+
+export interface TokenScope {
+    collections?: string[];
+    folders?: string[];
+    tags?: string[];
+}
+
+export async function createMcpToken(name: string, role: string, scope?: TokenScope): Promise<[McpToken, string]> {
+    return invoke('create_mcp_token', { name, role, scope: scope || null });
+}
+
+export async function listMcpTokens(): Promise<McpToken[]> {
+    return invoke('list_mcp_tokens');
+}
+
+export async function revokeMcpToken(tokenId: string): Promise<void> {
+    return invoke('revoke_mcp_token', { tokenId });
+}
+
+export async function rotateMcpToken(tokenId: string): Promise<string> {
+    return invoke('rotate_mcp_token', { tokenId });
+}

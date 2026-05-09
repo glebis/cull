@@ -283,6 +283,10 @@ pub fn run() {
             commands::lineage::remove_from_lineage_group,
             commands::lineage::get_batch_images,
             commands::lineage::scan_lineage,
+            commands::mcp::create_mcp_token,
+            commands::mcp::list_mcp_tokens,
+            commands::mcp::revoke_mcp_token,
+            commands::mcp::rotate_mcp_token,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

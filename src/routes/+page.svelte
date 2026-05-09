@@ -11,8 +11,11 @@
     import CommandBar from '$lib/components/CommandBar.svelte';
     import Export from '$lib/components/Export.svelte';
     import Toast from '$lib/components/Toast.svelte';
+    import ImportBanner from '$lib/components/ImportBanner.svelte';
+    import LineageView from '$lib/components/LineageView.svelte';
+    import McpSettings from '$lib/components/McpSettings.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections, showToast } from '$lib/stores';
+    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections, showToast, settingsOpen } from '$lib/stores';
     import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages, trashImages, deleteImagesPermanently } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
@@ -122,6 +125,7 @@
     {#if !noSidebar && !$zenMode}
         <Sidebar />
     {/if}
+    <ImportBanner />
     {#if $viewMode === 'grid'}
         <div class="main-with-commandbar">
             <div class="command-bar-area">
@@ -137,6 +141,8 @@
         <EmbeddingExplorer />
     {:else if $viewMode === 'export'}
         <Export />
+    {:else if $viewMode === 'lineage'}
+        <LineageView />
     {:else}
         <div class="placeholder">
             <span class="placeholder-label">{$viewMode}</span>
@@ -155,6 +161,10 @@
         </div>
     {/if}
 </div>
+
+{#if $settingsOpen}
+    <McpSettings onclose={() => settingsOpen.set(false)} />
+{/if}
 
 <style>
     .app-shell {
