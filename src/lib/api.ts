@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from './tauri-mock';
 
 export interface Image {
     id: string;
@@ -81,6 +81,10 @@ export async function importFolder(folderPath: string): Promise<ImportResponse> 
 
 export async function importFiles(filePaths: string[]): Promise<ImportResponse> {
     return invoke<ImportResponse>('import_files', { filePaths });
+}
+
+export async function regenerateThumbnails(): Promise<number> {
+    return invoke<number>('regenerate_thumbnails');
 }
 
 export async function setRating(imageId: string, rating: number): Promise<void> {
@@ -273,4 +277,29 @@ export async function openWithParams(params: {
     gap?: number;
 }): Promise<void> {
     return invoke('open_with_params', params);
+}
+
+// Vision / Ollama commands
+export async function checkOllama(): Promise<string[]> {
+    return invoke('check_ollama');
+}
+
+export async function setOllamaConfig(url?: string, model?: string): Promise<void> {
+    return invoke('set_ollama_config', { url: url ?? null, model: model ?? null });
+}
+
+export async function getOllamaConfig(): Promise<[string, string]> {
+    return invoke('get_ollama_config');
+}
+
+export async function analyzeImages(imageIds: string[]): Promise<number> {
+    return invoke('analyze_images', { imageIds });
+}
+
+export async function getVisionMetadata(imageId: string): Promise<[string, string, string][]> {
+    return invoke('get_vision_metadata', { imageId });
+}
+
+export async function getVisionCount(source?: string): Promise<number> {
+    return invoke('get_vision_count', { source: source ?? null });
 }
