@@ -1,7 +1,7 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
-    import { revealItemInDir } from '@tauri-apps/plugin-opener';
     import { onMount } from 'svelte';
+    import ContextMenu from './ContextMenu.svelte';
     import { images, focusedIndex, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode } from '$lib/stores';
     import { getDetections, getVisionMetadata } from '$lib/api';
     import type { Detection } from '$lib/api';
@@ -121,31 +121,12 @@
         navigateBack();
     }
 
-    let contextMenuVisible = $state(false);
-    let contextMenuX = $state(0);
-    let contextMenuY = $state(0);
+    let ctxMenu = $state({ visible: false, x: 0, y: 0 });
 
     function handleContextMenu(e: MouseEvent) {
         if (!image) return;
         e.preventDefault();
-        contextMenuX = e.clientX;
-        contextMenuY = e.clientY;
-        contextMenuVisible = true;
-
-        function closeMenu() {
-            contextMenuVisible = false;
-            window.removeEventListener('click', closeMenu);
-            window.removeEventListener('contextmenu', closeMenu);
-        }
-        setTimeout(() => {
-            window.addEventListener('click', closeMenu);
-            window.addEventListener('contextmenu', closeMenu);
-        });
-    }
-
-    function revealInFinder() {
-        contextMenuVisible = false;
-        if (image) revealItemInDir(image.path);
+        ctxMenu = { visible: true, x: e.clientX, y: e.clientY };
     }
 </script>
 
@@ -250,16 +231,13 @@
     </div>
     {/if}
 
-    {#if contextMenuVisible}
-        <div
-            class="context-menu"
-            style="left: {contextMenuX}px; top: {contextMenuY}px;"
-            role="menu"
-        >
-            <button class="context-menu-item" onclick={revealInFinder} role="menuitem">
-                Reveal in Finder
-            </button>
-        </div>
+    {#if ctxMenu.visible && image}
+        <ContextMenu
+            {image}
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            onclose={() => ctxMenu.visible = false}
+        />
     {/if}
 </div>
 
@@ -400,31 +378,6 @@
     }
     .zoom {
         color: var(--blue);
-    }
-    .context-menu {
-        position: fixed;
-        z-index: 9999;
-        background: var(--surface, #2a2a2e);
-        border: 1px solid var(--border, #444);
-        border-radius: 4px;
-        padding: 4px 0;
-        min-width: 160px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-    }
-    .context-menu-item {
-        display: block;
-        width: 100%;
-        padding: 6px 12px;
-        background: none;
-        border: none;
-        color: var(--text, #eee);
-        font-size: 12px;
-        text-align: left;
-        cursor: pointer;
-    }
-    .context-menu-item:hover {
-        background: var(--blue, #3b82f6);
-        color: #fff;
     }
     /* Bounding boxes */
     .bbox {

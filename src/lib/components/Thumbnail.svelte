@@ -1,7 +1,7 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
-    import { revealItemInDir } from '@tauri-apps/plugin-opener';
     import type { ImageWithFile } from '$lib/api';
+    import ContextMenu from './ContextMenu.svelte';
 
     interface Props {
         item: ImageWithFile;
@@ -41,9 +41,7 @@
         focused ? 'focused' : selected ? 'selected' : ''
     );
 
-    let contextMenuVisible = $state(false);
-    let contextMenuX = $state(0);
-    let contextMenuY = $state(0);
+    let ctxMenu = $state({ visible: false, x: 0, y: 0 });
 
     function handleImgError() {
         imgError = true;
@@ -52,25 +50,7 @@
     function handleContextMenu(e: MouseEvent) {
         e.preventDefault();
         e.stopPropagation();
-        contextMenuX = e.clientX;
-        contextMenuY = e.clientY;
-        contextMenuVisible = true;
-
-        function closeMenu() {
-            contextMenuVisible = false;
-            window.removeEventListener('click', closeMenu);
-            window.removeEventListener('contextmenu', closeMenu);
-        }
-        // Close on next click or right-click anywhere
-        setTimeout(() => {
-            window.addEventListener('click', closeMenu);
-            window.addEventListener('contextmenu', closeMenu);
-        });
-    }
-
-    function revealInFinder() {
-        contextMenuVisible = false;
-        revealItemInDir(item.path);
+        ctxMenu = { visible: true, x: e.clientX, y: e.clientY };
     }
 </script>
 
@@ -120,16 +100,13 @@
     {/if}
 </div>
 
-{#if contextMenuVisible}
-    <div
-        class="context-menu"
-        style="left: {contextMenuX}px; top: {contextMenuY}px;"
-        role="menu"
-    >
-        <button class="context-menu-item" onclick={revealInFinder} role="menuitem">
-            Reveal in Finder
-        </button>
-    </div>
+{#if ctxMenu.visible}
+    <ContextMenu
+        image={item}
+        x={ctxMenu.x}
+        y={ctxMenu.y}
+        onclose={() => ctxMenu.visible = false}
+    />
 {/if}
 
 <style>
@@ -220,30 +197,5 @@
     .badge.reject {
         background: var(--red);
         color: var(--bg);
-    }
-    .context-menu {
-        position: fixed;
-        z-index: 9999;
-        background: var(--surface, #2a2a2e);
-        border: 1px solid var(--border, #444);
-        border-radius: 4px;
-        padding: 4px 0;
-        min-width: 160px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-    }
-    .context-menu-item {
-        display: block;
-        width: 100%;
-        padding: 6px 12px;
-        background: none;
-        border: none;
-        color: var(--text, #eee);
-        font-size: 12px;
-        text-align: left;
-        cursor: pointer;
-    }
-    .context-menu-item:hover {
-        background: var(--blue, #3b82f6);
-        color: #fff;
     }
 </style>
