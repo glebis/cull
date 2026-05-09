@@ -2,6 +2,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
+use super::c2pa_reader;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceEvidence {
     pub detector: String,
@@ -214,10 +216,52 @@ pub fn read_png_text_chunks(path: &std::path::Path) -> std::result::Result<Vec<(
     Ok(chunks)
 }
 
-pub fn detect_source(filename: &str, png_text_chunks: &[(String, String)]) -> SourceDetectionResult {
+pub fn detect_from_c2pa(path: &std::path::Path) -> SourceDetectionResult {
+    let Some(info) = c2pa_reader::read_c2pa_info(path) else {
+        return SourceDetectionResult::unknown();
+    };
+
+    let Some(label) = info.openai_source_label() else {
+        return SourceDetectionResult {
+            source_label: None,
+            confidence: 0.0,
+            is_ai_generated: None,
+            ai_prompt: None,
+            evidence: vec![SourceEvidence {
+                detector: "c2pa".to_string(),
+                source_label: None,
+                confidence: 0.0,
+                details: format!("C2PA found but non-OpenAI agent: {:?}", info.software_agents),
+            }],
+        };
+    };
+
+    let details = if info.has_chatgpt_layer {
+        format!("C2PA manifest: {} (via ChatGPT), agents: {:?}", label, info.software_agents)
+    } else {
+        format!("C2PA manifest: {}, agents: {:?}", label, info.software_agents)
+    };
+
+    SourceDetectionResult {
+        source_label: Some(label.to_string()),
+        confidence: 0.95,
+        is_ai_generated: Some(true),
+        ai_prompt: None,
+        evidence: vec![SourceEvidence {
+            detector: "c2pa".to_string(),
+            source_label: Some(label.to_string()),
+            confidence: 0.95,
+            details,
+        }],
+    }
+}
+
+pub fn detect_source(filename: &str, png_text_chunks: &[(String, String)], file_path: &std::path::Path) -> SourceDetectionResult {
+    let c2pa_result = detect_from_c2pa(file_path);
     let filename_result = detect_from_filename(filename);
     let png_result = detect_from_png_text_chunks(png_text_chunks);
-    combine_detection_results(vec![png_result, filename_result])
+    // C2PA has highest priority since it's cryptographically backed
+    combine_detection_results(vec![c2pa_result, png_result, filename_result])
 }
 
 #[cfg(test)]

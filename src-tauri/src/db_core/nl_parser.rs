@@ -20,8 +20,20 @@ static SD_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(stable\s*diffusion|sd|a1111|automatic1111)\b").unwrap()
 });
 
+static GPT_IMAGE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(gpt[\s\-_]?image[\s\-_]?2?|image[\s\-_]?gen[\s\-_]?2)\b").unwrap()
+});
+
+static CHATGPT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bchatgpt\b").unwrap()
+});
+
+static OPENAI_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bopenai\b").unwrap()
+});
+
 static DALLE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(dall[\-·]?e|chatgpt|openai)\b").unwrap()
+    Regex::new(r"(?i)\b(dall[\-·\.]?e)\b").unwrap()
 });
 
 static COMFYUI_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -80,10 +92,6 @@ static PHOTOS_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\bphotos?\b").unwrap()
 });
 
-static NOT_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bnot\s+").unwrap()
-});
-
 fn get_patterns() -> Vec<PatternRule> {
     vec![
         PatternRule {
@@ -115,11 +123,47 @@ fn get_patterns() -> Vec<PatternRule> {
             }),
         },
         PatternRule {
-            pattern: &DALLE_RE,
+            pattern: &GPT_IMAGE_RE,
             build: |_| Some(FilterNode::Rule {
                 field: Field::SourceLabel,
                 op: RuleOp::Eq,
-                value: FilterValue::String("dalle".to_string()),
+                value: FilterValue::String("gpt_image_2".to_string()),
+            }),
+        },
+        PatternRule {
+            pattern: &CHATGPT_RE,
+            build: |_| Some(FilterNode::Rule {
+                field: Field::SourceLabel,
+                op: RuleOp::In,
+                value: FilterValue::StringArray(vec![
+                    "gpt_image_2".to_string(),
+                    "dalle_3".to_string(),
+                    "dalle".to_string(),
+                ]),
+            }),
+        },
+        PatternRule {
+            pattern: &OPENAI_RE,
+            build: |_| Some(FilterNode::Rule {
+                field: Field::SourceLabel,
+                op: RuleOp::In,
+                value: FilterValue::StringArray(vec![
+                    "gpt_image_2".to_string(),
+                    "dalle_3".to_string(),
+                    "dalle".to_string(),
+                    "openai".to_string(),
+                ]),
+            }),
+        },
+        PatternRule {
+            pattern: &DALLE_RE,
+            build: |_| Some(FilterNode::Rule {
+                field: Field::SourceLabel,
+                op: RuleOp::In,
+                value: FilterValue::StringArray(vec![
+                    "dalle_3".to_string(),
+                    "dalle".to_string(),
+                ]),
             }),
         },
         PatternRule {
@@ -339,5 +383,63 @@ mod tests {
         let result = parse_query("");
         let (sql, _) = result.to_sql_clause().unwrap();
         assert_eq!(sql, "1=1");
+    }
+
+    use rusqlite::types::Value as SqlValue;
+
+    fn params_contain(params: &[SqlValue], needle: &str) -> bool {
+        params.iter().any(|p| match p {
+            SqlValue::Text(t) => t.contains(needle),
+            _ => false,
+        })
+    }
+
+    #[test]
+    fn test_parse_gpt_image_2() {
+        let result = parse_query("gpt image 2");
+        let (sql, params) = result.to_sql_clause().unwrap();
+        assert!(sql.contains("source_label"), "sql: {}", sql);
+        assert!(params_contain(&params, "gpt_image_2"), "params: {:?}", params);
+    }
+
+    #[test]
+    fn test_parse_gpt_image_hyphenated() {
+        let result = parse_query("gpt-image-2");
+        let (sql, params) = result.to_sql_clause().unwrap();
+        assert!(sql.contains("source_label"), "sql: {}", sql);
+        assert!(params_contain(&params, "gpt_image_2"), "params: {:?}", params);
+    }
+
+    #[test]
+    fn test_parse_image_gen_2() {
+        let result = parse_query("image gen 2");
+        let (sql, params) = result.to_sql_clause().unwrap();
+        assert!(sql.contains("source_label"), "sql: {}", sql);
+        assert!(params_contain(&params, "gpt_image_2"), "params: {:?}", params);
+    }
+
+    #[test]
+    fn test_parse_openai_umbrella() {
+        let result = parse_query("openai");
+        let (sql, params) = result.to_sql_clause().unwrap();
+        assert!(sql.contains("source_label"), "sql: {}", sql);
+        assert!(params_contain(&params, "gpt_image_2"), "params: {:?}", params);
+        assert!(params_contain(&params, "dalle"), "params: {:?}", params);
+    }
+
+    #[test]
+    fn test_parse_chatgpt() {
+        let result = parse_query("chatgpt");
+        let (sql, params) = result.to_sql_clause().unwrap();
+        assert!(sql.contains("source_label"), "sql: {}", sql);
+        assert!(params_contain(&params, "gpt_image_2"), "params: {:?}", params);
+    }
+
+    #[test]
+    fn test_parse_dalle_only() {
+        let result = parse_query("dall-e");
+        let (sql, params) = result.to_sql_clause().unwrap();
+        assert!(sql.contains("source_label"), "sql: {}", sql);
+        assert!(params_contain(&params, "dalle"), "params: {:?}", params);
     }
 }

@@ -1,6 +1,6 @@
 use sha2::{Sha256, Digest};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -8,12 +8,6 @@ use super::db::Database;
 use super::models::*;
 use super::thumbnails;
 use super::source_detection::{detect_source, read_png_text_chunks};
-
-pub struct ImportResult {
-    pub imported: u32,
-    pub skipped: u32,
-    pub errors: Vec<String>,
-}
 
 pub fn import_file(
     db: &Database,
@@ -73,7 +67,7 @@ pub fn import_file(
     } else {
         vec![]
     };
-    let detection = detect_source(filename, &png_chunks);
+    let detection = detect_source(filename, &png_chunks, file_path);
 
     let aspect_ratio = width as f64 / height.max(1) as f64;
     let orientation = if (aspect_ratio - 1.0).abs() < 0.05 {
@@ -111,27 +105,3 @@ pub fn import_file(
     Ok(Some(image_id))
 }
 
-pub fn import_folder(
-    db: &Database,
-    folder_path: &Path,
-    app_data_dir: &Path,
-) -> ImportResult {
-    let mut result = ImportResult { imported: 0, skipped: 0, errors: vec![] };
-
-    let entries: Vec<PathBuf> = walkdir::WalkDir::new(folder_path)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.path().to_path_buf())
-        .collect();
-
-    for path in entries {
-        match import_file(db, &path, app_data_dir) {
-            Ok(Some(_)) => result.imported += 1,
-            Ok(None) => result.skipped += 1,
-            Err(e) => result.errors.push(format!("{}: {}", path.display(), e)),
-        }
-    }
-
-    result
-}

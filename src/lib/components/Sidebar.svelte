@@ -1,8 +1,8 @@
 <script lang="ts">
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, images, focusedIndex, folders, activeFolder, minSizeFilter, collections, activeCollection, collectMode, collectModeTarget, smartCollections, activeSmartCollection } from '$lib/stores';
-    import { importFolder as apiImportFolder, listImages, listImagesByFolder, listImagesFiltered, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, listCollectionImages, deleteCollectionApi, listSmartCollections, evaluateSmartCollection } from '$lib/api';
+    import { totalCount, images, focusedIndex, folders, activeFolder, minSizeFilter, collections, activeCollection, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast } from '$lib/stores';
+    import { importFolder as apiImportFolder, listImages, listImagesByFolder, listImagesFiltered, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, listCollectionImages, deleteCollectionApi, listSmartCollections, evaluateSmartCollection, isYoloAvailable, isNudenetAvailable, downloadYoloModel, downloadNudenetModel, getDetectionCount, searchByDetectedClass, detectObjects, detectNsfw, getImagesByIds, regenerateThumbnails, checkOllama, analyzeImages, getVisionCount } from '$lib/api';
     import type { SmartCollection } from '$lib/api';
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
@@ -11,6 +11,8 @@
     let importCurrent = $state(0);
     let importTotal = $state(0);
     let lastResult = $state('');
+    let regenerating = $state(false);
+    let regenProgress = $state({ current: 0, total: 0 });
     let foldersExpanded = $state(true);
 
     interface DisplayFolder {
@@ -70,6 +72,7 @@
         } catch (e) {
             console.error('Failed to load smart collections:', e);
         }
+        loadAiState().catch(e => console.error('Failed to load AI state:', e));
     });
 
     function folderName(path: string): string {
@@ -181,6 +184,28 @@
         minSizeFilter.set(value);
     }
 
+    async function handleRegenerateThumbnails() {
+        regenerating = true;
+        regenProgress = { current: 0, total: 0 };
+
+        const unlisten: UnlistenFn = await listen<{ current: number; total: number }>(
+            'thumbnail-progress',
+            (event) => {
+                regenProgress = event.payload;
+            }
+        );
+
+        try {
+            const count = await regenerateThumbnails();
+            lastResult = `Regenerated ${count} thumbnails`;
+        } catch (e) {
+            lastResult = `Thumbnail error: ${e}`;
+        } finally {
+            unlisten();
+            regenerating = false;
+        }
+    }
+
     async function handleImportFolder() {
         const selected = await open({ directory: true, multiple: false });
         if (!selected) return;
@@ -209,16 +234,159 @@
 
         try {
             const result = await apiImportFolder(selected as string);
+            const folderName = (selected as string).split('/').filter(Boolean).pop() ?? selected;
             lastResult = `+${result.imported} imported, ${result.skipped} skipped`;
             if (result.errors.length > 0) {
                 lastResult += `, ${result.errors.length} errors`;
             }
+            showToast(`Imported "${folderName}"`, {
+                detail: lastResult,
+                type: 'success',
+                duration: 8000,
+            });
             await refreshImages();
         } catch (e) {
             lastResult = `Error: ${e}`;
+            showToast('Import failed', { detail: String(e), type: 'error', duration: 10000 });
         } finally {
             unlisten();
             importing = false;
+        }
+    }
+
+    // AI Models state
+    let aiExpanded = $state(true);
+    let yoloReady = $state(false);
+    let nudenetReady = $state(false);
+    let yoloDownloading = $state(false);
+    let nudenetDownloading = $state(false);
+    let yoloDownloadPct = $state(0);
+    let nudenetDownloadPct = $state(0);
+    let yoloProcessed = $state(0);
+    let nudenetProcessed = $state(0);
+    let selectedYoloVariant = $state('medium');
+    let detectedClasses = $state<[string, number][]>([]);
+    let detectingBatch = $state(false);
+    let ollamaModels = $state<string[]>([]);
+    let ollamaReady = $derived(ollamaModels.length > 0);
+    let visionProcessed = $state(0);
+    let analyzingBatch = $state(false);
+
+    async function loadAiState() {
+        try {
+            yoloReady = await isYoloAvailable(selectedYoloVariant);
+            nudenetReady = await isNudenetAvailable();
+            if (yoloReady) {
+                const variantName = selectedYoloVariant === 'nano' ? 'yolo11n' : selectedYoloVariant === 'small' ? 'yolo11s' : 'yolo11m';
+                yoloProcessed = await getDetectionCount(variantName);
+            }
+            if (nudenetReady) {
+                nudenetProcessed = await getDetectionCount('nudenet');
+            }
+            await loadDetectedClasses();
+        } catch (_) {}
+        try {
+            ollamaModels = await checkOllama();
+            visionProcessed = await getVisionCount();
+        } catch (_) {
+            ollamaModels = [];
+        }
+    }
+
+    async function handleAnalyzeBatch() {
+        if (analyzingBatch) return;
+        analyzingBatch = true;
+        try {
+            const allImgs = await listImages(100000, 0);
+            const allIds = allImgs.map(i => i.image.id);
+            await analyzeImages(allIds);
+            await loadAiState();
+        } catch (e) {
+            console.error('Vision analysis error:', e);
+        } finally {
+            analyzingBatch = false;
+        }
+    }
+
+    async function loadDetectedClasses() {
+        const commonClasses = ['person', 'dog', 'cat', 'car', 'bicycle', 'bird', 'horse', 'chair', 'bottle', 'laptop', 'phone', 'book'];
+        const results: [string, number][] = [];
+        for (const cls of commonClasses) {
+            try {
+                const matches = await searchByDetectedClass(cls, 1);
+                if (matches.length > 0) {
+                    const count = await searchByDetectedClass(cls, 100000);
+                    results.push([cls, count.length]);
+                }
+            } catch (_) {}
+        }
+        results.sort((a, b) => b[1] - a[1]);
+        detectedClasses = results;
+    }
+
+    async function handleDownloadYolo() {
+        yoloDownloading = true;
+        yoloDownloadPct = 0;
+        const unlisten = await listen<{ downloaded: number; total: number }>('yolo-download-progress', (e) => {
+            if (e.payload.total > 0) yoloDownloadPct = Math.round((e.payload.downloaded / e.payload.total) * 100);
+        });
+        try {
+            await downloadYoloModel(selectedYoloVariant);
+            yoloReady = true;
+        } catch (e) {
+            console.error('YOLO download error:', e);
+        } finally {
+            unlisten();
+            yoloDownloading = false;
+        }
+    }
+
+    async function handleDownloadNudenet() {
+        nudenetDownloading = true;
+        nudenetDownloadPct = 0;
+        const unlisten = await listen<{ downloaded: number; total: number }>('nudenet-download-progress', (e) => {
+            if (e.payload.total > 0) nudenetDownloadPct = Math.round((e.payload.downloaded / e.payload.total) * 100);
+        });
+        try {
+            await downloadNudenetModel();
+            nudenetReady = true;
+        } catch (e) {
+            console.error('NudeNet download error:', e);
+        } finally {
+            unlisten();
+            nudenetDownloading = false;
+        }
+    }
+
+    async function handleDetectRemaining() {
+        if (detectingBatch) return;
+        detectingBatch = true;
+        try {
+            const allImgs = await listImages(100000, 0);
+            const allIds = allImgs.map(i => i.image.id);
+            if (yoloReady) await detectObjects(allIds, selectedYoloVariant);
+            if (nudenetReady) await detectNsfw(allIds);
+            await loadAiState();
+        } catch (e) {
+            console.error('Batch detection error:', e);
+        } finally {
+            detectingBatch = false;
+        }
+    }
+
+    async function filterByClass(className: string) {
+        try {
+            const matches = await searchByDetectedClass(className, 100000);
+            const ids = matches.map(m => m[0]);
+            if (ids.length > 0) {
+                const imgs = await getImagesByIds(ids);
+                images.set(imgs);
+                focusedIndex.set(0);
+                activeFolder.set(null);
+                activeCollection.set(null);
+            }
+        } catch (e) {
+            console.error('Filter by class error:', e);
         }
     }
 
@@ -294,6 +462,113 @@
         </div>
     </div>
 
+    <div class="section">
+        <button class="folders-toggle" onclick={() => aiExpanded = !aiExpanded}>
+            <span class="toggle-arrow">{aiExpanded ? '▾' : '▸'}</span>
+            <span class="folders-toggle-label">AI MODELS</span>
+        </button>
+
+        {#if aiExpanded}
+            <div class="ai-models-content">
+                <div class="model-row">
+                    <span class="model-name">YOLO</span>
+                    {#if yoloDownloading}
+                        <span class="model-status downloading">
+                            {yoloDownloadPct}%
+                        </span>
+                    {:else if yoloReady}
+                        <span class="model-status ready">ready</span>
+                    {:else}
+                        <span class="model-status missing">missing</span>
+                    {/if}
+                </div>
+
+                {#if yoloDownloading}
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: {yoloDownloadPct}%"></div>
+                    </div>
+                {/if}
+
+                {#if !yoloReady && !yoloDownloading}
+                    <div class="model-download-row">
+                        <select class="variant-select" bind:value={selectedYoloVariant}>
+                            <option value="nano">nano 6MB</option>
+                            <option value="small">small 22MB</option>
+                            <option value="medium">medium 50MB</option>
+                        </select>
+                        <button class="download-btn" onclick={handleDownloadYolo}>dl</button>
+                    </div>
+                {/if}
+
+                <div class="model-row">
+                    <span class="model-name">NudeNet</span>
+                    {#if nudenetDownloading}
+                        <span class="model-status downloading">
+                            {nudenetDownloadPct}%
+                        </span>
+                    {:else if nudenetReady}
+                        <span class="model-status ready">ready</span>
+                    {:else}
+                        <span class="model-status missing">missing</span>
+                    {/if}
+                </div>
+
+                {#if nudenetDownloading}
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: {nudenetDownloadPct}%"></div>
+                    </div>
+                {/if}
+
+                {#if !nudenetReady && !nudenetDownloading}
+                    <button class="download-btn full-width" onclick={handleDownloadNudenet}>download 12MB</button>
+                {/if}
+
+                <div class="model-row">
+                    <span class="model-name">Ollama</span>
+                    {#if ollamaReady}
+                        <span class="model-status ready">{ollamaModels.length} models</span>
+                    {:else}
+                        <span class="model-status missing">offline</span>
+                    {/if}
+                </div>
+
+                {#if yoloReady || nudenetReady}
+                    <div class="processed-row">
+                        <span class="processed-label">Detection</span>
+                        <span class="processed-count">{yoloProcessed}/{$totalCount}</span>
+                    </div>
+                    {#if yoloProcessed < $totalCount}
+                        <button class="detect-btn" onclick={handleDetectRemaining} disabled={detectingBatch}>
+                            {detectingBatch ? 'detecting...' : `> detect remaining ${$totalCount - yoloProcessed}`}
+                        </button>
+                    {/if}
+                {/if}
+
+                {#if ollamaReady}
+                    <div class="processed-row">
+                        <span class="processed-label">Vision</span>
+                        <span class="processed-count">{visionProcessed}/{$totalCount}</span>
+                    </div>
+                    {#if visionProcessed < $totalCount}
+                        <button class="detect-btn" onclick={handleAnalyzeBatch} disabled={analyzingBatch}>
+                            {analyzingBatch ? 'analyzing...' : `> analyze remaining ${$totalCount - visionProcessed}`}
+                        </button>
+                    {/if}
+                {/if}
+
+                {#if detectedClasses.length > 0}
+                    <div class="detected-header">DETECTED</div>
+                    {#each detectedClasses as [cls, count]}
+                        <button class="section-item detected-class" onclick={() => filterByClass(cls)}>
+                            <span class="class-tag">{cls}</span>
+                            <span class="count">{count}</span>
+                        </button>
+                    {/each}
+                {/if}
+            </div>
+        {/if}
+    </div>
+
     {#if $smartCollections.length > 0}
     <div class="section">
         <div class="section-header">SMART</div>
@@ -336,8 +611,11 @@
         {#if lastResult}
             <div class="import-result">{lastResult}</div>
         {/if}
-        <button class="import-btn" onclick={handleImportFolder} disabled={importing}>
+        <button class="import-btn" onclick={handleImportFolder} disabled={importing || regenerating}>
             {importing ? (importTotal > 0 ? `Importing ${importCurrent}/${importTotal}...` : 'Scanning...') : '+ Import Folder'}
+        </button>
+        <button class="import-btn secondary" onclick={handleRegenerateThumbnails} disabled={importing || regenerating}>
+            {regenerating ? `Thumbnails ${regenProgress.current}/${regenProgress.total}...` : 'Regenerate Thumbnails'}
         </button>
     </div>
 </div>
@@ -569,5 +847,127 @@
     .import-btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+    }
+    .import-btn.secondary {
+        background: rgba(122, 162, 247, 0.08);
+        font-size: 10px;
+        padding: 4px 8px;
+        margin-top: 4px;
+    }
+    /* AI Models section */
+    .ai-models-content {
+        padding: 0 8px;
+    }
+    .model-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 3px 0;
+        font-size: 11px;
+    }
+    .model-name {
+        color: var(--text-primary, #e0e0e0);
+        font-weight: 600;
+    }
+    .model-status {
+        font-size: 10px;
+    }
+    .model-status.ready {
+        color: var(--green, #9ece6a);
+    }
+    .model-status.missing {
+        color: var(--text-secondary, #565f89);
+    }
+    .model-status.downloading {
+        color: var(--orange, #e0af68);
+    }
+    .progress-bar {
+        height: 3px;
+        background: var(--border, #1a1a2e);
+        border-radius: 2px;
+        margin: 2px 0 4px;
+        overflow: hidden;
+    }
+    .progress-fill {
+        height: 100%;
+        background: var(--blue, #7aa2f7);
+        transition: width 0.3s;
+    }
+    .model-download-row {
+        display: flex;
+        gap: 4px;
+        margin: 2px 0 4px;
+    }
+    .variant-select {
+        flex: 1;
+        font-size: 10px;
+        padding: 2px 4px;
+        background: var(--bg, #08080c);
+        color: var(--text-primary, #e0e0e0);
+        border: 1px solid var(--border, #1a1a2e);
+        border-radius: var(--radius, 4px);
+        font-family: inherit;
+    }
+    .download-btn {
+        font-size: 10px;
+        padding: 2px 6px;
+        background: rgba(122, 162, 247, 0.15);
+        color: var(--blue, #7aa2f7);
+        border: 1px solid var(--border, #1a1a2e);
+        border-radius: var(--radius, 4px);
+        cursor: pointer;
+        font-family: inherit;
+    }
+    .download-btn:hover {
+        background: rgba(122, 162, 247, 0.25);
+        border-color: var(--blue, #7aa2f7);
+    }
+    .download-btn.full-width {
+        width: 100%;
+        margin: 2px 0 4px;
+    }
+    .processed-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 10px;
+        color: var(--text-secondary, #565f89);
+        padding: 4px 0 2px;
+    }
+    .processed-label {
+        color: var(--text-secondary, #565f89);
+    }
+    .processed-count {
+        color: var(--text-primary, #e0e0e0);
+    }
+    .detect-btn {
+        width: 100%;
+        font-size: 10px;
+        padding: 3px 6px;
+        background: none;
+        color: var(--blue, #7aa2f7);
+        border: none;
+        cursor: pointer;
+        font-family: inherit;
+        text-align: left;
+    }
+    .detect-btn:hover:not(:disabled) {
+        color: var(--text-primary, #e0e0e0);
+    }
+    .detect-btn:disabled {
+        color: var(--text-secondary, #565f89);
+        cursor: not-allowed;
+    }
+    .detected-header {
+        font-size: 9px;
+        font-weight: 700;
+        color: var(--text-secondary, #565f89);
+        letter-spacing: 0.1em;
+        padding: 6px 0 2px;
+    }
+    .detected-class {
+        padding: 2px 0;
+    }
+    .class-tag {
+        color: var(--purple, #bb9af7);
     }
 </style>

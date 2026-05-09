@@ -1,3 +1,4 @@
+pub mod c2pa_reader;
 pub mod db;
 pub mod detection;
 pub mod embeddings;
@@ -8,3 +9,4 @@ pub mod smart_collections;
 pub mod source_detection;
 pub mod nl_parser;
 pub mod thumbnails;
+pub mod vision;

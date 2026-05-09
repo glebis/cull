@@ -1,4 +1,4 @@
-import { invoke } from './tauri-mock';
+import { invoke } from '@tauri-apps/api/core';
 
 export interface Image {
     id: string;

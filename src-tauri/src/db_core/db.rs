@@ -568,6 +568,39 @@ impl Database {
         Ok(count)
     }
 
+    // ---- Vision metadata methods ----
+
+    pub fn store_vision_metadata(&self, image_id: &str, source: &str, fields: &std::collections::HashMap<String, String>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        for (key, value) in fields {
+            conn.execute(
+                "INSERT OR REPLACE INTO image_metadata (image_id, key, value, source) VALUES (?1, ?2, ?3, ?4)",
+                params![image_id, key, value, source],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn get_vision_metadata(&self, image_id: &str) -> Result<Vec<(String, String, String)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT key, value, source FROM image_metadata WHERE image_id = ?1 ORDER BY key"
+        )?;
+        let rows = stmt.query_map(params![image_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        })?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
+    pub fn count_vision_processed(&self, source: &str) -> Result<u32> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(DISTINCT image_id) FROM image_metadata WHERE source = ?1",
+            params![source],
+            |row| row.get::<_, u32>(0),
+        )
+    }
+
     pub fn image_count(&self) -> Result<u32> {
         let conn = self.conn.lock().unwrap();
         conn.query_row("SELECT COUNT(*) FROM images", [], |row| row.get(0))

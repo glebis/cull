@@ -73,6 +73,37 @@ export const collectModeTarget = writable<string | null>(null); // collection id
 export const smartCollections = writable<SmartCollection[]>([]);
 export const activeSmartCollection = writable<SmartCollection | null>(null);
 
+// Detection overlay state
+export type NsfwMode = 'blur' | 'hide' | 'show';
+export const showDetectionBoxes = writable<boolean>(false);
+export const showDetectionInspector = writable<boolean>(false);
+export const nsfwMode = writable<NsfwMode>('blur');
+
+// Toast notifications
+export interface Toast {
+    id: number;
+    message: string;
+    detail?: string;
+    type: 'info' | 'success' | 'warning' | 'error';
+    duration: number;
+}
+export const toasts = writable<Toast[]>([]);
+let toastId = 0;
+export function showToast(message: string, opts?: { detail?: string; type?: Toast['type']; duration?: number }) {
+    const id = ++toastId;
+    const toast: Toast = {
+        id,
+        message,
+        detail: opts?.detail,
+        type: opts?.type ?? 'info',
+        duration: opts?.duration ?? 7000,
+    };
+    toasts.update(t => [...t, toast]);
+    setTimeout(() => {
+        toasts.update(t => t.filter(x => x.id !== id));
+    }, toast.duration);
+}
+
 export const focusedImage = derived(
     [images, focusedIndex],
     ([$images, $idx]) => $images[$idx] ?? null
