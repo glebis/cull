@@ -1,23 +1,31 @@
 use rmcp::{
     ServerHandler,
-    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{ServerCapabilities, ServerInfo},
-    schemars, tool, tool_router,
+    handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
+    model::{ServerCapabilities, ServerInfo, CallToolRequestParams, CallToolResult},
+    schemars, tool, tool_router, ErrorData,
+    service::RequestContext, RoleServer,
 };
 use tauri::Manager;
 
 use crate::AppState;
+use super::auth::{AuthContext, require_capability};
 
 #[derive(Debug, Clone)]
 pub struct ImageViewMcp {
     pub app_handle: tauri::AppHandle,
+    pub auth: AuthContext,
     tool_router: ToolRouter<Self>,
 }
 
 impl ImageViewMcp {
     pub fn new(app_handle: tauri::AppHandle) -> Self {
+        Self::with_auth(app_handle, AuthContext::Local)
+    }
+
+    pub fn with_auth(app_handle: tauri::AppHandle, auth: AuthContext) -> Self {
         Self {
             app_handle,
+            auth,
             tool_router: Self::tool_router(),
         }
     }
@@ -449,5 +457,22 @@ impl ServerHandler for ImageViewMcp {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_instructions("ImageView MCP server — browse, curate, and manage an AI art image library")
+    }
+
+    fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<CallToolResult, ErrorData>> + Send + '_ {
+        async move {
+            let tool_name: &str = &request.name;
+
+            if let Err(msg) = require_capability(&self.auth, tool_name) {
+                return Err(ErrorData::invalid_request(msg, None));
+            }
+
+            let call_context = ToolCallContext::new(self, request, context);
+            self.tool_router.call(call_context).await
+        }
     }
 }
