@@ -15,8 +15,8 @@ let waitingForStar = false;
 
 const VIEW_MODE_KEYS: Record<string, ViewMode> = {
     '1': 'grid',
-    '2': 'compare',
-    '3': 'loupe',
+    '2': 'loupe',
+    '3': 'compare',
     '4': 'canvas',
     '5': 'lineage',
     '6': 'embeddings',
