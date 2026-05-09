@@ -8,9 +8,11 @@ import {
     gridGap,
     loupeScale,
     activeFolder,
+    folders,
     windowName,
     windowLabel,
     navigateTo,
+    showToast,
     type ViewMode,
 } from './stores';
 import { importFolder, importFiles, listImagesByFolder, listImages } from './api';
@@ -53,13 +55,24 @@ export async function handleParams(params: OpenParams) {
     // Handle folder import
     if (params.folder) {
         try {
-            await importFolder(params.folder);
+            const result = await importFolder(params.folder);
             activeFolder.set(params.folder);
+            const folderName = params.folder.split('/').filter(Boolean).pop() ?? params.folder;
             const imgs = await listImagesByFolder(params.folder, 100000, 0);
             images.set(imgs);
             focusedIndex.set(0);
+            // Refresh folder list in sidebar
+            const { listFolders } = await import('./api');
+            const f = await listFolders();
+            folders.set(f);
+            showToast(`Imported "${folderName}"`, {
+                detail: `+${result.imported} new, ${result.skipped} skipped · ${imgs.length} total in folder`,
+                type: 'success',
+                duration: 8000,
+            });
         } catch (e) {
             console.error('Deep link: failed to import folder', e);
+            showToast('Import failed', { detail: String(e), type: 'error', duration: 10000 });
         }
     }
 

@@ -22,14 +22,6 @@ pub struct ImageFile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Project {
-    pub id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Selection {
     pub image_id: String,
     pub project_id: Option<String>,

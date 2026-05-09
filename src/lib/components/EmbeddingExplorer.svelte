@@ -49,8 +49,9 @@
     let selectedPoint = $state<Point | null>(null);
     let highlightedCluster = $state<number | null>(null);
 
-    // Thumbnail images for scatter
+    // Thumbnail images for scatter — keyed by "{id}_{size}"
     let thumbnailImages: Map<string, HTMLImageElement> = new Map();
+    const THUMB_SIZES = [64, 128, 256];
 
     // Canvas interaction
     let canvas: HTMLCanvasElement;
@@ -228,18 +229,44 @@
         }
     }
 
+    function sizedThumbPath(basePath: string, size: number): string {
+        // basePath: "/path/to/{id}.jpg" → "/path/to/{id}_{size}.jpg"
+        return basePath.replace(/\.jpg$/, `_${size}.jpg`);
+    }
+
     function preloadThumbnails() {
         thumbnailImages.clear();
         for (const point of points) {
             const img = imageMap.get(point.id);
             if (!img?.thumbnail_path) continue;
-            const el = new Image();
-            el.src = convertFileSrc(img.thumbnail_path);
-            el.onload = () => {
-                thumbnailImages.set(point.id, el);
-                requestDraw();
-            };
+            for (const size of THUMB_SIZES) {
+                const key = `${point.id}_${size}`;
+                const el = new Image();
+                el.src = convertFileSrc(sizedThumbPath(img.thumbnail_path, size));
+                el.onload = () => {
+                    thumbnailImages.set(key, el);
+                    requestDraw();
+                };
+            }
         }
+    }
+
+    function pickThumbnail(id: string, displayPx: number): HTMLImageElement | undefined {
+        const dpr = window.devicePixelRatio || 1;
+        const physicalPx = displayPx * dpr;
+        // Pick smallest size that covers the physical pixel need
+        for (const size of THUMB_SIZES) {
+            if (size >= physicalPx) {
+                const el = thumbnailImages.get(`${id}_${size}`);
+                if (el?.complete && el.naturalWidth > 0) return el;
+            }
+        }
+        // Fallback to largest available
+        for (let i = THUMB_SIZES.length - 1; i >= 0; i--) {
+            const el = thumbnailImages.get(`${id}_${THUMB_SIZES[i]}`);
+            if (el?.complete && el.naturalWidth > 0) return el;
+        }
+        return undefined;
     }
 
     function nameCluster(clusterPoints: Point[]): string {
@@ -458,13 +485,18 @@
             const isSelected = selectedPoint && selectedPoint.id === p.id;
             const isHovered = hoveredPoint && hoveredPoint.id === p.id;
 
-            const thumbEl = useThumb ? thumbnailImages.get(p.id) : undefined;
+            const thumbEl = useThumb ? pickThumbnail(p.id, baseThumbSize) : undefined;
 
             if (thumbEl && thumbEl.complete && thumbEl.naturalWidth > 0) {
                 const thumbSize = baseThumbSize;
                 const half = thumbSize / 2;
 
-                ctx.drawImage(thumbEl, sx - half, sy - half, thumbSize, thumbSize);
+                // Snap to device pixels to avoid sub-pixel blur
+                const dpr = window.devicePixelRatio || 1;
+                const dx = Math.round((sx - half) * dpr) / dpr;
+                const dy = Math.round((sy - half) * dpr) / dpr;
+                const ds = Math.round(thumbSize * dpr) / dpr;
+                ctx.drawImage(thumbEl, dx, dy, ds, ds);
 
                 // Only highlight selected/hovered — thin white outline
                 if (isSelected || isHovered) {

@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { viewMode, totalCount, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections } from '$lib/stores';
+    import { viewMode, totalCount, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections, showDetectionBoxes, nsfwMode } from '$lib/stores';
     import { derived } from 'svelte/store';
 
     const collectionName = derived(
@@ -35,6 +35,12 @@
         {/if}
     </div>
     <div class="right">
+        {#if $showDetectionBoxes}
+            <span class="hint active-hint">D:boxes</span>
+        {:else}
+            <span class="hint">D:boxes</span>
+        {/if}
+        <span class="hint">B:nsfw:{$nsfwMode}</span>
         <span class="hint">hjkl:nav</span>
         <span class="hint">space:select</span>
         <span class="hint">s+1-5:rate</span>
@@ -83,6 +89,9 @@
     .hint {
         color: var(--text-secondary);
         font-size: 10px;
+    }
+    .active-hint {
+        color: var(--green, #9ece6a);
     }
     .preset {
         color: var(--text-secondary);

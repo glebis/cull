@@ -4,8 +4,10 @@ import {
     compareActiveSide, loupeScale, loupePanX, loupePanY,
     sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode,
     collections, collectMode, collectModeTarget, activeCollection,
+    showDetectionBoxes, showDetectionInspector, nsfwMode,
     navigateTo, navigateBack,
 } from './stores';
+import type { NsfwMode } from './stores';
 import type { ViewMode } from './stores';
 import { setRating, setDecision, createCollection, addToCollection, listCollections, listCollectionImages } from './api';
 
@@ -241,6 +243,24 @@ export function handleKeydown(e: KeyboardEvent) {
     if (e.metaKey && e.key === 'b') {
         e.preventDefault();
         sidebarVisible.update(v => !v);
+        return;
+    }
+
+    // Detection shortcuts (D, I, B)
+    if (e.key === 'd' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        showDetectionBoxes.update(v => !v);
+        return;
+    }
+    if (e.key === 'i' && !e.metaKey && !e.ctrlKey && !e.altKey && (mode === 'loupe' || mode === 'compare')) {
+        e.preventDefault();
+        showDetectionInspector.update(v => !v);
+        return;
+    }
+    if (e.key === 'b' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        const modes: NsfwMode[] = ['blur', 'hide', 'show'];
+        nsfwMode.update(v => modes[(modes.indexOf(v) + 1) % modes.length]);
         return;
     }
 

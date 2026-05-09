@@ -1,7 +1,9 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { revealItemInDir } from '@tauri-apps/plugin-opener';
-    import { images, focusedIndex, statusHint, loupeScale, loupePanX, loupePanY, navigateBack } from '$lib/stores';
+    import { images, focusedIndex, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode } from '$lib/stores';
+    import { getDetections, getVisionMetadata } from '$lib/api';
+    import type { Detection } from '$lib/api';
 
     let dragging = $state(false);
     let dragStartX = $state(0);
@@ -17,19 +19,48 @@
     let rating = $derived(image?.selection?.star_rating ?? 0);
     let decision = $derived(image?.selection?.decision ?? 'undecided');
 
+    let detections = $state<Detection[]>([]);
+    let nsfwDetections = $state<Detection[]>([]);
+    let isNsfw = $derived(nsfwDetections.length > 0);
+    let spaceHeld = $state(false);
+    let imgEl: HTMLImageElement | undefined = $state();
+    let visionMeta = $state<[string, string, string][]>([]);
+    let hideOverlays = $state(false);
+
+    $effect(() => {
+        const id = image?.image.id;
+        if (!id) { detections = []; nsfwDetections = []; return; }
+        getDetections(id).then(dets => {
+            detections = dets.filter(d => !d.class_name.includes('EXPOSED') && !d.class_name.includes('COVERED') && !d.class_name.includes('FACE_') && !d.class_name.includes('BELLY') && !d.class_name.includes('FEET') && !d.class_name.includes('ARMPITS') && !d.class_name.includes('ANUS') && !d.class_name.includes('BUTTOCKS') && !d.class_name.includes('BREAST') && !d.class_name.includes('GENITALIA'));
+            nsfwDetections = dets.filter(d => d.class_name.includes('EXPOSED'));
+        }).catch(() => { detections = []; nsfwDetections = []; });
+        getVisionMetadata(id).then(m => { visionMeta = m; }).catch(() => { visionMeta = []; });
+    });
+
+    let shouldBlur = $derived(isNsfw && $nsfwMode === 'blur' && !spaceHeld);
+
+    function handleSpaceDown(e: KeyboardEvent) {
+        if (e.code === 'Space' && isNsfw && $nsfwMode === 'blur') {
+            e.preventDefault();
+            spaceHeld = true;
+        }
+    }
+    function handleSpaceUp(e: KeyboardEvent) {
+        if (e.code === 'Space') spaceHeld = false;
+    }
+
     $effect(() => {
         const info = `${filename} | ${dimensions} | ${format}`;
         statusHint.set(info);
         return () => statusHint.set(null);
     });
 
-    // Reset zoom/pan when image changes
+    // Reset pan (but keep zoom) when image changes
     let prevImageId = $state('');
     $effect(() => {
         const id = image?.image.id ?? '';
         if (id !== prevImageId) {
             prevImageId = id;
-            loupeScale.set(1);
             loupePanX.set(0);
             loupePanY.set(0);
         }
@@ -100,6 +131,8 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
+<svelte:window onkeydown={handleSpaceDown} onkeyup={handleSpaceUp} />
+<div class="loupe-wrapper" class:has-inspector={$showDetectionInspector}>
 <div
     class="loupe-container"
     onwheel={handleWheel}
@@ -113,16 +146,60 @@
     class:zoomed={$loupeScale > 1}
 >
     {#if image}
-        <img
-            {src}
-            alt={filename}
-            draggable="false"
-            style="transform: scale({$loupeScale}) translate({$loupePanX / $loupeScale}px, {$loupePanY / $loupeScale}px);"
-        />
+        <div class="image-frame">
+            <img
+                bind:this={imgEl}
+                {src}
+                alt={filename}
+                draggable="false"
+                class:blurred={shouldBlur}
+                class:pixel-zoom={$loupeScale > 4}
+                style="transform: scale({$loupeScale}) translate({$loupePanX / $loupeScale}px, {$loupePanY / $loupeScale}px);"
+            />
+
+            {#if shouldBlur}
+                <div class="nsfw-overlay">
+                    <div class="nsfw-label">NSFW BLURRED</div>
+                    <div class="nsfw-hint">hold Space to peek</div>
+                </div>
+            {/if}
+
+            {#if $showDetectionBoxes && imgEl}
+                {#each detections as det}
+                    <div
+                        class="bbox"
+                        style="
+                            left: {det.x * 100}%;
+                            top: {det.y * 100}%;
+                            width: {det.width * 100}%;
+                            height: {det.height * 100}%;
+                            transform: scale({$loupeScale}) translate({$loupePanX / $loupeScale}px, {$loupePanY / $loupeScale}px);
+                        "
+                    >
+                        <span class="bbox-label">{det.class_name} {det.confidence.toFixed(2)}</span>
+                    </div>
+                {/each}
+                {#each nsfwDetections as det}
+                    <div
+                        class="bbox bbox-nsfw"
+                        style="
+                            left: {det.x * 100}%;
+                            top: {det.y * 100}%;
+                            width: {det.width * 100}%;
+                            height: {det.height * 100}%;
+                            transform: scale({$loupeScale}) translate({$loupePanX / $loupeScale}px, {$loupePanY / $loupeScale}px);
+                        "
+                    >
+                        <span class="bbox-label">{det.class_name} {det.confidence.toFixed(2)}</span>
+                    </div>
+                {/each}
+            {/if}
+        </div>
     {:else}
         <div class="empty">No image selected</div>
     {/if}
 
+    {#if !hideOverlays}
     <div class="overlay-bar">
         <span class="filename">{filename}</span>
         <span class="sep">|</span>
@@ -148,6 +225,7 @@
             <span class="zoom">{Math.round($loupeScale * 100)}%</span>
         {/if}
     </div>
+    {/if}
 
     {#if contextMenuVisible}
         <div
@@ -162,9 +240,57 @@
     {/if}
 </div>
 
+{#if $showDetectionInspector}
+    <div class="inspector">
+        <div class="inspector-header">DETECTIONS</div>
+        {#if detections.length > 0}
+            <div class="inspector-section">OBJECTS</div>
+            {#each detections as det}
+                <div class="inspector-row">
+                    <span class="inspector-class">{det.class_name}</span>
+                    <span class="inspector-conf">{det.confidence.toFixed(2)}</span>
+                </div>
+            {/each}
+        {:else}
+            <div class="inspector-empty">no objects</div>
+        {/if}
+
+        <div class="inspector-section">NSFW</div>
+        {#if nsfwDetections.length > 0}
+            {#each nsfwDetections as det}
+                <div class="inspector-row">
+                    <span class="inspector-class nsfw">{det.class_name}</span>
+                    <span class="inspector-conf">{det.confidence.toFixed(2)}</span>
+                </div>
+            {/each}
+        {:else}
+            <div class="inspector-empty">none</div>
+        {/if}
+
+        {#if visionMeta.length > 0}
+            <div class="inspector-section">VISION</div>
+            {#each visionMeta as [key, value, _source]}
+                <div class="inspector-meta-row">
+                    <span class="meta-key">{key}</span>
+                    <span class="meta-value">{value}</span>
+                </div>
+            {/each}
+        {/if}
+    </div>
+{/if}
+</div>
+
 <style>
-    .loupe-container {
+    .loupe-wrapper {
         grid-area: main;
+        display: flex;
+        overflow: hidden;
+    }
+    .loupe-wrapper.has-inspector .loupe-container {
+        flex: 1;
+    }
+    .loupe-container {
+        flex: 1;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -179,6 +305,14 @@
     .loupe-container.dragging {
         cursor: grabbing;
     }
+    .image-frame {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        max-width: 100%;
+        max-height: 100%;
+    }
     img {
         max-width: 100%;
         max-height: 100%;
@@ -186,6 +320,13 @@
         transform-origin: center center;
         user-select: none;
         -webkit-user-drag: none;
+        transition: filter 0.2s;
+    }
+    img.blurred {
+        filter: blur(30px) brightness(0.5);
+    }
+    img.pixel-zoom {
+        image-rendering: pixelated;
     }
     .empty {
         color: var(--text-secondary);
@@ -258,5 +399,106 @@
     .context-menu-item:hover {
         background: var(--blue, #3b82f6);
         color: #fff;
+    }
+    /* Bounding boxes */
+    .bbox {
+        position: absolute;
+        border: 1px solid var(--green, #9ece6a);
+        transform-origin: center center;
+        pointer-events: none;
+    }
+    .bbox-nsfw {
+        border-color: var(--red, #f7768e);
+    }
+    .bbox-label {
+        position: absolute;
+        top: -16px;
+        left: 0;
+        font-size: 9px;
+        padding: 1px 4px;
+        background: rgba(8, 8, 12, 0.8);
+        color: var(--green, #9ece6a);
+        white-space: nowrap;
+    }
+    .bbox-nsfw .bbox-label {
+        color: var(--red, #f7768e);
+    }
+    /* NSFW overlay */
+    .nsfw-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+    }
+    .nsfw-label {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--red, #f7768e);
+        letter-spacing: 0.1em;
+    }
+    .nsfw-hint {
+        font-size: 10px;
+        color: var(--text-secondary, #565f89);
+        margin-top: 4px;
+    }
+    /* Inspector panel */
+    .inspector {
+        width: 180px;
+        background: var(--surface, #0c0c12);
+        border-left: 1px solid var(--border, #1a1a2e);
+        padding: 8px;
+        overflow-y: auto;
+        font-size: 11px;
+    }
+    .inspector-header {
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--text-secondary, #565f89);
+        letter-spacing: 0.1em;
+        margin-bottom: 8px;
+    }
+    .inspector-section {
+        font-size: 9px;
+        font-weight: 700;
+        color: var(--text-secondary, #565f89);
+        letter-spacing: 0.08em;
+        margin-top: 8px;
+        margin-bottom: 4px;
+    }
+    .inspector-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 2px 0;
+    }
+    .inspector-class {
+        color: var(--purple, #bb9af7);
+    }
+    .inspector-class.nsfw {
+        color: var(--red, #f7768e);
+    }
+    .inspector-conf {
+        color: var(--text-secondary, #565f89);
+    }
+    .inspector-empty {
+        color: var(--text-secondary, #565f89);
+        font-style: italic;
+        font-size: 10px;
+    }
+    .inspector-meta-row {
+        display: flex;
+        flex-direction: column;
+        padding: 1px 0;
+        font-size: 10px;
+    }
+    .meta-key {
+        color: var(--text-secondary, #565f89);
+        font-size: 9px;
+    }
+    .meta-value {
+        color: var(--text-primary, #e0e0e0);
+        word-break: break-word;
     }
 </style>
