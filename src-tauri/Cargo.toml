@@ -35,7 +35,7 @@ ndarray = "0.15"
 reqwest = { version = "0.12", features = ["stream", "json"] }
 futures-util = "0.3"
 base64 = "0.22"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "net", "io-util", "rt"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
@@ -44,4 +44,7 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 png = "0.17"
 printpdf = "0.7"
 thiserror = "1"
+rmcp = { version = "1.6", features = ["server", "macros"] }
+anyhow = "1"
+tokio-util = { version = "0.7", features = ["codec"] }
 

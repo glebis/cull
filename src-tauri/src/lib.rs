@@ -96,6 +96,9 @@ pub fn run() {
                 menu::handle_menu_event(&menu_handle, &event);
             });
 
+            // Start MCP socket server
+            mcp::server::start_mcp_server(app.handle().clone());
+
             // Handle deep link URLs that launched the app
             #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
             {
