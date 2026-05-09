@@ -54,8 +54,8 @@ pub async fn generate_embeddings(
 
 #[tauri::command]
 pub async fn get_all_embeddings(state: State<'_, AppState>, model: Option<String>) -> Result<Vec<(String, Vec<f32>)>, String> {
-    let model_name = model.as_deref().unwrap_or("clip-vit-b32");
-    state.db.get_all_embeddings(model_name).map_err(|e| e.to_string())
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::get_all_embeddings(&ctx, model.as_deref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -65,11 +65,9 @@ pub async fn find_similar_images(
     top_k: u32,
     model: Option<String>,
 ) -> Result<Vec<(String, f32)>, String> {
-    let model_name = model.as_deref().unwrap_or("clip-vit-b32");
-    let all = state.db.get_all_embeddings(model_name).map_err(|e| e.to_string())?;
-    let query = all.iter().find(|(id, _)| id == &image_id)
-        .ok_or("Image has no embedding")?;
-    state.db.find_similar(&query.1, model_name, top_k as usize).map_err(|e| e.to_string())
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::find_similar_images(&ctx, &image_id, top_k as usize, model.as_deref())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -136,14 +134,14 @@ pub async fn download_clip_model(app: AppHandle, state: State<'_, AppState>) -> 
 
 #[tauri::command]
 pub async fn is_model_available(state: State<'_, AppState>) -> Result<bool, String> {
-    let engine = state.embedding_engine.lock().unwrap();
-    Ok(engine.is_model_available())
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::is_clip_available(&ctx).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn get_embedding_count(state: State<'_, AppState>, model: Option<String>) -> Result<u32, String> {
-    let model_name = model.as_deref().unwrap_or("clip-vit-b32");
-    state.db.embedding_count(model_name).map_err(|e| e.to_string())
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::get_embedding_count(&ctx, model.as_deref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

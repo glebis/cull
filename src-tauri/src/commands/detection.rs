@@ -218,7 +218,8 @@ pub async fn get_detections(
     image_id: String,
     model: Option<String>,
 ) -> Result<Vec<Detection>, String> {
-    state.db.get_detections(&image_id, model.as_deref()).map_err(|e| e.to_string())
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::get_detections(&ctx, &image_id, model.as_deref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -227,7 +228,8 @@ pub async fn search_by_detected_class(
     class_name: String,
     limit: Option<u32>,
 ) -> Result<Vec<(String, f32)>, String> {
-    state.db.search_by_class(&class_name, limit.unwrap_or(100)).map_err(|e| e.to_string())
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::search_by_detected_class(&ctx, &class_name, limit.unwrap_or(100)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -255,5 +257,6 @@ pub async fn get_detection_count(
     state: State<'_, AppState>,
     model: String,
 ) -> Result<u32, String> {
-    state.db.detection_count(&model).map_err(|e| e.to_string())
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::get_detection_count(&ctx, &model).map_err(|e| e.to_string())
 }

@@ -3,6 +3,8 @@ use crate::AppState;
 use crate::db_core::smart_collections::SmartCollection;
 use crate::db_core::models::ImageWithFile;
 use crate::db_core::nl_parser::parse_query;
+use crate::services::ServiceContext;
+use crate::services::curation as svc;
 
 #[tauri::command]
 pub async fn create_smart_collection(
@@ -11,7 +13,8 @@ pub async fn create_smart_collection(
     filter_json: String,
     nl_query: Option<String>,
 ) -> Result<String, String> {
-    state.db.create_smart_collection(&name, &filter_json, nl_query.as_deref(), false)
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::create_smart_collection(&ctx, &name, &filter_json, nl_query.as_deref())
         .map_err(|e| e.to_string())
 }
 
@@ -19,8 +22,8 @@ pub async fn create_smart_collection(
 pub async fn list_smart_collections(
     state: State<'_, AppState>,
 ) -> Result<Vec<SmartCollection>, String> {
-    state.db.list_smart_collections()
-        .map_err(|e| e.to_string())
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::list_smart_collections(&ctx).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -28,8 +31,8 @@ pub async fn evaluate_smart_collection(
     state: State<'_, AppState>,
     filter_json: String,
 ) -> Result<Vec<ImageWithFile>, String> {
-    state.db.evaluate_smart_collection(&filter_json)
-        .map_err(|e| e.to_string())
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::evaluate_smart_collection(&ctx, &filter_json).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -37,8 +40,8 @@ pub async fn delete_smart_collection(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<(), String> {
-    state.db.delete_smart_collection(&id)
-        .map_err(|e| e.to_string())
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::delete_smart_collection(&ctx, &id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -49,7 +52,8 @@ pub async fn update_smart_collection(
     filter_json: String,
     nl_query: Option<String>,
 ) -> Result<(), String> {
-    state.db.update_smart_collection(&id, &name, &filter_json, nl_query.as_deref())
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::update_smart_collection(&ctx, &id, &name, &filter_json, nl_query.as_deref())
         .map_err(|e| e.to_string())
 }
 

@@ -1,11 +1,13 @@
 use tauri::State;
 use crate::AppState;
 use crate::db_core::models::ImageWithFile;
-use crate::db_core::thumbnails;
+use crate::services::{Pagination, ServiceContext};
+use crate::services::library as svc;
 
 #[tauri::command]
 pub async fn list_folders(state: State<'_, AppState>) -> Result<Vec<(String, u32)>, String> {
-    state.db.list_folders().map_err(|e| e.to_string())
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::list_folders(&ctx).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -15,16 +17,9 @@ pub async fn list_images_by_folder(
     limit: u32,
     offset: u32,
 ) -> Result<Vec<ImageWithFile>, String> {
-    let db = &state.db;
-    let app_data_dir = &state.app_data_dir;
-    let mut images = db.list_images_by_folder(&folder, limit, offset).map_err(|e| e.to_string())?;
-    for img in &mut images {
-        let thumb = thumbnails::thumbnail_path(app_data_dir, &img.image.id);
-        if thumb.exists() {
-            img.thumbnail_path = Some(thumb.to_string_lossy().to_string());
-        }
-    }
-    Ok(images)
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::list_images_by_folder(&ctx, &folder, Pagination::clamped(offset, limit))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -33,18 +28,9 @@ pub async fn list_images(
     limit: u32,
     offset: u32,
 ) -> Result<Vec<ImageWithFile>, String> {
-    let db = &state.db;
-    let app_data_dir = &state.app_data_dir;
-    let mut images = db.list_images(limit, offset).map_err(|e| e.to_string())?;
-
-    for img in &mut images {
-        let thumb = thumbnails::thumbnail_path(app_data_dir, &img.image.id);
-        if thumb.exists() {
-            img.thumbnail_path = Some(thumb.to_string_lossy().to_string());
-        }
-    }
-
-    Ok(images)
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::list_images(&ctx, Pagination::clamped(offset, limit))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -63,21 +49,15 @@ pub async fn list_images_filtered(
     limit: u32,
     offset: u32,
 ) -> Result<Vec<ImageWithFile>, String> {
-    let db = &state.db;
-    let app_data_dir = &state.app_data_dir;
-    let mut images = db.list_images_filtered(min_width, min_height, limit, offset).map_err(|e| e.to_string())?;
-    for img in &mut images {
-        let thumb = thumbnails::thumbnail_path(app_data_dir, &img.image.id);
-        if thumb.exists() {
-            img.thumbnail_path = Some(thumb.to_string_lossy().to_string());
-        }
-    }
-    Ok(images)
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::list_images_filtered(&ctx, min_width, min_height, Pagination::clamped(offset, limit))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn get_image_count(state: State<'_, AppState>) -> Result<u32, String> {
-    state.db.image_count().map_err(|e| e.to_string())
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::get_image_count(&ctx).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -85,19 +65,9 @@ pub async fn get_images_by_ids(
     state: State<'_, AppState>,
     image_ids: Vec<String>,
 ) -> Result<Vec<ImageWithFile>, String> {
-    let db = &state.db;
-    let app_data_dir = &state.app_data_dir;
+    let ctx = ServiceContext::from_app_state(&state, None);
     let id_refs: Vec<&str> = image_ids.iter().map(|s| s.as_str()).collect();
-    let mut images = db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
-
-    for img in &mut images {
-        let thumb = thumbnails::thumbnail_path(app_data_dir, &img.image.id);
-        if thumb.exists() {
-            img.thumbnail_path = Some(thumb.to_string_lossy().to_string());
-        }
-    }
-
-    Ok(images)
+    svc::get_images_by_ids(&ctx, &id_refs).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -105,18 +75,8 @@ pub async fn get_iteration_siblings(
     state: State<'_, AppState>,
     parent_id: String,
 ) -> Result<Vec<ImageWithFile>, String> {
-    let db = &state.db;
-    let app_data_dir = &state.app_data_dir;
-    let mut images = db.get_iteration_siblings(&parent_id).map_err(|e| e.to_string())?;
-
-    for img in &mut images {
-        let thumb = thumbnails::thumbnail_path(app_data_dir, &img.image.id);
-        if thumb.exists() {
-            img.thumbnail_path = Some(thumb.to_string_lossy().to_string());
-        }
-    }
-
-    Ok(images)
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::get_iteration_siblings(&ctx, &parent_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

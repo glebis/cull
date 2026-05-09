@@ -84,7 +84,8 @@ pub async fn get_vision_metadata(
     state: State<'_, AppState>,
     image_id: String,
 ) -> Result<Vec<(String, String, String)>, String> {
-    state.db.get_vision_metadata(&image_id).map_err(|e| e.to_string())
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::get_vision_metadata(&ctx, &image_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -92,6 +93,6 @@ pub async fn get_vision_count(
     state: State<'_, AppState>,
     source: Option<String>,
 ) -> Result<u32, String> {
-    let src = source.unwrap_or_else(|| "minicpm-v".to_string());
-    state.db.count_vision_processed(&src).map_err(|e| e.to_string())
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::get_vision_count(&ctx, source.as_deref()).map_err(|e| e.to_string())
 }
