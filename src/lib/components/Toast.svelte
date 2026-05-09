@@ -1,5 +1,9 @@
 <script lang="ts">
     import { toasts } from '$lib/stores';
+
+    function dismiss(id: number) {
+        toasts.update(t => t.filter(x => x.id !== id));
+    }
 </script>
 
 {#if $toasts.length > 0}
@@ -9,6 +13,15 @@
                 <div class="toast-message">{toast.message}</div>
                 {#if toast.detail}
                     <div class="toast-detail">{toast.detail}</div>
+                {/if}
+                {#if toast.actions && toast.actions.length > 0}
+                    <div class="toast-actions">
+                        {#each toast.actions as action}
+                            <button class="toast-action-btn" onclick={() => { action.onclick(); dismiss(toast.id); }}>
+                                {action.label}
+                            </button>
+                        {/each}
+                    </div>
                 {/if}
             </div>
         {/each}
@@ -54,6 +67,23 @@
         font-size: 10px;
         color: var(--text-secondary, #565f89);
         margin-top: 3px;
+    }
+    .toast-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 4px;
+    }
+    .toast-action-btn {
+        background: none;
+        border: none;
+        color: var(--accent, #8cc63f);
+        cursor: pointer;
+        font-size: 12px;
+        padding: 0;
+        text-decoration: underline;
+    }
+    .toast-action-btn:hover {
+        opacity: 0.8;
     }
     @keyframes toast-in {
         from { opacity: 0; transform: translateX(20px); }

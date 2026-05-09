@@ -30,6 +30,8 @@ export interface ImportResponse {
     imported: number;
     skipped: number;
     errors: string[];
+    batch_id: string | null;
+    image_ids: string[];
 }
 
 // Smart Collections types
@@ -324,4 +326,54 @@ export async function getAppSetting(key: string): Promise<string | null> {
 
 export async function setAppSetting(key: string, value: string): Promise<void> {
     return invoke('set_app_setting', { key, value });
+}
+
+// Lineage commands
+export interface LineageGroup {
+    id: string;
+    name: string;
+    created_at: string;
+    detection_method: string | null;
+    detection_score: number | null;
+    image_count: number;
+}
+
+export async function listLineageGroups(): Promise<LineageGroup[]> {
+    return invoke('list_lineage_groups');
+}
+
+export async function getLineageGroupImages(groupId: string): Promise<ImageWithFile[]> {
+    return invoke('get_lineage_group_images', { groupId });
+}
+
+export async function createLineageGroupManual(name: string, imageIds: string[]): Promise<string> {
+    return invoke('create_lineage_group_manual', { name, imageIds });
+}
+
+export async function renameLineageGroup(groupId: string, name: string): Promise<void> {
+    return invoke('rename_lineage_group', { groupId, name });
+}
+
+export async function mergeLineageGroups(keepId: string, mergeId: string): Promise<void> {
+    return invoke('merge_lineage_groups', { keepId, mergeId });
+}
+
+export async function dissolveLineageGroup(groupId: string): Promise<void> {
+    return invoke('dissolve_lineage_group', { groupId });
+}
+
+export async function addToLineageGroup(groupId: string, imageId: string): Promise<void> {
+    return invoke('add_to_lineage_group', { groupId, imageId });
+}
+
+export async function removeFromLineageGroup(imageId: string): Promise<void> {
+    return invoke('remove_from_lineage_group', { imageId });
+}
+
+export async function getBatchImages(batchId: string): Promise<ImageWithFile[]> {
+    return invoke('get_batch_images', { batchId });
+}
+
+export async function scanLineage(): Promise<number> {
+    return invoke('scan_lineage');
 }

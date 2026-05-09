@@ -73,6 +73,17 @@ export const collectModeTarget = writable<string | null>(null); // collection id
 export const smartCollections = writable<SmartCollection[]>([]);
 export const activeSmartCollection = writable<SmartCollection | null>(null);
 
+// Import batch filter (transient — shows only batch images after import)
+export const importBatchFilter = writable<string | null>(null);
+export const importBatchImageIds = writable<string[]>([]);
+
+// Pinned (active) collection — new imports auto-append here
+export const pinnedCollection = writable<string | null>(null);
+
+// Lineage tab layout preference
+export type LineageLayout = 'timeline' | 'comparison';
+export const lineageLayout = writable<LineageLayout>('timeline');
+
 // Detection overlay state
 export type NsfwMode = 'blur' | 'hide' | 'show';
 export const showDetectionBoxes = writable<boolean>(false);
@@ -80,16 +91,22 @@ export const showDetectionInspector = writable<boolean>(false);
 export const nsfwMode = writable<NsfwMode>('blur');
 
 // Toast notifications
+export interface ToastAction {
+    label: string;
+    onclick: () => void;
+}
+
 export interface Toast {
     id: number;
     message: string;
     detail?: string;
     type: 'info' | 'success' | 'warning' | 'error';
     duration: number;
+    actions?: ToastAction[];
 }
 export const toasts = writable<Toast[]>([]);
 let toastId = 0;
-export function showToast(message: string, opts?: { detail?: string; type?: Toast['type']; duration?: number }) {
+export function showToast(message: string, opts?: { detail?: string; type?: Toast['type']; duration?: number; actions?: ToastAction[] }) {
     const id = ++toastId;
     const toast: Toast = {
         id,
@@ -97,6 +114,7 @@ export function showToast(message: string, opts?: { detail?: string; type?: Toas
         detail: opts?.detail,
         type: opts?.type ?? 'info',
         duration: opts?.duration ?? 7000,
+        actions: opts?.actions,
     };
     toasts.update(t => [...t, toast]);
     setTimeout(() => {
