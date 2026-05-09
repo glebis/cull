@@ -287,6 +287,57 @@ pub fn get_recent_audit(ctx: &ServiceContext, limit: u32) -> Result<Vec<crate::d
     Ok(entries)
 }
 
+pub fn parse_scope(scope_json: &Option<String>) -> Option<TokenScope> {
+    scope_json.as_ref()
+        .and_then(|s| serde_json::from_str(s).ok())
+}
+
+pub fn image_in_scope(scope: &Option<TokenScope>, image_path: &str, image_collections: &[String]) -> bool {
+    let s = match scope {
+        None => return true,
+        Some(s) => s,
+    };
+
+    if let Some(folders) = &s.folders {
+        for folder in folders {
+            if image_path.starts_with(folder) {
+                return true;
+            }
+        }
+    }
+
+    if let Some(collections) = &s.collections {
+        for col_id in collections {
+            if image_collections.contains(col_id) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+pub fn folder_in_scope(scope: &Option<TokenScope>, folder_path: &str) -> bool {
+    let s = match scope {
+        None => return true,
+        Some(s) => s,
+    };
+
+    if let Some(folders) = &s.folders {
+        for allowed in folders {
+            if folder_path.starts_with(allowed) || allowed.starts_with(folder_path) {
+                return true;
+            }
+        }
+    }
+
+    if s.collections.is_some() {
+        return true;
+    }
+
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -607,6 +658,119 @@ mod tests {
         let pepper = secrets.get("mcp_pepper").unwrap();
         assert!(pepper.is_some());
         assert_eq!(pepper.unwrap().len(), 64);
+    }
+
+    #[test]
+    fn test_parse_scope_none() {
+        assert!(parse_scope(&None).is_none());
+    }
+
+    #[test]
+    fn test_parse_scope_valid() {
+        let json = Some(r#"{"collections":["col_a"],"folders":["/art"],"tags":["public"]}"#.to_string());
+        let scope = parse_scope(&json).unwrap();
+        assert_eq!(scope.collections.unwrap(), vec!["col_a"]);
+        assert_eq!(scope.folders.unwrap(), vec!["/art"]);
+        assert_eq!(scope.tags.unwrap(), vec!["public"]);
+    }
+
+    #[test]
+    fn test_parse_scope_invalid_json() {
+        let json = Some("not json".to_string());
+        assert!(parse_scope(&json).is_none());
+    }
+
+    #[test]
+    fn test_image_in_scope_unrestricted() {
+        assert!(image_in_scope(&None, "/any/path/image.png", &[]));
+    }
+
+    #[test]
+    fn test_image_in_scope_folder_match() {
+        let scope = Some(TokenScope {
+            collections: None,
+            folders: Some(vec!["/art/midjourney".to_string()]),
+            tags: None,
+        });
+        assert!(image_in_scope(&scope, "/art/midjourney/img001.png", &[]));
+        assert!(image_in_scope(&scope, "/art/midjourney/subfolder/img.jpg", &[]));
+    }
+
+    #[test]
+    fn test_image_in_scope_folder_no_match() {
+        let scope = Some(TokenScope {
+            collections: None,
+            folders: Some(vec!["/art/midjourney".to_string()]),
+            tags: None,
+        });
+        assert!(!image_in_scope(&scope, "/art/dalle/img001.png", &[]));
+        assert!(!image_in_scope(&scope, "/photos/vacation.jpg", &[]));
+    }
+
+    #[test]
+    fn test_image_in_scope_collection_match() {
+        let scope = Some(TokenScope {
+            collections: Some(vec!["col_abc".to_string()]),
+            folders: None,
+            tags: None,
+        });
+        assert!(image_in_scope(&scope, "/any/path.png", &["col_abc".to_string()]));
+        assert!(!image_in_scope(&scope, "/any/path.png", &["col_other".to_string()]));
+        assert!(!image_in_scope(&scope, "/any/path.png", &[]));
+    }
+
+    #[test]
+    fn test_image_in_scope_union_semantics() {
+        let scope = Some(TokenScope {
+            collections: Some(vec!["col_abc".to_string()]),
+            folders: Some(vec!["/art/dalle".to_string()]),
+            tags: None,
+        });
+        // Matches folder
+        assert!(image_in_scope(&scope, "/art/dalle/img.png", &[]));
+        // Matches collection
+        assert!(image_in_scope(&scope, "/other/path.png", &["col_abc".to_string()]));
+        // Matches neither
+        assert!(!image_in_scope(&scope, "/other/path.png", &[]));
+    }
+
+    #[test]
+    fn test_image_in_scope_no_match() {
+        let scope = Some(TokenScope {
+            collections: Some(vec!["col_abc".to_string()]),
+            folders: Some(vec!["/art".to_string()]),
+            tags: Some(vec!["public".to_string()]),
+        });
+        assert!(!image_in_scope(&scope, "/photos/vacation.jpg", &["col_other".to_string()]));
+    }
+
+    #[test]
+    fn test_folder_in_scope_unrestricted() {
+        assert!(folder_in_scope(&None, "/any/folder"));
+    }
+
+    #[test]
+    fn test_folder_in_scope_match() {
+        let scope = Some(TokenScope {
+            folders: Some(vec!["/art/midjourney".to_string()]),
+            collections: None,
+            tags: None,
+        });
+        assert!(folder_in_scope(&scope, "/art/midjourney"));
+        assert!(folder_in_scope(&scope, "/art/midjourney/subfolder"));
+        // Parent folder contains the allowed folder
+        assert!(folder_in_scope(&scope, "/art"));
+    }
+
+    #[test]
+    fn test_folder_in_scope_no_match() {
+        let scope = Some(TokenScope {
+            folders: Some(vec!["/art/midjourney".to_string()]),
+            collections: None,
+            tags: None,
+        });
+        assert!(!folder_in_scope(&scope, "/photos"));
+        assert!(!folder_in_scope(&scope, "/art/dalle"));
     }
 
     #[test]

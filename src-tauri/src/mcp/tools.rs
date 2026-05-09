@@ -8,6 +8,8 @@ use rmcp::{
 use tauri::Manager;
 
 use crate::AppState;
+use crate::db_core::models::TokenScope;
+use crate::services::tokens;
 use super::auth::{AuthContext, require_capability};
 
 #[derive(Debug, Clone)]
@@ -28,6 +30,30 @@ impl ImageViewMcp {
             auth,
             tool_router: Self::tool_router(),
         }
+    }
+
+    fn token_scope(&self) -> Option<TokenScope> {
+        match &self.auth {
+            AuthContext::Local => None,
+            AuthContext::Authenticated(token) => tokens::parse_scope(&token.scope_json),
+        }
+    }
+
+    fn check_image_scope(&self, image_path: &str) -> bool {
+        let scope = self.token_scope();
+        tokens::image_in_scope(&scope, image_path, &[])
+    }
+
+    fn filter_images_by_scope(&self, images: Vec<serde_json::Value>, paths: &[String]) -> Vec<serde_json::Value> {
+        let scope = self.token_scope();
+        if scope.is_none() {
+            return images;
+        }
+        images.into_iter()
+            .zip(paths.iter())
+            .filter(|(_, path)| tokens::image_in_scope(&scope, path, &[]))
+            .map(|(img, _)| img)
+            .collect()
     }
 }
 
@@ -157,10 +183,13 @@ impl ImageViewMcp {
         let state = self.app_handle.state::<AppState>();
         let offset = params.offset.unwrap_or(0);
         let limit = params.limit.unwrap_or(50).min(100).max(1);
+        let scope = self.token_scope();
 
         match state.db.list_images(limit, offset) {
             Ok(images) => {
-                let result: Vec<serde_json::Value> = images.iter().map(|img| {
+                let result: Vec<serde_json::Value> = images.iter()
+                    .filter(|img| tokens::image_in_scope(&scope, &img.path, &[]))
+                    .map(|img| {
                     serde_json::json!({
                         "id": img.image.id,
                         "path": img.path,
@@ -185,18 +214,23 @@ impl ImageViewMcp {
 
         match state.db.get_images_by_ids(&id_refs) {
             Ok(images) => match images.into_iter().next() {
-                Some(img) => serde_json::json!({
-                    "id": img.image.id,
-                    "path": img.path,
-                    "width": img.image.width,
-                    "height": img.image.height,
-                    "format": img.image.format,
-                    "file_size": img.image.file_size,
-                    "created_at": img.image.created_at,
-                    "imported_at": img.image.imported_at,
-                    "rating": img.selection.as_ref().and_then(|s| s.star_rating),
-                    "decision": img.selection.as_ref().map(|s| &s.decision),
-                }).to_string(),
+                Some(img) => {
+                    if !self.check_image_scope(&img.path) {
+                        return format!("Error: Image '{}' not found", params.image_id);
+                    }
+                    serde_json::json!({
+                        "id": img.image.id,
+                        "path": img.path,
+                        "width": img.image.width,
+                        "height": img.image.height,
+                        "format": img.image.format,
+                        "file_size": img.image.file_size,
+                        "created_at": img.image.created_at,
+                        "imported_at": img.image.imported_at,
+                        "rating": img.selection.as_ref().and_then(|s| s.star_rating),
+                        "decision": img.selection.as_ref().map(|s| &s.decision),
+                    }).to_string()
+                }
                 None => format!("Error: Image '{}' not found", params.image_id),
             },
             Err(e) => format!("Error: {}", e),
@@ -206,11 +240,14 @@ impl ImageViewMcp {
     #[tool(description = "List all imported folders with image counts")]
     fn list_folders(&self, Parameters(_): Parameters<EmptyParams>) -> String {
         let state = self.app_handle.state::<AppState>();
+        let scope = self.token_scope();
         match state.db.list_folders() {
             Ok(folders) => {
-                let result: Vec<serde_json::Value> = folders.iter().map(|(path, count)| {
-                    serde_json::json!({"path": path, "image_count": count})
-                }).collect();
+                let result: Vec<serde_json::Value> = folders.iter()
+                    .filter(|(path, _)| tokens::folder_in_scope(&scope, path))
+                    .map(|(path, count)| {
+                        serde_json::json!({"path": path, "image_count": count})
+                    }).collect();
                 serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
             }
             Err(e) => format!("Error: {}", e),
@@ -233,13 +270,19 @@ impl ImageViewMcp {
 
     #[tool(description = "List images in a specific folder with pagination")]
     fn list_folder_images(&self, Parameters(params): Parameters<ListFolderImagesParams>) -> String {
+        let scope = self.token_scope();
+        if !tokens::folder_in_scope(&scope, &params.folder_path) {
+            return "[]".to_string();
+        }
         let state = self.app_handle.state::<AppState>();
         let offset = params.offset.unwrap_or(0);
         let limit = params.limit.unwrap_or(50).min(100).max(1);
 
         match state.db.list_images_by_folder(&params.folder_path, limit, offset) {
             Ok(images) => {
-                let result: Vec<serde_json::Value> = images.iter().map(|img| {
+                let result: Vec<serde_json::Value> = images.iter()
+                    .filter(|img| tokens::image_in_scope(&scope, &img.path, &[]))
+                    .map(|img| {
                     serde_json::json!({
                         "id": img.image.id,
                         "path": img.path,
@@ -264,6 +307,13 @@ impl ImageViewMcp {
             return "Error: Rating must be 0-5".to_string();
         }
         let state = self.app_handle.state::<AppState>();
+        if let Ok(images) = state.db.get_images_by_ids(&[params.image_id.as_str()]) {
+            if let Some(img) = images.first() {
+                if !self.check_image_scope(&img.path) {
+                    return "Error: Access denied — image outside token scope".to_string();
+                }
+            }
+        }
         match state.db.set_rating(&params.image_id, params.rating) {
             Ok(()) => serde_json::json!({"status": "ok", "image_id": params.image_id, "rating": params.rating}).to_string(),
             Err(e) => format!("Error: {}", e),
@@ -276,6 +326,13 @@ impl ImageViewMcp {
             return "Error: Decision must be 'selected', 'rejected', or 'none'".to_string();
         }
         let state = self.app_handle.state::<AppState>();
+        if let Ok(images) = state.db.get_images_by_ids(&[params.image_id.as_str()]) {
+            if let Some(img) = images.first() {
+                if !self.check_image_scope(&img.path) {
+                    return "Error: Access denied — image outside token scope".to_string();
+                }
+            }
+        }
         match state.db.set_decision(&params.image_id, &params.decision) {
             Ok(()) => serde_json::json!({"status": "ok", "image_id": params.image_id, "decision": params.decision}).to_string(),
             Err(e) => format!("Error: {}", e),
@@ -432,6 +489,10 @@ impl ImageViewMcp {
 
     #[tool(description = "Navigate the local app to a folder in grid view")]
     fn navigate_to_folder(&self, Parameters(params): Parameters<NavigateToFolderParams>) -> String {
+        let scope = self.token_scope();
+        if !tokens::folder_in_scope(&scope, &params.folder_path) {
+            return "Error: Access denied — folder outside token scope".to_string();
+        }
         use tauri::Emitter;
         let params_json = serde_json::json!({
             "folder": params.folder_path,
