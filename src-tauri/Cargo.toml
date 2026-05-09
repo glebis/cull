@@ -35,7 +35,7 @@ ndarray = "0.15"
 reqwest = { version = "0.12", features = ["stream", "json"] }
 futures-util = "0.3"
 base64 = "0.22"
-tokio = { version = "1", features = ["time", "net", "io-util", "rt"] }
+tokio = { version = "1", features = ["time", "net", "io-util", "io-std", "rt", "rt-multi-thread"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
@@ -48,4 +48,8 @@ rmcp = { version = "1.6", features = ["server", "macros"] }
 anyhow = "1"
 tokio-util = { version = "0.7", features = ["codec"] }
 clap = { version = "4", features = ["derive"] }
+rand = "0.8"
+subtle = "2"
+hex = "0.4"
+dirs = "5"
 

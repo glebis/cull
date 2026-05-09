@@ -24,6 +24,7 @@ impl Database {
         self.migrate_smart_collections()?;
         self.seed_preset_collections()?;
         self.migrate_lineage_tables()?;
+        self.migrate_mcp_tables()?;
         Ok(())
     }
 
@@ -154,6 +155,32 @@ impl Database {
             let _ = conn.execute(&sql, []);
         }
 
+        Ok(())
+    }
+
+    fn migrate_mcp_tables(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("
+            CREATE TABLE IF NOT EXISTS mcp_tokens (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                secret_hash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                scope_json TEXT,
+                created_at TEXT NOT NULL,
+                expires_at TEXT,
+                last_used_at TEXT,
+                revoked INTEGER DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS mcp_audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_id TEXT,
+                tool_name TEXT NOT NULL,
+                params_json TEXT,
+                result_status TEXT NOT NULL,
+                timestamp TEXT NOT NULL
+            );
+        ")?;
         Ok(())
     }
 

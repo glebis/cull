@@ -39,10 +39,68 @@ fn is_image_path(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
+fn run_stdio_bridge() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
+
+    rt.block_on(async {
+        let app_data_dir = dirs::data_dir()
+            .expect("No data dir")
+            .join("com.glebkalinin.imageview");
+
+        let sock_path = mcp::socket::socket_path(&app_data_dir);
+
+        let stream = match tokio::net::UnixStream::connect(&sock_path).await {
+            Ok(s) => s,
+            Err(_) => {
+                eprintln!("MCP socket not found, launching app in tray mode...");
+                let exe = std::env::current_exe().expect("Can't find own executable");
+                std::process::Command::new(&exe)
+                    .arg("--tray")
+                    .spawn()
+                    .expect("Failed to launch app in tray mode");
+
+                let mut attempts = 0;
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    match tokio::net::UnixStream::connect(&sock_path).await {
+                        Ok(s) => break s,
+                        Err(_) if attempts < 20 => { attempts += 1; }
+                        Err(e) => {
+                            eprintln!("Failed to connect to MCP socket after 10s: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+        };
+
+        let (mut sock_read, mut sock_write) = tokio::io::split(stream);
+        let mut stdin = tokio::io::stdin();
+        let mut stdout = tokio::io::stdout();
+
+        tokio::select! {
+            r = tokio::io::copy(&mut stdin, &mut sock_write) => {
+                if let Err(e) = r { eprintln!("stdin->socket: {}", e); }
+            }
+            r = tokio::io::copy(&mut sock_read, &mut stdout) => {
+                if let Err(e) = r { eprintln!("socket->stdout: {}", e); }
+            }
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let args = <cli::CliArgs as clap::Parser>::parse();
     let start_hidden = args.tray;
+
+    if args.mcp_stdio {
+        run_stdio_bridge();
+        return;
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

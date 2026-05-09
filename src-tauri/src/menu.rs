@@ -47,8 +47,8 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     // View menu
     let view_menu = Submenu::new(app, "View", true)?;
     view_menu.append(&MenuItem::with_id(app, "view_grid", "Grid", true, Some::<&str>("CmdOrCtrl+1"))?)?;
-    view_menu.append(&MenuItem::with_id(app, "view_compare", "Compare", true, Some::<&str>("CmdOrCtrl+2"))?)?;
-    view_menu.append(&MenuItem::with_id(app, "view_loupe", "Loupe", true, Some::<&str>("CmdOrCtrl+3"))?)?;
+    view_menu.append(&MenuItem::with_id(app, "view_loupe", "Loupe", true, Some::<&str>("CmdOrCtrl+2"))?)?;
+    view_menu.append(&MenuItem::with_id(app, "view_compare", "Compare", true, Some::<&str>("CmdOrCtrl+3"))?)?;
     view_menu.append(&MenuItem::with_id(app, "view_canvas", "Canvas", true, Some::<&str>("CmdOrCtrl+4"))?)?;
     view_menu.append(&MenuItem::with_id(app, "view_lineage", "Lineage", true, Some::<&str>("CmdOrCtrl+5"))?)?;
     view_menu.append(&MenuItem::with_id(app, "view_embeddings", "Embedding Explorer", true, Some::<&str>("CmdOrCtrl+6"))?)?;

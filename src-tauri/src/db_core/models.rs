@@ -38,3 +38,32 @@ pub struct ImageWithFile {
     pub selection: Option<Selection>,
     pub source_label: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpToken {
+    pub id: String,
+    pub name: String,
+    pub role: String,
+    pub scope_json: Option<String>,
+    pub created_at: String,
+    pub expires_at: Option<String>,
+    pub last_used_at: Option<String>,
+    pub revoked: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenScope {
+    pub collections: Option<Vec<String>>,
+    pub folders: Option<Vec<String>>,
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditEntry {
+    pub id: i64,
+    pub token_id: Option<String>,
+    pub tool_name: String,
+    pub params_json: Option<String>,
+    pub result_status: String,
+    pub timestamp: String,
+}
