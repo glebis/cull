@@ -163,6 +163,11 @@ pub fn run() {
             commands::vision::analyze_images,
             commands::vision::get_vision_metadata,
             commands::vision::get_vision_count,
+            commands::export::create_export_manifest,
+            commands::export::validate_export_manifest,
+            commands::export::apply_export_patches,
+            commands::export::list_export_presets,
+            commands::export::get_export_asset,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
