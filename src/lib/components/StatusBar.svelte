@@ -1,6 +1,17 @@
 <script lang="ts">
-    import { viewMode, totalCount, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections, showDetectionBoxes, nsfwMode } from '$lib/stores';
+    import { viewMode, totalCount, images, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections, showDetectionBoxes, nsfwMode } from '$lib/stores';
     import { derived } from 'svelte/store';
+
+    const displayCount = derived(
+        [images, totalCount],
+        ([$imgs, $total]) => {
+            const showing = $imgs.length;
+            if (showing < $total && showing > 0) {
+                return `${showing} / ${$total} images`;
+            }
+            return `${$total} images`;
+        }
+    );
 
     const collectionName = derived(
         [activeCollection, collections],
@@ -20,7 +31,7 @@
             <span class="collection-name">{$collectionName}</span>
         {/if}
         <span class="sep">|</span>
-        <span>{$totalCount} images</span>
+        <span>{$displayCount}</span>
         {#if $selectedCount > 0}
             <span class="sep">|</span>
             <span class="selected">{$selectedCount} selected</span>

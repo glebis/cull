@@ -40,6 +40,8 @@
         showRules = true;
         applied = false;
         saving = false;
+        // Auto-apply: parse + apply in one step
+        await handleApply();
     }
 
     async function handleApply() {
@@ -55,6 +57,8 @@
         if (e.key === 'Enter') {
             if (saving) {
                 handleSaveConfirm();
+            } else if (showRules && parsedFilter) {
+                handleApply();
             } else {
                 handleParse();
             }

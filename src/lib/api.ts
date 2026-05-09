@@ -1,16 +1,4 @@
-import { invoke as tauriInvoke } from '@tauri-apps/api/core';
-
-function isTauri(): boolean {
-    return typeof window !== 'undefined' && '__TAURI__' in window;
-}
-
-async function invoke<T>(cmd: string, args?: any): Promise<T> {
-    if (isTauri()) {
-        return tauriInvoke<T>(cmd, args);
-    }
-    const { invoke: mockInvoke } = await import('./tauri-mock');
-    return mockInvoke<T>(cmd, args);
-}
+import { invoke } from '@tauri-apps/api/core';
 
 export interface Image {
     id: string;
@@ -97,6 +85,10 @@ export async function importFiles(filePaths: string[]): Promise<ImportResponse> 
 
 export async function regenerateThumbnails(): Promise<number> {
     return invoke<number>('regenerate_thumbnails');
+}
+
+export async function rescanSources(): Promise<number> {
+    return invoke<number>('rescan_sources');
 }
 
 export async function setRating(imageId: string, rating: number): Promise<void> {

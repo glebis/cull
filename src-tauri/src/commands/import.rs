@@ -149,6 +149,61 @@ pub async fn regenerate_thumbnails(
     Ok(regenerated)
 }
 
+#[tauri::command]
+pub async fn rescan_sources(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<u32, String> {
+    let db = &state.db;
+    let images = db.list_images(100000, 0).map_err(|e| e.to_string())?;
+    let total = images.len() as u32;
+    let mut updated = 0u32;
+
+    for (i, img) in images.iter().enumerate() {
+        let path = std::path::Path::new(&img.path);
+        if !path.exists() {
+            continue;
+        }
+
+        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let ext = path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
+        let png_chunks = if ext == "png" {
+            crate::db_core::source_detection::read_png_text_chunks(path).unwrap_or_default()
+        } else {
+            vec![]
+        };
+
+        let detection = crate::db_core::source_detection::detect_source(filename, &png_chunks, path);
+
+        if detection.source_label.is_some() {
+            let aspect_ratio = img.image.width as f64 / img.image.height.max(1) as f64;
+            let orientation = if (aspect_ratio - 1.0).abs() < 0.05 { "square" }
+                else if aspect_ratio > 1.0 { "landscape" }
+                else { "portrait" };
+            let megapixels = (img.image.width as f64 * img.image.height as f64) / 1_000_000.0;
+
+            let _ = db.update_source_detection(
+                &img.image.id,
+                detection.source_label.as_deref(),
+                detection.confidence,
+                &detection.to_evidence_json(),
+                detection.is_ai_generated,
+                detection.ai_prompt.as_deref(),
+                aspect_ratio,
+                orientation,
+                megapixels,
+            );
+            updated += 1;
+        }
+
+        let _ = app.emit("rescan-progress", serde_json::json!({
+            "current": i + 1, "total": total
+        }));
+    }
+
+    Ok(updated)
+}
+
 fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
     tokio::spawn(async move {
         let state: State<'_, AppState> = app.state();
