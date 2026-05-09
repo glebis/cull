@@ -42,8 +42,8 @@ pub fn has_capability(role: &str, capability: &str) -> bool {
 pub fn tool_capability(tool_name: &str) -> &'static str {
     match tool_name {
         "list_images" | "get_image" | "list_folders" | "list_folder_images"
-        | "list_collections" | "get_library_stats" | "get_detections"
-        | "get_vision_metadata" => "library:read",
+        | "list_collections" | "list_collection_images" | "get_library_stats"
+        | "get_detections" | "get_vision_metadata" => "library:read",
 
         "search_images" | "find_similar" | "search_by_object" => "library:search",
 

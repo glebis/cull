@@ -44,7 +44,13 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 png = "0.17"
 printpdf = "0.7"
 thiserror = "1"
-rmcp = { version = "1.6", features = ["server", "macros"] }
+rmcp = { version = "1.6", features = ["server", "macros", "transport-streamable-http-server"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "http1"] }
+http-body-util = "0.1"
+http = "1"
+tower-service = "0.3"
+bytes = "1"
 anyhow = "1"
 tokio-util = { version = "0.7", features = ["codec"] }
 clap = { version = "4", features = ["derive"] }

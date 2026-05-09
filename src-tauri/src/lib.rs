@@ -162,6 +162,23 @@ pub fn run() {
             // Start MCP socket server
             mcp::server::start_mcp_server(app.handle().clone());
 
+            // Start MCP HTTP server if enabled via CLI or settings
+            {
+                let http_enabled = args.mcp_http.is_some() || {
+                    let state: tauri::State<'_, AppState> = app.state();
+                    state.db.get_setting("mcp_http_enabled")
+                        .ok()
+                        .flatten()
+                        .map(|v| v == "true")
+                        .unwrap_or(false)
+                };
+                if http_enabled {
+                    let port = args.mcp_http.flatten().unwrap_or(9847);
+                    let host = args.mcp_http_host.clone();
+                    mcp::http::start_http_server(app.handle().clone(), host, port);
+                }
+            }
+
             // Set up system tray
             tray::setup_tray(app.handle())?;
 
