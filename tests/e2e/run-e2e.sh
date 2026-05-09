@@ -95,22 +95,17 @@ echo ""
 
 # ── 4: Save collection ──
 log "Save collection"
-SAVE=$(echo "$PAGE" | grep "Save Collection" | grep -oE 'e[0-9]+' | head -1)
+SAVE=$(echo "$PAGE" | grep -i "Save Collection" | grep -oE 'e[0-9]+' | head -1)
 if [ -n "$SAVE" ]; then
-    ab click "@$SAVE" > /dev/null
+    # Use CSS selector — refs go stale between snapshot and click
+    ab eval "document.querySelector('.save-btn').click();" > /dev/null
     sleep 2
     get_page
     has "NAME\|Name\|name-input\|Portrait\|Cancel" && pass "Name bar appeared" || fail "No name bar"
     ab screenshot "$SHOTS/04-naming.png" > /dev/null
 
-    # Click the Save confirm button directly
-    CONFIRM=$(echo "$PAGE" | grep -i '"Save"' | grep -oE 'e[0-9]+' | head -1)
-    if [ -n "$CONFIRM" ]; then
-        ab click "@$CONFIRM" > /dev/null
-    else
-        # Fallback: dispatch Enter on the name input
-        ab eval "document.querySelector('.name-input').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', code:'Enter', bubbles:true}));" > /dev/null
-    fi
+    # Click Save confirm via CSS selector (refs go stale between snapshot and click)
+    ab eval "document.querySelector('.save-confirm-btn').click();" > /dev/null
     sleep 3
     get_page
     has "Saved as\|saved\|saved-toast\|Portrait" && pass "Save confirmation shown" || fail "No save confirmation"
