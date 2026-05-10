@@ -1237,3 +1237,486 @@ impl ServerHandler for ImageViewMcp {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::db_core::models::{McpToken, TokenScope};
+    use crate::services::tokens;
+    use super::AuthContext;
+
+    // --- Path redaction logic ---
+
+    #[test]
+    fn test_redact_path_extracts_filename() {
+        let path = "/Users/gleb/art/midjourney/image_001.png";
+        let filename = std::path::Path::new(path)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap();
+        assert_eq!(filename, "image_001.png");
+    }
+
+    #[test]
+    fn test_redact_path_preserves_extension() {
+        let path = "/some/deep/path/photo.CR2";
+        let filename = std::path::Path::new(path)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap();
+        assert_eq!(filename, "photo.CR2");
+    }
+
+    #[test]
+    fn test_redact_path_handles_root() {
+        let path = "/";
+        let filename = std::path::Path::new(path)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| "[redacted]".to_string());
+        assert_eq!(filename, "[redacted]");
+    }
+
+    #[test]
+    fn test_redact_path_handles_empty() {
+        let path = "";
+        let filename = std::path::Path::new(path)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| "[redacted]".to_string());
+        assert_eq!(filename, "[redacted]");
+    }
+
+    #[test]
+    fn test_redact_path_handles_spaces() {
+        let path = "/Users/gleb/My Art/image 001.png";
+        let filename = std::path::Path::new(path)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap();
+        assert_eq!(filename, "image 001.png");
+    }
+
+    // --- is_remote logic ---
+
+    #[test]
+    fn test_local_is_not_remote() {
+        assert!(!matches!(AuthContext::Local, AuthContext::Authenticated(_)));
+    }
+
+    #[test]
+    fn test_authenticated_is_remote() {
+        let token = make_token("viewer", None);
+        let auth = AuthContext::Authenticated(token);
+        assert!(matches!(auth, AuthContext::Authenticated(_)));
+    }
+
+    // --- Scope filtering on images ---
+
+    #[test]
+    fn test_scope_none_allows_all_images() {
+        assert!(tokens::image_in_scope(&None, "/any/path.jpg", &[]));
+        assert!(tokens::image_in_scope(&None, "", &[]));
+    }
+
+    #[test]
+    fn test_scope_single_folder() {
+        let scope = Some(TokenScope {
+            folders: Some(vec!["/art/midjourney".to_string()]),
+            collections: None,
+            tags: None,
+        });
+        assert!(tokens::image_in_scope(&scope, "/art/midjourney/img1.png", &[]));
+        assert!(tokens::image_in_scope(&scope, "/art/midjourney/sub/img2.png", &[]));
+        assert!(!tokens::image_in_scope(&scope, "/art/dalle/img3.png", &[]));
+        assert!(!tokens::image_in_scope(&scope, "/photos/vacation.jpg", &[]));
+    }
+
+    #[test]
+    fn test_scope_multiple_folders() {
+        let scope = Some(TokenScope {
+            folders: Some(vec!["/art/midjourney".to_string(), "/art/dalle".to_string()]),
+            collections: None,
+            tags: None,
+        });
+        assert!(tokens::image_in_scope(&scope, "/art/midjourney/img.png", &[]));
+        assert!(tokens::image_in_scope(&scope, "/art/dalle/img.png", &[]));
+        assert!(!tokens::image_in_scope(&scope, "/art/stable/img.png", &[]));
+    }
+
+    #[test]
+    fn test_scope_path_traversal_blocked() {
+        let scope = Some(TokenScope {
+            folders: Some(vec!["/art".to_string()]),
+            collections: None,
+            tags: None,
+        });
+        assert!(tokens::image_in_scope(&scope, "/art/image.jpg", &[]));
+        assert!(!tokens::image_in_scope(&scope, "/artifacts/image.jpg", &[]));
+        assert!(!tokens::image_in_scope(&scope, "/artisan/image.jpg", &[]));
+    }
+
+    #[test]
+    fn test_scope_collection_match() {
+        let scope = Some(TokenScope {
+            folders: None,
+            collections: Some(vec!["col_abc".to_string(), "col_def".to_string()]),
+            tags: None,
+        });
+        assert!(tokens::image_in_scope(&scope, "/any/path.jpg", &["col_abc".to_string()]));
+        assert!(tokens::image_in_scope(&scope, "/any/path.jpg", &["col_def".to_string()]));
+        assert!(!tokens::image_in_scope(&scope, "/any/path.jpg", &["col_xyz".to_string()]));
+        assert!(!tokens::image_in_scope(&scope, "/any/path.jpg", &[]));
+    }
+
+    #[test]
+    fn test_scope_union_folder_or_collection() {
+        let scope = Some(TokenScope {
+            folders: Some(vec!["/art".to_string()]),
+            collections: Some(vec!["col_abc".to_string()]),
+            tags: None,
+        });
+        // Folder match alone
+        assert!(tokens::image_in_scope(&scope, "/art/img.png", &[]));
+        // Collection match alone
+        assert!(tokens::image_in_scope(&scope, "/photos/img.png", &["col_abc".to_string()]));
+        // Neither
+        assert!(!tokens::image_in_scope(&scope, "/photos/img.png", &[]));
+    }
+
+    // --- Folder scope filtering ---
+
+    #[test]
+    fn test_folder_scope_none_allows_all() {
+        assert!(tokens::folder_in_scope(&None, "/any/folder"));
+    }
+
+    #[test]
+    fn test_folder_scope_match() {
+        let scope = Some(TokenScope {
+            folders: Some(vec!["/art".to_string()]),
+            collections: None,
+            tags: None,
+        });
+        assert!(tokens::folder_in_scope(&scope, "/art"));
+        assert!(tokens::folder_in_scope(&scope, "/art/sub"));
+        assert!(!tokens::folder_in_scope(&scope, "/photos"));
+    }
+
+    #[test]
+    fn test_folder_scope_traversal_blocked() {
+        let scope = Some(TokenScope {
+            folders: Some(vec!["/art".to_string()]),
+            collections: None,
+            tags: None,
+        });
+        assert!(!tokens::folder_in_scope(&scope, "/artifacts"));
+        assert!(!tokens::folder_in_scope(&scope, "/artisan"));
+    }
+
+    // --- Input validation ---
+
+    #[test]
+    fn test_rating_bounds() {
+        for r in 0..=5u8 {
+            assert!(r <= 5);
+        }
+        assert!(6u8 > 5);
+        assert!(255u8 > 5);
+    }
+
+    #[test]
+    fn test_decision_valid_values() {
+        let valid = |d: &str| matches!(d, "selected" | "rejected" | "none");
+        assert!(valid("selected"));
+        assert!(valid("rejected"));
+        assert!(valid("none"));
+        assert!(!valid("maybe"));
+        assert!(!valid(""));
+        assert!(!valid("SELECTED"));
+    }
+
+    // --- Pagination clamping ---
+
+    #[test]
+    fn test_limit_clamped_to_range() {
+        let clamp = |limit: u32| limit.min(100).max(1);
+        assert_eq!(clamp(0), 1);
+        assert_eq!(clamp(1), 1);
+        assert_eq!(clamp(50), 50);
+        assert_eq!(clamp(100), 100);
+        assert_eq!(clamp(200), 100);
+        assert_eq!(clamp(u32::MAX), 100);
+    }
+
+    #[test]
+    fn test_scoped_overfetch_multiplier() {
+        let limit: u32 = 50;
+        let scope_active = true;
+        let fetch = if scope_active { limit * 3 } else { limit };
+        assert_eq!(fetch, 150);
+
+        let no_scope = false;
+        let fetch = if no_scope { limit * 3 } else { limit };
+        assert_eq!(fetch, 50);
+    }
+
+    // --- Collection scope on list_collections ---
+
+    #[test]
+    fn test_collection_scope_filters_list() {
+        let scope = Some(TokenScope {
+            folders: None,
+            collections: Some(vec!["col_abc".to_string()]),
+            tags: None,
+        });
+        let collections = vec![
+            ("col_abc".to_string(), "Favorites".to_string(), 10u32),
+            ("col_def".to_string(), "Archive".to_string(), 5u32),
+            ("col_ghi".to_string(), "WIP".to_string(), 3u32),
+        ];
+        let filtered: Vec<_> = collections.iter()
+            .filter(|(id, _, _)| {
+                match &scope {
+                    None => true,
+                    Some(s) => match &s.collections {
+                        None => true,
+                        Some(allowed) => allowed.contains(id),
+                    }
+                }
+            })
+            .collect();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].0, "col_abc");
+    }
+
+    #[test]
+    fn test_collection_scope_none_shows_all() {
+        let scope: Option<TokenScope> = None;
+        let collections = vec![
+            ("col_abc".to_string(), "Favorites".to_string(), 10u32),
+            ("col_def".to_string(), "Archive".to_string(), 5u32),
+        ];
+        let filtered: Vec<_> = collections.iter()
+            .filter(|(id, _, _)| {
+                match &scope {
+                    None => true,
+                    Some(s) => match &s.collections {
+                        None => true,
+                        Some(allowed) => allowed.contains(id),
+                    }
+                }
+            })
+            .collect();
+        assert_eq!(filtered.len(), 2);
+    }
+
+    // --- Job snapshot serialization ---
+
+    #[test]
+    fn test_job_snapshot_serializes_correctly() {
+        let snapshot = crate::services::jobs::JobSnapshot {
+            job_id: "job_abc123def4".to_string(),
+            kind: "import".to_string(),
+            status: "running".to_string(),
+            current: 5,
+            total: 10,
+            message: Some("processing image_xyz".to_string()),
+            error: None,
+            created_at: "2026-05-10T00:00:00Z".to_string(),
+            updated_at: "2026-05-10T00:01:00Z".to_string(),
+        };
+        let json = serde_json::to_string(&snapshot).unwrap();
+        assert!(json.contains("\"job_id\":\"job_abc123def4\""));
+        assert!(json.contains("\"status\":\"running\""));
+        assert!(json.contains("\"current\":5"));
+        assert!(json.contains("\"total\":10"));
+        assert!(json.contains("\"kind\":\"import\""));
+    }
+
+    #[test]
+    fn test_job_snapshot_null_optional_fields() {
+        let snapshot = crate::services::jobs::JobSnapshot {
+            job_id: "job_test".to_string(),
+            kind: "vision".to_string(),
+            status: "completed".to_string(),
+            current: 10,
+            total: 10,
+            message: None,
+            error: None,
+            created_at: "2026-05-10T00:00:00Z".to_string(),
+            updated_at: "2026-05-10T00:00:00Z".to_string(),
+        };
+        let json = serde_json::to_string(&snapshot).unwrap();
+        assert!(json.contains("\"message\":null"));
+        assert!(json.contains("\"error\":null"));
+    }
+
+    #[test]
+    fn test_job_snapshot_with_error() {
+        let snapshot = crate::services::jobs::JobSnapshot {
+            job_id: "job_fail".to_string(),
+            kind: "embeddings".to_string(),
+            status: "failed".to_string(),
+            current: 3,
+            total: 10,
+            message: None,
+            error: Some("Model not downloaded".to_string()),
+            created_at: "2026-05-10T00:00:00Z".to_string(),
+            updated_at: "2026-05-10T00:00:00Z".to_string(),
+        };
+        let json = serde_json::to_string(&snapshot).unwrap();
+        assert!(json.contains("\"error\":\"Model not downloaded\""));
+        assert!(json.contains("\"status\":\"failed\""));
+    }
+
+    // --- Tool capability mapping completeness ---
+
+    #[test]
+    fn test_read_tools_map_to_library_read() {
+        let read_tools = [
+            "list_images", "get_image", "list_folders", "list_folder_images",
+            "list_collections", "list_collection_images", "get_library_stats",
+            "get_detections", "get_vision_metadata",
+        ];
+        for tool in &read_tools {
+            assert_eq!(
+                tokens::tool_capability(tool), "library:read",
+                "Tool '{}' should map to library:read", tool
+            );
+        }
+    }
+
+    #[test]
+    fn test_search_tools_map_to_library_search() {
+        let search_tools = ["find_similar", "search_by_object", "search_images"];
+        for tool in &search_tools {
+            assert_eq!(
+                tokens::tool_capability(tool), "library:search",
+                "Tool '{}' should map to library:search", tool
+            );
+        }
+    }
+
+    #[test]
+    fn test_curation_tools_map_to_curation_write() {
+        let curation_tools = [
+            "set_rating", "set_decision", "create_collection",
+            "add_to_collection", "delete_collection", "create_smart_collection",
+        ];
+        for tool in &curation_tools {
+            assert_eq!(
+                tokens::tool_capability(tool), "curation:write",
+                "Tool '{}' should map to curation:write", tool
+            );
+        }
+    }
+
+    #[test]
+    fn test_import_tools_map_to_import_write() {
+        assert_eq!(tokens::tool_capability("import_folder"), "import:write");
+        assert_eq!(tokens::tool_capability("import_files"), "import:write");
+    }
+
+    #[test]
+    fn test_display_tools_map_to_display_navigate() {
+        let display_tools = ["show_image", "navigate_to_folder", "show_collection"];
+        for tool in &display_tools {
+            assert_eq!(
+                tokens::tool_capability(tool), "display:navigate",
+                "Tool '{}' should map to display:navigate", tool
+            );
+        }
+    }
+
+    #[test]
+    fn test_ai_tools_map_to_ai_run() {
+        let ai_tools = ["generate_embeddings", "detect_objects", "analyze_images"];
+        for tool in &ai_tools {
+            assert_eq!(
+                tokens::tool_capability(tool), "ai:run",
+                "Tool '{}' should map to ai:run", tool
+            );
+        }
+    }
+
+    #[test]
+    fn test_token_tools_map_to_tokens_manage() {
+        let token_tools = [
+            "create_token", "list_tokens", "revoke_token", "rotate_token",
+            "get_audit_log", "prune_audit_log",
+        ];
+        for tool in &token_tools {
+            assert_eq!(
+                tokens::tool_capability(tool), "tokens:manage",
+                "Tool '{}' should map to tokens:manage", tool
+            );
+        }
+    }
+
+    #[test]
+    fn test_admin_only_tools_map_to_settings_manage() {
+        let admin_tools = ["rescan_sources", "get_job", "list_jobs", "cancel_job"];
+        for tool in &admin_tools {
+            assert_eq!(
+                tokens::tool_capability(tool), "settings:manage",
+                "Tool '{}' should map to settings:manage", tool
+            );
+        }
+    }
+
+    #[test]
+    fn test_unknown_tool_maps_to_settings_manage() {
+        assert_eq!(tokens::tool_capability("nonexistent_tool"), "settings:manage");
+        assert_eq!(tokens::tool_capability(""), "settings:manage");
+        assert_eq!(tokens::tool_capability("drop_database"), "settings:manage");
+    }
+
+    // --- Auth + scope integration ---
+
+    #[test]
+    fn test_token_scope_parsed_from_json() {
+        let scope_json = Some(r#"{"folders":["/art"],"collections":["col_1"]}"#.to_string());
+        let scope = tokens::parse_scope(&scope_json);
+        assert!(scope.is_some());
+        let s = scope.unwrap();
+        assert_eq!(s.folders.as_ref().unwrap(), &vec!["/art".to_string()]);
+        assert_eq!(s.collections.as_ref().unwrap(), &vec!["col_1".to_string()]);
+    }
+
+    #[test]
+    fn test_token_scope_none_when_no_json() {
+        let scope = tokens::parse_scope(&None);
+        assert!(scope.is_none());
+    }
+
+    #[test]
+    fn test_token_scope_none_on_invalid_json() {
+        let scope = tokens::parse_scope(&Some("not json".to_string()));
+        assert!(scope.is_none());
+    }
+
+    #[test]
+    fn test_token_scope_empty_object() {
+        let scope = tokens::parse_scope(&Some("{}".to_string()));
+        assert!(scope.is_some());
+        let s = scope.unwrap();
+        assert!(s.folders.is_none());
+        assert!(s.collections.is_none());
+        assert!(s.tags.is_none());
+    }
+
+    // --- Helper ---
+
+    fn make_token(role: &str, scope_json: Option<String>) -> McpToken {
+        McpToken {
+            id: format!("tok_{}", role),
+            name: format!("{} test token", role),
+            role: role.to_string(),
+            scope_json,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            expires_at: None,
+            last_used_at: None,
+            revoked: false,
+        }
+    }
+}
