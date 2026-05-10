@@ -68,3 +68,20 @@ pub struct AuditEntry {
     pub result_status: String,
     pub timestamp: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerationRun {
+    pub id: String,
+    pub prompt: Option<String>,
+    pub negative_prompt: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub settings_json: String,
+    pub seed: Option<String>,
+    pub parent_run_id: Option<String>,
+    pub source_type: String,
+    pub source_path: Option<String>,
+    pub raw_metadata_json: Option<String>,
+    pub created_at: Option<String>,
+    pub imported_at: String,
+}

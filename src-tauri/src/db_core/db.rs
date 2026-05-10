@@ -1,4 +1,4 @@
-use rusqlite::{Connection, Result, params};
+use rusqlite::{Connection, Result, params, OptionalExtension};
 use std::path::Path;
 use std::sync::Mutex;
 use super::models::*;
@@ -25,6 +25,7 @@ impl Database {
         self.seed_preset_collections()?;
         self.migrate_lineage_tables()?;
         self.migrate_mcp_tables()?;
+        self.migrate_generation_runs()?;
         Ok(())
     }
 
@@ -192,6 +193,30 @@ impl Database {
                 updated_at TEXT NOT NULL
             );
         ")?;
+        Ok(())
+    }
+
+    fn migrate_generation_runs(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS generation_runs (
+                id TEXT PRIMARY KEY,
+                prompt TEXT,
+                negative_prompt TEXT,
+                provider TEXT,
+                model TEXT,
+                settings_json TEXT NOT NULL DEFAULT '{}',
+                seed TEXT,
+                parent_run_id TEXT REFERENCES generation_runs(id),
+                source_type TEXT NOT NULL,
+                source_path TEXT,
+                raw_metadata_json TEXT,
+                created_at TEXT,
+                imported_at TEXT NOT NULL
+            );"
+        )?;
+        let sql = "ALTER TABLE images ADD COLUMN generation_run_id TEXT REFERENCES generation_runs(id)";
+        let _ = conn.execute(sql, []);
         Ok(())
     }
 
@@ -1141,6 +1166,53 @@ impl Database {
             rusqlite::params![image_id, width, height, aspect, orientation, megapixels],
         )?;
         Ok(())
+    }
+
+    pub fn insert_generation_run(&self, run: &GenerationRun) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO generation_runs (id, prompt, negative_prompt, provider, model, settings_json, seed, parent_run_id, source_type, source_path, raw_metadata_json, created_at, imported_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            rusqlite::params![run.id, run.prompt, run.negative_prompt, run.provider, run.model, run.settings_json, run.seed, run.parent_run_id, run.source_type, run.source_path, run.raw_metadata_json, run.created_at, run.imported_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn link_image_to_run(&self, image_id: &str, run_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE images SET generation_run_id = ?1 WHERE id = ?2",
+            rusqlite::params![run_id, image_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_generation_run_for_image(&self, image_id: &str) -> Result<Option<GenerationRun>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT g.id, g.prompt, g.negative_prompt, g.provider, g.model, g.settings_json, g.seed, g.parent_run_id, g.source_type, g.source_path, g.raw_metadata_json, g.created_at, g.imported_at
+             FROM generation_runs g
+             JOIN images i ON i.generation_run_id = g.id
+             WHERE i.id = ?1"
+        )?;
+        let run = stmt.query_row(rusqlite::params![image_id], |row| {
+            Ok(GenerationRun {
+                id: row.get(0)?,
+                prompt: row.get(1)?,
+                negative_prompt: row.get(2)?,
+                provider: row.get(3)?,
+                model: row.get(4)?,
+                settings_json: row.get(5)?,
+                seed: row.get(6)?,
+                parent_run_id: row.get(7)?,
+                source_type: row.get(8)?,
+                source_path: row.get(9)?,
+                raw_metadata_json: row.get(10)?,
+                created_at: row.get(11)?,
+                imported_at: row.get(12)?,
+            })
+        }).optional()?;
+        Ok(run)
     }
 }
 
