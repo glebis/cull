@@ -10,5 +10,6 @@ pub mod source_detection;
 pub mod nl_parser;
 pub mod thumbnails;
 pub mod secrets;
+pub mod sidecar;
 pub mod vision;
 pub mod lineage;
