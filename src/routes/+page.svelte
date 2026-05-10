@@ -6,6 +6,7 @@
     import Grid from '$lib/components/Grid.svelte';
     import Compare from '$lib/components/Compare.svelte';
     import Loupe from '$lib/components/Loupe.svelte';
+    import Canvas from '$lib/components/Canvas.svelte';
     import EmbeddingExplorer from '$lib/components/EmbeddingExplorer.svelte';
     import UpdateBanner from '$lib/components/UpdateBanner.svelte';
     import CommandBar from '$lib/components/CommandBar.svelte';
@@ -156,6 +157,8 @@
         <Export />
     {:else if $viewMode === 'lineage'}
         <LineageView />
+    {:else if $viewMode === 'canvas'}
+        <Canvas />
     {:else}
         <div class="placeholder">
             <span class="placeholder-label">{$viewMode}</span>
