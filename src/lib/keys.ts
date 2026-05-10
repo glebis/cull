@@ -5,7 +5,7 @@ import {
     sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode,
     collections, collectMode, collectModeTarget, activeCollection,
     showDetectionBoxes, showDetectionInspector, nsfwMode,
-    navigateTo, navigateBack,
+    navigateTo, navigateBack, searchOpen,
 } from './stores';
 import type { NsfwMode } from './stores';
 import type { ViewMode } from './stores';
@@ -214,6 +214,18 @@ export function handleKeydown(e: KeyboardEvent) {
 
     const tag = (e.target as HTMLElement)?.tagName;
     if (['BUTTON', 'A', 'SELECT'].includes(tag) && (e.key === ' ' || e.key === 'Enter')) return;
+
+    // Search bar: / or Cmd+F opens search
+    if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        searchOpen.set(true);
+        return;
+    }
+    if (e.key === 'f' && e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        searchOpen.set(true);
+        return;
+    }
 
     const mode = get(viewMode);
 

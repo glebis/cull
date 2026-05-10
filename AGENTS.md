@@ -39,15 +39,18 @@ ImageView is a Tauri 2 + SvelteKit 5 + Rust desktop image viewer focused on AI-g
 Tokyo Night dark theme. All components MUST use these tokens, never hardcode colors.
 
 ### API Layer
-- `src/lib/api.ts` imports `invoke` from `src/lib/tauri-mock.ts`
-- `tauri-mock.ts` checks `isTauri()` at call time (not module load):
-  - Inside Tauri → uses real `@tauri-apps/api/core` invoke
-  - In Chrome browser → returns mock data for testing
-- This means the app works in both Tauri and standalone browser
+- `src/lib/api.ts` imports `invoke` directly from `@tauri-apps/api/core`
+- **NO MOCK LAYER.** Never add a mock/fallback invoke. The app is a Tauri desktop app — it always runs with the real Rust backend. A previous mock layer (`tauri-mock.ts`) caused persistent bugs where the UI showed fake test data instead of the real database. It was removed 2026-05-09.
+- `src/lib/tauri-mock.ts` exists for E2E browser testing ONLY — it must never be imported from `api.ts` or any component
+
+### Data Safety
+- **NEVER delete, trash, or reset `imageview.db`** — it contains real user data (ratings, selections, collections) accumulated over many sessions
+- When the UI shows wrong data, the bug is in the code, not the database
+- The database path: `~/Library/Application Support/com.glebkalinin.imageview/imageview.db`
 
 ## E2E Testing with agent-browser
 
-Tests run against `localhost:1420` in Chrome Beta via CDP.
+Tests run against `localhost:1420` in Chrome Beta via CDP. E2E tests use `tauri-mock.ts` directly (not via api.ts) for browser-only testing.
 
 ### Prerequisites
 ```bash
@@ -55,7 +58,7 @@ Tests run against `localhost:1420` in Chrome Beta via CDP.
 "/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta" \
   --remote-debugging-port=9222 --user-data-dir="$HOME/.chrome-beta-profile" &
 
-# Vite dev server (mock layer activates automatically outside Tauri)
+# Vite dev server
 npx vite dev --port 1420 &
 ```
 

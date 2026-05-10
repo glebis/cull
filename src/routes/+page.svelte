@@ -15,10 +15,11 @@
     import LineageView from '$lib/components/LineageView.svelte';
     import McpSettings from '$lib/components/McpSettings.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections, showToast, settingsOpen } from '$lib/stores';
+    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections, showToast, settingsOpen, searchOpen } from '$lib/stores';
     import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages, trashImages, deleteImagesPermanently } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
+    import { saveAppState, restoreAppStateBeforeImages, applyRestoredViewState } from '$lib/persistence';
     import { listen } from '@tauri-apps/api/event';
     import { onMount } from 'svelte';
 
@@ -89,8 +90,13 @@
     }
 
     onMount(() => {
-        loadImages().catch(e => console.error('Failed to load images on mount:', e));
-        initDeepLink().catch(e => console.error('Failed to init deep link:', e));
+        const init = async () => {
+            const restored = restoreAppStateBeforeImages();
+            await loadImages();
+            applyRestoredViewState(restored);
+            await initDeepLink();
+        };
+        init().catch(e => console.error('Failed to initialize app:', e));
         initMenu().catch(e => console.error('Failed to init menu:', e));
 
         const dragUnlisten = listen<boolean>('drag-hover', (event) => {
@@ -106,11 +112,18 @@
             loadImages().catch(e => console.error('Failed to reload images with filter:', e));
         });
 
+        const saveTimer = setInterval(saveAppState, 5000);
+        const handleBeforeUnload = () => saveAppState();
+        window.addEventListener('beforeunload', handleBeforeUnload);
+
         return () => {
             unsub();
             dragUnlisten.then(fn => fn());
             window.removeEventListener('trash-focused-image', handleTrash);
             window.removeEventListener('delete-focused-image', handlePermanentDelete);
+            clearInterval(saveTimer);
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+            saveAppState();
         };
     });
 </script>

@@ -1,4 +1,4 @@
-import { invoke as tauriInvoke } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
 import type {
     ExportManifest,
     JsonPatch,
@@ -7,18 +7,6 @@ import type {
     PresetInfo,
     AssetResponse,
 } from './export-types';
-
-function isTauri(): boolean {
-    return typeof window !== 'undefined' && '__TAURI__' in window;
-}
-
-async function invoke<T>(cmd: string, args?: any): Promise<T> {
-    if (isTauri()) {
-        return tauriInvoke<T>(cmd, args);
-    }
-    const { invoke: mockInvoke } = await import('./tauri-mock');
-    return mockInvoke<T>(cmd, args);
-}
 
 export async function createExportManifest(
     imageIds: string[],

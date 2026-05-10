@@ -2,7 +2,7 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { onMount } from 'svelte';
     import ContextMenu from './ContextMenu.svelte';
-    import { images, focusedIndex, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode } from '$lib/stores';
+    import { images, focusedIndex, focusedImage, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode } from '$lib/stores';
     import { getDetections, getVisionMetadata } from '$lib/api';
     import type { Detection } from '$lib/api';
 
@@ -12,7 +12,7 @@
     let panStartX = $state(0);
     let panStartY = $state(0);
 
-    let image = $derived($images[$focusedIndex] ?? null);
+    let image = $derived($focusedImage);
     let src = $derived(image ? convertFileSrc(image.path) : '');
     let filename = $derived(image?.path.split('/').pop() ?? '');
     let dimensions = $derived(image ? `${image.image.width}x${image.image.height}` : '');
@@ -39,6 +39,19 @@
     let imgEl: HTMLImageElement | undefined = $state();
     let visionMeta = $state<[string, string, string][]>([]);
     let hideOverlays = $state(false);
+    let toastDecision = $state<string | null>(null);
+    let toastKey = $state(0);
+
+    let prevDecision = $state('');
+    $effect(() => {
+        const d = decision;
+        if (d !== prevDecision && prevDecision !== '' && d !== 'undecided') {
+            toastDecision = d;
+            toastKey++;
+            setTimeout(() => { toastDecision = null; }, 800);
+        }
+        prevDecision = d;
+    });
 
     onMount(() => {
         function toggleOverlays() { hideOverlays = !hideOverlays; }
@@ -197,6 +210,21 @@
         </div>
     {:else}
         <div class="empty">No image selected</div>
+    {/if}
+
+    {#if !hideOverlays && decision !== 'undecided'}
+        <div class="mini-status" class:mini-accept={decision === 'accept'} class:mini-reject={decision === 'reject'}>
+            {#if decision === 'accept'}✓{:else}×{/if}
+        </div>
+    {/if}
+
+    {#if toastDecision}
+        {#key toastKey}
+        <div class="status-toast" class:toast-accept={toastDecision === 'accept'} class:toast-reject={toastDecision === 'reject'}>
+            <span class="toast-icon">{toastDecision === 'accept' ? '✓' : '×'}</span>
+            <span>{toastDecision === 'accept' ? 'Accepted' : 'Rejected'}</span>
+        </div>
+        {/key}
     {/if}
 
     {#if !hideOverlays}
@@ -378,6 +406,83 @@
     }
     .zoom {
         color: var(--blue);
+    }
+    /* Decision badge (persistent) */
+    .mini-status {
+        position: absolute;
+        top: 18px;
+        right: 18px;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        font-size: 17px;
+        font-weight: 800;
+        pointer-events: none;
+        box-shadow: 0 0 0 1px rgba(8, 8, 12, 0.8), 0 8px 22px rgba(0, 0, 0, 0.34);
+    }
+    .mini-status.mini-accept {
+        background: var(--green);
+        color: var(--bg);
+    }
+    .mini-status.mini-reject {
+        background: var(--red);
+        color: var(--bg);
+    }
+    /* Decision toast (transient) */
+    .status-toast {
+        position: absolute;
+        left: 50%;
+        bottom: 56px;
+        z-index: 30;
+        transform: translateX(-50%);
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        height: 42px;
+        padding: 0 16px;
+        background: rgba(8, 8, 12, 0.76);
+        border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
+        border-radius: 999px;
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        font-size: 13px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+        pointer-events: none;
+        animation: status-pop 720ms ease-out forwards;
+    }
+    .toast-icon {
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        font-size: 15px;
+        font-weight: 700;
+    }
+    .toast-accept {
+        color: var(--green);
+    }
+    .toast-accept .toast-icon {
+        background: var(--green);
+        color: var(--bg);
+    }
+    .toast-reject {
+        color: var(--red);
+    }
+    .toast-reject .toast-icon {
+        background: var(--red);
+        color: var(--bg);
+    }
+    @keyframes status-pop {
+        0% { opacity: 0; transform: translateX(-50%) translateY(8px) scale(0.96); }
+        14% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+        78% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+        100% { opacity: 0; transform: translateX(-50%) translateY(-4px) scale(0.98); }
     }
     /* Bounding boxes */
     .bbox {

@@ -31,7 +31,7 @@ pub fn generate_thumbnail(
 
     // Generate pyramid: each size downscales from the previous for better quality
     let mut current = img;
-    let mut last_path = thumb_dir.join(format!("{}.jpg", image_id));
+    let last_path = thumb_dir.join(format!("{}.jpg", image_id));
 
     for &size in THUMBNAIL_SIZES.iter().rev() {
         let resized = current.resize(size, size, FilterType::Lanczos3);

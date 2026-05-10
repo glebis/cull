@@ -6,6 +6,7 @@ export type ViewMode = 'grid' | 'compare' | 'loupe' | 'canvas' | 'lineage' | 'em
 export const images = writable<ImageWithFile[]>([]);
 export const selectedIds = writable<Set<string>>(new Set());
 export const focusedIndex = writable<number>(0);
+export const focusedImageOverride = writable<ImageWithFile | null>(null);
 export const totalCount = writable<number>(0);
 export const viewMode = writable<ViewMode>('grid');
 
@@ -122,10 +123,34 @@ export function showToast(message: string, opts?: { detail?: string; type?: Toas
     }, toast.duration);
 }
 
+// Embedding view state (persists across tab switches)
+export interface EmbeddingViewState {
+    panX: number;
+    panY: number;
+    scale: number;
+    selectedPointId: string | null;
+    highlightedCluster: number | null;
+    provider: 'clip' | 'gemini';
+    projectionKey: string | null;
+    hasUserView: boolean;
+}
+
+export const embeddingViewState = writable<EmbeddingViewState>({
+    panX: 0,
+    panY: 0,
+    scale: 1,
+    selectedPointId: null,
+    highlightedCluster: null,
+    provider: 'clip',
+    projectionKey: null,
+    hasUserView: false,
+});
+
 // Settings panel
 export const settingsOpen = writable<boolean>(false);
+export const searchOpen = writable<boolean>(false);
 
 export const focusedImage = derived(
-    [images, focusedIndex],
-    ([$images, $idx]) => $images[$idx] ?? null
+    [images, focusedIndex, focusedImageOverride],
+    ([$images, $idx, $override]) => $override ?? $images[$idx] ?? null
 );

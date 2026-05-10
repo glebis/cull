@@ -72,11 +72,13 @@ export async function handleParams(params: OpenParams) {
             const { listFolders } = await import('./api');
             const f = await listFolders();
             folders.set(f);
-            showToast(`Imported "${folderName}"`, {
-                detail: `+${result.imported} new, ${result.skipped} skipped · ${imgs.length} total in folder`,
-                type: 'success',
-                duration: 8000,
-            });
+            if (result.imported > 0) {
+                showToast(`Imported "${folderName}"`, {
+                    detail: `+${result.imported} new, ${result.skipped} skipped · ${imgs.length} total in folder`,
+                    type: 'success',
+                    duration: 8000,
+                });
+            }
         } catch (e) {
             console.error('Deep link: failed to import folder', e);
             showToast('Import failed', { detail: String(e), type: 'error', duration: 10000 });
@@ -196,7 +198,7 @@ let lastHandledAt = 0;
 function deduplicatedHandleParams(params: OpenParams, source: string) {
     const key = JSON.stringify(params);
     const now = Date.now();
-    if (key === lastHandledKey && now - lastHandledAt < 2000) {
+    if (key === lastHandledKey && now - lastHandledAt < 5000) {
         console.log(`[deep-link] Skipping duplicate from ${source}`);
         return;
     }

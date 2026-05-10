@@ -4,13 +4,19 @@ vi.mock('./stores', () => ({
     viewMode: { set: vi.fn() },
     thumbnailSize: { set: vi.fn() },
     focusedIndex: { set: vi.fn() },
-    images: { set: vi.fn() },
+    focusedImageOverride: { set: vi.fn() },
+    images: { set: vi.fn(), subscribe: vi.fn(() => vi.fn()) },
     gridGap: { set: vi.fn() },
     loupeScale: { set: vi.fn() },
     activeFolder: { set: vi.fn() },
     windowName: { set: vi.fn() },
     windowLabel: { set: vi.fn() },
     navigateTo: vi.fn(),
+    showToast: vi.fn(),
+    pinnedCollection: { subscribe: vi.fn(() => vi.fn()) },
+    importBatchFilter: { set: vi.fn() },
+    importBatchImageIds: { set: vi.fn() },
+    embeddingViewState: { set: vi.fn(), subscribe: vi.fn(() => vi.fn()) },
 }));
 
 vi.mock('./api', () => ({
@@ -18,6 +24,10 @@ vi.mock('./api', () => ({
     importFiles: vi.fn(),
     listImagesByFolder: vi.fn(),
     listImages: vi.fn(),
+    addToCollection: vi.fn(),
+    listCollections: vi.fn(),
+    listCollectionImages: vi.fn(),
+    getBatchImages: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -31,7 +41,7 @@ vi.mock('@tauri-apps/plugin-deep-link', () => ({
 
 import { handleParams, initDeepLink } from './deeplink';
 import { thumbnailSize, focusedIndex, images, gridGap, loupeScale, activeFolder, navigateTo } from './stores';
-import { importFolder, importFiles, listImagesByFolder, listImages } from './api';
+import { importFolder, importFiles, listImagesByFolder, listImages, getBatchImages } from './api';
 import { listen } from '@tauri-apps/api/event';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 
@@ -106,8 +116,8 @@ describe('handleParams', () => {
 
     it('imports multiple paths', async () => {
         const fakeImages = [{ path: '/a.jpg' }, { path: '/b.jpg' }];
-        vi.mocked(importFiles).mockResolvedValue(undefined as never);
-        vi.mocked(listImages).mockResolvedValue(fakeImages as never);
+        vi.mocked(importFiles).mockResolvedValue({ imported: 2, skipped: 0, image_ids: ['1', '2'], batch_id: 'b1' } as never);
+        vi.mocked(getBatchImages).mockResolvedValue(fakeImages as never);
 
         await handleParams({ paths: ['/a.jpg', '/b.jpg'] });
 
