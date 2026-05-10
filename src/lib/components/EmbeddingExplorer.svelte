@@ -541,21 +541,27 @@
             const thumbEl = useThumb ? pickThumbnail(p.id, baseThumbSize) : undefined;
 
             if (thumbEl && thumbEl.complete && thumbEl.naturalWidth > 0) {
-                const thumbSize = baseThumbSize;
-                const half = thumbSize / 2;
+                const aspect = thumbEl.naturalWidth / thumbEl.naturalHeight;
+                let dw: number, dh: number;
+                if (aspect >= 1) {
+                    dw = baseThumbSize;
+                    dh = baseThumbSize / aspect;
+                } else {
+                    dh = baseThumbSize;
+                    dw = baseThumbSize * aspect;
+                }
 
-                // Snap to device pixels to avoid sub-pixel blur
                 const dpr = window.devicePixelRatio || 1;
-                const dx = Math.round((sx - half) * dpr) / dpr;
-                const dy = Math.round((sy - half) * dpr) / dpr;
-                const ds = Math.round(thumbSize * dpr) / dpr;
-                ctx.drawImage(thumbEl, dx, dy, ds, ds);
+                const dx = Math.round((sx - dw / 2) * dpr) / dpr;
+                const dy = Math.round((sy - dh / 2) * dpr) / dpr;
+                const drawW = Math.round(dw * dpr) / dpr;
+                const drawH = Math.round(dh * dpr) / dpr;
+                ctx.drawImage(thumbEl, dx, dy, drawW, drawH);
 
-                // Only highlight selected/hovered — thin white outline
                 if (isSelected || isHovered) {
                     ctx.strokeStyle = '#ffffff';
                     ctx.lineWidth = isSelected ? 2 : 1;
-                    ctx.strokeRect(sx - half, sy - half, thumbSize, thumbSize);
+                    ctx.strokeRect(sx - dw / 2, sy - dh / 2, dw, dh);
                 }
             } else {
                 // Colored dot fallback
