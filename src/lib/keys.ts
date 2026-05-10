@@ -320,6 +320,16 @@ function handleGridKeys(e: KeyboardEvent) {
         (document.querySelector('.grid-container')?.clientHeight ?? 600) / (get(thumbnailSize) + get(gridGap))
     ));
 
+    // Direct 1-5 rating in grid (without Cmd)
+    if (!e.metaKey && !e.ctrlKey && !e.altKey) {
+        const n = parseInt(e.key);
+        if (n >= 1 && n <= 5) {
+            e.preventDefault();
+            handleStarRating(n);
+            return;
+        }
+    }
+
     switch (e.key) {
         case 'h':
         case 'ArrowLeft':
@@ -638,6 +648,16 @@ function handleCompareKeys(e: KeyboardEvent) {
 }
 
 function handleLoupeKeys(e: KeyboardEvent) {
+    // Direct 1-5 rating in loupe (no chord needed)
+    if (!e.metaKey && !e.ctrlKey && !e.altKey) {
+        const n = parseInt(e.key);
+        if (n >= 1 && n <= 5) {
+            e.preventDefault();
+            handleStarRating(n);
+            return;
+        }
+    }
+
     switch (e.key) {
         case 'h':
         case 'ArrowLeft':
