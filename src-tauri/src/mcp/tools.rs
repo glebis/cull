@@ -316,7 +316,7 @@ impl ImageViewMcp {
     fn list_images(&self, Parameters(params): Parameters<ListImagesParams>) -> String {
         let state = self.app_handle.state::<AppState>();
         let offset = params.offset.unwrap_or(0);
-        let limit = params.limit.unwrap_or(50).min(100).max(1);
+        let limit = clamp_limit(params.limit.unwrap_or(50));
         let scope = self.token_scope();
         let fetch_limit = if scope.is_some() { limit * 3 } else { limit };
 
@@ -423,7 +423,7 @@ impl ImageViewMcp {
         }
         let state = self.app_handle.state::<AppState>();
         let offset = params.offset.unwrap_or(0);
-        let limit = params.limit.unwrap_or(50).min(100).max(1);
+        let limit = clamp_limit(params.limit.unwrap_or(50));
 
         match state.db.list_images_by_folder(&params.folder_path, limit, offset) {
             Ok(images) => {
@@ -578,7 +578,7 @@ impl ImageViewMcp {
             _ => {}
         }
         let state = self.app_handle.state::<AppState>();
-        let top_k = params.limit.unwrap_or(10).min(100) as usize;
+        let top_k = clamp_limit(params.limit.unwrap_or(10)) as usize;
 
         let all = match state.db.get_all_embeddings("clip-vit-b32") {
             Ok(a) => a,
@@ -607,7 +607,7 @@ impl ImageViewMcp {
     #[tool(description = "Search for images containing a detected object class (e.g. 'person', 'car', 'dog'). Requires object detection to have been run.")]
     fn search_by_object(&self, Parameters(params): Parameters<SearchByObjectParams>) -> String {
         let state = self.app_handle.state::<AppState>();
-        let limit = params.limit.unwrap_or(50).min(100);
+        let limit = clamp_limit(params.limit.unwrap_or(50));
         match state.db.search_by_class(&params.class_name, limit * 2) {
             Ok(results) => {
                 let r: Vec<serde_json::Value> = results.iter()
