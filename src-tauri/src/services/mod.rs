@@ -6,6 +6,7 @@ pub mod export;
 #[allow(dead_code)]
 pub mod ai;
 pub mod display;
+pub mod jobs;
 pub mod tokens;
 
 use crate::db_core::db::Database;

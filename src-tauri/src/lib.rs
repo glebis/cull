@@ -24,6 +24,7 @@ pub struct AppState {
     pub detection_engine: Mutex<DetectionEngine>,
     pub safety_engine: Mutex<DetectionEngine>,
     pub secrets: Box<dyn SecretStore>,
+    pub jobs: crate::services::jobs::JobRegistry,
 }
 
 const IMAGE_EXTENSIONS: &[&str] = &[
@@ -150,7 +151,8 @@ pub fn run() {
             let safety_engine = Mutex::new(DetectionEngine::new_nudenet(&model_dir));
 
             let secrets = Box::new(KeychainStore::new("imageview"));
-            app.manage(AppState { db, app_data_dir, embedding_engine, detection_engine, safety_engine, secrets });
+            let jobs = crate::services::jobs::JobRegistry::default();
+            app.manage(AppState { db, app_data_dir, embedding_engine, detection_engine, safety_engine, secrets, jobs });
 
             // Set up native menu bar
             let handle = app.handle();
