@@ -27,6 +27,22 @@
     let dragOffsetX = $state(0);
     let dragOffsetY = $state(0);
 
+    let resizeItem = $state<string | null>(null);
+    let resizeStartX = $state(0);
+    let resizeStartY = $state(0);
+    let resizeStartW = $state(0);
+    let resizeStartH = $state(0);
+
+    function handleResizeMouseDown(e: MouseEvent, item: CanvasItem) {
+        e.stopPropagation();
+        e.preventDefault();
+        resizeItem = item.id;
+        resizeStartX = e.clientX;
+        resizeStartY = e.clientY;
+        resizeStartW = item.width;
+        resizeStartH = item.height;
+    }
+
     const ITEM_GAP = 20;
     const ITEM_HEIGHT = 200;
 
@@ -70,6 +86,15 @@
         if (panning) {
             panX = panOriginX + (e.clientX - panStartX);
             panY = panOriginY + (e.clientY - panStartY);
+        } else if (resizeItem) {
+            const item = canvasItems.find(it => it.id === resizeItem);
+            if (item) {
+                const dx = (e.clientX - resizeStartX) / zoom;
+                const aspect = item.image.image.width / item.image.image.height;
+                item.width = Math.max(50, resizeStartW + dx);
+                item.height = item.width / aspect;
+                canvasItems = canvasItems;
+            }
         } else if (dragItem) {
             const item = canvasItems.find(it => it.id === dragItem);
             if (item) {
@@ -83,6 +108,7 @@
     function handleCanvasMouseUp() {
         panning = false;
         dragItem = null;
+        resizeItem = null;
     }
 
     function handleItemMouseDown(e: MouseEvent, item: CanvasItem) {
@@ -148,6 +174,10 @@
                     alt=""
                     draggable="false"
                 />
+                <div
+                    class="resize-handle"
+                    onmousedown={(e) => handleResizeMouseDown(e, item)}
+                ></div>
             </div>
         {/each}
     </div>
@@ -190,5 +220,20 @@
         object-fit: cover;
         pointer-events: none;
         display: block;
+    }
+    .resize-handle {
+        position: absolute;
+        bottom: -4px;
+        right: -4px;
+        width: 12px;
+        height: 12px;
+        background: #4a9eff;
+        border-radius: 2px;
+        cursor: nwse-resize;
+        opacity: 0;
+        transition: opacity 0.15s;
+    }
+    .canvas-item:hover .resize-handle {
+        opacity: 1;
     }
 </style>
