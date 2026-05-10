@@ -32,6 +32,10 @@
     };
     let sourceDisplay = $derived(image?.source_label ? SOURCE_DISPLAY[image.source_label] ?? image.source_label : null);
 
+    let prompt = $derived(image?.image.ai_prompt ?? null);
+    let promptExpanded = $state(false);
+    let promptTruncated = $derived(prompt && prompt.length > 80 ? prompt.slice(0, 80) + '…' : prompt);
+
     let detections = $state<Detection[]>([]);
     let nsfwDetections = $state<Detection[]>([]);
     let isNsfw = $derived(nsfwDetections.length > 0);
@@ -256,7 +260,19 @@
             <span class="sep">|</span>
             <span class="zoom">{Math.round($loupeScale * 100)}%</span>
         {/if}
+        {#if prompt}
+            <span class="sep">|</span>
+            <button class="prompt-toggle" onclick={() => promptExpanded = !promptExpanded}
+                    title={promptExpanded ? 'Collapse prompt' : 'Show full prompt'}>
+                ✦ {promptExpanded ? 'Hide prompt' : 'Prompt'}
+            </button>
+        {/if}
     </div>
+    {#if prompt && promptExpanded}
+        <div class="prompt-panel">
+            <div class="prompt-text">{prompt}</div>
+        </div>
+    {/if}
     {/if}
 
     {#if ctxMenu.visible && image}
@@ -406,6 +422,38 @@
     }
     .zoom {
         color: var(--blue);
+    }
+    .prompt-toggle {
+        background: none;
+        border: none;
+        color: rgba(255,255,255,0.7);
+        cursor: pointer;
+        font-size: 0.75rem;
+        padding: 0;
+        font-family: inherit;
+    }
+    .prompt-toggle:hover {
+        color: #fff;
+    }
+    .prompt-panel {
+        position: absolute;
+        bottom: 36px;
+        left: 0;
+        right: 0;
+        background: rgba(0,0,0,0.85);
+        padding: 12px 16px;
+        font-size: 0.8rem;
+        color: rgba(255,255,255,0.9);
+        line-height: 1.5;
+        max-height: 200px;
+        overflow-y: auto;
+        backdrop-filter: blur(8px);
+        z-index: 10;
+    }
+    .prompt-text {
+        white-space: pre-wrap;
+        word-break: break-word;
+        user-select: text;
     }
     /* Decision badge (persistent) */
     .mini-status {
