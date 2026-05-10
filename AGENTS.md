@@ -103,6 +103,16 @@ type FilterNode =
 - Deterministic regex-based (`nl_parser.rs`), not ML
 - Covers: ratings, sources (midjourney/sd/dalle/comfyui), orientation, format, recency, decisions, color labels
 
+### Generation Runs
+- `generation_runs` table is canonical source of truth for AI generation metadata (prompt, model, provider, seed, settings)
+- Created from sidecar JSON files (`.json` adjacent to images) during import, or manually via MCP `set_generation_metadata`
+- Images link via `generation_run_id` FK
+- Sidecar parser handles both OpenAI (`provider, quality, thinking, estimated_cost`) and Gemini (`model, duration_s, edit_source`) schemas
+- Raw sidecar JSON preserved in `raw_metadata_json` for forward-compatibility
+- Key files: `db_core/sidecar.rs` (parser), `db_core/import.rs` (integration), `db_core/db.rs` (queries)
+- MCP tools: `get_generation_run`, `set_generation_metadata`
+- Loupe displays prompt + provider/model/seed tags when available
+
 ## bd Issue Tracking
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
