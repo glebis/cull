@@ -294,29 +294,25 @@
                 </div>
             {/if}
 
-            {#if $showDetectionBoxes && imgEl}
-                {#each detections as det}
+            {#if $showDetectionBoxes && imgEl && image}
+                {@const imgNatW = image.image.width}
+                {@const imgNatH = image.image.height}
+                {@const frameW = imgEl.parentElement?.clientWidth ?? 1}
+                {@const frameH = imgEl.parentElement?.clientHeight ?? 1}
+                {@const scale = Math.min(frameW / imgNatW, frameH / imgNatH)}
+                {@const rendW = imgNatW * scale}
+                {@const rendH = imgNatH * scale}
+                {@const offX = (frameW - rendW) / 2}
+                {@const offY = (frameH - rendH) / 2}
+                {#each [...detections, ...nsfwDetections] as det}
                     <div
                         class="bbox"
+                        class:bbox-nsfw={det.class_name.includes('EXPOSED')}
                         style="
-                            left: {det.x * 100}%;
-                            top: {det.y * 100}%;
-                            width: {det.width * 100}%;
-                            height: {det.height * 100}%;
-                            transform: scale({$loupeScale}) translate({$loupePanX / $loupeScale}px, {$loupePanY / $loupeScale}px);
-                        "
-                    >
-                        <span class="bbox-label">{det.class_name} {det.confidence.toFixed(2)}</span>
-                    </div>
-                {/each}
-                {#each nsfwDetections as det}
-                    <div
-                        class="bbox bbox-nsfw"
-                        style="
-                            left: {det.x * 100}%;
-                            top: {det.y * 100}%;
-                            width: {det.width * 100}%;
-                            height: {det.height * 100}%;
+                            left: {offX + det.x * rendW}px;
+                            top: {offY + det.y * rendH}px;
+                            width: {det.width * rendW}px;
+                            height: {det.height * rendH}px;
                             transform: scale({$loupeScale}) translate({$loupePanX / $loupeScale}px, {$loupePanY / $loupeScale}px);
                         "
                     >
