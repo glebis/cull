@@ -38,6 +38,7 @@
 
     let detections = $state<Detection[]>([]);
     let nsfwDetections = $state<Detection[]>([]);
+    let detectionsLoaded = $state(false);
     let isNsfw = $derived(nsfwDetections.length > 0);
     let spaceHeld = $state(false);
     let imgEl: HTMLImageElement | undefined = $state();
@@ -88,15 +89,19 @@
 
     $effect(() => {
         const id = image?.image.id;
-        if (!id) { detections = []; nsfwDetections = []; return; }
+        if (!id) { detections = []; nsfwDetections = []; detectionsLoaded = false; return; }
+        detectionsLoaded = false;
         getDetections(id).then(dets => {
             detections = dets.filter(d => !d.class_name.includes('EXPOSED') && !d.class_name.includes('COVERED') && !d.class_name.includes('FACE_') && !d.class_name.includes('BELLY') && !d.class_name.includes('FEET') && !d.class_name.includes('ARMPITS') && !d.class_name.includes('ANUS') && !d.class_name.includes('BUTTOCKS') && !d.class_name.includes('BREAST') && !d.class_name.includes('GENITALIA'));
             nsfwDetections = dets.filter(d => d.class_name.includes('EXPOSED'));
-        }).catch(() => { detections = []; nsfwDetections = []; });
+            detectionsLoaded = true;
+        }).catch(() => { detections = []; nsfwDetections = []; detectionsLoaded = true; });
         getVisionMetadata(id).then(m => { visionMeta = m; }).catch(() => { visionMeta = []; });
     });
 
-    let shouldBlur = $derived(isNsfw && $nsfwMode === 'blur' && !spaceHeld);
+    let shouldBlur = $derived(
+        $nsfwMode === 'blur' && !spaceHeld && (!detectionsLoaded || isNsfw)
+    );
 
     function handleSpaceDown(e: KeyboardEvent) {
         if (e.code === 'Space' && isNsfw && $nsfwMode === 'blur') {
@@ -271,6 +276,7 @@
                 alt={filename}
                 draggable="false"
                 class:blurred={shouldBlur}
+                class:unblurring={detectionsLoaded}
                 class:pixel-zoom={$loupeScale > 4}
                 style="transform: scale({$loupeScale}) translate({$loupePanX / $loupeScale}px, {$loupePanY / $loupeScale}px);"
             />
@@ -490,10 +496,12 @@
         transform-origin: center center;
         user-select: none;
         -webkit-user-drag: none;
-        transition: filter 0.2s;
     }
     img.blurred {
         filter: blur(30px) brightness(0.5);
+    }
+    img.unblurring {
+        transition: filter 0.2s;
     }
     img.pixel-zoom {
         image-rendering: pixelated;
