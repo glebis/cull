@@ -142,6 +142,33 @@ impl JobRegistry {
             .unwrap_or(true)
     }
 
+    pub fn persist_terminal(&self, job_id: &str, db: &crate::db_core::db::Database) {
+        let jobs = self.jobs.lock().unwrap();
+        if let Some(state) = jobs.get(job_id) {
+            let status = &state.snapshot.status;
+            if matches!(status.as_str(), "completed" | "failed" | "cancelled") {
+                let _ = db.save_job(&state.snapshot);
+            }
+        }
+    }
+
+    pub fn load_from_db(&self, db: &crate::db_core::db::Database) {
+        if let Ok(stale) = db.mark_stale_running_jobs_failed() {
+            if stale > 0 {
+                eprintln!("Marked {} stale jobs as failed", stale);
+            }
+        }
+        let _ = db.prune_old_jobs(1);
+        if let Ok(snapshots) = db.load_terminal_jobs() {
+            let mut jobs = self.jobs.lock().unwrap();
+            for snapshot in snapshots {
+                let cancel = CancellationToken::new();
+                cancel.cancel();
+                jobs.entry(snapshot.job_id.clone()).or_insert(JobState { snapshot, cancel });
+            }
+        }
+    }
+
     fn prune_locked(&self, jobs: &mut HashMap<String, JobState>) {
         let now = chrono::Utc::now();
         let is_terminal = |s: &str| matches!(s, "completed" | "failed" | "cancelled");

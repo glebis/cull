@@ -180,8 +180,77 @@ impl Database {
                 result_status TEXT NOT NULL,
                 timestamp TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS mcp_jobs (
+                job_id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                current INTEGER NOT NULL DEFAULT 0,
+                total INTEGER NOT NULL DEFAULT 0,
+                message TEXT,
+                error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
         ")?;
         Ok(())
+    }
+
+    pub fn save_job(&self, snapshot: &crate::services::jobs::JobSnapshot) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO mcp_jobs (job_id, kind, status, current, total, message, error, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                snapshot.job_id, snapshot.kind, snapshot.status,
+                snapshot.current, snapshot.total, snapshot.message, snapshot.error,
+                snapshot.created_at, snapshot.updated_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn load_terminal_jobs(&self) -> Result<Vec<crate::services::jobs::JobSnapshot>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT job_id, kind, status, current, total, message, error, created_at, updated_at
+             FROM mcp_jobs WHERE status IN ('completed', 'failed', 'cancelled')
+             ORDER BY updated_at DESC LIMIT 100"
+        )?;
+        let jobs = stmt.query_map([], |row| {
+            Ok(crate::services::jobs::JobSnapshot {
+                job_id: row.get(0)?,
+                kind: row.get(1)?,
+                status: row.get(2)?,
+                current: row.get(3)?,
+                total: row.get(4)?,
+                message: row.get(5)?,
+                error: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })?.collect::<Result<Vec<_>>>()?;
+        Ok(jobs)
+    }
+
+    pub fn prune_old_jobs(&self, max_age_hours: i64) -> Result<u32> {
+        let cutoff = (chrono::Utc::now() - chrono::Duration::hours(max_age_hours)).to_rfc3339();
+        let conn = self.conn.lock().unwrap();
+        let deleted = conn.execute(
+            "DELETE FROM mcp_jobs WHERE updated_at < ?1",
+            params![cutoff],
+        )?;
+        Ok(deleted as u32)
+    }
+
+    pub fn mark_stale_running_jobs_failed(&self) -> Result<u32> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let conn = self.conn.lock().unwrap();
+        let updated = conn.execute(
+            "UPDATE mcp_jobs SET status = 'failed', error = 'App stopped before job completed', updated_at = ?1
+             WHERE status IN ('running', 'cancelling')",
+            params![now],
+        )?;
+        Ok(updated as u32)
     }
 
     pub fn insert_image(&self, image: &Image) -> Result<()> {
@@ -1161,5 +1230,25 @@ mod tests {
 
         let results = db.get_iteration_siblings("parent").unwrap();
         assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_update_image_dimensions() {
+        let db = test_db();
+        insert_test_image(&db, "img-1", "hash-1");
+
+        db.update_image_dimensions("img-1", 500, 300).unwrap();
+
+        let images = db.get_images_by_ids(&["img-1"]).unwrap();
+        assert_eq!(images[0].image.width, 500);
+        assert_eq!(images[0].image.height, 300);
+    }
+
+    #[test]
+    fn test_update_image_dimensions_nonexistent() {
+        let db = test_db();
+        // Should not error, just affect 0 rows
+        let result = db.update_image_dimensions("nonexistent", 100, 100);
+        assert!(result.is_ok());
     }
 }

@@ -720,6 +720,7 @@ impl ImageViewMcp {
             for (i, path) in entries.iter().enumerate() {
                 if cancel_token.is_cancelled() {
                     state.jobs.mark_cancelled(&job_id);
+                    state.jobs.persist_terminal(&job_id, &state.db);
                     let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "cancelled"}));
                     return;
                 }
@@ -735,6 +736,7 @@ impl ImageViewMcp {
             }
 
             state.jobs.complete(&job_id);
+                state.jobs.persist_terminal(&job_id, &state.db);
             let _ = app.emit("job-status-changed", serde_json::json!({
                 "job_id": &job_id, "status": "completed",
                 "imported": imported, "skipped": skipped, "errors": errors,
@@ -765,6 +767,7 @@ impl ImageViewMcp {
             for (i, img) in images.iter().enumerate() {
                 if cancel_token.is_cancelled() {
                     state.jobs.mark_cancelled(&job_id);
+                    state.jobs.persist_terminal(&job_id, &state.db);
                     let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "cancelled"}));
                     return;
                 }
@@ -808,6 +811,7 @@ impl ImageViewMcp {
             }
 
             state.jobs.complete(&job_id);
+                state.jobs.persist_terminal(&job_id, &state.db);
             let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "completed", "updated": updated}));
         });
 
@@ -852,6 +856,7 @@ impl ImageViewMcp {
             for (i, image_id) in image_ids.iter().enumerate() {
                 if cancel_token.is_cancelled() {
                     state.jobs.mark_cancelled(&job_id);
+                    state.jobs.persist_terminal(&job_id, &state.db);
                     let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "cancelled"}));
                     return;
                 }
@@ -883,6 +888,7 @@ impl ImageViewMcp {
             }
 
             state.jobs.complete(&job_id);
+                state.jobs.persist_terminal(&job_id, &state.db);
             let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "completed", "processed": generated}));
         });
 
@@ -934,6 +940,7 @@ impl ImageViewMcp {
             for (i, image_id) in image_ids.iter().enumerate() {
                 if cancel_token.is_cancelled() {
                     state.jobs.mark_cancelled(&job_id);
+                    state.jobs.persist_terminal(&job_id, &state.db);
                     let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "cancelled"}));
                     return;
                 }
@@ -965,6 +972,7 @@ impl ImageViewMcp {
             }
 
             state.jobs.complete(&job_id);
+                state.jobs.persist_terminal(&job_id, &state.db);
             let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "completed", "processed": detected}));
         });
 
@@ -1002,6 +1010,7 @@ impl ImageViewMcp {
             for (i, image_id) in image_ids.iter().enumerate() {
                 if cancel_token.is_cancelled() {
                     state.jobs.mark_cancelled(&job_id);
+                    state.jobs.persist_terminal(&job_id, &state.db);
                     let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "cancelled"}));
                     return;
                 }
@@ -1026,6 +1035,7 @@ impl ImageViewMcp {
 
                 if cancel_token.is_cancelled() {
                     state.jobs.mark_cancelled(&job_id);
+                    state.jobs.persist_terminal(&job_id, &state.db);
                     return;
                 }
 
@@ -1041,6 +1051,7 @@ impl ImageViewMcp {
             }
 
             state.jobs.complete(&job_id);
+                state.jobs.persist_terminal(&job_id, &state.db);
             let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "completed", "processed": analyzed}));
         });
 

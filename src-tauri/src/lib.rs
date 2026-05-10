@@ -154,6 +154,12 @@ pub fn run() {
             let jobs = crate::services::jobs::JobRegistry::default();
             app.manage(AppState { db, app_data_dir, embedding_engine, detection_engine, safety_engine, secrets, jobs });
 
+            // Load persisted job history from DB
+            {
+                let state: tauri::State<'_, AppState> = app.state();
+                state.jobs.load_from_db(&state.db);
+            }
+
             // Set up native menu bar
             let handle = app.handle();
             let app_menu = menu::create_menu(handle)?;
