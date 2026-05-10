@@ -225,8 +225,10 @@ export function easeOutQuad(t: number): number {
 }
 
 export function computeScatterThumbSize(scale: number, pointCount: number): { size: number; useThumb: boolean } {
-    const densityFactor = Math.max(1, Math.sqrt(pointCount / 10));
-    const size = Math.max(4, Math.min(48, (8 * Math.sqrt(scale)) / densityFactor));
+    const density = Math.max(1, Math.sqrt(pointCount / 80));
+    const densityWeight = 1 / Math.sqrt(Math.max(scale, 1));
+    const penalty = 1 + (density - 1) * densityWeight;
+    const size = Math.max(4, Math.min(192, 10 * Math.pow(scale, 0.45) / penalty));
     return { size, useThumb: size >= 8 };
 }
 

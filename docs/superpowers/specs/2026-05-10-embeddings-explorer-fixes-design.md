@@ -1,8 +1,8 @@
 # Embeddings Explorer Fixes — Design Spec
 
 **Date:** 2026-05-10
-**Status:** Draft
-**Scope:** 4 independent fixes to the EmbeddingExplorer component
+**Status:** Reviewed / ready for implementation
+**Scope:** 4 related fixes to the EmbeddingExplorer component and app state persistence
 
 ---
 
@@ -15,7 +15,7 @@ The Embeddings tab has four issues that prevent it from matching the original vi
 3. **View state resets on tab switch** — pan, zoom, and selection are lost when switching to Loupe and back
 4. **No state persistence across relaunches** — all app preferences (view, folder, zoom, filters) are lost on restart
 
-These fixes are independent and can be implemented in parallel by separate agents.
+These fixes are related. Fix 1 and Fix 2 can be developed independently, but both modify `EmbeddingExplorer.svelte` and must be merged carefully. Fix 3 also modifies `EmbeddingExplorer.svelte` and should land after Fix 1 and Fix 2. Fix 4 depends on Fix 3's `embeddingViewState` store.
 
 ---
 
@@ -66,45 +66,53 @@ for (const img of embeddingImages) {
 imageMap = map;
 ```
 
-2. Fix Loupe navigation for images outside the filtered set. In `handleFocusInGrid()` and `handleCanvasDblClick()`:
+2. Fix Loupe navigation for images outside the filtered set. Do **not** append out-of-filter images into the global `images` store from `EmbeddingExplorer.svelte`.
 
 ```typescript
-// Before:
-const idx = $images.findIndex(img => img.image.id === point.id);
-if (idx >= 0) {
-    focusedIndex.set(idx);
-    navigateTo('loupe');
-}
+export const focusedImageOverride = writable<ImageWithFile | null>(null);
 
-// After:
-let idx = $images.findIndex(img => img.image.id === point.id);
-if (idx < 0) {
-    // Image not in current filter — inject it temporarily
-    const img = imageMap.get(point.id);
-    if (img) {
-        images.update(list => [...list, img]);
-        idx = get(images).length - 1;
+export const focusedImage = derived(
+    [images, focusedIndex, focusedImageOverride],
+    ([$images, $idx, $override]) => $override ?? $images[$idx] ?? null
+);
+```
+
+Add a helper in `EmbeddingExplorer.svelte`:
+
+```typescript
+function focusImageForLoupe(imageId: string): boolean {
+    const idx = $images.findIndex(img => img.image.id === imageId);
+    if (idx >= 0) {
+        focusedImageOverride.set(null);
+        focusedIndex.set(idx);
+        return true;
     }
-}
-if (idx >= 0) {
-    focusedIndex.set(idx);
-    navigateTo('loupe');
+
+    const img = imageMap.get(imageId);
+    if (!img) return false;
+    focusedImageOverride.set(img);
+    return true;
 }
 ```
 
-3. Similarly fix `handlePointClick()` — it currently sets `focusedIndex` only when the image is in `$images`. Apply the same inject-if-missing pattern.
+Use this helper in `handlePointClick()`, `handleFocusInGrid()`, and `handleCanvasDblClick()`. `handlePointClick()` should still set `selectedPoint` and zoom even if the image is not in `$images`; it should set `focusedIndex` only when the point is in the current list.
+
+Update `Loupe.svelte` to read `focusedImage` instead of deriving directly from `$images[$focusedIndex]`.
 
 ### Files Modified
 
 | File | Change |
 |------|--------|
-| `src/lib/components/EmbeddingExplorer.svelte` | Replace imageMap construction in `loadProjection()`. Fix `handlePointClick`, `handleFocusInGrid`, `handleCanvasDblClick` to handle images outside filtered set. Add `import { get } from 'svelte/store'` if not present. |
+| `src/lib/components/EmbeddingExplorer.svelte` | Replace imageMap construction in `loadProjection()`. Fix `handlePointClick`, `handleFocusInGrid`, `handleCanvasDblClick` to handle images outside filtered set. Import `focusedImageOverride`. |
+| `src/lib/stores.ts` | Add `focusedImageOverride` and update `focusedImage` derived store. |
+| `src/lib/components/Loupe.svelte` | Use `focusedImage` derived store instead of `$images[$focusedIndex]`. |
 
 ### Edge Cases
 
 - **Image deleted from DB but embedding still exists:** `getImagesByIds` will return fewer results than requested. The embedding point will still render as a colored dot. This is acceptable — stale embeddings are cleaned up during regeneration.
 - **Large embedding sets (1000+):** `getImagesByIds` accepts an array of IDs. The Rust side does a batch `SELECT ... WHERE id IN (...)` which SQLite handles fine up to ~1000 IDs. For larger sets, chunk into batches of 500.
-- **$images changes after injection:** When the user switches folders or filters, `loadImages()` in `+page.svelte` replaces `$images` entirely. The injected image will be gone — this is correct because the user navigated away from the embedding context.
+- **Out-of-filter Loupe navigation:** Use `focusedImageOverride`; do not mutate `images`. Mutating `images` from `EmbeddingExplorer` pollutes the filtered/folder-scoped global list, can create duplicates, changes next/previous Loupe behavior, and can race with `loadImages()` replacing the store.
+- **Override lifetime:** Clear `focusedImageOverride` whenever the user navigates to a normal grid image, changes folder/collection/filter, or `loadImages()` replaces `images`.
 
 ### Testing
 
@@ -150,11 +158,11 @@ export function computeScatterThumbSize(
 | Scale | densityWeight | penalty | Raw size | Clamped | Thumbnail tier |
 |-------|--------------|---------|----------|---------|----------------|
 | 1     | 1.00         | 1.97    | 5.1      | 5       | dot            |
-| 5     | 0.45         | 1.43    | 11.2     | 11      | 64px           |
-| 20    | 0.22         | 1.21    | 24.1     | 24      | 64px           |
-| 100   | 0.10         | 1.10    | 57.2     | 57      | 64px           |
-| 500   | 0.04         | 1.04    | 111      | 111     | 128px          |
-| 800+  | 0.04         | 1.03    | 135+     | 135+    | 256px          |
+| 5     | 0.45         | 1.43    | 14.4     | 14      | 64px           |
+| 20    | 0.22         | 1.22    | 31.6     | 32      | 64px           |
+| 100   | 0.10         | 1.10    | 72.4     | 72      | 128px          |
+| 500   | 0.04         | 1.04    | 157.1    | 157     | 256px          |
+| 800   | 0.04         | 1.03    | 195.8    | 192     | 256px          |
 
 **THUMB_SIZES update:** add 800 to the array: `[64, 128, 256, 800]`.
 
@@ -164,7 +172,7 @@ export function computeScatterThumbSize(
 |------|--------|
 | `src/lib/embedding-utils.ts` | Replace `computeScatterThumbSize()` with new formula |
 | `src/lib/embedding-utils.test.ts` | Update tests for new formula behavior |
-| `src/lib/components/EmbeddingExplorer.svelte` | Change `THUMB_SIZES` from `[64, 128, 256]` to `[64, 128, 256, 800]`. Replace inline thumb size calculation at line 474-475 with call to `computeScatterThumbSize(scale, points.length)` from embedding-utils (already imported elsewhere but the draw function uses its own inline copy). |
+| `src/lib/components/EmbeddingExplorer.svelte` | Change `THUMB_SIZES` from `[64, 128, 256]` to `[64, 128, 256, 800]`. Import `computeScatterThumbSize` from `$lib/embedding-utils`. Replace inline thumb size calculation at line 474-475 with `const { size: baseThumbSize, useThumb } = computeScatterThumbSize(scale, points.length)`. Use the same helper for hover hit testing so visual size and clickable area stay aligned. |
 
 ### Edge Cases
 
@@ -209,6 +217,7 @@ export interface EmbeddingViewState {
     selectedPointId: string | null;
     highlightedCluster: number | null;
     provider: 'clip' | 'gemini';
+    projectionKey: string | null;
     hasUserView: boolean;  // false until user pans/zooms/selects
 }
 
@@ -219,22 +228,40 @@ export const embeddingViewState = writable<EmbeddingViewState>({
     selectedPointId: null,
     highlightedCluster: null,
     provider: 'clip',
+    projectionKey: null,
     hasUserView: false,
 });
 ```
 
 **Component integration:**
 
-1. On mount, read from `$embeddingViewState` and restore `panX`, `panY`, `scale`, `highlightedCluster`, `selectedProvider`. If `hasUserView` is true and the provider matches, skip `fitView()`.
+1. On mount, read from `$embeddingViewState` and restore `selectedProvider`. Do not restore `panX`, `panY`, or `scale` until after `loadProjection()` has produced points and computed the current `projectionKey`.
 
-2. After `loadProjection()` builds the `points` array, restore `selectedPoint` by finding the point matching `selectedPointId`:
+2. Make the projection deterministic enough to reuse saved view coordinates:
+   - Sort `embeddings` by image ID before building `vectors`.
+   - Pass a deterministic `random` function to `new UMAP(...)`.
+   - Make k-means deterministic too, or replace the local random `kMeans()` with a seeded/deterministic helper.
+   - Compute `projectionKey` from `selectedProvider`, sorted IDs, and embedding count. A simple stable key such as `${provider}:${ids.length}:${ids.join('|')}` is fine for this feature.
+
+3. After `loadProjection()` builds the `points` array, restore `panX`, `panY`, `scale`, `highlightedCluster`, and `selectedPoint` only if the saved state matches the current projection:
    ```typescript
-   if (savedState.selectedPointId) {
-       selectedPoint = points.find(p => p.id === savedState.selectedPointId) ?? null;
+   const savedState = get(embeddingViewState);
+   if (savedState.hasUserView && savedState.provider === selectedProvider && savedState.projectionKey === projectionKey) {
+       panX = savedState.panX;
+       panY = savedState.panY;
+       scale = savedState.scale;
+       highlightedCluster = savedState.highlightedCluster;
+       selectedPoint = savedState.selectedPointId
+           ? points.find(p => p.id === savedState.selectedPointId) ?? null
+           : null;
+   } else {
+       highlightedCluster = null;
+       selectedPoint = null;
+       fitView();
    }
    ```
 
-3. On every user interaction that changes view state (pan, zoom, selection, cluster highlight), save back to the store. Use a `saveViewState()` helper called from `handleWheel`, `handleMouseUp` (after pan), `handlePointClick`, `focusCluster`:
+4. On every user interaction that changes view state (pan, zoom, selection, cluster highlight), save back to the store. Use a `saveViewState()` helper called from `handleWheel`, `handleMouseUp` (after pan), `handlePointClick`, `zoomToPoint` when its animation completes, and `focusCluster`:
    ```typescript
    function saveViewState() {
        embeddingViewState.set({
@@ -242,12 +269,13 @@ export const embeddingViewState = writable<EmbeddingViewState>({
            selectedPointId: selectedPoint?.id ?? null,
            highlightedCluster,
            provider: selectedProvider,
+           projectionKey,
            hasUserView: true,
        });
    }
    ```
 
-4. In `handleResize()`, replace unconditional `fitView()`:
+5. In `handleResize()`, replace unconditional `fitView()`:
    ```typescript
    // Before:
    if (points.length > 0) {
@@ -257,14 +285,15 @@ export const embeddingViewState = writable<EmbeddingViewState>({
 
    // After:
    if (points.length > 0) {
-       if (!get(embeddingViewState).hasUserView) {
+       const savedState = get(embeddingViewState);
+       if (!savedState.hasUserView || savedState.provider !== selectedProvider || savedState.projectionKey !== projectionKey) {
            fitView();
        }
        requestDraw();
    }
    ```
 
-5. When the provider changes or the embedding set changes (different IDs), reset `hasUserView` to false so `fitView()` runs for the new data.
+6. When the provider changes or the embedding set changes (different IDs), do not blindly reset the store during every `loadProjection()` call. Instead, compute a new `projectionKey`; if it differs from the saved key, `fitView()` runs and the next user interaction writes the new key.
 
 ### Files Modified
 
@@ -275,9 +304,10 @@ export const embeddingViewState = writable<EmbeddingViewState>({
 
 ### Edge Cases
 
-- **UMAP produces different projections each run:** UMAP is stochastic — point coordinates change on every `loadProjection()` call. The saved `panX/panY/scale` will be wrong for the new coordinate space. **Mitigation:** reset `hasUserView` to false whenever `loadProjection()` runs, so `fitView()` recenters. Only preserve view state within a single session where the projection hasn't been recomputed.
-- **Provider switch:** when `selectedProvider` changes, `loadProjection()` runs, which resets `hasUserView`. Correct.
+- **UMAP produces different projections each run:** UMAP is stochastic by default. Resetting `hasUserView` whenever `loadProjection()` runs is not sufficient because `loadProjection()` runs on every Embeddings remount, including normal tab switches. Use sorted IDs plus deterministic UMAP/k-means random sources, and validate saved view state with `projectionKey`.
+- **Provider switch:** when `selectedProvider` changes, `projectionKey` changes. The saved view is ignored and `fitView()` runs.
 - **selectedPointId references deleted image:** `points.find()` returns null. Selection is cleared. Correct.
+- **Concurrent loads:** guard `loadProjection()` with a monotonically increasing request token so a slower previous provider load cannot overwrite `points`, `imageMap`, or restored view state after a newer provider selection.
 
 ### Testing
 
@@ -326,7 +356,7 @@ interface PersistedState {
 }
 ```
 
-**Two functions:**
+**Three functions:**
 
 ```typescript
 export function saveAppState(): void {
@@ -357,13 +387,14 @@ export function saveAppState(): void {
     }
 }
 
-export function restoreAppState(): void {
+export function restoreAppStateBeforeImages(): PersistedState | null {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return;
+        if (!raw) return null;
         const state: PersistedState = JSON.parse(raw);
-        if (state._version !== SCHEMA_VERSION) return; // version mismatch — ignore
-        viewMode.set(state.viewMode);
+        if (state._version !== SCHEMA_VERSION) return null; // version mismatch — ignore
+
+        // Set filters before loadImages(); apply viewMode after image restore.
         thumbnailSize.set(state.thumbnailSize);
         gridPreset.set(state.gridPreset);
         gridGap.set(state.gridGap);
@@ -380,20 +411,35 @@ export function restoreAppState(): void {
         showDetectionBoxes.set(state.showDetectionBoxes);
         nsfwMode.set(state.nsfwMode);
         embeddingViewState.set(state.embeddingViewState);
+        return state;
     } catch {
         // Corrupted data — ignore
+        return null;
     }
+}
+
+export function applyRestoredViewState(state: PersistedState | null): void {
+    if (!state) return;
+    viewMode.set(state.viewMode);
 }
 ```
 
 **Integration in `+page.svelte`:**
 
 ```typescript
-import { saveAppState, restoreAppState } from '$lib/persistence';
+import { saveAppState, restoreAppStateBeforeImages, applyRestoredViewState } from '$lib/persistence';
 
 onMount(() => {
-    restoreAppState();  // Must run BEFORE loadImages() so activeFolder/activeCollection are set
-    loadImages().catch(e => console.error('Failed to load images on mount:', e));
+    const init = async () => {
+        const restored = restoreAppStateBeforeImages();
+        await loadImages();
+        applyRestoredViewState(restored);
+
+        // Keep the existing deep-link behavior after initial load so launch
+        // params can override restored state and replace images when needed.
+        await initDeepLink();
+    };
+    init().catch(e => console.error('Failed to initialize app state:', e));
     // ... existing init code ...
 
     // Debounced autosave every 5s
@@ -427,10 +473,14 @@ onMount(() => {
 The restore must happen before `loadImages()` because `activeFolder` and `activeCollection` determine which images are fetched:
 
 ```
-restoreAppState()     → sets activeFolder, activeCollection, viewMode, etc.
-loadImages()          → reads activeFolder/activeCollection → fetches correct image subset
-EmbeddingExplorer mount → reads embeddingViewState → restores pan/zoom
+restoreAppStateBeforeImages() → sets activeFolder, activeCollection, minSizeFilter, etc.
+loadImages()                  → reads restored filters → fetches correct image subset
+applyRestoredViewState()      → sets viewMode and view-specific UI state
+EmbeddingExplorer mount       → loads deterministic projection → restores pan/zoom if projectionKey matches
+initDeepLink()                → launch URL can override restored state and replace images
 ```
+
+Do not set `viewMode` before `loadImages()` completes. Restoring `viewMode = 'loupe'` or `'embeddings'` before image data is available can mount view components against an empty image list and produce transient empty UI or stale focused state.
 
 ### Schema Versioning
 
@@ -448,15 +498,16 @@ if (state._version === 1) {
 
 | File | Change |
 |------|--------|
-| `src/lib/persistence.ts` | New file — `saveAppState()`, `restoreAppState()`, `PersistedState` interface |
-| `src/routes/+page.svelte` | Import and call `restoreAppState()` before `loadImages()` in `onMount()`. Set up autosave interval and `beforeunload` handler. |
+| `src/lib/persistence.ts` | New file — `saveAppState()`, `restoreAppStateBeforeImages()`, `applyRestoredViewState()`, `PersistedState` interface |
+| `src/routes/+page.svelte` | Import and call `restoreAppStateBeforeImages()` before `loadImages()` in `onMount()`, then call `applyRestoredViewState()`. Set up autosave interval and `beforeunload` handler. |
 
 ### Edge Cases
 
 - **localStorage unavailable:** WebView should always support it, but the `try/catch` handles edge cases silently.
 - **Stale folder reference:** if `activeFolder` was set to a folder that no longer exists, `listImagesByFolder()` will return an empty list. User sees an empty grid and can switch folders. This is acceptable — no crash.
-- **Stale smart collection ID:** `activeSmartCollectionId` is persisted as a string. On restore, it needs to be matched against the loaded `smartCollections` list. If the ID doesn't match, `activeSmartCollection` stays null. Handle this after smart collections are fetched from the DB.
+- **Stale smart collection ID:** `activeSmartCollectionId` is persisted as a string. Existing `+page.svelte::loadImages()` does not read `activeSmartCollection`, so restoring smart collections requires additional integration: load smart collections before `loadImages()`, resolve the saved ID to an object, and call `evaluateSmartCollection()` when active. If this is not implemented, do not claim smart collection persistence.
 - **Concurrent windows:** if multiple windows are open, the last one to save wins. This is acceptable for a desktop app.
+- **Deep links:** `initDeepLink()` currently handles launch URLs and may also fetch/replace `images` itself. Keep it after initial persisted-state restore/load so launch params override saved preferences. If `initDeepLink()` is later refactored to return parsed launch params instead of applying them, then apply those params before `loadImages()`.
 
 ### Testing
 
@@ -472,18 +523,19 @@ if (state._version === 1) {
 | File | Fix # | Type |
 |------|-------|------|
 | `src/lib/components/EmbeddingExplorer.svelte` | 1, 2, 3 | Modify |
+| `src/lib/components/Loupe.svelte` | 1 | Modify |
 | `src/lib/embedding-utils.ts` | 2 | Modify |
 | `src/lib/embedding-utils.test.ts` | 2 | Modify |
-| `src/lib/stores.ts` | 3 | Modify |
+| `src/lib/stores.ts` | 1, 3 | Modify |
 | `src/lib/persistence.ts` | 4 | New |
 | `src/routes/+page.svelte` | 4 | Modify |
 
 ## Implementation Order
 
-These fixes are independent and can be implemented in parallel:
+These fixes are not fully independent:
 
-- **Fix 1** (image rendering) and **Fix 2** (zoom formula) modify different parts of `EmbeddingExplorer.svelte` — no conflicts.
-- **Fix 3** (view state store) adds to `stores.ts` and modifies mounting/interaction code in `EmbeddingExplorer.svelte` — coordinates with Fix 1 on the `loadProjection` function but touches different lines.
+- **Fix 1** (image rendering) and **Fix 2** (zoom formula) can be implemented in parallel, but both touch `EmbeddingExplorer.svelte`; expect a small merge conflict around imports and draw/hit-test helpers.
+- **Fix 3** (view state store) adds to `stores.ts` and modifies mounting, `loadProjection()`, provider changes, resize handling, click handling, and animation completion in `EmbeddingExplorer.svelte`. It should be applied after Fix 1 and Fix 2.
 - **Fix 4** (persistence) creates a new file and modifies `+page.svelte` — independent of the other three. Depends on Fix 3 for `embeddingViewState` being in the store, so should apply after Fix 3.
 
 **Recommended parallel groups:**

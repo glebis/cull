@@ -3,7 +3,9 @@
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { UMAP } from 'umap-js';
-    import { images, focusedIndex, viewMode, zenMode, navigateTo } from '$lib/stores';
+    import { images, focusedIndex, focusedImageOverride, viewMode, zenMode, navigateTo, embeddingViewState } from '$lib/stores';
+    import { get } from 'svelte/store';
+    import { computeScatterThumbSize } from '$lib/embedding-utils';
     import { openUrl } from '@tauri-apps/plugin-opener';
     import {
         isModelAvailable,
@@ -16,6 +18,8 @@
         setApiKey,
         validateApiKey,
         generateGeminiEmbeddings,
+        getImagesByIds,
+        regenerateThumbnails,
     } from '$lib/api';
     import type { ImageWithFile } from '$lib/api';
 
@@ -26,6 +30,8 @@
     let genProgress = $state({ current: 0, total: 0 });
     let embeddingCount = $state(0);
     let totalImages = $state(0);
+    let regeneratingThumbs = $state(false);
+    let staleEmbeddingCount = $state(0);
 
     // Provider config
     type Provider = 'clip' | 'gemini';
@@ -51,7 +57,8 @@
 
     // Thumbnail images for scatter — keyed by "{id}_{size}"
     let thumbnailImages: Map<string, HTMLImageElement> = new Map();
-    const THUMB_SIZES = [64, 128, 256];
+    let failedThumbnailIds = $state<Set<string>>(new Set());
+    const THUMB_SIZES = [64, 128, 256, 800];
 
     // Canvas interaction
     let canvas: HTMLCanvasElement;
@@ -66,6 +73,9 @@
     let dragStartPanX = 0;
     let dragStartPanY = 0;
 
+    // Projection identity for view state validation
+    let projectionKey = $state<string | null>(null);
+
     // Image lookup for thumbnails
     let imageMap = $state<Map<string, ImageWithFile>>(new Map());
 
@@ -77,6 +87,8 @@
     ];
 
     onMount(async () => {
+        const savedState = get(embeddingViewState);
+        selectedProvider = savedState.provider;
         await checkModel();
         await loadEmbeddingState();
         await loadApiKeyState();
@@ -229,23 +241,48 @@
         }
     }
 
+    async function handleRegenerateThumbnails() {
+        regeneratingThumbs = true;
+        try {
+            await regenerateThumbnails();
+            await loadProjection();
+        } catch (e) {
+            console.error('Thumbnail regeneration failed:', e);
+        } finally {
+            regeneratingThumbs = false;
+        }
+    }
+
     function sizedThumbPath(basePath: string, size: number): string {
-        // basePath: "/path/to/{id}.jpg" → "/path/to/{id}_{size}.jpg"
+        if (size === 800) return basePath;
         return basePath.replace(/\.jpg$/, `_${size}.jpg`);
     }
 
     function preloadThumbnails() {
         thumbnailImages.clear();
+        failedThumbnailIds = new Set();
         for (const point of points) {
             const img = imageMap.get(point.id);
-            if (!img?.thumbnail_path) continue;
+            if (!img?.thumbnail_path) {
+                failedThumbnailIds.add(point.id);
+                continue;
+            }
+            let anyLoaded = false;
+            let loadAttempts = 0;
             for (const size of THUMB_SIZES) {
                 const key = `${point.id}_${size}`;
                 const el = new Image();
                 el.src = convertFileSrc(sizedThumbPath(img.thumbnail_path, size));
                 el.onload = () => {
+                    anyLoaded = true;
                     thumbnailImages.set(key, el);
                     requestDraw();
+                };
+                el.onerror = () => {
+                    loadAttempts++;
+                    if (loadAttempts === THUMB_SIZES.length && !anyLoaded) {
+                        failedThumbnailIds = new Set([...failedThumbnailIds, point.id]);
+                    }
                 };
             }
         }
@@ -253,15 +290,13 @@
 
     function pickThumbnail(id: string, displayPx: number): HTMLImageElement | undefined {
         const dpr = window.devicePixelRatio || 1;
-        const physicalPx = displayPx * dpr;
-        // Pick smallest size that covers the physical pixel need
+        const physicalPx = displayPx * dpr * 1.5;
         for (const size of THUMB_SIZES) {
             if (size >= physicalPx) {
                 const el = thumbnailImages.get(`${id}_${size}`);
                 if (el?.complete && el.naturalWidth > 0) return el;
             }
         }
-        // Fallback to largest available
         for (let i = THUMB_SIZES.length - 1; i >= 0; i--) {
             const el = thumbnailImages.get(`${id}_${THUMB_SIZES[i]}`);
             if (el?.complete && el.naturalWidth > 0) return el;
@@ -321,6 +356,7 @@
             }
         }
         requestDraw();
+        saveViewState();
     }
 
     async function loadProjection() {
@@ -332,12 +368,15 @@
                 return;
             }
 
-            // Build image map for lookup
+            // Build image map from all embedded images (not just current filter)
+            const embeddingIds = embeddings.map(([id]) => id);
+            const embeddingImages = await getImagesByIds(embeddingIds);
             const map = new Map<string, ImageWithFile>();
-            for (const img of $images) {
+            for (const img of embeddingImages) {
                 map.set(img.image.id, img);
             }
             imageMap = map;
+            staleEmbeddingCount = embeddingIds.length - embeddingImages.length;
 
             // Run UMAP — tight clusters with clear separation
             const vectors = embeddings.map(([_, vec]) => vec);
@@ -375,9 +414,26 @@
                     previewPaths: getClusterPreviewPaths(pts),
                 }));
 
-            // Auto-fit view
-            highlightedCluster = null;
-            fitView();
+            // Compute projection key for view state validation
+            const sortedIds = embeddings.map(([id]) => id).sort();
+            const newProjectionKey = `${selectedProvider}:${sortedIds.length}:${sortedIds.join('|')}`;
+            projectionKey = newProjectionKey;
+
+            // Restore view state if it matches the current projection
+            const savedState = get(embeddingViewState);
+            if (savedState.hasUserView && savedState.provider === selectedProvider && savedState.projectionKey === newProjectionKey) {
+                panX = savedState.panX;
+                panY = savedState.panY;
+                scale = savedState.scale;
+                highlightedCluster = savedState.highlightedCluster;
+                selectedPoint = savedState.selectedPointId
+                    ? points.find(p => p.id === savedState.selectedPointId) ?? null
+                    : null;
+            } else {
+                highlightedCluster = null;
+                fitView();
+            }
+
             preloadThumbnails();
             requestDraw();
         } catch (e) {
@@ -470,10 +526,7 @@
         ctx.imageSmoothingQuality = 'high';
         ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-        // Thumbnail size: small at overview, grows when zoomed in
-        const pointDensityFactor = Math.max(1, Math.sqrt(points.length / 10));
-        const baseThumbSize = Math.max(4, Math.min(48, (8 * Math.sqrt(scale)) / pointDensityFactor));
-        const useThumb = baseThumbSize >= 8;
+        const { size: baseThumbSize, useThumb } = computeScatterThumbSize(scale, points.length);
 
         // Draw points — clean thumbnails, no borders, no transparency
         const margin = baseThumbSize + 10;
@@ -575,6 +628,17 @@
         }
     }
 
+    function saveViewState() {
+        embeddingViewState.set({
+            panX, panY, scale,
+            selectedPointId: selectedPoint?.id ?? null,
+            highlightedCluster,
+            provider: selectedProvider,
+            projectionKey,
+            hasUserView: true,
+        });
+    }
+
     function handleWheel(e: WheelEvent) {
         e.preventDefault();
         const rect = canvas.getBoundingClientRect();
@@ -590,6 +654,7 @@
         scale = newScale;
 
         requestDraw();
+        saveViewState();
     }
 
     function handleMouseDown(e: MouseEvent) {
@@ -612,7 +677,7 @@
         const rect = canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
-        const thumbSize = Math.max(8, Math.min(60, 20 * Math.sqrt(scale)));
+        const { size: thumbSize } = computeScatterThumbSize(scale, points.length);
         const hitHalf = Math.max(6, thumbSize / 2);
 
         let found: Point | null = null;
@@ -639,15 +704,27 @@
             }
         }
         dragging = false;
+        saveViewState();
+    }
+
+    function focusImageForLoupe(imageId: string): boolean {
+        const idx = $images.findIndex(img => img.image.id === imageId);
+        if (idx >= 0) {
+            focusedImageOverride.set(null);
+            focusedIndex.set(idx);
+            return true;
+        }
+        const img = imageMap.get(imageId);
+        if (!img) return false;
+        focusedImageOverride.set(img);
+        return true;
     }
 
     function handlePointClick(point: Point) {
         selectedPoint = point;
-        const idx = $images.findIndex(img => img.image.id === point.id);
-        if (idx >= 0) {
-            focusedIndex.set(idx);
-        }
+        focusImageForLoupe(point.id);
         zoomToPoint(point);
+        saveViewState();
     }
 
     function zoomToPoint(point: Point) {
@@ -674,20 +751,14 @@
     }
 
     function handleFocusInGrid() {
-        if (selectedPoint) {
-            const idx = $images.findIndex(img => img.image.id === selectedPoint!.id);
-            if (idx >= 0) {
-                focusedIndex.set(idx);
-                navigateTo('loupe');
-            }
+        if (selectedPoint && focusImageForLoupe(selectedPoint.id)) {
+            navigateTo('loupe');
         }
     }
 
     function handleCanvasDblClick(e: MouseEvent) {
         if (!hoveredPoint) return;
-        const idx = $images.findIndex(img => img.image.id === hoveredPoint!.id);
-        if (idx >= 0) {
-            focusedIndex.set(idx);
+        if (focusImageForLoupe(hoveredPoint.id)) {
             navigateTo('loupe');
         }
     }
@@ -709,7 +780,10 @@
                     }
                 }
                 if (points.length > 0) {
-                    fitView();
+                    const savedState = get(embeddingViewState);
+                    if (!savedState.hasUserView || savedState.provider !== selectedProvider || savedState.projectionKey !== projectionKey) {
+                        fitView();
+                    }
                     requestDraw();
                 }
             }
@@ -856,6 +930,27 @@
             </div>
         {/if}
 
+        {#if failedThumbnailIds.size > 0 || staleEmbeddingCount > 0}
+            <div class="panel-section warning-section">
+                {#if failedThumbnailIds.size > 0}
+                    <div class="warning-row">
+                        <span class="warning-icon">&#9888;</span>
+                        <span>{failedThumbnailIds.size} missing thumbnails</span>
+                    </div>
+                    <button class="action-btn warning" onclick={handleRegenerateThumbnails} disabled={regeneratingThumbs}>
+                        {regeneratingThumbs ? 'Regenerating...' : 'Regenerate Thumbnails'}
+                    </button>
+                {/if}
+                {#if staleEmbeddingCount > 0}
+                    <div class="warning-row">
+                        <span class="warning-icon">&#9888;</span>
+                        <span>{staleEmbeddingCount} stale embeddings</span>
+                    </div>
+                    <div class="warning-hint">Images deleted but embeddings remain. Regenerate embeddings to clean up.</div>
+                {/if}
+            </div>
+        {/if}
+
         {#if clusters.length > 0}
             <div class="panel-section">
                 <div class="section-header">CLUSTERS</div>
@@ -968,6 +1063,38 @@
     .panel-section {
         padding: 12px;
         border-bottom: 1px solid var(--border);
+    }
+
+    .warning-section {
+        background: rgba(224, 175, 104, 0.08);
+    }
+
+    .warning-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        color: var(--orange);
+    }
+
+    .warning-icon {
+        font-size: 12px;
+    }
+
+    .warning-hint {
+        font-size: 9px;
+        color: var(--text-secondary);
+        margin-top: 4px;
+    }
+
+    .action-btn.warning {
+        background: rgba(224, 175, 104, 0.15);
+        color: var(--orange);
+    }
+
+    .action-btn.warning:hover:not(:disabled) {
+        background: rgba(224, 175, 104, 0.25);
+        border-color: var(--orange);
     }
 
     .section-header {

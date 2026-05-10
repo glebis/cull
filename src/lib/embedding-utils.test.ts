@@ -568,10 +568,26 @@ describe('computeScatterThumbSize', () => {
         expect(result.useThumb).toBe(false);
     });
 
-    it('smaller with more points', () => {
+    it('smaller with more points at same scale', () => {
         const few = computeScatterThumbSize(5, 10);
         const many = computeScatterThumbSize(5, 1000);
         expect(many.size).toBeLessThan(few.size);
+    });
+
+    it('density penalty fades at high zoom', () => {
+        const fewHigh = computeScatterThumbSize(500, 10);
+        const manyHigh = computeScatterThumbSize(500, 1000);
+        const fewLow = computeScatterThumbSize(5, 10);
+        const manyLow = computeScatterThumbSize(5, 1000);
+        const ratioHigh = manyHigh.size / fewHigh.size;
+        const ratioLow = manyLow.size / fewLow.size;
+        expect(ratioHigh).toBeGreaterThan(ratioLow);
+    });
+
+    it('grows large when zoomed in (up to 192)', () => {
+        const result = computeScatterThumbSize(800, 310);
+        expect(result.size).toBeGreaterThan(150);
+        expect(result.size).toBeLessThanOrEqual(192);
     });
 
     it('clamps to 4 minimum', () => {
@@ -585,9 +601,11 @@ describe('computeScatterThumbSize', () => {
         expect(result.useThumb).toBe(false);
     });
 
-    it('handles zero points (densityFactor=1)', () => {
+    it('handles zero points (no density penalty)', () => {
         const result = computeScatterThumbSize(10, 0);
         expect(result.size).toBeGreaterThan(0);
+        const withPoints = computeScatterThumbSize(10, 310);
+        expect(result.size).toBeGreaterThanOrEqual(withPoints.size);
     });
 });
 

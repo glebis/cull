@@ -2,8 +2,8 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { onMount } from 'svelte';
     import ContextMenu from './ContextMenu.svelte';
-    import { images, focusedIndex, focusedImage, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode } from '$lib/stores';
-    import { getDetections, getVisionMetadata } from '$lib/api';
+    import { images, focusedIndex, focusedImage, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast } from '$lib/stores';
+    import { getDetections, getVisionMetadata, cropImage } from '$lib/api';
     import type { Detection } from '$lib/api';
 
     let dragging = $state(false);
@@ -69,10 +69,12 @@
             }
         }
         window.addEventListener('image-updated', handleImageUpdated);
+        window.addEventListener('enter-crop-mode', enterCropMode);
 
         return () => {
             window.removeEventListener('toggle-loupe-overlays', toggleOverlays);
             window.removeEventListener('image-updated', handleImageUpdated);
+            window.removeEventListener('enter-crop-mode', enterCropMode);
         };
     });
 
@@ -151,6 +153,80 @@
         navigateBack();
     }
 
+    // Crop mode
+    let cropMode = $state(false);
+    let cropStart = $state<{x: number, y: number} | null>(null);
+    let cropEnd = $state<{x: number, y: number} | null>(null);
+    let cropping = $state(false);
+
+    function enterCropMode() {
+        cropMode = true;
+        cropStart = null;
+        cropEnd = null;
+    }
+
+    function cancelCrop() {
+        cropMode = false;
+        cropStart = null;
+        cropEnd = null;
+    }
+
+    function getCropRect() {
+        if (!cropStart || !cropEnd || !imgEl || !image) return null;
+        const rect = imgEl.getBoundingClientRect();
+        const scaleX = image.image.width / rect.width;
+        const scaleY = image.image.height / rect.height;
+        const x1 = Math.min(cropStart.x, cropEnd.x);
+        const y1 = Math.min(cropStart.y, cropEnd.y);
+        const x2 = Math.max(cropStart.x, cropEnd.x);
+        const y2 = Math.max(cropStart.y, cropEnd.y);
+        return {
+            x: Math.round((x1 - rect.left) * scaleX),
+            y: Math.round((y1 - rect.top) * scaleY),
+            width: Math.round((x2 - x1) * scaleX),
+            height: Math.round((y2 - y1) * scaleY),
+        };
+    }
+
+    async function applyCrop() {
+        const rect = getCropRect();
+        if (!rect || !image || rect.width < 10 || rect.height < 10) return;
+        cropping = true;
+        try {
+            await cropImage(image.image.id, rect.x, rect.y, rect.width, rect.height, false);
+            showToast('Image cropped', { type: 'info', duration: 2000 });
+            window.dispatchEvent(new CustomEvent('image-updated'));
+        } catch (e) {
+            showToast(`Crop failed: ${e}`, { type: 'error', duration: 5000 });
+        }
+        cropping = false;
+        cancelCrop();
+    }
+
+    function handleCropMouseDown(e: MouseEvent) {
+        if (!cropMode) return;
+        cropStart = { x: e.clientX, y: e.clientY };
+        cropEnd = { x: e.clientX, y: e.clientY };
+    }
+
+    function handleCropMouseMove(e: MouseEvent) {
+        if (!cropMode || !cropStart) return;
+        cropEnd = { x: e.clientX, y: e.clientY };
+    }
+
+    function handleCropMouseUp() {
+        // Selection complete — user clicks Apply or Cancel
+    }
+
+    $effect(() => {
+        if (!cropMode) return;
+        function handleEsc(e: KeyboardEvent) {
+            if (e.key === 'Escape') cancelCrop();
+        }
+        window.addEventListener('keydown', handleEsc);
+        return () => window.removeEventListener('keydown', handleEsc);
+    });
+
     let ctxMenu = $state({ visible: false, x: 0, y: 0 });
 
     function handleContextMenu(e: MouseEvent) {
@@ -227,6 +303,30 @@
         </div>
     {:else}
         <div class="empty">No image selected</div>
+    {/if}
+
+    {#if cropMode}
+        <div
+            class="crop-overlay"
+            onmousedown={handleCropMouseDown}
+            onmousemove={handleCropMouseMove}
+            onmouseup={handleCropMouseUp}
+        >
+            {#if cropStart && cropEnd}
+                {@const left = Math.min(cropStart.x, cropEnd.x)}
+                {@const top = Math.min(cropStart.y, cropEnd.y)}
+                {@const w = Math.abs(cropEnd.x - cropStart.x)}
+                {@const h = Math.abs(cropEnd.y - cropStart.y)}
+                <div class="crop-selection" style="left:{left}px;top:{top}px;width:{w}px;height:{h}px;"></div>
+            {/if}
+            <div class="crop-toolbar">
+                <button onclick={applyCrop} disabled={cropping || !cropStart}>
+                    {cropping ? 'Cropping…' : '✓ Apply'}
+                </button>
+                <button onclick={cancelCrop}>✕ Cancel</button>
+                <span class="crop-hint">Draw a rectangle to crop • Esc to cancel</span>
+            </div>
+        </div>
     {/if}
 
     {#if !hideOverlays && decision !== 'undecided'}
@@ -645,5 +745,50 @@
     .meta-value {
         color: var(--text-primary, #e0e0e0);
         word-break: break-word;
+    }
+    /* Crop mode */
+    .crop-overlay {
+        position: absolute;
+        inset: 0;
+        cursor: crosshair;
+        z-index: 20;
+    }
+    .crop-selection {
+        position: fixed;
+        border: 2px dashed #4a9eff;
+        background: rgba(74, 158, 255, 0.1);
+        pointer-events: none;
+    }
+    .crop-toolbar {
+        position: absolute;
+        bottom: 48px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0,0,0,0.85);
+        padding: 8px 16px;
+        border-radius: 8px;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        backdrop-filter: blur(8px);
+    }
+    .crop-toolbar button {
+        background: none;
+        border: 1px solid rgba(255,255,255,0.3);
+        color: #fff;
+        padding: 4px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.8rem;
+    }
+    .crop-toolbar button:hover:not(:disabled) {
+        background: rgba(255,255,255,0.1);
+    }
+    .crop-toolbar button:disabled {
+        opacity: 0.4;
+    }
+    .crop-hint {
+        color: rgba(255,255,255,0.5);
+        font-size: 0.75rem;
     }
 </style>

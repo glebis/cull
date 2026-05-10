@@ -690,6 +690,11 @@ function handleLoupeKeys(e: KeyboardEvent) {
         }
         return;
     }
+    if (e.key === 'c' && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('enter-crop-mode'));
+        return;
+    }
 
     switch (e.key) {
         case 'h':
@@ -757,20 +762,6 @@ function handleLoupeKeys(e: KeyboardEvent) {
         case 'f':
             e.preventDefault();
             toggleFullscreen();
-            break;
-        case 'c':
-            // Compare current + next image
-            e.preventDefault();
-            {
-                const imgs = get(images);
-                const idx = get(focusedIndex);
-                const current = imgs[idx];
-                const next = imgs[idx + 1] ?? imgs[0];
-                if (current && next) {
-                    compareImages.set([current, next]);
-                    navigateTo('compare');
-                }
-            }
             break;
     }
 
