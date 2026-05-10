@@ -455,6 +455,13 @@ impl ImageViewMcp {
 
     #[tool(description = "Add images to an existing collection")]
     fn add_to_collection(&self, Parameters(params): Parameters<AddToCollectionParams>) -> String {
+        for image_id in &params.image_ids {
+            match self.check_image_id_scope(image_id) {
+                Ok(false) => return format!("Error: Access denied — image '{}' outside token scope", image_id),
+                Err(e) => return format!("Error: {}", e),
+                _ => {}
+            }
+        }
         let state = self.app_handle.state::<AppState>();
         let refs: Vec<&str> = params.image_ids.iter().map(|s| s.as_str()).collect();
         match state.db.add_to_collection(&params.collection_id, &refs) {
@@ -734,6 +741,13 @@ impl ImageViewMcp {
 
     #[tool(description = "Generate CLIP visual embeddings for images (required for find_similar). Returns count processed.")]
     fn generate_embeddings(&self, Parameters(params): Parameters<GenerateEmbeddingsParams>) -> String {
+        for image_id in &params.image_ids {
+            match self.check_image_id_scope(image_id) {
+                Ok(false) => return format!("Error: Access denied — image '{}' outside token scope", image_id),
+                Err(e) => return format!("Error: {}", e),
+                _ => {}
+            }
+        }
         let state = self.app_handle.state::<AppState>();
 
         {
@@ -779,6 +793,13 @@ impl ImageViewMcp {
 
     #[tool(description = "Run YOLO object detection on images. Returns count processed.")]
     fn detect_objects(&self, Parameters(params): Parameters<DetectObjectsParams>) -> String {
+        for image_id in &params.image_ids {
+            match self.check_image_id_scope(image_id) {
+                Ok(false) => return format!("Error: Access denied — image '{}' outside token scope", image_id),
+                Err(e) => return format!("Error: {}", e),
+                _ => {}
+            }
+        }
         let state = self.app_handle.state::<AppState>();
 
         let variant = match params.variant.as_deref() {
@@ -833,6 +854,13 @@ impl ImageViewMcp {
 
     #[tool(description = "Analyze images with Ollama vision model for natural language descriptions. Returns count processed.")]
     fn analyze_images(&self, Parameters(params): Parameters<AnalyzeImagesParams>) -> String {
+        for image_id in &params.image_ids {
+            match self.check_image_id_scope(image_id) {
+                Ok(false) => return format!("Error: Access denied — image '{}' outside token scope", image_id),
+                Err(e) => return format!("Error: {}", e),
+                _ => {}
+            }
+        }
         let state = self.app_handle.state::<AppState>();
 
         let url = state.db.get_setting("ollama_url")

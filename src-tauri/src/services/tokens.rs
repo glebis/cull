@@ -293,6 +293,13 @@ pub fn parse_scope(scope_json: &Option<String>) -> Option<TokenScope> {
         .and_then(|s| serde_json::from_str(s).ok())
 }
 
+fn is_path_under(path: &str, ancestor: &str) -> bool {
+    use std::path::Path;
+    let path = Path::new(path);
+    let ancestor = Path::new(ancestor);
+    path.starts_with(ancestor)
+}
+
 pub fn image_in_scope(scope: &Option<TokenScope>, image_path: &str, image_collections: &[String]) -> bool {
     let s = match scope {
         None => return true,
@@ -301,7 +308,7 @@ pub fn image_in_scope(scope: &Option<TokenScope>, image_path: &str, image_collec
 
     if let Some(folders) = &s.folders {
         for folder in folders {
-            if image_path.starts_with(folder) {
+            if is_path_under(image_path, folder) {
                 return true;
             }
         }
@@ -326,7 +333,7 @@ pub fn folder_in_scope(scope: &Option<TokenScope>, folder_path: &str) -> bool {
 
     if let Some(folders) = &s.folders {
         for allowed in folders {
-            if folder_path.starts_with(allowed) || allowed.starts_with(folder_path) {
+            if is_path_under(folder_path, allowed) || is_path_under(allowed, folder_path) {
                 return true;
             }
         }
@@ -772,6 +779,26 @@ mod tests {
         });
         assert!(!folder_in_scope(&scope, "/photos"));
         assert!(!folder_in_scope(&scope, "/art/dalle"));
+    }
+
+    #[test]
+    fn test_path_traversal_prevention() {
+        let scope = Some(TokenScope {
+            folders: Some(vec!["/art".to_string()]),
+            collections: None,
+            tags: None,
+        });
+        // /art/image.jpg should match
+        assert!(image_in_scope(&scope, "/art/image.jpg", &[]));
+        // /art/sub/image.jpg should match
+        assert!(image_in_scope(&scope, "/art/sub/image.jpg", &[]));
+        // /artifacts/image.jpg should NOT match (path traversal)
+        assert!(!image_in_scope(&scope, "/artifacts/image.jpg", &[]));
+        // /artisan/image.jpg should NOT match
+        assert!(!image_in_scope(&scope, "/artisan/image.jpg", &[]));
+        // Same for folder_in_scope
+        assert!(folder_in_scope(&scope, "/art/sub"));
+        assert!(!folder_in_scope(&scope, "/artifacts"));
     }
 
     #[test]
