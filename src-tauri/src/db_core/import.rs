@@ -8,6 +8,7 @@ use super::db::Database;
 use super::models::*;
 use super::thumbnails;
 use super::source_detection::{detect_source, read_png_text_chunks};
+use super::sidecar;
 
 pub fn import_file(
     db: &Database,
@@ -69,6 +70,30 @@ pub fn import_file(
         vec![]
     };
     let detection = detect_source(filename, &png_chunks, file_path);
+
+    // Check for sidecar JSON and create generation_run
+    if let Some(sidecar_path) = sidecar::find_sidecar(file_path) {
+        if let Ok(sc) = sidecar::parse_sidecar(&sidecar_path) {
+            let run_id = Uuid::new_v4().to_string();
+            let run = super::models::GenerationRun {
+                id: run_id.clone(),
+                prompt: sc.prompt.clone(),
+                negative_prompt: sc.negative_prompt,
+                provider: sc.provider,
+                model: sc.model,
+                settings_json: sc.settings_json,
+                seed: sc.seed,
+                parent_run_id: None,
+                source_type: "sidecar".to_string(),
+                source_path: Some(sidecar_path.to_string_lossy().to_string()),
+                raw_metadata_json: Some(sc.raw_json),
+                created_at: sc.created_at,
+                imported_at: Utc::now().to_rfc3339(),
+            };
+            let _ = db.insert_generation_run(&run);
+            let _ = db.link_image_to_run(&image_id, &run_id);
+        }
+    }
 
     let aspect_ratio = width as f64 / height.max(1) as f64;
     let orientation = if (aspect_ratio - 1.0).abs() < 0.05 {
