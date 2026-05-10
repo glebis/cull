@@ -15,6 +15,7 @@
     import ImportBanner from '$lib/components/ImportBanner.svelte';
     import LineageView from '$lib/components/LineageView.svelte';
     import McpSettings from '$lib/components/McpSettings.svelte';
+    import JobProgressPanel from '$lib/components/JobProgressPanel.svelte';
     import { handleKeydown } from '$lib/keys';
     import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections, showToast, settingsOpen, searchOpen } from '$lib/stores';
     import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages, trashImages, deleteImagesPermanently } from '$lib/api';
@@ -177,6 +178,8 @@
         </div>
     {/if}
 </div>
+
+<JobProgressPanel />
 
 {#if $settingsOpen}
     <McpSettings onclose={() => settingsOpen.set(false)} />
