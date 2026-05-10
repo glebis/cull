@@ -549,12 +549,7 @@ impl ImageViewMcp {
             Err(e) => return format!("Error: {}", e),
             _ => {}
         }
-        use tauri::Emitter;
-        let params_json = serde_json::json!({
-            "focus": params.image_id,
-            "view": "loupe",
-        });
-        match self.app_handle.emit("open-with-params", params_json) {
+        match crate::services::display::show_image(&self.app_handle, &params.image_id) {
             Ok(()) => serde_json::json!({"status": "ok", "action": "opened in loupe"}).to_string(),
             Err(e) => format!("Error: {}", e),
         }
@@ -566,12 +561,7 @@ impl ImageViewMcp {
         if !tokens::folder_in_scope(&scope, &params.folder_path) {
             return "Error: Access denied — folder outside token scope".to_string();
         }
-        use tauri::Emitter;
-        let params_json = serde_json::json!({
-            "folder": params.folder_path,
-            "view": "grid",
-        });
-        match self.app_handle.emit("open-with-params", params_json) {
+        match crate::services::display::navigate_to_folder(&self.app_handle, &params.folder_path) {
             Ok(()) => serde_json::json!({"status": "ok", "action": "navigated to folder"}).to_string(),
             Err(e) => format!("Error: {}", e),
         }
@@ -579,8 +569,7 @@ impl ImageViewMcp {
 
     #[tool(description = "Display a collection in the local app grid view")]
     fn show_collection(&self, Parameters(params): Parameters<CollectionIdParams>) -> String {
-        use tauri::Emitter;
-        match self.app_handle.emit("navigate-collection", serde_json::json!({"collection_id": params.collection_id})) {
+        match crate::services::display::show_collection(&self.app_handle, &params.collection_id) {
             Ok(()) => serde_json::json!({"status": "ok", "action": "showing collection"}).to_string(),
             Err(e) => format!("Error: {}", e),
         }
