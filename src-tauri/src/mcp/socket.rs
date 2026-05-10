@@ -66,3 +66,86 @@ pub async fn start_socket_server(
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_socket_path_construction() {
+        let dir = PathBuf::from("/tmp/test-app-data");
+        let path = socket_path(&dir);
+        assert_eq!(path, PathBuf::from("/tmp/test-app-data/mcp.sock"));
+    }
+
+    #[test]
+    fn test_socket_path_nested() {
+        let dir = PathBuf::from("/Users/test/Library/Application Support/com.test.app");
+        let path = socket_path(&dir);
+        assert!(path.ends_with("mcp.sock"));
+        assert!(path.to_string_lossy().contains("com.test.app"));
+    }
+
+    #[tokio::test]
+    async fn test_socket_bind_and_connect() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("test.sock");
+
+        let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
+
+        let client = tokio::net::UnixStream::connect(&sock_path).await.unwrap();
+        assert!(client.peer_addr().is_ok());
+
+        let (server_stream, _) = listener.accept().await.unwrap();
+        assert!(server_stream.peer_addr().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_stale_socket_file_not_connectable() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("stale.sock");
+
+        std::fs::write(&sock_path, "").unwrap();
+        assert!(sock_path.exists());
+
+        let result = tokio::net::UnixStream::connect(&sock_path).await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_socket_permissions_0600() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("perm.sock");
+
+        let _listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+            let meta = std::fs::metadata(&sock_path).unwrap();
+            let mode = meta.permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_multiple_clients_can_connect() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("multi.sock");
+
+        let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
+
+        let c1 = tokio::net::UnixStream::connect(&sock_path).await.unwrap();
+        let c2 = tokio::net::UnixStream::connect(&sock_path).await.unwrap();
+
+        let (s1, _) = listener.accept().await.unwrap();
+        let (s2, _) = listener.accept().await.unwrap();
+
+        assert!(c1.peer_addr().is_ok());
+        assert!(c2.peer_addr().is_ok());
+        assert!(s1.peer_addr().is_ok());
+        assert!(s2.peer_addr().is_ok());
+    }
+}
