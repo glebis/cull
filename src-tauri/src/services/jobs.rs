@@ -346,4 +346,202 @@ mod tests {
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].job_id, job_id);
     }
+
+    #[test]
+    fn test_complete_after_cancel_yields_cancelled() {
+        let registry = JobRegistry::default();
+        let (job_id, _token) = registry.create_job("import", 10);
+        registry.cancel(&job_id).unwrap();
+        registry.complete(&job_id);
+        let snapshot = registry.get(&job_id).unwrap();
+        assert_eq!(snapshot.status, "cancelled");
+    }
+
+    #[test]
+    fn test_fail_after_cancel_yields_cancelled() {
+        let registry = JobRegistry::default();
+        let (job_id, _token) = registry.create_job("import", 10);
+        registry.cancel(&job_id).unwrap();
+        registry.fail(&job_id, "some error");
+        let snapshot = registry.get(&job_id).unwrap();
+        assert_eq!(snapshot.status, "cancelled");
+        assert!(snapshot.error.is_none());
+    }
+
+    // --- Persistence tests ---
+
+    fn test_db() -> crate::db_core::db::Database {
+        crate::db_core::db::Database::open(std::path::Path::new(":memory:")).unwrap()
+    }
+
+    #[test]
+    fn test_persist_terminal_saves_completed() {
+        let db = test_db();
+        let registry = JobRegistry::default();
+        let (job_id, _) = registry.create_job("import", 10);
+        registry.complete(&job_id);
+        registry.persist_terminal(&job_id, &db);
+
+        let loaded = db.load_terminal_jobs().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].job_id, job_id);
+        assert_eq!(loaded[0].status, "completed");
+        assert_eq!(loaded[0].kind, "import");
+    }
+
+    #[test]
+    fn test_persist_terminal_saves_failed() {
+        let db = test_db();
+        let registry = JobRegistry::default();
+        let (job_id, _) = registry.create_job("embeddings", 5);
+        registry.fail(&job_id, "Model not found");
+        registry.persist_terminal(&job_id, &db);
+
+        let loaded = db.load_terminal_jobs().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].status, "failed");
+        assert_eq!(loaded[0].error.as_deref(), Some("Model not found"));
+    }
+
+    #[test]
+    fn test_persist_terminal_saves_cancelled() {
+        let db = test_db();
+        let registry = JobRegistry::default();
+        let (job_id, _) = registry.create_job("detection", 20);
+        registry.cancel(&job_id).unwrap();
+        registry.mark_cancelled(&job_id);
+        registry.persist_terminal(&job_id, &db);
+
+        let loaded = db.load_terminal_jobs().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].status, "cancelled");
+    }
+
+    #[test]
+    fn test_persist_terminal_ignores_running() {
+        let db = test_db();
+        let registry = JobRegistry::default();
+        let (job_id, _) = registry.create_job("import", 10);
+        registry.persist_terminal(&job_id, &db);
+
+        let loaded = db.load_terminal_jobs().unwrap();
+        assert_eq!(loaded.len(), 0);
+    }
+
+    #[test]
+    fn test_load_from_db_restores_terminal_jobs() {
+        let db = test_db();
+
+        // Create and persist two jobs
+        let registry1 = JobRegistry::default();
+        let (id1, _) = registry1.create_job("import", 10);
+        registry1.complete(&id1);
+        registry1.persist_terminal(&id1, &db);
+
+        let (id2, _) = registry1.create_job("vision", 5);
+        registry1.fail(&id2, "timeout");
+        registry1.persist_terminal(&id2, &db);
+
+        // Load into a fresh registry (simulates restart)
+        let registry2 = JobRegistry::default();
+        registry2.load_from_db(&db);
+
+        assert!(registry2.get(&id1).is_some());
+        assert_eq!(registry2.get(&id1).unwrap().status, "completed");
+        assert!(registry2.get(&id2).is_some());
+        assert_eq!(registry2.get(&id2).unwrap().status, "failed");
+    }
+
+    #[test]
+    fn test_load_from_db_marks_stale_running_as_failed() {
+        let db = test_db();
+
+        // Manually insert a "running" job into DB (simulates crash)
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO mcp_jobs (job_id, kind, status, current, total, created_at, updated_at)
+                 VALUES ('job_crashed123', 'import', 'running', 5, 10, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            ).unwrap();
+        }
+
+        let registry = JobRegistry::default();
+        registry.load_from_db(&db);
+
+        let snapshot = registry.get("job_crashed123").unwrap();
+        assert_eq!(snapshot.status, "failed");
+    }
+
+    #[test]
+    fn test_load_from_db_marks_stale_cancelling_as_failed() {
+        let db = test_db();
+
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO mcp_jobs (job_id, kind, status, current, total, created_at, updated_at)
+                 VALUES ('job_cancel_stale', 'detection', 'cancelling', 3, 10, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            ).unwrap();
+        }
+
+        let registry = JobRegistry::default();
+        registry.load_from_db(&db);
+
+        let snapshot = registry.get("job_cancel_stale").unwrap();
+        assert_eq!(snapshot.status, "failed");
+    }
+
+    #[test]
+    fn test_persist_then_load_preserves_progress() {
+        let db = test_db();
+        let registry = JobRegistry::default();
+        let (job_id, _) = registry.create_job("embeddings", 100);
+        registry.update_progress(&job_id, 73, Some("image_xyz"));
+        registry.complete(&job_id);
+        registry.persist_terminal(&job_id, &db);
+
+        let registry2 = JobRegistry::default();
+        registry2.load_from_db(&db);
+
+        let snapshot = registry2.get(&job_id).unwrap();
+        assert_eq!(snapshot.current, 100); // complete sets current = total
+        assert_eq!(snapshot.total, 100);
+        assert_eq!(snapshot.kind, "embeddings");
+    }
+
+    #[test]
+    fn test_db_prune_old_jobs() {
+        let db = test_db();
+
+        // Insert a job with old timestamp
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO mcp_jobs (job_id, kind, status, current, total, created_at, updated_at)
+                 VALUES ('job_old_one', 'import', 'completed', 10, 10, '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z')",
+                [],
+            ).unwrap();
+        }
+
+        let pruned = db.prune_old_jobs(1).unwrap();
+        assert_eq!(pruned, 1);
+
+        let loaded = db.load_terminal_jobs().unwrap();
+        assert_eq!(loaded.len(), 0);
+    }
+
+    #[test]
+    fn test_multiple_persist_updates_not_duplicates() {
+        let db = test_db();
+        let registry = JobRegistry::default();
+        let (job_id, _) = registry.create_job("import", 10);
+        registry.complete(&job_id);
+        registry.persist_terminal(&job_id, &db);
+        registry.persist_terminal(&job_id, &db); // second persist should update, not error
+
+        let loaded = db.load_terminal_jobs().unwrap();
+        assert_eq!(loaded.len(), 1);
+    }
 }
