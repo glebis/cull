@@ -204,6 +204,68 @@ pub struct ImageIdParams {
     pub image_id: String,
 }
 
+// --- Import param structs ---
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ImportFolderParams {
+    #[schemars(description = "Absolute path to folder to import")]
+    pub folder_path: String,
+}
+
+// --- AI param structs ---
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct GenerateEmbeddingsParams {
+    #[schemars(description = "List of image IDs to generate CLIP embeddings for")]
+    pub image_ids: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DetectObjectsParams {
+    #[schemars(description = "List of image IDs to run YOLO object detection on")]
+    pub image_ids: Vec<String>,
+    #[schemars(description = "YOLO variant: 'nano', 'small', or 'medium' (default: 'medium')")]
+    pub variant: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AnalyzeImagesParams {
+    #[schemars(description = "List of image IDs to analyze with Ollama vision model")]
+    pub image_ids: Vec<String>,
+}
+
+// --- Token management param structs ---
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CreateTokenParams {
+    #[schemars(description = "Human-readable name for the token")]
+    pub name: String,
+    #[schemars(description = "Role: 'viewer', 'curator', 'operator', or 'admin'")]
+    pub role: String,
+    #[schemars(description = "Optional scope restriction")]
+    pub scope: Option<crate::db_core::models::TokenScope>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct TokenIdParams {
+    #[schemars(description = "Token ID (e.g. tok_abc123)")]
+    pub token_id: String,
+}
+
+// --- Audit param structs ---
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AuditLogParams {
+    #[schemars(description = "Max entries to return (default 50, max 500)")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct PruneAuditParams {
+    #[schemars(description = "Delete entries older than this many days (default 30)")]
+    pub retention_days: Option<u32>,
+}
+
 #[tool_router]
 impl ImageViewMcp {
     #[tool(description = "Get library statistics: image count, folder count, collection count")]
@@ -573,6 +635,345 @@ impl ImageViewMcp {
             Ok(()) => serde_json::json!({"status": "ok", "action": "showing collection"}).to_string(),
             Err(e) => format!("Error: {}", e),
         }
+    }
+
+    // --- Import tools ---
+
+    #[tool(description = "Import all images from a folder into the library. Returns imported/skipped/error counts.")]
+    fn import_folder(&self, Parameters(params): Parameters<ImportFolderParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let db = &state.db;
+        let app_data_dir = &state.app_data_dir;
+
+        let extensions = ["jpg", "jpeg", "png", "webp", "gif"];
+        let entries: Vec<std::path::PathBuf> = walkdir::WalkDir::new(&params.folder_path)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .filter(|e| {
+                e.path().extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| extensions.contains(&ext.to_lowercase().as_str()))
+                    .unwrap_or(false)
+            })
+            .map(|e| e.path().to_path_buf())
+            .collect();
+
+        let mut imported = 0u32;
+        let mut skipped = 0u32;
+        let mut errors = 0u32;
+
+        for path in &entries {
+            match crate::db_core::import::import_file(db, path, app_data_dir) {
+                Ok(Some(_)) => imported += 1,
+                Ok(None) => skipped += 1,
+                Err(_) => errors += 1,
+            }
+        }
+
+        serde_json::json!({
+            "imported": imported,
+            "skipped": skipped,
+            "errors": errors,
+            "total_found": entries.len(),
+        }).to_string()
+    }
+
+    #[tool(description = "Rescan all imported source folders for new/changed/missing files. Returns count of updated metadata.")]
+    fn rescan_sources(&self, Parameters(_): Parameters<EmptyParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let db = &state.db;
+
+        let images = match db.list_images(100000, 0) {
+            Ok(imgs) => imgs,
+            Err(e) => return format!("Error: {}", e),
+        };
+
+        let mut updated = 0u32;
+        for img in &images {
+            let path = std::path::Path::new(&img.path);
+            if !path.exists() { continue; }
+
+            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let ext = path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
+            let png_chunks = if ext == "png" {
+                crate::db_core::source_detection::read_png_text_chunks(path).unwrap_or_default()
+            } else {
+                vec![]
+            };
+
+            let detection = crate::db_core::source_detection::detect_source(filename, &png_chunks, path);
+
+            if detection.source_label.is_some() {
+                let aspect_ratio = img.image.width as f64 / img.image.height.max(1) as f64;
+                let orientation = if (aspect_ratio - 1.0).abs() < 0.05 { "square" }
+                    else if aspect_ratio > 1.0 { "landscape" }
+                    else { "portrait" };
+                let megapixels = (img.image.width as f64 * img.image.height as f64) / 1_000_000.0;
+
+                let _ = db.update_source_detection(
+                    &img.image.id,
+                    detection.source_label.as_deref(),
+                    detection.confidence,
+                    &detection.to_evidence_json(),
+                    detection.is_ai_generated,
+                    detection.ai_prompt.as_deref(),
+                    aspect_ratio,
+                    orientation,
+                    megapixels,
+                );
+                updated += 1;
+            }
+        }
+
+        serde_json::json!({"updated": updated, "scanned": images.len()}).to_string()
+    }
+
+    // --- AI / Processing tools ---
+
+    #[tool(description = "Generate CLIP visual embeddings for images (required for find_similar). Returns count processed.")]
+    fn generate_embeddings(&self, Parameters(params): Parameters<GenerateEmbeddingsParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+
+        {
+            let mut engine = state.embedding_engine.lock().unwrap();
+            if engine.session.is_none() {
+                if !engine.is_model_available() {
+                    return "Error: Model not downloaded. Run download_clip_model first.".to_string();
+                }
+                if let Err(e) = engine.load_model() {
+                    return format!("Error loading model: {}", e);
+                }
+            }
+        }
+
+        let mut generated = 0u32;
+        for image_id in &params.image_ids {
+            let id_refs: Vec<&str> = vec![image_id.as_str()];
+            let images = match state.db.get_images_by_ids(&id_refs) {
+                Ok(imgs) => imgs,
+                Err(_) => continue,
+            };
+            let img = match images.first() {
+                Some(img) => img,
+                None => continue,
+            };
+
+            let engine = state.embedding_engine.lock().unwrap();
+            match engine.generate_embedding(std::path::Path::new(&img.path)) {
+                Ok(embedding) => {
+                    drop(engine);
+                    let _ = state.db.store_embedding(image_id, "clip-vit-b32", &embedding);
+                    generated += 1;
+                }
+                Err(e) => {
+                    drop(engine);
+                    eprintln!("Embedding error for {}: {}", image_id, e);
+                }
+            }
+        }
+
+        serde_json::json!({"processed": generated, "total": params.image_ids.len()}).to_string()
+    }
+
+    #[tool(description = "Run YOLO object detection on images. Returns count processed.")]
+    fn detect_objects(&self, Parameters(params): Parameters<DetectObjectsParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+
+        let variant = match params.variant.as_deref() {
+            Some(v) => match crate::db_core::detection::YoloVariant::from_str(v) {
+                Some(var) => var,
+                None => return format!("Error: Invalid variant '{}'. Use 'nano', 'small', or 'medium'.", v),
+            },
+            None => crate::db_core::detection::YoloVariant::Medium,
+        };
+
+        {
+            let mut engine = state.detection_engine.lock().unwrap();
+            let needs_load = engine.session.is_none() || engine.loaded_variant != Some(variant);
+            if needs_load {
+                if !engine.is_variant_available(variant) {
+                    return format!("Error: Model {} not downloaded", variant.model_name());
+                }
+                if let Err(e) = engine.load_yolo(variant) {
+                    return format!("Error loading model: {}", e);
+                }
+            }
+        }
+
+        let mut detected = 0u32;
+        for image_id in &params.image_ids {
+            let id_refs: Vec<&str> = vec![image_id.as_str()];
+            let images = match state.db.get_images_by_ids(&id_refs) {
+                Ok(imgs) => imgs,
+                Err(_) => continue,
+            };
+            let img = match images.first() {
+                Some(img) => img,
+                None => continue,
+            };
+
+            let engine = state.detection_engine.lock().unwrap();
+            match engine.detect(std::path::Path::new(&img.path)) {
+                Ok(detections) => {
+                    drop(engine);
+                    let _ = state.db.store_detections(image_id, variant.model_name(), &detections);
+                    detected += 1;
+                }
+                Err(e) => {
+                    drop(engine);
+                    eprintln!("Detection error for {}: {}", image_id, e);
+                }
+            }
+        }
+
+        serde_json::json!({"processed": detected, "total": params.image_ids.len()}).to_string()
+    }
+
+    #[tool(description = "Analyze images with Ollama vision model for natural language descriptions. Returns count processed.")]
+    fn analyze_images(&self, Parameters(params): Parameters<AnalyzeImagesParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+
+        let url = state.db.get_setting("ollama_url")
+            .unwrap_or(None)
+            .unwrap_or_else(|| crate::db_core::vision::default_ollama_url().to_string());
+        let model = state.db.get_setting("ollama_model")
+            .unwrap_or(None)
+            .unwrap_or_else(|| "minicpm-v".to_string());
+
+        let mut analyzed = 0u32;
+        for image_id in &params.image_ids {
+            let id_refs: Vec<&str> = vec![image_id.as_str()];
+            let images = match state.db.get_images_by_ids(&id_refs) {
+                Ok(imgs) => imgs,
+                Err(_) => continue,
+            };
+            let img = match images.first() {
+                Some(img) => img,
+                None => continue,
+            };
+
+            let path = img.path.clone();
+            let url_clone = url.clone();
+            let model_clone = model.clone();
+
+            let result = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(
+                    crate::db_core::vision::analyze_image(std::path::Path::new(&path), &url_clone, &model_clone)
+                )
+            });
+
+            match result {
+                Ok(fields) => {
+                    let _ = state.db.store_vision_metadata(image_id, &model, &fields);
+                    analyzed += 1;
+                }
+                Err(e) => eprintln!("Vision error for {}: {}", image_id, e),
+            }
+        }
+
+        serde_json::json!({"processed": analyzed, "total": params.image_ids.len()}).to_string()
+    }
+
+    // --- Token management tools ---
+
+    #[tool(description = "Create a new MCP access token. Returns token ID and secret (shown only once).")]
+    fn create_token(&self, Parameters(params): Parameters<CreateTokenParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let ctx = crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
+        match crate::services::tokens::create_token(&ctx, &params.name, &params.role, params.scope) {
+            Ok((token, secret)) => serde_json::json!({
+                "token_id": token.id,
+                "name": token.name,
+                "role": token.role,
+                "secret": secret,
+                "warning": "Store the secret securely — it cannot be retrieved again"
+            }).to_string(),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "List all active (non-revoked) MCP tokens")]
+    fn list_tokens(&self, Parameters(_): Parameters<EmptyParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let ctx = crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
+        match crate::services::tokens::list_tokens(&ctx) {
+            Ok(tokens_list) => {
+                let result: Vec<serde_json::Value> = tokens_list.iter().map(|t| {
+                    serde_json::json!({
+                        "id": t.id, "name": t.name, "role": t.role,
+                        "created_at": t.created_at, "last_used_at": t.last_used_at,
+                    })
+                }).collect();
+                serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Revoke an MCP token permanently")]
+    fn revoke_token(&self, Parameters(params): Parameters<TokenIdParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let ctx = crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
+        match crate::services::tokens::revoke_token(&ctx, &params.token_id) {
+            Ok(()) => serde_json::json!({"status": "ok", "revoked": params.token_id}).to_string(),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Rotate a token's secret. Returns new secret (old becomes invalid).")]
+    fn rotate_token(&self, Parameters(params): Parameters<TokenIdParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let ctx = crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
+        match crate::services::tokens::rotate_token(&ctx, &params.token_id) {
+            Ok(new_secret) => serde_json::json!({
+                "token_id": params.token_id,
+                "new_secret": new_secret,
+                "warning": "Store the new secret securely"
+            }).to_string(),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    // --- Audit tools ---
+
+    #[tool(description = "Get recent MCP audit log entries")]
+    fn get_audit_log(&self, Parameters(params): Parameters<AuditLogParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let ctx = crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
+        let limit = params.limit.unwrap_or(50).min(500);
+        match crate::services::tokens::get_recent_audit(&ctx, limit) {
+            Ok(entries) => {
+                let result: Vec<serde_json::Value> = entries.iter().map(|e| {
+                    serde_json::json!({
+                        "id": e.id, "token_id": e.token_id,
+                        "tool_name": e.tool_name, "result_status": e.result_status,
+                        "timestamp": e.timestamp,
+                    })
+                }).collect();
+                serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Delete old audit log entries. Returns count deleted.")]
+    fn prune_audit_log(&self, Parameters(params): Parameters<PruneAuditParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let ctx = crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
+        let days = params.retention_days.unwrap_or(30);
+        match crate::services::tokens::prune_audit_log(&ctx, days) {
+            Ok(deleted) => serde_json::json!({"deleted": deleted, "retention_days": days}).to_string(),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    // --- Export tools ---
+
+    #[tool(description = "List available export presets (platforms, sizes, formats)")]
+    fn list_export_presets(&self, Parameters(_): Parameters<EmptyParams>) -> String {
+        let presets = crate::services::export::list_presets();
+        serde_json::to_string(&presets).unwrap_or_else(|_| "[]".to_string())
     }
 }
 

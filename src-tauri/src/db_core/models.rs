@@ -51,13 +51,14 @@ pub struct McpToken {
     pub revoked: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TokenScope {
     pub collections: Option<Vec<String>>,
     pub folders: Option<Vec<String>>,
     pub tags: Option<Vec<String>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEntry {
     pub id: i64,

@@ -44,6 +44,7 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 png = "0.17"
 printpdf = "0.7"
 thiserror = "1"
+schemars = "1.2"
 rmcp = { version = "1.6", features = ["server", "macros", "transport-streamable-http-server"] }
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "http1"] }
