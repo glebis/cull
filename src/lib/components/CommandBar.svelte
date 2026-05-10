@@ -1,21 +1,86 @@
 <script lang="ts">
     import { parseNlQuery, evaluateSmartCollection, createSmartCollection, listSmartCollections } from '$lib/api';
-    import { images, smartCollections, activeSmartCollection, activeFolder, activeCollection } from '$lib/stores';
+    import { invoke } from '@tauri-apps/api/core';
+    import { listen } from '@tauri-apps/api/event';
+    import { images, smartCollections, activeSmartCollection, activeFolder, activeCollection, searchOpen, viewMode, navigateTo, navigateBack } from '$lib/stores';
     import type { FilterNode } from '$lib/api';
     import RuleBuilder from './RuleBuilder.svelte';
+    import { onMount, onDestroy, tick } from 'svelte';
 
     let query = $state('');
     let parsedFilter: FilterNode | null = $state(null);
     let matchCount = $state(0);
     let showRules = $state(false);
     let applied = $state(false);
+    let isCollapsed = $state(false);
+    let isDirtyFromManualEdit = $state(false);
+    let isApplying = $state(false);
+    let isListening = $state(false);
+    let applyRequestId = $state(0);
+    let dictationLocale = $state('en-US');
 
     let saving = $state(false);
     let collectionName = $state('');
     let savedMessage = $state('');
     let savedTimeout: ReturnType<typeof setTimeout> | null = null;
 
+    let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+    let unlisteners: Array<() => void> = [];
+
+    let inputEl: HTMLInputElement | undefined = $state();
+    let barEl: HTMLDivElement | undefined = $state();
+
+    let applyDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Open when searchOpen store becomes true
+    $effect(() => {
+        if ($searchOpen) {
+            tick().then(() => inputEl?.focus());
+        }
+    });
+
+    onMount(async () => {
+        const grid = document.querySelector('.grid-container');
+        if (grid) {
+            const onScroll = () => {
+                isCollapsed = grid.scrollTop > 50 && (showRules || applied);
+            };
+            grid.addEventListener('scroll', onScroll, { passive: true });
+        }
+
+        const unlistenResult = await listen<{ text: string; is_final: boolean }>('dictation-result', (event) => {
+            query = event.payload.text;
+            if (silenceTimer) clearTimeout(silenceTimer);
+            if (event.payload.is_final) {
+                silenceTimer = setTimeout(() => {
+                    stopVoice();
+                    if (query.trim()) handleParse();
+                }, 1500);
+            }
+        });
+        unlisteners.push(unlistenResult);
+
+        const unlistenStarted = await listen('dictation-started', () => {
+            isListening = true;
+        });
+        unlisteners.push(unlistenStarted);
+
+        const unlistenError = await listen<{ message: string }>('dictation-error', (event) => {
+            console.error('Dictation error:', event.payload.message);
+            isListening = false;
+        });
+        unlisteners.push(unlistenError);
+    });
+
+    onDestroy(() => {
+        unlisteners.forEach(fn => fn());
+        if (silenceTimer) clearTimeout(silenceTimer);
+    });
+
     function generateName(q: string): string {
+        if (isDirtyFromManualEdit && parsedFilter) {
+            return chipSummary(parsedFilter);
+        }
         return q.trim()
             .split(/\s+/)
             .map(w => w.charAt(0).toUpperCase() + w.slice(1))
@@ -25,6 +90,18 @@
             .replace(/\bOr More\b/i, '+')
             .replace(/\bAnd Above\b/i, '+')
             .replace(/\bStars?\b/i, 'Stars');
+    }
+
+    // Produce a short human-readable summary from a FilterNode for dirty-edited names
+    function chipSummary(node: FilterNode): string {
+        if (node.type === 'group') {
+            const parts = node.children.map(chipSummary).join(` ${node.op} `);
+            return parts.length > 40 ? parts.slice(0, 37) + '…' : parts;
+        }
+        if (node.type === 'not') {
+            return `NOT ${chipSummary(node.child)}`;
+        }
+        return `${node.field} ${node.op} ${node.value}`;
     }
 
     async function handleParse() {
@@ -40,7 +117,7 @@
         showRules = true;
         applied = false;
         saving = false;
-        // Auto-apply: parse + apply in one step
+        isDirtyFromManualEdit = false;
         await handleApply();
     }
 
@@ -51,18 +128,82 @@
         $images = results;
         matchCount = results.length;
         applied = true;
+        if ($viewMode !== 'grid') {
+            navigateTo('grid');
+        }
+    }
+
+    async function debouncedApply() {
+        if (applyDebounceTimer) clearTimeout(applyDebounceTimer);
+        applyDebounceTimer = setTimeout(async () => {
+            const reqId = ++applyRequestId;
+            isApplying = true;
+            try {
+                const filterJson = JSON.stringify(parsedFilter);
+                const results = await evaluateSmartCollection(filterJson);
+                if (reqId === applyRequestId) {
+                    $images = results;
+                    matchCount = results.length;
+                    applied = true;
+                }
+            } finally {
+                if (reqId === applyRequestId) isApplying = false;
+            }
+        }, 300);
+    }
+
+    function handleFilterChange(next: FilterNode) {
+        parsedFilter = next;
+        isDirtyFromManualEdit = true;
+        debouncedApply();
     }
 
     function handleKeydown(e: KeyboardEvent) {
         if (e.key === 'Enter') {
             if (saving) {
                 handleSaveConfirm();
+            } else if (applied) {
+                handleDismiss();
             } else if (showRules && parsedFilter) {
                 handleApply();
             } else {
                 handleParse();
             }
+        } else if (e.key === 'Escape') {
+            handleClose();
         }
+    }
+
+    function handleDismiss() {
+        stopVoice();
+        query = '';
+        parsedFilter = null;
+        showRules = false;
+        applied = false;
+        saving = false;
+        savedMessage = '';
+        isDirtyFromManualEdit = false;
+        isCollapsed = false;
+        $searchOpen = false;
+        navigateBack();
+    }
+
+    function openSearch() {
+        $searchOpen = true;
+        tick().then(() => inputEl?.focus());
+    }
+
+    function handleClose() {
+        stopVoice();
+        query = '';
+        parsedFilter = null;
+        showRules = false;
+        applied = false;
+        saving = false;
+        savedMessage = '';
+        isDirtyFromManualEdit = false;
+        isCollapsed = false;
+        $searchOpen = false;
     }
 
     function handleClear() {
@@ -72,10 +213,20 @@
         applied = false;
         saving = false;
         savedMessage = '';
+        isDirtyFromManualEdit = false;
+    }
+
+    function expandFromCollapse() {
+        isCollapsed = false;
+        const grid = document.querySelector('.grid-container');
+        if (grid) grid.scrollTop = 0;
     }
 
     function handleSaveStart() {
         collectionName = generateName(query);
+        if (isDirtyFromManualEdit) {
+            collectionName += ' (edited)';
+        }
         saving = true;
     }
 
@@ -86,8 +237,9 @@
     async function handleSaveConfirm() {
         if (!parsedFilter || !collectionName.trim()) return;
         const filterJson = JSON.stringify(parsedFilter);
+        const nlQuery = isDirtyFromManualEdit ? query + ' (edited)' : query;
         try {
-            await createSmartCollection(collectionName.trim(), filterJson, query);
+            await createSmartCollection(collectionName.trim(), filterJson, nlQuery);
             const updated = await listSmartCollections();
             $smartCollections = updated;
 
@@ -104,6 +256,8 @@
             query = '';
             parsedFilter = null;
             applied = false;
+            isDirtyFromManualEdit = false;
+            $searchOpen = false;
 
             if (savedTimeout) clearTimeout(savedTimeout);
             savedTimeout = setTimeout(() => { savedMessage = ''; }, 3000);
@@ -116,31 +270,105 @@
         if (e.key === 'Enter') handleSaveConfirm();
         if (e.key === 'Escape') handleSaveCancel();
     }
+
+    function toggleVoice() {
+        if (isListening) {
+            stopVoice();
+        } else {
+            startVoice();
+        }
+    }
+
+    function toggleLocale() {
+        dictationLocale = dictationLocale === 'en-US' ? 'ru-RU' : 'en-US';
+    }
+
+    async function startVoice() {
+        try {
+            await invoke('start_dictation', { locale: dictationLocale });
+        } catch (e) {
+            console.error('Failed to start dictation:', e);
+            isListening = false;
+        }
+    }
+
+    async function stopVoice() {
+        if (silenceTimer) clearTimeout(silenceTimer);
+        try {
+            await invoke('stop_dictation');
+        } catch (_) {}
+        isListening = false;
+    }
 </script>
 
-<div class="command-bar-wrapper">
-    {#if savedMessage}
-        <div class="saved-toast">
-            <span class="saved-icon">&#10003;</span>
-            {savedMessage}
-        </div>
-    {/if}
-
-    {#if !savedMessage}
+{#if savedMessage}
+    <div class="saved-toast">
+        <span class="saved-icon">&#10003;</span>
+        {savedMessage}
+    </div>
+{:else if isCollapsed && (showRules || applied)}
+    <div class="collapsed-pill" onclick={expandFromCollapse} role="button" tabindex="0" onkeydown={e => e.key === 'Enter' && expandFromCollapse()}>
+        <span class="pill-icon">🔍</span>
+        <span class="pill-query">{query || 'Filter active'}</span>
+        <span class="pill-count">{matchCount}</span>
+        <button class="pill-close" onclick={(e) => { e.stopPropagation(); handleClose(); }}>×</button>
+    </div>
+{:else if $searchOpen}
+    <div class="command-bar-wrapper" bind:this={barEl}>
         <div class="command-bar">
             <span class="command-icon">/</span>
             <input
-                type="text"
+                bind:this={inputEl}
                 bind:value={query}
                 onkeydown={handleKeydown}
                 placeholder="landscape midjourney 4 stars or more..."
                 class="command-input"
-                aria-label="Filter images by natural language query"
+                role="searchbox"
+                aria-label="Search images"
             />
+            <button
+                class="locale-btn"
+                onclick={toggleLocale}
+                aria-label="Switch dictation language"
+                title={dictationLocale === 'en-US' ? 'English' : 'Russian'}
+            >
+                {dictationLocale === 'en-US' ? 'EN' : 'RU'}
+            </button>
+            <button
+                class="mic-btn"
+                class:listening={isListening}
+                onclick={toggleVoice}
+                aria-label="Toggle voice input"
+                aria-pressed={isListening}
+            >
+                {isListening ? '⏸' : '🎤'}
+            </button>
+            <span class="esc-badge">esc</span>
             {#if query}
-                <button class="clear-btn" onclick={handleClear}>&times;</button>
+                <button class="clear-btn" onclick={handleClear}>×</button>
             {/if}
+            <button class="close-btn" onclick={handleClose}>×</button>
         </div>
+
+        {#if showRules && parsedFilter}
+            <div class="parsed-rules" class:dimmed={saving}>
+                <div class="rules-header">
+                    <span class="parsed-label">Parsed as:</span>
+                    <div class="rules-actions">
+                        {#if applied}
+                            <span class="match-count">{matchCount} images</span>
+                        {/if}
+                        <button class="apply-btn" onclick={handleApply} disabled={isApplying}>
+                            {isApplying ? '...' : applied ? 'Refresh' : 'Apply'}
+                        </button>
+                        {#if applied && !saving}
+                            <button class="save-btn" onclick={handleSaveStart}>Save Collection</button>
+                        {/if}
+                    </div>
+                </div>
+                <RuleBuilder filter={parsedFilter} onchange={handleFilterChange} />
+            </div>
+        {/if}
 
         {#if saving}
             <div class="name-bar">
@@ -156,35 +384,111 @@
                 <button class="save-cancel-btn" onclick={handleSaveCancel}>Cancel</button>
             </div>
         {/if}
-
-        {#if showRules && parsedFilter}
-            <div class="parsed-rules" class:dimmed={saving}>
-                <div class="rules-header">
-                    <span class="parsed-label">Parsed as:</span>
-                    <div class="rules-actions">
-                        {#if applied}
-                            <span class="match-count">{matchCount} images</span>
-                        {/if}
-                        <button class="apply-btn" onclick={handleApply}>
-                            {applied ? 'Refresh' : 'Apply'}
-                        </button>
-                        {#if applied && !saving}
-                            <button class="save-btn" onclick={handleSaveStart}>
-                                Save Collection
-                            </button>
-                        {/if}
-                    </div>
-                </div>
-                <RuleBuilder filter={parsedFilter} />
-            </div>
-        {/if}
-    {/if}
-</div>
+    </div>
+{:else}
+    <div class="search-hint" onclick={openSearch} role="button" tabindex="0" onkeydown={e => e.key === 'Enter' && openSearch()}>
+        <span class="hint-slash">/</span>
+        <span class="hint-text">to search</span>
+    </div>
+{/if}
 
 <style>
+    .search-hint {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        height: 36px;
+        padding: 0 16px;
+        cursor: pointer;
+        border-radius: 8px;
+        transition: background 120ms;
+        user-select: none;
+    }
+
+    .search-hint:hover {
+        background: rgba(255,255,255,0.04);
+    }
+
+    .hint-slash {
+        color: var(--text-secondary);
+        font-size: 14px;
+        font-weight: 600;
+        opacity: 0.5;
+    }
+
+    .hint-text {
+        color: var(--text-secondary);
+        font-size: 13px;
+        opacity: 0.4;
+    }
+
+    .collapsed-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 28px;
+        padding: 0 10px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        cursor: pointer;
+        max-width: 320px;
+        animation: pill-in 150ms ease-out;
+    }
+
+    .pill-icon {
+        font-size: 12px;
+        flex-shrink: 0;
+    }
+
+    .pill-query {
+        font-size: 12px;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 180px;
+    }
+
+    .pill-count {
+        font-size: 11px;
+        color: var(--text-secondary);
+        background: rgba(255,255,255,0.06);
+        padding: 1px 6px;
+        border-radius: 999px;
+        flex-shrink: 0;
+    }
+
+    .pill-close {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+        padding: 0;
+        flex-shrink: 0;
+        transition: color 120ms;
+    }
+
+    .pill-close:hover {
+        color: var(--red);
+    }
+
+    @keyframes pill-in {
+        from { opacity: 0; transform: scale(0.95); }
+        to { opacity: 1; transform: scale(1); }
+    }
+
     .command-bar-wrapper {
         display: flex;
         flex-direction: column;
+        animation: wrapper-in 200ms ease-out;
+    }
+
+    @keyframes wrapper-in {
+        from { opacity: 0; transform: translateY(-4px); }
+        to { opacity: 1; transform: translateY(0); }
     }
 
     .command-bar {
@@ -230,6 +534,71 @@
         opacity: 0.6;
     }
 
+    .locale-btn {
+        height: 22px;
+        padding: 0 6px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(122,162,247,0.08);
+        border: 1px solid rgba(122,162,247,0.2);
+        border-radius: 4px;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        flex-shrink: 0;
+        transition: background 120ms, color 120ms;
+    }
+
+    .locale-btn:hover {
+        background: rgba(122,162,247,0.15);
+        color: var(--blue);
+    }
+
+    .mic-btn {
+        width: 28px;
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(122,162,247,0.1);
+        border: 1px solid rgba(122,162,247,0.25);
+        border-radius: 50%;
+        color: var(--blue);
+        cursor: pointer;
+        font-size: 13px;
+        flex-shrink: 0;
+        transition: background 120ms, border-color 120ms;
+    }
+
+    .mic-btn:hover {
+        background: rgba(122,162,247,0.2);
+    }
+
+    .mic-btn.listening {
+        animation: mic-pulse 1s ease-in-out infinite;
+        border-color: var(--blue);
+    }
+
+    @keyframes mic-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(122,162,247,0.4); }
+        50% { box-shadow: 0 0 0 8px rgba(122,162,247,0); }
+    }
+
+    .esc-badge {
+        font-size: 10px;
+        color: var(--text-secondary);
+        background: rgba(255,255,255,0.06);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 2px 5px;
+        flex-shrink: 0;
+        opacity: 0.6;
+        cursor: default;
+    }
+
     .clear-btn {
         width: 28px;
         height: 28px;
@@ -242,10 +611,33 @@
         color: var(--text-secondary);
         cursor: pointer;
         font-size: 14px;
+        flex-shrink: 0;
         transition: color 120ms, border-color 120ms, background 120ms;
     }
 
     .clear-btn:hover {
+        color: var(--red);
+        border-color: rgba(247, 118, 142, 0.4);
+        background: rgba(247, 118, 142, 0.08);
+    }
+
+    .close-btn {
+        width: 28px;
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 14px;
+        flex-shrink: 0;
+        transition: color 120ms, border-color 120ms, background 120ms;
+    }
+
+    .close-btn:hover {
         color: var(--red);
         border-color: rgba(247, 118, 142, 0.4);
         background: rgba(247, 118, 142, 0.08);
@@ -299,12 +691,17 @@
         transition: background 120ms, color 120ms, transform 80ms;
     }
 
-    .apply-btn:hover {
+    .apply-btn:disabled {
+        opacity: 0.5;
+        cursor: default;
+    }
+
+    .apply-btn:not(:disabled):hover {
         background: linear-gradient(180deg, rgba(122,162,247,0.3), rgba(122,162,247,0.15));
         color: #8fb3ff;
     }
 
-    .apply-btn:active {
+    .apply-btn:not(:disabled):active {
         transform: translateY(1px);
     }
 

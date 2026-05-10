@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { resolveComparePair, ratingStars, decisionLabel } from './compare-utils';
+import { resolveComparePair, ratingStars, decisionLabel, computeCompareSwap } from './compare-utils';
 import type { ImageWithFile } from './api';
 
 function makeImage(id: string, overrides?: { star_rating?: number | null; decision?: string }): ImageWithFile {
     return {
         image: { id, sha256_hash: '', width: 100, height: 100, format: 'jpeg', file_size: 1000, created_at: '', imported_at: '', ai_prompt: null },
+        source_label: null,
         path: `/photos/${id}.jpg`,
         thumbnail_path: null,
         selection: overrides ? {
@@ -118,5 +119,55 @@ describe('decisionLabel', () => {
 
     it('returns undecided for null image', () => {
         expect(decisionLabel(null)).toBe('undecided');
+    });
+});
+
+describe('computeCompareSwap', () => {
+    const ids = ['a', 'b', 'c', 'd', 'e'];
+
+    it('moves active side down when two are selected', () => {
+        const result = computeCompareSwap(ids, new Set(['a', 'c']), 0, 1, 1);
+        expect(result).not.toBeNull();
+        expect(result!.newSelectedIds).toEqual(new Set(['a', 'd']));
+    });
+
+    it('moves active side up when two are selected', () => {
+        const result = computeCompareSwap(ids, new Set(['b', 'd']), 0, 0, -1);
+        expect(result).not.toBeNull();
+        expect(result!.newSelectedIds).toEqual(new Set(['a', 'd']));
+    });
+
+    it('prevents swapping to the same image as the other side', () => {
+        const result = computeCompareSwap(ids, new Set(['a', 'b']), 0, 0, 1);
+        expect(result).toBeNull();
+    });
+
+    it('clamps at start of list (no change)', () => {
+        const result = computeCompareSwap(ids, new Set(['a', 'c']), 0, 0, -1);
+        expect(result).not.toBeNull();
+        expect(result!.newSelectedIds).toEqual(new Set(['a', 'c']));
+    });
+
+    it('clamps at end of list (no change)', () => {
+        const result = computeCompareSwap(ids, new Set(['a', 'e']), 0, 1, 1);
+        expect(result).not.toBeNull();
+        expect(result!.newSelectedIds).toEqual(new Set(['a', 'e']));
+    });
+
+    it('promotes to explicit selection from implicit pair', () => {
+        const result = computeCompareSwap(ids, new Set(), 1, 0, -1);
+        expect(result).not.toBeNull();
+        expect(result!.newSelectedIds).toEqual(new Set(['a', 'c']));
+    });
+
+    it('moves right side independently from implicit pair', () => {
+        const result = computeCompareSwap(ids, new Set(), 0, 1, 1);
+        expect(result).not.toBeNull();
+        expect(result!.newSelectedIds).toEqual(new Set(['a', 'c']));
+    });
+
+    it('returns null for fewer than 2 images', () => {
+        expect(computeCompareSwap(['a'], new Set(), 0, 0, 1)).toBeNull();
+        expect(computeCompareSwap([], new Set(), 0, 0, 1)).toBeNull();
     });
 });

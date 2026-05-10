@@ -14,6 +14,7 @@
     import Toast from '$lib/components/Toast.svelte';
     import ImportBanner from '$lib/components/ImportBanner.svelte';
     import LineageView from '$lib/components/LineageView.svelte';
+    import Tinder from '$lib/components/Tinder.svelte';
     import McpSettings from '$lib/components/McpSettings.svelte';
     import JobProgressPanel from '$lib/components/JobProgressPanel.svelte';
     import { handleKeydown } from '$lib/keys';
@@ -160,6 +161,8 @@
         <LineageView />
     {:else if $viewMode === 'canvas'}
         <Canvas />
+    {:else if $viewMode === 'tinder'}
+        <Tinder />
     {:else}
         <div class="placeholder">
             <span class="placeholder-label">{$viewMode}</span>

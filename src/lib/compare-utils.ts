@@ -28,3 +28,41 @@ export function ratingStars(img: ImageWithFile | null): number {
 export function decisionLabel(img: ImageWithFile | null): string {
     return img?.selection?.decision ?? 'undecided';
 }
+
+export interface SwapResult {
+    newSelectedIds: Set<string>;
+}
+
+export function computeCompareSwap(
+    imageIds: string[],
+    selectedIds: Set<string>,
+    focusedIndex: number,
+    activeSide: 0 | 1,
+    direction: 1 | -1
+): SwapResult | null {
+    if (imageIds.length < 2) return null;
+
+    if (selectedIds.size >= 2) {
+        const selArr = Array.from(selectedIds);
+        const targetId = selArr[activeSide];
+        const currentIdx = imageIds.indexOf(targetId);
+        if (currentIdx < 0) return null;
+        const newIdx = Math.max(0, Math.min(imageIds.length - 1, currentIdx + direction));
+        const newId = imageIds[newIdx];
+        if (!newId || newId === selArr[1 - activeSide]) return null;
+        selArr[activeSide] = newId;
+        return { newSelectedIds: new Set(selArr) };
+    }
+
+    const leftId = imageIds[focusedIndex];
+    const rightId = imageIds[focusedIndex + 1];
+    if (!leftId || !rightId) return null;
+
+    const selArr = [leftId, rightId];
+    const currentIdx = activeSide === 0 ? focusedIndex : focusedIndex + 1;
+    const newIdx = Math.max(0, Math.min(imageIds.length - 1, currentIdx + direction));
+    const newId = imageIds[newIdx];
+    if (!newId || newId === selArr[1 - activeSide]) return null;
+    selArr[activeSide] = newId;
+    return { newSelectedIds: new Set(selArr) };
+}

@@ -1,7 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import type { ImageWithFile, SmartCollection } from './api';
 
-export type ViewMode = 'grid' | 'compare' | 'loupe' | 'canvas' | 'lineage' | 'embeddings' | 'export';
+export type ViewMode = 'grid' | 'compare' | 'loupe' | 'canvas' | 'lineage' | 'embeddings' | 'export' | 'tinder';
 
 export const images = writable<ImageWithFile[]>([]);
 export const selectedIds = writable<Set<string>>(new Set());

@@ -7,6 +7,7 @@ import {
     showDetectionBoxes, showDetectionInspector, nsfwMode,
     navigateTo, navigateBack, searchOpen, focusedImage,
 } from './stores';
+import { computeCompareSwap } from './compare-utils';
 import type { NsfwMode } from './stores';
 import type { ViewMode } from './stores';
 import { setRating, setDecision, createCollection, addToCollection, listCollections, listCollectionImages, rotateImage } from './api';
@@ -21,6 +22,7 @@ const VIEW_MODE_KEYS: Record<string, ViewMode> = {
     '5': 'lineage',
     '6': 'embeddings',
     '7': 'export',
+    '8': 'tinder',
 };
 
 function getColCount(): number {
@@ -325,6 +327,9 @@ export function handleKeydown(e: KeyboardEvent) {
         case 'loupe':
             handleLoupeKeys(e);
             break;
+        case 'tinder':
+            handleTinderKeys(e);
+            break;
     }
 }
 
@@ -564,31 +569,16 @@ async function handleCollectModeAdd() {
 
 function compareSwapFocusedImage(direction: 1 | -1) {
     const imgs = get(images);
-    const side = get(compareActiveSide);
-    const sel = get(selectedIds);
-    const idx = get(focusedIndex);
-
-    if (sel.size >= 2) {
-        const selArr = Array.from(sel);
-        const targetId = selArr[side];
-        const currentIdx = imgs.findIndex(i => i.image.id === targetId);
-        const newIdx = Math.max(0, Math.min(imgs.length - 1, currentIdx + direction));
-        const newId = imgs[newIdx]?.image.id;
-        if (newId && newId !== selArr[1 - side]) {
-            selArr[side] = newId;
-            selectedIds.set(new Set(selArr));
-        }
-    } else {
-        if (side === 0) {
-            const newIdx = Math.max(0, idx + direction);
-            if (newIdx !== idx + 1) focusedIndex.set(newIdx);
-        } else {
-            const rightIdx = idx + 1 + direction;
-            if (rightIdx >= 0 && rightIdx < imgs.length && rightIdx !== idx) {
-                const newFocused = Math.min(rightIdx - 1, imgs.length - 2);
-                focusedIndex.set(Math.max(0, newFocused));
-            }
-        }
+    const imageIds = imgs.map(i => i.image.id);
+    const result = computeCompareSwap(
+        imageIds,
+        get(selectedIds),
+        get(focusedIndex),
+        get(compareActiveSide),
+        direction
+    );
+    if (result) {
+        selectedIds.set(result.newSelectedIds);
     }
 }
 
@@ -843,6 +833,34 @@ function handleLoupeKeys(e: KeyboardEvent) {
             break;
     }
 
+}
+
+function handleTinderKeys(e: KeyboardEvent) {
+    switch (e.key) {
+        case 'ArrowLeft':
+        case 'h':
+            e.preventDefault();
+            window.dispatchEvent(new CustomEvent('tinder-choose', { detail: 'left' }));
+            break;
+        case 'ArrowRight':
+        case 'l':
+            e.preventDefault();
+            window.dispatchEvent(new CustomEvent('tinder-choose', { detail: 'right' }));
+            break;
+        case 'ArrowDown':
+        case 'j':
+            e.preventDefault();
+            window.dispatchEvent(new CustomEvent('tinder-choose', { detail: 'skip' }));
+            break;
+        case 'Escape':
+            e.preventDefault();
+            navigateBack() || navigateTo('grid');
+            break;
+        case 'z':
+            e.preventDefault();
+            window.dispatchEvent(new CustomEvent('tinder-undo'));
+            break;
+    }
 }
 
 function toggleFullscreen() {
