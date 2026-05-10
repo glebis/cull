@@ -9,6 +9,7 @@ export interface Image {
     file_size: number;
     created_at: string;
     imported_at: string;
+    ai_prompt: string | null;
 }
 
 export interface Selection {

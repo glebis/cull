@@ -57,6 +57,7 @@ pub fn import_file(
         file_size,
         created_at: now.clone(),
         imported_at: now.clone(),
+        ai_prompt: None,
     };
 
     db.insert_image(&image).map_err(|e| e.to_string())?;

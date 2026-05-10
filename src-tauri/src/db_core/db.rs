@@ -208,7 +208,7 @@ impl Database {
     pub fn find_by_hash(&self, hash: &str) -> Result<Option<Image>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, sha256_hash, width, height, format, file_size, created_at, imported_at
+            "SELECT id, sha256_hash, width, height, format, file_size, created_at, imported_at, ai_prompt
              FROM images WHERE sha256_hash = ?1"
         )?;
         let mut rows = stmt.query_map(params![hash], |row| {
@@ -221,6 +221,7 @@ impl Database {
                 file_size: row.get(5)?,
                 created_at: row.get(6)?,
                 imported_at: row.get(7)?,
+                ai_prompt: row.get(8)?,
             })
         })?;
         match rows.next() {
@@ -234,7 +235,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -263,6 +264,7 @@ impl Database {
                     file_size: row.get(5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
+                    ai_prompt: row.get(13)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
@@ -326,7 +328,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -356,6 +358,7 @@ impl Database {
                     file_size: row.get(5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
+                    ai_prompt: row.get(13)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
@@ -371,7 +374,7 @@ impl Database {
         let mut sql = String::from(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -407,6 +410,7 @@ impl Database {
                     file_size: row.get(5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
+                    ai_prompt: row.get(13)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
@@ -467,7 +471,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
              FROM collection_items ci
              JOIN images i ON i.id = ci.image_id
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
@@ -497,6 +501,7 @@ impl Database {
                     file_size: row.get(5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
+                    ai_prompt: row.get(13)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
@@ -681,7 +686,7 @@ impl Database {
         let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -712,6 +717,7 @@ impl Database {
                     file_size: row.get(5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
+                    ai_prompt: row.get(13)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
@@ -727,7 +733,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
              FROM iterations it
              JOIN images i ON i.id = it.child_id
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
@@ -757,6 +763,7 @@ impl Database {
                     file_size: row.get(5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
+                    ai_prompt: row.get(13)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
@@ -944,7 +951,7 @@ impl Database {
         let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -980,6 +987,7 @@ impl Database {
                     file_size: row.get(5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
+                    ai_prompt: row.get(13)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
@@ -1083,6 +1091,7 @@ mod tests {
             file_size: 1024,
             created_at: "2026-05-07T00:00:00Z".to_string(),
             imported_at: "2026-05-07T00:00:00Z".to_string(),
+            ai_prompt: None,
         };
         db.insert_image(&img).unwrap();
         let file = ImageFile {

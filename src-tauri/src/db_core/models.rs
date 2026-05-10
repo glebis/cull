@@ -10,6 +10,7 @@ pub struct Image {
     pub file_size: u64,
     pub created_at: String,
     pub imported_at: String,
+    pub ai_prompt: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
