@@ -176,9 +176,18 @@ async fn run_http_server(
                         config,
                     );
 
-                    let resp = tower_service::Service::call(&mut mcp_service, req).await.unwrap();
+                    let resp = match tower_service::Service::call(&mut mcp_service, req).await {
+                        Ok(r) => r,
+                        Err(_) => {
+                            return Ok(
+                                hyper::Response::builder()
+                                    .status(500)
+                                    .body(Full::new(Bytes::from("Internal Server Error")))
+                                    .unwrap()
+                            );
+                        }
+                    };
 
-                    // Convert BoxBody response to Full<Bytes>
                     use http_body_util::BodyExt;
                     let (parts, body) = resp.into_parts();
                     let body_bytes = body.collect().await

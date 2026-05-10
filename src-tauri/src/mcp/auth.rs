@@ -89,7 +89,6 @@ mod tests {
         "navigate_to_folder",
         "show_collection",
         "import_folder",
-        "rescan_sources",
         "generate_embeddings",
         "detect_objects",
         "analyze_images",
@@ -124,7 +123,7 @@ mod tests {
         "create_smart_collection",
     ];
 
-    const IMPORT_TOOLS: &[&str] = &["import_folder", "import_files", "rescan_sources"];
+    const IMPORT_TOOLS: &[&str] = &["import_folder", "import_files"];
     const EXPORT_TOOLS: &[&str] = &["export_images", "list_export_presets", "assemble_pdf"];
     const DISPLAY_TOOLS: &[&str] = &["show_image", "navigate_to_folder", "show_collection"];
     const AI_TOOLS: &[&str] = &["generate_embeddings", "detect_objects", "analyze_images"];

@@ -50,7 +50,8 @@ pub fn tool_capability(tool_name: &str) -> &'static str {
         "set_rating" | "set_decision" | "create_collection" | "add_to_collection"
         | "delete_collection" | "create_smart_collection" => "curation:write",
 
-        "import_folder" | "import_files" | "rescan_sources" => "import:write",
+        "import_folder" | "import_files" => "import:write",
+        "rescan_sources" => "settings:manage",
 
         "export_images" | "list_export_presets" | "assemble_pdf" => "export:read",
 
@@ -149,46 +150,55 @@ pub fn create_token(
 
 pub fn validate_token(ctx: &ServiceContext, secret: &str) -> Result<Option<McpToken>, ServiceError> {
     let pepper = get_or_create_pepper(ctx)?;
+    let computed_hash = hash_secret(&pepper, secret);
     let conn = ctx.db.conn.lock().unwrap();
 
-    let mut stmt = conn.prepare(
-        "SELECT id, name, secret_hash, role, scope_json, created_at, expires_at, last_used_at, revoked
-         FROM mcp_tokens WHERE revoked = 0"
-    )?;
-
-    let rows: Vec<(String, String, String, String, Option<String>, String, Option<String>, Option<String>, i32)> =
-        stmt.query_map([], |row| {
+    let result = conn.query_row(
+        "SELECT id, name, secret_hash, role, scope_json, created_at, expires_at, last_used_at
+         FROM mcp_tokens WHERE secret_hash = ?1 AND revoked = 0",
+        rusqlite::params![computed_hash],
+        |row| {
             Ok((
-                row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
-                row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
-                row.get(8)?,
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
             ))
-        })?.collect::<rusqlite::Result<Vec<_>>>()?;
+        },
+    );
 
-    drop(stmt);
+    let (id, name, stored_hash, role, scope_json, created_at, expires_at, _last_used_at) = match result {
+        Ok(row) => row,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+        Err(e) => return Err(ServiceError::Database(e)),
+    };
 
-    for (id, name, stored_hash, role, scope_json, created_at, expires_at, _last_used_at, _revoked) in rows {
-        if verify_secret(&pepper, secret, &stored_hash) {
-            if let Some(ref exp) = expires_at {
-                if let Ok(exp_time) = chrono::DateTime::parse_from_rfc3339(exp) {
-                    if exp_time < chrono::Utc::now() {
-                        return Ok(None);
-                    }
-                }
+    if !verify_secret(&pepper, secret, &stored_hash) {
+        return Ok(None);
+    }
+
+    if let Some(ref exp) = expires_at {
+        if let Ok(exp_time) = chrono::DateTime::parse_from_rfc3339(exp) {
+            if exp_time < chrono::Utc::now() {
+                return Ok(None);
             }
-
-            let now = chrono::Utc::now().to_rfc3339();
-            let _ = conn.execute(
-                "UPDATE mcp_tokens SET last_used_at = ?1 WHERE id = ?2",
-                rusqlite::params![now, id],
-            );
-
-            return Ok(Some(McpToken {
-                id, name, role, scope_json, created_at, expires_at,
-                last_used_at: Some(now), revoked: false,
-            }));
         }
     }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let _ = conn.execute(
+        "UPDATE mcp_tokens SET last_used_at = ?1 WHERE id = ?2",
+        rusqlite::params![now, id],
+    );
+
+    return Ok(Some(McpToken {
+        id, name, role, scope_json, created_at, expires_at,
+        last_used_at: Some(now), revoked: false,
+    }));
 
     Ok(None)
 }

@@ -289,11 +289,13 @@ impl ImageViewMcp {
         let offset = params.offset.unwrap_or(0);
         let limit = params.limit.unwrap_or(50).min(100).max(1);
         let scope = self.token_scope();
+        let fetch_limit = if scope.is_some() { limit * 3 } else { limit };
 
-        match state.db.list_images(limit, offset) {
+        match state.db.list_images(fetch_limit, offset) {
             Ok(images) => {
                 let result: Vec<serde_json::Value> = images.iter()
                     .filter(|img| tokens::image_in_scope(&scope, &img.path, &[]))
+                    .take(limit as usize)
                     .map(|img| {
                     serde_json::json!({
                         "id": img.image.id,
@@ -351,7 +353,7 @@ impl ImageViewMcp {
                 let result: Vec<serde_json::Value> = folders.iter()
                     .filter(|(path, _)| tokens::folder_in_scope(&scope, path))
                     .map(|(path, count)| {
-                        serde_json::json!({"path": path, "image_count": count})
+                        serde_json::json!({"path": self.maybe_redact_path(path), "image_count": count})
                     }).collect();
                 serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
             }
@@ -362,11 +364,22 @@ impl ImageViewMcp {
     #[tool(description = "List all collections with image counts")]
     fn list_collections(&self, Parameters(_): Parameters<EmptyParams>) -> String {
         let state = self.app_handle.state::<AppState>();
+        let scope = self.token_scope();
         match state.db.list_collections() {
             Ok(collections) => {
-                let result: Vec<serde_json::Value> = collections.iter().map(|(id, name, count)| {
-                    serde_json::json!({"id": id, "name": name, "image_count": count})
-                }).collect();
+                let result: Vec<serde_json::Value> = collections.iter()
+                    .filter(|(id, _, _)| {
+                        match &scope {
+                            None => true,
+                            Some(s) => match &s.collections {
+                                None => true,
+                                Some(allowed) => allowed.contains(id),
+                            }
+                        }
+                    })
+                    .map(|(id, name, count)| {
+                        serde_json::json!({"id": id, "name": name, "image_count": count})
+                    }).collect();
                 serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
             }
             Err(e) => format!("Error: {}", e),
@@ -1012,6 +1025,18 @@ impl ServerHandler for ImageViewMcp {
             .with_instructions("ImageView MCP server — browse, curate, and manage an AI art image library")
     }
 
+    fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<rmcp::model::ListToolsResult, ErrorData>> + Send + '_ {
+        std::future::ready(Ok(rmcp::model::ListToolsResult {
+            tools: self.tool_router.list_all(),
+            next_cursor: None,
+            meta: None,
+        }))
+    }
+
     fn call_tool(
         &self,
         request: CallToolRequestParams,
@@ -1030,7 +1055,12 @@ impl ServerHandler for ImageViewMcp {
             let call_context = ToolCallContext::new(self, request, context);
             let result = self.tool_router.call(call_context).await;
 
-            let status = if result.is_ok() { "ok" } else { "error" };
+            let status = match &result {
+                Err(_) => "error",
+                Ok(r) => {
+                    if r.is_error.unwrap_or(false) { "error" } else { "ok" }
+                }
+            };
             self.log_tool_call(&tool_name, params_json.as_deref(), status);
 
             result
