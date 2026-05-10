@@ -3,7 +3,7 @@
     import { onMount } from 'svelte';
     import ContextMenu from './ContextMenu.svelte';
     import { images, focusedIndex, focusedImage, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast } from '$lib/stores';
-    import { getDetections, getVisionMetadata, cropImage } from '$lib/api';
+    import { getDetections, getVisionMetadata, cropImage, getImagesByIds } from '$lib/api';
     import type { Detection } from '$lib/api';
 
     let dragging = $state(false);
@@ -66,6 +66,14 @@
                 const currentSrc = imgEl.src;
                 imgEl.src = '';
                 imgEl.src = currentSrc + '?t=' + Date.now();
+            }
+            const img = image;
+            if (img) {
+                getImagesByIds([img.image.id]).then(updated => {
+                    if (updated.length > 0) {
+                        images.update(all => all.map(i => i.image.id === img.image.id ? updated[0] : i));
+                    }
+                }).catch(() => {});
             }
         }
         window.addEventListener('image-updated', handleImageUpdated);
@@ -221,10 +229,14 @@
     $effect(() => {
         if (!cropMode) return;
         function handleEsc(e: KeyboardEvent) {
-            if (e.key === 'Escape') cancelCrop();
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                cancelCrop();
+            }
         }
-        window.addEventListener('keydown', handleEsc);
-        return () => window.removeEventListener('keydown', handleEsc);
+        window.addEventListener('keydown', handleEsc, true);
+        return () => window.removeEventListener('keydown', handleEsc, true);
     });
 
     let ctxMenu = $state({ visible: false, x: 0, y: 0 });
@@ -319,7 +331,7 @@
                 {@const h = Math.abs(cropEnd.y - cropStart.y)}
                 <div class="crop-selection" style="left:{left}px;top:{top}px;width:{w}px;height:{h}px;"></div>
             {/if}
-            <div class="crop-toolbar">
+            <div class="crop-toolbar" onmousedown={(e) => e.stopPropagation()}>
                 <button onclick={applyCrop} disabled={cropping || !cropStart}>
                     {cropping ? 'Cropping…' : '✓ Apply'}
                 </button>

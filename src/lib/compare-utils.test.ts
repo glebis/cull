@@ -4,7 +4,7 @@ import type { ImageWithFile } from './api';
 
 function makeImage(id: string, overrides?: { star_rating?: number | null; decision?: string }): ImageWithFile {
     return {
-        image: { id, sha256_hash: '', width: 100, height: 100, format: 'jpeg', file_size: 1000, created_at: '', imported_at: '' },
+        image: { id, sha256_hash: '', width: 100, height: 100, format: 'jpeg', file_size: 1000, created_at: '', imported_at: '', ai_prompt: null },
         path: `/photos/${id}.jpg`,
         thumbnail_path: null,
         selection: overrides ? {

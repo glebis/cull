@@ -17,10 +17,16 @@ pub async fn crop_image(
     let img_record = images.first().ok_or("Image not found")?;
     let path = PathBuf::from(&img_record.path);
 
+    if width == 0 || height == 0 {
+        return Err("Crop dimensions must be non-zero".to_string());
+    }
+
     let img = image::open(&path).map_err(|e| format!("Failed to open image: {e}"))?;
     let (img_w, img_h) = img.dimensions();
 
-    if x + width > img_w || y + height > img_h {
+    if x.checked_add(width).map_or(true, |r| r > img_w)
+        || y.checked_add(height).map_or(true, |r| r > img_h)
+    {
         return Err(format!(
             "Crop region ({x},{y},{width},{height}) exceeds image dimensions ({img_w}x{img_h})"
         ));
@@ -29,9 +35,9 @@ pub async fn crop_image(
     let cropped = img.crop_imm(x, y, width, height);
 
     let output_path = if save_as_copy {
-        let stem = path.file_stem().unwrap().to_string_lossy();
+        let stem = path.file_stem().ok_or("Invalid file path: no stem")?.to_string_lossy();
         let ext = path.extension().unwrap_or_default().to_string_lossy();
-        let parent = path.parent().unwrap();
+        let parent = path.parent().ok_or("Invalid file path: no parent")?;
         let new_name = format!("{stem}_crop.{ext}");
         parent.join(new_name)
     } else {

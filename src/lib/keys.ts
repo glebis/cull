@@ -286,7 +286,7 @@ export function handleKeydown(e: KeyboardEvent) {
         showDetectionInspector.update(v => !v);
         return;
     }
-    if (e.key === 'b' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    if (e.key === 'b' && !e.metaKey && !e.ctrlKey && !e.altKey && mode !== 'grid') {
         e.preventDefault();
         const modes: NsfwMode[] = ['blur', 'hide', 'show'];
         nsfwMode.update(v => modes[(modes.indexOf(v) + 1) % modes.length]);
@@ -754,7 +754,7 @@ function handleLoupeKeys(e: KeyboardEvent) {
         if (img) {
             rotateImage(img.image.id, 270).then(() => {
                 window.dispatchEvent(new CustomEvent('image-updated'));
-            });
+            }).catch(err => console.error('Rotate failed:', err));
         }
         return;
     }
@@ -764,7 +764,7 @@ function handleLoupeKeys(e: KeyboardEvent) {
         if (img) {
             rotateImage(img.image.id, 90).then(() => {
                 window.dispatchEvent(new CustomEvent('image-updated'));
-            });
+            }).catch(err => console.error('Rotate failed:', err));
         }
         return;
     }

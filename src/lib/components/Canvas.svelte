@@ -47,15 +47,28 @@
     const ITEM_GAP = 20;
     const ITEM_HEIGHT = 200;
 
+    let prevImageIds = $state('');
+
     $effect(() => {
         const imgs = $images;
-        if (canvasItems.length === 0 && imgs.length > 0) {
+        const currentIds = imgs.map(i => i.image.id).join(',');
+        if (currentIds !== prevImageIds && imgs.length > 0) {
+            prevImageIds = currentIds;
             layoutGrid(imgs);
         }
     });
 
     function layoutGrid(imgs: ImageWithFile[]) {
         const cols = Math.ceil(Math.sqrt(imgs.length));
+        const colWidths = new Array(cols).fill(0);
+        for (let i = 0; i < Math.min(cols, imgs.length); i++) {
+            const aspect = imgs[i].image.width / imgs[i].image.height;
+            colWidths[i] = ITEM_HEIGHT * aspect;
+        }
+        let colX = [0];
+        for (let c = 1; c < cols; c++) {
+            colX[c] = colX[c - 1] + (colWidths[c - 1] || ITEM_HEIGHT) + ITEM_GAP;
+        }
         canvasItems = imgs.map((img, i) => {
             const aspect = img.image.width / img.image.height;
             const w = ITEM_HEIGHT * aspect;
@@ -64,7 +77,7 @@
             return {
                 id: img.image.id,
                 image: img,
-                x: col * (w + ITEM_GAP),
+                x: colX[col],
                 y: row * (ITEM_HEIGHT + ITEM_GAP),
                 width: w,
                 height: ITEM_HEIGHT,
