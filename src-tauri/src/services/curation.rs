@@ -74,12 +74,13 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Mutex;
 
-    fn make_ctx_parts() -> (Database, MemoryStore, PathBuf, Mutex<EmbeddingEngine>, Mutex<DetectionEngine>, Mutex<DetectionEngine>) {
+    fn make_ctx_parts() -> (Database, MemoryStore, PathBuf, Mutex<EmbeddingEngine>, Mutex<DetectionEngine>, Mutex<DetectionEngine>, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
         let secrets = MemoryStore::new();
-        let dir = PathBuf::from("/tmp/imageview-test");
-        let mdir = PathBuf::from("/tmp/imageview-test/models");
-        (db, secrets, dir, Mutex::new(EmbeddingEngine::new(&mdir)), Mutex::new(DetectionEngine::new_yolo(&mdir)), Mutex::new(DetectionEngine::new_nudenet(&mdir)))
+        let dir = tmp.path().to_path_buf();
+        let mdir = tmp.path().join("models");
+        (db, secrets, dir, Mutex::new(EmbeddingEngine::new(&mdir)), Mutex::new(DetectionEngine::new_yolo(&mdir)), Mutex::new(DetectionEngine::new_nudenet(&mdir)), tmp)
     }
 
     fn ctx<'a>(db: &'a Database, s: &'a MemoryStore, d: &'a PathBuf, ee: &'a Mutex<EmbeddingEngine>, de: &'a Mutex<DetectionEngine>, se: &'a Mutex<DetectionEngine>) -> ServiceContext<'a> {
@@ -100,7 +101,7 @@ mod tests {
 
     #[test]
     fn test_set_rating_and_read() {
-        let (db, s, d, ee, de, se) = make_ctx_parts();
+        let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
         insert_img(&db, "r1");
         let c = ctx(&db, &s, &d, &ee, &de, &se);
         set_rating(&c, "r1", 4).unwrap();
@@ -110,7 +111,7 @@ mod tests {
 
     #[test]
     fn test_set_decision() {
-        let (db, s, d, ee, de, se) = make_ctx_parts();
+        let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
         insert_img(&db, "d1");
         let c = ctx(&db, &s, &d, &ee, &de, &se);
         set_decision(&c, "d1", "accept").unwrap();
@@ -120,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_create_and_list_collections() {
-        let (db, s, d, ee, de, se) = make_ctx_parts();
+        let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
         let c = ctx(&db, &s, &d, &ee, &de, &se);
         let id = create_collection(&c, "My Collection").unwrap();
         assert!(!id.is_empty());
@@ -132,7 +133,7 @@ mod tests {
 
     #[test]
     fn test_add_to_and_list_collection_images() {
-        let (db, s, d, ee, de, se) = make_ctx_parts();
+        let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
         insert_img(&db, "ci1");
         insert_img(&db, "ci2");
         let c = ctx(&db, &s, &d, &ee, &de, &se);
@@ -144,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_delete_collection() {
-        let (db, s, d, ee, de, se) = make_ctx_parts();
+        let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
         let c = ctx(&db, &s, &d, &ee, &de, &se);
         let id = create_collection(&c, "To Delete").unwrap();
         delete_collection(&c, &id).unwrap();
@@ -154,7 +155,7 @@ mod tests {
 
     #[test]
     fn test_create_smart_collection() {
-        let (db, s, d, ee, de, se) = make_ctx_parts();
+        let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
         let c = ctx(&db, &s, &d, &ee, &de, &se);
         let filter = r#"{"type":"rating","operator":"gte","value":4}"#;
         let id = create_smart_collection(&c, "Top Rated", filter, Some("4+ stars")).unwrap();
@@ -165,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_delete_smart_collection() {
-        let (db, s, d, ee, de, se) = make_ctx_parts();
+        let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
         let c = ctx(&db, &s, &d, &ee, &de, &se);
         let filter = r#"{"type":"rating","operator":"gte","value":3}"#;
         let id = create_smart_collection(&c, "To Remove", filter, None).unwrap();

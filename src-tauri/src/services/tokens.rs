@@ -366,15 +366,16 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Mutex;
 
-    fn test_context() -> (Database, MemoryStore, PathBuf, Mutex<EmbeddingEngine>, Mutex<DetectionEngine>, Mutex<DetectionEngine>) {
+    fn test_context() -> (Database, MemoryStore, PathBuf, Mutex<EmbeddingEngine>, Mutex<DetectionEngine>, Mutex<DetectionEngine>, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
         let secrets = MemoryStore::new();
-        let app_data_dir = PathBuf::from("/tmp/imageview-test");
-        let model_dir = PathBuf::from("/tmp/imageview-test/models");
+        let app_data_dir = tmp.path().to_path_buf();
+        let model_dir = tmp.path().join("models");
         let embedding_engine = Mutex::new(EmbeddingEngine::new(&model_dir));
         let detection_engine = Mutex::new(DetectionEngine::new_yolo(&model_dir));
         let safety_engine = Mutex::new(DetectionEngine::new_nudenet(&model_dir));
-        (db, secrets, app_data_dir, embedding_engine, detection_engine, safety_engine)
+        (db, secrets, app_data_dir, embedding_engine, detection_engine, safety_engine, tmp)
     }
 
     fn make_ctx<'a>(
@@ -485,7 +486,7 @@ mod tests {
 
     #[test]
     fn test_create_token() {
-        let (db, secrets, dir, ee, de, se) = test_context();
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
         let (token, secret) = create_token(&ctx, "Test Token", ROLE_VIEWER, None).unwrap();
@@ -504,7 +505,7 @@ mod tests {
 
     #[test]
     fn test_create_token_with_scope() {
-        let (db, secrets, dir, ee, de, se) = test_context();
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
         let scope = TokenScope {
@@ -523,7 +524,7 @@ mod tests {
 
     #[test]
     fn test_create_token_invalid_role() {
-        let (db, secrets, dir, ee, de, se) = test_context();
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
         let result = create_token(&ctx, "Bad", "superadmin", None);
@@ -533,7 +534,7 @@ mod tests {
 
     #[test]
     fn test_validate_token() {
-        let (db, secrets, dir, ee, de, se) = test_context();
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
         let (token, secret) = create_token(&ctx, "Auth Test", ROLE_ADMIN, None).unwrap();
@@ -548,7 +549,7 @@ mod tests {
 
     #[test]
     fn test_validate_wrong_secret() {
-        let (db, secrets, dir, ee, de, se) = test_context();
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
         let _ = create_token(&ctx, "Token", ROLE_VIEWER, None).unwrap();
@@ -559,7 +560,7 @@ mod tests {
 
     #[test]
     fn test_revoke_token() {
-        let (db, secrets, dir, ee, de, se) = test_context();
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
         let (token, secret) = create_token(&ctx, "To Revoke", ROLE_CURATOR, None).unwrap();
@@ -575,7 +576,7 @@ mod tests {
 
     #[test]
     fn test_revoke_nonexistent() {
-        let (db, secrets, dir, ee, de, se) = test_context();
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
         let result = revoke_token(&ctx, "tok_nonexistent");
@@ -584,7 +585,7 @@ mod tests {
 
     #[test]
     fn test_rotate_token() {
-        let (db, secrets, dir, ee, de, se) = test_context();
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
         let (token, old_secret) = create_token(&ctx, "Rotatable", ROLE_OPERATOR, None).unwrap();
@@ -603,7 +604,7 @@ mod tests {
 
     #[test]
     fn test_list_tokens_multiple() {
-        let (db, secrets, dir, ee, de, se) = test_context();
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
         create_token(&ctx, "Token A", ROLE_VIEWER, None).unwrap();
@@ -621,7 +622,7 @@ mod tests {
 
     #[test]
     fn test_audit_log() {
-        let (db, secrets, dir, ee, de, se) = test_context();
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
         log_audit(&ctx, Some("tok_abc"), "list_images", Some(r#"{"limit":10}"#), "ok").unwrap();
@@ -639,7 +640,7 @@ mod tests {
 
     #[test]
     fn test_prune_audit_log() {
-        let (db, secrets, dir, ee, de, se) = test_context();
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
         // Insert an entry with an old timestamp
@@ -666,7 +667,7 @@ mod tests {
 
     #[test]
     fn test_pepper_auto_generated() {
-        let (db, secrets, dir, ee, de, se) = test_context();
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
         assert!(secrets.get("mcp_pepper").unwrap().is_none());
@@ -813,7 +814,7 @@ mod tests {
 
     #[test]
     fn test_pepper_reused() {
-        let (db, secrets, dir, ee, de, se) = test_context();
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
         let (_, secret1) = create_token(&ctx, "T1", ROLE_VIEWER, None).unwrap();

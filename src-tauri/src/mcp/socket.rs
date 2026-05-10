@@ -89,27 +89,32 @@ mod tests {
 
     #[tokio::test]
     async fn test_socket_bind_and_connect() {
+        use tokio::time::{timeout, Duration};
         let dir = tempfile::tempdir().unwrap();
         let sock_path = dir.path().join("test.sock");
 
         let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
 
-        let client = tokio::net::UnixStream::connect(&sock_path).await.unwrap();
+        let client = timeout(Duration::from_secs(5), tokio::net::UnixStream::connect(&sock_path))
+            .await.expect("connect timed out").unwrap();
         assert!(client.peer_addr().is_ok());
 
-        let (server_stream, _) = listener.accept().await.unwrap();
+        let (server_stream, _) = timeout(Duration::from_secs(5), listener.accept())
+            .await.expect("accept timed out").unwrap();
         assert!(server_stream.peer_addr().is_ok());
     }
 
     #[tokio::test]
     async fn test_stale_socket_file_not_connectable() {
+        use tokio::time::{timeout, Duration};
         let dir = tempfile::tempdir().unwrap();
         let sock_path = dir.path().join("stale.sock");
 
         std::fs::write(&sock_path, "").unwrap();
         assert!(sock_path.exists());
 
-        let result = tokio::net::UnixStream::connect(&sock_path).await;
+        let result = timeout(Duration::from_secs(5), tokio::net::UnixStream::connect(&sock_path))
+            .await.expect("connect timed out");
         assert!(result.is_err());
     }
 
@@ -132,16 +137,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_clients_can_connect() {
+        use tokio::time::{timeout, Duration};
         let dir = tempfile::tempdir().unwrap();
         let sock_path = dir.path().join("multi.sock");
 
         let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
 
-        let c1 = tokio::net::UnixStream::connect(&sock_path).await.unwrap();
-        let c2 = tokio::net::UnixStream::connect(&sock_path).await.unwrap();
+        let c1 = timeout(Duration::from_secs(5), tokio::net::UnixStream::connect(&sock_path))
+            .await.expect("c1 connect timed out").unwrap();
+        let c2 = timeout(Duration::from_secs(5), tokio::net::UnixStream::connect(&sock_path))
+            .await.expect("c2 connect timed out").unwrap();
 
-        let (s1, _) = listener.accept().await.unwrap();
-        let (s2, _) = listener.accept().await.unwrap();
+        let (s1, _) = timeout(Duration::from_secs(5), listener.accept())
+            .await.expect("s1 accept timed out").unwrap();
+        let (s2, _) = timeout(Duration::from_secs(5), listener.accept())
+            .await.expect("s2 accept timed out").unwrap();
 
         assert!(c1.peer_addr().is_ok());
         assert!(c2.peer_addr().is_ok());

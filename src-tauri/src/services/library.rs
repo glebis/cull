@@ -91,15 +91,16 @@ mod tests {
     use crate::db_core::detection::DetectionEngine;
     use std::sync::Mutex;
 
-    fn make_ctx_parts() -> (Database, MemoryStore, PathBuf, Mutex<EmbeddingEngine>, Mutex<DetectionEngine>, Mutex<DetectionEngine>) {
+    fn make_ctx_parts() -> (Database, MemoryStore, PathBuf, Mutex<EmbeddingEngine>, Mutex<DetectionEngine>, Mutex<DetectionEngine>, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
         let secrets = MemoryStore::new();
-        let app_data_dir = PathBuf::from("/tmp/imageview-test");
-        let model_dir = PathBuf::from("/tmp/imageview-test/models");
+        let app_data_dir = tmp.path().to_path_buf();
+        let model_dir = tmp.path().join("models");
         let ee = Mutex::new(EmbeddingEngine::new(&model_dir));
         let de = Mutex::new(DetectionEngine::new_yolo(&model_dir));
         let se = Mutex::new(DetectionEngine::new_nudenet(&model_dir));
-        (db, secrets, app_data_dir, ee, de, se)
+        (db, secrets, app_data_dir, ee, de, se, tmp)
     }
 
     fn make_ctx<'a>(
@@ -139,7 +140,7 @@ mod tests {
 
     #[test]
     fn test_list_images_empty_db() {
-        let (db, sec, dir, ee, de, se) = make_ctx_parts();
+        let (db, sec, dir, ee, de, se, _tmp) = make_ctx_parts();
         let ctx = make_ctx(&db, &sec, &dir, &ee, &de, &se);
         let result = list_images(&ctx, Pagination::default()).unwrap();
         assert!(result.is_empty());
@@ -147,7 +148,7 @@ mod tests {
 
     #[test]
     fn test_list_images_returns_inserted() {
-        let (db, sec, dir, ee, de, se) = make_ctx_parts();
+        let (db, sec, dir, ee, de, se, _tmp) = make_ctx_parts();
         insert_test_image(&db, "img_1", "/photos/a.png");
         insert_test_image(&db, "img_2", "/photos/b.png");
         let ctx = make_ctx(&db, &sec, &dir, &ee, &de, &se);
@@ -157,7 +158,7 @@ mod tests {
 
     #[test]
     fn test_get_image_not_found() {
-        let (db, sec, dir, ee, de, se) = make_ctx_parts();
+        let (db, sec, dir, ee, de, se, _tmp) = make_ctx_parts();
         let ctx = make_ctx(&db, &sec, &dir, &ee, &de, &se);
         let result = get_image(&ctx, "nonexistent");
         assert!(result.is_err());
@@ -169,7 +170,7 @@ mod tests {
 
     #[test]
     fn test_get_image_found() {
-        let (db, sec, dir, ee, de, se) = make_ctx_parts();
+        let (db, sec, dir, ee, de, se, _tmp) = make_ctx_parts();
         insert_test_image(&db, "img_x", "/photos/x.png");
         let ctx = make_ctx(&db, &sec, &dir, &ee, &de, &se);
         let img = get_image(&ctx, "img_x").unwrap();
@@ -179,7 +180,7 @@ mod tests {
 
     #[test]
     fn test_list_folders_empty() {
-        let (db, sec, dir, ee, de, se) = make_ctx_parts();
+        let (db, sec, dir, ee, de, se, _tmp) = make_ctx_parts();
         let ctx = make_ctx(&db, &sec, &dir, &ee, &de, &se);
         let result = list_folders(&ctx).unwrap();
         assert!(result.is_empty());
@@ -187,14 +188,14 @@ mod tests {
 
     #[test]
     fn test_get_image_count_zero() {
-        let (db, sec, dir, ee, de, se) = make_ctx_parts();
+        let (db, sec, dir, ee, de, se, _tmp) = make_ctx_parts();
         let ctx = make_ctx(&db, &sec, &dir, &ee, &de, &se);
         assert_eq!(get_image_count(&ctx).unwrap(), 0);
     }
 
     #[test]
     fn test_get_image_count_with_images() {
-        let (db, sec, dir, ee, de, se) = make_ctx_parts();
+        let (db, sec, dir, ee, de, se, _tmp) = make_ctx_parts();
         insert_test_image(&db, "c1", "/p/1.png");
         insert_test_image(&db, "c2", "/p/2.png");
         insert_test_image(&db, "c3", "/p/3.png");
@@ -212,7 +213,7 @@ mod tests {
 
     #[test]
     fn test_get_images_by_ids() {
-        let (db, sec, dir, ee, de, se) = make_ctx_parts();
+        let (db, sec, dir, ee, de, se, _tmp) = make_ctx_parts();
         insert_test_image(&db, "id_a", "/a.png");
         insert_test_image(&db, "id_b", "/b.png");
         insert_test_image(&db, "id_c", "/c.png");
@@ -226,7 +227,7 @@ mod tests {
 
     #[test]
     fn test_list_images_pagination() {
-        let (db, sec, dir, ee, de, se) = make_ctx_parts();
+        let (db, sec, dir, ee, de, se, _tmp) = make_ctx_parts();
         for i in 0..10 {
             insert_test_image(&db, &format!("pg_{}", i), &format!("/p/{}.png", i));
         }

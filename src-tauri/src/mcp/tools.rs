@@ -12,6 +12,25 @@ use crate::db_core::models::TokenScope;
 use crate::services::tokens;
 use super::auth::{AuthContext, require_capability};
 
+fn redact_path(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_else(|| "[redacted]".to_string())
+}
+
+fn clamp_limit(limit: u32) -> u32 {
+    limit.min(100).max(1)
+}
+
+fn is_valid_rating(rating: u8) -> bool {
+    rating <= 5
+}
+
+fn is_valid_decision(decision: &str) -> bool {
+    matches!(decision, "selected" | "rejected" | "none")
+}
+
 #[derive(Debug, Clone)]
 pub struct ImageViewMcp {
     pub app_handle: tauri::AppHandle,
@@ -79,11 +98,7 @@ impl ImageViewMcp {
 
     fn maybe_redact_path(&self, path: &str) -> serde_json::Value {
         if self.is_remote() {
-            let filename = std::path::Path::new(path)
-                .file_name()
-                .map(|f| f.to_string_lossy().to_string())
-                .unwrap_or_else(|| "[redacted]".to_string());
-            serde_json::Value::String(filename)
+            serde_json::Value::String(redact_path(path))
         } else {
             serde_json::Value::String(path.to_string())
         }
@@ -435,7 +450,7 @@ impl ImageViewMcp {
 
     #[tool(description = "Rate an image from 0 (unrated) to 5 stars")]
     fn set_rating(&self, Parameters(params): Parameters<SetRatingParams>) -> String {
-        if params.rating > 5 {
+        if !is_valid_rating(params.rating) {
             return "Error: Rating must be 0-5".to_string();
         }
         match self.check_image_id_scope(&params.image_id) {
@@ -452,7 +467,7 @@ impl ImageViewMcp {
 
     #[tool(description = "Set selection decision on an image: 'selected', 'rejected', or 'none'")]
     fn set_decision(&self, Parameters(params): Parameters<SetDecisionParams>) -> String {
-        if !matches!(params.decision.as_str(), "selected" | "rejected" | "none") {
+        if !is_valid_decision(&params.decision) {
             return "Error: Decision must be 'selected', 'rejected', or 'none'".to_string();
         }
         match self.check_image_id_scope(&params.image_id) {
@@ -1244,56 +1259,31 @@ mod tests {
     use crate::services::tokens;
     use super::AuthContext;
 
-    // --- Path redaction logic ---
+    // --- Path redaction (tests production `redact_path`) ---
 
     #[test]
     fn test_redact_path_extracts_filename() {
-        let path = "/Users/gleb/art/midjourney/image_001.png";
-        let filename = std::path::Path::new(path)
-            .file_name()
-            .map(|f| f.to_string_lossy().to_string())
-            .unwrap();
-        assert_eq!(filename, "image_001.png");
+        assert_eq!(super::redact_path("/Users/gleb/art/midjourney/image_001.png"), "image_001.png");
     }
 
     #[test]
     fn test_redact_path_preserves_extension() {
-        let path = "/some/deep/path/photo.CR2";
-        let filename = std::path::Path::new(path)
-            .file_name()
-            .map(|f| f.to_string_lossy().to_string())
-            .unwrap();
-        assert_eq!(filename, "photo.CR2");
+        assert_eq!(super::redact_path("/some/deep/path/photo.CR2"), "photo.CR2");
     }
 
     #[test]
     fn test_redact_path_handles_root() {
-        let path = "/";
-        let filename = std::path::Path::new(path)
-            .file_name()
-            .map(|f| f.to_string_lossy().to_string())
-            .unwrap_or_else(|| "[redacted]".to_string());
-        assert_eq!(filename, "[redacted]");
+        assert_eq!(super::redact_path("/"), "[redacted]");
     }
 
     #[test]
     fn test_redact_path_handles_empty() {
-        let path = "";
-        let filename = std::path::Path::new(path)
-            .file_name()
-            .map(|f| f.to_string_lossy().to_string())
-            .unwrap_or_else(|| "[redacted]".to_string());
-        assert_eq!(filename, "[redacted]");
+        assert_eq!(super::redact_path(""), "[redacted]");
     }
 
     #[test]
     fn test_redact_path_handles_spaces() {
-        let path = "/Users/gleb/My Art/image 001.png";
-        let filename = std::path::Path::new(path)
-            .file_name()
-            .map(|f| f.to_string_lossy().to_string())
-            .unwrap();
-        assert_eq!(filename, "image 001.png");
+        assert_eq!(super::redact_path("/Users/gleb/My Art/image 001.png"), "image 001.png");
     }
 
     // --- is_remote logic ---
@@ -1413,101 +1403,67 @@ mod tests {
         assert!(!tokens::folder_in_scope(&scope, "/artisan"));
     }
 
-    // --- Input validation ---
+    // --- Input validation (tests production helpers) ---
 
     #[test]
-    fn test_rating_bounds() {
+    fn test_rating_valid_range() {
         for r in 0..=5u8 {
-            assert!(r <= 5);
+            assert!(super::is_valid_rating(r), "Rating {} should be valid", r);
         }
-        assert!(6u8 > 5);
-        assert!(255u8 > 5);
+    }
+
+    #[test]
+    fn test_rating_invalid() {
+        assert!(!super::is_valid_rating(6));
+        assert!(!super::is_valid_rating(255));
     }
 
     #[test]
     fn test_decision_valid_values() {
-        let valid = |d: &str| matches!(d, "selected" | "rejected" | "none");
-        assert!(valid("selected"));
-        assert!(valid("rejected"));
-        assert!(valid("none"));
-        assert!(!valid("maybe"));
-        assert!(!valid(""));
-        assert!(!valid("SELECTED"));
+        assert!(super::is_valid_decision("selected"));
+        assert!(super::is_valid_decision("rejected"));
+        assert!(super::is_valid_decision("none"));
     }
 
-    // --- Pagination clamping ---
+    #[test]
+    fn test_decision_invalid_values() {
+        assert!(!super::is_valid_decision("maybe"));
+        assert!(!super::is_valid_decision(""));
+        assert!(!super::is_valid_decision("SELECTED"));
+    }
+
+    // --- Pagination clamping (tests production `clamp_limit`) ---
 
     #[test]
     fn test_limit_clamped_to_range() {
-        let clamp = |limit: u32| limit.min(100).max(1);
-        assert_eq!(clamp(0), 1);
-        assert_eq!(clamp(1), 1);
-        assert_eq!(clamp(50), 50);
-        assert_eq!(clamp(100), 100);
-        assert_eq!(clamp(200), 100);
-        assert_eq!(clamp(u32::MAX), 100);
+        assert_eq!(super::clamp_limit(0), 1);
+        assert_eq!(super::clamp_limit(1), 1);
+        assert_eq!(super::clamp_limit(50), 50);
+        assert_eq!(super::clamp_limit(100), 100);
+        assert_eq!(super::clamp_limit(200), 100);
+        assert_eq!(super::clamp_limit(u32::MAX), 100);
     }
 
-    #[test]
-    fn test_scoped_overfetch_multiplier() {
-        let limit: u32 = 50;
-        let scope_active = true;
-        let fetch = if scope_active { limit * 3 } else { limit };
-        assert_eq!(fetch, 150);
-
-        let no_scope = false;
-        let fetch = if no_scope { limit * 3 } else { limit };
-        assert_eq!(fetch, 50);
-    }
-
-    // --- Collection scope on list_collections ---
+    // --- Collection scope (these test the same scope helpers used in production) ---
 
     #[test]
-    fn test_collection_scope_filters_list() {
+    fn test_collection_scope_restricts_access() {
         let scope = Some(TokenScope {
             folders: None,
             collections: Some(vec!["col_abc".to_string()]),
             tags: None,
         });
-        let collections = vec![
-            ("col_abc".to_string(), "Favorites".to_string(), 10u32),
-            ("col_def".to_string(), "Archive".to_string(), 5u32),
-            ("col_ghi".to_string(), "WIP".to_string(), 3u32),
-        ];
-        let filtered: Vec<_> = collections.iter()
-            .filter(|(id, _, _)| {
-                match &scope {
-                    None => true,
-                    Some(s) => match &s.collections {
-                        None => true,
-                        Some(allowed) => allowed.contains(id),
-                    }
-                }
-            })
-            .collect();
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].0, "col_abc");
+        // image_in_scope with collection membership
+        assert!(tokens::image_in_scope(&scope, "/any.jpg", &["col_abc".to_string()]));
+        assert!(!tokens::image_in_scope(&scope, "/any.jpg", &["col_def".to_string()]));
+        assert!(!tokens::image_in_scope(&scope, "/any.jpg", &["col_ghi".to_string()]));
     }
 
     #[test]
-    fn test_collection_scope_none_shows_all() {
+    fn test_no_collection_scope_allows_all() {
         let scope: Option<TokenScope> = None;
-        let collections = vec![
-            ("col_abc".to_string(), "Favorites".to_string(), 10u32),
-            ("col_def".to_string(), "Archive".to_string(), 5u32),
-        ];
-        let filtered: Vec<_> = collections.iter()
-            .filter(|(id, _, _)| {
-                match &scope {
-                    None => true,
-                    Some(s) => match &s.collections {
-                        None => true,
-                        Some(allowed) => allowed.contains(id),
-                    }
-                }
-            })
-            .collect();
-        assert_eq!(filtered.len(), 2);
+        assert!(tokens::image_in_scope(&scope, "/any.jpg", &["col_abc".to_string()]));
+        assert!(tokens::image_in_scope(&scope, "/any.jpg", &[]));
     }
 
     // --- Job snapshot serialization ---
