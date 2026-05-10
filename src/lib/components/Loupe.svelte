@@ -3,8 +3,8 @@
     import { onMount } from 'svelte';
     import ContextMenu from './ContextMenu.svelte';
     import { images, focusedIndex, focusedImage, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast } from '$lib/stores';
-    import { getDetections, getVisionMetadata, cropImage, getImagesByIds } from '$lib/api';
-    import type { Detection } from '$lib/api';
+    import { getDetections, getVisionMetadata, cropImage, getImagesByIds, getGenerationRun } from '$lib/api';
+    import type { Detection, GenerationRun } from '$lib/api';
 
     let dragging = $state(false);
     let dragStartX = $state(0);
@@ -32,7 +32,12 @@
     };
     let sourceDisplay = $derived(image?.source_label ? SOURCE_DISPLAY[image.source_label] ?? image.source_label : null);
 
-    let prompt = $derived(image?.image.ai_prompt ?? null);
+    let generationRun = $state<GenerationRun | null>(null);
+
+    let prompt = $derived(generationRun?.prompt ?? image?.image.ai_prompt ?? null);
+    let genModel = $derived(generationRun?.model ?? null);
+    let genProvider = $derived(generationRun?.provider ?? null);
+    let genSeed = $derived(generationRun?.seed ?? null);
     let promptExpanded = $state(false);
     let promptTruncated = $derived(prompt && prompt.length > 80 ? prompt.slice(0, 80) + '…' : prompt);
 
@@ -97,6 +102,7 @@
             detectionsLoaded = true;
         }).catch(() => { detections = []; nsfwDetections = []; detectionsLoaded = true; });
         getVisionMetadata(id).then(m => { visionMeta = m; }).catch(() => { visionMeta = []; });
+        getGenerationRun(id).then(r => { generationRun = r; }).catch(() => { generationRun = null; });
     });
 
     let shouldBlur = $derived(
@@ -402,6 +408,13 @@
     {#if prompt && promptExpanded}
         <div class="prompt-panel">
             <div class="prompt-text">{prompt}</div>
+            {#if genModel || genProvider || genSeed}
+                <div class="prompt-meta">
+                    {#if genProvider}<span class="meta-tag">{genProvider}</span>{/if}
+                    {#if genModel}<span class="meta-tag">{genModel}</span>{/if}
+                    {#if genSeed}<span class="meta-tag">seed:{genSeed}</span>{/if}
+                </div>
+            {/if}
         </div>
     {/if}
     {/if}
@@ -765,6 +778,20 @@
     .meta-value {
         color: var(--text-primary, #e0e0e0);
         word-break: break-word;
+    }
+    .prompt-meta {
+        display: flex;
+        gap: 6px;
+        margin-top: 6px;
+        flex-wrap: wrap;
+    }
+    .meta-tag {
+        background: var(--bg-elevated, #2a2a3e);
+        color: var(--text-secondary, #888);
+        padding: 1px 6px;
+        border-radius: 3px;
+        font-size: 10px;
+        font-family: var(--font-mono);
     }
     /* Crop mode */
     .crop-overlay {
