@@ -71,6 +71,15 @@
         ro.observe(containerEl);
         return () => ro.disconnect();
     });
+
+    let prevFocusedIndex = $state<number | null>(null);
+    $effect(() => {
+        const idx = $focusedIndex;
+        if (idx === prevFocusedIndex) return;
+        prevFocusedIndex = idx;
+        const el = containerEl?.querySelector('[tabindex="0"]') as HTMLElement | null;
+        el?.focus();
+    });
 </script>
 
 <div

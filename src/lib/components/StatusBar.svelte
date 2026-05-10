@@ -76,11 +76,15 @@
         padding: 0 12px;
         font-size: 11px;
         grid-area: statusbar;
+        gap: 12px;
     }
     .left {
         display: flex;
         align-items: center;
         gap: 8px;
+        flex-shrink: 0;
+        min-width: 0;
+        overflow: hidden;
     }
     .mode {
         color: var(--green);
@@ -96,10 +100,14 @@
     .right {
         display: flex;
         gap: 12px;
+        overflow: hidden;
+        flex-shrink: 1;
+        min-width: 0;
     }
     .hint {
         color: var(--text-secondary);
         font-size: 10px;
+        white-space: nowrap;
     }
     .active-hint {
         color: var(--green, #9ece6a);

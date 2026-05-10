@@ -58,7 +58,7 @@
     class="thumb {borderClass}"
     style="width: {size}px; height: {size}px;"
     role="gridcell"
-    tabindex="-1"
+    tabindex={focused ? 0 : -1}
     aria-label={filename}
     aria-selected={selected}
     {onclick}

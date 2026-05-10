@@ -51,7 +51,8 @@
 :root {
     --bg: #08080c;
     --surface: #0c0c12;
-    --border: #1a1a2e;
+    --border: #2a2a42;
+    --border-subtle: #1a1a2e;
     --text: #e0e0e0;
     --text-secondary: #7a7fa0;
     --green: #9ece6a;
@@ -86,5 +87,12 @@ html, body {
 
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+    }
+}

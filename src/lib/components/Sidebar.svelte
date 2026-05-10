@@ -16,41 +16,7 @@
     let rescanning = $state(false);
     let foldersExpanded = $state(true);
 
-    interface DisplayFolder {
-        name: string;
-        disambig: string; // parent context shown when names collide
-        fullPath: string;
-        count: number;
-    }
-
-    // Build a flat, disambiguated folder list
-    function buildDisplayFolders(flatFolders: [string, number][]): DisplayFolder[] {
-        const result: DisplayFolder[] = flatFolders.map(([fullPath, count]) => {
-            const parts = fullPath.split('/').filter(p => p.length > 0);
-            const name = parts[parts.length - 1] || fullPath;
-            return { name, disambig: '', fullPath, count };
-        });
-
-        // Find duplicate names and add parent path to disambiguate
-        const byName = new Map<string, DisplayFolder[]>();
-        for (const f of result) {
-            const group = byName.get(f.name) || [];
-            group.push(f);
-            byName.set(f.name, group);
-        }
-        for (const [, group] of byName) {
-            if (group.length <= 1) continue;
-            for (const f of group) {
-                const parts = f.fullPath.split('/').filter(p => p.length > 0);
-                // Show up to 2 parent segments for context
-                const contextParts = parts.slice(Math.max(0, parts.length - 3), parts.length - 1);
-                f.disambig = contextParts.join('/');
-            }
-        }
-
-        result.sort((a, b) => a.name.localeCompare(b.name));
-        return result;
-    }
+    import { buildDisplayFolders } from '$lib/sidebar-utils';
 
     let displayFolders = $derived(buildDisplayFolders($folders));
 
@@ -450,21 +416,25 @@
             </button>
 
             {#if foldersExpanded}
+                <div role="tree" aria-label="Folder hierarchy">
                 {#each displayFolders as folder}
-                    <div class="folder-row" class:active={$activeFolder === folder.fullPath}>
-                        <button class="section-item" onclick={() => selectFolder(folder.fullPath)} title={folder.fullPath}>
-                            <span class="icon">&#9656;</span>
-                            <span class="folder-label">
-                                {folder.name}
-                                {#if folder.disambig}
-                                    <span class="folder-disambig">{folder.disambig}</span>
-                                {/if}
+                    <div class="folder-row" class:active={$activeFolder === folder.fullPath} style="padding-left: {folder.depth * 12}px" role="treeitem" aria-level={folder.depth + 1} {...(folder.hasChildren && folder.count === 0 ? { 'aria-expanded': 'true' } : {})}>
+                        {#if folder.count > 0}
+                            <button class="section-item" onclick={() => selectFolder(folder.fullPath)} title={folder.fullPath}>
+                                <span class="icon">{folder.hasChildren ? '▾' : '▸'}</span>
+                                <span class="folder-label">{folder.name}</span>
+                                <span class="count">({folder.count})</span>
+                            </button>
+                            <button class="delete-btn" onclick={(e: Event) => handleDeleteFolder(e, folder.fullPath)} title="Remove folder">&times;</button>
+                        {:else}
+                            <span class="section-item folder-group">
+                                <span class="icon">▾</span>
+                                <span class="folder-label">{folder.name}</span>
                             </span>
-                            <span class="count">({folder.count})</span>
-                        </button>
-                        <button class="delete-btn" onclick={(e: Event) => handleDeleteFolder(e, folder.fullPath)} title="Remove folder">&times;</button>
+                        {/if}
                     </div>
                 {/each}
+                </div>
             {/if}
         {/if}
     </div>
@@ -687,7 +657,7 @@
     }
     .section-item {
         font-size: 12px;
-        padding: 4px 8px;
+        padding: 6px 8px;
         border-radius: var(--radius);
         cursor: pointer;
         display: flex;
@@ -749,7 +719,7 @@
         flex-shrink: 0;
         background: none;
         border: none;
-        padding: 2px 4px;
+        padding: 6px 6px;
         font-family: inherit;
     }
     .folder-row:hover .delete-btn {
@@ -760,7 +730,7 @@
     }
     .folders-toggle {
         font-size: 11px;
-        padding: 4px 8px;
+        padding: 6px 8px;
         cursor: pointer;
         display: flex;
         align-items: center;
@@ -788,19 +758,19 @@
         text-transform: uppercase;
     }
     .folder-label {
-        display: flex;
-        flex-direction: column;
         min-width: 0;
         overflow: hidden;
-    }
-    .folder-disambig {
-        font-size: 9px;
-        color: var(--text-secondary);
-        opacity: 0.5;
-        white-space: nowrap;
-        overflow: hidden;
         text-overflow: ellipsis;
-        line-height: 1.2;
+        white-space: nowrap;
+    }
+    .folder-group {
+        cursor: default;
+        color: var(--text-secondary);
+        font-size: 11px;
+        font-weight: 600;
+    }
+    .folder-group:hover {
+        background: none;
     }
     .filter-row {
         padding: 4px 8px;
@@ -817,7 +787,7 @@
     }
     .preset-btn {
         font-size: 10px;
-        padding: 2px 6px;
+        padding: 4px 8px;
         border-radius: var(--radius);
         border: 1px solid var(--border);
         background: none;
@@ -1041,7 +1011,7 @@
         cursor: pointer;
         font-size: 11px;
         opacity: 0.4;
-        padding: 0 4px;
+        padding: 4px 6px;
     }
     .pin-btn:hover, .pin-btn.active { opacity: 1; }
 </style>

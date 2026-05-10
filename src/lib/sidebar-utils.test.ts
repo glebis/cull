@@ -40,74 +40,87 @@ describe('buildDisplayFolders', () => {
         expect(buildDisplayFolders([])).toEqual([]);
     });
 
-    it('builds a single folder', () => {
+    it('builds a single folder with depth 0', () => {
         const result = buildDisplayFolders([['/Users/test/Photos', 10]]);
         expect(result).toHaveLength(1);
         expect(result[0].name).toBe('Photos');
-        expect(result[0].disambig).toBe('');
         expect(result[0].fullPath).toBe('/Users/test/Photos');
         expect(result[0].count).toBe(10);
+        expect(result[0].depth).toBe(0);
     });
 
-    it('sorts by name alphabetically', () => {
+    it('strips common prefix and builds tree', () => {
         const result = buildDisplayFolders([
-            ['/z/Zebras', 1],
-            ['/a/Apples', 2],
-            ['/m/Mangos', 3],
+            ['/Users/test/project/src/assets', 5],
+            ['/Users/test/project/src/images', 3],
+            ['/Users/test/project/docs/photos', 2],
+        ]);
+        // Common prefix: /Users/test/project
+        // Tree: docs/photos (collapsed), src (group) -> assets, images
+        expect(result.map(f => f.name)).toEqual(['docs/photos', 'src', 'assets', 'images']);
+        expect(result[0].depth).toBe(0);
+        expect(result[0].count).toBe(2);
+        const src = result.find(f => f.name === 'src');
+        expect(src?.depth).toBe(0);
+        expect(src?.hasChildren).toBe(true);
+        expect(src?.count).toBe(0);
+        const assets = result.find(f => f.name === 'assets');
+        expect(assets?.depth).toBe(1);
+        expect(assets?.count).toBe(5);
+    });
+
+    it('sorts siblings alphabetically', () => {
+        const result = buildDisplayFolders([
+            ['/root/Zebras', 1],
+            ['/root/Apples', 2],
+            ['/root/Mangos', 3],
         ]);
         expect(result.map(f => f.name)).toEqual(['Apples', 'Mangos', 'Zebras']);
     });
 
-    it('disambiguates duplicate folder names with exact parent context', () => {
+    it('nests children under parents with correct depth', () => {
         const result = buildDisplayFolders([
-            ['/Users/alice/Photos', 5],
-            ['/Users/bob/Photos', 3],
+            ['/root/a/child1', 1],
+            ['/root/a/child2', 2],
+            ['/root/b', 3],
         ]);
-        expect(result).toHaveLength(2);
-        const byPath = Object.fromEntries(result.map(f => [f.fullPath, f.disambig]));
-        expect(byPath['/Users/alice/Photos']).toBe('Users/alice');
-        expect(byPath['/Users/bob/Photos']).toBe('Users/bob');
+        // a is a group at depth 0, child1/child2 at depth 1, b at depth 0
+        const a = result.find(f => f.name === 'a');
+        expect(a?.depth).toBe(0);
+        expect(a?.hasChildren).toBe(true);
+        const child1 = result.find(f => f.name === 'child1');
+        expect(child1?.depth).toBe(1);
+        const b = result.find(f => f.name === 'b');
+        expect(b?.depth).toBe(0);
     });
 
-    it('does not disambiguate unique names', () => {
+    it('collapses single-child chains', () => {
         const result = buildDisplayFolders([
-            ['/a/Cats', 1],
-            ['/b/Dogs', 2],
+            ['/root/a/b/c/deep', 5],
         ]);
-        expect(result[0].disambig).toBe('');
-        expect(result[1].disambig).toBe('');
+        expect(result).toHaveLength(1);
+        expect(result[0].name).toBe('deep');
+        expect(result[0].depth).toBe(0);
     });
 
-    it('shows up to 2 parent segments for disambiguation', () => {
+    it('collapses intermediate single-child nodes into combined names', () => {
         const result = buildDisplayFolders([
-            ['/root/level1/level2/Photos', 1],
-            ['/other/path/here/Photos', 2],
+            ['/root/node_modules/zod/lib/assets', 3],
+            ['/root/src/images', 5],
         ]);
-        const byPath = Object.fromEntries(result.map(f => [f.fullPath, f.disambig]));
-        expect(byPath['/root/level1/level2/Photos']).toBe('level1/level2');
-        expect(byPath['/other/path/here/Photos']).toBe('path/here');
+        // node_modules/zod/lib/assets collapses into one entry
+        // src/images collapses into one entry
+        const nm = result.find(f => f.name.includes('node_modules'));
+        expect(nm?.name).toBe('node_modules/zod/lib/assets');
+        const src = result.find(f => f.name.includes('src'));
+        expect(src?.name).toBe('src/images');
     });
 
-    it('disambiguates root-level duplicate names', () => {
-        const result = buildDisplayFolders([
-            ['/Photos', 5],
-            ['/Users/Photos', 3],
-        ]);
-        expect(result).toHaveLength(2);
-        const byPath = Object.fromEntries(result.map(f => [f.fullPath, f.disambig]));
-        expect(byPath['/Photos']).toBe('');
-        expect(byPath['/Users/Photos']).toBe('Users');
-    });
-
-    it('disambiguates three folders with the same name', () => {
-        const result = buildDisplayFolders([
-            ['/a/b/Imports', 1],
-            ['/c/d/Imports', 2],
-            ['/e/f/Imports', 3],
-        ]);
-        const disambigs = result.map(f => f.disambig);
-        expect(new Set(disambigs).size).toBe(3);
-        expect(disambigs.every(d => d.length > 0)).toBe(true);
+    it('handles single folder (no common prefix stripping)', () => {
+        const result = buildDisplayFolders([['/Photos', 5]]);
+        expect(result).toHaveLength(1);
+        expect(result[0].name).toBe('Photos');
+        expect(result[0].depth).toBe(0);
     });
 });
 

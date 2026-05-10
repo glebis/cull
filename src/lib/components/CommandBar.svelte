@@ -135,6 +135,7 @@
                 onkeydown={handleKeydown}
                 placeholder="landscape midjourney 4 stars or more..."
                 class="command-input"
+                aria-label="Filter images by natural language query"
             />
             {#if query}
                 <button class="clear-btn" onclick={handleClear}>&times;</button>
