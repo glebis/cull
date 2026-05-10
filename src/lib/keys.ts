@@ -316,6 +316,9 @@ export function handleKeydown(e: KeyboardEvent) {
         case 'grid':
             handleGridKeys(e);
             break;
+        case 'canvas':
+            handleCanvasKeys(e);
+            break;
         case 'compare':
             handleCompareKeys(e);
             break;
@@ -586,6 +589,81 @@ function compareSwapFocusedImage(direction: 1 | -1) {
                 focusedIndex.set(Math.max(0, newFocused));
             }
         }
+    }
+}
+
+function handleCanvasKeys(e: KeyboardEvent) {
+    if (!e.metaKey && !e.ctrlKey && !e.altKey) {
+        const n = parseInt(e.key);
+        if (n >= 1 && n <= 5) {
+            e.preventDefault();
+            handleStarRating(n);
+            return;
+        }
+    }
+
+    switch (e.key) {
+        case 'h':
+        case 'ArrowLeft':
+            e.preventDefault();
+            moveFocus(-1);
+            break;
+        case 'l':
+        case 'ArrowRight':
+            e.preventDefault();
+            moveFocus(1);
+            break;
+        case 'k':
+        case 'ArrowUp':
+            e.preventDefault();
+            moveFocus(-1);
+            break;
+        case 'j':
+        case 'ArrowDown':
+            e.preventDefault();
+            moveFocus(1);
+            break;
+        case ' ':
+            e.preventDefault();
+            if (get(collectMode)) {
+                handleCollectModeAdd();
+            } else {
+                toggleSelect();
+            }
+            break;
+        case 's':
+            e.preventDefault();
+            waitingForStar = true;
+            statusHint.set('Rate: press 1-5');
+            break;
+        case '0':
+            e.preventDefault();
+            handleStarRating(0);
+            break;
+        case 'a':
+            e.preventDefault();
+            handleDecision('accept');
+            break;
+        case 'x':
+            e.preventDefault();
+            handleDecision('reject');
+            break;
+        case 'u':
+            e.preventDefault();
+            handleDecision('undecided');
+            break;
+        case 'Enter':
+            e.preventDefault();
+            navigateTo('loupe');
+            break;
+        case 'Escape':
+            e.preventDefault();
+            navigateBack() || navigateTo('grid');
+            break;
+        case 'f':
+            e.preventDefault();
+            toggleFullscreen();
+            break;
     }
 }
 
