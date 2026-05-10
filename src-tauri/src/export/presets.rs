@@ -30,6 +30,7 @@ pub fn get_preset(id: &str) -> Option<&'static PlatformPreset> {
     PRESETS.iter().find(|p| p.id == id)
 }
 
+#[allow(dead_code)]
 pub fn list_presets() -> &'static [PlatformPreset] {
     PRESETS
 }

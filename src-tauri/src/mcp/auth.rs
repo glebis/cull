@@ -14,6 +14,7 @@ impl AuthContext {
         }
     }
 
+    #[allow(dead_code)]
     pub fn token_id(&self) -> Option<&str> {
         match self {
             AuthContext::Local => None,
@@ -87,6 +88,18 @@ mod tests {
         "show_image",
         "navigate_to_folder",
         "show_collection",
+        "import_folder",
+        "rescan_sources",
+        "generate_embeddings",
+        "detect_objects",
+        "analyze_images",
+        "create_token",
+        "list_tokens",
+        "revoke_token",
+        "rotate_token",
+        "get_audit_log",
+        "prune_audit_log",
+        "list_export_presets",
     ];
 
     const READ_TOOLS: &[&str] = &[
@@ -114,12 +127,14 @@ mod tests {
     const IMPORT_TOOLS: &[&str] = &["import_folder", "import_files", "rescan_sources"];
     const EXPORT_TOOLS: &[&str] = &["export_images", "list_export_presets", "assemble_pdf"];
     const DISPLAY_TOOLS: &[&str] = &["show_image", "navigate_to_folder", "show_collection"];
-    const AI_TOOLS: &[&str] = &["generate_embeddings", "analyze_images"];
+    const AI_TOOLS: &[&str] = &["generate_embeddings", "detect_objects", "analyze_images"];
     const TOKEN_TOOLS: &[&str] = &[
         "create_token",
         "list_tokens",
         "revoke_token",
         "rotate_token",
+        "get_audit_log",
+        "prune_audit_log",
     ];
 
     // --- Basic auth context tests ---

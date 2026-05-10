@@ -56,9 +56,10 @@ pub fn tool_capability(tool_name: &str) -> &'static str {
 
         "show_image" | "navigate_to_folder" | "show_collection" => "display:navigate",
 
-        "generate_embeddings" | "analyze_images" => "ai:run",
+        "generate_embeddings" | "detect_objects" | "analyze_images" => "ai:run",
 
-        "create_token" | "list_tokens" | "revoke_token" | "rotate_token" => "tokens:manage",
+        "create_token" | "list_tokens" | "revoke_token" | "rotate_token"
+        | "get_audit_log" | "prune_audit_log" => "tokens:manage",
 
         _ => "settings:manage",
     }
@@ -166,7 +167,7 @@ pub fn validate_token(ctx: &ServiceContext, secret: &str) -> Result<Option<McpTo
 
     drop(stmt);
 
-    for (id, name, stored_hash, role, scope_json, created_at, expires_at, last_used_at, _revoked) in rows {
+    for (id, name, stored_hash, role, scope_json, created_at, expires_at, _last_used_at, _revoked) in rows {
         if verify_secret(&pepper, secret, &stored_hash) {
             if let Some(ref exp) = expires_at {
                 if let Ok(exp_time) = chrono::DateTime::parse_from_rfc3339(exp) {

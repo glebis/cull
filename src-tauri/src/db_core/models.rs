@@ -58,7 +58,6 @@ pub struct TokenScope {
     pub tags: Option<Vec<String>>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEntry {
     pub id: i64,

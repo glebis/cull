@@ -1,7 +1,9 @@
+#[allow(dead_code)]
 pub mod library;
+#[allow(dead_code)]
 pub mod curation;
-pub mod import;
 pub mod export;
+#[allow(dead_code)]
 pub mod ai;
 pub mod display;
 pub mod tokens;
@@ -35,8 +37,10 @@ impl Pagination {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PagedResult<T> {
+
     pub items: Vec<T>,
     pub total: u32,
     pub offset: u32,
@@ -63,6 +67,7 @@ impl From<ServiceError> for String {
     }
 }
 
+#[allow(dead_code)]
 pub struct ServiceContext<'a> {
     pub db: &'a Database,
     pub app_data_dir: &'a PathBuf,

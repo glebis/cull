@@ -44,6 +44,7 @@ impl ImageViewMcp {
         tokens::image_in_scope(&scope, image_path, &[])
     }
 
+    #[allow(dead_code)]
     fn filter_images_by_scope(&self, images: Vec<serde_json::Value>, paths: &[String]) -> Vec<serde_json::Value> {
         let scope = self.token_scope();
         if scope.is_none() {

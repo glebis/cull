@@ -11,6 +11,7 @@ pub fn socket_path(app_data_dir: &PathBuf) -> PathBuf {
     app_data_dir.join("mcp.sock")
 }
 
+#[allow(dead_code)]
 pub fn active_connections() -> u32 {
     CONNECTION_COUNT.load(Ordering::Relaxed)
 }

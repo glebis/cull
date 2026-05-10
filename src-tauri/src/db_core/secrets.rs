@@ -45,10 +45,12 @@ impl SecretStore for KeychainStore {
     }
 }
 
+#[allow(dead_code)]
 pub struct MemoryStore {
     data: Mutex<HashMap<String, String>>,
 }
 
+#[allow(dead_code)]
 impl MemoryStore {
     pub fn new() -> Self {
         Self { data: Mutex::new(HashMap::new()) }
