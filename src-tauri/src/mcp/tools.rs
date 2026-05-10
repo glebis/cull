@@ -220,6 +220,18 @@ pub struct ImageIdParams {
     pub image_id: String,
 }
 
+// --- Generation metadata param structs ---
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct SetGenerationMetadataParams {
+    image_id: String,
+    prompt: String,
+    model: Option<String>,
+    provider: Option<String>,
+    seed: Option<String>,
+    settings_json: Option<String>,
+}
+
 // --- Import param structs ---
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -653,6 +665,54 @@ impl ImageViewMcp {
             }
             Err(e) => format!("Error: {}", e),
         }
+    }
+
+    #[tool(description = "Get AI generation metadata (prompt, model, seed, provider) for an image")]
+    fn get_generation_run(&self, Parameters(params): Parameters<ImageIdParams>) -> String {
+        match self.check_image_id_scope(&params.image_id) {
+            Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
+            Err(e) => return format!("Error: {}", e),
+            _ => {}
+        }
+        let state = self.app_handle.state::<AppState>();
+        match state.db.get_generation_run_for_image(&params.image_id) {
+            Ok(Some(run)) => serde_json::to_string(&run).unwrap_or_else(|_| "null".to_string()),
+            Ok(None) => "null".to_string(),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Manually attach AI generation metadata to an image (creates a generation run record)")]
+    fn set_generation_metadata(&self, Parameters(params): Parameters<SetGenerationMetadataParams>) -> String {
+        match self.check_image_id_scope(&params.image_id) {
+            Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
+            Err(e) => return format!("Error: {}", e),
+            _ => {}
+        }
+        let state = self.app_handle.state::<AppState>();
+        let run = crate::db_core::models::GenerationRun {
+            id: uuid::Uuid::new_v4().to_string(),
+            prompt: Some(params.prompt),
+            negative_prompt: None,
+            provider: params.provider,
+            model: params.model,
+            settings_json: params.settings_json.unwrap_or_else(|| "{}".to_string()),
+            seed: params.seed,
+            parent_run_id: None,
+            source_type: "manual".to_string(),
+            source_path: None,
+            raw_metadata_json: None,
+            created_at: Some(chrono::Utc::now().to_rfc3339()),
+            imported_at: chrono::Utc::now().to_rfc3339(),
+        };
+        let run_id = run.id.clone();
+        if let Err(e) = state.db.insert_generation_run(&run) {
+            return format!("Error creating run: {}", e);
+        }
+        if let Err(e) = state.db.link_image_to_run(&params.image_id, &run_id) {
+            return format!("Error linking image: {}", e);
+        }
+        format!("Created generation run {} for image {}", run_id, params.image_id)
     }
 
     // --- Display / Navigation tools ---
