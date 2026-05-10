@@ -686,6 +686,10 @@ impl ImageViewMcp {
 
     #[tool(description = "Import all images from a folder into the library. Returns imported/skipped/error counts.")]
     fn import_folder(&self, Parameters(params): Parameters<ImportFolderParams>) -> String {
+        let scope = self.token_scope();
+        if !tokens::folder_in_scope(&scope, &params.folder_path) {
+            return "Error: Access denied — folder outside token scope".to_string();
+        }
         let state = self.app_handle.state::<AppState>();
         let app = self.app_handle.clone();
 
@@ -1019,6 +1023,11 @@ impl ImageViewMcp {
                 let result = crate::db_core::vision::analyze_image(
                     std::path::Path::new(&path), &url_clone, &model_clone
                 ).await;
+
+                if cancel_token.is_cancelled() {
+                    state.jobs.mark_cancelled(&job_id);
+                    return;
+                }
 
                 match result {
                     Ok(fields) => {

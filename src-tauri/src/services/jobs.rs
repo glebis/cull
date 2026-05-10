@@ -76,8 +76,12 @@ impl JobRegistry {
     pub fn complete(&self, job_id: &str) {
         let mut jobs = self.jobs.lock().unwrap();
         if let Some(state) = jobs.get_mut(job_id) {
-            state.snapshot.status = "completed".to_string();
-            state.snapshot.current = state.snapshot.total;
+            if state.cancel.is_cancelled() {
+                state.snapshot.status = "cancelled".to_string();
+            } else {
+                state.snapshot.status = "completed".to_string();
+                state.snapshot.current = state.snapshot.total;
+            }
             state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
         }
     }
@@ -85,8 +89,12 @@ impl JobRegistry {
     pub fn fail(&self, job_id: &str, error: &str) {
         let mut jobs = self.jobs.lock().unwrap();
         if let Some(state) = jobs.get_mut(job_id) {
-            state.snapshot.status = "failed".to_string();
-            state.snapshot.error = Some(error.to_string());
+            if state.cancel.is_cancelled() {
+                state.snapshot.status = "cancelled".to_string();
+            } else {
+                state.snapshot.status = "failed".to_string();
+                state.snapshot.error = Some(error.to_string());
+            }
             state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
         }
     }
