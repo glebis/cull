@@ -1,7 +1,6 @@
 use tauri::State;
 use crate::AppState;
-use crate::services::ServiceContext;
-use crate::services::curation as svc;
+use crate::services::undo::Action;
 
 #[tauri::command]
 pub async fn set_rating(
@@ -9,8 +8,8 @@ pub async fn set_rating(
     image_id: String,
     rating: u8,
 ) -> Result<(), String> {
-    let ctx = ServiceContext::from_app_state(&state, None);
-    svc::set_rating(&ctx, &image_id, rating).map_err(|e| e.to_string())
+    state.action_manager.execute(&state.db, Action::SetRating { image_id, rating })?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -19,6 +18,6 @@ pub async fn set_decision(
     image_id: String,
     decision: String,
 ) -> Result<(), String> {
-    let ctx = ServiceContext::from_app_state(&state, None);
-    svc::set_decision(&ctx, &image_id, &decision).map_err(|e| e.to_string())
+    state.action_manager.execute(&state.db, Action::SetDecision { image_id, decision })?;
+    Ok(())
 }

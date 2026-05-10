@@ -26,6 +26,7 @@ pub struct AppState {
     pub safety_engine: Mutex<DetectionEngine>,
     pub secrets: Box<dyn SecretStore>,
     pub jobs: crate::services::jobs::JobRegistry,
+    pub action_manager: services::undo::ActionManager,
 }
 
 const IMAGE_EXTENSIONS: &[&str] = &[
@@ -153,7 +154,7 @@ pub fn run() {
 
             let secrets = Box::new(KeychainStore::new("imageview"));
             let jobs = crate::services::jobs::JobRegistry::default();
-            app.manage(AppState { db, app_data_dir, embedding_engine, detection_engine, safety_engine, secrets, jobs });
+            app.manage(AppState { db, app_data_dir, embedding_engine, detection_engine, safety_engine, secrets, jobs, action_manager: services::undo::ActionManager::new() });
 
             // Load persisted job history from DB
             {
@@ -297,6 +298,7 @@ pub fn run() {
             commands::lineage::get_batch_images,
             commands::lineage::scan_lineage,
             commands::lineage::get_generation_run,
+            commands::lineage::rescan_sidecars,
             commands::mcp::create_mcp_token,
             commands::mcp::list_mcp_tokens,
             commands::mcp::revoke_mcp_token,
@@ -305,6 +307,10 @@ pub fn run() {
             commands::transform::rotate_image,
             commands::dictation::start_dictation,
             commands::dictation::stop_dictation,
+            commands::undo::undo,
+            commands::undo::redo,
+            commands::undo::get_undo_status,
+            commands::undo::list_undo_history,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

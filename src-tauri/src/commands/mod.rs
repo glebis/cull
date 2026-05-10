@@ -12,4 +12,5 @@ pub mod selection;
 pub mod smart_collections;
 pub mod vision;
 pub mod transform;
+pub mod undo;
 pub mod window;
