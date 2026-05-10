@@ -87,6 +87,16 @@ impl ImageViewMcp {
             serde_json::Value::String(path.to_string())
         }
     }
+
+    fn log_tool_call(&self, tool_name: &str, params_json: Option<&str>, status: &str) {
+        let state = self.app_handle.state::<AppState>();
+        let ctx = crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
+        let token_id = match &self.auth {
+            AuthContext::Local => None,
+            AuthContext::Authenticated(t) => Some(t.id.as_str()),
+        };
+        let _ = crate::services::tokens::log_audit(&ctx, token_id, tool_name, params_json, status);
+    }
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -589,14 +599,22 @@ impl ServerHandler for ImageViewMcp {
         context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = Result<CallToolResult, ErrorData>> + Send + '_ {
         async move {
-            let tool_name: &str = &request.name;
+            let tool_name = request.name.to_string();
+            let params_json = request.arguments.as_ref()
+                .and_then(|args| serde_json::to_string(args).ok());
 
-            if let Err(msg) = require_capability(&self.auth, tool_name) {
+            if let Err(msg) = require_capability(&self.auth, &tool_name) {
+                self.log_tool_call(&tool_name, None, "denied");
                 return Err(ErrorData::invalid_request(msg, None));
             }
 
             let call_context = ToolCallContext::new(self, request, context);
-            self.tool_router.call(call_context).await
+            let result = self.tool_router.call(call_context).await;
+
+            let status = if result.is_ok() { "ok" } else { "error" };
+            self.log_tool_call(&tool_name, params_json.as_deref(), status);
+
+            result
         }
     }
 }
