@@ -195,12 +195,10 @@ pub fn validate_token(ctx: &ServiceContext, secret: &str) -> Result<Option<McpTo
         rusqlite::params![now, id],
     );
 
-    return Ok(Some(McpToken {
+    Ok(Some(McpToken {
         id, name, role, scope_json, created_at, expires_at,
         last_used_at: Some(now), revoked: false,
-    }));
-
-    Ok(None)
+    }))
 }
 
 pub fn list_tokens(ctx: &ServiceContext) -> Result<Vec<McpToken>, ServiceError> {

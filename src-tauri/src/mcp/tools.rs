@@ -424,14 +424,12 @@ impl ImageViewMcp {
         if params.rating > 5 {
             return "Error: Rating must be 0-5".to_string();
         }
-        let state = self.app_handle.state::<AppState>();
-        if let Ok(images) = state.db.get_images_by_ids(&[params.image_id.as_str()]) {
-            if let Some(img) = images.first() {
-                if !self.check_image_scope(&img.path) {
-                    return "Error: Access denied — image outside token scope".to_string();
-                }
-            }
+        match self.check_image_id_scope(&params.image_id) {
+            Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
+            Err(e) => return format!("Error: {}", e),
+            _ => {}
         }
+        let state = self.app_handle.state::<AppState>();
         match state.db.set_rating(&params.image_id, params.rating) {
             Ok(()) => serde_json::json!({"status": "ok", "image_id": params.image_id, "rating": params.rating}).to_string(),
             Err(e) => format!("Error: {}", e),
@@ -443,14 +441,12 @@ impl ImageViewMcp {
         if !matches!(params.decision.as_str(), "selected" | "rejected" | "none") {
             return "Error: Decision must be 'selected', 'rejected', or 'none'".to_string();
         }
-        let state = self.app_handle.state::<AppState>();
-        if let Ok(images) = state.db.get_images_by_ids(&[params.image_id.as_str()]) {
-            if let Some(img) = images.first() {
-                if !self.check_image_scope(&img.path) {
-                    return "Error: Access denied — image outside token scope".to_string();
-                }
-            }
+        match self.check_image_id_scope(&params.image_id) {
+            Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
+            Err(e) => return format!("Error: {}", e),
+            _ => {}
         }
+        let state = self.app_handle.state::<AppState>();
         match state.db.set_decision(&params.image_id, &params.decision) {
             Ok(()) => serde_json::json!({"status": "ok", "image_id": params.image_id, "decision": params.decision}).to_string(),
             Err(e) => format!("Error: {}", e),
@@ -485,6 +481,13 @@ impl ImageViewMcp {
 
     #[tool(description = "Delete a collection (does not delete the images)")]
     fn delete_collection(&self, Parameters(params): Parameters<CollectionIdParams>) -> String {
+        if let Some(ref scope) = self.token_scope() {
+            if let Some(ref allowed) = scope.collections {
+                if !allowed.contains(&params.collection_id) {
+                    return "Error: Access denied — collection outside token scope".to_string();
+                }
+            }
+        }
         let state = self.app_handle.state::<AppState>();
         match state.db.delete_collection(&params.collection_id) {
             Ok(()) => serde_json::json!({"status": "ok"}).to_string(),
@@ -652,6 +655,13 @@ impl ImageViewMcp {
 
     #[tool(description = "Display a collection in the local app grid view")]
     fn show_collection(&self, Parameters(params): Parameters<CollectionIdParams>) -> String {
+        if let Some(ref scope) = self.token_scope() {
+            if let Some(ref allowed) = scope.collections {
+                if !allowed.contains(&params.collection_id) {
+                    return "Error: Access denied — collection outside token scope".to_string();
+                }
+            }
+        }
         match crate::services::display::show_collection(&self.app_handle, &params.collection_id) {
             Ok(()) => serde_json::json!({"status": "ok", "action": "showing collection"}).to_string(),
             Err(e) => format!("Error: {}", e),
