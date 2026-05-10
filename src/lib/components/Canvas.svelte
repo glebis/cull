@@ -1,7 +1,8 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
-    import { images, focusedIndex, selectedIds, statusHint, navigateBack } from '$lib/stores';
+    import { images, focusedIndex, focusedImage, selectedIds, statusHint, navigateTo } from '$lib/stores';
     import type { ImageWithFile } from '$lib/api';
+    import ContextMenu from './ContextMenu.svelte';
 
     interface CanvasItem {
         id: string;
@@ -119,11 +120,28 @@
         dragOffsetY = (e.clientY - panY) / zoom - item.y;
     }
 
+    let ctxMenu = $state<{ visible: boolean; x: number; y: number; image: ImageWithFile | null }>({
+        visible: false, x: 0, y: 0, image: null
+    });
+
+    function handleItemContextMenu(e: MouseEvent, item: CanvasItem) {
+        e.preventDefault();
+        e.stopPropagation();
+        const idx = $images.findIndex(img => img.image.id === item.id);
+        if (idx >= 0) focusedIndex.set(idx);
+        ctxMenu = { visible: true, x: e.clientX, y: e.clientY, image: item.image };
+    }
+
+    function handleItemClick(e: MouseEvent, item: CanvasItem) {
+        const idx = $images.findIndex(img => img.image.id === item.id);
+        if (idx >= 0) focusedIndex.set(idx);
+    }
+
     function handleItemDblClick(item: CanvasItem) {
         const idx = $images.findIndex(img => img.image.id === item.id);
         if (idx >= 0) {
             focusedIndex.set(idx);
-            navigateBack();
+            navigateTo('loupe');
         }
     }
 
@@ -160,12 +178,17 @@
 >
     <div class="canvas-layer" style="transform: translate({panX}px, {panY}px) scale({zoom});">
         {#each canvasItems as item (item.id)}
+            {@const rating = item.image.selection?.star_rating ?? 0}
+            {@const decision = item.image.selection?.decision ?? 'undecided'}
             <div
                 class="canvas-item"
                 class:selected={$selectedIds.has(item.id)}
+                class:focused={$focusedImage?.image.id === item.id}
                 style="left: {item.x}px; top: {item.y}px; width: {item.width}px; height: {item.height}px;"
                 onmousedown={(e) => handleItemMouseDown(e, item)}
+                onclick={(e) => handleItemClick(e, item)}
                 ondblclick={() => handleItemDblClick(item)}
+                oncontextmenu={(e) => handleItemContextMenu(e, item)}
                 role="img"
                 aria-label={item.image.path.split('/').pop()}
             >
@@ -174,6 +197,14 @@
                     alt=""
                     draggable="false"
                 />
+                {#if decision !== 'undecided'}
+                    <div class="badge decision-badge" class:accept={decision === 'accept'} class:reject={decision === 'reject'}>
+                        {decision === 'accept' ? '✓' : '×'}
+                    </div>
+                {/if}
+                {#if rating > 0}
+                    <div class="badge rating-badge">{'★'.repeat(rating)}</div>
+                {/if}
                 <div
                     class="resize-handle"
                     onmousedown={(e) => handleResizeMouseDown(e, item)}
@@ -181,6 +212,15 @@
             </div>
         {/each}
     </div>
+
+    {#if ctxMenu.visible && ctxMenu.image}
+        <ContextMenu
+            image={ctxMenu.image}
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            onclose={() => ctxMenu = { visible: false, x: 0, y: 0, image: null }}
+        />
+    {/if}
 </div>
 
 <style>
@@ -207,6 +247,10 @@
         border-radius: 2px;
         cursor: move;
         transition: border-color 0.1s;
+    }
+    .canvas-item.focused {
+        border-color: #4a9eff;
+        box-shadow: 0 0 0 1px #4a9eff;
     }
     .canvas-item.selected {
         border-color: #4a9eff;
@@ -235,5 +279,35 @@
     }
     .canvas-item:hover .resize-handle {
         opacity: 1;
+    }
+    .badge {
+        position: absolute;
+        font-size: 0.65rem;
+        padding: 1px 4px;
+        border-radius: 2px;
+        pointer-events: none;
+        line-height: 1.2;
+    }
+    .decision-badge {
+        top: 4px;
+        left: 4px;
+        font-size: 0.8rem;
+        font-weight: bold;
+    }
+    .decision-badge.accept {
+        background: rgba(34, 197, 94, 0.85);
+        color: #fff;
+    }
+    .decision-badge.reject {
+        background: rgba(239, 68, 68, 0.85);
+        color: #fff;
+    }
+    .rating-badge {
+        top: 4px;
+        right: 4px;
+        color: #fbbf24;
+        background: rgba(0,0,0,0.6);
+        font-size: 0.7rem;
+        letter-spacing: -1px;
     }
 </style>
