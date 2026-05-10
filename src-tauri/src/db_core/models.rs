@@ -85,3 +85,17 @@ pub struct GenerationRun {
     pub created_at: Option<String>,
     pub imported_at: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UndoRecord {
+    pub seq: i64,
+    pub id: String,
+    pub action_type: String,
+    pub label: String,
+    pub before_json: String,
+    pub after_json: String,
+    pub affected_image_ids: Option<String>,
+    pub group_id: Option<String>,
+    pub has_file_backup: bool,
+    pub created_at: String,
+}

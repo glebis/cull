@@ -26,6 +26,7 @@ impl Database {
         self.migrate_lineage_tables()?;
         self.migrate_mcp_tables()?;
         self.migrate_generation_runs()?;
+        self.migrate_undo_tables()?;
         Ok(())
     }
 
@@ -193,6 +194,34 @@ impl Database {
                 updated_at TEXT NOT NULL
             );
         ")?;
+        Ok(())
+    }
+
+    fn migrate_undo_tables(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS undo_records (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT NOT NULL UNIQUE,
+                action_type TEXT NOT NULL,
+                label TEXT NOT NULL,
+                before_json TEXT NOT NULL,
+                after_json TEXT NOT NULL,
+                affected_image_ids TEXT,
+                group_id TEXT,
+                has_file_backup INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS undo_file_backups (
+                id TEXT PRIMARY KEY,
+                undo_record_id TEXT NOT NULL REFERENCES undo_records(id) ON DELETE CASCADE,
+                original_path TEXT NOT NULL,
+                backup_path TEXT NOT NULL,
+                file_hash TEXT,
+                created_at TEXT NOT NULL
+            );"
+        )?;
         Ok(())
     }
 
@@ -1213,6 +1242,107 @@ impl Database {
             })
         }).optional()?;
         Ok(run)
+    }
+
+    pub fn get_images_without_generation_run(&self) -> Result<Vec<(String, String)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT i.id, f.path
+             FROM images i
+             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+             WHERE i.generation_run_id IS NULL"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    // ---- Undo/Redo helpers ----
+
+    pub fn get_selection_for_image(&self, image_id: &str) -> Result<Option<Selection>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT image_id, project_id, star_rating, color_label, decision
+             FROM selections WHERE image_id = ?1 AND project_id = '__global__'"
+        )?;
+        stmt.query_row(params![image_id], |row| {
+            Ok(Selection {
+                image_id: row.get(0)?,
+                project_id: row.get(1)?,
+                star_rating: row.get(2)?,
+                color_label: row.get(3)?,
+                decision: row.get(4).unwrap_or_else(|_| "undecided".to_string()),
+            })
+        }).optional()
+    }
+
+    pub fn get_undo_record_by_seq(&self, seq: i64) -> Result<Option<UndoRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT seq, id, action_type, label, before_json, after_json, affected_image_ids, group_id, has_file_backup, created_at
+             FROM undo_records WHERE seq = ?1"
+        )?;
+        stmt.query_row(params![seq], |row| {
+            Ok(UndoRecord {
+                seq: row.get(0)?,
+                id: row.get(1)?,
+                action_type: row.get(2)?,
+                label: row.get(3)?,
+                before_json: row.get(4)?,
+                after_json: row.get(5)?,
+                affected_image_ids: row.get(6)?,
+                group_id: row.get(7)?,
+                has_file_backup: row.get::<_, i32>(8)? != 0,
+                created_at: row.get(9)?,
+            })
+        }).optional()
+    }
+
+    pub fn get_max_undo_seq(&self) -> Result<Option<i64>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row("SELECT MAX(seq) FROM undo_records", [], |row| row.get(0))
+    }
+
+    pub fn count_undo_records(&self) -> Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row("SELECT COUNT(*) FROM undo_records", [], |row| row.get(0))
+    }
+
+    pub fn list_undo_records(&self, limit: u32) -> Result<Vec<UndoRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT seq, id, action_type, label, before_json, after_json, affected_image_ids, group_id, has_file_backup, created_at
+             FROM undo_records ORDER BY seq DESC LIMIT ?1"
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            Ok(UndoRecord {
+                seq: row.get(0)?,
+                id: row.get(1)?,
+                action_type: row.get(2)?,
+                label: row.get(3)?,
+                before_json: row.get(4)?,
+                after_json: row.get(5)?,
+                affected_image_ids: row.get(6)?,
+                group_id: row.get(7)?,
+                has_file_backup: row.get::<_, i32>(8)? != 0,
+                created_at: row.get(9)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
+    pub fn prune_oldest_undo_records(&self, keep_count: usize) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM undo_records WHERE seq NOT IN (
+                SELECT seq FROM undo_records ORDER BY seq DESC LIMIT ?1
+            )", params![keep_count])?;
+        Ok(())
     }
 }
 
