@@ -36,6 +36,22 @@ export interface ImportResponse {
     image_ids: string[];
 }
 
+export interface GenerationRun {
+    id: string;
+    prompt: string | null;
+    negative_prompt: string | null;
+    provider: string | null;
+    model: string | null;
+    settings_json: string;
+    seed: string | null;
+    parent_run_id: string | null;
+    source_type: string;
+    source_path: string | null;
+    raw_metadata_json: string | null;
+    created_at: string | null;
+    imported_at: string;
+}
+
 // Smart Collections types
 
 export interface FilterGroup {
@@ -421,4 +437,8 @@ export async function cropImage(imageId: string, x: number, y: number, width: nu
 
 export async function rotateImage(imageId: string, degrees: number): Promise<void> {
     return invoke<void>('rotate_image', { imageId, degrees });
+}
+
+export async function getGenerationRun(imageId: string): Promise<GenerationRun | null> {
+    return invoke<GenerationRun | null>('get_generation_run', { imageId });
 }

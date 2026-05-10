@@ -1,7 +1,7 @@
 use tauri::State;
 use crate::AppState;
 use crate::db_core::lineage::LineageGroup;
-use crate::db_core::models::ImageWithFile;
+use crate::db_core::models::{GenerationRun, ImageWithFile};
 
 #[tauri::command]
 pub async fn list_lineage_groups(
@@ -98,4 +98,12 @@ pub async fn scan_lineage(
     let count = groups.len() as u32;
     let _ = app.emit("lineage-scan-complete", serde_json::json!({ "groups": count }));
     Ok(count)
+}
+
+#[tauri::command]
+pub async fn get_generation_run(
+    state: State<'_, AppState>,
+    image_id: String,
+) -> Result<Option<GenerationRun>, String> {
+    state.db.get_generation_run_for_image(&image_id).map_err(|e| e.to_string())
 }

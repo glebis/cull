@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod db_core;
+mod dictation;
 mod export;
 mod mcp;
 mod menu;
@@ -295,12 +296,15 @@ pub fn run() {
             commands::lineage::remove_from_lineage_group,
             commands::lineage::get_batch_images,
             commands::lineage::scan_lineage,
+            commands::lineage::get_generation_run,
             commands::mcp::create_mcp_token,
             commands::mcp::list_mcp_tokens,
             commands::mcp::revoke_mcp_token,
             commands::mcp::rotate_mcp_token,
             commands::transform::crop_image,
             commands::transform::rotate_image,
+            commands::dictation::start_dictation,
+            commands::dictation::stop_dictation,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
