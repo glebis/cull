@@ -60,7 +60,20 @@
     onMount(() => {
         function toggleOverlays() { hideOverlays = !hideOverlays; }
         window.addEventListener('toggle-loupe-overlays', toggleOverlays);
-        return () => window.removeEventListener('toggle-loupe-overlays', toggleOverlays);
+
+        function handleImageUpdated() {
+            if (imgEl) {
+                const currentSrc = imgEl.src;
+                imgEl.src = '';
+                imgEl.src = currentSrc + '?t=' + Date.now();
+            }
+        }
+        window.addEventListener('image-updated', handleImageUpdated);
+
+        return () => {
+            window.removeEventListener('toggle-loupe-overlays', toggleOverlays);
+            window.removeEventListener('image-updated', handleImageUpdated);
+        };
     });
 
     $effect(() => {

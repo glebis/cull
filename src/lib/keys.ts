@@ -5,11 +5,11 @@ import {
     sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode,
     collections, collectMode, collectModeTarget, activeCollection,
     showDetectionBoxes, showDetectionInspector, nsfwMode,
-    navigateTo, navigateBack, searchOpen,
+    navigateTo, navigateBack, searchOpen, focusedImage,
 } from './stores';
 import type { NsfwMode } from './stores';
 import type { ViewMode } from './stores';
-import { setRating, setDecision, createCollection, addToCollection, listCollections, listCollectionImages } from './api';
+import { setRating, setDecision, createCollection, addToCollection, listCollections, listCollectionImages, rotateImage } from './api';
 
 let waitingForStar = false;
 
@@ -668,6 +668,27 @@ function handleLoupeKeys(e: KeyboardEvent) {
             handleStarRating(n);
             return;
         }
+    }
+
+    if (e.key === '[') {
+        e.preventDefault();
+        const img = get(focusedImage);
+        if (img) {
+            rotateImage(img.image.id, 270).then(() => {
+                window.dispatchEvent(new CustomEvent('image-updated'));
+            });
+        }
+        return;
+    }
+    if (e.key === ']') {
+        e.preventDefault();
+        const img = get(focusedImage);
+        if (img) {
+            rotateImage(img.image.id, 90).then(() => {
+                window.dispatchEvent(new CustomEvent('image-updated'));
+            });
+        }
+        return;
     }
 
     switch (e.key) {

@@ -414,3 +414,11 @@ export async function revokeMcpToken(tokenId: string): Promise<void> {
 export async function rotateMcpToken(tokenId: string): Promise<string> {
     return invoke('rotate_mcp_token', { tokenId });
 }
+
+export async function cropImage(imageId: string, x: number, y: number, width: number, height: number, saveAsCopy: boolean): Promise<string> {
+    return invoke<string>('crop_image', { imageId, x, y, width, height, saveAsCopy });
+}
+
+export async function rotateImage(imageId: string, degrees: number): Promise<void> {
+    return invoke<void>('rotate_image', { imageId, degrees });
+}
