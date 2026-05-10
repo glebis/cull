@@ -1130,6 +1130,18 @@ impl Database {
         }
         Ok(count)
     }
+
+    pub fn update_image_dimensions(&self, image_id: &str, width: u32, height: u32) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let aspect = width as f64 / height as f64;
+        let orientation = if width > height { "landscape" } else if height > width { "portrait" } else { "square" };
+        let megapixels = (width as f64 * height as f64) / 1_000_000.0;
+        conn.execute(
+            "UPDATE images SET width = ?2, height = ?3, aspect_ratio = ?4, orientation = ?5, megapixels = ?6 WHERE id = ?1",
+            rusqlite::params![image_id, width, height, aspect, orientation, megapixels],
+        )?;
+        Ok(())
+    }
 }
 
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {

@@ -10,4 +10,5 @@ pub mod mcp;
 pub mod selection;
 pub mod smart_collections;
 pub mod vision;
+pub mod transform;
 pub mod window;

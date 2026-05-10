@@ -299,6 +299,8 @@ pub fn run() {
             commands::mcp::list_mcp_tokens,
             commands::mcp::revoke_mcp_token,
             commands::mcp::rotate_mcp_token,
+            commands::transform::crop_image,
+            commands::transform::rotate_image,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
