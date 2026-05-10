@@ -5,7 +5,7 @@ use rmcp::{
     schemars, tool, tool_router, ErrorData,
     service::RequestContext, RoleServer,
 };
-use tauri::Manager;
+use tauri::{Manager, Emitter};
 
 use crate::AppState;
 use crate::db_core::models::TokenScope;
@@ -211,6 +211,20 @@ pub struct ImageIdParams {
 pub struct ImportFolderParams {
     #[schemars(description = "Absolute path to folder to import")]
     pub folder_path: String,
+}
+
+// --- Job param structs ---
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct GetJobParams {
+    #[schemars(description = "Job ID to query")]
+    pub job_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CancelJobParams {
+    #[schemars(description = "Job ID to cancel")]
+    pub job_id: String,
 }
 
 // --- AI param structs ---
@@ -673,8 +687,7 @@ impl ImageViewMcp {
     #[tool(description = "Import all images from a folder into the library. Returns imported/skipped/error counts.")]
     fn import_folder(&self, Parameters(params): Parameters<ImportFolderParams>) -> String {
         let state = self.app_handle.state::<AppState>();
-        let db = &state.db;
-        let app_data_dir = &state.app_data_dir;
+        let app = self.app_handle.clone();
 
         let extensions = ["jpg", "jpeg", "png", "webp", "gif"];
         let entries: Vec<std::path::PathBuf> = walkdir::WalkDir::new(&params.folder_path)
@@ -690,74 +703,111 @@ impl ImageViewMcp {
             .map(|e| e.path().to_path_buf())
             .collect();
 
-        let mut imported = 0u32;
-        let mut skipped = 0u32;
-        let mut errors = 0u32;
+        let total = entries.len() as u32;
+        let (job_id, cancel_token) = state.jobs.create_job("import", total);
+        let job_id_ret = job_id.clone();
 
-        for path in &entries {
-            match crate::db_core::import::import_file(db, path, app_data_dir) {
-                Ok(Some(_)) => imported += 1,
-                Ok(None) => skipped += 1,
-                Err(_) => errors += 1,
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<AppState>();
+            let mut imported = 0u32;
+            let mut skipped = 0u32;
+            let mut errors = 0u32;
+
+            for (i, path) in entries.iter().enumerate() {
+                if cancel_token.is_cancelled() {
+                    state.jobs.mark_cancelled(&job_id);
+                    let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "cancelled"}));
+                    return;
+                }
+
+                let filename = path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+                match crate::db_core::import::import_file(&state.db, path, &state.app_data_dir) {
+                    Ok(Some(_)) => imported += 1,
+                    Ok(None) => skipped += 1,
+                    Err(_) => errors += 1,
+                }
+                state.jobs.update_progress(&job_id, (i + 1) as u32, Some(&filename));
+                let _ = app.emit("import-progress", serde_json::json!({"current": i + 1, "total": total, "filename": filename}));
             }
-        }
 
-        serde_json::json!({
-            "imported": imported,
-            "skipped": skipped,
-            "errors": errors,
-            "total_found": entries.len(),
-        }).to_string()
+            state.jobs.complete(&job_id);
+            let _ = app.emit("job-status-changed", serde_json::json!({
+                "job_id": &job_id, "status": "completed",
+                "imported": imported, "skipped": skipped, "errors": errors,
+            }));
+        });
+
+        serde_json::json!({"job_id": job_id_ret, "total_files": total}).to_string()
     }
 
     #[tool(description = "Rescan all imported source folders for new/changed/missing files. Returns count of updated metadata.")]
     fn rescan_sources(&self, Parameters(_): Parameters<EmptyParams>) -> String {
         let state = self.app_handle.state::<AppState>();
-        let db = &state.db;
+        let app = self.app_handle.clone();
 
-        let images = match db.list_images(100000, 0) {
+        let images = match state.db.list_images(100000, 0) {
             Ok(imgs) => imgs,
             Err(e) => return format!("Error: {}", e),
         };
 
-        let mut updated = 0u32;
-        for img in &images {
-            let path = std::path::Path::new(&img.path);
-            if !path.exists() { continue; }
+        let total = images.len() as u32;
+        let (job_id, cancel_token) = state.jobs.create_job("rescan", total);
+        let job_id_ret = job_id.clone();
 
-            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let ext = path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
-            let png_chunks = if ext == "png" {
-                crate::db_core::source_detection::read_png_text_chunks(path).unwrap_or_default()
-            } else {
-                vec![]
-            };
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<AppState>();
+            let mut updated = 0u32;
 
-            let detection = crate::db_core::source_detection::detect_source(filename, &png_chunks, path);
+            for (i, img) in images.iter().enumerate() {
+                if cancel_token.is_cancelled() {
+                    state.jobs.mark_cancelled(&job_id);
+                    let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "cancelled"}));
+                    return;
+                }
 
-            if detection.source_label.is_some() {
-                let aspect_ratio = img.image.width as f64 / img.image.height.max(1) as f64;
-                let orientation = if (aspect_ratio - 1.0).abs() < 0.05 { "square" }
-                    else if aspect_ratio > 1.0 { "landscape" }
-                    else { "portrait" };
-                let megapixels = (img.image.width as f64 * img.image.height as f64) / 1_000_000.0;
+                let path = std::path::Path::new(&img.path);
+                if !path.exists() {
+                    state.jobs.update_progress(&job_id, (i + 1) as u32, None);
+                    continue;
+                }
 
-                let _ = db.update_source_detection(
-                    &img.image.id,
-                    detection.source_label.as_deref(),
-                    detection.confidence,
-                    &detection.to_evidence_json(),
-                    detection.is_ai_generated,
-                    detection.ai_prompt.as_deref(),
-                    aspect_ratio,
-                    orientation,
-                    megapixels,
-                );
-                updated += 1;
+                let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let ext = path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
+                let png_chunks = if ext == "png" {
+                    crate::db_core::source_detection::read_png_text_chunks(path).unwrap_or_default()
+                } else {
+                    vec![]
+                };
+
+                let detection = crate::db_core::source_detection::detect_source(filename, &png_chunks, path);
+                if detection.source_label.is_some() {
+                    let aspect_ratio = img.image.width as f64 / img.image.height.max(1) as f64;
+                    let orientation = if (aspect_ratio - 1.0).abs() < 0.05 { "square" }
+                        else if aspect_ratio > 1.0 { "landscape" }
+                        else { "portrait" };
+                    let megapixels = (img.image.width as f64 * img.image.height as f64) / 1_000_000.0;
+
+                    let _ = state.db.update_source_detection(
+                        &img.image.id,
+                        detection.source_label.as_deref(),
+                        detection.confidence,
+                        &detection.to_evidence_json(),
+                        detection.is_ai_generated,
+                        detection.ai_prompt.as_deref(),
+                        aspect_ratio,
+                        orientation,
+                        megapixels,
+                    );
+                    updated += 1;
+                }
+                state.jobs.update_progress(&job_id, (i + 1) as u32, Some(filename));
             }
-        }
 
-        serde_json::json!({"updated": updated, "scanned": images.len()}).to_string()
+            state.jobs.complete(&job_id);
+            let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "completed", "updated": updated}));
+        });
+
+        serde_json::json!({"job_id": job_id_ret, "total_images": total}).to_string()
     }
 
     // --- AI / Processing tools ---
@@ -785,33 +835,54 @@ impl ImageViewMcp {
             }
         }
 
-        let mut generated = 0u32;
-        for image_id in &params.image_ids {
-            let id_refs: Vec<&str> = vec![image_id.as_str()];
-            let images = match state.db.get_images_by_ids(&id_refs) {
-                Ok(imgs) => imgs,
-                Err(_) => continue,
-            };
-            let img = match images.first() {
-                Some(img) => img,
-                None => continue,
-            };
+        let total = params.image_ids.len() as u32;
+        let (job_id, cancel_token) = state.jobs.create_job("embeddings", total);
+        let job_id_ret = job_id.clone();
+        let app = self.app_handle.clone();
+        let image_ids = params.image_ids.clone();
 
-            let engine = state.embedding_engine.lock().unwrap();
-            match engine.generate_embedding(std::path::Path::new(&img.path)) {
-                Ok(embedding) => {
-                    drop(engine);
-                    let _ = state.db.store_embedding(image_id, "clip-vit-b32", &embedding);
-                    generated += 1;
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<AppState>();
+            let mut generated = 0u32;
+
+            for (i, image_id) in image_ids.iter().enumerate() {
+                if cancel_token.is_cancelled() {
+                    state.jobs.mark_cancelled(&job_id);
+                    let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "cancelled"}));
+                    return;
                 }
-                Err(e) => {
-                    drop(engine);
-                    eprintln!("Embedding error for {}: {}", image_id, e);
+
+                let id_refs: Vec<&str> = vec![image_id.as_str()];
+                let images = match state.db.get_images_by_ids(&id_refs) {
+                    Ok(imgs) => imgs,
+                    Err(_) => { state.jobs.update_progress(&job_id, (i + 1) as u32, None); continue; },
+                };
+                let img = match images.first() {
+                    Some(img) => img,
+                    None => { state.jobs.update_progress(&job_id, (i + 1) as u32, None); continue; },
+                };
+
+                let engine = state.embedding_engine.lock().unwrap();
+                match engine.generate_embedding(std::path::Path::new(&img.path)) {
+                    Ok(embedding) => {
+                        drop(engine);
+                        let _ = state.db.store_embedding(image_id, "clip-vit-b32", &embedding);
+                        generated += 1;
+                    }
+                    Err(e) => {
+                        drop(engine);
+                        eprintln!("Embedding error for {}: {}", image_id, e);
+                    }
                 }
+                state.jobs.update_progress(&job_id, (i + 1) as u32, Some(image_id));
+                let _ = app.emit("embedding-progress", serde_json::json!({"current": i + 1, "total": total}));
             }
-        }
 
-        serde_json::json!({"processed": generated, "total": params.image_ids.len()}).to_string()
+            state.jobs.complete(&job_id);
+            let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "completed", "processed": generated}));
+        });
+
+        serde_json::json!({"job_id": job_id_ret, "total_images": total}).to_string()
     }
 
     #[tool(description = "Run YOLO object detection on images. Returns count processed.")]
@@ -846,33 +917,54 @@ impl ImageViewMcp {
             }
         }
 
-        let mut detected = 0u32;
-        for image_id in &params.image_ids {
-            let id_refs: Vec<&str> = vec![image_id.as_str()];
-            let images = match state.db.get_images_by_ids(&id_refs) {
-                Ok(imgs) => imgs,
-                Err(_) => continue,
-            };
-            let img = match images.first() {
-                Some(img) => img,
-                None => continue,
-            };
+        let total = params.image_ids.len() as u32;
+        let (job_id, cancel_token) = state.jobs.create_job("detection", total);
+        let job_id_ret = job_id.clone();
+        let app = self.app_handle.clone();
+        let image_ids = params.image_ids.clone();
 
-            let engine = state.detection_engine.lock().unwrap();
-            match engine.detect(std::path::Path::new(&img.path)) {
-                Ok(detections) => {
-                    drop(engine);
-                    let _ = state.db.store_detections(image_id, variant.model_name(), &detections);
-                    detected += 1;
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<AppState>();
+            let mut detected = 0u32;
+
+            for (i, image_id) in image_ids.iter().enumerate() {
+                if cancel_token.is_cancelled() {
+                    state.jobs.mark_cancelled(&job_id);
+                    let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "cancelled"}));
+                    return;
                 }
-                Err(e) => {
-                    drop(engine);
-                    eprintln!("Detection error for {}: {}", image_id, e);
+
+                let id_refs: Vec<&str> = vec![image_id.as_str()];
+                let images = match state.db.get_images_by_ids(&id_refs) {
+                    Ok(imgs) => imgs,
+                    Err(_) => { state.jobs.update_progress(&job_id, (i + 1) as u32, None); continue; },
+                };
+                let img = match images.first() {
+                    Some(img) => img,
+                    None => { state.jobs.update_progress(&job_id, (i + 1) as u32, None); continue; },
+                };
+
+                let engine = state.detection_engine.lock().unwrap();
+                match engine.detect(std::path::Path::new(&img.path)) {
+                    Ok(detections) => {
+                        drop(engine);
+                        let _ = state.db.store_detections(image_id, variant.model_name(), &detections);
+                        detected += 1;
+                    }
+                    Err(e) => {
+                        drop(engine);
+                        eprintln!("Detection error for {}: {}", image_id, e);
+                    }
                 }
+                state.jobs.update_progress(&job_id, (i + 1) as u32, Some(image_id));
+                let _ = app.emit("detection-progress", serde_json::json!({"current": i + 1, "total": total, "model": variant.model_name()}));
             }
-        }
 
-        serde_json::json!({"processed": detected, "total": params.image_ids.len()}).to_string()
+            state.jobs.complete(&job_id);
+            let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "completed", "processed": detected}));
+        });
+
+        serde_json::json!({"job_id": job_id_ret, "total_images": total}).to_string()
     }
 
     #[tool(description = "Analyze images with Ollama vision model for natural language descriptions. Returns count processed.")]
@@ -893,38 +985,84 @@ impl ImageViewMcp {
             .unwrap_or(None)
             .unwrap_or_else(|| "minicpm-v".to_string());
 
-        let mut analyzed = 0u32;
-        for image_id in &params.image_ids {
-            let id_refs: Vec<&str> = vec![image_id.as_str()];
-            let images = match state.db.get_images_by_ids(&id_refs) {
-                Ok(imgs) => imgs,
-                Err(_) => continue,
-            };
-            let img = match images.first() {
-                Some(img) => img,
-                None => continue,
-            };
+        let total = params.image_ids.len() as u32;
+        let (job_id, cancel_token) = state.jobs.create_job("vision", total);
+        let job_id_ret = job_id.clone();
+        let app = self.app_handle.clone();
+        let image_ids = params.image_ids.clone();
 
-            let path = img.path.clone();
-            let url_clone = url.clone();
-            let model_clone = model.clone();
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<AppState>();
+            let mut analyzed = 0u32;
 
-            let result = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(
-                    crate::db_core::vision::analyze_image(std::path::Path::new(&path), &url_clone, &model_clone)
-                )
-            });
-
-            match result {
-                Ok(fields) => {
-                    let _ = state.db.store_vision_metadata(image_id, &model, &fields);
-                    analyzed += 1;
+            for (i, image_id) in image_ids.iter().enumerate() {
+                if cancel_token.is_cancelled() {
+                    state.jobs.mark_cancelled(&job_id);
+                    let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "cancelled"}));
+                    return;
                 }
-                Err(e) => eprintln!("Vision error for {}: {}", image_id, e),
-            }
-        }
 
-        serde_json::json!({"processed": analyzed, "total": params.image_ids.len()}).to_string()
+                let id_refs: Vec<&str> = vec![image_id.as_str()];
+                let images = match state.db.get_images_by_ids(&id_refs) {
+                    Ok(imgs) => imgs,
+                    Err(_) => { state.jobs.update_progress(&job_id, (i + 1) as u32, None); continue; },
+                };
+                let img = match images.first() {
+                    Some(img) => img,
+                    None => { state.jobs.update_progress(&job_id, (i + 1) as u32, None); continue; },
+                };
+
+                let path = img.path.clone();
+                let url_clone = url.clone();
+                let model_clone = model.clone();
+
+                let result = crate::db_core::vision::analyze_image(
+                    std::path::Path::new(&path), &url_clone, &model_clone
+                ).await;
+
+                match result {
+                    Ok(fields) => {
+                        let _ = state.db.store_vision_metadata(image_id, &model, &fields);
+                        analyzed += 1;
+                    }
+                    Err(e) => eprintln!("Vision error for {}: {}", image_id, e),
+                }
+                state.jobs.update_progress(&job_id, (i + 1) as u32, Some(image_id));
+                let _ = app.emit("vision-progress", serde_json::json!({"current": i + 1, "total": total, "model": model}));
+            }
+
+            state.jobs.complete(&job_id);
+            let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "completed", "processed": analyzed}));
+        });
+
+        serde_json::json!({"job_id": job_id_ret, "total_images": total}).to_string()
+    }
+
+    // --- Job management tools ---
+
+    #[tool(description = "Get status and progress of a background job by ID")]
+    fn get_job(&self, Parameters(params): Parameters<GetJobParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state.jobs.get(&params.job_id) {
+            Some(snapshot) => serde_json::to_string(&snapshot).unwrap_or_else(|_| "{}".to_string()),
+            None => format!("Error: Job '{}' not found", params.job_id),
+        }
+    }
+
+    #[tool(description = "List all background jobs (running and recent completed/failed/cancelled)")]
+    fn list_jobs(&self, Parameters(_): Parameters<EmptyParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let jobs = state.jobs.list();
+        serde_json::to_string(&jobs).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    #[tool(description = "Cancel a running background job. Sets status to 'cancelling', job stops after current item.")]
+    fn cancel_job(&self, Parameters(params): Parameters<CancelJobParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state.jobs.cancel(&params.job_id) {
+            Ok(()) => serde_json::json!({"status": "cancelling", "job_id": params.job_id}).to_string(),
+            Err(e) => format!("Error: {}", e),
+        }
     }
 
     // --- Token management tools ---
@@ -1035,16 +1173,18 @@ impl ServerHandler for ImageViewMcp {
             .with_instructions("ImageView MCP server — browse, curate, and manage an AI art image library")
     }
 
-    fn list_tools(
+    async fn list_tools(
         &self,
         _request: Option<rmcp::model::PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<rmcp::model::ListToolsResult, ErrorData>> + Send + '_ {
-        std::future::ready(Ok(rmcp::model::ListToolsResult {
-            tools: self.tool_router.list_all(),
+    ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
+        let tools = self.tool_router.list_all();
+        eprintln!("MCP list_tools: returning {} tools", tools.len());
+        Ok(rmcp::model::ListToolsResult {
+            tools,
             next_cursor: None,
             meta: None,
-        }))
+        })
     }
 
     fn call_tool(

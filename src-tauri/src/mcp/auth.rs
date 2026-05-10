@@ -101,6 +101,10 @@ mod tests {
         "list_export_presets",
     ];
 
+    const ADMIN_ONLY_TOOLS: &[&str] = &[
+        "get_job", "list_jobs", "cancel_job", "rescan_sources",
+    ];
+
     const READ_TOOLS: &[&str] = &[
         "get_library_stats",
         "list_images",
@@ -210,6 +214,13 @@ mod tests {
             assert!(
                 require_capability(&auth, tool).is_ok(),
                 "Local should pass for token tool '{}'",
+                tool
+            );
+        }
+        for tool in ADMIN_ONLY_TOOLS {
+            assert!(
+                require_capability(&auth, tool).is_ok(),
+                "Local should pass for admin-only tool '{}'",
                 tool
             );
         }
