@@ -12,6 +12,7 @@
     let { visible, initialPrompt, sourceImageId, onclose, ongenerated }: Props = $props();
 
     let prompt = $state('');
+    let provider = $state('openai');
     let model = $state('gpt-image-2');
     let size = $state('1024x1024');
     let quality = $state('auto');
@@ -23,6 +24,19 @@
     const SIZES = ['1024x1024', '1024x1536', '1536x1024', 'auto'];
     const QUALITIES = ['auto', 'low', 'high'];
 
+    const PROVIDER_MODELS: Record<string, string[]> = {
+        openai: ['gpt-image-2'],
+        openrouter: ['openai/gpt-image-2'],
+    };
+    let availableModels = $derived(PROVIDER_MODELS[provider] ?? ['gpt-image-2']);
+
+    $effect(() => {
+        const models = PROVIDER_MODELS[provider];
+        if (models && !models.includes(model)) {
+            model = models[0];
+        }
+    });
+
     $effect(() => {
         if (visible) {
             prompt = initialPrompt;
@@ -33,7 +47,7 @@
 
     $effect(() => {
         if (visible) {
-            estimateGenerationCost(model, size, quality, n)
+            estimateGenerationCost(provider, model, size, quality, n)
                 .then(c => costEstimate = c)
                 .catch(() => costEstimate = null);
         }
@@ -41,7 +55,7 @@
 
     async function updateCost() {
         try {
-            costEstimate = await estimateGenerationCost(model, size, quality, n);
+            costEstimate = await estimateGenerationCost(provider, model, size, quality, n);
         } catch {
             costEstimate = null;
         }
@@ -53,6 +67,7 @@
         error = null;
         try {
             const resp = await resubmitPrompt({
+                provider,
                 source_image_id: sourceImageId,
                 prompt: prompt.trim(),
                 n,
@@ -93,6 +108,25 @@
                     placeholder="Describe the image..."
                 ></textarea>
             </label>
+
+            <div class="settings-row">
+                <label class="field compact">
+                    <span class="field-label">Provider</span>
+                    <select bind:value={provider}>
+                        <option value="openai">OpenAI</option>
+                        <option value="openrouter">OpenRouter</option>
+                    </select>
+                </label>
+
+                <label class="field compact">
+                    <span class="field-label">Model</span>
+                    <select bind:value={model}>
+                        {#each availableModels as m}
+                            <option value={m}>{m}</option>
+                        {/each}
+                    </select>
+                </label>
+            </div>
 
             <div class="settings-row">
                 <label class="field compact">

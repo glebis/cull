@@ -9,8 +9,28 @@ use crate::db_core::db::Database;
 use crate::db_core::models::GenerationRun;
 use crate::services::jobs::JobRegistry;
 
+pub struct ProviderConfig {
+    pub base_url: &'static str,
+    pub key_name: &'static str,
+}
+
+pub fn provider_config(provider: &str) -> Result<ProviderConfig, String> {
+    match provider {
+        "openai" => Ok(ProviderConfig {
+            base_url: "https://api.openai.com/v1",
+            key_name: "api_key_openai",
+        }),
+        "openrouter" => Ok(ProviderConfig {
+            base_url: "https://openrouter.ai/api/v1",
+            key_name: "api_key_openrouter",
+        }),
+        _ => Err(format!("Unknown provider: {}", provider)),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerationRequest {
+    pub provider: String,
     pub source_image_id: Option<String>,
     pub prompt: String,
     pub n: u8,
@@ -38,17 +58,21 @@ struct OpenAiImageData {
     b64_json: Option<String>,
 }
 
-const PRICING: &[(&str, &str, f64)] = &[
-    ("gpt-image-2", "1024x1024", 0.040),
-    ("gpt-image-2", "1024x1536", 0.060),
-    ("gpt-image-2", "1536x1024", 0.060),
-    ("gpt-image-2", "auto", 0.040),
+const PRICING: &[(&str, &str, &str, f64)] = &[
+    ("openai", "gpt-image-2", "1024x1024", 0.040),
+    ("openai", "gpt-image-2", "1024x1536", 0.060),
+    ("openai", "gpt-image-2", "1536x1024", 0.060),
+    ("openai", "gpt-image-2", "auto", 0.040),
+    ("openrouter", "openai/gpt-image-2", "1024x1024", 0.040),
+    ("openrouter", "openai/gpt-image-2", "1024x1536", 0.060),
+    ("openrouter", "openai/gpt-image-2", "1536x1024", 0.060),
+    ("openrouter", "openai/gpt-image-2", "auto", 0.040),
 ];
 
-pub fn estimate_cost(model: &str, size: &str, quality: &str, n: u8) -> f64 {
+pub fn estimate_cost(provider: &str, model: &str, size: &str, quality: &str, n: u8) -> f64 {
     let base = PRICING.iter()
-        .find(|(m, s, _)| *m == model && *s == size)
-        .map(|(_, _, p)| *p)
+        .find(|(p, m, s, _)| *p == provider && *m == model && *s == size)
+        .map(|(_, _, _, price)| *price)
         .unwrap_or(0.040);
     let multiplier = if quality == "high" { 2.0 } else { 1.0 };
     base * multiplier * n as f64
@@ -57,6 +81,7 @@ pub fn estimate_cost(model: &str, size: &str, quality: &str, n: u8) -> f64 {
 pub async fn generate_images(
     request: &GenerationRequest,
     api_key: &str,
+    base_url: &str,
     app_data_dir: &Path,
     db: &Database,
     jobs: &JobRegistry,
@@ -80,7 +105,7 @@ pub async fn generate_images(
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
     let resp = client
-        .post("https://api.openai.com/v1/images/generations")
+        .post(&format!("{}/images/generations", base_url))
         .header("Authorization", format!("Bearer {}", api_key))
         .json(&serde_json::json!({
             "model": &request.model,
@@ -262,7 +287,7 @@ fn save_generated_image(
         else if aspect > 1.0 { "landscape" } else { "portrait" };
     let megapixels = (width as f64 * height as f64) / 1_000_000.0;
     db.update_source_detection(
-        &image_id, Some("openai"), 100.0,
+        &image_id, Some(&request.provider), 100.0,
         "{\"source\":\"openai_api_generation\"}", Some(true),
         Some(&request.prompt), aspect, orientation, megapixels,
     ).map_err(|e| e.to_string())?;
@@ -273,13 +298,13 @@ fn save_generated_image(
         "size": &request.size,
         "quality": &request.quality,
         "variation_index": index,
-        "estimated_cost": estimate_cost(&request.model, &request.size, &request.quality, 1),
+        "estimated_cost": estimate_cost(&request.provider, &request.model, &request.size, &request.quality, 1),
     });
     let run = GenerationRun {
         id: run_id.clone(),
         prompt: Some(request.prompt.clone()),
         negative_prompt: None,
-        provider: Some("openai".to_string()),
+        provider: Some(request.provider.clone()),
         model: Some(request.model.clone()),
         settings_json: settings.to_string(),
         seed: None,

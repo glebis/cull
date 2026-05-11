@@ -176,6 +176,15 @@ pub async fn validate_api_key(provider: String, key: String) -> Result<bool, Str
                 .map_err(|e| format!("{}", e))?;
             Ok(resp.status().is_success())
         }
+        "openrouter" => {
+            let resp = client
+                .get("https://openrouter.ai/api/v1/models")
+                .header("Authorization", format!("Bearer {}", key))
+                .send()
+                .await
+                .map_err(|e| format!("{}", e))?;
+            Ok(resp.status().is_success())
+        }
         _ => Ok(false),
     }
 }

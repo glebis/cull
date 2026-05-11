@@ -461,6 +461,7 @@ export async function rescanSidecars(): Promise<number> {
 }
 
 export interface ResubmitPromptRequest {
+    provider: string;
     source_image_id: string | null;
     prompt: string;
     n: number;
@@ -475,6 +476,7 @@ export interface ResubmitPromptResponse {
 
 export interface CostEstimate {
     estimated_cost: number;
+    provider: string;
     model: string;
     size: string;
     quality: string;
@@ -485,8 +487,8 @@ export async function resubmitPrompt(request: ResubmitPromptRequest): Promise<Re
     return invoke<ResubmitPromptResponse>('resubmit_prompt', { request });
 }
 
-export async function estimateGenerationCost(model: string, size: string, quality: string, n: number): Promise<CostEstimate> {
-    return invoke<CostEstimate>('estimate_generation_cost', { model, size, quality, n });
+export async function estimateGenerationCost(provider: string, model: string, size: string, quality: string, n: number): Promise<CostEstimate> {
+    return invoke<CostEstimate>('estimate_generation_cost', { provider, model, size, quality, n });
 }
 
 // Sessions

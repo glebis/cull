@@ -5,6 +5,7 @@ use crate::services::generation;
 
 #[derive(Debug, Deserialize)]
 pub struct ResubmitRequest {
+    pub provider: String,
     pub source_image_id: Option<String>,
     pub prompt: String,
     pub n: u8,
@@ -21,6 +22,7 @@ pub struct ResubmitResponse {
 #[derive(Debug, Serialize)]
 pub struct CostEstimate {
     pub estimated_cost: f64,
+    pub provider: String,
     pub model: String,
     pub size: String,
     pub quality: String,
@@ -33,8 +35,10 @@ pub async fn resubmit_prompt(
     state: State<'_, AppState>,
     request: ResubmitRequest,
 ) -> Result<ResubmitResponse, String> {
-    let api_key = state.secrets.get("api_key_openai")?
-        .ok_or("OpenAI API key not set. Go to Settings to add it.")?;
+    let provider_cfg = generation::provider_config(&request.provider)?;
+    let api_key = state.secrets.get(provider_cfg.key_name)?
+        .ok_or_else(|| format!("{} API key not set. Go to Settings to add it.", request.provider))?;
+    let base_url = provider_cfg.base_url.to_string();
 
     if request.prompt.trim().is_empty() {
         return Err("Prompt cannot be empty".to_string());
@@ -44,6 +48,7 @@ pub async fn resubmit_prompt(
     }
 
     let gen_request = generation::GenerationRequest {
+        provider: request.provider,
         source_image_id: request.source_image_id,
         prompt: request.prompt,
         n: request.n,
@@ -64,6 +69,7 @@ pub async fn resubmit_prompt(
         let _ = generation::generate_images(
             &gen_request,
             &api_key,
+            &base_url,
             &app_data_dir,
             &db,
             &jobs,
@@ -78,13 +84,15 @@ pub async fn resubmit_prompt(
 
 #[tauri::command]
 pub async fn estimate_generation_cost(
+    provider: String,
     model: String,
     size: String,
     quality: String,
     n: u8,
 ) -> Result<CostEstimate, String> {
     Ok(CostEstimate {
-        estimated_cost: generation::estimate_cost(&model, &size, &quality, n),
+        estimated_cost: generation::estimate_cost(&provider, &model, &size, &quality, n),
+        provider,
         model,
         size,
         quality,
