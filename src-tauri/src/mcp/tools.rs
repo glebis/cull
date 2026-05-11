@@ -1,3 +1,6 @@
+// Copyright (c) 2025-2026 Gleb Kalinin. Architecture and design by author.
+// Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
+
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
@@ -946,7 +949,7 @@ impl ImageViewMcp {
         let state = self.app_handle.state::<AppState>();
 
         {
-            let mut engine = state.embedding_engine.lock().unwrap();
+            let mut engine = state.embedding_engine.lock();
             if engine.session.is_none() {
                 if !engine.is_model_available() {
                     return "Error: Model not downloaded. Run download_clip_model first.".to_string();
@@ -985,7 +988,7 @@ impl ImageViewMcp {
                     None => { state.jobs.update_progress(&job_id, (i + 1) as u32, None); continue; },
                 };
 
-                let engine = state.embedding_engine.lock().unwrap();
+                let engine = state.embedding_engine.lock();
                 match engine.generate_embedding(std::path::Path::new(&img.path)) {
                     Ok(embedding) => {
                         drop(engine);
@@ -1029,7 +1032,7 @@ impl ImageViewMcp {
         };
 
         {
-            let mut engine = state.detection_engine.lock().unwrap();
+            let mut engine = state.detection_engine.lock();
             let needs_load = engine.session.is_none() || engine.loaded_variant != Some(variant);
             if needs_load {
                 if !engine.is_variant_available(variant) {
@@ -1069,7 +1072,7 @@ impl ImageViewMcp {
                     None => { state.jobs.update_progress(&job_id, (i + 1) as u32, None); continue; },
                 };
 
-                let engine = state.detection_engine.lock().unwrap();
+                let engine = state.detection_engine.lock();
                 match engine.detect(std::path::Path::new(&img.path)) {
                     Ok(detections) => {
                         drop(engine);

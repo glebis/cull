@@ -1,3 +1,6 @@
+// Copyright (c) 2025-2026 Gleb Kalinin. Architecture and design by author.
+// Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
+
 use rusqlite::{Connection, Result, params, OptionalExtension};
 use std::path::Path;
 use std::sync::Arc;
