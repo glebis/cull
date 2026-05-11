@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use crate::AppState;
 use crate::db_core::models::ImageWithFile;
 use crate::services::{Pagination, ServiceContext};
@@ -156,4 +156,68 @@ pub async fn set_app_setting(
     value: String,
 ) -> Result<(), String> {
     state.db.set_setting(&key, &value).map_err(|e| e.to_string())
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct LibraryHealthResult {
+    pub purged: u32,
+    pub missing_sources: u32,
+    pub to_regenerate: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn check_library_health(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<LibraryHealthResult, String> {
+    let db = &state.db;
+    let app_data_dir = &state.app_data_dir;
+
+    let auto_purge = db.get_setting("auto_purge_missing")
+        .unwrap_or(None)
+        .unwrap_or_else(|| "true".to_string());
+    let auto_purge = auto_purge == "true";
+
+    let images = db.list_images(100000, 0).map_err(|e| e.to_string())?;
+    let total = images.len() as u32;
+    let mut purged = 0u32;
+    let mut missing_sources = 0u32;
+    let mut to_regenerate = Vec::new();
+
+    for (i, img) in images.iter().enumerate() {
+        let source_path = std::path::Path::new(&img.path);
+        if !source_path.exists() {
+            if auto_purge {
+                let conn = db.conn.lock().unwrap();
+                let _ = conn.execute("DELETE FROM images WHERE id = ?1", rusqlite::params![img.image.id]);
+                // Clean up orphaned thumbnail files
+                let thumb = crate::db_core::thumbnails::thumbnail_path(app_data_dir, &img.image.id);
+                if thumb.exists() {
+                    let _ = std::fs::remove_file(&thumb);
+                }
+                for &size in &crate::db_core::thumbnails::THUMBNAIL_SIZES {
+                    let sized = crate::db_core::thumbnails::sized_thumbnail_path(app_data_dir, &img.image.id, size);
+                    if sized.exists() {
+                        let _ = std::fs::remove_file(&sized);
+                    }
+                }
+                purged += 1;
+            } else {
+                missing_sources += 1;
+            }
+        } else {
+            let thumb = crate::db_core::thumbnails::thumbnail_path(app_data_dir, &img.image.id);
+            if !thumb.exists() {
+                to_regenerate.push(img.image.id.clone());
+            }
+        }
+
+        if i % 100 == 0 {
+            let _ = app.emit("health-check-progress", serde_json::json!({
+                "current": i + 1, "total": total
+            }));
+        }
+    }
+
+    Ok(LibraryHealthResult { purged, missing_sources, to_regenerate })
 }

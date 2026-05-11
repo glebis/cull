@@ -236,6 +236,7 @@ pub fn run() {
             commands::library::delete_images_permanently,
             commands::library::get_app_setting,
             commands::library::set_app_setting,
+            commands::library::check_library_health,
             commands::selection::set_rating,
             commands::selection::set_decision,
             commands::deeplink::open_with_params,
