@@ -10,7 +10,7 @@ pub async fn generate_embeddings(
 ) -> Result<u32, String> {
     // Ensure model is loaded
     {
-        let mut engine = state.embedding_engine.lock().unwrap();
+        let mut engine = state.embedding_engine.lock();
         if engine.session.is_none() {
             if !engine.is_model_available() {
                 return Err("Model not downloaded. Run download_clip_model first.".to_string());
@@ -29,8 +29,9 @@ pub async fn generate_embeddings(
         let img = images.first().ok_or("Image not found")?;
 
         // Generate embedding
-        let engine = state.embedding_engine.lock().unwrap();
-        match engine.generate_embedding(std::path::Path::new(&img.path)) {
+        let ml_path = crate::commands::resolve_image_path_for_ml(img, &state.app_data_dir);
+        let engine = state.embedding_engine.lock();
+        match engine.generate_embedding(&ml_path) {
             Ok(embedding) => {
                 drop(engine); // Release lock before DB write
                 state.db.store_embedding(image_id, "clip-vit-b32", &embedding).map_err(|e| e.to_string())?;
@@ -76,7 +77,7 @@ pub async fn download_clip_model(app: AppHandle, state: State<'_, AppState>) -> 
     use std::io::Write;
 
     let model_path = {
-        let engine = state.embedding_engine.lock().unwrap();
+        let engine = state.embedding_engine.lock();
         engine.model_path()
     };
 
@@ -125,7 +126,7 @@ pub async fn download_clip_model(app: AppHandle, state: State<'_, AppState>) -> 
 
     // Load the model after download
     {
-        let mut engine = state.embedding_engine.lock().unwrap();
+        let mut engine = state.embedding_engine.lock();
         engine.load_model()?;
     }
 
@@ -147,7 +148,10 @@ pub async fn get_embedding_count(state: State<'_, AppState>, model: Option<Strin
 #[tauri::command]
 pub async fn set_api_key(state: State<'_, AppState>, provider: String, key: String) -> Result<(), String> {
     let secret_key = format!("api_key_{}", provider);
-    state.secrets.set(&secret_key, &key)
+    state.secrets.set(&secret_key, &key)?;
+    let flag_key = format!("api_key_exists_{}", provider);
+    state.db.set_setting(&flag_key, "true").map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -192,16 +196,19 @@ pub async fn validate_api_key(provider: String, key: String) -> Result<bool, Str
 #[tauri::command]
 pub async fn delete_api_key(state: State<'_, AppState>, provider: String) -> Result<(), String> {
     let secret_key = format!("api_key_{}", provider);
-    state.secrets.delete(&secret_key)
+    state.secrets.delete(&secret_key)?;
+    let flag_key = format!("api_key_exists_{}", provider);
+    state.db.set_setting(&flag_key, "false").map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn has_api_key(state: State<'_, AppState>, provider: String) -> Result<bool, String> {
-    let secret_key = format!("api_key_{}", provider);
-    match state.secrets.get(&secret_key) {
-        Ok(Some(k)) => Ok(!k.is_empty()),
+    let flag_key = format!("api_key_exists_{}", provider);
+    match state.db.get_setting(&flag_key) {
+        Ok(Some(v)) => Ok(v == "true"),
         Ok(None) => Ok(false),
-        Err(e) => Err(e),
+        Err(e) => Err(e.to_string()),
     }
 }
 
@@ -214,6 +221,9 @@ pub async fn generate_gemini_embeddings(
     let api_key = state.secrets.get("api_key_google")?
         .ok_or("Google API key not set")?;
 
+    // Backfill presence flag for existing keys migrated before this feature
+    let _ = state.db.set_setting("api_key_exists_google", "true");
+
     let provider = GeminiEmbeddingProvider::new(&api_key);
     let total = image_ids.len() as u32;
     let mut generated = 0u32;
@@ -223,7 +233,8 @@ pub async fn generate_gemini_embeddings(
         let images = state.db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
         let img = images.first().ok_or("Image not found")?;
 
-        match provider.generate_embedding(std::path::Path::new(&img.path)).await {
+        let ml_path = crate::commands::resolve_image_path_for_ml(img, &state.app_data_dir);
+        match provider.generate_embedding(&ml_path).await {
             Ok(embedding) => {
                 state.db.store_embedding(image_id, "gemini-embedding-2", &embedding)
                     .map_err(|e| e.to_string())?;

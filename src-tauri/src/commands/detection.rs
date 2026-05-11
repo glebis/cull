@@ -14,7 +14,7 @@ pub async fn download_yolo_model(
     let variant = YoloVariant::from_str(&variant).ok_or("Invalid variant. Use: nano, small, medium")?;
 
     let model_path = {
-        let engine = state.detection_engine.lock().unwrap();
+        let engine = state.detection_engine.lock();
         engine.model_path_for_variant(variant)
     };
 
@@ -51,7 +51,7 @@ pub async fn download_yolo_model(
     }));
 
     {
-        let mut engine = state.detection_engine.lock().unwrap();
+        let mut engine = state.detection_engine.lock();
         engine.load_yolo(variant)?;
     }
 
@@ -67,7 +67,7 @@ pub async fn download_nudenet_model(
     use std::io::Write;
 
     let model_path = {
-        let engine = state.safety_engine.lock().unwrap();
+        let engine = state.safety_engine.lock();
         engine.nudenet_model_path()
     };
 
@@ -104,7 +104,7 @@ pub async fn download_nudenet_model(
     }));
 
     {
-        let mut engine = state.safety_engine.lock().unwrap();
+        let mut engine = state.safety_engine.lock();
         engine.load_nudenet()?;
     }
 
@@ -125,7 +125,7 @@ pub async fn detect_objects(
         .unwrap_or(YoloVariant::Medium);
 
     {
-        let mut engine = state.detection_engine.lock().unwrap();
+        let mut engine = state.detection_engine.lock();
         let needs_load = engine.session.is_none()
             || engine.loaded_variant != Some(variant);
         if needs_load {
@@ -144,8 +144,9 @@ pub async fn detect_objects(
         let images = state.db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
         let img = images.first().ok_or("Image not found")?;
 
-        let engine = state.detection_engine.lock().unwrap();
-        match engine.detect(std::path::Path::new(&img.path)) {
+        let detect_path = crate::commands::resolve_image_path_for_ml(img, &state.app_data_dir);
+        let engine = state.detection_engine.lock();
+        match engine.detect(&detect_path) {
             Ok(detections) => {
                 drop(engine);
                 state.db.store_detections(image_id, variant.model_name(), &detections)
@@ -173,7 +174,7 @@ pub async fn detect_nsfw(
     image_ids: Vec<String>,
 ) -> Result<u32, String> {
     {
-        let mut engine = state.safety_engine.lock().unwrap();
+        let mut engine = state.safety_engine.lock();
         if engine.session.is_none() {
             if !engine.is_nudenet_available() {
                 return Err("NudeNet model not downloaded".to_string());
@@ -190,8 +191,9 @@ pub async fn detect_nsfw(
         let images = state.db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
         let img = images.first().ok_or("Image not found")?;
 
-        let engine = state.safety_engine.lock().unwrap();
-        match engine.detect(std::path::Path::new(&img.path)) {
+        let detect_path = crate::commands::resolve_image_path_for_ml(img, &state.app_data_dir);
+        let engine = state.safety_engine.lock();
+        match engine.detect(&detect_path) {
             Ok(detections) => {
                 drop(engine);
                 state.db.store_detections(image_id, "nudenet", &detections)
@@ -242,13 +244,13 @@ pub async fn is_yolo_available(
         .map(|v| YoloVariant::from_str(v).ok_or("Invalid variant"))
         .transpose()?
         .unwrap_or(YoloVariant::Medium);
-    let engine = state.detection_engine.lock().unwrap();
+    let engine = state.detection_engine.lock();
     Ok(engine.is_variant_available(variant))
 }
 
 #[tauri::command]
 pub async fn is_nudenet_available(state: State<'_, AppState>) -> Result<bool, String> {
-    let engine = state.safety_engine.lock().unwrap();
+    let engine = state.safety_engine.lock();
     Ok(engine.is_nudenet_available())
 }
 
