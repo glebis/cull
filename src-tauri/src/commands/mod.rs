@@ -4,6 +4,7 @@ pub mod detection;
 pub mod dictation;
 pub mod embeddings;
 pub mod export;
+pub mod generation;
 pub mod import;
 pub mod library;
 pub mod lineage;

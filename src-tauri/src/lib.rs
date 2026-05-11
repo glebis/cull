@@ -243,6 +243,7 @@ pub fn run() {
             commands::collections::list_collections,
             commands::collections::add_to_collection,
             commands::collections::list_collection_images,
+            commands::collections::remove_from_collection,
             commands::collections::delete_collection,
             commands::embeddings::generate_embeddings,
             commands::embeddings::get_all_embeddings,
@@ -311,6 +312,8 @@ pub fn run() {
             commands::undo::redo,
             commands::undo::get_undo_status,
             commands::undo::list_undo_history,
+            commands::generation::resubmit_prompt,
+            commands::generation::estimate_generation_cost,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
