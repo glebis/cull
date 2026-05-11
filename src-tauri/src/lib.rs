@@ -391,6 +391,9 @@ pub fn run() {
             commands::files::rename_image,
             commands::files::create_subfolder,
             commands::raw::backfill_raw_previews,
+            commands::privacy::get_data_flow_status,
+            commands::privacy::get_api_audit_log,
+            commands::privacy::export_audit_log,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -18,6 +18,7 @@ pub mod transform;
 pub mod undo;
 pub mod window;
 pub mod sessions;
+pub mod privacy;
 
 pub fn resolve_image_path_for_ml(img: &crate::db_core::models::ImageWithFile, app_data_dir: &std::path::Path) -> std::path::PathBuf {
     let ext = std::path::Path::new(&img.path)
