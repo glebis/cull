@@ -9,6 +9,8 @@ const MOCK_SMART_COLLECTIONS = [
 let userCollections: typeof MOCK_SMART_COLLECTIONS = [];
 let nextId = 100;
 
+const mockApiKeys: Record<string, string> = {};
+
 function makeMockImage(i: number) {
   return {
     image: {
@@ -160,6 +162,20 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   check_library_health: () => ({ purged: 0, missing_sources: 0, to_regenerate: [] }),
   regenerate_thumbnails_by_ids: () => 0,
   regenerate_single_thumbnail: () => '',
+  set_api_key: (_: any, args: { provider: string; key: string }) => {
+    mockApiKeys[`api_key_${args.provider}`] = args.key;
+  },
+  get_api_key: (_: any, args: { provider: string }) => {
+    return mockApiKeys[`api_key_${args.provider}`] ?? null;
+  },
+  has_api_key: (_: any, args: { provider: string }) => {
+    const k = mockApiKeys[`api_key_${args.provider}`];
+    return k !== undefined && k !== '';
+  },
+  delete_api_key: (_: any, args: { provider: string }) => {
+    delete mockApiKeys[`api_key_${args.provider}`];
+  },
+  validate_api_key: () => true,
   backfill_image_metadata: () => 0,
   list_images: () => Array.from({ length: 20 }, (_, i) => makeMockImage(i)),
   get_image_count: () => 20,

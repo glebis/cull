@@ -262,6 +262,14 @@ export async function validateApiKey(provider: string, key: string): Promise<boo
     return invoke('validate_api_key', { provider, key });
 }
 
+export async function deleteApiKey(provider: string): Promise<void> {
+    return invoke('delete_api_key', { provider });
+}
+
+export async function hasApiKey(provider: string): Promise<boolean> {
+    return invoke<boolean>('has_api_key', { provider });
+}
+
 export async function generateGeminiEmbeddings(imageIds: string[]): Promise<number> {
     return invoke('generate_gemini_embeddings', { imageIds });
 }
