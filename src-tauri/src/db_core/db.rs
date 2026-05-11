@@ -1,17 +1,18 @@
 use rusqlite::{Connection, Result, params, OptionalExtension};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use super::models::*;
 use super::smart_collections::{FilterNode, SmartCollection};
 
+#[derive(Clone)]
 pub struct Database {
-    pub(crate) conn: Mutex<Connection>,
+    pub(crate) conn: Arc<Mutex<Connection>>,
 }
 
 impl Database {
     pub fn open(db_path: &Path) -> Result<Self> {
         let conn = Connection::open(db_path)?;
-        let db = Database { conn: Mutex::new(conn) };
+        let db = Database { conn: Arc::new(Mutex::new(conn)) };
         db.run_migrations()?;
         Ok(db)
     }
