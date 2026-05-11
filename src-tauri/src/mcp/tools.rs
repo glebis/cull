@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026 Gleb Kalinin. Architecture and design by author.
+// Copyright (c) 2025-present Gleb Kalinin. Architecture and design by author.
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
 use rmcp::{

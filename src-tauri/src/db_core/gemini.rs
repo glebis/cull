@@ -1,3 +1,6 @@
+// Copyright (c) 2025-present Gleb Kalinin. Architecture and design by author.
+// Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
+
 use base64::Engine;
 use reqwest::Client;
 use serde::Deserialize;

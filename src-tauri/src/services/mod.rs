@@ -1,3 +1,6 @@
+// Copyright (c) 2025-present Gleb Kalinin. Architecture and design by author.
+// Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
+
 #[allow(dead_code)]
 pub mod library;
 #[allow(dead_code)]
@@ -18,7 +21,7 @@ use crate::db_core::detection::DetectionEngine;
 use crate::db_core::secrets::SecretStore;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Pagination {

@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2025-present Gleb Kalinin. Architecture and design by author. -->
+<!-- Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md. -->
 <script lang="ts">
     import '../app.css';
     import TabBar from '$lib/components/TabBar.svelte';

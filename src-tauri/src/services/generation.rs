@@ -1,3 +1,6 @@
+// Copyright (c) 2025-present Gleb Kalinin. Architecture and design by author.
+// Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use chrono::Utc;
@@ -416,6 +419,7 @@ fn save_image_bytes(
         created_at: now.clone(),
         imported_at: now.clone(),
         ai_prompt: Some(request.prompt.clone()),
+        raw_metadata: None,
     };
     db.insert_image(&image_record).map_err(|e| e.to_string())?;
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026 Gleb Kalinin. Architecture and design by author.
+// Copyright (c) 2025-present Gleb Kalinin. Architecture and design by author.
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
 use rusqlite::{Connection, Result, params, OptionalExtension};
@@ -35,6 +35,18 @@ impl Database {
         self.migrate_sessions()?;
         self.migrate_library_roots()?;
         self.migrate_image_file_stat_columns()?;
+        self.migrate_raw_metadata()?;
+        Ok(())
+    }
+
+    fn migrate_raw_metadata(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        let sql = "ALTER TABLE images ADD COLUMN raw_metadata TEXT";
+        match conn.execute(sql, []) {
+            Ok(_) => {}
+            Err(e) if e.to_string().contains("duplicate column") => {}
+            Err(e) => return Err(e),
+        }
         Ok(())
     }
 
@@ -364,7 +376,7 @@ impl Database {
     pub fn find_by_hash(&self, hash: &str) -> Result<Option<Image>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT id, sha256_hash, width, height, format, file_size, created_at, imported_at, ai_prompt
+            "SELECT id, sha256_hash, width, height, format, file_size, created_at, imported_at, ai_prompt, raw_metadata
              FROM images WHERE sha256_hash = ?1"
         )?;
         let mut rows = stmt.query_map(params![hash], |row| {
@@ -378,6 +390,7 @@ impl Database {
                 created_at: row.get(6)?,
                 imported_at: row.get(7)?,
                 ai_prompt: row.get(8)?,
+                raw_metadata: row.get(9)?,
             })
         })?;
         match rows.next() {
@@ -392,7 +405,7 @@ impl Database {
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
-                    f.missing_at
+                    i.raw_metadata, f.missing_at
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -422,12 +435,13 @@ impl Database {
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
+                    raw_metadata: row.get(14)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
-                missing_at: row.get(14)?,
+                missing_at: row.get(15)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -487,7 +501,7 @@ impl Database {
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
-                    f.missing_at
+                    i.raw_metadata, f.missing_at
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -518,12 +532,13 @@ impl Database {
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
+                    raw_metadata: row.get(14)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
-                missing_at: row.get(14)?,
+                missing_at: row.get(15)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -535,7 +550,7 @@ impl Database {
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
-                    f.missing_at
+                    i.raw_metadata, f.missing_at
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -572,12 +587,13 @@ impl Database {
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
+                    raw_metadata: row.get(14)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
-                missing_at: row.get(14)?,
+                missing_at: row.get(15)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -634,7 +650,7 @@ impl Database {
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
-                    f.missing_at
+                    i.raw_metadata, f.missing_at
              FROM collection_items ci
              JOIN images i ON i.id = ci.image_id
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
@@ -665,12 +681,13 @@ impl Database {
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
+                    raw_metadata: row.get(14)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
-                missing_at: row.get(14)?,
+                missing_at: row.get(15)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -974,7 +991,7 @@ impl Database {
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
-                    f.missing_at
+                    i.raw_metadata, f.missing_at
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -1006,12 +1023,13 @@ impl Database {
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
+                    raw_metadata: row.get(14)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
-                missing_at: row.get(14)?,
+                missing_at: row.get(15)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -1023,7 +1041,7 @@ impl Database {
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
-                    f.missing_at
+                    i.raw_metadata, f.missing_at
              FROM iterations it
              JOIN images i ON i.id = it.child_id
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
@@ -1054,12 +1072,13 @@ impl Database {
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
+                    raw_metadata: row.get(14)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
-                missing_at: row.get(14)?,
+                missing_at: row.get(15)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -1243,7 +1262,7 @@ impl Database {
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
-                    f.missing_at
+                    i.raw_metadata, f.missing_at
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -1280,12 +1299,13 @@ impl Database {
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
+                    raw_metadata: row.get(14)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
-                missing_at: row.get(14)?,
+                missing_at: row.get(15)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -1321,6 +1341,15 @@ impl Database {
                 orientation,
                 megapixels,
             ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_raw_metadata(&self, image_id: &str, metadata_json: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE images SET raw_metadata = ?1 WHERE id = ?2",
+            params![metadata_json, image_id],
         )?;
         Ok(())
     }
@@ -1589,6 +1618,7 @@ mod tests {
             created_at: "2026-05-07T00:00:00Z".to_string(),
             imported_at: "2026-05-07T00:00:00Z".to_string(),
             ai_prompt: None,
+            raw_metadata: None,
         };
         db.insert_image(&img).unwrap();
         let file = ImageFile {
@@ -1747,6 +1777,7 @@ mod file_watcher_tests {
             created_at: "2026-05-07T00:00:00Z".to_string(),
             imported_at: "2026-05-07T00:00:00Z".to_string(),
             ai_prompt: None,
+            raw_metadata: None,
         };
         db.insert_image(&img).unwrap();
         let file = ImageFile {

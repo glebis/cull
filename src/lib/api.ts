@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026 Gleb Kalinin. Architecture and design by author.
+// Copyright (c) 2025-present Gleb Kalinin. Architecture and design by author.
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
 import { invoke } from '@tauri-apps/api/core';
@@ -13,6 +13,13 @@ export interface Image {
     created_at: string;
     imported_at: string;
     ai_prompt: string | null;
+    raw_metadata: string | null;
+}
+
+const RAW_EXTENSIONS = ['cr2', 'cr3', 'nef', 'arw', 'dng', 'orf', 'raf', 'rw2'];
+
+export function isRawFormat(format: string): boolean {
+    return RAW_EXTENSIONS.includes(format.toLowerCase());
 }
 
 export interface Selection {
