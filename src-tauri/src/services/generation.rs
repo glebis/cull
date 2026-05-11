@@ -75,7 +75,10 @@ pub async fn generate_images(
     let generated_dir = app_data_dir.join("generated");
     std::fs::create_dir_all(&generated_dir).map_err(|e| format!("Dir create error: {}", e))?;
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
     let resp = client
         .post("https://api.openai.com/v1/images/generations")
         .header("Authorization", format!("Bearer {}", api_key))
@@ -108,9 +111,23 @@ pub async fn generate_images(
     }
 
     let resp_body = resp.text().await
-        .map_err(|e| { jobs.fail(job_id, &e.to_string()); format!("Read error: {}", e) })?;
+        .map_err(|e| {
+            let msg = format!("Read error: {}", e);
+            jobs.fail(job_id, &msg);
+            let _ = app_handle.emit("job-status-changed", serde_json::json!({
+                "job_id": job_id, "kind": "generation", "status": "failed",
+            }));
+            msg
+        })?;
     let api_resp: OpenAiImageResponse = serde_json::from_str(&resp_body)
-        .map_err(|e| { jobs.fail(job_id, &e.to_string()); format!("Parse error: {}", e) })?;
+        .map_err(|e| {
+            let msg = format!("Parse error: {}", e);
+            jobs.fail(job_id, &msg);
+            let _ = app_handle.emit("job-status-changed", serde_json::json!({
+                "job_id": job_id, "kind": "generation", "status": "failed",
+            }));
+            msg
+        })?;
 
     let parent_run_id = if let Some(ref src_id) = request.source_image_id {
         db.get_generation_run_for_image(src_id)
@@ -291,7 +308,12 @@ fn create_generation_lineage(
     source_image_id: Option<&str>,
     prompt: &str,
 ) -> Result<String, String> {
-    let truncated = if prompt.len() > 40 { &prompt[..40] } else { prompt };
+    let truncated: &str = if prompt.chars().count() > 40 {
+        let end = prompt.char_indices().nth(40).map(|(i, _)| i).unwrap_or(prompt.len());
+        &prompt[..end]
+    } else {
+        prompt
+    };
     let name = format!("Gen: {}", truncated);
     let group_id = db.create_lineage_group(&name, "generation", 100.0)
         .map_err(|e| e.to_string())?;

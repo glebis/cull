@@ -13,3 +13,4 @@ pub mod secrets;
 pub mod sidecar;
 pub mod vision;
 pub mod lineage;
+pub mod sessions;

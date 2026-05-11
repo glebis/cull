@@ -28,7 +28,14 @@
             prompt = initialPrompt;
             error = null;
             submitting = false;
-            updateCost();
+        }
+    });
+
+    $effect(() => {
+        if (visible) {
+            estimateGenerationCost(model, size, quality, n)
+                .then(c => costEstimate = c)
+                .catch(() => costEstimate = null);
         }
     });
 

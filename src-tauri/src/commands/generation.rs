@@ -36,6 +36,9 @@ pub async fn resubmit_prompt(
     let api_key = state.secrets.get("api_key_openai")?
         .ok_or("OpenAI API key not set. Go to Settings to add it.")?;
 
+    if request.prompt.trim().is_empty() {
+        return Err("Prompt cannot be empty".to_string());
+    }
     if request.n < 1 || request.n > 4 {
         return Err("n must be between 1 and 4".to_string());
     }

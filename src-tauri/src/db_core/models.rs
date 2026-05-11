@@ -99,3 +99,28 @@ pub struct UndoRecord {
     pub has_file_backup: bool,
     pub created_at: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub folder_path: String,
+    pub settings_json: Option<String>,
+    pub created_at: String,
+    pub image_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Canvas {
+    pub id: String,
+    pub session_id: String,
+    pub name: String,
+    pub canvas_type: String,
+    pub layout_json: String,
+    pub filter_json: Option<String>,
+    pub grid_config_json: Option<String>,
+    pub sort_order: i32,
+    pub created_at: String,
+    pub updated_at: String,
+}
