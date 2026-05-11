@@ -3,10 +3,9 @@
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { UMAP } from 'umap-js';
-    import { images, focusedIndex, focusedImageOverride, viewMode, zenMode, navigateTo, embeddingViewState } from '$lib/stores';
+    import { images, focusedIndex, focusedImageOverride, viewMode, zenMode, navigateTo, embeddingViewState, settingsOpen } from '$lib/stores';
     import { get } from 'svelte/store';
     import { computeScatterThumbSize } from '$lib/embedding-utils';
-    import { openUrl } from '@tauri-apps/plugin-opener';
     import {
         isModelAvailable,
         downloadClipModel,
@@ -14,9 +13,7 @@
         getAllEmbeddings,
         getEmbeddingCount,
         listImages,
-        getApiKey,
-        setApiKey,
-        validateApiKey,
+        hasApiKey,
         generateGeminiEmbeddings,
         getImagesByIds,
         regenerateThumbnails,
@@ -37,9 +34,7 @@
     type Provider = 'clip' | 'gemini';
     let selectedProvider = $state<Provider>('clip');
     let configOpen = $state(false);
-    let apiKey = $state('');
-    let keyValid = $state<boolean | null>(null);
-    let validating = $state(false);
+    let hasGoogleKey = $state(false);
     let geminiEmbeddingCount = $state(0);
 
     // Download progress
@@ -116,10 +111,8 @@
 
     async function loadApiKeyState() {
         try {
-            const key = await getApiKey('google');
-            if (key) {
-                apiKey = key;
-                keyValid = true; // assume valid if stored
+            hasGoogleKey = await hasApiKey('google');
+            if (hasGoogleKey) {
                 geminiEmbeddingCount = await getEmbeddingCount('gemini-embedding-2');
             }
         } catch (e) {
@@ -127,25 +120,14 @@
         }
     }
 
-    async function handleSaveApiKey() {
-        if (!apiKey.trim()) {
-            keyValid = null;
-            return;
+    let prevSettingsOpen = false;
+    $effect(() => {
+        const isOpen = $settingsOpen;
+        if (prevSettingsOpen && !isOpen) {
+            loadApiKeyState();
         }
-        validating = true;
-        try {
-            const valid = await validateApiKey('google', apiKey.trim());
-            keyValid = valid;
-            if (valid) {
-                await setApiKey('google', apiKey.trim());
-            }
-        } catch (e) {
-            keyValid = false;
-            console.error('Validation failed:', e);
-        } finally {
-            validating = false;
-        }
-    }
+        prevSettingsOpen = isOpen;
+    });
 
     async function handleGenerateGemini() {
         generating = true;
@@ -171,10 +153,6 @@
             unlisten();
             generating = false;
         }
-    }
-
-    function openApiKeyPage() {
-        openUrl('https://aistudio.google.com/apikey');
     }
 
     function formatBytes(bytes: number): string {
@@ -830,30 +808,13 @@
 
         {#if configOpen}
             <div class="panel-section config-section">
-                <div class="section-header">GEMINI API KEY</div>
-                <div class="api-key-row">
-                    <input
-                        type="password"
-                        placeholder="AIza..."
-                        bind:value={apiKey}
-                        class="api-input"
-                        onblur={handleSaveApiKey}
-                    />
-                    <button class="link-btn" onclick={openApiKeyPage}>
-                        Get Key &rarr;
+                {#if selectedProvider === 'gemini' && !hasGoogleKey}
+                    <div class="section-header">GEMINI API KEY REQUIRED</div>
+                    <p class="key-missing-text">Set your Google API key in Settings to use Gemini embeddings.</p>
+                    <button class="settings-link-btn" onclick={() => settingsOpen.set(true)}>
+                        Open Settings
                     </button>
-                </div>
-                <div class="key-status" class:valid={keyValid === true} class:invalid={keyValid === false}>
-                    {#if validating}
-                        Validating...
-                    {:else if keyValid === true}
-                        &#9679; Connected
-                    {:else if keyValid === false}
-                        &#9675; Invalid key
-                    {:else}
-                        &#9675; No key set
-                    {/if}
-                </div>
+                {/if}
             </div>
         {/if}
 
@@ -922,10 +883,10 @@
                     <span class="stat-label">Embeddings</span>
                     <span class="stat-value">{geminiEmbeddingCount}</span>
                 </div>
-                <button class="action-btn" onclick={handleGenerateGemini} disabled={generating || keyValid !== true}>
+                <button class="action-btn" onclick={handleGenerateGemini} disabled={generating || !hasGoogleKey} title={hasGoogleKey ? '' : 'Set Google API key in Settings'}>
                     {#if generating}
                         Generating {genProgress.current}/{genProgress.total}...
-                    {:else if keyValid !== true}
+                    {:else if !hasGoogleKey}
                         Set API Key First
                     {:else if geminiEmbeddingCount < $images.length}
                         Generate Embeddings ({$images.length - geminiEmbeddingCount} remaining)
@@ -1394,59 +1355,22 @@
         background: rgba(0, 0, 0, 0.15);
     }
 
-    .api-key-row {
-        display: flex;
-        gap: 6px;
-        align-items: center;
-    }
-
-    .api-input {
-        flex: 1;
-        background: var(--bg);
-        color: var(--text);
-        border: 1px solid var(--border);
-        font-family: var(--font);
-        font-size: 11px;
-        padding: 4px 6px;
-        border-radius: var(--radius);
-    }
-
-    .api-input:focus {
-        outline: none;
-        border-color: var(--blue);
-    }
-
-    .api-input::placeholder {
+    .key-missing-text {
+        font-size: 12px;
         color: var(--text-secondary);
-        opacity: 0.5;
+        margin: 0 0 8px 0;
     }
-
-    .link-btn {
+    .settings-link-btn {
         background: none;
-        border: none;
+        border: 1px solid var(--blue);
+        border-radius: var(--radius, 4px);
+        padding: 4px 12px;
+        font-size: 12px;
+        font-family: inherit;
         color: var(--blue);
-        font-family: var(--font);
-        font-size: 10px;
         cursor: pointer;
-        white-space: nowrap;
-        padding: 0;
     }
-
-    .link-btn:hover {
-        text-decoration: underline;
-    }
-
-    .key-status {
-        font-size: 10px;
-        color: var(--text-secondary);
-        margin-top: 4px;
-    }
-
-    .key-status.valid {
-        color: #9ece6a;
-    }
-
-    .key-status.invalid {
-        color: #f7768e;
+    .settings-link-btn:hover {
+        background: rgba(122, 162, 247, 0.1);
     }
 </style>
