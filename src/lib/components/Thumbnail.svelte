@@ -1,6 +1,7 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
     import type { ImageWithFile } from '$lib/api';
+    import { regenerateSingleThumbnail } from '$lib/api';
     import ContextMenu from './ContextMenu.svelte';
 
     interface Props {
@@ -36,6 +37,7 @@
     };
     let sourceTag = $derived(item.source_label ? SOURCE_LABELS[item.source_label] ?? item.source_label : null);
     let imgError = $state(false);
+    let regenerating = $state(false);
 
     let borderClass = $derived(
         focused ? 'focused' : selected ? 'selected' : ''
@@ -43,8 +45,17 @@
 
     let ctxMenu = $state({ visible: false, x: 0, y: 0 });
 
-    function handleImgError() {
-        imgError = true;
+    async function handleImgError() {
+        if (regenerating) return;
+        regenerating = true;
+        try {
+            const newPath = await regenerateSingleThumbnail(item.image.id);
+            item.thumbnail_path = newPath;
+        } catch {
+            imgError = true;
+        } finally {
+            regenerating = false;
+        }
     }
 
     function handleContextMenu(e: MouseEvent) {
@@ -68,6 +79,8 @@
 >
     {#if imgError}
         <div class="fallback-text">{filename}</div>
+    {:else if regenerating}
+        <div class="regenerating"></div>
     {:else}
         <img {src} alt={filename} loading="lazy" draggable="false" onerror={handleImgError} />
     {/if}
@@ -146,6 +159,17 @@
         word-break: break-all;
         padding: 4px;
         overflow: hidden;
+    }
+    .regenerating {
+        width: 24px;
+        height: 24px;
+        border: 2px solid var(--border);
+        border-top-color: var(--blue);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+        to { transform: rotate(360deg); }
     }
     .rating {
         position: absolute;
