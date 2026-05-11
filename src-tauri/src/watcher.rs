@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher, Event, EventKind};
@@ -17,6 +18,7 @@ pub struct FileWatcher {
     watcher: Option<RecommendedWatcher>,
     intent_registry: Arc<DashMap<PathBuf, MoveIntent>>,
     sync_queue: Arc<DashMap<PathBuf, Instant>>,
+    pub module_raw: Arc<AtomicBool>,
 }
 
 const INTENT_EXPIRY_SECS: u64 = 60;
@@ -54,6 +56,7 @@ impl FileWatcher {
             watcher: None,
             intent_registry: Arc::new(DashMap::new()),
             sync_queue: Arc::new(DashMap::new()),
+            module_raw: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -83,13 +86,16 @@ impl FileWatcher {
         let intent_reg = self.intent_registry.clone();
         let sync_q = self.sync_queue.clone();
         let handle = app_handle.clone();
+        let module_raw = self.module_raw.clone();
 
         let db_clone = db.clone();
         let sync_q_clone = sync_q.clone();
+        let module_raw_cb = module_raw.clone();
         let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
             match res {
                 Ok(event) => {
-                    Self::handle_event(event, &db_clone, &handle, &intent_reg, &sync_q_clone);
+                    let module_raw_val = module_raw_cb.load(std::sync::atomic::Ordering::Relaxed);
+                    Self::handle_event(event, &db_clone, &handle, &intent_reg, &sync_q_clone, module_raw_val);
                 }
                 Err(e) => {
                     eprintln!("[watcher] Error: {}", e);
@@ -206,6 +212,7 @@ impl FileWatcher {
         app_handle: &AppHandle,
         intent_registry: &DashMap<PathBuf, MoveIntent>,
         sync_queue: &DashMap<PathBuf, Instant>,
+        module_raw: bool,
     ) {
         // Skip cloud provider internal/metadata files entirely
         if event.paths.iter().all(|p| crate::cloud::is_cloud_internal_file(p)) {
@@ -222,7 +229,7 @@ impl FileWatcher {
         match event.kind {
             EventKind::Remove(_) => {
                 for path in &event.paths {
-                    if !crate::extensions::is_image_path(path, false) { continue; }
+                    if !crate::extensions::is_image_path(path, module_raw) { continue; }
                     if crate::cloud::is_cloud_internal_file(path) { continue; }
                     if intent_registry.remove(path).is_some() {
                         continue;
@@ -272,7 +279,7 @@ impl FileWatcher {
             }
             EventKind::Create(_) | EventKind::Modify(notify::event::ModifyKind::Data(_)) => {
                 for path in &event.paths {
-                    if !crate::extensions::is_image_path(path, false) { continue; }
+                    if !crate::extensions::is_image_path(path, module_raw) { continue; }
                     if intent_registry.remove(path).is_some() { continue; }
                     sync_queue.insert(path.clone(), Instant::now());
                 }
@@ -281,7 +288,7 @@ impl FileWatcher {
                 if event.paths.len() == 2 {
                     let old = &event.paths[0];
                     let new = &event.paths[1];
-                    if crate::extensions::is_image_path(old, false) || crate::extensions::is_image_path(new, false) {
+                    if crate::extensions::is_image_path(old, module_raw) || crate::extensions::is_image_path(new, module_raw) {
                         if intent_registry.remove(old).is_some() || intent_registry.remove(new).is_some() {
                             return;
                         }
@@ -301,7 +308,7 @@ impl FileWatcher {
                     }
                 } else {
                     for path in &event.paths {
-                        if !crate::extensions::is_image_path(path, false) { continue; }
+                        if !crate::extensions::is_image_path(path, module_raw) { continue; }
                         if intent_registry.remove(path).is_some() {
                             continue;
                         }

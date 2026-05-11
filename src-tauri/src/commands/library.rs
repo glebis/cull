@@ -157,7 +157,12 @@ pub async fn set_app_setting(
     key: String,
     value: String,
 ) -> Result<(), String> {
-    state.db.set_setting(&key, &value).map_err(|e| e.to_string())
+    state.db.set_setting(&key, &value).map_err(|e| e.to_string())?;
+    if key == "module_raw" {
+        let enabled = value == "true";
+        state.file_watcher.lock().module_raw.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+    Ok(())
 }
 
 #[derive(Clone, serde::Serialize)]

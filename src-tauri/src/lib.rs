@@ -212,6 +212,9 @@ pub fn run() {
                 let app_handle_clone = app.handle().clone();
                 let data_dir_clone = state.app_data_dir.clone();
                 let mut fw = state.file_watcher.lock();
+                let module_raw = state.db.get_setting("module_raw")
+                    .ok().flatten().map(|v| v == "true").unwrap_or(false);
+                fw.module_raw.store(module_raw, std::sync::atomic::Ordering::Relaxed);
                 if let Err(e) = fw.start(db_clone, app_handle_clone, roots, data_dir_clone) {
                     eprintln!("[watcher] Failed to start: {}", e);
                 }

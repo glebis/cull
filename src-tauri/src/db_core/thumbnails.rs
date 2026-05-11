@@ -57,6 +57,38 @@ pub fn generate_thumbnail(
     Ok(last_path)
 }
 
+pub fn generate_thumbnail_from_image(
+    img: &image::DynamicImage,
+    app_data_dir: &Path,
+    image_id: &str,
+) -> Result<PathBuf, String> {
+    let thumb_dir = thumbnail_dir(app_data_dir);
+    let mut current = img.clone();
+    let src_max = current.width().max(current.height());
+    let last_path = thumb_dir.join(format!("{}.jpg", image_id));
+
+    for &size in THUMBNAIL_SIZES.iter().rev() {
+        if size >= src_max {
+            if size == 800 {
+                save_jpeg(&current, &last_path)?;
+            } else {
+                let sized_path = thumb_dir.join(format!("{}_{}.jpg", image_id, size));
+                save_jpeg(&current, &sized_path)?;
+            }
+            continue;
+        }
+        let resized = current.resize(size, size, FilterType::Lanczos3);
+        if size == 800 {
+            save_jpeg(&resized, &last_path)?;
+        } else {
+            let sized_path = thumb_dir.join(format!("{}_{}.jpg", image_id, size));
+            save_jpeg(&resized, &sized_path)?;
+        }
+        current = resized;
+    }
+    Ok(last_path)
+}
+
 pub fn thumbnail_path(app_data_dir: &Path, image_id: &str) -> PathBuf {
     thumbnail_dir(app_data_dir).join(format!("{}.jpg", image_id))
 }

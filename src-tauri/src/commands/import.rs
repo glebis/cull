@@ -28,7 +28,9 @@ pub async fn import_folder(
     let app_data_dir = &state.app_data_dir;
 
     // Collect all image files first so we know the total
-    let extensions = crate::extensions::supported_extensions(false);
+    let module_raw = state.db.get_setting("module_raw")
+        .ok().flatten().map(|v| v == "true").unwrap_or(false);
+    let extensions = crate::extensions::supported_extensions(module_raw);
     let entries: Vec<std::path::PathBuf> = walkdir::WalkDir::new(&folder_path)
         .into_iter()
         .filter_map(|e| e.ok())

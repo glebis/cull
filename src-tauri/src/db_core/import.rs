@@ -10,6 +10,14 @@ use super::thumbnails;
 use super::source_detection::{detect_source, read_png_text_chunks};
 use super::sidecar;
 
+fn is_module_raw_enabled(db: &Database) -> bool {
+    db.get_setting("module_raw")
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false)
+}
+
 
 #[derive(Debug)]
 pub enum SyncOutcome {
@@ -31,7 +39,8 @@ pub fn sync_file(
         .map(|e| e.to_lowercase())
         .unwrap_or_default();
 
-    if !crate::extensions::supported_extensions(false).contains(&ext.as_str()) {
+    let module_raw = is_module_raw_enabled(db);
+    if !crate::extensions::supported_extensions(module_raw).contains(&ext.as_str()) {
         return Ok(SyncOutcome::Skipped);
     }
 
@@ -42,7 +51,7 @@ pub fn sync_file(
         .unwrap_or_default();
 
     let path_str = file_path.to_string_lossy().to_string();
-    let can_decode = crate::extensions::is_decodable(&ext, false);
+    let can_decode = crate::extensions::is_decodable(&ext, module_raw);
 
     if let Some(existing_file) = db.get_image_file_by_path(&path_str).map_err(|e| e.to_string())? {
         let size_match = existing_file.last_seen_size.map_or(false, |s| s == file_size);
@@ -72,15 +81,28 @@ pub fn sync_file(
             }
             let _ = db.repoint_image_file(&existing_file.id, &img.id, file_size, &mtime);
             if can_decode {
-                let _ = thumbnails::generate_thumbnail(file_path, app_data_dir, &img.id);
+                if crate::extensions::is_raw_extension(&ext) {
+                    if let Ok(preview) = crate::raw::decode_raw_preview(file_path) {
+                        let _ = thumbnails::generate_thumbnail_from_image(&preview.image, app_data_dir, &img.id);
+                    }
+                } else {
+                    let _ = thumbnails::generate_thumbnail(file_path, app_data_dir, &img.id);
+                }
             }
             return Ok(SyncOutcome::ContentChanged { image_id: img.id });
         }
 
-        let image_id = create_image_record(db, file_path, &hash, &ext, &data, can_decode)?;
+        let (image_id, raw_preview) = create_image_record(db, file_path, &hash, &ext, &data, can_decode)?;
         let _ = db.repoint_image_file(&existing_file.id, &image_id, file_size, &mtime);
         if can_decode {
-            let _ = thumbnails::generate_thumbnail(file_path, app_data_dir, &image_id);
+            if let Some(preview) = &raw_preview {
+                let _ = thumbnails::generate_thumbnail_from_image(&preview.image, app_data_dir, &image_id);
+                if let Ok(meta_json) = serde_json::to_string(&preview.metadata) {
+                    let _ = db.update_raw_metadata(&image_id, &meta_json);
+                }
+            } else {
+                let _ = thumbnails::generate_thumbnail(file_path, app_data_dir, &image_id);
+            }
             run_source_detection(db, file_path, &image_id, &ext);
             run_sidecar_detection(db, file_path, &image_id);
         }
@@ -105,7 +127,7 @@ pub fn sync_file(
         return Ok(SyncOutcome::NewImport { image_id: existing_img.id });
     }
 
-    let image_id = create_image_record(db, file_path, &hash, &ext, &data, can_decode)?;
+    let (image_id, raw_preview) = create_image_record(db, file_path, &hash, &ext, &data, can_decode)?;
     let file_record = ImageFile {
         id: Uuid::new_v4().to_string(),
         image_id: image_id.clone(),
@@ -118,7 +140,14 @@ pub fn sync_file(
     db.insert_image_file(&file_record).map_err(|e| e.to_string())?;
 
     if can_decode {
-        let _ = thumbnails::generate_thumbnail(file_path, app_data_dir, &image_id);
+        if let Some(preview) = &raw_preview {
+            let _ = thumbnails::generate_thumbnail_from_image(&preview.image, app_data_dir, &image_id);
+            if let Ok(meta_json) = serde_json::to_string(&preview.metadata) {
+                let _ = db.update_raw_metadata(&image_id, &meta_json);
+            }
+        } else {
+            let _ = thumbnails::generate_thumbnail(file_path, app_data_dir, &image_id);
+        }
         run_source_detection(db, file_path, &image_id, &ext);
         run_sidecar_detection(db, file_path, &image_id);
         Ok(SyncOutcome::NewImport { image_id })
@@ -145,12 +174,20 @@ fn create_image_record(
     ext: &str,
     data: &[u8],
     can_decode: bool,
-) -> Result<String, String> {
-    let (width, height) = if can_decode {
-        let img = image::open(file_path).map_err(|e| format!("Decode error: {}", e))?;
-        (img.width(), img.height())
+) -> Result<(String, Option<crate::raw::RawPreview>), String> {
+    let (width, height, raw_preview) = if can_decode {
+        if crate::extensions::is_raw_extension(ext) {
+            let preview = crate::raw::decode_raw_preview(file_path)
+                .map_err(|e| format!("RAW decode failed: {}", e))?;
+            let w = preview.image.width();
+            let h = preview.image.height();
+            (w, h, Some(preview))
+        } else {
+            let img = image::open(file_path).map_err(|e| format!("Decode error: {}", e))?;
+            (img.width(), img.height(), None)
+        }
     } else {
-        (0, 0)
+        (0, 0, None)
     };
 
     let image_id = Uuid::new_v4().to_string();
@@ -168,7 +205,7 @@ fn create_image_record(
         raw_metadata: None,
     };
     db.insert_image(&image).map_err(|e| e.to_string())?;
-    Ok(image_id)
+    Ok((image_id, raw_preview))
 }
 
 fn compute_hash(data: &[u8]) -> String {
