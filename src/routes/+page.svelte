@@ -17,9 +17,10 @@
     import Tinder from '$lib/components/Tinder.svelte';
     import McpSettings from '$lib/components/McpSettings.svelte';
     import JobProgressPanel from '$lib/components/JobProgressPanel.svelte';
+    import TrashConfirmDialog from '$lib/components/TrashConfirmDialog.svelte';
     import { handleKeydown } from '$lib/keys';
     import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections, showToast, settingsOpen, searchOpen } from '$lib/stores';
-    import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages, trashImages, deleteImagesPermanently } from '$lib/api';
+    import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages, trashImages, deleteImagesPermanently, getAppSetting, setAppSetting } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
     import { saveAppState, restoreAppStateBeforeImages, applyRestoredViewState } from '$lib/persistence';
@@ -27,6 +28,9 @@
     import { onMount } from 'svelte';
 
     let dragOver = $state(false);
+    let trashConfirmVisible = $state(false);
+    let trashConfirmFileName = $state('');
+    let skipTrashConfirmSession = $state(false);
 
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
     let noSidebar = $derived(immersive || !$sidebarVisible);
@@ -61,7 +65,7 @@
         }
     }
 
-    async function handleTrash() {
+    async function executeTrash() {
         const imgs = $images;
         const idx = $focusedIndex;
         const img = imgs[idx];
@@ -74,6 +78,32 @@
             focusedIndex.update(i => Math.min(i, $images.length - 1));
             totalCount.update(c => c - 1);
         }
+    }
+
+    async function handleTrash() {
+        const img = $images[$focusedIndex];
+        if (!img) return;
+
+        if (skipTrashConfirmSession) {
+            await executeTrash();
+            return;
+        }
+
+        const alwaysSkip = await getAppSetting('skip_trash_confirm');
+        if (alwaysSkip === 'true') {
+            await executeTrash();
+            return;
+        }
+
+        trashConfirmFileName = img.path.split('/').pop() ?? '';
+        trashConfirmVisible = true;
+    }
+
+    async function handleTrashConfirm(suppress: 'none' | 'session' | 'always') {
+        trashConfirmVisible = false;
+        if (suppress === 'session') skipTrashConfirmSession = true;
+        if (suppress === 'always') await setAppSetting('skip_trash_confirm', 'true');
+        await executeTrash();
     }
 
     async function handlePermanentDelete() {
@@ -190,6 +220,13 @@
 {#if $settingsOpen}
     <McpSettings onclose={() => settingsOpen.set(false)} />
 {/if}
+
+<TrashConfirmDialog
+    visible={trashConfirmVisible}
+    fileName={trashConfirmFileName}
+    onconfirm={handleTrashConfirm}
+    oncancel={() => trashConfirmVisible = false}
+/>
 
 <style>
     .app-shell {

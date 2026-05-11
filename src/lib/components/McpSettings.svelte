@@ -7,6 +7,7 @@
 
     let tokens = $state<McpToken[]>([]);
     let closeToTray = $state(true);
+    let confirmTrash = $state(true);
     let httpEnabled = $state(false);
     let httpPort = $state('9847');
     let loading = $state(true);
@@ -28,14 +29,16 @@
 
     onMount(async () => {
         try {
-            const [toks, ctSetting, httpSetting, portSetting] = await Promise.all([
+            const [toks, ctSetting, trashSetting, httpSetting, portSetting] = await Promise.all([
                 listMcpTokens(),
                 getAppSetting('close_to_tray'),
+                getAppSetting('skip_trash_confirm'),
                 getAppSetting('mcp_http_enabled'),
                 getAppSetting('mcp_http_port'),
             ]);
             tokens = toks;
             closeToTray = ctSetting !== 'false';
+            confirmTrash = trashSetting !== 'true';
             httpEnabled = httpSetting === 'true';
             if (portSetting) httpPort = portSetting;
         } catch (e) {
@@ -47,6 +50,11 @@
     async function toggleCloseToTray() {
         closeToTray = !closeToTray;
         await setAppSetting('close_to_tray', closeToTray ? 'true' : 'false');
+    }
+
+    async function toggleConfirmTrash() {
+        confirmTrash = !confirmTrash;
+        await setAppSetting('skip_trash_confirm', confirmTrash ? 'false' : 'true');
     }
 
     async function toggleHttp() {
@@ -150,6 +158,12 @@
                     <span>Close to tray</span>
                     <button class="toggle" class:on={closeToTray} onclick={toggleCloseToTray}>
                         {closeToTray ? 'ON' : 'OFF'}
+                    </button>
+                </div>
+                <div class="setting-row">
+                    <span>Confirm before Trash</span>
+                    <button class="toggle" class:on={confirmTrash} onclick={toggleConfirmTrash}>
+                        {confirmTrash ? 'ON' : 'OFF'}
                     </button>
                 </div>
                 <div class="setting-row">
