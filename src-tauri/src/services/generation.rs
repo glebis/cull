@@ -105,26 +105,23 @@ const PRICING: &[(&str, &str, &str, f64)] = &[
     ("openai", "gpt-image-2", "1024x1536", 0.060),
     ("openai", "gpt-image-2", "1536x1024", 0.060),
     ("openai", "gpt-image-2", "auto", 0.040),
-    // OpenRouter
+    // OpenRouter (OpenAI-compatible models only)
     ("openrouter", "openai/gpt-image-2", "1024x1024", 0.040),
     ("openrouter", "openai/gpt-image-2", "auto", 0.040),
     ("openrouter", "openai/gpt-5-image", "auto", 0.040),
     ("openrouter", "openai/gpt-5-image-mini", "auto", 0.020),
-    ("openrouter", "google/gemini-2.5-flash-image", "auto", 0.002),
-    ("openrouter", "google/gemini-3-pro-image-preview", "auto", 0.010),
-    ("openrouter", "google/gemini-3.1-flash-image-preview", "auto", 0.002),
     // Google direct
-    ("google", "gemini-3.1-flash-image-preview", "auto", 0.002),
-    ("google", "gemini-3-pro-image-preview", "auto", 0.010),
-    ("google", "gemini-2.5-flash-image", "auto", 0.002),
+    ("google", "gemini-2.5-flash-image", "auto", 0.039),
+    ("google", "gemini-3-pro-image-preview", "auto", 0.039),
 ];
 
 pub fn estimate_cost(provider: &str, model: &str, size: &str, quality: &str, n: u8) -> f64 {
     let base = PRICING.iter()
         .find(|(p, m, s, _)| *p == provider && *m == model && *s == size)
+        .or_else(|| PRICING.iter().find(|(p, m, _, _)| *p == provider && *m == model))
         .map(|(_, _, _, price)| *price)
         .unwrap_or(0.040);
-    let multiplier = if quality == "high" { 2.0 } else { 1.0 };
+    let multiplier = if provider == "openai" && quality == "high" { 2.0 } else { 1.0 };
     base * multiplier * n as f64
 }
 
@@ -284,7 +281,20 @@ pub async fn generate_images(
                 }
 
                 let url = format!("{}/models/{}:generateContent", base_url, request.model);
-                let parts = vec![serde_json::json!({"text": &request.prompt})];
+                let mut parts = vec![serde_json::json!({"text": &request.prompt})];
+                if let Some(ref src_id) = request.source_image_id {
+                    if let Ok(images) = db.get_images_by_ids(&[src_id.as_str()]) {
+                        if let Some(src_img) = images.first() {
+                            if let Ok(img_bytes) = std::fs::read(&src_img.path) {
+                                let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &img_bytes);
+                                let mime = if src_img.path.ends_with(".png") { "image/png" } else { "image/jpeg" };
+                                parts.push(serde_json::json!({
+                                    "inlineData": {"mimeType": mime, "data": b64}
+                                }));
+                            }
+                        }
+                    }
+                }
                 let payload = serde_json::json!({
                     "contents": [{"parts": parts}],
                     "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},

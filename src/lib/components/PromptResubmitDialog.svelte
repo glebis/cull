@@ -27,8 +27,8 @@
 
     const PROVIDER_MODELS: Record<string, string[]> = {
         openai: ['gpt-image-2'],
-        openrouter: ['openai/gpt-image-2', 'openai/gpt-5-image', 'openai/gpt-5-image-mini', 'google/gemini-2.5-flash-image', 'google/gemini-3-pro-image-preview', 'google/gemini-3.1-flash-image-preview'],
-        google: ['gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview', 'gemini-2.5-flash-image'],
+        openrouter: ['openai/gpt-image-2', 'openai/gpt-5-image', 'openai/gpt-5-image-mini'],
+        google: ['gemini-2.5-flash-image', 'gemini-3-pro-image-preview'],
     };
     let availableModels = $derived(PROVIDER_MODELS[provider] ?? ['gpt-image-2']);
 
@@ -54,14 +54,6 @@
                 .catch(() => costEstimate = null);
         }
     });
-
-    async function updateCost() {
-        try {
-            costEstimate = await estimateGenerationCost(provider, model, size, quality, n);
-        } catch {
-            costEstimate = null;
-        }
-    }
 
     async function submit() {
         if (!prompt.trim() || submitting) return;
@@ -134,7 +126,7 @@
             <div class="settings-row">
                 <label class="field compact">
                     <span class="field-label">Size</span>
-                    <select bind:value={size} onchange={updateCost}>
+                    <select bind:value={size}>
                         {#each SIZES as s}
                             <option value={s}>{s}</option>
                         {/each}
@@ -148,7 +140,7 @@
                             <button
                                 class="btn-option"
                                 class:active={quality === q}
-                                onclick={() => { quality = q; updateCost(); }}
+                                onclick={() => quality = q}
                             >{q}</button>
                         {/each}
                     </div>
@@ -161,17 +153,19 @@
                             <button
                                 class="btn-option"
                                 class:active={n === v}
-                                onclick={() => { n = v; updateCost(); }}
+                                onclick={() => n = v}
                             >{v}</button>
                         {/each}
                     </div>
                 </label>
             </div>
 
+            {#if sourceImageId}
             <label class="checkbox-field">
                 <input type="checkbox" bind:checked={includeSource} />
                 <span>Include original image as reference</span>
             </label>
+            {/if}
 
             {#if costEstimate}
                 <div class="cost-estimate">
