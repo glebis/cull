@@ -19,13 +19,15 @@
     import JobProgressPanel from '$lib/components/JobProgressPanel.svelte';
     import TrashConfirmDialog from '$lib/components/TrashConfirmDialog.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections, showToast, settingsOpen, searchOpen } from '$lib/stores';
+    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections, showToast, settingsOpen, searchOpen, showMissing } from '$lib/stores';
     import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages, trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds } from '$lib/api';
+    import type { ImageWithFile } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
     import { saveAppState, restoreAppStateBeforeImages, applyRestoredViewState } from '$lib/persistence';
     import { listen } from '@tauri-apps/api/event';
     import { onMount } from 'svelte';
+    import { get } from 'svelte/store';
 
     let dragOver = $state(false);
     let trashConfirmVisible = $state(false);
@@ -35,13 +37,18 @@
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
     let noSidebar = $derived(immersive || !$sidebarVisible);
 
+    function filterMissing(imgs: ImageWithFile[]): ImageWithFile[] {
+        if (get(showMissing)) return imgs;
+        return imgs.filter(img => !img.missing_at);
+    }
+
     async function loadImages() {
         const count = await getImageCount();
         totalCount.set(count);
         const collection = $activeCollection;
         if (collection !== null) {
             const imgs = await listCollectionImages(collection);
-            images.set(imgs);
+            images.set(filterMissing(imgs));
             focusedIndex.set(0);
             return;
         }
@@ -60,7 +67,7 @@
             } else {
                 imgs = await listImages(100000, 0);
             }
-            images.set(imgs);
+            images.set(filterMissing(imgs));
             focusedIndex.set(0);
         }
     }
@@ -162,10 +169,20 @@
         const handleReloadImages = () => loadImages().catch(e => console.error('Failed to reload:', e));
         window.addEventListener('reload-images', handleReloadImages);
 
+        const watcherUnlisten = listen<void>('images:changed', () => {
+            loadImages().catch(e => console.error('Failed to reload after fs change:', e));
+        });
+
         let first = true;
         const unsub = minSizeFilter.subscribe(() => {
             if (first) { first = false; return; }
             loadImages().catch(e => console.error('Failed to reload images with filter:', e));
+        });
+
+        let firstMissing = true;
+        const unsubMissing = showMissing.subscribe(() => {
+            if (firstMissing) { firstMissing = false; return; }
+            loadImages().catch(e => console.error('Failed to reload images with missing filter:', e));
         });
 
         const saveTimer = setInterval(saveAppState, 5000);
@@ -174,7 +191,9 @@
 
         return () => {
             unsub();
+            unsubMissing();
             dragUnlisten.then(fn => fn());
+            watcherUnlisten.then(fn => fn());
             window.removeEventListener('trash-focused-image', handleTrash);
             window.removeEventListener('delete-focused-image', handlePermanentDelete);
             window.removeEventListener('reload-images', handleReloadImages);

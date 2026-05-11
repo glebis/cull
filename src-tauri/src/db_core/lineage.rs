@@ -186,7 +186,8 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
+                    f.missing_at
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -221,6 +222,7 @@ impl Database {
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
+                missing_at: row.get(14)?,
             })
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
@@ -283,7 +285,8 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
+                    f.missing_at
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -318,6 +321,7 @@ impl Database {
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
+                missing_at: row.get(14)?,
             })
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)

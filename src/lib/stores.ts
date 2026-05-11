@@ -63,6 +63,7 @@ export const loupePanY = writable<number>(0);
 export const folders = writable<[string, number][]>([]);
 export const activeFolder = writable<string | null>(null);
 export const minSizeFilter = writable<number>(0);
+export const showMissing = writable<boolean>(false);
 
 // Collections
 export const collections = writable<[string, string, number][]>([]); // [id, name, count]

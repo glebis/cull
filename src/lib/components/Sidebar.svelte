@@ -1,7 +1,7 @@
 <script lang="ts">
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, images, focusedIndex, folders, activeFolder, minSizeFilter, collections, activeCollection, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection } from '$lib/stores';
+    import { totalCount, images, focusedIndex, folders, activeFolder, minSizeFilter, collections, activeCollection, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, showMissing } from '$lib/stores';
     import { importFolder as apiImportFolder, listImages, listImagesByFolder, listImagesFiltered, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, listCollectionImages, deleteCollectionApi, listSmartCollections, evaluateSmartCollection, isYoloAvailable, isNudenetAvailable, downloadYoloModel, downloadNudenetModel, getDetectionCount, searchByDetectedClass, detectObjects, detectNsfw, getImagesByIds, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount } from '$lib/api';
     import type { SmartCollection } from '$lib/api';
     import { onMount } from 'svelte';
@@ -478,6 +478,10 @@
                 {/each}
             </div>
         </div>
+        <label class="show-missing-toggle">
+            <input type="checkbox" bind:checked={$showMissing} />
+            Show missing files
+        </label>
     </div>
 
     <div class="section">
@@ -827,6 +831,21 @@
         background: rgba(122, 162, 247, 0.15);
         color: var(--blue);
         border-color: var(--blue);
+    }
+    .show-missing-toggle {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 8px;
+        font-size: 11px;
+        color: var(--text-secondary);
+        cursor: pointer;
+    }
+    .show-missing-toggle:hover {
+        color: var(--text-primary, #cdd6f4);
+    }
+    .show-missing-toggle input {
+        accent-color: var(--blue);
     }
     .new-collection-btn {
         margin-left: auto;

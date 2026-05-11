@@ -1,9 +1,9 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { revealItemInDir } from '@tauri-apps/plugin-opener';
-    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, listCollectionImages } from '$lib/api';
+    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, listCollectionImages, moveImage, renameImage, listFolders } from '$lib/api';
     import type { ImageWithFile } from '$lib/api';
-    import { images, focusedIndex, selectedIds, activeCollection, collections } from '$lib/stores';
+    import { images, focusedIndex, selectedIds, activeCollection, collections, showToast } from '$lib/stores';
 
     interface Props {
         image: ImageWithFile;
@@ -17,6 +17,7 @@
     let menuEl: HTMLDivElement | undefined = $state();
     let openSubmenu = $state<string | null>(null);
     let collectionList = $state<[string, string, number][]>([]);
+    let folderList = $state<[string, number][]>([]);
     let menuX = $state(x);
     let menuY = $state(y);
     let activeIndex = $state(0);
@@ -93,6 +94,7 @@
                     if (key === 'rate') openSubmenu = 'rate';
                     else if (key === 'collections') { loadCollections(); }
                     else if (key === 'copy') openSubmenu = 'copy';
+                    else if (key === 'moveto') { loadFolders(); }
                 }
             }
         } else if (e.key === 'ArrowLeft' || e.key === 'Escape') {
@@ -190,6 +192,35 @@
         const allImages = $images.filter(img => !ids.has(img.image.id));
         images.set(allImages);
         if ($focusedIndex >= allImages.length) focusedIndex.set(Math.max(0, allImages.length - 1));
+    }
+
+    async function handleRename() {
+        onclose();
+        const currentName = image.path.split('/').pop() ?? '';
+        const newName = window.prompt('Rename file:', currentName);
+        if (!newName?.trim() || newName.trim() === currentName) return;
+        try {
+            await renameImage(image.image.id, newName.trim());
+            showToast(`Renamed to ${newName.trim()}`, { type: 'success' });
+        } catch (e) {
+            showToast(`Rename failed: ${e}`, { type: 'error' });
+        }
+    }
+
+    async function loadFolders() {
+        openSubmenu = 'moveto';
+        folderList = await listFolders();
+    }
+
+    async function handleMoveTo(folder: string) {
+        onclose();
+        try {
+            await moveImage(image.image.id, folder);
+            const folderName = folder.split('/').pop() ?? folder;
+            showToast(`Moved to ${folderName}`, { type: 'success' });
+        } catch (e) {
+            showToast(`Move failed: ${e}`, { type: 'error' });
+        }
     }
 </script>
 
@@ -349,6 +380,43 @@
         tabindex={activeIndex === 8 ? 0 : -1}
     >Reveal in Finder</button>
 
+    <button
+        class="context-menu-item"
+        onclick={handleRename}
+        role="menuitem"
+        data-menu-index="9"
+        tabindex={activeIndex === 9 ? 0 : -1}
+    >Rename...</button>
+
+    <!-- Move to -->
+    <div class="submenu-parent"
+        onmouseenter={loadFolders}
+        onmouseleave={() => { if (openSubmenu === 'moveto') openSubmenu = null; }}
+    >
+        <button
+            class="context-menu-item has-submenu"
+            role="menuitem"
+            data-menu-index="10"
+            data-submenu-key="moveto"
+            tabindex={activeIndex === 10 ? 0 : -1}
+        >
+            <span>Move to...</span>
+            <span class="arrow">►</span>
+        </button>
+        {#if openSubmenu === 'moveto'}
+            <div class="submenu" role="menu">
+                {#each folderList as [folder, count]}
+                    <button class="context-menu-item" onclick={() => handleMoveTo(folder)} role="menuitem" tabindex="-1">
+                        {folder.split('/').pop()} <span class="count">({count})</span>
+                    </button>
+                {/each}
+                {#if folderList.length === 0}
+                    <div class="context-menu-item" style="color: var(--text-secondary); cursor: default;">No folders</div>
+                {/if}
+            </div>
+        {/if}
+    </div>
+
     <div class="separator"></div>
 
     <!-- Destructive -->
@@ -356,8 +424,8 @@
         class="context-menu-item danger"
         onclick={handleTrash}
         role="menuitem"
-        data-menu-index="9"
-        tabindex={activeIndex === 9 ? 0 : -1}
+        data-menu-index="11"
+        tabindex={activeIndex === 11 ? 0 : -1}
     >Trash{multiCount > 1 ? ` (${multiCount})` : ''}</button>
 </div>
 

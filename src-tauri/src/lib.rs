@@ -7,6 +7,7 @@ mod mcp;
 mod menu;
 mod services;
 mod tray;
+mod watcher;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -27,6 +28,7 @@ pub struct AppState {
     pub secrets: Box<dyn SecretStore>,
     pub jobs: crate::services::jobs::JobRegistry,
     pub action_manager: services::undo::ActionManager,
+    pub file_watcher: Mutex<watcher::FileWatcher>,
 }
 
 const IMAGE_EXTENSIONS: &[&str] = &[
@@ -154,12 +156,24 @@ pub fn run() {
 
             let secrets = Box::new(KeychainStore::new("imageview"));
             let jobs = crate::services::jobs::JobRegistry::default();
-            app.manage(AppState { db, app_data_dir, embedding_engine, detection_engine, safety_engine, secrets, jobs, action_manager: services::undo::ActionManager::new() });
+            app.manage(AppState { db, app_data_dir, embedding_engine, detection_engine, safety_engine, secrets, jobs, action_manager: services::undo::ActionManager::new(), file_watcher: Mutex::new(watcher::FileWatcher::new()) });
 
             // Load persisted job history from DB
             {
                 let state: tauri::State<'_, AppState> = app.state();
                 state.jobs.load_from_db(&state.db);
+            }
+
+            // Start file watcher
+            {
+                let state: tauri::State<'_, AppState> = app.state();
+                let roots = state.db.list_library_roots().unwrap_or_default();
+                let db_clone = state.db.clone();
+                let app_handle_clone = app.handle().clone();
+                let mut fw = state.file_watcher.lock().unwrap();
+                if let Err(e) = fw.start(db_clone, app_handle_clone, roots) {
+                    eprintln!("[watcher] Failed to start: {}", e);
+                }
             }
 
             // Set up native menu bar
@@ -327,6 +341,9 @@ pub fn run() {
             commands::sessions::list_canvases,
             commands::sessions::update_canvas_layout,
             commands::sessions::delete_canvas,
+            commands::files::move_image,
+            commands::files::rename_image,
+            commands::files::create_subfolder,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -38,6 +38,7 @@ pub struct ImageWithFile {
     pub thumbnail_path: Option<String>,
     pub selection: Option<Selection>,
     pub source_label: Option<String>,
+    pub missing_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

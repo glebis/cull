@@ -26,6 +26,7 @@ export interface ImageWithFile {
     thumbnail_path: string | null;
     selection: Selection | null;
     source_label: string | null;
+    missing_at: string | null;
 }
 
 export interface ImportResponse {
@@ -562,4 +563,17 @@ export async function updateCanvasLayout(canvasId: string, layoutJson: string): 
 }
 export async function deleteCanvas(canvasId: string): Promise<void> {
     return invoke<void>('delete_canvas', { canvasId });
+}
+
+// File management
+export async function moveImage(imageId: string, destinationFolder: string): Promise<string> {
+    return invoke<string>('move_image', { imageId, destinationFolder });
+}
+
+export async function renameImage(imageId: string, newName: string): Promise<string> {
+    return invoke<string>('rename_image', { imageId, newName });
+}
+
+export async function createSubfolder(parentPath: string, name: string): Promise<string> {
+    return invoke<string>('create_subfolder', { parentPath, name });
 }

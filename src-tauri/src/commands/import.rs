@@ -74,6 +74,8 @@ pub async fn import_folder(
         }
     }
 
+    let _ = state.db.add_library_root(&folder_path);
+
     let batch_id = if !new_image_ids.is_empty() {
         let batch = db.create_import_batch("folder", new_image_ids.len() as u32, None)
             .map_err(|e| e.to_string())?;

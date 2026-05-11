@@ -85,6 +85,12 @@
         <img {src} alt={filename} loading="lazy" draggable="false" onerror={handleImgError} />
     {/if}
 
+    {#if item.missing_at}
+        <div class="missing-overlay">
+            <span class="missing-badge">Missing</span>
+        </div>
+    {/if}
+
     {#if rating > 0}
         <div class="rating">
             {#each Array(rating) as _}
@@ -221,5 +227,22 @@
     .badge.reject {
         background: var(--red);
         color: var(--bg);
+    }
+    .missing-overlay {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+    }
+    .missing-badge {
+        font-size: 9px;
+        font-weight: 600;
+        color: #f87171;
+        background: rgba(127, 29, 29, 0.6);
+        padding: 1px 6px;
+        border-radius: 3px;
     }
 </style>

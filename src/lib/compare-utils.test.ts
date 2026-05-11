@@ -15,6 +15,7 @@ function makeImage(id: string, overrides?: { star_rating?: number | null; decisi
             color_label: null,
             decision: overrides.decision ?? 'undecided',
         } : null,
+        missing_at: null,
     };
 }
 

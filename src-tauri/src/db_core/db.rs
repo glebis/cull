@@ -29,6 +29,19 @@ impl Database {
         self.migrate_generation_runs()?;
         self.migrate_undo_tables()?;
         self.migrate_sessions()?;
+        self.migrate_library_roots()?;
+        Ok(())
+    }
+
+    fn migrate_library_roots(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS library_roots (
+                id TEXT PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE,
+                added_at TEXT NOT NULL
+            );"
+        )?;
         Ok(())
     }
 
@@ -360,7 +373,8 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
+                    f.missing_at
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -395,6 +409,7 @@ impl Database {
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
+                missing_at: row.get(14)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -453,7 +468,8 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
+                    f.missing_at
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -489,6 +505,7 @@ impl Database {
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
+                missing_at: row.get(14)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -499,7 +516,8 @@ impl Database {
         let mut sql = String::from(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
+                    f.missing_at
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -541,6 +559,7 @@ impl Database {
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
+                missing_at: row.get(14)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -596,7 +615,8 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
+                    f.missing_at
              FROM collection_items ci
              JOIN images i ON i.id = ci.image_id
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
@@ -632,6 +652,7 @@ impl Database {
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
+                missing_at: row.get(14)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -797,9 +818,110 @@ impl Database {
         )
     }
 
+    // ---- File watcher helpers ----
+
+    pub fn mark_file_missing(&self, path: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let updated = conn.execute(
+            "UPDATE image_files SET missing_at = datetime('now') WHERE path = ?1 AND missing_at IS NULL",
+            params![path],
+        )?;
+        Ok(updated > 0)
+    }
+
+    pub fn restore_file(&self, path: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let updated = conn.execute(
+            "UPDATE image_files SET missing_at = NULL, last_seen_at = datetime('now') WHERE path = ?1",
+            params![path],
+        )?;
+        Ok(updated > 0)
+    }
+
+    pub fn update_image_file_path(&self, file_id: &str, new_path: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE image_files SET path = ?2, last_seen_at = datetime('now'), missing_at = NULL WHERE id = ?1",
+            params![file_id, new_path],
+        )?;
+        Ok(())
+    }
+
+    pub fn restore_or_move_file_by_hash(&self, sha256: &str, new_path: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let file_id: Option<String> = conn.query_row(
+            "SELECT f.id FROM image_files f
+             JOIN images i ON i.id = f.image_id
+             WHERE i.sha256_hash = ?1 AND f.missing_at IS NOT NULL
+             ORDER BY f.missing_at DESC LIMIT 1",
+            params![sha256],
+            |row| row.get(0),
+        ).optional()?;
+
+        if let Some(fid) = file_id {
+            conn.execute(
+                "UPDATE image_files SET path = ?2, missing_at = NULL, last_seen_at = datetime('now') WHERE id = ?1",
+                params![fid, new_path],
+            )?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub fn get_image_file_by_path(&self, path: &str) -> Result<Option<ImageFile>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, image_id, path, last_seen_at, missing_at FROM image_files WHERE path = ?1"
+        )?;
+        let mut rows = stmt.query_map(params![path], |row| {
+            Ok(ImageFile {
+                id: row.get(0)?,
+                image_id: row.get(1)?,
+                path: row.get(2)?,
+                last_seen_at: row.get(3)?,
+                missing_at: row.get(4)?,
+            })
+        })?;
+        match rows.next() {
+            Some(Ok(f)) => Ok(Some(f)),
+            _ => Ok(None),
+        }
+    }
+
+    // ---- Library roots ----
+
+    pub fn add_library_root(&self, path: &str) -> Result<String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO library_roots (id, path, added_at) VALUES (?1, ?2, datetime('now'))",
+            params![id, path],
+        )?;
+        Ok(id)
+    }
+
+    pub fn list_library_roots(&self) -> Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT path FROM library_roots ORDER BY added_at")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        rows.collect()
+    }
+
+    pub fn remove_library_root(&self, path: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let deleted = conn.execute("DELETE FROM library_roots WHERE path = ?1", params![path])?;
+        Ok(deleted > 0)
+    }
+
     pub fn image_count(&self) -> Result<u32> {
         let conn = self.conn.lock().unwrap();
-        conn.query_row("SELECT COUNT(*) FROM images", [], |row| row.get(0))
+        conn.query_row(
+            "SELECT COUNT(DISTINCT i.id) FROM images i
+             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL",
+            [],
+            |row| row.get(0),
+        )
     }
 
     pub fn get_images_by_ids(&self, ids: &[&str]) -> Result<Vec<ImageWithFile>> {
@@ -811,7 +933,8 @@ impl Database {
         let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
+                    f.missing_at
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -848,6 +971,7 @@ impl Database {
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
+                missing_at: row.get(14)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -858,7 +982,8 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
+                    f.missing_at
              FROM iterations it
              JOIN images i ON i.id = it.child_id
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
@@ -894,6 +1019,7 @@ impl Database {
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
+                missing_at: row.get(14)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -1076,7 +1202,8 @@ impl Database {
         let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
-                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
+                    f.missing_at
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -1118,6 +1245,7 @@ impl Database {
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
+                missing_at: row.get(14)?,
             })
         })?;
         rows.collect::<Result<Vec<_>>>()
@@ -1555,5 +1683,227 @@ mod session_tests {
         assert!(indexes.contains(&"idx_selections_project".to_string()));
         assert!(indexes.contains(&"idx_embeddings_image".to_string()));
         assert!(indexes.contains(&"idx_images_import_batch".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod file_watcher_tests {
+    use super::*;
+
+    fn test_db() -> Database {
+        Database::open(std::path::Path::new(":memory:")).unwrap()
+    }
+
+    fn insert_test_image(db: &Database, id: &str, hash: &str) {
+        let img = Image {
+            id: id.to_string(),
+            sha256_hash: hash.to_string(),
+            width: 100,
+            height: 100,
+            format: "png".to_string(),
+            file_size: 1000,
+            created_at: "2026-05-07T00:00:00Z".to_string(),
+            imported_at: "2026-05-07T00:00:00Z".to_string(),
+            ai_prompt: None,
+        };
+        db.insert_image(&img).unwrap();
+        let file = ImageFile {
+            id: format!("f-{}", id),
+            image_id: id.to_string(),
+            path: format!("/tmp/{}.png", id),
+            last_seen_at: "2026-05-07T00:00:00Z".to_string(),
+            missing_at: None,
+        };
+        db.insert_image_file(&file).unwrap();
+    }
+
+    // -- mark_file_missing --
+
+    #[test]
+    fn test_mark_file_missing_sets_timestamp() {
+        let db = test_db();
+        insert_test_image(&db, "img-1", "hash-1");
+
+        let result = db.mark_file_missing("/tmp/img-1.png").unwrap();
+        assert!(result);
+
+        let images = db.list_images(100, 0).unwrap();
+        assert_eq!(images.len(), 0, "missing image should be excluded from list_images");
+    }
+
+    #[test]
+    fn test_mark_file_missing_returns_false_for_unknown_path() {
+        let db = test_db();
+        let result = db.mark_file_missing("/nonexistent/path.png").unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_mark_file_missing_idempotent() {
+        let db = test_db();
+        insert_test_image(&db, "img-1", "hash-1");
+
+        assert!(db.mark_file_missing("/tmp/img-1.png").unwrap());
+        assert!(!db.mark_file_missing("/tmp/img-1.png").unwrap(), "second call should return false");
+    }
+
+    // -- restore_file --
+
+    #[test]
+    fn test_restore_file_clears_missing() {
+        let db = test_db();
+        insert_test_image(&db, "img-1", "hash-1");
+        db.mark_file_missing("/tmp/img-1.png").unwrap();
+
+        assert_eq!(db.list_images(100, 0).unwrap().len(), 0);
+
+        let restored = db.restore_file("/tmp/img-1.png").unwrap();
+        assert!(restored);
+
+        let images = db.list_images(100, 0).unwrap();
+        assert_eq!(images.len(), 1, "restored image should reappear");
+    }
+
+    #[test]
+    fn test_restore_file_unknown_path() {
+        let db = test_db();
+        let result = db.restore_file("/nonexistent/path.png").unwrap();
+        assert!(!result);
+    }
+
+    // -- update_image_file_path --
+
+    #[test]
+    fn test_update_image_file_path() {
+        let db = test_db();
+        insert_test_image(&db, "img-1", "hash-1");
+
+        db.update_image_file_path("f-img-1", "/new/location/img-1.png").unwrap();
+
+        let images = db.list_images(100, 0).unwrap();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].path, "/new/location/img-1.png");
+    }
+
+    #[test]
+    fn test_update_image_file_path_clears_missing() {
+        let db = test_db();
+        insert_test_image(&db, "img-1", "hash-1");
+        db.mark_file_missing("/tmp/img-1.png").unwrap();
+        assert_eq!(db.list_images(100, 0).unwrap().len(), 0);
+
+        db.update_image_file_path("f-img-1", "/new/img-1.png").unwrap();
+
+        let images = db.list_images(100, 0).unwrap();
+        assert_eq!(images.len(), 1, "path update should clear missing_at");
+        assert_eq!(images[0].path, "/new/img-1.png");
+    }
+
+    // -- restore_or_move_file_by_hash --
+
+    #[test]
+    fn test_restore_by_hash_moves_missing_file() {
+        let db = test_db();
+        insert_test_image(&db, "img-1", "hash-abc");
+        db.mark_file_missing("/tmp/img-1.png").unwrap();
+
+        let moved = db.restore_or_move_file_by_hash("hash-abc", "/new/path.png").unwrap();
+        assert!(moved);
+
+        let images = db.list_images(100, 0).unwrap();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].path, "/new/path.png");
+        assert!(images[0].missing_at.is_none());
+    }
+
+    #[test]
+    fn test_restore_by_hash_returns_false_no_match() {
+        let db = test_db();
+        let result = db.restore_or_move_file_by_hash("unknown-hash", "/some/path.png").unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_restore_by_hash_ignores_non_missing() {
+        let db = test_db();
+        insert_test_image(&db, "img-1", "hash-abc");
+        // Not marked missing
+        let result = db.restore_or_move_file_by_hash("hash-abc", "/new/path.png").unwrap();
+        assert!(!result, "should not operate on non-missing files");
+    }
+
+    // -- image_count with missing --
+
+    #[test]
+    fn test_image_count_excludes_missing() {
+        let db = test_db();
+        insert_test_image(&db, "img-1", "hash-1");
+        insert_test_image(&db, "img-2", "hash-2");
+        insert_test_image(&db, "img-3", "hash-3");
+
+        assert_eq!(db.image_count().unwrap(), 3);
+
+        db.mark_file_missing("/tmp/img-2.png").unwrap();
+
+        assert_eq!(db.image_count().unwrap(), 2);
+    }
+
+    // -- library_roots --
+
+    #[test]
+    fn test_add_and_list_library_roots() {
+        let db = test_db();
+        db.add_library_root("/photos/vacation").unwrap();
+        db.add_library_root("/photos/work").unwrap();
+
+        let roots = db.list_library_roots().unwrap();
+        assert_eq!(roots.len(), 2);
+        assert!(roots.contains(&"/photos/vacation".to_string()));
+        assert!(roots.contains(&"/photos/work".to_string()));
+    }
+
+    #[test]
+    fn test_add_library_root_idempotent() {
+        let db = test_db();
+        db.add_library_root("/photos/vacation").unwrap();
+        db.add_library_root("/photos/vacation").unwrap();
+
+        let roots = db.list_library_roots().unwrap();
+        assert_eq!(roots.len(), 1);
+    }
+
+    #[test]
+    fn test_remove_library_root() {
+        let db = test_db();
+        db.add_library_root("/photos/vacation").unwrap();
+        assert_eq!(db.list_library_roots().unwrap().len(), 1);
+
+        let removed = db.remove_library_root("/photos/vacation").unwrap();
+        assert!(removed);
+
+        let roots = db.list_library_roots().unwrap();
+        assert!(roots.is_empty());
+    }
+
+    // -- get_image_file_by_path --
+
+    #[test]
+    fn test_get_image_file_by_path_found() {
+        let db = test_db();
+        insert_test_image(&db, "img-1", "hash-1");
+
+        let file = db.get_image_file_by_path("/tmp/img-1.png").unwrap();
+        assert!(file.is_some());
+        let f = file.unwrap();
+        assert_eq!(f.image_id, "img-1");
+        assert_eq!(f.path, "/tmp/img-1.png");
+        assert!(f.missing_at.is_none());
+    }
+
+    #[test]
+    fn test_get_image_file_by_path_not_found() {
+        let db = test_db();
+        let file = db.get_image_file_by_path("/nonexistent/path.png").unwrap();
+        assert!(file.is_none());
     }
 }
