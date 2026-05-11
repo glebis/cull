@@ -60,13 +60,24 @@ pub async fn analyze_images(
             None => continue,
         };
 
+        let ollama_jurisdiction = if url.contains("localhost") || url.contains("127.0.0.1") { "Local" } else { "Remote" };
         match vision::analyze_image(std::path::Path::new(&img.path), &url, &model).await {
             Ok(fields) => {
+                let _ = crate::services::audit::log_api_call(
+                    &state.db, "ollama", &url, "image",
+                    std::fs::metadata(&img.path).map(|m| m.len() as i64).unwrap_or(0),
+                    None, None, Some(&model), 200, ollama_jurisdiction,
+                );
                 state.db.store_vision_metadata(image_id, &model, &fields)
                     .map_err(|e| e.to_string())?;
                 analyzed += 1;
             }
             Err(e) => {
+                let _ = crate::services::audit::log_api_call(
+                    &state.db, "ollama", &url, "image",
+                    std::fs::metadata(&img.path).map(|m| m.len() as i64).unwrap_or(0),
+                    None, None, Some(&model), 500, ollama_jurisdiction,
+                );
                 eprintln!("Vision error for {}: {}", image_id, e);
             }
         }

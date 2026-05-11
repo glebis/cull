@@ -221,16 +221,37 @@ pub async fn generate_images(
                     format!("API request failed: {}", e)
                 })?;
 
-            if !resp.status().is_success() {
-                let status = resp.status();
+            let resp_status = resp.status();
+            let jurisdiction = match request.provider.as_str() {
+                "openai" => "US - OpenAI Inc",
+                "openrouter" => "US - OpenRouter (proxy)",
+                _ => "Unknown",
+            };
+
+            if !resp_status.is_success() {
+                let _ = crate::services::audit::log_api_call(
+                    db, &request.provider,
+                    &format!("{}/images/generations", base_url),
+                    if request.source_image_id.is_some() { "prompt+image" } else { "prompt" },
+                    request.prompt.len() as i64, Some(&request.prompt), None,
+                    Some(&request.model), resp_status.as_u16() as i32, jurisdiction,
+                );
                 let body = resp.text().await.unwrap_or_default();
-                let msg = format!("API error {}: {}", status, body);
+                let msg = format!("API error {}: {}", resp_status, body);
                 jobs.fail(job_id, &msg);
                 let _ = app_handle.emit("job-status-changed", serde_json::json!({
                     "job_id": job_id, "kind": "generation", "status": "failed",
                 }));
                 return Err(msg);
             }
+
+            let _ = crate::services::audit::log_api_call(
+                db, &request.provider,
+                &format!("{}/images/generations", base_url),
+                if request.source_image_id.is_some() { "prompt+image" } else { "prompt" },
+                request.prompt.len() as i64, Some(&request.prompt), None,
+                Some(&request.model), 200, jurisdiction,
+            );
 
             let resp_body = resp.text().await
                 .map_err(|e| {
@@ -313,12 +334,24 @@ pub async fn generate_images(
 
                 match resp {
                     Ok(r) => {
-                        if !r.status().is_success() {
-                            let status = r.status();
+                        let gemini_status = r.status();
+                        if !gemini_status.is_success() {
+                            let _ = crate::services::audit::log_api_call(
+                                db, "google", &url,
+                                if request.source_image_id.is_some() { "prompt+image" } else { "prompt" },
+                                request.prompt.len() as i64, Some(&request.prompt), None,
+                                Some(&request.model), gemini_status.as_u16() as i32, "US - Google LLC",
+                            );
                             let body = r.text().await.unwrap_or_default();
-                            errors.push(format!("Image {}: Gemini API error {}: {}", i, status, body));
+                            errors.push(format!("Image {}: Gemini API error {}: {}", i, gemini_status, body));
                             continue;
                         }
+                        let _ = crate::services::audit::log_api_call(
+                            db, "google", &url,
+                            if request.source_image_id.is_some() { "prompt+image" } else { "prompt" },
+                            request.prompt.len() as i64, Some(&request.prompt), None,
+                            Some(&request.model), 200, "US - Google LLC",
+                        );
                         match r.text().await {
                             Ok(resp_body) => {
                                 match extract_image_gemini(&resp_body) {

@@ -234,13 +234,27 @@ pub async fn generate_gemini_embeddings(
         let img = images.first().ok_or("Image not found")?;
 
         let ml_path = crate::commands::resolve_image_path_for_ml(img, &state.app_data_dir);
+        let file_size = std::fs::metadata(&ml_path).map(|m| m.len() as i64).unwrap_or(0);
+        let dims = format!("{}x{}", img.image.width, img.image.height);
         match provider.generate_embedding(&ml_path).await {
             Ok(embedding) => {
+                let _ = crate::services::audit::log_api_call(
+                    &state.db, "gemini",
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-exp-03-07:embedContent",
+                    "image", file_size, None, Some(&dims),
+                    Some("gemini-embedding-exp-03-07"), 200, "US - Google LLC",
+                );
                 state.db.store_embedding(image_id, "gemini-embedding-2", &embedding)
                     .map_err(|e| e.to_string())?;
                 generated += 1;
             }
             Err(e) => {
+                let _ = crate::services::audit::log_api_call(
+                    &state.db, "gemini",
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-exp-03-07:embedContent",
+                    "image", file_size, None, Some(&dims),
+                    Some("gemini-embedding-exp-03-07"), 500, "US - Google LLC",
+                );
                 eprintln!("Gemini embedding error for {}: {}", image_id, e);
             }
         }
