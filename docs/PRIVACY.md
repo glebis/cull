@@ -2,11 +2,11 @@
 
 *Last updated: 2026-05-12*
 
-This document describes what data ImageView sends to external services, where it goes, and under what legal framework each provider operates.
+This document describes what data Cull sends to external services, where it goes, and under what legal framework each provider operates.
 
 ## Core Principle
 
-ImageView is local-first. All core features (viewing, rating, collections, CLIP search, object detection) run entirely on your machine. Cloud features are strictly opt-in via BYOK (Bring Your Own Key).
+Cull is local-first. All core features (viewing, rating, collections, CLIP search, object detection) run entirely on your machine. Cloud features are strictly opt-in via BYOK (Bring Your Own Key).
 
 ## Data Flow Summary
 
@@ -38,7 +38,7 @@ ImageView is local-first. All core features (viewing, rating, collections, CLIP 
 | **ToS** | openai.com/policies/terms-of-use/ |
 | **Trust portal** | trust.openai.com |
 
-**What ImageView sends:** Prompts (text) and optionally source images (base64) for image generation. API key is sent as a bearer token.
+**What Cull sends:** Prompts (text) and optionally source images (base64) for image generation. API key is sent as a bearer token.
 
 ### Google Gemini API (`generativelanguage.googleapis.com`)
 
@@ -53,7 +53,7 @@ ImageView is local-first. All core features (viewing, rating, collections, CLIP 
 | **DPA** | Via Google Cloud terms |
 | **ToS** | ai.google.dev/gemini-api/terms |
 
-**What ImageView sends:** Full images (base64-encoded) for embedding generation. API key is sent as a URL parameter.
+**What Cull sends:** Full images (base64-encoded) for embedding generation. API key is sent as a URL parameter.
 
 **IMPORTANT:** If you use the free Gemini API tier, your images are used for Google model training. Use the paid tier for privacy-sensitive images.
 
@@ -71,7 +71,7 @@ ImageView is local-first. All core features (viewing, rating, collections, CLIP 
 | **ToS** | openrouter.ai/terms |
 | **Privacy** | openrouter.ai/privacy |
 
-**What ImageView sends:** Prompts and optionally source images for generation. Note: OpenRouter is a proxy — data ultimately reaches downstream providers (OpenAI, Anthropic, Google, etc.). Privacy posture is only as strong as the weakest provider in the chain.
+**What Cull sends:** Prompts and optionally source images for generation. Note: OpenRouter is a proxy — data ultimately reaches downstream providers (OpenAI, Anthropic, Google, etc.). Privacy posture is only as strong as the weakest provider in the chain.
 
 ### Ollama (localhost)
 
@@ -84,7 +84,7 @@ ImageView is local-first. All core features (viewing, rating, collections, CLIP 
 | **Training** | No data collection. Limited opt-out telemetry (version, request counts — not prompts) |
 | **Privacy** | ollama.com/privacy |
 
-**What ImageView sends:** Images (base64) to the Ollama API endpoint. By default this is `localhost:11434` — data never leaves your machine unless you configure a remote Ollama instance.
+**What Cull sends:** Images (base64) to the Ollama API endpoint. By default this is `localhost:11434` — data never leaves your machine unless you configure a remote Ollama instance.
 
 ## GDPR Risk Assessment
 

@@ -6,7 +6,7 @@
 
 ## Context
 
-Need to expose ImageView's library to AI agents (Claude Code, Cursor, automation scripts). Traditional approach would be a REST API. MCP (Model Context Protocol) is Anthropic's emerging standard for tool-agent communication.
+Need to expose Cull's library to AI agents (Claude Code, Cursor, automation scripts). Traditional approach would be a REST API. MCP (Model Context Protocol) is Anthropic's emerging standard for tool-agent communication.
 
 ## Options Considered
 

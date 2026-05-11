@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-05-12T00:42:31.837793",
+  "prompt": "A pixel-perfect dark-themed settings panel UI screenshot for a desktop image management app. Tokyo Night dark theme. Background #08080c, surfaces #0c0c12, borders #1a1a2e, text #e0e0e0 in monospace font.\n\nThe panel title says \"Privacy & Data\" at the top.\n\nDATA FLOW STATUS section shows a clean table with 4 columns: Feature, Status, Server, Data Sent.\nRows with colored circle indicators:\nRow 1: \"CLIP embeddings\" - green circle \"Local\" - dash - \"Nothing\"\nRow 2: \"Object detection\" - green circle \"Local\" - dash - \"Nothing\"\nRow 3: \"Ollama vision\" - green circle \"Local\" - \"localhost\" - \"Images\"\nRow 4: \"Gemini embeddings\" - red circle \"Active\" - \"US\" - \"Images + key\"\nRow 5: \"OpenAI generation\" - yellow circle \"Configured\" - \"US\" - \"Prompts + images\"\nRow 6: \"OpenRouter\" - gray circle \"No key\" - \"US\" - \"Prompts + images\"\nRow 7: \"MCP local\" - green circle \"Active\" - \"localhost\" - \"Metadata\"\nRow 8: \"MCP HTTP\" - gray circle \"Off\" - \"network\" - \"Metadata\"\n\nBelow the table: \"API Call History\" section header with a down arrow. Shows a list of recent API calls:\nFirst entry is expanded with details showing endpoint, data sent description, model name, jurisdiction \"US - Google LLC\", and a ToS link. \nThree more entries below it are collapsed, showing just timestamp, provider name, data size, and a green checkmark.\n\nAt bottom: three collapsed sections with right arrows: \"What could leave this machine\", \"Jurisdiction summary\", \"Export audit log\"\n\nStyle: clean developer UI, no decorations, subtle dark borders, monospace text, colored dot indicators (green #9ece6a, red #f7768e, yellow #e0af68, blue #7aa2f7, gray #565a7a)",
+  "preset": null,
+  "platform": "slides",
+  "thinking": "medium",
+  "quality": "high",
+  "provider": "openai",
+  "n": 1,
+  "seed": null,
+  "output": "/Users/glebkalinin/ai_projects/claude-code-lab/20260502-obsidian/imageview/docs/privacy-dashboard-mockup.png",
+  "project": null,
+  "estimated_cost": 0.32
+}

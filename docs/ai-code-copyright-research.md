@@ -1,6 +1,6 @@
 # Copyright of AI-Generated Code: Research Findings
 
-*Researched 2026-05-12. Applicable to Gleb Kalinin's ImageView project (100% AI-generated code via Claude Code).*
+*Researched 2026-05-12. Applicable to Gleb Kalinin's Cull project (100% AI-generated code via Claude Code).*
 
 ## TL;DR
 
