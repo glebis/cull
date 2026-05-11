@@ -177,4 +177,35 @@ mod tests {
         buf.extend_from_slice(jpeg_blob);
         buf
     }
+
+    #[test]
+    #[ignore] // requires real RAF file on disk
+    fn test_real_gfx_raf() {
+        let path = std::path::Path::new(
+            "/Users/glebkalinin/Documents/Pictures/20210317 a53/Capture/20210317 a53 0028.RAF"
+        );
+        if !path.exists() {
+            eprintln!("Skipping: test RAF file not found");
+            return;
+        }
+        let preview = FujiRafDecoder.extract_preview(path).unwrap();
+        assert!(preview.image.width() > 0, "Preview width should be > 0");
+        assert!(preview.image.height() > 0, "Preview height should be > 0");
+        assert!(preview.image.width() >= 1000, "Preview should be at least 1000px wide, got {}", preview.image.width());
+        eprintln!("Preview: {}x{}", preview.image.width(), preview.image.height());
+        eprintln!("Camera: {:?}", preview.metadata.camera_model);
+        assert_eq!(preview.metadata.camera_model.as_deref(), Some("GFX 50R"));
+    }
+
+    #[test]
+    #[ignore]
+    fn test_real_gfx_raf_via_libraw() {
+        let path = std::path::Path::new(
+            "/Users/glebkalinin/Documents/Pictures/20210317 a53/Capture/20210317 a53 0028.RAF"
+        );
+        if !path.exists() { return; }
+        let preview = super::super::decode_raw_preview(path).unwrap();
+        assert!(preview.image.width() > 0);
+        eprintln!("decode_raw_preview: {}x{}", preview.image.width(), preview.image.height());
+    }
 }
