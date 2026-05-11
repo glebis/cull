@@ -2,7 +2,7 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { onMount } from 'svelte';
     import ContextMenu from './ContextMenu.svelte';
-    import { images, focusedIndex, focusedImage, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast } from '$lib/stores';
+    import { images, focusedIndex, focusedImage, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
     import { getDetections, getVisionMetadata, cropImage, getImagesByIds, getGenerationRun } from '$lib/api';
     import type { Detection, GenerationRun } from '$lib/api';
 
@@ -53,8 +53,15 @@
     let toastKey = $state(0);
 
     let prevDecision = $state('');
+    let prevImageIdForToast = $state('');
     $effect(() => {
         const d = decision;
+        const id = image?.image.id ?? '';
+        if (id !== prevImageIdForToast) {
+            prevImageIdForToast = id;
+            prevDecision = d;
+            return;
+        }
         if (d !== prevDecision && prevDecision !== '' && d !== 'undecided') {
             toastDecision = d;
             toastKey++;
@@ -106,7 +113,7 @@
     });
 
     let shouldBlur = $derived(
-        $nsfwMode === 'blur' && !spaceHeld && (!detectionsLoaded || isNsfw)
+        $nsfwMode === 'blur' && !spaceHeld && detectionsLoaded && isNsfw
     );
 
     function handleSpaceDown(e: KeyboardEvent) {
@@ -250,6 +257,14 @@
         return () => window.removeEventListener('keydown', handleEsc, true);
     });
 
+    let isSelected = $derived(image ? $selectedIds.has(image.image.id) : false);
+
+    async function copyPrompt() {
+        if (!prompt) return;
+        await navigator.clipboard.writeText(prompt);
+        showToast('Prompt copied', { type: 'info', duration: 1500 });
+    }
+
     let ctxMenu = $state({ visible: false, x: 0, y: 0 });
 
     function handleContextMenu(e: MouseEvent) {
@@ -356,6 +371,10 @@
         </div>
     {/if}
 
+    {#if !hideOverlays && isSelected}
+        <div class="mini-selected">SEL</div>
+    {/if}
+
     {#if toastDecision}
         {#key toastKey}
         <div class="status-toast" class:toast-accept={toastDecision === 'accept'} class:toast-reject={toastDecision === 'reject'}>
@@ -404,6 +423,16 @@
     </div>
     {#if prompt && promptExpanded}
         <div class="prompt-panel">
+            <div class="prompt-header">
+                <span class="prompt-label">PROMPT</span>
+                <button class="prompt-copy" onclick={copyPrompt} title="Copy prompt">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                        <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                    </svg>
+                    Copy
+                </button>
+            </div>
             <div class="prompt-text">{prompt}</div>
             {#if genModel || genProvider || genSeed}
                 <div class="prompt-meta">
@@ -583,20 +612,68 @@
         bottom: 36px;
         left: 0;
         right: 0;
-        background: rgba(0,0,0,0.85);
+        background: rgba(0,0,0,0.9);
         padding: 12px 16px;
-        font-size: 0.8rem;
-        color: rgba(255,255,255,0.9);
-        line-height: 1.5;
-        max-height: 200px;
+        font-size: 13px;
+        color: rgba(255,255,255,0.92);
+        line-height: 1.6;
+        max-height: 240px;
         overflow-y: auto;
-        backdrop-filter: blur(8px);
+        backdrop-filter: blur(12px);
         z-index: 10;
+        border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    .prompt-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+    }
+    .prompt-label {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        color: rgba(255,255,255,0.4);
+    }
+    .prompt-copy {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 4px;
+        color: rgba(255,255,255,0.7);
+        padding: 3px 8px;
+        font-size: 10px;
+        font-family: inherit;
+        cursor: pointer;
+        transition: background 0.15s, color 0.15s;
+    }
+    .prompt-copy:hover {
+        background: rgba(255,255,255,0.15);
+        color: #fff;
     }
     .prompt-text {
         white-space: pre-wrap;
         word-break: break-word;
         user-select: text;
+    }
+    .mini-selected {
+        position: absolute;
+        top: 18px;
+        left: 18px;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        pointer-events: none;
+        background: var(--blue, #7aa2f7);
+        color: var(--bg);
+        box-shadow: 0 0 0 1px rgba(8, 8, 12, 0.8), 0 8px 22px rgba(0, 0, 0, 0.34);
     }
     /* Decision badge (persistent) */
     .mini-status {

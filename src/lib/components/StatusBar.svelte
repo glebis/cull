@@ -54,13 +54,14 @@
         <span class="hint">B:nsfw:{$nsfwMode}</span>
         <span class="hint">hjkl:nav</span>
         <span class="hint">space:select</span>
-        <span class="hint">s+1-5:rate</span>
+        <span class="hint">1-5:rate</span>
         <span class="hint">0:clear</span>
         <span class="hint">a:accept</span>
         <span class="hint">x:reject</span>
         <span class="hint">u:undecide</span>
         <span class="hint">c:collect</span>
         <span class="hint">b:batch</span>
+        <span class="hint">f:fullscreen</span>
         <span class="hint">+/-:size</span>
     </div>
 </div>

@@ -29,14 +29,23 @@ pub fn generate_thumbnail(
     let img = image::open(source_path).map_err(|e| format!("Failed to open image: {}", e))?;
     let thumb_dir = thumbnail_dir(app_data_dir);
 
-    // Generate pyramid: each size downscales from the previous for better quality
     let mut current = img;
+    let src_max = current.width().max(current.height());
     let last_path = thumb_dir.join(format!("{}.jpg", image_id));
 
     for &size in THUMBNAIL_SIZES.iter().rev() {
+        if size >= src_max {
+            // Never upscale — save a copy at native resolution instead
+            if size == 800 {
+                save_jpeg(&current, &last_path)?;
+            } else {
+                let sized_path = thumb_dir.join(format!("{}_{}.jpg", image_id, size));
+                save_jpeg(&current, &sized_path)?;
+            }
+            continue;
+        }
         let resized = current.resize(size, size, FilterType::Lanczos3);
         if size == 800 {
-            // Main thumbnail (backward-compatible path)
             save_jpeg(&resized, &last_path)?;
         } else {
             let sized_path = thumb_dir.join(format!("{}_{}.jpg", image_id, size));

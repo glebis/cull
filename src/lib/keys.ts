@@ -295,6 +295,13 @@ export function handleKeydown(e: KeyboardEvent) {
         return;
     }
 
+    // Cmd+0: actual size (reset loupe zoom)
+    if (e.key === '0' && e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        resetLoupeZoom();
+        return;
+    }
+
     // View mode switching with Cmd+number (⌘1-7)
     if (VIEW_MODE_KEYS[e.key] && e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
@@ -456,6 +463,10 @@ function handleGridKeys(e: KeyboardEvent) {
         case 'b':
             e.preventDefault();
             handleToggleCollectMode();
+            break;
+        case 'f':
+            e.preventDefault();
+            toggleFullscreen();
             break;
     }
 }
@@ -784,6 +795,10 @@ function handleLoupeKeys(e: KeyboardEvent) {
         case 'ArrowDown':
             e.preventDefault();
             moveLoupeFocus(1);
+            break;
+        case ' ':
+            e.preventDefault();
+            toggleSelect();
             break;
         case '+':
         case '=':
