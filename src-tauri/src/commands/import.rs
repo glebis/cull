@@ -182,6 +182,39 @@ pub async fn regenerate_thumbnails(
 }
 
 #[tauri::command]
+pub async fn regenerate_thumbnails_by_ids(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    image_ids: Vec<String>,
+) -> Result<u32, String> {
+    let db = &state.db;
+    let app_data_dir = &state.app_data_dir;
+    let total = image_ids.len() as u32;
+    let mut regenerated = 0u32;
+
+    for (i, image_id) in image_ids.iter().enumerate() {
+        let id_refs: Vec<&str> = vec![image_id.as_str()];
+        if let Ok(found) = db.get_images_by_ids(&id_refs) {
+            if let Some(img) = found.first() {
+                let source_path = std::path::Path::new(&img.path);
+                if source_path.exists() {
+                    match crate::db_core::thumbnails::generate_thumbnail(source_path, app_data_dir, &img.image.id) {
+                        Ok(_) => regenerated += 1,
+                        Err(e) => eprintln!("Thumbnail failed for {}: {}", img.path, e),
+                    }
+                }
+            }
+        }
+        let _ = app.emit("thumbnail-progress", ThumbnailProgress {
+            current: (i + 1) as u32,
+            total,
+        });
+    }
+
+    Ok(regenerated)
+}
+
+#[tauri::command]
 pub async fn rescan_sources(
     app: AppHandle,
     state: State<'_, AppState>,
