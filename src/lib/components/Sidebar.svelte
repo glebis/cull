@@ -17,6 +17,9 @@
     let foldersExpanded = $state(true);
 
     import { buildDisplayFolders } from '$lib/sidebar-utils';
+    import SessionSwitcher from './SessionSwitcher.svelte';
+    import { activeSession, sessionCanvases } from '$lib/stores';
+    import { createCanvas } from '$lib/api';
 
     let displayFolders = $derived(buildDisplayFolders($folders));
 
@@ -400,6 +403,28 @@
 </script>
 
 <div class="sidebar">
+    <SessionSwitcher />
+
+    {#if $activeSession}
+        <div class="section">
+            <div class="section-header">
+                <span>CANVASES</span>
+                <button class="section-action" onclick={async () => {
+                    if ($activeSession) {
+                        const canvas = await createCanvas($activeSession.id, 'New Canvas', 'manual');
+                        sessionCanvases.update(c => [...c, canvas]);
+                    }
+                }}>+</button>
+            </div>
+            {#each $sessionCanvases as canvas}
+                <button class="section-item">
+                    <span>{canvas.name}</span>
+                    <span class="count">{canvas.canvas_type}</span>
+                </button>
+            {/each}
+        </div>
+    {/if}
+
     <div class="section">
         <div class="section-header">LIBRARY</div>
         <button class="section-item" class:active={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null} onclick={() => selectFolder(null)}>

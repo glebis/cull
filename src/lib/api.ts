@@ -488,3 +488,58 @@ export async function resubmitPrompt(request: ResubmitPromptRequest): Promise<Re
 export async function estimateGenerationCost(model: string, size: string, quality: string, n: number): Promise<CostEstimate> {
     return invoke<CostEstimate>('estimate_generation_cost', { model, size, quality, n });
 }
+
+// Sessions
+export interface Session {
+    id: string;
+    name: string;
+    description: string | null;
+    folder_path: string;
+    settings_json: string | null;
+    created_at: string;
+    image_count: number;
+}
+
+export interface Canvas {
+    id: string;
+    session_id: string;
+    name: string;
+    canvas_type: 'manual' | 'query';
+    layout_json: string;
+    filter_json: string | null;
+    grid_config_json: string | null;
+    sort_order: number;
+    created_at: string;
+    updated_at: string;
+}
+
+export async function createSession(name: string): Promise<Session> {
+    return invoke<Session>('create_session', { name });
+}
+export async function listSessions(): Promise<Session[]> {
+    return invoke<Session[]>('list_sessions');
+}
+export async function getSession(sessionId: string): Promise<Session> {
+    return invoke<Session>('get_session', { sessionId });
+}
+export async function deleteSession(sessionId: string, deleteFiles: boolean): Promise<void> {
+    return invoke<void>('delete_session', { sessionId, deleteFiles });
+}
+export async function convertSessionToCollection(sessionId: string): Promise<void> {
+    return invoke<void>('convert_session_to_collection', { sessionId });
+}
+export async function validateSessionFolder(sessionId: string): Promise<boolean> {
+    return invoke<boolean>('validate_session_folder', { sessionId });
+}
+export async function createCanvas(sessionId: string, name: string, canvasType: string): Promise<Canvas> {
+    return invoke<Canvas>('create_canvas', { sessionId, name, canvasType });
+}
+export async function listCanvases(sessionId: string): Promise<Canvas[]> {
+    return invoke<Canvas[]>('list_canvases', { sessionId });
+}
+export async function updateCanvasLayout(canvasId: string, layoutJson: string): Promise<void> {
+    return invoke<void>('update_canvas_layout', { canvasId, layoutJson });
+}
+export async function deleteCanvas(canvasId: string): Promise<void> {
+    return invoke<void>('delete_canvas', { canvasId });
+}

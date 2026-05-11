@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
-import type { ImageWithFile, SmartCollection } from './api';
+import type { ImageWithFile, SmartCollection, Session, Canvas } from './api';
 
 export type ViewMode = 'grid' | 'compare' | 'loupe' | 'canvas' | 'lineage' | 'embeddings' | 'export' | 'tinder';
 
@@ -145,6 +145,11 @@ export const embeddingViewState = writable<EmbeddingViewState>({
     projectionKey: null,
     hasUserView: false,
 });
+
+// Sessions
+export const sessions = writable<Session[]>([]);
+export const activeSession = writable<Session | null>(null);
+export const sessionCanvases = writable<Canvas[]>([]);
 
 // Settings panel
 export const settingsOpen = writable<boolean>(false);
