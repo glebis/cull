@@ -271,6 +271,8 @@ pub fn run() {
             commands::embeddings::set_api_key,
             commands::embeddings::get_api_key,
             commands::embeddings::validate_api_key,
+            commands::embeddings::delete_api_key,
+            commands::embeddings::has_api_key,
             commands::embeddings::generate_gemini_embeddings,
             commands::window::create_window,
             commands::window::list_windows,

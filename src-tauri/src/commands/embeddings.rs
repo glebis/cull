@@ -190,6 +190,22 @@ pub async fn validate_api_key(provider: String, key: String) -> Result<bool, Str
 }
 
 #[tauri::command]
+pub async fn delete_api_key(state: State<'_, AppState>, provider: String) -> Result<(), String> {
+    let secret_key = format!("api_key_{}", provider);
+    state.secrets.delete(&secret_key)
+}
+
+#[tauri::command]
+pub async fn has_api_key(state: State<'_, AppState>, provider: String) -> Result<bool, String> {
+    let secret_key = format!("api_key_{}", provider);
+    match state.secrets.get(&secret_key) {
+        Ok(Some(k)) => Ok(!k.is_empty()),
+        Ok(None) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+#[tauri::command]
 pub async fn generate_gemini_embeddings(
     app: AppHandle,
     state: State<'_, AppState>,
