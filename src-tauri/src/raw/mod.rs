@@ -1,4 +1,5 @@
 pub mod fuji;
+pub mod libraw;
 
 use std::path::Path;
 use serde::{Serialize, Deserialize};
@@ -42,6 +43,5 @@ pub fn decode_raw_preview(path: &Path) -> Result<RawPreview, String> {
         }
     }
 
-    // TODO: Task 5 adds LibRaw fallback here
-    Err(format!("No RAW decoder available for .{}", ext))
+    libraw::LibRawDecoder.extract_preview(path)
 }

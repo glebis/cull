@@ -20,11 +20,6 @@ pub struct FileWatcher {
 }
 
 const INTENT_EXPIRY_SECS: u64 = 60;
-const IMAGE_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif",
-    "heic", "heif", "avif", "svg", "ico",
-    "cr2", "cr3", "nef", "arw", "dng", "orf", "raf", "rw2", "psd",
-];
 
 /// Try to find an image_file record by path, attempting both the given path
 /// and common macOS symlink variants (/tmp ↔ /private/tmp).
@@ -52,12 +47,6 @@ fn normalize_path_for_db(path: &std::path::Path) -> String {
     }
 }
 
-fn is_image_ext(path: &std::path::Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
-        .unwrap_or(false)
-}
 
 impl FileWatcher {
     pub fn new() -> Self {
@@ -233,7 +222,7 @@ impl FileWatcher {
         match event.kind {
             EventKind::Remove(_) => {
                 for path in &event.paths {
-                    if !is_image_ext(path) { continue; }
+                    if !crate::extensions::is_image_path(path, false) { continue; }
                     if crate::cloud::is_cloud_internal_file(path) { continue; }
                     if intent_registry.remove(path).is_some() {
                         continue;
@@ -283,7 +272,7 @@ impl FileWatcher {
             }
             EventKind::Create(_) | EventKind::Modify(notify::event::ModifyKind::Data(_)) => {
                 for path in &event.paths {
-                    if !is_image_ext(path) { continue; }
+                    if !crate::extensions::is_image_path(path, false) { continue; }
                     if intent_registry.remove(path).is_some() { continue; }
                     sync_queue.insert(path.clone(), Instant::now());
                 }
@@ -292,7 +281,7 @@ impl FileWatcher {
                 if event.paths.len() == 2 {
                     let old = &event.paths[0];
                     let new = &event.paths[1];
-                    if is_image_ext(old) || is_image_ext(new) {
+                    if crate::extensions::is_image_path(old, false) || crate::extensions::is_image_path(new, false) {
                         if intent_registry.remove(old).is_some() || intent_registry.remove(new).is_some() {
                             return;
                         }
@@ -312,7 +301,7 @@ impl FileWatcher {
                     }
                 } else {
                     for path in &event.paths {
-                        if !is_image_ext(path) { continue; }
+                        if !crate::extensions::is_image_path(path, false) { continue; }
                         if intent_registry.remove(path).is_some() {
                             continue;
                         }
@@ -428,23 +417,35 @@ mod tests {
     }
 
     #[test]
-    fn test_is_image_ext_recognizes_common_formats() {
-        assert!(is_image_ext(std::path::Path::new("photo.jpg")));
-        assert!(is_image_ext(std::path::Path::new("photo.JPEG")));
-        assert!(is_image_ext(std::path::Path::new("photo.png")));
-        assert!(is_image_ext(std::path::Path::new("photo.webp")));
-        assert!(is_image_ext(std::path::Path::new("photo.cr2")));
-        assert!(is_image_ext(std::path::Path::new("photo.dng")));
-        assert!(is_image_ext(std::path::Path::new("photo.heic")));
-        assert!(is_image_ext(std::path::Path::new("photo.psd")));
+    fn test_is_image_path_recognizes_common_formats() {
+        assert!(crate::extensions::is_image_path(std::path::Path::new("photo.jpg"), false));
+        assert!(crate::extensions::is_image_path(std::path::Path::new("photo.JPEG"), false));
+        assert!(crate::extensions::is_image_path(std::path::Path::new("photo.png"), false));
+        assert!(crate::extensions::is_image_path(std::path::Path::new("photo.webp"), false));
+        assert!(crate::extensions::is_image_path(std::path::Path::new("photo.cr2"), true));
+        assert!(crate::extensions::is_image_path(std::path::Path::new("photo.dng"), true));
+        assert!(crate::extensions::is_image_path(std::path::Path::new("photo.heic"), false));
+        assert!(crate::extensions::is_image_path(std::path::Path::new("photo.psd"), false));
     }
 
     #[test]
-    fn test_is_image_ext_rejects_non_images() {
-        assert!(!is_image_ext(std::path::Path::new("doc.txt")));
-        assert!(!is_image_ext(std::path::Path::new("data.json")));
-        assert!(!is_image_ext(std::path::Path::new("script.rs")));
-        assert!(!is_image_ext(std::path::Path::new("noext")));
-        assert!(!is_image_ext(std::path::Path::new(".hidden")));
+    fn test_is_image_path_rejects_non_images() {
+        assert!(!crate::extensions::is_image_path(std::path::Path::new("doc.txt"), false));
+        assert!(!crate::extensions::is_image_path(std::path::Path::new("data.json"), false));
+        assert!(!crate::extensions::is_image_path(std::path::Path::new("script.rs"), false));
+        assert!(!crate::extensions::is_image_path(std::path::Path::new("noext"), false));
+        assert!(!crate::extensions::is_image_path(std::path::Path::new(".hidden"), false));
+    }
+
+    #[test]
+    fn test_raw_extensions_visible_when_enabled() {
+        // RAW extensions are hidden with module_raw=false
+        assert!(!crate::extensions::is_image_path(std::path::Path::new("photo.raf"), false));
+        assert!(!crate::extensions::is_image_path(std::path::Path::new("photo.cr2"), false));
+        assert!(!crate::extensions::is_image_path(std::path::Path::new("photo.nef"), false));
+        // RAW extensions are visible with module_raw=true
+        assert!(crate::extensions::is_image_path(std::path::Path::new("photo.raf"), true));
+        assert!(crate::extensions::is_image_path(std::path::Path::new("photo.cr2"), true));
+        assert!(crate::extensions::is_image_path(std::path::Path::new("photo.nef"), true));
     }
 }

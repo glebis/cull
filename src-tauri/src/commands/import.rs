@@ -28,7 +28,7 @@ pub async fn import_folder(
     let app_data_dir = &state.app_data_dir;
 
     // Collect all image files first so we know the total
-    let extensions = ["jpg", "jpeg", "png", "webp", "gif"];
+    let extensions = crate::extensions::supported_extensions(false);
     let entries: Vec<std::path::PathBuf> = walkdir::WalkDir::new(&folder_path)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -290,12 +290,13 @@ pub async fn rescan_sources(
 }
 
 fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
-    tokio::spawn(async move {
+    let app_clone = app.clone();
+    crate::spawn_guarded(app_clone, "post-import-detection", move || async move {
         let state: State<'_, AppState> = app.state();
 
         // YOLO detection (if model available)
         let yolo_available = {
-            let engine = state.detection_engine.lock().unwrap();
+            let engine = state.detection_engine.lock();
             engine.is_variant_available(crate::db_core::detection::YoloVariant::Medium)
         };
 
@@ -305,7 +306,7 @@ fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
             }));
 
             {
-                let mut engine = state.detection_engine.lock().unwrap();
+                let mut engine = state.detection_engine.lock();
                 if engine.session.is_none() {
                     let _ = engine.load_yolo(crate::db_core::detection::YoloVariant::Medium);
                 }
@@ -315,7 +316,7 @@ fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
                 let id_refs: Vec<&str> = vec![image_id.as_str()];
                 if let Ok(images) = state.db.get_images_by_ids(&id_refs) {
                     if let Some(img) = images.first() {
-                        let engine = state.detection_engine.lock().unwrap();
+                        let engine = state.detection_engine.lock();
                         if let Ok(detections) = engine.detect(std::path::Path::new(&img.path)) {
                             drop(engine);
                             let _ = state.db.store_detections(image_id, "yolov8m", &detections);
@@ -331,7 +332,7 @@ fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
 
         // NudeNet safety check (if model available)
         let nudenet_available = {
-            let engine = state.safety_engine.lock().unwrap();
+            let engine = state.safety_engine.lock();
             engine.is_nudenet_available()
         };
 
@@ -341,7 +342,7 @@ fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
             }));
 
             {
-                let mut engine = state.safety_engine.lock().unwrap();
+                let mut engine = state.safety_engine.lock();
                 if engine.session.is_none() {
                     let _ = engine.load_nudenet();
                 }
@@ -351,7 +352,7 @@ fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
                 let id_refs: Vec<&str> = vec![image_id.as_str()];
                 if let Ok(images) = state.db.get_images_by_ids(&id_refs) {
                     if let Some(img) = images.first() {
-                        let engine = state.safety_engine.lock().unwrap();
+                        let engine = state.safety_engine.lock();
                         if let Ok(detections) = engine.detect(std::path::Path::new(&img.path)) {
                             drop(engine);
                             let _ = state.db.store_detections(image_id, "nudenet", &detections);

@@ -10,15 +10,6 @@ use super::thumbnails;
 use super::source_detection::{detect_source, read_png_text_chunks};
 use super::sidecar;
 
-pub const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif",
-    "heic", "heif", "avif", "svg", "ico",
-    "cr2", "cr3", "nef", "arw", "dng", "orf", "raf", "rw2", "psd",
-];
-
-const DECODABLE_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "webp", "gif",
-];
 
 #[derive(Debug)]
 pub enum SyncOutcome {
@@ -40,7 +31,7 @@ pub fn sync_file(
         .map(|e| e.to_lowercase())
         .unwrap_or_default();
 
-    if !SUPPORTED_EXTENSIONS.contains(&ext.as_str()) {
+    if !crate::extensions::supported_extensions(false).contains(&ext.as_str()) {
         return Ok(SyncOutcome::Skipped);
     }
 
@@ -51,7 +42,7 @@ pub fn sync_file(
         .unwrap_or_default();
 
     let path_str = file_path.to_string_lossy().to_string();
-    let can_decode = DECODABLE_EXTENSIONS.contains(&ext.as_str());
+    let can_decode = crate::extensions::is_decodable(&ext, false);
 
     if let Some(existing_file) = db.get_image_file_by_path(&path_str).map_err(|e| e.to_string())? {
         let size_match = existing_file.last_seen_size.map_or(false, |s| s == file_size);

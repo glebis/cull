@@ -1,3 +1,6 @@
+// Copyright (c) 2025-2026 Gleb Kalinin. Architecture and design by author.
+// Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
+
 mod cli;
 mod commands;
 mod db_core;
@@ -78,18 +81,6 @@ where
     });
 }
 
-const IMAGE_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif",
-    "heic", "heif", "avif", "svg", "ico",
-    "cr2", "cr3", "nef", "arw", "dng", "orf", "raf", "rw2", "psd",
-];
-
-fn is_image_path(path: &std::path::Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
-        .unwrap_or(false)
-}
 
 fn run_stdio_bridge() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -464,7 +455,7 @@ pub fn run() {
             if let tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::DragDrop(ref drag_event), .. } = event {
                 match drag_event {
                     tauri::DragDropEvent::Enter { paths, .. } => {
-                        let has_images = paths.iter().any(|p| is_image_path(p));
+                        let has_images = paths.iter().any(|p| crate::extensions::is_image_path(p, false));
                         let has_dirs = paths.iter().any(|p| p.is_dir());
                         if has_images || has_dirs {
                             let _ = app.emit("drag-hover", true);
@@ -478,7 +469,7 @@ pub fn run() {
 
                         let dirs: Vec<&PathBuf> = paths.iter().filter(|p| p.is_dir()).collect();
                         let files: Vec<String> = paths.iter()
-                            .filter(|p| !p.is_dir() && is_image_path(p))
+                            .filter(|p| !p.is_dir() && crate::extensions::is_image_path(p, false))
                             .map(|p| p.to_string_lossy().into_owned())
                             .collect();
 
