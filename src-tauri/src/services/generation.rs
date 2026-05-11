@@ -9,9 +9,16 @@ use crate::db_core::db::Database;
 use crate::db_core::models::GenerationRun;
 use crate::services::jobs::JobRegistry;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ApiStyle {
+    OpenAi,
+    Gemini,
+}
+
 pub struct ProviderConfig {
     pub base_url: &'static str,
     pub key_name: &'static str,
+    pub api_style: ApiStyle,
 }
 
 pub fn provider_config(provider: &str) -> Result<ProviderConfig, String> {
@@ -19,10 +26,17 @@ pub fn provider_config(provider: &str) -> Result<ProviderConfig, String> {
         "openai" => Ok(ProviderConfig {
             base_url: "https://api.openai.com/v1",
             key_name: "api_key_openai",
+            api_style: ApiStyle::OpenAi,
         }),
         "openrouter" => Ok(ProviderConfig {
             base_url: "https://openrouter.ai/api/v1",
             key_name: "api_key_openrouter",
+            api_style: ApiStyle::OpenAi,
+        }),
+        "google" => Ok(ProviderConfig {
+            base_url: "https://generativelanguage.googleapis.com/v1beta",
+            key_name: "api_key_google",
+            api_style: ApiStyle::Gemini,
         }),
         _ => Err(format!("Unknown provider: {}", provider)),
     }
@@ -58,15 +72,51 @@ struct OpenAiImageData {
     b64_json: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct GeminiResponse {
+    candidates: Option<Vec<GeminiCandidate>>,
+}
+#[derive(Debug, Deserialize)]
+struct GeminiCandidate {
+    content: Option<GeminiContent>,
+}
+#[derive(Debug, Deserialize)]
+struct GeminiContent {
+    parts: Option<Vec<GeminiPart>>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GeminiPart {
+    inline_data: Option<GeminiInlineData>,
+    #[serde(default)]
+    text: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GeminiInlineData {
+    data: String,
+    #[allow(dead_code)]
+    mime_type: String,
+}
+
 const PRICING: &[(&str, &str, &str, f64)] = &[
+    // OpenAI direct
     ("openai", "gpt-image-2", "1024x1024", 0.040),
     ("openai", "gpt-image-2", "1024x1536", 0.060),
     ("openai", "gpt-image-2", "1536x1024", 0.060),
     ("openai", "gpt-image-2", "auto", 0.040),
+    // OpenRouter
     ("openrouter", "openai/gpt-image-2", "1024x1024", 0.040),
-    ("openrouter", "openai/gpt-image-2", "1024x1536", 0.060),
-    ("openrouter", "openai/gpt-image-2", "1536x1024", 0.060),
     ("openrouter", "openai/gpt-image-2", "auto", 0.040),
+    ("openrouter", "openai/gpt-5-image", "auto", 0.040),
+    ("openrouter", "openai/gpt-5-image-mini", "auto", 0.020),
+    ("openrouter", "google/gemini-2.5-flash-image", "auto", 0.002),
+    ("openrouter", "google/gemini-3-pro-image-preview", "auto", 0.010),
+    ("openrouter", "google/gemini-3.1-flash-image-preview", "auto", 0.002),
+    // Google direct
+    ("google", "gemini-3.1-flash-image-preview", "auto", 0.002),
+    ("google", "gemini-3-pro-image-preview", "auto", 0.010),
+    ("google", "gemini-2.5-flash-image", "auto", 0.002),
 ];
 
 pub fn estimate_cost(provider: &str, model: &str, size: &str, quality: &str, n: u8) -> f64 {
@@ -78,10 +128,41 @@ pub fn estimate_cost(provider: &str, model: &str, size: &str, quality: &str, n: 
     base * multiplier * n as f64
 }
 
+fn extract_images_openai(resp_body: &str) -> Result<Vec<Vec<u8>>, String> {
+    let api_resp: OpenAiImageResponse = serde_json::from_str(resp_body)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    let mut images = Vec::new();
+    for item in &api_resp.data {
+        let b64 = item.b64_json.as_deref().ok_or("No b64_json in response")?;
+        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)
+            .map_err(|e| format!("Base64 decode error: {}", e))?;
+        images.push(bytes);
+    }
+    Ok(images)
+}
+
+fn extract_image_gemini(resp_body: &str) -> Result<Vec<u8>, String> {
+    let resp: GeminiResponse = serde_json::from_str(resp_body)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    let candidates = resp.candidates.ok_or("No candidates in response")?;
+    let candidate = candidates.first().ok_or("Empty candidates")?;
+    let content = candidate.content.as_ref().ok_or("No content")?;
+    let parts = content.parts.as_ref().ok_or("No parts")?;
+    for part in parts {
+        if let Some(ref data) = part.inline_data {
+            let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data.data)
+                .map_err(|e| format!("Base64 decode: {}", e))?;
+            return Ok(bytes);
+        }
+    }
+    Err("No image data in Gemini response".to_string())
+}
+
 pub async fn generate_images(
     request: &GenerationRequest,
     api_key: &str,
     base_url: &str,
+    api_style: ApiStyle,
     app_data_dir: &Path,
     db: &Database,
     jobs: &JobRegistry,
@@ -104,55 +185,6 @@ pub async fn generate_images(
         .timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
-    let resp = client
-        .post(&format!("{}/images/generations", base_url))
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&serde_json::json!({
-            "model": &request.model,
-            "prompt": &request.prompt,
-            "n": request.n,
-            "size": &request.size,
-            "quality": &request.quality,
-        }))
-        .send()
-        .await
-        .map_err(|e| {
-            jobs.fail(job_id, &e.to_string());
-            let _ = app_handle.emit("job-status-changed", serde_json::json!({
-                "job_id": job_id, "kind": "generation", "status": "failed",
-            }));
-            format!("API request failed: {}", e)
-        })?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        let msg = format!("OpenAI API error {}: {}", status, body);
-        jobs.fail(job_id, &msg);
-        let _ = app_handle.emit("job-status-changed", serde_json::json!({
-            "job_id": job_id, "kind": "generation", "status": "failed",
-        }));
-        return Err(msg);
-    }
-
-    let resp_body = resp.text().await
-        .map_err(|e| {
-            let msg = format!("Read error: {}", e);
-            jobs.fail(job_id, &msg);
-            let _ = app_handle.emit("job-status-changed", serde_json::json!({
-                "job_id": job_id, "kind": "generation", "status": "failed",
-            }));
-            msg
-        })?;
-    let api_resp: OpenAiImageResponse = serde_json::from_str(&resp_body)
-        .map_err(|e| {
-            let msg = format!("Parse error: {}", e);
-            jobs.fail(job_id, &msg);
-            let _ = app_handle.emit("job-status-changed", serde_json::json!({
-                "job_id": job_id, "kind": "generation", "status": "failed",
-            }));
-            msg
-        })?;
 
     let parent_run_id = if let Some(ref src_id) = request.source_image_id {
         db.get_generation_run_for_image(src_id)
@@ -167,29 +199,140 @@ pub async fn generate_images(
     let mut run_ids = Vec::new();
     let mut errors = Vec::new();
 
-    for (i, item) in api_resp.data.iter().enumerate() {
-        if cancel.is_cancelled() {
-            jobs.mark_cancelled(job_id);
-            let _ = app_handle.emit("job-status-changed", serde_json::json!({
-                "job_id": job_id, "kind": "generation", "status": "cancelled",
-            }));
-            break;
-        }
+    match api_style {
+        ApiStyle::OpenAi => {
+            let resp = client
+                .post(&format!("{}/images/generations", base_url))
+                .header("Authorization", format!("Bearer {}", api_key))
+                .json(&serde_json::json!({
+                    "model": &request.model,
+                    "prompt": &request.prompt,
+                    "n": request.n,
+                    "size": &request.size,
+                    "quality": &request.quality,
+                }))
+                .send()
+                .await
+                .map_err(|e| {
+                    jobs.fail(job_id, &e.to_string());
+                    let _ = app_handle.emit("job-status-changed", serde_json::json!({
+                        "job_id": job_id, "kind": "generation", "status": "failed",
+                    }));
+                    format!("API request failed: {}", e)
+                })?;
 
-        match save_generated_image(item, i, request, &generated_dir, db, parent_run_id.as_deref(), &resp_body) {
-            Ok((image_id, run_id)) => {
-                image_ids.push(image_id);
-                run_ids.push(run_id);
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                let msg = format!("API error {}: {}", status, body);
+                jobs.fail(job_id, &msg);
+                let _ = app_handle.emit("job-status-changed", serde_json::json!({
+                    "job_id": job_id, "kind": "generation", "status": "failed",
+                }));
+                return Err(msg);
             }
-            Err(e) => errors.push(format!("Image {}: {}", i, e)),
-        }
 
-        jobs.update_progress(job_id, (i + 1) as u32, Some(&format!("Saved image {}/{}", i + 1, request.n)));
-        let _ = app_handle.emit("generation-progress", serde_json::json!({
-            "job_id": job_id,
-            "current": i + 1,
-            "total": request.n,
-        }));
+            let resp_body = resp.text().await
+                .map_err(|e| {
+                    let msg = format!("Read error: {}", e);
+                    jobs.fail(job_id, &msg);
+                    let _ = app_handle.emit("job-status-changed", serde_json::json!({
+                        "job_id": job_id, "kind": "generation", "status": "failed",
+                    }));
+                    msg
+                })?;
+
+            let decoded_images = extract_images_openai(&resp_body).map_err(|e| {
+                jobs.fail(job_id, &e);
+                let _ = app_handle.emit("job-status-changed", serde_json::json!({
+                    "job_id": job_id, "kind": "generation", "status": "failed",
+                }));
+                e
+            })?;
+
+            for (i, bytes) in decoded_images.iter().enumerate() {
+                if cancel.is_cancelled() {
+                    jobs.mark_cancelled(job_id);
+                    let _ = app_handle.emit("job-status-changed", serde_json::json!({
+                        "job_id": job_id, "kind": "generation", "status": "cancelled",
+                    }));
+                    break;
+                }
+
+                match save_image_bytes(bytes, i, request, &generated_dir, db, parent_run_id.as_deref(), &resp_body) {
+                    Ok((image_id, run_id)) => {
+                        image_ids.push(image_id);
+                        run_ids.push(run_id);
+                    }
+                    Err(e) => errors.push(format!("Image {}: {}", i, e)),
+                }
+
+                jobs.update_progress(job_id, (i + 1) as u32, Some(&format!("Saved image {}/{}", i + 1, request.n)));
+                let _ = app_handle.emit("generation-progress", serde_json::json!({
+                    "job_id": job_id, "current": i + 1, "total": request.n,
+                }));
+            }
+        }
+        ApiStyle::Gemini => {
+            for i in 0..request.n as usize {
+                if cancel.is_cancelled() {
+                    jobs.mark_cancelled(job_id);
+                    let _ = app_handle.emit("job-status-changed", serde_json::json!({
+                        "job_id": job_id, "kind": "generation", "status": "cancelled",
+                    }));
+                    break;
+                }
+
+                let url = format!("{}/models/{}:generateContent", base_url, request.model);
+                let parts = vec![serde_json::json!({"text": &request.prompt})];
+                let payload = serde_json::json!({
+                    "contents": [{"parts": parts}],
+                    "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
+                });
+
+                let resp = client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .header("x-goog-api-key", api_key)
+                    .json(&payload)
+                    .send()
+                    .await;
+
+                match resp {
+                    Ok(r) => {
+                        if !r.status().is_success() {
+                            let status = r.status();
+                            let body = r.text().await.unwrap_or_default();
+                            errors.push(format!("Image {}: Gemini API error {}: {}", i, status, body));
+                            continue;
+                        }
+                        match r.text().await {
+                            Ok(resp_body) => {
+                                match extract_image_gemini(&resp_body) {
+                                    Ok(bytes) => {
+                                        match save_image_bytes(&bytes, i, request, &generated_dir, db, parent_run_id.as_deref(), &resp_body) {
+                                            Ok((image_id, run_id)) => {
+                                                image_ids.push(image_id);
+                                                run_ids.push(run_id);
+                                            }
+                                            Err(e) => errors.push(format!("Image {}: {}", i, e)),
+                                        }
+                                    }
+                                    Err(e) => errors.push(format!("Image {}: {}", i, e)),
+                                }
+                            }
+                            Err(e) => errors.push(format!("Image {}: Read error: {}", i, e)),
+                        }
+                    }
+                    Err(e) => errors.push(format!("Image {}: Request failed: {}", i, e)),
+                }
+
+                jobs.update_progress(job_id, (i + 1) as u32, Some(&format!("Saved image {}/{}", i + 1, request.n)));
+                let _ = app_handle.emit("generation-progress", serde_json::json!({
+                    "job_id": job_id, "current": i + 1, "total": request.n,
+                }));
+            }
+        }
     }
 
     let lineage_group_id = if image_ids.len() > 1 || request.source_image_id.is_some() {
@@ -230,8 +373,8 @@ pub async fn generate_images(
     })
 }
 
-fn save_generated_image(
-    item: &OpenAiImageData,
+fn save_image_bytes(
+    bytes: &[u8],
     index: usize,
     request: &GenerationRequest,
     generated_dir: &Path,
@@ -239,13 +382,6 @@ fn save_generated_image(
     parent_run_id: Option<&str>,
     raw_api_response: &str,
 ) -> Result<(String, String), String> {
-    let b64 = item.b64_json.as_deref()
-        .ok_or("No b64_json in response")?;
-
-    let bytes = base64::Engine::decode(
-        &base64::engine::general_purpose::STANDARD, b64
-    ).map_err(|e| format!("Base64 decode error: {}", e))?;
-
     let image_id = Uuid::new_v4().to_string();
     let filename = format!("{}_{}.png", &image_id[..8], index);
     let file_path = generated_dir.join(&filename);
@@ -288,7 +424,7 @@ fn save_generated_image(
     let megapixels = (width as f64 * height as f64) / 1_000_000.0;
     db.update_source_detection(
         &image_id, Some(&request.provider), 100.0,
-        "{\"source\":\"openai_api_generation\"}", Some(true),
+        &format!("{{\"source\":\"{}_api_generation\"}}", request.provider), Some(true),
         Some(&request.prompt), aspect, orientation, megapixels,
     ).map_err(|e| e.to_string())?;
 
@@ -309,7 +445,7 @@ fn save_generated_image(
         settings_json: settings.to_string(),
         seed: None,
         parent_run_id: parent_run_id.map(|s| s.to_string()),
-        source_type: "openai_api".to_string(),
+        source_type: format!("{}_api", request.provider),
         source_path: Some(file_path.to_string_lossy().to_string()),
         raw_metadata_json: Some(raw_api_response.to_string()),
         created_at: Some(now.clone()),

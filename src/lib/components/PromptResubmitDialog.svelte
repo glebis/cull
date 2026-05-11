@@ -20,13 +20,15 @@
     let submitting = $state(false);
     let error = $state<string | null>(null);
     let costEstimate = $state<CostEstimate | null>(null);
+    let includeSource = $state(false);
 
     const SIZES = ['1024x1024', '1024x1536', '1536x1024', 'auto'];
     const QUALITIES = ['auto', 'low', 'high'];
 
     const PROVIDER_MODELS: Record<string, string[]> = {
         openai: ['gpt-image-2'],
-        openrouter: ['openai/gpt-image-2'],
+        openrouter: ['openai/gpt-image-2', 'openai/gpt-5-image', 'openai/gpt-5-image-mini', 'google/gemini-2.5-flash-image', 'google/gemini-3-pro-image-preview', 'google/gemini-3.1-flash-image-preview'],
+        google: ['gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview', 'gemini-2.5-flash-image'],
     };
     let availableModels = $derived(PROVIDER_MODELS[provider] ?? ['gpt-image-2']);
 
@@ -68,7 +70,7 @@
         try {
             const resp = await resubmitPrompt({
                 provider,
-                source_image_id: sourceImageId,
+                source_image_id: includeSource ? sourceImageId : null,
                 prompt: prompt.trim(),
                 n,
                 model,
@@ -104,7 +106,7 @@
                 <span class="field-label">Prompt</span>
                 <textarea
                     bind:value={prompt}
-                    rows={4}
+                    rows={8}
                     placeholder="Describe the image..."
                 ></textarea>
             </label>
@@ -115,6 +117,7 @@
                     <select bind:value={provider}>
                         <option value="openai">OpenAI</option>
                         <option value="openrouter">OpenRouter</option>
+                        <option value="google">Google</option>
                     </select>
                 </label>
 
@@ -140,22 +143,35 @@
 
                 <label class="field compact">
                     <span class="field-label">Quality</span>
-                    <select bind:value={quality} onchange={updateCost}>
+                    <div class="btn-group">
                         {#each QUALITIES as q}
-                            <option value={q}>{q}</option>
+                            <button
+                                class="btn-option"
+                                class:active={quality === q}
+                                onclick={() => { quality = q; updateCost(); }}
+                            >{q}</button>
                         {/each}
-                    </select>
+                    </div>
                 </label>
 
                 <label class="field compact">
                     <span class="field-label">Variations</span>
-                    <select bind:value={n} onchange={updateCost}>
+                    <div class="btn-group">
                         {#each [1, 2, 3, 4] as v}
-                            <option value={v}>{v}</option>
+                            <button
+                                class="btn-option"
+                                class:active={n === v}
+                                onclick={() => { n = v; updateCost(); }}
+                            >{v}</button>
                         {/each}
-                    </select>
+                    </div>
                 </label>
             </div>
+
+            <label class="checkbox-field">
+                <input type="checkbox" bind:checked={includeSource} />
+                <span>Include original image as reference</span>
+            </label>
 
             {#if costEstimate}
                 <div class="cost-estimate">
@@ -192,7 +208,7 @@
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: calc(var(--radius) * 2);
-        width: 480px;
+        width: 640px;
         max-width: 90vw;
         max-height: 80vh;
         overflow-y: auto;
@@ -300,5 +316,42 @@
     }
     .btn:hover:not(:disabled) {
         filter: brightness(1.1);
+    }
+    .btn-group {
+        display: flex;
+        gap: 1px;
+        background: var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+    }
+    .btn-option {
+        flex: 1;
+        padding: 4px 8px;
+        background: var(--bg);
+        border: none;
+        color: var(--text-secondary);
+        font-family: var(--font);
+        font-size: 12px;
+        cursor: pointer;
+        transition: background 0.1s, color 0.1s;
+    }
+    .btn-option:hover {
+        background: var(--surface);
+        color: var(--text);
+    }
+    .btn-option.active {
+        background: var(--blue);
+        color: var(--bg);
+    }
+    .checkbox-field {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing);
+        font-size: 12px;
+        color: var(--text-secondary);
+        cursor: pointer;
+    }
+    .checkbox-field input[type="checkbox"] {
+        accent-color: var(--blue);
     }
 </style>

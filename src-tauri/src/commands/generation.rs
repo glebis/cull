@@ -39,6 +39,7 @@ pub async fn resubmit_prompt(
     let api_key = state.secrets.get(provider_cfg.key_name)?
         .ok_or_else(|| format!("{} API key not set. Go to Settings to add it.", request.provider))?;
     let base_url = provider_cfg.base_url.to_string();
+    let api_style = provider_cfg.api_style;
 
     if request.prompt.trim().is_empty() {
         return Err("Prompt cannot be empty".to_string());
@@ -70,6 +71,7 @@ pub async fn resubmit_prompt(
             &gen_request,
             &api_key,
             &base_url,
+            api_style,
             &app_data_dir,
             &db,
             &jobs,
