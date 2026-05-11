@@ -224,6 +224,7 @@ pub fn run() {
             commands::import::import_files,
             commands::import::regenerate_thumbnails,
             commands::import::regenerate_thumbnails_by_ids,
+            commands::import::regenerate_single_thumbnail,
             commands::import::rescan_sources,
             commands::library::list_images,
             commands::library::get_image_count,

@@ -215,6 +215,24 @@ pub async fn regenerate_thumbnails_by_ids(
 }
 
 #[tauri::command]
+pub async fn regenerate_single_thumbnail(
+    state: State<'_, AppState>,
+    image_id: String,
+) -> Result<String, String> {
+    let db = &state.db;
+    let app_data_dir = &state.app_data_dir;
+    let id_refs: Vec<&str> = vec![image_id.as_str()];
+    let found = db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
+    let img = found.first().ok_or_else(|| format!("Image '{}' not found", image_id))?;
+    let source_path = std::path::Path::new(&img.path);
+    if !source_path.exists() {
+        return Err(format!("Source file missing: {}", img.path));
+    }
+    let thumb_path = crate::db_core::thumbnails::generate_thumbnail(source_path, app_data_dir, &image_id)?;
+    Ok(thumb_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 pub async fn rescan_sources(
     app: AppHandle,
     state: State<'_, AppState>,
