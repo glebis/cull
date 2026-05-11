@@ -137,6 +137,15 @@ impl FileWatcher {
                 let mut any_changed = false;
                 for path in ready {
                     sync_queue.remove(&path);
+                    // Skip cloud placeholders — no local content to hash
+                    if crate::cloud::is_cloud_placeholder(&path) {
+                        continue;
+                    }
+                    if crate::cloud::detect_cloud_provider(&path).is_some() {
+                        if let Ok(meta) = std::fs::metadata(&path) {
+                            if meta.len() == 0 { continue; }
+                        }
+                    }
                     match crate::db_core::import::sync_file(&sync_db, &path, &app_data_dir) {
                         Ok(outcome) => {
                             match &outcome {
@@ -209,6 +218,11 @@ impl FileWatcher {
         intent_registry: &DashMap<PathBuf, MoveIntent>,
         sync_queue: &DashMap<PathBuf, Instant>,
     ) {
+        // Skip cloud provider internal/metadata files entirely
+        if event.paths.iter().all(|p| crate::cloud::is_cloud_internal_file(p)) {
+            return;
+        }
+
         let now = Instant::now();
         intent_registry.retain(|_, intent| {
             now.duration_since(intent.registered_at).as_secs() < INTENT_EXPIRY_SECS
@@ -220,6 +234,7 @@ impl FileWatcher {
             EventKind::Remove(_) => {
                 for path in &event.paths {
                     if !is_image_ext(path) { continue; }
+                    if crate::cloud::is_cloud_internal_file(path) { continue; }
                     if intent_registry.remove(path).is_some() {
                         continue;
                     }
@@ -227,6 +242,29 @@ impl FileWatcher {
                         eprintln!("[watcher] Root offline for {}, skipping", path.display());
                         let _ = app_handle.emit("watcher:volume-offline", path.to_string_lossy().to_string());
                         continue;
+                    }
+                    // Cloud eviction check: if file is in a cloud folder and the parent
+                    // dir still exists, check for .icloud stub or zero-byte placeholder
+                    if let Some(provider) = crate::cloud::detect_cloud_provider(path) {
+                        if path.parent().map_or(false, |p| p.exists()) {
+                            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                            let stub_name = format!(".{}.icloud", name);
+                            let stub_path = path.parent().unwrap().join(&stub_name);
+                            if stub_path.exists() || crate::cloud::is_cloud_placeholder(&stub_path) {
+                                eprintln!("[watcher] Cloud eviction ({:?}), skipping: {}", provider, path.display());
+                                let _ = app_handle.emit("watcher:cloud-eviction", serde_json::json!({
+                                    "path": path.to_string_lossy(),
+                                    "provider": format!("{:?}", provider),
+                                }));
+                                continue;
+                            }
+                            if let Ok(meta) = std::fs::metadata(path) {
+                                if meta.len() == 0 {
+                                    eprintln!("[watcher] Cloud placeholder ({:?}), skipping: {}", provider, path.display());
+                                    continue;
+                                }
+                            }
+                        }
                     }
                     // Use flexible lookup to handle macOS symlink paths
                     if let Some(file) = find_file_by_path_flexible(db, path) {

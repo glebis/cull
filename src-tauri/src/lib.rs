@@ -7,6 +7,7 @@ mod mcp;
 mod menu;
 mod services;
 mod tray;
+mod cloud;
 mod watcher;
 
 use std::path::PathBuf;

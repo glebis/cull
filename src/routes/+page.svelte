@@ -173,6 +173,28 @@
             loadImages().catch(e => console.error('Failed to reload after fs change:', e));
         });
 
+        const panicUnlisten = listen<{thread: string, location: string | null, message: string}>('rust-panic', (event) => {
+            console.error('[rust-panic]', event.payload);
+            showToast('Background thread crashed', { detail: event.payload.message, type: 'error', duration: 10000 });
+        });
+
+        const taskFailUnlisten = listen<{task: string, message: string, recoverable: boolean}>('background-task-failed', (event) => {
+            console.error('[task-failed]', event.payload);
+            showToast(`${event.payload.task} failed`, { detail: event.payload.message, type: 'error', duration: 8000 });
+        });
+
+        let cloudWarningShown = false;
+        const cloudUnlisten = listen<{path: string, provider: string}>('watcher:cloud-eviction', (event) => {
+            if (!cloudWarningShown) {
+                cloudWarningShown = true;
+                showToast(`Cloud files detected`, {
+                    detail: `Some images in your ${event.payload.provider} folder are stored in the cloud. Open them in Finder to download locally.`,
+                    type: 'info',
+                    duration: 10000,
+                });
+            }
+        });
+
         let first = true;
         const unsub = minSizeFilter.subscribe(() => {
             if (first) { first = false; return; }
@@ -194,6 +216,9 @@
             unsubMissing();
             dragUnlisten.then(fn => fn());
             watcherUnlisten.then(fn => fn());
+            panicUnlisten.then(fn => fn());
+            taskFailUnlisten.then(fn => fn());
+            cloudUnlisten.then(fn => fn());
             window.removeEventListener('trash-focused-image', handleTrash);
             window.removeEventListener('delete-focused-image', handlePermanentDelete);
             window.removeEventListener('reload-images', handleReloadImages);
