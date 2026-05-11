@@ -95,6 +95,7 @@ pub fn sync_file(
         let (image_id, raw_preview) = create_image_record(db, file_path, &hash, &ext, &data, can_decode)?;
         let _ = db.repoint_image_file(&existing_file.id, &image_id, file_size, &mtime);
         if can_decode {
+            let raw_dims = raw_preview.as_ref().map(|p| (p.image.width(), p.image.height()));
             if let Some(preview) = &raw_preview {
                 let _ = thumbnails::generate_thumbnail_from_image(&preview.image, app_data_dir, &image_id);
                 if let Ok(meta_json) = serde_json::to_string(&preview.metadata) {
@@ -103,7 +104,7 @@ pub fn sync_file(
             } else {
                 let _ = thumbnails::generate_thumbnail(file_path, app_data_dir, &image_id);
             }
-            run_source_detection(db, file_path, &image_id, &ext);
+            run_source_detection(db, file_path, &image_id, &ext, raw_dims);
             run_sidecar_detection(db, file_path, &image_id);
         }
         return Ok(SyncOutcome::ContentChanged { image_id });
@@ -140,6 +141,7 @@ pub fn sync_file(
     db.insert_image_file(&file_record).map_err(|e| e.to_string())?;
 
     if can_decode {
+        let raw_dims = raw_preview.as_ref().map(|p| (p.image.width(), p.image.height()));
         if let Some(preview) = &raw_preview {
             let _ = thumbnails::generate_thumbnail_from_image(&preview.image, app_data_dir, &image_id);
             if let Ok(meta_json) = serde_json::to_string(&preview.metadata) {
@@ -148,7 +150,7 @@ pub fn sync_file(
         } else {
             let _ = thumbnails::generate_thumbnail(file_path, app_data_dir, &image_id);
         }
-        run_source_detection(db, file_path, &image_id, &ext);
+        run_source_detection(db, file_path, &image_id, &ext, raw_dims);
         run_sidecar_detection(db, file_path, &image_id);
         Ok(SyncOutcome::NewImport { image_id })
     } else {
@@ -214,7 +216,28 @@ fn compute_hash(data: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-fn run_source_detection(db: &Database, file_path: &Path, image_id: &str, ext: &str) {
+fn run_source_detection(db: &Database, file_path: &Path, image_id: &str, ext: &str, override_dims: Option<(u32, u32)>) {
+    let (width, height) = override_dims.unwrap_or_else(|| {
+        image::open(file_path)
+            .map(|i| (i.width(), i.height()))
+            .unwrap_or((0, 0))
+    });
+
+    if crate::extensions::is_raw_extension(ext) {
+        let aspect_ratio = width as f64 / height.max(1) as f64;
+        let orientation = if (aspect_ratio - 1.0).abs() < 0.05 { "square" }
+            else if aspect_ratio > 1.0 { "landscape" }
+            else { "portrait" };
+        let megapixels = (width as f64 * height as f64) / 1_000_000.0;
+        let _ = db.update_source_detection(
+            image_id, Some("camera"), 1.0,
+            &serde_json::json!({"method": "raw_format"}).to_string(),
+            Some(false), None,
+            aspect_ratio, orientation, megapixels,
+        );
+        return;
+    }
+
     let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     let png_chunks = if ext == "png" {
         read_png_text_chunks(file_path).unwrap_or_default()
@@ -223,9 +246,6 @@ fn run_source_detection(db: &Database, file_path: &Path, image_id: &str, ext: &s
     };
     let detection = detect_source(filename, &png_chunks, file_path);
 
-    let (width, height) = image::open(file_path)
-        .map(|i| (i.width(), i.height()))
-        .unwrap_or((0, 0));
     let aspect_ratio = width as f64 / height.max(1) as f64;
     let orientation = if (aspect_ratio - 1.0).abs() < 0.05 { "square" }
         else if aspect_ratio > 1.0 { "landscape" }
