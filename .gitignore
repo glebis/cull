@@ -26,8 +26,8 @@ dist/
 thumbnails/
 
 # Tooling (Enzyme, Beads, Superpowers)
-.enzyme/
-.enzyme-embeddings/
+**/.enzyme/
+**/.enzyme-embeddings/
 .beads/
 .superpowers/
 .tdd-state.json
