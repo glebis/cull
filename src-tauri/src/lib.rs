@@ -8,6 +8,8 @@ mod menu;
 mod services;
 mod tray;
 mod cloud;
+pub mod extensions;
+pub mod raw;
 mod watcher;
 
 use std::path::PathBuf;
