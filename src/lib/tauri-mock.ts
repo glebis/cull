@@ -157,6 +157,9 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   save_export_image: () => '/mock/exported-slide.png',
   assemble_export_pdf: () => '/mock/exported.pdf',
 
+  check_library_health: () => ({ purged: 0, missing_sources: 0, to_regenerate: [] }),
+  regenerate_thumbnails_by_ids: () => 0,
+  regenerate_single_thumbnail: () => '',
   backfill_image_metadata: () => 0,
   list_images: () => Array.from({ length: 20 }, (_, i) => makeMockImage(i)),
   get_image_count: () => 20,
