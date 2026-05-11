@@ -36,6 +36,7 @@ impl Database {
         self.migrate_library_roots()?;
         self.migrate_image_file_stat_columns()?;
         self.migrate_raw_metadata()?;
+        self.migrate_audit_log()?;
         Ok(())
     }
 
@@ -47,6 +48,26 @@ impl Database {
             Err(e) if e.to_string().contains("duplicate column") => {}
             Err(e) => return Err(e),
         }
+        Ok(())
+    }
+
+    fn migrate_audit_log(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS api_audit_log (
+                id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                endpoint TEXT NOT NULL,
+                data_type TEXT NOT NULL,
+                data_size_bytes INTEGER,
+                prompt_preview TEXT,
+                image_dimensions TEXT,
+                model TEXT,
+                response_status INTEGER,
+                jurisdiction TEXT
+            );"
+        )?;
         Ok(())
     }
 

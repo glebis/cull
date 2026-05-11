@@ -14,6 +14,7 @@ pub mod tokens;
 pub mod undo;
 pub mod generation;
 pub mod sessions;
+pub mod audit;
 
 use crate::db_core::db::Database;
 use crate::db_core::embeddings::EmbeddingEngine;
