@@ -215,7 +215,7 @@ pub async fn check_library_health(
 
         let threshold = format!("-{} days", purge_days);
         let ids_to_purge: Vec<String> = {
-            let conn = db.conn.lock().unwrap();
+            let conn = db.conn.lock();
             let mut stmt = conn.prepare(
                 "SELECT DISTINCT i.id FROM images i
                  WHERE NOT EXISTS (
@@ -240,7 +240,7 @@ pub async fn check_library_health(
         };
 
         for id in &ids_to_purge {
-            let conn = db.conn.lock().unwrap();
+            let conn = db.conn.lock();
             let _ = conn.execute("DELETE FROM images WHERE id = ?1", rusqlite::params![id]);
             drop(conn);
             let thumb = crate::db_core::thumbnails::thumbnail_path(app_data_dir, id);
