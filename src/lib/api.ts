@@ -159,6 +159,10 @@ export async function listCollectionImages(collectionId: string): Promise<ImageW
     return invoke('list_collection_images', { collectionId });
 }
 
+export async function removeFromCollection(collectionId: string, imageIds: string[]): Promise<void> {
+    return invoke('remove_from_collection', { collectionId, imageIds });
+}
+
 export async function deleteCollectionApi(collectionId: string): Promise<void> {
     return invoke('delete_collection', { collectionId });
 }
@@ -337,6 +341,15 @@ export async function deleteImagesPermanently(imageIds: string[]): Promise<numbe
     return invoke('delete_images_permanently', { imageIds });
 }
 
+// Undo/Redo
+export async function undo(): Promise<string | null> {
+    return invoke('undo');
+}
+
+export async function redo(): Promise<string | null> {
+    return invoke('redo');
+}
+
 // Settings
 export async function getAppSetting(key: string): Promise<string | null> {
     return invoke('get_app_setting', { key });
@@ -441,4 +454,37 @@ export async function rotateImage(imageId: string, degrees: number): Promise<voi
 
 export async function getGenerationRun(imageId: string): Promise<GenerationRun | null> {
     return invoke<GenerationRun | null>('get_generation_run', { imageId });
+}
+
+export async function rescanSidecars(): Promise<number> {
+    return invoke<number>('rescan_sidecars');
+}
+
+export interface ResubmitPromptRequest {
+    source_image_id: string | null;
+    prompt: string;
+    n: number;
+    model: string;
+    size: string;
+    quality: string;
+}
+
+export interface ResubmitPromptResponse {
+    job_id: string;
+}
+
+export interface CostEstimate {
+    estimated_cost: number;
+    model: string;
+    size: string;
+    quality: string;
+    n: number;
+}
+
+export async function resubmitPrompt(request: ResubmitPromptRequest): Promise<ResubmitPromptResponse> {
+    return invoke<ResubmitPromptResponse>('resubmit_prompt', { request });
+}
+
+export async function estimateGenerationCost(model: string, size: string, quality: string, n: number): Promise<CostEstimate> {
+    return invoke<CostEstimate>('estimate_generation_cost', { model, size, quality, n });
 }

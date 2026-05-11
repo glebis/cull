@@ -41,7 +41,10 @@
             const u6 = await listen<any>('rescan-progress', (e) => {
                 upsertJob(e.payload.job_id ?? `evt_rescan`, 'rescan', 'running', e.payload.current, e.payload.total, null);
             });
-            unlisteners = [u1, u2, u3, u4, u5, u6];
+            const u7 = await listen<any>('generation-progress', (e) => {
+                upsertJob(e.payload.job_id ?? `evt_generation`, 'generation', 'running', e.payload.current, e.payload.total, `Generating image ${e.payload.current}/${e.payload.total}`);
+            });
+            unlisteners = [u1, u2, u3, u4, u5, u6, u7];
         } catch {
             // Not in Tauri environment
         }
