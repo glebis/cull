@@ -2,6 +2,8 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { onMount } from 'svelte';
     import ContextMenu from './ContextMenu.svelte';
+    import PromptResubmitDialog from './PromptResubmitDialog.svelte';
+    import GenerationResultsStrip from './GenerationResultsStrip.svelte';
     import { images, focusedIndex, focusedImage, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
     import { getDetections, getVisionMetadata, cropImage, getImagesByIds, getGenerationRun } from '$lib/api';
     import type { Detection, GenerationRun } from '$lib/api';
@@ -39,6 +41,7 @@
     let genProvider = $derived(generationRun?.provider ?? null);
     let genSeed = $derived(generationRun?.seed ?? null);
     let promptExpanded = $state(false);
+    let resubmitVisible = $state(false);
     let promptTruncated = $derived(prompt && prompt.length > 80 ? prompt.slice(0, 80) + '…' : prompt);
 
     let detections = $state<Detection[]>([]);
@@ -432,6 +435,9 @@
                     </svg>
                     Copy
                 </button>
+                <button class="prompt-action" onclick={() => resubmitVisible = true} title="Re-generate with this prompt">
+                    Re-generate
+                </button>
             </div>
             <div class="prompt-text">{prompt}</div>
             {#if genModel || genProvider || genSeed}
@@ -454,6 +460,19 @@
         />
     {/if}
 </div>
+
+    <PromptResubmitDialog
+        visible={resubmitVisible}
+        initialPrompt={prompt ?? ''}
+        sourceImageId={image?.image.id ?? null}
+        onclose={() => resubmitVisible = false}
+        ongenerated={(ids, jobId) => {}}
+    />
+
+    <GenerationResultsStrip
+        oncompare={(ids) => {}}
+        onselect={(id) => {}}
+    />
 
 {#if $showDetectionInspector}
     <div class="inspector">
@@ -915,5 +934,19 @@
     .crop-hint {
         color: rgba(255,255,255,0.5);
         font-size: 0.75rem;
+    }
+    .prompt-action {
+        background: var(--blue);
+        color: var(--bg);
+        border: none;
+        border-radius: var(--radius);
+        font-family: var(--font);
+        font-size: 11px;
+        padding: 2px 8px;
+        cursor: pointer;
+        margin-left: auto;
+    }
+    .prompt-action:hover {
+        filter: brightness(1.15);
     }
 </style>
