@@ -107,6 +107,24 @@ export async function regenerateThumbnails(): Promise<number> {
     return invoke<number>('regenerate_thumbnails');
 }
 
+export interface LibraryHealthResult {
+    purged: number;
+    missing_sources: number;
+    to_regenerate: string[];
+}
+
+export async function checkLibraryHealth(): Promise<LibraryHealthResult> {
+    return invoke<LibraryHealthResult>('check_library_health');
+}
+
+export async function regenerateThumbnailsByIds(imageIds: string[]): Promise<number> {
+    return invoke<number>('regenerate_thumbnails_by_ids', { imageIds });
+}
+
+export async function regenerateSingleThumbnail(imageId: string): Promise<string> {
+    return invoke<string>('regenerate_single_thumbnail', { imageId });
+}
+
 export async function rescanSources(): Promise<number> {
     return invoke<number>('rescan_sources');
 }
