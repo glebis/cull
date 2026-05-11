@@ -44,6 +44,7 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 png = "0.17"
 printpdf = "0.7"
 thiserror = "1"
+parking_lot = "0.12"
 schemars = "1.2"
 rmcp = { version = "1.6", features = ["server", "macros", "transport-streamable-http-server"] }
 hyper = { version = "1", features = ["server", "http1"] }
@@ -59,6 +60,7 @@ rand = "0.8"
 subtle = "2"
 hex = "0.4"
 dirs = "5"
+rsraw = "0.1"
 notify = "6"
 dashmap = "6"
 
