@@ -3,6 +3,9 @@
     import { listMcpTokens, createMcpToken, revokeMcpToken, rotateMcpToken, getAppSetting, setAppSetting, hasApiKey, setApiKey, deleteApiKey, validateApiKey, backfillRawPreviews } from '$lib/api';
     import type { McpToken } from '$lib/api';
     import { showToast } from '$lib/stores';
+    import PrivacyDashboard from './PrivacyDashboard.svelte';
+
+    let activeSettingsTab = $state<'general' | 'privacy'>('general');
 
     let { onclose }: { onclose: () => void } = $props();
 
@@ -225,7 +228,16 @@
             <button class="close-btn" onclick={onclose}>&times;</button>
         </div>
 
-        {#if loading}
+        <div class="settings-tabs">
+            <button class="settings-tab" class:active={activeSettingsTab === 'general'} onclick={() => activeSettingsTab = 'general'}>General</button>
+            <button class="settings-tab" class:active={activeSettingsTab === 'privacy'} onclick={() => activeSettingsTab = 'privacy'}>Privacy & Data</button>
+        </div>
+
+        {#if activeSettingsTab === 'privacy'}
+            <div class="section">
+                <PrivacyDashboard />
+            </div>
+        {:else if loading}
             <p class="loading">Loading...</p>
         {:else}
             <div class="section">
@@ -415,6 +427,24 @@
         padding: 16px 20px;
         border-bottom: 1px solid var(--border);
     }
+    .settings-tabs {
+        display: flex;
+        gap: 4px;
+        padding: 8px 20px;
+        border-bottom: 1px solid var(--border);
+    }
+    .settings-tab {
+        padding: 6px 12px;
+        background: none;
+        border: none;
+        border-radius: var(--radius);
+        color: var(--text-secondary);
+        font-family: var(--font);
+        font-size: 12px;
+        cursor: pointer;
+    }
+    .settings-tab:hover { color: var(--text); }
+    .settings-tab.active { background: var(--bg); color: var(--text); }
     .panel-header h2 {
         margin: 0;
         font-size: 14px;
