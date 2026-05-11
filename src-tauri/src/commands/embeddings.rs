@@ -158,15 +158,25 @@ pub async fn get_api_key(state: State<'_, AppState>, provider: String) -> Result
 
 #[tauri::command]
 pub async fn validate_api_key(provider: String, key: String) -> Result<bool, String> {
-    if provider == "google" {
-        let client = reqwest::Client::new();
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models?key={}", key
-        );
-        let resp = client.get(&url).send().await.map_err(|e| format!("{}", e))?;
-        Ok(resp.status().is_success())
-    } else {
-        Ok(false)
+    let client = reqwest::Client::new();
+    match provider.as_str() {
+        "google" => {
+            let url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/models?key={}", key
+            );
+            let resp = client.get(&url).send().await.map_err(|e| format!("{}", e))?;
+            Ok(resp.status().is_success())
+        }
+        "openai" => {
+            let resp = client
+                .get("https://api.openai.com/v1/models")
+                .header("Authorization", format!("Bearer {}", key))
+                .send()
+                .await
+                .map_err(|e| format!("{}", e))?;
+            Ok(resp.status().is_success())
+        }
+        _ => Ok(false),
     }
 }
 
