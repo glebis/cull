@@ -298,7 +298,7 @@ pub fn run() {
             commands::lineage::get_batch_images,
             commands::lineage::scan_lineage,
             commands::lineage::get_generation_run,
-            commands::lineage::rescan_sidecars,
+            // commands::lineage::rescan_sidecars, // TODO: not yet implemented
             commands::mcp::create_mcp_token,
             commands::mcp::list_mcp_tokens,
             commands::mcp::revoke_mcp_token,
@@ -311,6 +311,16 @@ pub fn run() {
             commands::undo::redo,
             commands::undo::get_undo_status,
             commands::undo::list_undo_history,
+            commands::sessions::create_session,
+            commands::sessions::list_sessions,
+            commands::sessions::get_session,
+            commands::sessions::delete_session,
+            commands::sessions::convert_session_to_collection,
+            commands::sessions::validate_session_folder,
+            commands::sessions::create_canvas,
+            commands::sessions::list_canvases,
+            commands::sessions::update_canvas_layout,
+            commands::sessions::delete_canvas,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

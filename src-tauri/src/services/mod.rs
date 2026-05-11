@@ -9,6 +9,7 @@ pub mod display;
 pub mod jobs;
 pub mod tokens;
 pub mod undo;
+pub mod sessions;
 
 use crate::db_core::db::Database;
 use crate::db_core::embeddings::EmbeddingEngine;

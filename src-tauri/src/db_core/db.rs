@@ -27,6 +27,7 @@ impl Database {
         self.migrate_mcp_tables()?;
         self.migrate_generation_runs()?;
         self.migrate_undo_tables()?;
+        self.migrate_sessions()?;
         Ok(())
     }
 
@@ -1344,6 +1345,50 @@ impl Database {
             )", params![keep_count])?;
         Ok(())
     }
+
+    fn migrate_sessions(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+
+        let project_columns = vec![
+            ("folder_path", "TEXT"),
+            ("owning_session_id", "TEXT REFERENCES projects(id)"),
+            ("settings_json", "TEXT"),
+        ];
+        for (name, typ) in &project_columns {
+            let sql = format!("ALTER TABLE projects ADD COLUMN {} {}", name, typ);
+            match conn.execute(&sql, []) {
+                Ok(_) => {},
+                Err(e) if e.to_string().contains("duplicate column") => {},
+                Err(e) => return Err(e),
+            }
+        }
+
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS canvases (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                canvas_type TEXT NOT NULL DEFAULT 'manual'
+                    CHECK (canvas_type IN ('manual', 'query')),
+                layout_json TEXT NOT NULL DEFAULT '{}',
+                filter_json TEXT,
+                grid_config_json TEXT,
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases(session_id);"
+        )?;
+
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_collection_items_image ON collection_items(image_id);
+             CREATE INDEX IF NOT EXISTS idx_selections_project ON selections(project_id);
+             CREATE INDEX IF NOT EXISTS idx_embeddings_image ON embeddings(image_id);
+             CREATE INDEX IF NOT EXISTS idx_images_import_batch ON images(import_batch_id);"
+        )?;
+
+        Ok(())
+    }
 }
 
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
@@ -1464,5 +1509,50 @@ mod tests {
         // Should not error, just affect 0 rows
         let result = db.update_image_dimensions("nonexistent", 100, 100);
         assert!(result.is_ok());
+    }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+
+    #[test]
+    fn test_session_migration_creates_canvases_table() {
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='canvases'",
+            [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(count, 1, "canvases table should exist after migration");
+    }
+
+    #[test]
+    fn test_session_migration_adds_project_columns() {
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT folder_path FROM projects LIMIT 0").unwrap();
+        drop(stmt);
+        stmt = conn.prepare("SELECT owning_session_id FROM projects LIMIT 0").unwrap();
+        drop(stmt);
+        stmt = conn.prepare("SELECT settings_json FROM projects LIMIT 0").unwrap();
+        drop(stmt);
+    }
+
+    #[test]
+    fn test_session_indexes_exist() {
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let indexes: Vec<String> = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='index'"
+        ).unwrap()
+        .query_map([], |row| row.get(0)).unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+        assert!(indexes.contains(&"idx_canvases_session".to_string()));
+        assert!(indexes.contains(&"idx_collection_items_image".to_string()));
+        assert!(indexes.contains(&"idx_selections_project".to_string()));
+        assert!(indexes.contains(&"idx_embeddings_image".to_string()));
+        assert!(indexes.contains(&"idx_images_import_batch".to_string()));
     }
 }

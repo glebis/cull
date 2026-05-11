@@ -14,3 +14,4 @@ pub mod vision;
 pub mod transform;
 pub mod undo;
 pub mod window;
+pub mod sessions;

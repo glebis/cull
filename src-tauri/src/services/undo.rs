@@ -75,7 +75,7 @@ impl ActionManager {
         // 2. Lock cursor position, then perform mutation + undo record insert in one transaction
         let mut cursor = self.cursor_seq.lock().unwrap();
 
-        let conn = db.conn.lock().unwrap();
+        let mut conn = db.conn.lock().unwrap();
         let tx = conn.savepoint().map_err(|e| e.to_string())?;
 
         // Clear redo branch if cursor is pointing to an undone record
