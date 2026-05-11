@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { listMcpTokens, createMcpToken, revokeMcpToken, rotateMcpToken, getAppSetting, setAppSetting } from '$lib/api';
+    import { listMcpTokens, createMcpToken, revokeMcpToken, rotateMcpToken, getAppSetting, setAppSetting, hasApiKey, setApiKey, deleteApiKey, validateApiKey } from '$lib/api';
     import type { McpToken } from '$lib/api';
 
     let { onclose }: { onclose: () => void } = $props();
@@ -20,6 +20,22 @@
     let revealedTokenName = $state('');
     let copied = $state(false);
 
+    let autoPurge = $state(true);
+
+    interface ApiKeyState {
+        exists: boolean;
+        inputValue: string;
+        status: 'none' | 'connected' | 'invalid' | 'validating' | 'error';
+    }
+    const PROVIDERS = ['openai', 'google', 'openrouter'] as const;
+    const PROVIDER_LABELS: Record<string, string> = { openai: 'OpenAI', google: 'Google', openrouter: 'OpenRouter' };
+    const PROVIDER_PLACEHOLDERS: Record<string, string> = { openai: 'sk-...', google: 'AIza...', openrouter: 'sk-or-...' };
+    let apiKeys = $state<Record<string, ApiKeyState>>({
+        openai: { exists: false, inputValue: '', status: 'none' },
+        google: { exists: false, inputValue: '', status: 'none' },
+        openrouter: { exists: false, inputValue: '', status: 'none' },
+    });
+
     const ROLES = [
         { value: 'viewer', label: 'Viewer', desc: 'Read-only library access' },
         { value: 'curator', label: 'Curator', desc: 'Read + rate/curate/export' },
@@ -29,20 +45,34 @@
 
     onMount(async () => {
         try {
-            const [toks, ctSetting, trashSetting, httpSetting, portSetting] = await Promise.all([
+            const [toks, ctSetting, trashSetting, httpSetting, portSetting, purgeSetting] = await Promise.all([
                 listMcpTokens(),
                 getAppSetting('close_to_tray'),
                 getAppSetting('skip_trash_confirm'),
                 getAppSetting('mcp_http_enabled'),
                 getAppSetting('mcp_http_port'),
+                getAppSetting('auto_purge_missing'),
             ]);
             tokens = toks;
             closeToTray = ctSetting !== 'false';
             confirmTrash = trashSetting !== 'true';
             httpEnabled = httpSetting === 'true';
             if (portSetting) httpPort = portSetting;
+            autoPurge = purgeSetting !== 'false';
+
+            const [hasOpenai, hasGoogle, hasOpenrouter] = await Promise.all([
+                hasApiKey('openai'),
+                hasApiKey('google'),
+                hasApiKey('openrouter'),
+            ]);
+            apiKeys.openai.exists = hasOpenai;
+            apiKeys.openai.status = hasOpenai ? 'connected' : 'none';
+            apiKeys.google.exists = hasGoogle;
+            apiKeys.google.status = hasGoogle ? 'connected' : 'none';
+            apiKeys.openrouter.exists = hasOpenrouter;
+            apiKeys.openrouter.status = hasOpenrouter ? 'connected' : 'none';
         } catch (e) {
-            console.error('Failed to load MCP settings:', e);
+            console.error('Failed to load settings:', e);
         }
         loading = false;
     });
@@ -67,6 +97,37 @@
         if (port > 0 && port < 65536) {
             await setAppSetting('mcp_http_port', httpPort);
         }
+    }
+
+    async function toggleAutoPurge() {
+        autoPurge = !autoPurge;
+        await setAppSetting('auto_purge_missing', autoPurge ? 'true' : 'false');
+    }
+
+    async function handleApiKeyBlur(provider: string) {
+        const key = apiKeys[provider].inputValue.trim();
+        if (!key) return;
+        apiKeys[provider].status = 'validating';
+        try {
+            const valid = await validateApiKey(provider, key);
+            if (valid) {
+                await setApiKey(provider, key);
+                apiKeys[provider].exists = true;
+                apiKeys[provider].status = 'connected';
+                apiKeys[provider].inputValue = '';
+            } else {
+                apiKeys[provider].status = 'invalid';
+            }
+        } catch {
+            apiKeys[provider].status = 'error';
+        }
+    }
+
+    async function handleRemoveApiKey(provider: string) {
+        await deleteApiKey(provider);
+        apiKeys[provider].exists = false;
+        apiKeys[provider].status = 'none';
+        apiKeys[provider].inputValue = '';
     }
 
     async function handleCreate() {
@@ -145,7 +206,7 @@
 <div class="overlay" onclick={onclose} onkeydown={(e) => e.key === 'Escape' && onclose()} role="dialog" tabindex="-1">
     <div class="panel" onclick={(e) => e.stopPropagation()} role="document">
         <div class="panel-header">
-            <h2>MCP Server</h2>
+            <h2>Settings</h2>
             <button class="close-btn" onclick={onclose}>&times;</button>
         </div>
 
@@ -183,6 +244,43 @@
                         {/if}
                     </div>
                 </div>
+                <div class="setting-row">
+                    <span>Auto-purge missing files</span>
+                    <button class="toggle" class:on={autoPurge} onclick={toggleAutoPurge}>
+                        {autoPurge ? 'ON' : 'OFF'}
+                    </button>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">API Keys</div>
+                {#each PROVIDERS as provider}
+                    <div class="setting-row api-key-row">
+                        <span class="provider-label">{PROVIDER_LABELS[provider]}</span>
+                        <div class="api-key-controls">
+                            {#if apiKeys[provider].exists && !apiKeys[provider].inputValue}
+                                <span class="key-status connected">&#9679; Connected</span>
+                                <button class="action-btn danger" onclick={() => handleRemoveApiKey(provider)}>Remove</button>
+                            {:else}
+                                <input
+                                    type="password"
+                                    placeholder={PROVIDER_PLACEHOLDERS[provider]}
+                                    bind:value={apiKeys[provider].inputValue}
+                                    class="api-input"
+                                    onblur={() => handleApiKeyBlur(provider)}
+                                />
+                                {#if apiKeys[provider].status === 'validating'}
+                                    <span class="key-status validating">Validating...</span>
+                                {:else if apiKeys[provider].status === 'invalid'}
+                                    <span class="key-status invalid">Invalid key</span>
+                                {:else if apiKeys[provider].status === 'error'}
+                                    <span class="key-status invalid">Could not validate</span>
+                                {/if}
+                            {/if}
+                        </div>
+                    </div>
+                {/each}
+                <div class="keychain-hint">&#128274; Stored securely in system keychain</div>
             </div>
 
             {#if revealedSecret}
@@ -518,5 +616,50 @@
         color: var(--text-secondary);
         overflow-x: auto;
         margin: 0;
+    }
+    .api-key-row {
+        flex-wrap: wrap;
+    }
+    .provider-label {
+        min-width: 90px;
+    }
+    .api-key-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+        justify-content: flex-end;
+    }
+    .api-input {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 4px 8px;
+        width: 180px;
+        font-size: 12px;
+        font-family: inherit;
+        color: var(--text);
+    }
+    .api-input:focus {
+        border-color: var(--blue);
+        outline: none;
+    }
+    .key-status {
+        font-size: 11px;
+        white-space: nowrap;
+    }
+    .key-status.connected {
+        color: var(--green);
+    }
+    .key-status.invalid {
+        color: var(--red);
+    }
+    .key-status.validating {
+        color: var(--orange);
+    }
+    .keychain-hint {
+        font-size: 11px;
+        color: var(--text-secondary);
+        margin-top: 8px;
     }
 </style>
