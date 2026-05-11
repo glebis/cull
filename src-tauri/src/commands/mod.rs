@@ -1,6 +1,7 @@
 pub mod collections;
 pub mod deeplink;
 pub mod detection;
+pub mod raw;
 pub mod dictation;
 pub mod embeddings;
 pub mod export;

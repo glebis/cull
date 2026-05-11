@@ -91,7 +91,7 @@ fn run_stdio_bridge() {
     rt.block_on(async {
         let app_data_dir = dirs::data_dir()
             .expect("No data dir")
-            .join("com.glebkalinin.imageview");
+            .join("com.glebkalinin.cull");
 
         let sock_path = mcp::socket::socket_path(&app_data_dir);
 
@@ -157,7 +157,7 @@ pub fn run() {
                 let _ = w.set_focus();
             }
             for arg in &args {
-                if arg.starts_with("imageview://") {
+                if arg.starts_with("cull://") {
                     eprintln!("[single-instance] Forwarding deep link: {}", arg);
                     let params = parse_deep_link(arg);
                     let _ = app.emit("open-with-params", params);
@@ -172,7 +172,7 @@ pub fn run() {
             std::fs::create_dir_all(&app_data_dir)
                 .map_err(|e| format!("failed to create app data dir: {}", e))?;
 
-            let db_path = app_data_dir.join("imageview.db");
+            let db_path = app_data_dir.join("cull.db");
             let db = match Database::open(&db_path) {
                 Ok(db) => db,
                 Err(e) => {
@@ -194,7 +194,7 @@ pub fn run() {
             let detection_engine = Mutex::new(DetectionEngine::new_yolo(&model_dir));
             let safety_engine = Mutex::new(DetectionEngine::new_nudenet(&model_dir));
 
-            let secrets = Box::new(KeychainStore::new("imageview"));
+            let secrets = Box::new(KeychainStore::new("cull"));
             let jobs = crate::services::jobs::JobRegistry::default();
             app.manage(AppState { db, app_data_dir, embedding_engine, detection_engine, safety_engine, secrets, jobs, action_manager: services::undo::ActionManager::new(), file_watcher: Mutex::new(watcher::FileWatcher::new()) });
 
@@ -390,6 +390,7 @@ pub fn run() {
             commands::files::move_image,
             commands::files::rename_image,
             commands::files::create_subfolder,
+            commands::raw::backfill_raw_previews,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -447,7 +448,7 @@ pub fn run() {
                 }
 
                 for url in urls {
-                    if url.scheme() == "imageview" {
+                    if url.scheme() == "cull" {
                         let params = parse_deep_link(url.as_str());
                         let _ = app.emit("open-with-params", params);
                     }

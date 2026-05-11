@@ -171,9 +171,26 @@ pub async fn regenerate_thumbnails(
     for (i, img) in images.iter().enumerate() {
         let source_path = std::path::Path::new(&img.path);
         if source_path.exists() {
-            match crate::db_core::thumbnails::generate_thumbnail(source_path, app_data_dir, &img.image.id) {
-                Ok(_) => regenerated += 1,
-                Err(e) => eprintln!("Thumbnail failed for {}: {}", img.path, e),
+            let ext = source_path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+            if crate::extensions::is_raw_extension(ext) {
+                match crate::raw::decode_raw_preview(source_path) {
+                    Ok(preview) => {
+                        match crate::db_core::thumbnails::generate_thumbnail_from_image(
+                            &preview.image, app_data_dir, &img.image.id,
+                        ) {
+                            Ok(_) => regenerated += 1,
+                            Err(e) => eprintln!("RAW thumbnail failed for {}: {}", img.path, e),
+                        }
+                    }
+                    Err(e) => eprintln!("RAW decode failed for {}: {}", img.path, e),
+                }
+            } else {
+                match crate::db_core::thumbnails::generate_thumbnail(source_path, app_data_dir, &img.image.id) {
+                    Ok(_) => regenerated += 1,
+                    Err(e) => eprintln!("Thumbnail failed for {}: {}", img.path, e),
+                }
             }
         }
         let _ = app.emit("thumbnail-progress", ThumbnailProgress {
@@ -202,9 +219,26 @@ pub async fn regenerate_thumbnails_by_ids(
             if let Some(img) = found.first() {
                 let source_path = std::path::Path::new(&img.path);
                 if source_path.exists() {
-                    match crate::db_core::thumbnails::generate_thumbnail(source_path, app_data_dir, &img.image.id) {
-                        Ok(_) => regenerated += 1,
-                        Err(e) => eprintln!("Thumbnail failed for {}: {}", img.path, e),
+                    let ext = source_path.extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("");
+                    if crate::extensions::is_raw_extension(ext) {
+                        match crate::raw::decode_raw_preview(source_path) {
+                            Ok(preview) => {
+                                match crate::db_core::thumbnails::generate_thumbnail_from_image(
+                                    &preview.image, app_data_dir, &img.image.id,
+                                ) {
+                                    Ok(_) => regenerated += 1,
+                                    Err(e) => eprintln!("RAW thumbnail failed for {}: {}", img.path, e),
+                                }
+                            }
+                            Err(e) => eprintln!("RAW decode failed for {}: {}", img.path, e),
+                        }
+                    } else {
+                        match crate::db_core::thumbnails::generate_thumbnail(source_path, app_data_dir, &img.image.id) {
+                            Ok(_) => regenerated += 1,
+                            Err(e) => eprintln!("Thumbnail failed for {}: {}", img.path, e),
+                        }
                     }
                 }
             }
@@ -232,7 +266,18 @@ pub async fn regenerate_single_thumbnail(
     if !source_path.exists() {
         return Err(format!("Source file missing: {}", img.path));
     }
-    let thumb_path = crate::db_core::thumbnails::generate_thumbnail(source_path, app_data_dir, &image_id)?;
+    let ext = source_path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    let thumb_path = if crate::extensions::is_raw_extension(ext) {
+        let preview = crate::raw::decode_raw_preview(source_path)
+            .map_err(|e| format!("RAW decode failed: {}", e))?;
+        crate::db_core::thumbnails::generate_thumbnail_from_image(
+            &preview.image, app_data_dir, &image_id,
+        )?
+    } else {
+        crate::db_core::thumbnails::generate_thumbnail(source_path, app_data_dir, &image_id)?
+    };
     Ok(thumb_path.to_string_lossy().to_string())
 }
 
@@ -318,8 +363,17 @@ fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
                 let id_refs: Vec<&str> = vec![image_id.as_str()];
                 if let Ok(images) = state.db.get_images_by_ids(&id_refs) {
                     if let Some(img) = images.first() {
+                        let detect_path = if crate::extensions::is_raw_extension(
+                            std::path::Path::new(&img.path).extension().and_then(|e| e.to_str()).unwrap_or("")
+                        ) {
+                            crate::db_core::thumbnails::thumbnail_path(
+                                &app.state::<AppState>().app_data_dir, image_id
+                            )
+                        } else {
+                            std::path::PathBuf::from(&img.path)
+                        };
                         let engine = state.detection_engine.lock();
-                        if let Ok(detections) = engine.detect(std::path::Path::new(&img.path)) {
+                        if let Ok(detections) = engine.detect(&detect_path) {
                             drop(engine);
                             let _ = state.db.store_detections(image_id, "yolov8m", &detections);
                         }
@@ -354,8 +408,17 @@ fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
                 let id_refs: Vec<&str> = vec![image_id.as_str()];
                 if let Ok(images) = state.db.get_images_by_ids(&id_refs) {
                     if let Some(img) = images.first() {
+                        let detect_path = if crate::extensions::is_raw_extension(
+                            std::path::Path::new(&img.path).extension().and_then(|e| e.to_str()).unwrap_or("")
+                        ) {
+                            crate::db_core::thumbnails::thumbnail_path(
+                                &app.state::<AppState>().app_data_dir, image_id
+                            )
+                        } else {
+                            std::path::PathBuf::from(&img.path)
+                        };
                         let engine = state.safety_engine.lock();
-                        if let Ok(detections) = engine.detect(std::path::Path::new(&img.path)) {
+                        if let Ok(detections) = engine.detect(&detect_path) {
                             drop(engine);
                             let _ = state.db.store_detections(image_id, "nudenet", &detections);
                         }
