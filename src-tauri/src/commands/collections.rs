@@ -30,6 +30,13 @@ pub async fn list_collection_images(state: State<'_, AppState>, collection_id: S
 }
 
 #[tauri::command]
+pub async fn remove_from_collection(state: State<'_, AppState>, collection_id: String, image_ids: Vec<String>) -> Result<(), String> {
+    let ctx = ServiceContext::from_app_state(&state, None);
+    let refs: Vec<&str> = image_ids.iter().map(|s| s.as_str()).collect();
+    svc::remove_from_collection(&ctx, &collection_id, &refs).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn delete_collection(state: State<'_, AppState>, collection_id: String) -> Result<(), String> {
     let ctx = ServiceContext::from_app_state(&state, None);
     svc::delete_collection(&ctx, &collection_id).map_err(|e| e.to_string())

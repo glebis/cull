@@ -29,6 +29,13 @@ pub fn list_collection_images(ctx: &ServiceContext, collection_id: &str) -> Resu
     Ok(images)
 }
 
+pub fn remove_from_collection(ctx: &ServiceContext, collection_id: &str, image_ids: &[&str]) -> Result<(), ServiceError> {
+    for id in image_ids {
+        ctx.db.remove_from_collection(collection_id, id)?;
+    }
+    Ok(())
+}
+
 pub fn delete_collection(ctx: &ServiceContext, collection_id: &str) -> Result<(), ServiceError> {
     Ok(ctx.db.delete_collection(collection_id)?)
 }

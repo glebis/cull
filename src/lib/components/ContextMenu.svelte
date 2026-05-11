@@ -1,9 +1,9 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { revealItemInDir } from '@tauri-apps/plugin-opener';
-    import { setRating, setDecision, listCollections, addToCollection, createCollection, findSimilarImages, trashImages } from '$lib/api';
+    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, listCollectionImages } from '$lib/api';
     import type { ImageWithFile } from '$lib/api';
-    import { images, focusedIndex } from '$lib/stores';
+    import { images, focusedIndex, selectedIds, activeCollection, collections } from '$lib/stores';
 
     interface Props {
         image: ImageWithFile;
@@ -16,13 +16,21 @@
 
     let menuEl: HTMLDivElement | undefined = $state();
     let openSubmenu = $state<string | null>(null);
-    let collections = $state<[string, string, number][]>([]);
+    let collectionList = $state<[string, string, number][]>([]);
     let menuX = $state(x);
     let menuY = $state(y);
     let activeIndex = $state(0);
 
     let currentRating = $derived(image.selection?.star_rating ?? 0);
     let currentDecision = $derived(image.selection?.decision ?? 'undecided');
+
+    let targetIds = $derived(
+        $selectedIds.size > 0 && $selectedIds.has(image.image.id)
+            ? [...$selectedIds]
+            : [image.image.id]
+    );
+    let multiCount = $derived(targetIds.length);
+    let inCollection = $derived($activeCollection !== null);
 
     let flatItems = $derived(
         menuEl
@@ -122,12 +130,14 @@
 
     async function loadCollections() {
         openSubmenu = 'collections';
-        collections = await listCollections();
+        collectionList = await listCollections();
     }
 
     async function handleAddToCollection(colId: string) {
         onclose();
-        await addToCollection(colId, [image.image.id]);
+        await addToCollection(colId, targetIds);
+        const c = await listCollections();
+        collections.set(c);
     }
 
     async function handleNewCollection() {
@@ -135,7 +145,21 @@
         const name = window.prompt('Collection name:');
         if (!name?.trim()) return;
         const colId = await createCollection(name.trim());
-        await addToCollection(colId, [image.image.id]);
+        await addToCollection(colId, targetIds);
+        const c = await listCollections();
+        collections.set(c);
+    }
+
+    async function handleRemoveFromCollection() {
+        const colId = $activeCollection;
+        if (!colId) return;
+        onclose();
+        await removeFromCollection(colId, targetIds);
+        const updated = await listCollectionImages(colId);
+        images.set(updated);
+        focusedIndex.update(i => Math.min(i, updated.length - 1));
+        const c = await listCollections();
+        collections.set(c);
     }
 
     async function handleFindSimilar() {
@@ -161,9 +185,11 @@
 
     async function handleTrash() {
         onclose();
-        await trashImages([image.image.id]);
-        const allImages = $images.filter(img => img.image.id !== image.image.id);
+        const ids = new Set(targetIds);
+        await trashImages([...ids]);
+        const allImages = $images.filter(img => !ids.has(img.image.id));
         images.set(allImages);
+        if ($focusedIndex >= allImages.length) focusedIndex.set(Math.max(0, allImages.length - 1));
     }
 </script>
 
@@ -176,6 +202,11 @@
     bind:this={menuEl}
     onkeydown={handleMenuKeydown}
 >
+    {#if multiCount > 1}
+        <div class="context-menu-header">{multiCount} images selected</div>
+        <div class="separator"></div>
+    {/if}
+
     <!-- Rate -->
     <div class="submenu-parent"
         onmouseenter={() => openSubmenu = 'rate'}
@@ -253,7 +284,7 @@
         </button>
         {#if openSubmenu === 'collections'}
             <div class="submenu" role="menu">
-                {#each collections as [id, name, count]}
+                {#each collectionList as [id, name, count]}
                     <button class="context-menu-item" onclick={() => handleAddToCollection(id)} role="menuitem" tabindex="-1">
                         {name} <span class="count">({count})</span>
                     </button>
@@ -264,6 +295,16 @@
         {/if}
     </div>
 
+    {#if inCollection}
+        <button
+            class="context-menu-item danger"
+            onclick={handleRemoveFromCollection}
+            role="menuitem"
+            data-menu-index="5"
+            tabindex={activeIndex === 5 ? 0 : -1}
+        >Remove from Collection{multiCount > 1 ? ` (${multiCount})` : ''}</button>
+    {/if}
+
     <div class="separator"></div>
 
     <!-- Search -->
@@ -271,8 +312,8 @@
         class="context-menu-item"
         onclick={handleFindSimilar}
         role="menuitem"
-        data-menu-index="5"
-        tabindex={activeIndex === 5 ? 0 : -1}
+        data-menu-index="6"
+        tabindex={activeIndex === 6 ? 0 : -1}
     >Find Similar</button>
 
     <div class="separator"></div>
@@ -285,9 +326,9 @@
         <button
             class="context-menu-item has-submenu"
             role="menuitem"
-            data-menu-index="6"
+            data-menu-index="7"
             data-submenu-key="copy"
-            tabindex={activeIndex === 6 ? 0 : -1}
+            tabindex={activeIndex === 7 ? 0 : -1}
         >
             <span>Copy</span>
             <span class="arrow">►</span>
@@ -304,8 +345,8 @@
         class="context-menu-item"
         onclick={act(() => revealItemInDir(image.path))}
         role="menuitem"
-        data-menu-index="7"
-        tabindex={activeIndex === 7 ? 0 : -1}
+        data-menu-index="8"
+        tabindex={activeIndex === 8 ? 0 : -1}
     >Reveal in Finder</button>
 
     <div class="separator"></div>
@@ -315,9 +356,9 @@
         class="context-menu-item danger"
         onclick={handleTrash}
         role="menuitem"
-        data-menu-index="8"
-        tabindex={activeIndex === 8 ? 0 : -1}
-    >Trash</button>
+        data-menu-index="9"
+        tabindex={activeIndex === 9 ? 0 : -1}
+    >Trash{multiCount > 1 ? ` (${multiCount})` : ''}</button>
 </div>
 
 <style>
@@ -401,5 +442,11 @@
     .count {
         font-size: 11px;
         color: var(--text-secondary);
+    }
+    .context-menu-header {
+        padding: 4px 12px;
+        font-size: 11px;
+        color: var(--blue);
+        font-weight: 600;
     }
 </style>
