@@ -44,7 +44,10 @@
             const u7 = await listen<any>('generation-progress', (e) => {
                 upsertJob(e.payload.job_id ?? `evt_generation`, 'generation', 'running', e.payload.current, e.payload.total, `Generating image ${e.payload.current}/${e.payload.total}`);
             });
-            unlisteners = [u1, u2, u3, u4, u5, u6, u7];
+            const u8 = await listen<any>('thumbnail-progress', (e) => {
+                upsertJob(e.payload.job_id ?? `evt_thumbnails`, 'thumbnails', 'running', e.payload.current, e.payload.total, null);
+            });
+            unlisteners = [u1, u2, u3, u4, u5, u6, u7, u8];
         } catch {
             // Not in Tauri environment
         }
@@ -96,6 +99,7 @@
             detection: 'Detection',
             vision: 'Vision',
             rescan: 'Rescan',
+            thumbnails: 'Thumbnails',
         };
         return labels[kind] ?? kind;
     }
