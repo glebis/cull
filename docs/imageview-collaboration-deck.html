@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ImageView Collaboration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Geist:wght@400;600;800&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --color-bg: #ffffff;
+  --color-fg: #000000;
+  --color-primary: #e85d04;
+  --color-secondary: #ffd60a;
+  --color-accent: #3a86ff;
+  --color-success: #38b000;
+  --color-error: #d62828;
+  --color-muted: #e5e5e5;
+  --font-body: 'EB Garamond', Georgia, serif;
+  --font-heading: 'Geist', Arial, sans-serif;
+  --font-mono: 'Geist Mono', 'Courier New', monospace;
+  --shadow: 4px 4px 0px 0px #000000;
+  --shadow-sm: 2px 2px 0px 0px #000000;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html {
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--color-fg);
+  background: var(--color-bg);
+  overflow-x: hidden;
+}
+
+.slide {
+  min-height: 100vh;
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 80px 120px;
+  position: relative;
+}
+
+h1 {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 4.5rem;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 3rem;
+  line-height: 1.1;
+  margin-bottom: 40px;
+}
+
+h3 {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 1.5rem;
+  margin-bottom: 12px;
+}
+
+p, li {
+  font-size: 1.4rem;
+  line-height: 1.5;
+}
+
+.subtitle {
+  font-family: var(--font-body);
+  font-size: 1.8rem;
+  margin-top: 24px;
+  font-style: italic;
+}
+
+/* Slide backgrounds */
+.bg-primary { background: var(--color-primary); color: white; }
+.bg-secondary { background: var(--color-secondary); color: var(--color-fg); }
+.bg-accent { background: var(--color-accent); color: white; }
+.bg-dark { background: var(--color-fg); color: white; }
+.bg-muted { background: var(--color-muted); }
+.bg-error { background: var(--color-error); color: white; }
+.bg-success { background: var(--color-success); color: white; }
+
+/* Cards */
+.card {
+  background: var(--color-bg);
+  border: 3px solid var(--color-fg);
+  box-shadow: var(--shadow);
+  padding: 28px 32px;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+  margin-top: 32px;
+}
+
+.card h3 { color: var(--color-fg); }
+.card p { font-size: 1.15rem; color: #333; }
+
+/* Stats */
+.stats-row {
+  display: flex;
+  gap: 48px;
+  margin-top: 40px;
+  flex-wrap: wrap;
+}
+
+.stat {
+  text-align: center;
+}
+
+.stat .value {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 4rem;
+  line-height: 1;
+  display: block;
+}
+
+.stat .label {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-top: 8px;
+  display: block;
+}
+
+/* Table */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 24px;
+  font-size: 1.1rem;
+}
+
+th {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  text-align: left;
+  padding: 12px 16px;
+  border-bottom: 3px solid var(--color-fg);
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-muted);
+  vertical-align: top;
+}
+
+tr:last-child td { border-bottom: 3px solid var(--color-fg); }
+
+/* ASCII block */
+.ascii {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  white-space: pre;
+  background: var(--color-fg);
+  color: white;
+  padding: 32px;
+  border: 3px solid var(--color-fg);
+  box-shadow: var(--shadow);
+  margin-top: 32px;
+  overflow-x: auto;
+}
+
+/* Bullets */
+ul {
+  list-style: none;
+  margin-top: 16px;
+}
+
+ul li {
+  padding: 6px 0;
+  padding-left: 24px;
+  position: relative;
+}
+
+ul li::before {
+  content: '▶';
+  position: absolute;
+  left: 0;
+  color: var(--color-primary);
+  font-size: 0.8em;
+}
+
+.bg-primary ul li::before,
+.bg-dark ul li::before,
+.bg-accent ul li::before { color: var(--color-secondary); }
+
+/* Badge */
+.badge {
+  display: inline-block;
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  padding: 4px 12px;
+  border: 2px solid currentColor;
+  box-shadow: var(--shadow-sm);
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+
+.badge-primary { background: var(--color-primary); color: white; border-color: var(--color-fg); }
+.badge-accent { background: var(--color-accent); color: white; border-color: var(--color-fg); }
+.badge-success { background: var(--color-success); color: white; border-color: var(--color-fg); }
+.badge-secondary { background: var(--color-secondary); color: var(--color-fg); border-color: var(--color-fg); }
+
+/* Two-col */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+  margin-top: 32px;
+}
+
+/* Quote */
+.quote {
+  font-style: italic;
+  font-size: 1.6rem;
+  line-height: 1.4;
+  border-left: 6px solid var(--color-primary);
+  padding-left: 24px;
+  margin: 24px 0;
+}
+
+.bg-primary .quote { border-left-color: var(--color-secondary); }
+.bg-dark .quote { border-left-color: var(--color-primary); }
+
+/* Footer */
+.slide-footer {
+  position: absolute;
+  bottom: 32px;
+  left: 120px;
+  right: 120px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: #999;
+  display: flex;
+  justify-content: space-between;
+}
+
+.bg-dark .slide-footer,
+.bg-primary .slide-footer,
+.bg-accent .slide-footer { color: rgba(255,255,255,0.5); }
+
+/* Nav dots */
+.nav-dots {
+  position: fixed;
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 100;
+}
+
+.nav-dot {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--color-fg);
+  background: var(--color-bg);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.nav-dot.active {
+  background: var(--color-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Tier diagram */
+.tier-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 24px;
+  margin-top: 32px;
+}
+
+.tier-card {
+  border: 3px solid var(--color-fg);
+  box-shadow: var(--shadow);
+  padding: 24px;
+}
+
+.tier-card h3 {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--color-fg);
+}
+
+.tier-card ul { margin-top: 0; }
+.tier-card li { font-size: 1.1rem; padding: 4px 0; }
+
+/* Cost highlight */
+.cost-box {
+  display: inline-block;
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 2.5rem;
+  background: var(--color-secondary);
+  color: var(--color-fg);
+  border: 3px solid var(--color-fg);
+  box-shadow: var(--shadow);
+  padding: 16px 32px;
+  margin: 16px 0;
+}
+</style>
+</head>
+<body>
+
+<!-- SLIDE 1: Title -->
+<section class="slide bg-primary" id="s1">
+  <div>
+    <span class="badge badge-secondary">ImageView</span>
+    <h1 style="margin-top:24px;">Collaborative<br>Image Curation</h1>
+    <p class="subtitle">Real-time shared viewing, rating, and curation for teams and audiences.</p>
+    <div style="margin-top:48px; font-family: var(--font-mono); font-size: 0.85rem; opacity: 0.7;">
+      ┌─ Spec Overview ─ May 2026 ─┐
+    </div>
+  </div>
+  <div class="slide-footer"><span>ImageView</span><span>1 / 12</span></div>
+</section>
+
+<!-- SLIDE 2: The Gap -->
+<section class="slide" id="s2">
+  <h2>The Gap Nobody Fills</h2>
+  <div class="two-col">
+    <div>
+      <h3>Whiteboard Tools</h3>
+      <p>Miro, FigJam, Excalidraw</p>
+      <p style="color:#666; margin-top:8px;">Great for sticky notes and diagrams. Not built for actual images.</p>
+      <div style="margin-top:24px;">
+        <h3>Image Review Tools</h3>
+        <p>Frame.io, Picflow</p>
+        <p style="color:#666; margin-top:8px;">Async feedback on individual assets. No real-time shared sessions.</p>
+      </div>
+    </div>
+    <div class="card" style="display:flex; align-items:center; justify-content:center; text-align:center;">
+      <div>
+        <p style="font-size:1.1rem; color:#666;">Real-time collaborative</p>
+        <p style="font-family: var(--font-heading); font-weight:800; font-size:2.2rem; margin: 8px 0;">Image Curation</p>
+        <p style="font-size:1.1rem; color:#666;">Visual media + shared decisions</p>
+        <div style="margin-top:16px; font-family: var(--font-mono); font-size:0.8rem; color: var(--color-primary);">= No dedicated tool exists</div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-footer"><span>ImageView Collaboration</span><span>2 / 12</span></div>
+</section>
+
+<!-- SLIDE 3: Jobs to Be Done -->
+<section class="slide bg-dark" id="s3">
+  <h2>5 Jobs, Poorly Served</h2>
+  <div class="card-grid">
+    <div class="card">
+      <span class="badge badge-primary">Job 1</span>
+      <h3>Live Editorial Session</h3>
+      <p>Team rates images together in real-time. Consensus in 1 hour, not 3-5 days.</p>
+    </div>
+    <div class="card">
+      <span class="badge badge-primary">Job 2</span>
+      <h3>Workshop Facilitation</h3>
+      <p>20 students on a shared canvas. Critique together, not watch one screen.</p>
+    </div>
+    <div class="card">
+      <span class="badge badge-primary">Job 3</span>
+      <h3>Remote Async Curation</h3>
+      <p>Distributed team rates across time zones. No scheduling calls.</p>
+    </div>
+    <div class="card">
+      <span class="badge badge-accent">Job 4</span>
+      <h3>AI Generation Loop</h3>
+      <p>Generate, vote, iterate on prompts as a team. Not one person in Discord.</p>
+    </div>
+    <div class="card">
+      <span class="badge badge-accent">Job 5</span>
+      <h3>Exhibition Planning</h3>
+      <p>Curator + artist arrange a virtual wall remotely. Lock final layout.</p>
+    </div>
+  </div>
+  <div class="slide-footer"><span>ImageView Collaboration</span><span>3 / 12</span></div>
+</section>
+
+<!-- SLIDE 4: Miro Pain Points -->
+<section class="slide bg-secondary" id="s4">
+  <h2>Why Not Just Use Miro?</h2>
+  <ul style="max-width:700px;">
+    <li><strong>$8-16/user/month</strong> kills community and workshop budgets</li>
+    <li><strong>10% feature usage</strong> — overwhelming UI for non-tech participants</li>
+    <li><strong>Not built for images</strong> — great for sticky notes, bad for photo curation</li>
+    <li><strong>No self-hosting</strong> — dealbreaker for GDPR-conscious orgs</li>
+    <li><strong>No offline/local mode</strong> — breaks in gallery Wi-Fi dead zones</li>
+  </ul>
+  <div class="quote" style="margin-top:40px; border-left-color: var(--color-fg);">
+    "Most teams use 10% of the features and pay for 100%."
+  </div>
+  <div class="slide-footer"><span>ImageView Collaboration</span><span>4 / 12</span></div>
+</section>
+
+<!-- SLIDE 5: Three-Tier Architecture -->
+<section class="slide" id="s5">
+  <h2>Three-Tier Architecture</h2>
+  <div class="tier-row">
+    <div class="tier-card" style="background: var(--color-primary); color: white;">
+      <h3 style="color: white; border-bottom-color: rgba(255,255,255,0.3);">Tier 1 ─ App</h3>
+      <p style="font-size:1.1rem; margin-bottom:12px;"><strong>Tauri Desktop</strong></p>
+      <ul>
+        <li>Host &amp; Editor roles</li>
+        <li>Full Yjs CRDT sync</li>
+        <li>Import, arrange, generate</li>
+        <li>AI image generation</li>
+        <li>Source of truth</li>
+      </ul>
+    </div>
+    <div class="tier-card" style="background: var(--color-accent); color: white;">
+      <h3 style="color: white; border-bottom-color: rgba(255,255,255,0.3);">Tier 2 ─ Web Team</h3>
+      <p style="font-size:1.1rem; margin-bottom:12px;"><strong>Browser App</strong></p>
+      <ul>
+        <li>Reviewer role</li>
+        <li>Filtered Yjs sync</li>
+        <li>Rate, comment, flag</li>
+        <li>Compare view</li>
+        <li>No install required</li>
+      </ul>
+    </div>
+    <div class="tier-card" style="background: var(--color-fg); color: white;">
+      <h3 style="color: white; border-bottom-color: rgba(255,255,255,0.3);">Tier 3 ─ Audience</h3>
+      <p style="font-size:1.1rem; margin-bottom:12px;"><strong>Public Page</strong></p>
+      <ul>
+        <li>Observer / Buyer role</li>
+        <li>SSE stream (one-way)</li>
+        <li>Bookmark, comment, vote</li>
+        <li>Download &amp; purchase</li>
+        <li>Scales to 1000s</li>
+      </ul>
+    </div>
+  </div>
+  <div class="slide-footer"><span>ImageView Collaboration</span><span>5 / 12</span></div>
+</section>
+
+<!-- SLIDE 6: Architecture Diagram -->
+<section class="slide bg-muted" id="s6">
+  <h2>How It Connects</h2>
+  <div class="ascii">                          ┌─────────────────────────┐
+                          │    Session Server        │
+                          │  ┌───────────────────┐   │
+                          │  │ Yjs Doc (CRDT)    │   │
+                          │  │ Image Proxy / CDN  │   │
+                          │  │ Role-based Filter  │   │
+                          │  │ Voice (optional)   │   │
+                          │  └───────────────────┘   │
+                          └────┬──────┬──────┬───────┘
+                               │      │      │
+              ┌────────────────┘      │      └────────────────┐
+              │                       │                       │
+   ┌──────────┴──────────┐ ┌─────────┴──────────┐ ┌──────────┴──────────┐
+   │  TIER 1: Tauri App  │ │  TIER 2: Browser   │ │  TIER 3: Audience   │
+   │  ◆ Full Yjs sync    │ │  ◆ Filtered Yjs    │ │  ◆ SSE stream       │
+   │  ◆ WebSocket ←→     │ │  ◆ WebSocket ←→    │ │  ◆ HTTP GET only    │
+   │  ◆ Host / Editor    │ │  ◆ Reviewer         │ │  ◆ Observer / Buyer │
+   └─────────────────────┘ └─────────────────────┘ └─────────────────────┘</div>
+  <div class="slide-footer"><span>ImageView Collaboration</span><span>6 / 12</span></div>
+</section>
+
+<!-- SLIDE 7: Tech Stack -->
+<section class="slide" id="s7">
+  <h2>Tech Stack</h2>
+  <div class="two-col">
+    <div>
+      <h3>Sync Layer</h3>
+      <div class="card" style="margin-bottom:24px;">
+        <p><strong>Yjs (CRDT)</strong> via y-websocket</p>
+        <p style="font-size:1rem; color:#666; margin-top:4px;">Offline-first, conflict-free, MIT licensed. Self-hostable. No vendor lock-in.</p>
+      </div>
+      <h3>Voice (optional)</h3>
+      <div class="card">
+        <p><strong>Daily.co</strong> (v1) → <strong>LiveKit</strong> (v2)</p>
+        <p style="font-size:1rem; color:#666; margin-top:4px;">Start hosted, migrate to self-hosted. VoiceProvider abstraction for clean swap.</p>
+      </div>
+    </div>
+    <div>
+      <h3>Hosting</h3>
+      <table>
+        <tr><th>Option</th><th>Cost</th></tr>
+        <tr><td>Local sidecar (LAN)</td><td><strong>$0</strong></td></tr>
+        <tr><td>Hetzner CX22</td><td><strong>$3.29/mo</strong></td></tr>
+        <tr><td>Fly.io</td><td>$0-5/mo</td></tr>
+        <tr><td>y-sweet (managed)</td><td>$0 (10 GB free)</td></tr>
+      </table>
+      <p style="margin-top:24px; font-size:1.1rem;">No vendor dependency. Users choose their server.</p>
+    </div>
+  </div>
+  <div class="slide-footer"><span>ImageView Collaboration</span><span>7 / 12</span></div>
+</section>
+
+<!-- SLIDE 8: Roles & Permissions -->
+<section class="slide bg-accent" id="s8">
+  <h2>Roles &amp; What They See</h2>
+  <table style="background: white; color: var(--color-fg); border: 3px solid var(--color-fg); box-shadow: var(--shadow);">
+    <tr>
+      <th>Capability</th><th>Host</th><th>Editor</th><th>Reviewer</th><th>Observer</th><th>Buyer</th>
+    </tr>
+    <tr><td>View images</td><td>All</td><td>All</td><td>Published</td><td>Streamed</td><td>Streamed</td></tr>
+    <tr><td>Rate / vote</td><td>Yes</td><td>Yes</td><td>Yes</td><td>No</td><td>No</td></tr>
+    <tr><td>Arrange canvas</td><td>Yes</td><td>Yes</td><td>No</td><td>No</td><td>No</td></tr>
+    <tr><td>Comment</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Moderated</td><td>Moderated</td></tr>
+    <tr><td>Download</td><td>N/A</td><td>N/A</td><td>If allowed</td><td>If allowed</td><td>Watermarked</td></tr>
+    <tr><td>Purchase</td><td>N/A</td><td>N/A</td><td>No</td><td>No</td><td>Yes</td></tr>
+  </table>
+  <p style="margin-top:24px; font-size:1.2rem;">Host assigns roles in real-time. Server enforces permissions.</p>
+  <div class="slide-footer"><span>ImageView Collaboration</span><span>8 / 12</span></div>
+</section>
+
+<!-- SLIDE 9: Cost -->
+<section class="slide bg-dark" id="s9">
+  <h2>What It Costs</h2>
+  <div class="two-col" style="align-items: start;">
+    <div>
+      <h3 style="color: var(--color-secondary);">Workshop</h3>
+      <p>20 people, 2 hours, weekly</p>
+      <div class="cost-box" style="margin-top:16px;">$3.29/mo</div>
+      <p style="margin-top:12px; font-size:1.1rem; color:#aaa;">Hetzner CX22 + Daily.co free tier (9,600 min &lt; 10k limit)</p>
+    </div>
+    <div>
+      <h3 style="color: var(--color-secondary);">Live Sale Event</h3>
+      <p>5 editors + 200 audience, 3 hours</p>
+      <div class="cost-box" style="margin-top:16px;">$6.49/mo</div>
+      <p style="margin-top:12px; font-size:1.1rem; color:#aaa;">Hetzner CX32 + Daily.co voice + Stripe fees on sales</p>
+    </div>
+  </div>
+  <p style="margin-top:48px; font-family: var(--font-heading); font-weight:800; font-size:1.5rem; color: var(--color-primary);">No per-seat pricing. No feature gates. Ever.</p>
+  <div class="slide-footer"><span>ImageView Collaboration</span><span>9 / 12</span></div>
+</section>
+
+<!-- SLIDE 10: Sprints -->
+<section class="slide" id="s10">
+  <h2>8 Sprints to Ship</h2>
+  <div class="card-grid" style="grid-template-columns: repeat(4, 1fr);">
+    <div class="card" style="border-left: 6px solid var(--color-primary);">
+      <h3 style="font-size:1rem;">A: Presence</h3>
+      <p style="font-size:0.95rem;">Who's online, what they see, follow mode</p>
+    </div>
+    <div class="card" style="border-left: 6px solid var(--color-primary);">
+      <h3 style="font-size:1rem;">B: Ratings</h3>
+      <p style="font-size:0.95rem;">Shared stars, consensus view, conflict-free merge</p>
+    </div>
+    <div class="card" style="border-left: 6px solid var(--color-accent);">
+      <h3 style="font-size:1rem;">C: Server</h3>
+      <p style="font-size:0.95rem;">Session server, image proxy, role-based filter</p>
+    </div>
+    <div class="card" style="border-left: 6px solid var(--color-accent);">
+      <h3 style="font-size:1rem;">D: Web Team</h3>
+      <p style="font-size:0.95rem;">Browser app for reviewers, comments, compare</p>
+    </div>
+    <div class="card" style="border-left: 6px solid var(--color-success);">
+      <h3 style="font-size:1rem;">E: Audience</h3>
+      <p style="font-size:0.95rem;">Public page: bookmark, comment, download, buy</p>
+    </div>
+    <div class="card" style="border-left: 6px solid var(--color-success);">
+      <h3 style="font-size:1rem;">F: Canvas</h3>
+      <p style="font-size:0.95rem;">Shared drag, lock, arrange, snapshot layouts</p>
+    </div>
+    <div class="card" style="border-left: 6px solid var(--color-secondary); border-left-color: var(--color-error);">
+      <h3 style="font-size:1rem;">G: Voice</h3>
+      <p style="font-size:0.95rem;">Daily.co v1, LiveKit v2, custom audio widget</p>
+    </div>
+    <div class="card" style="border-left: 6px solid var(--color-error);">
+      <h3 style="font-size:1rem;">H: Moderation</h3>
+      <p style="font-size:0.95rem;">Roles, permissions, kick, anonymous critique</p>
+    </div>
+  </div>
+  <div class="slide-footer"><span>ImageView Collaboration</span><span>10 / 12</span></div>
+</section>
+
+<!-- SLIDE 11: UX Flow -->
+<section class="slide bg-muted" id="s11">
+  <h2>How a Session Works</h2>
+  <div class="two-col">
+    <div>
+      <h3>Host</h3>
+      <ol style="list-style:none; counter-reset: step;">
+        <li style="padding: 8px 0; padding-left: 36px; position: relative; font-size:1.2rem;"><span style="position:absolute; left:0; font-family: var(--font-heading); font-weight:800; color: var(--color-primary);">01</span> Click "Start Session"</li>
+        <li style="padding: 8px 0; padding-left: 36px; position: relative; font-size:1.2rem;"><span style="position:absolute; left:0; font-family: var(--font-heading); font-weight:800; color: var(--color-primary);">02</span> QR code + 3 links generated</li>
+        <li style="padding: 8px 0; padding-left: 36px; position: relative; font-size:1.2rem;"><span style="position:absolute; left:0; font-family: var(--font-heading); font-weight:800; color: var(--color-primary);">03</span> Select images, start review</li>
+        <li style="padding: 8px 0; padding-left: 36px; position: relative; font-size:1.2rem;"><span style="position:absolute; left:0; font-family: var(--font-heading); font-weight:800; color: var(--color-primary);">04</span> See consensus emerge live</li>
+        <li style="padding: 8px 0; padding-left: 36px; position: relative; font-size:1.2rem;"><span style="position:absolute; left:0; font-family: var(--font-heading); font-weight:800; color: var(--color-primary);">05</span> Apply selections to DB</li>
+      </ol>
+    </div>
+    <div>
+      <h3>Participants</h3>
+      <ol style="list-style:none;">
+        <li style="padding: 8px 0; padding-left: 36px; position: relative; font-size:1.2rem;"><span style="position:absolute; left:0; font-family: var(--font-heading); font-weight:800; color: var(--color-accent);">01</span> Scan QR or open link</li>
+        <li style="padding: 8px 0; padding-left: 36px; position: relative; font-size:1.2rem;"><span style="position:absolute; left:0; font-family: var(--font-heading); font-weight:800; color: var(--color-accent);">02</span> Enter name — no account needed</li>
+        <li style="padding: 8px 0; padding-left: 36px; position: relative; font-size:1.2rem;"><span style="position:absolute; left:0; font-family: var(--font-heading); font-weight:800; color: var(--color-accent);">03</span> See images, rate independently</li>
+        <li style="padding: 8px 0; padding-left: 36px; position: relative; font-size:1.2rem;"><span style="position:absolute; left:0; font-family: var(--font-heading); font-weight:800; color: var(--color-accent);">04</span> Comment, flag, compare</li>
+        <li style="padding: 8px 0; padding-left: 36px; position: relative; font-size:1.2rem;"><span style="position:absolute; left:0; font-family: var(--font-heading); font-weight:800; color: var(--color-accent);">05</span> Audience: bookmark, buy</li>
+      </ol>
+    </div>
+  </div>
+  <div class="slide-footer"><span>ImageView Collaboration</span><span>11 / 12</span></div>
+</section>
+
+<!-- SLIDE 12: Closing -->
+<section class="slide bg-primary" id="s12">
+  <div>
+    <h1>Real-time image curation<br>for everyone.</h1>
+    <div class="stats-row" style="margin-top:48px;">
+      <div class="stat"><span class="value">$0</span><span class="label">Local workshops</span></div>
+      <div class="stat"><span class="value">30</span><span class="label">Concurrent users</span></div>
+      <div class="stat"><span class="value">3</span><span class="label">Tiers of access</span></div>
+      <div class="stat"><span class="value">0</span><span class="label">Per-seat fees</span></div>
+    </div>
+    <div style="margin-top:48px; font-family: var(--font-mono); font-size:0.9rem; opacity: 0.7;">
+      ┌─ Open source ─ Self-hostable ─ CRDT-powered ─ Yjs + y-websocket ─┐
+    </div>
+  </div>
+  <div class="slide-footer"><span>ImageView</span><span>12 / 12</span></div>
+</section>
+
+<!-- Navigation dots -->
+<nav class="nav-dots" id="navDots"></nav>
+
+<script>
+const slides = document.querySelectorAll('.slide');
+const navContainer = document.getElementById('navDots');
+
+slides.forEach((slide, i) => {
+  const dot = document.createElement('div');
+  dot.className = 'nav-dot';
+  dot.addEventListener('click', () => slide.scrollIntoView({ behavior: 'smooth' }));
+  navContainer.appendChild(dot);
+});
+
+const dots = document.querySelectorAll('.nav-dot');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const index = Array.from(slides).indexOf(entry.target);
+      dots.forEach((d, i) => d.classList.toggle('active', i === index));
+    }
+  });
+}, { threshold: 0.5 });
+
+slides.forEach(s => observer.observe(s));
+
+document.addEventListener('keydown', e => {
+  const current = Array.from(slides).findIndex(s => {
+    const rect = s.getBoundingClientRect();
+    return rect.top >= -100 && rect.top < window.innerHeight / 2;
+  });
+  if (e.key === 'ArrowDown' || e.key === 'PageDown') {
+    e.preventDefault();
+    if (current < slides.length - 1) slides[current + 1].scrollIntoView({ behavior: 'smooth' });
+  } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
+    e.preventDefault();
+    if (current > 0) slides[current - 1].scrollIntoView({ behavior: 'smooth' });
+  } else if (e.key === 'Home') {
+    e.preventDefault();
+    slides[0].scrollIntoView({ behavior: 'smooth' });
+  } else if (e.key === 'End') {
+    e.preventDefault();
+    slides[slides.length - 1].scrollIntoView({ behavior: 'smooth' });
+  }
+});
+</script>
+</body>
+</html>

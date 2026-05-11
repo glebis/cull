@@ -1,7 +1,10 @@
+use std::path::Path;
+use uuid::Uuid;
 use tauri::State;
 use crate::AppState;
 use crate::db_core::lineage::LineageGroup;
 use crate::db_core::models::{GenerationRun, ImageWithFile};
+use crate::db_core::sidecar;
 
 #[tauri::command]
 pub async fn list_lineage_groups(
@@ -106,4 +109,41 @@ pub async fn get_generation_run(
     image_id: String,
 ) -> Result<Option<GenerationRun>, String> {
     state.db.get_generation_run_for_image(&image_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn rescan_sidecars(
+    state: State<'_, AppState>,
+) -> Result<u32, String> {
+    let images = state.db.get_images_without_generation_run().map_err(|e| e.to_string())?;
+    let mut linked = 0u32;
+    for (image_id, file_path) in &images {
+        let path = Path::new(file_path);
+        if let Some(sidecar_path) = sidecar::find_sidecar(path) {
+            if let Ok(sc) = sidecar::parse_sidecar(&sidecar_path) {
+                let run_id = Uuid::new_v4().to_string();
+                let run = GenerationRun {
+                    id: run_id.clone(),
+                    prompt: sc.prompt,
+                    negative_prompt: sc.negative_prompt,
+                    provider: sc.provider,
+                    model: sc.model,
+                    settings_json: sc.settings_json,
+                    seed: sc.seed,
+                    parent_run_id: None,
+                    source_type: "sidecar".to_string(),
+                    source_path: Some(sidecar_path.to_string_lossy().to_string()),
+                    raw_metadata_json: Some(sc.raw_json),
+                    created_at: sc.created_at,
+                    imported_at: chrono::Utc::now().to_rfc3339(),
+                };
+                if state.db.insert_generation_run(&run).is_ok() {
+                    if state.db.link_image_to_run(image_id, &run_id).is_ok() {
+                        linked += 1;
+                    }
+                }
+            }
+        }
+    }
+    Ok(linked)
 }

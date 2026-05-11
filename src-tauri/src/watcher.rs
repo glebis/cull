@@ -142,6 +142,26 @@ impl FileWatcher {
         Ok(())
     }
 
+    /// Check if the library root containing this path is offline (e.g. volume ejected,
+    /// network mount disconnected). If so, skip marking files missing — the whole volume
+    /// is gone, not individual files.
+    fn is_root_offline(path: &std::path::Path, db: &Database) -> bool {
+        if let Ok(roots) = db.list_library_roots() {
+            let path_str = path.to_string_lossy();
+            for root in &roots {
+                let without_private = path_str.replacen("/private", "", 1);
+                let with_private = format!("/private{}", path_str);
+                let matches = path_str.starts_with(root)
+                    || without_private.starts_with(root)
+                    || with_private.starts_with(root);
+                if matches {
+                    return !std::path::Path::new(root).exists();
+                }
+            }
+        }
+        false
+    }
+
     fn handle_event(
         event: Event,
         db: &Database,
@@ -160,6 +180,11 @@ impl FileWatcher {
                 for path in &event.paths {
                     if !is_image_ext(path) { continue; }
                     if intent_registry.remove(path).is_some() {
+                        continue;
+                    }
+                    if Self::is_root_offline(path, db) {
+                        eprintln!("[watcher] Root offline for {}, skipping", path.display());
+                        let _ = app_handle.emit("watcher:volume-offline", path.to_string_lossy().to_string());
                         continue;
                     }
                     // Use flexible lookup to handle macOS symlink paths
@@ -231,6 +256,9 @@ impl FileWatcher {
                     for path in &event.paths {
                         if !is_image_ext(path) { continue; }
                         if intent_registry.remove(path).is_some() {
+                            continue;
+                        }
+                        if Self::is_root_offline(path, db) {
                             continue;
                         }
                         if !path.exists() {

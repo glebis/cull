@@ -715,6 +715,45 @@ impl ImageViewMcp {
         format!("Created generation run {} for image {}", run_id, params.image_id)
     }
 
+    #[tool(description = "Rescan all images for sidecar JSON files and backfill generation metadata. Returns the number of images linked.")]
+    fn rescan_sidecars(&self) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let images = match state.db.get_images_without_generation_run() {
+            Ok(v) => v,
+            Err(e) => return format!("Error: {}", e),
+        };
+        let mut linked = 0u32;
+        for (image_id, file_path) in &images {
+            let path = std::path::Path::new(file_path);
+            if let Some(sidecar_path) = crate::db_core::sidecar::find_sidecar(path) {
+                if let Ok(sc) = crate::db_core::sidecar::parse_sidecar(&sidecar_path) {
+                    let run_id = uuid::Uuid::new_v4().to_string();
+                    let run = crate::db_core::models::GenerationRun {
+                        id: run_id.clone(),
+                        prompt: sc.prompt,
+                        negative_prompt: sc.negative_prompt,
+                        provider: sc.provider,
+                        model: sc.model,
+                        settings_json: sc.settings_json,
+                        seed: sc.seed,
+                        parent_run_id: None,
+                        source_type: "sidecar".to_string(),
+                        source_path: Some(sidecar_path.to_string_lossy().to_string()),
+                        raw_metadata_json: Some(sc.raw_json),
+                        created_at: sc.created_at,
+                        imported_at: chrono::Utc::now().to_rfc3339(),
+                    };
+                    if state.db.insert_generation_run(&run).is_ok() {
+                        if state.db.link_image_to_run(image_id, &run_id).is_ok() {
+                            linked += 1;
+                        }
+                    }
+                }
+            }
+        }
+        format!("Rescanned {} images, linked {} sidecars", images.len(), linked)
+    }
+
     // --- Display / Navigation tools ---
 
     #[tool(description = "Open an image in the loupe (fullscreen detail) view on the local app")]

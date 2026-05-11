@@ -100,6 +100,7 @@ pub async fn trash_images(
                 if let Ok(output) = status {
                     if output.status.success() {
                         trashed += 1;
+                        let _ = state.db.mark_file_missing(&img.path);
                         let filename = std::path::Path::new(&img.path)
                             .file_name()
                             .and_then(|n| n.to_str())
@@ -134,6 +135,7 @@ pub async fn delete_images_permanently(
         if let Some(img) = found.first() {
             let path = std::path::Path::new(&img.path);
             if path.exists() && std::fs::remove_file(path).is_ok() {
+                let _ = state.db.mark_file_missing(&img.path);
                 deleted += 1;
             }
         }
@@ -184,27 +186,12 @@ pub async fn check_library_health(
     let mut missing_sources = 0u32;
     let mut to_regenerate = Vec::new();
 
+    // Phase 1: soft-mark missing files
     for (i, img) in images.iter().enumerate() {
         let source_path = std::path::Path::new(&img.path);
         if !source_path.exists() {
-            if auto_purge {
-                let conn = db.conn.lock().unwrap();
-                let _ = conn.execute("DELETE FROM images WHERE id = ?1", rusqlite::params![img.image.id]);
-                // Clean up orphaned thumbnail files
-                let thumb = crate::db_core::thumbnails::thumbnail_path(app_data_dir, &img.image.id);
-                if thumb.exists() {
-                    let _ = std::fs::remove_file(&thumb);
-                }
-                for &size in &crate::db_core::thumbnails::THUMBNAIL_SIZES {
-                    let sized = crate::db_core::thumbnails::sized_thumbnail_path(app_data_dir, &img.image.id, size);
-                    if sized.exists() {
-                        let _ = std::fs::remove_file(&sized);
-                    }
-                }
-                purged += 1;
-            } else {
-                missing_sources += 1;
-            }
+            let _ = db.mark_file_missing(&img.path);
+            missing_sources += 1;
         } else {
             let thumb = crate::db_core::thumbnails::thumbnail_path(app_data_dir, &img.image.id);
             if !thumb.exists() {
@@ -216,6 +203,57 @@ pub async fn check_library_health(
             let _ = app.emit("health-check-progress", serde_json::json!({
                 "current": i + 1, "total": total
             }));
+        }
+    }
+
+    // Phase 2: purge records that have been missing longer than the threshold
+    if auto_purge {
+        let purge_days: i64 = db.get_setting("purge_after_days")
+            .ok().flatten()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+
+        let threshold = format!("-{} days", purge_days);
+        let ids_to_purge: Vec<String> = {
+            let conn = db.conn.lock().unwrap();
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT i.id FROM images i
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM image_files f
+                     WHERE f.image_id = i.id AND f.missing_at IS NULL
+                 )
+                 AND NOT EXISTS (
+                     SELECT 1 FROM image_files f
+                     WHERE f.image_id = i.id
+                     AND f.missing_at > datetime('now', ?1)
+                 )"
+            ).map_err(|e| e.to_string())?;
+            let rows = stmt.query_map(rusqlite::params![threshold], |row| row.get::<_, String>(0))
+                .map_err(|e| e.to_string())?;
+            let mut result = Vec::new();
+            for row in rows {
+                if let Ok(id) = row {
+                    result.push(id);
+                }
+            }
+            result
+        };
+
+        for id in &ids_to_purge {
+            let conn = db.conn.lock().unwrap();
+            let _ = conn.execute("DELETE FROM images WHERE id = ?1", rusqlite::params![id]);
+            drop(conn);
+            let thumb = crate::db_core::thumbnails::thumbnail_path(app_data_dir, id);
+            if thumb.exists() {
+                let _ = std::fs::remove_file(&thumb);
+            }
+            for &size in &crate::db_core::thumbnails::THUMBNAIL_SIZES {
+                let sized = crate::db_core::thumbnails::sized_thumbnail_path(app_data_dir, id, size);
+                if sized.exists() {
+                    let _ = std::fs::remove_file(&sized);
+                }
+            }
+            purged += 1;
         }
     }
 

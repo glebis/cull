@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ImageView — Product Presentation</title>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Geist:wght@400;600;800&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --color-background: #ffffff;
+  --color-foreground: #000000;
+  --color-primary: #e85d04;
+  --color-secondary: #ffd60a;
+  --color-accent: #3a86ff;
+  --color-success: #38b000;
+  --color-error: #d62828;
+  --color-muted: #e5e5e5;
+  --font-body: 'EB Garamond', Georgia, serif;
+  --font-heading: 'Geist', Arial, sans-serif;
+  --font-mono: 'Geist Mono', 'Courier New', monospace;
+  --shadow: 4px 4px 0px 0px #000000;
+  --shadow-sm: 2px 2px 0px 0px #000000;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-body);
+  color: var(--color-foreground);
+  background: var(--color-foreground);
+  overflow: hidden;
+}
+
+.slide {
+  width: 100vw;
+  height: 100vh;
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 80px;
+  position: relative;
+  overflow: hidden;
+}
+
+.slide.active { display: flex; }
+
+h1 {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  line-height: 1.05;
+}
+
+h2 {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+h3 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+p, li {
+  font-family: var(--font-body);
+  font-size: 1.4rem;
+  line-height: 1.6;
+}
+
+code, .mono {
+  font-family: var(--font-mono);
+}
+
+.slide-number {
+  position: absolute;
+  bottom: 30px;
+  right: 40px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  opacity: 0.5;
+}
+
+.tag {
+  display: inline-block;
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 6px 14px;
+  border: 3px solid;
+  box-shadow: var(--shadow-sm);
+}
+
+.ascii-frame {
+  font-family: var(--font-mono);
+  white-space: pre;
+  line-height: 1.4;
+}
+
+/* ── SLIDE 1: TITLE ── */
+.slide-title {
+  background: var(--color-primary);
+  color: #fff;
+  text-align: center;
+}
+.slide-title h1 {
+  font-size: 5.5rem;
+  margin-bottom: 20px;
+}
+.slide-title .subtitle {
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  opacity: 0.85;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 40px;
+}
+.slide-title .icon-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 48px);
+  gap: 8px;
+  margin: 0 auto 30px;
+}
+.slide-title .icon-cell {
+  width: 48px;
+  height: 48px;
+  background: rgba(255,255,255,0.08);
+  border: 2px solid rgba(255,255,255,0.2);
+}
+.slide-title .icon-cell.active {
+  background: var(--color-success);
+  border-color: #fff;
+}
+
+/* ── SLIDE 2: PROBLEM ── */
+.slide-problem {
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
+.slide-problem .split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 80px;
+  width: 100%;
+  max-width: 1100px;
+  align-items: center;
+}
+.slide-problem .old-world h2 {
+  font-size: 2.8rem;
+  color: var(--color-foreground);
+  opacity: 0.3;
+  text-decoration: line-through;
+  margin-bottom: 16px;
+}
+.slide-problem .old-world p {
+  font-size: 1.2rem;
+  opacity: 0.5;
+}
+.slide-problem .new-world h2 {
+  font-size: 2.8rem;
+  color: var(--color-primary);
+  margin-bottom: 16px;
+}
+.slide-problem .new-world p {
+  font-size: 1.2rem;
+}
+.slide-problem .divider {
+  position: absolute;
+  left: 50%;
+  top: 15%;
+  bottom: 15%;
+  width: 3px;
+  background: var(--color-foreground);
+}
+
+/* ── SLIDE 3: PARADIGM SHIFT ── */
+.slide-paradigm {
+  background: var(--color-foreground);
+  color: #fff;
+  text-align: center;
+}
+.slide-paradigm h1 {
+  font-size: 4rem;
+  max-width: 900px;
+  margin-bottom: 40px;
+}
+.slide-paradigm .highlight {
+  color: var(--color-secondary);
+}
+.slide-paradigm .subtext {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  opacity: 0.5;
+  max-width: 600px;
+}
+
+/* ── SLIDE 4: AGENT NATIVE ── */
+.slide-agent {
+  background: var(--color-secondary);
+  color: var(--color-foreground);
+}
+.slide-agent .content {
+  max-width: 1000px;
+  width: 100%;
+}
+.slide-agent h1 {
+  font-size: 3.5rem;
+  margin-bottom: 10px;
+}
+.slide-agent .tagline {
+  font-size: 1.8rem;
+  margin-bottom: 50px;
+}
+.slide-agent .terminal-box {
+  background: var(--color-foreground);
+  color: #9ece6a;
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  padding: 30px;
+  border: 3px solid var(--color-foreground);
+  box-shadow: 6px 6px 0px 0px rgba(0,0,0,0.3);
+  white-space: pre-line;
+  line-height: 1.7;
+}
+.slide-agent .terminal-box .prompt {
+  color: #7aa2f7;
+}
+.slide-agent .terminal-box .comment {
+  color: #7a7fa0;
+}
+
+/* ── SLIDE 5: EMBEDDING EXPLORER ── */
+.slide-embeddings {
+  background: var(--color-foreground);
+  color: #fff;
+}
+.slide-embeddings .content {
+  max-width: 1100px;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 60px;
+  align-items: center;
+}
+.slide-embeddings h1 {
+  font-size: 3rem;
+  margin-bottom: 20px;
+}
+.slide-embeddings .highlight { color: var(--color-primary); }
+.slide-embeddings p {
+  color: rgba(255,255,255,0.7);
+  margin-bottom: 20px;
+}
+.slide-embeddings .scatter-viz {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  background: #0c0c12;
+  border: 2px solid #1a1a2e;
+  overflow: hidden;
+}
+.dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  opacity: 0.7;
+}
+
+/* ── SLIDE 6: FEATURES GRID ── */
+.slide-features {
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
+.slide-features h2 {
+  font-size: 2.5rem;
+  margin-bottom: 50px;
+  text-align: center;
+}
+.slide-features .grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  max-width: 1000px;
+  width: 100%;
+}
+.feature-card {
+  background: var(--color-background);
+  border: 3px solid var(--color-foreground);
+  box-shadow: var(--shadow);
+  padding: 28px;
+}
+.feature-card .card-header {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 10px;
+  opacity: 0.5;
+}
+.feature-card h3 {
+  font-size: 1.3rem;
+  margin-bottom: 10px;
+}
+.feature-card p {
+  font-size: 1rem;
+  line-height: 1.5;
+  opacity: 0.7;
+}
+.feature-card.accent {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-foreground);
+}
+.feature-card.accent .card-header { opacity: 0.7; }
+.feature-card.accent p { opacity: 0.85; }
+
+/* ── SLIDE 7: KEYBOARD ── */
+.slide-keyboard {
+  background: var(--color-accent);
+  color: #fff;
+  text-align: center;
+}
+.slide-keyboard h1 {
+  font-size: 4rem;
+  margin-bottom: 16px;
+}
+.slide-keyboard .tagline {
+  font-size: 1.4rem;
+  margin-bottom: 50px;
+  opacity: 0.85;
+}
+.keys-row {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+.key {
+  width: 64px;
+  height: 64px;
+  background: rgba(255,255,255,0.15);
+  border: 3px solid #fff;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 1.4rem;
+  font-weight: 500;
+}
+.key.highlight-key {
+  background: var(--color-secondary);
+  color: var(--color-foreground);
+  border-color: var(--color-foreground);
+}
+.key-label {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  opacity: 0.6;
+  margin-top: 16px;
+  letter-spacing: 1px;
+}
+
+/* ── SLIDE 8: TECH STACK ── */
+.slide-tech {
+  background: var(--color-muted);
+  color: var(--color-foreground);
+}
+.slide-tech .content {
+  max-width: 900px;
+  width: 100%;
+  text-align: center;
+}
+.slide-tech h2 {
+  font-size: 2.8rem;
+  margin-bottom: 50px;
+}
+.stack-items {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 40px;
+}
+.stack-item {
+  background: var(--color-background);
+  border: 3px solid var(--color-foreground);
+  box-shadow: var(--shadow);
+  padding: 20px 30px;
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 1.2rem;
+}
+.slide-tech .footnote {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  opacity: 0.5;
+}
+
+/* ── SLIDE 9: PRIVACY ── */
+.slide-privacy {
+  background: var(--color-foreground);
+  color: #fff;
+  text-align: center;
+}
+.slide-privacy h1 {
+  font-size: 3.5rem;
+  margin-bottom: 20px;
+}
+.slide-privacy .highlight { color: var(--color-success); }
+.slide-privacy .details {
+  display: flex;
+  gap: 40px;
+  justify-content: center;
+  margin-top: 40px;
+}
+.slide-privacy .detail-item {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  padding: 16px 24px;
+  border: 2px solid #333;
+}
+.slide-privacy .detail-item .value {
+  font-size: 2rem;
+  font-family: var(--font-heading);
+  font-weight: 800;
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* ── SLIDE 10: SPEED ── */
+.slide-speed {
+  background: var(--color-primary);
+  color: #fff;
+}
+.slide-speed .content {
+  max-width: 1000px;
+  width: 100%;
+  text-align: center;
+}
+.slide-speed h1 {
+  font-size: 3rem;
+  margin-bottom: 50px;
+}
+.speed-compare {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 40px;
+  align-items: center;
+}
+.speed-box {
+  background: rgba(0,0,0,0.2);
+  border: 3px solid #fff;
+  padding: 40px 30px;
+  text-align: center;
+}
+.speed-box .time {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 3.5rem;
+  display: block;
+  margin-bottom: 8px;
+}
+.speed-box .label {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.7;
+}
+.speed-vs {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 2rem;
+  opacity: 0.5;
+}
+
+/* ── SLIDE 11: CTA ── */
+.slide-cta {
+  background: var(--color-secondary);
+  color: var(--color-foreground);
+  text-align: center;
+}
+.slide-cta h1 {
+  font-size: 4rem;
+  margin-bottom: 20px;
+}
+.slide-cta .code-block {
+  background: var(--color-foreground);
+  color: #9ece6a;
+  font-family: var(--font-mono);
+  font-size: 1.2rem;
+  padding: 24px 40px;
+  border: 3px solid var(--color-foreground);
+  box-shadow: 6px 6px 0px 0px rgba(0,0,0,0.15);
+  display: inline-block;
+  margin: 30px 0;
+}
+.slide-cta .links {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  margin-top: 20px;
+  opacity: 0.6;
+}
+
+/* ── NAV ── */
+.nav-hint {
+  position: fixed;
+  bottom: 30px;
+  left: 40px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  opacity: 0.3;
+  z-index: 100;
+  color: inherit;
+}
+.progress-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 4px;
+  background: var(--color-primary);
+  transition: width 0.3s ease;
+  z-index: 100;
+}
+</style>
+</head>
+<body>
+
+<div class="progress-bar" id="progress"></div>
+<div class="nav-hint">← → or hjkl</div>
+
+<!-- ── SLIDE 1: TITLE ── -->
+<div class="slide slide-title active" data-slide="1">
+  <div class="icon-grid">
+    <div class="icon-cell"></div><div class="icon-cell"></div><div class="icon-cell"></div>
+    <div class="icon-cell"></div><div class="icon-cell active"></div><div class="icon-cell"></div>
+    <div class="icon-cell"></div><div class="icon-cell"></div><div class="icon-cell"></div>
+  </div>
+  <h1>ImageView</h1>
+  <div class="subtitle">Agent-friendly AI image viewer for macOS</div>
+  <div class="tag" style="color:#fff;border-color:#fff;">Tauri 2 + Rust + Svelte 5 + ONNX</div>
+  <span class="slide-number" style="color:rgba(255,255,255,0.4)">1 / 11</span>
+</div>
+
+<!-- ── SLIDE 2: PROBLEM ── -->
+<div class="slide slide-problem" data-slide="2">
+  <div class="divider"></div>
+  <div class="split">
+    <div class="old-world">
+      <h2>Preview.app</h2>
+      <p>Built for documents.<br>One image at a time.<br>No metadata. No search.<br>No automation.</p>
+      <div style="margin-top:20px;font-family:var(--font-mono);font-size:0.85rem;opacity:0.3;">circa 2001</div>
+    </div>
+    <div class="new-world">
+      <h2>You, today</h2>
+      <p>10,000 AI-generated images.<br>Hundreds of prompt variations.<br>Need to find, compare, curate, export.<br>Need your agent to help.</p>
+      <div class="tag" style="margin-top:20px;background:var(--color-primary);color:#fff;border-color:var(--color-foreground);">NEW CATEGORY</div>
+    </div>
+  </div>
+  <span class="slide-number">2 / 11</span>
+</div>
+
+<!-- ── SLIDE 3: PARADIGM SHIFT ── -->
+<div class="slide slide-paradigm" data-slide="3">
+  <h1>Your images are a <span class="highlight">vector space.</span><br>Start navigating.</h1>
+  <p class="subtext">CLIP embeddings + UMAP visualization turn 10K images into a navigable landscape. Clusters emerge. Outliers surface. Similar images find each other.</p>
+  <span class="slide-number" style="color:rgba(255,255,255,0.3)">3 / 11</span>
+</div>
+
+<!-- ── SLIDE 4: AGENT NATIVE ── -->
+<div class="slide slide-agent" data-slide="4">
+  <div class="content">
+    <h1>Your agent can see what you see.</h1>
+    <p class="tagline">32 MCP tools. Zero mouse clicks.</p>
+    <div class="terminal-box"><span class="prompt">claude&gt;</span> Open ~/renders, find all images similar to hero-v3.png,
+       rate the top 10 as 5-star, export as a contact sheet
+
+<span class="comment"># ImageView MCP executes:</span>
+<span class="prompt">→</span> imageview://import?folder=~/renders&recursive=true
+<span class="prompt">→</span> imageview://search?similar=hero-v3.png&top=10
+<span class="prompt">→</span> imageview://rate?stars=5&selection=current
+<span class="prompt">→</span> imageview://export?format=contact-sheet&output=~/Desktop</div>
+  </div>
+  <span class="slide-number">4 / 11</span>
+</div>
+
+<!-- ── SLIDE 5: EMBEDDING EXPLORER ── -->
+<div class="slide slide-embeddings" data-slide="5">
+  <div class="content">
+    <div>
+      <h1>CLIP embeddings turn your chaos into <span class="highlight">a map.</span></h1>
+      <p>Every image becomes a point in semantic space. UMAP projects high-dimensional embeddings into a 2D scatter plot. K-means finds clusters automatically.</p>
+      <p style="color:var(--color-primary);font-family:var(--font-heading);font-weight:800;">1,400+ lines of visualization. Runs locally via ONNX Runtime.</p>
+    </div>
+    <div class="scatter-viz" id="scatter">
+      <!-- Generated dots -->
+    </div>
+  </div>
+  <span class="slide-number" style="color:rgba(255,255,255,0.3)">5 / 11</span>
+</div>
+
+<!-- ── SLIDE 6: FEATURES ── -->
+<div class="slide slide-features" data-slide="6">
+  <h2>Seven views. One keyboard.</h2>
+  <div class="grid">
+    <div class="feature-card accent">
+      <div class="card-header">01 — View</div>
+      <h3>Grid</h3>
+      <p>4 thumbnail presets. Vim navigation. Star ratings overlay.</p>
+    </div>
+    <div class="feature-card">
+      <div class="card-header">02 — Compare</div>
+      <h3>Side-by-Side</h3>
+      <p>A/B prompt variations. Synced zoom. Accept/reject decisions.</p>
+    </div>
+    <div class="feature-card">
+      <div class="card-header">03 — Inspect</div>
+      <h3>Loupe</h3>
+      <p>20x zoom with smooth pan. Pixel-level inspection. Zen mode.</p>
+    </div>
+    <div class="feature-card">
+      <div class="card-header">04 — Explore</div>
+      <h3>Embeddings</h3>
+      <p>UMAP scatter plot. Auto-clustering. Semantic similarity.</p>
+    </div>
+    <div class="feature-card accent">
+      <div class="card-header">05 — Curate</div>
+      <h3>Collections</h3>
+      <p>Star 1-5. Accept/reject. Collect mode. Batch operations.</p>
+    </div>
+    <div class="feature-card">
+      <div class="card-header">06 — Automate</div>
+      <h3>MCP + CLI</h3>
+      <p>Every GUI action has a CLI equivalent. Composable pipelines.</p>
+    </div>
+  </div>
+  <span class="slide-number">6 / 11</span>
+</div>
+
+<!-- ── SLIDE 7: KEYBOARD ── -->
+<div class="slide slide-keyboard" data-slide="7">
+  <h1>Vim for images.</h1>
+  <p class="tagline">Every action reachable without a mouse.</p>
+  <div class="keys-row">
+    <div class="key">1</div>
+    <div class="key">2</div>
+    <div class="key">3</div>
+    <div class="key">4</div>
+    <div class="key">5</div>
+    <div class="key">6</div>
+    <div class="key">7</div>
+  </div>
+  <div class="key-label">GRID &nbsp; COMPARE &nbsp; LOUPE &nbsp; CANVAS &nbsp; LINEAGE &nbsp; EMBED &nbsp; EXPORT</div>
+  <div style="margin-top:40px;"></div>
+  <div class="keys-row">
+    <div class="key" style="width:48px;height:48px;font-size:1.1rem;">s</div>
+    <div class="key highlight-key" style="width:48px;height:48px;font-size:1.1rem;">h</div>
+    <div class="key highlight-key" style="width:48px;height:48px;font-size:1.1rem;">j</div>
+    <div class="key highlight-key" style="width:48px;height:48px;font-size:1.1rem;">k</div>
+    <div class="key highlight-key" style="width:48px;height:48px;font-size:1.1rem;">l</div>
+    <div class="key" style="width:48px;height:48px;font-size:1.1rem;">a</div>
+    <div class="key" style="width:48px;height:48px;font-size:1.1rem;">x</div>
+  </div>
+  <div class="key-label">STAR &nbsp;&nbsp; ← &nbsp;&nbsp; ↓ &nbsp;&nbsp; ↑ &nbsp;&nbsp; → &nbsp;&nbsp; ACCEPT &nbsp;&nbsp; REJECT</div>
+  <span class="slide-number" style="color:rgba(255,255,255,0.4)">7 / 11</span>
+</div>
+
+<!-- ── SLIDE 8: TECH STACK ── -->
+<div class="slide slide-tech" data-slide="8">
+  <div class="content">
+    <h2>Not cloud. Not Electron.<br>Native on your Mac.</h2>
+    <div class="stack-items">
+      <div class="stack-item">Tauri 2</div>
+      <div class="stack-item">Rust</div>
+      <div class="stack-item">Svelte 5</div>
+      <div class="stack-item">SQLite</div>
+      <div class="stack-item">ONNX Runtime</div>
+    </div>
+    <p class="footnote">SHA-256 dedup · Lanczos3 thumbnails · CLIP ViT-B/32 · Gemini Embedding 2</p>
+  </div>
+  <span class="slide-number">8 / 11</span>
+</div>
+
+<!-- ── SLIDE 9: PRIVACY ── -->
+<div class="slide slide-privacy" data-slide="9">
+  <h1>Every pixel stays<br>on <span class="highlight">your machine.</span></h1>
+  <div class="details">
+    <div class="detail-item">
+      <span class="value">0</span>
+      cloud uploads
+    </div>
+    <div class="detail-item">
+      <span class="value" style="color:var(--color-success);">Local</span>
+      CLIP + ONNX
+    </div>
+    <div class="detail-item">
+      <span class="value">SQLite</span>
+      your data, your file
+    </div>
+    <div class="detail-item">
+      <span class="value">BSL 1.1</span>
+      open source 2030
+    </div>
+  </div>
+  <span class="slide-number" style="color:rgba(255,255,255,0.3)">9 / 11</span>
+</div>
+
+<!-- ── SLIDE 10: SPEED ── -->
+<div class="slide slide-speed" data-slide="10">
+  <div class="content">
+    <h1>Rate 1,000 images in the time it takes to open Lightroom.</h1>
+    <div class="speed-compare">
+      <div class="speed-box">
+        <span class="time">~2s</span>
+        <span class="label">ImageView launch + import</span>
+      </div>
+      <div class="speed-vs">vs</div>
+      <div class="speed-box">
+        <span class="time">12s+</span>
+        <span class="label">Lightroom cold start</span>
+      </div>
+    </div>
+  </div>
+  <span class="slide-number" style="color:rgba(255,255,255,0.4)">10 / 11</span>
+</div>
+
+<!-- ── SLIDE 11: CTA ── -->
+<div class="slide slide-cta" data-slide="11">
+  <h1>Start navigating.</h1>
+  <div class="code-block">$ git clone github.com/gastownhall/imageview && npm run tauri dev</div>
+  <p class="links">
+    ┌─ github.com/gastownhall/imageview ─┐<br>
+    │ &nbsp; Tauri 2 &middot; Rust &middot; Svelte 5 &middot; macOS &nbsp;&nbsp;│<br>
+    └─────────────────────────────────────┘
+  </p>
+  <span class="slide-number">11 / 11</span>
+</div>
+
+<script>
+let current = 0;
+const slides = document.querySelectorAll('.slide');
+const progress = document.getElementById('progress');
+const scatter = document.getElementById('scatter');
+
+function updateProgress() {
+  const pct = ((current + 1) / slides.length) * 100;
+  progress.style.width = pct + '%';
+}
+
+function goTo(n) {
+  if (n < 0 || n >= slides.length) return;
+  slides[current].classList.remove('active');
+  current = n;
+  slides[current].classList.add('active');
+  updateProgress();
+  // inherit nav-hint color from slide
+  const hint = document.querySelector('.nav-hint');
+  const bg = getComputedStyle(slides[current]).backgroundColor;
+  hint.style.color = 'inherit';
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === 'l' || e.key === ' ') { e.preventDefault(); goTo(current + 1); }
+  if (e.key === 'ArrowLeft' || e.key === 'h') { e.preventDefault(); goTo(current - 1); }
+  if (e.key === 'Home') goTo(0);
+  if (e.key === 'End') goTo(slides.length - 1);
+});
+
+// Touch / click navigation
+document.addEventListener('click', (e) => {
+  if (e.clientX > window.innerWidth / 2) goTo(current + 1);
+  else goTo(current - 1);
+});
+
+// Generate scatter dots for slide 5
+if (scatter) {
+  const clusters = [
+    { cx: 30, cy: 25, color: '#e85d04', count: 18 },
+    { cx: 70, cy: 30, color: '#3a86ff', count: 15 },
+    { cx: 45, cy: 65, color: '#38b000', count: 20 },
+    { cx: 20, cy: 75, color: '#ffd60a', count: 12 },
+    { cx: 80, cy: 70, color: '#bb9af7', count: 14 },
+    { cx: 55, cy: 40, color: '#f7768e', count: 8 },
+  ];
+  clusters.forEach(c => {
+    for (let i = 0; i < c.count; i++) {
+      const dot = document.createElement('div');
+      dot.className = 'dot';
+      const x = c.cx + (Math.random() - 0.5) * 18;
+      const y = c.cy + (Math.random() - 0.5) * 18;
+      dot.style.left = x + '%';
+      dot.style.top = y + '%';
+      dot.style.background = c.color;
+      dot.style.width = (5 + Math.random() * 6) + 'px';
+      dot.style.height = dot.style.width;
+      scatter.appendChild(dot);
+    }
+  });
+}
+
+updateProgress();
+</script>
+</body>
+</html>
