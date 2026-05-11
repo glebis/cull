@@ -599,3 +599,37 @@ export async function createSubfolder(parentPath: string, name: string): Promise
 export async function backfillRawPreviews(): Promise<number> {
     return invoke<number>('backfill_raw_previews');
 }
+
+// Privacy & audit log
+export interface AuditLogEntry {
+    id: string;
+    timestamp: string;
+    provider: string;
+    endpoint: string;
+    data_type: string;
+    data_size_bytes: number | null;
+    prompt_preview: string | null;
+    image_dimensions: string | null;
+    model: string | null;
+    response_status: number | null;
+    jurisdiction: string;
+}
+
+export interface DataFlowEntry {
+    feature: string;
+    status: string;
+    server: string;
+    data_sent: string;
+}
+
+export async function getDataFlowStatus(): Promise<DataFlowEntry[]> {
+    return invoke('get_data_flow_status');
+}
+
+export async function getApiAuditLog(limit: number): Promise<AuditLogEntry[]> {
+    return invoke('get_api_audit_log', { limit });
+}
+
+export async function exportAuditLog(): Promise<string> {
+    return invoke('export_audit_log');
+}
