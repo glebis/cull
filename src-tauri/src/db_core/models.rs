@@ -20,6 +20,8 @@ pub struct ImageFile {
     pub path: String,
     pub last_seen_at: String,
     pub missing_at: Option<String>,
+    pub last_seen_size: Option<u64>,
+    pub last_seen_mtime: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

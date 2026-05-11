@@ -1,6 +1,7 @@
 use rusqlite::{Connection, Result, params, OptionalExtension};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use super::models::*;
 use super::smart_collections::{FilterNode, SmartCollection};
 
@@ -18,7 +19,7 @@ impl Database {
     }
 
     fn run_migrations(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let schema = include_str!("schema.sql");
         conn.execute_batch(schema)?;
         drop(conn);
@@ -30,11 +31,12 @@ impl Database {
         self.migrate_undo_tables()?;
         self.migrate_sessions()?;
         self.migrate_library_roots()?;
+        self.migrate_image_file_stat_columns()?;
         Ok(())
     }
 
     fn migrate_library_roots(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS library_roots (
                 id TEXT PRIMARY KEY,
@@ -45,8 +47,21 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_image_file_stat_columns(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        for (name, typ) in &[("last_seen_size", "INTEGER"), ("last_seen_mtime", "TEXT")] {
+            let sql = format!("ALTER TABLE image_files ADD COLUMN {} {}", name, typ);
+            match conn.execute(&sql, []) {
+                Ok(_) => {}
+                Err(e) if e.to_string().contains("duplicate column") => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+
     fn migrate_smart_collections(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
 
         let columns = vec![
             ("source_label", "TEXT"),
@@ -92,7 +107,7 @@ impl Database {
     }
 
     fn seed_preset_collections(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
 
         let existing: i64 = conn.query_row(
             "SELECT COUNT(*) FROM projects WHERE is_preset = 1",
@@ -142,7 +157,7 @@ impl Database {
     }
 
     fn migrate_lineage_tables(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS lineage_groups (
@@ -176,7 +191,7 @@ impl Database {
     }
 
     fn migrate_mcp_tables(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute_batch("
             CREATE TABLE IF NOT EXISTS mcp_tokens (
                 id TEXT PRIMARY KEY,
@@ -213,7 +228,7 @@ impl Database {
     }
 
     fn migrate_undo_tables(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS undo_records (
                 seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -241,7 +256,7 @@ impl Database {
     }
 
     fn migrate_generation_runs(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS generation_runs (
                 id TEXT PRIMARY KEY,
@@ -265,7 +280,7 @@ impl Database {
     }
 
     pub fn save_job(&self, snapshot: &crate::services::jobs::JobSnapshot) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT OR REPLACE INTO mcp_jobs (job_id, kind, status, current, total, message, error, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -279,7 +294,7 @@ impl Database {
     }
 
     pub fn load_terminal_jobs(&self) -> Result<Vec<crate::services::jobs::JobSnapshot>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT job_id, kind, status, current, total, message, error, created_at, updated_at
              FROM mcp_jobs WHERE status IN ('completed', 'failed', 'cancelled')
@@ -303,7 +318,7 @@ impl Database {
 
     pub fn prune_old_jobs(&self, max_age_hours: i64) -> Result<u32> {
         let cutoff = (chrono::Utc::now() - chrono::Duration::hours(max_age_hours)).to_rfc3339();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let deleted = conn.execute(
             "DELETE FROM mcp_jobs WHERE updated_at < ?1",
             params![cutoff],
@@ -313,7 +328,7 @@ impl Database {
 
     pub fn mark_stale_running_jobs_failed(&self) -> Result<u32> {
         let now = chrono::Utc::now().to_rfc3339();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let updated = conn.execute(
             "UPDATE mcp_jobs SET status = 'failed', error = 'App stopped before job completed', updated_at = ?1
              WHERE status IN ('running', 'cancelling')",
@@ -323,7 +338,7 @@ impl Database {
     }
 
     pub fn insert_image(&self, image: &Image) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT OR IGNORE INTO images (id, sha256_hash, width, height, format, file_size, created_at, imported_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -334,17 +349,17 @@ impl Database {
     }
 
     pub fn insert_image_file(&self, file: &ImageFile) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
-            "INSERT OR REPLACE INTO image_files (id, image_id, path, last_seen_at, missing_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![file.id, file.image_id, file.path, file.last_seen_at, file.missing_at],
+            "INSERT OR REPLACE INTO image_files (id, image_id, path, last_seen_at, missing_at, last_seen_size, last_seen_mtime)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![file.id, file.image_id, file.path, file.last_seen_at, file.missing_at, file.last_seen_size, file.last_seen_mtime],
         )?;
         Ok(())
     }
 
     pub fn find_by_hash(&self, hash: &str) -> Result<Option<Image>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT id, sha256_hash, width, height, format, file_size, created_at, imported_at, ai_prompt
              FROM images WHERE sha256_hash = ?1"
@@ -369,7 +384,7 @@ impl Database {
     }
 
     pub fn list_images(&self, limit: u32, offset: u32) -> Result<Vec<ImageWithFile>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
@@ -416,7 +431,7 @@ impl Database {
     }
 
     pub fn set_rating(&self, image_id: &str, rating: u8) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO selections (image_id, project_id, star_rating, decision)
              VALUES (?1, '__global__', ?2, 'undecided')
@@ -428,7 +443,7 @@ impl Database {
     }
 
     pub fn set_decision(&self, image_id: &str, decision: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO selections (image_id, project_id, decision)
              VALUES (?1, '__global__', ?2)
@@ -440,7 +455,7 @@ impl Database {
     }
 
     pub fn list_folders(&self) -> Result<Vec<(String, u32)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT f.path, f.image_id FROM image_files f WHERE f.missing_at IS NULL"
         )?;
@@ -463,7 +478,7 @@ impl Database {
     }
 
     pub fn list_images_by_folder(&self, folder: &str, limit: u32, offset: u32) -> Result<Vec<ImageWithFile>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let pattern = format!("{}/%", folder);
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
@@ -512,7 +527,7 @@ impl Database {
     }
 
     pub fn list_images_filtered(&self, min_width: Option<u32>, min_height: Option<u32>, limit: u32, offset: u32) -> Result<Vec<ImageWithFile>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut sql = String::from(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
@@ -570,7 +585,7 @@ impl Database {
     pub fn create_collection(&self, name: &str) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO projects (id, name, description, created_at) VALUES (?1, ?2, NULL, ?3)",
             params![id, name, now],
@@ -579,7 +594,7 @@ impl Database {
     }
 
     pub fn list_collections(&self) -> Result<Vec<(String, String, u32)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT p.id, p.name, COUNT(ci.image_id) as cnt
              FROM projects p
@@ -595,7 +610,7 @@ impl Database {
     }
 
     pub fn add_to_collection(&self, collection_id: &str, image_ids: &[&str]) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let max_pos: i64 = conn.query_row(
             "SELECT COALESCE(MAX(position), -1) FROM collection_items WHERE collection_id = ?1",
             params![collection_id],
@@ -611,7 +626,7 @@ impl Database {
     }
 
     pub fn list_collection_images(&self, collection_id: &str) -> Result<Vec<ImageWithFile>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
@@ -659,7 +674,7 @@ impl Database {
     }
 
     pub fn delete_collection(&self, collection_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute("DELETE FROM collection_items WHERE collection_id = ?1", params![collection_id])?;
         conn.execute("DELETE FROM projects WHERE id = ?1", params![collection_id])?;
         Ok(())
@@ -668,7 +683,7 @@ impl Database {
     // ---- Settings methods ----
 
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare("SELECT value FROM app_settings WHERE key = ?1")?;
         let mut rows = stmt.query_map(params![key], |row| row.get(0))?;
         match rows.next() {
@@ -678,7 +693,7 @@ impl Database {
     }
 
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
             params![key, value],
@@ -689,7 +704,7 @@ impl Database {
     // ---- Embedding methods ----
 
     pub fn store_embedding(&self, image_id: &str, model_name: &str, vector: &[f32]) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let bytes: Vec<u8> = vector.iter().flat_map(|f| f.to_le_bytes()).collect();
         conn.execute(
             "INSERT OR REPLACE INTO embeddings (id, image_id, model_name, vector, dims, dtype, normalized, created_at)
@@ -707,7 +722,7 @@ impl Database {
     }
 
     pub fn get_all_embeddings(&self, model_name: &str) -> Result<Vec<(String, Vec<f32>)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT image_id, vector, dims FROM embeddings WHERE model_name = ?1"
         )?;
@@ -735,7 +750,7 @@ impl Database {
     }
 
     pub fn embedding_count(&self, model_name: &str) -> Result<u32> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.query_row(
             "SELECT COUNT(*) FROM embeddings WHERE model_name = ?1",
             params![model_name],
@@ -744,7 +759,7 @@ impl Database {
     }
 
     pub fn remove_from_collection(&self, collection_id: &str, image_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "DELETE FROM collection_items WHERE collection_id = ?1 AND image_id = ?2",
             params![collection_id, image_id],
@@ -753,7 +768,7 @@ impl Database {
     }
 
     pub fn delete_images_by_folder(&self, folder: &str) -> Result<u32> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let pattern = format!("{}/%", folder);
 
         // Get image IDs that ONLY exist in this folder (no other paths)
@@ -788,7 +803,7 @@ impl Database {
     // ---- Vision metadata methods ----
 
     pub fn store_vision_metadata(&self, image_id: &str, source: &str, fields: &std::collections::HashMap<String, String>) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         for (key, value) in fields {
             conn.execute(
                 "INSERT OR REPLACE INTO image_metadata (image_id, key, value, source) VALUES (?1, ?2, ?3, ?4)",
@@ -799,7 +814,7 @@ impl Database {
     }
 
     pub fn get_vision_metadata(&self, image_id: &str) -> Result<Vec<(String, String, String)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT key, value, source FROM image_metadata WHERE image_id = ?1 ORDER BY key"
         )?;
@@ -810,7 +825,7 @@ impl Database {
     }
 
     pub fn count_vision_processed(&self, source: &str) -> Result<u32> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.query_row(
             "SELECT COUNT(DISTINCT image_id) FROM image_metadata WHERE source = ?1",
             params![source],
@@ -821,7 +836,7 @@ impl Database {
     // ---- File watcher helpers ----
 
     pub fn mark_file_missing(&self, path: &str) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let updated = conn.execute(
             "UPDATE image_files SET missing_at = datetime('now') WHERE path = ?1 AND missing_at IS NULL",
             params![path],
@@ -830,7 +845,7 @@ impl Database {
     }
 
     pub fn restore_file(&self, path: &str) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let updated = conn.execute(
             "UPDATE image_files SET missing_at = NULL, last_seen_at = datetime('now') WHERE path = ?1",
             params![path],
@@ -839,7 +854,7 @@ impl Database {
     }
 
     pub fn update_image_file_path(&self, file_id: &str, new_path: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "UPDATE image_files SET path = ?2, last_seen_at = datetime('now'), missing_at = NULL WHERE id = ?1",
             params![file_id, new_path],
@@ -848,7 +863,7 @@ impl Database {
     }
 
     pub fn restore_or_move_file_by_hash(&self, sha256: &str, new_path: &str) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let file_id: Option<String> = conn.query_row(
             "SELECT f.id FROM image_files f
              JOIN images i ON i.id = f.image_id
@@ -870,9 +885,9 @@ impl Database {
     }
 
     pub fn get_image_file_by_path(&self, path: &str) -> Result<Option<ImageFile>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT id, image_id, path, last_seen_at, missing_at FROM image_files WHERE path = ?1"
+            "SELECT id, image_id, path, last_seen_at, missing_at, last_seen_size, last_seen_mtime FROM image_files WHERE path = ?1"
         )?;
         let mut rows = stmt.query_map(params![path], |row| {
             Ok(ImageFile {
@@ -881,6 +896,8 @@ impl Database {
                 path: row.get(2)?,
                 last_seen_at: row.get(3)?,
                 missing_at: row.get(4)?,
+                last_seen_size: row.get(5)?,
+                last_seen_mtime: row.get(6)?,
             })
         })?;
         match rows.next() {
@@ -889,11 +906,31 @@ impl Database {
         }
     }
 
+    pub fn touch_image_file(&self, file_id: &str, size: u64, mtime: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE image_files SET last_seen_at = datetime('now'), missing_at = NULL,
+             last_seen_size = ?2, last_seen_mtime = ?3 WHERE id = ?1",
+            params![file_id, size as i64, mtime],
+        )?;
+        Ok(())
+    }
+
+    pub fn repoint_image_file(&self, file_id: &str, new_image_id: &str, size: u64, mtime: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE image_files SET image_id = ?2, last_seen_at = datetime('now'), missing_at = NULL,
+             last_seen_size = ?3, last_seen_mtime = ?4 WHERE id = ?1",
+            params![file_id, new_image_id, size as i64, mtime],
+        )?;
+        Ok(())
+    }
+
     // ---- Library roots ----
 
     pub fn add_library_root(&self, path: &str) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT OR IGNORE INTO library_roots (id, path, added_at) VALUES (?1, ?2, datetime('now'))",
             params![id, path],
@@ -902,20 +939,20 @@ impl Database {
     }
 
     pub fn list_library_roots(&self) -> Result<Vec<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare("SELECT path FROM library_roots ORDER BY added_at")?;
         let rows = stmt.query_map([], |row| row.get(0))?;
         rows.collect()
     }
 
     pub fn remove_library_root(&self, path: &str) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let deleted = conn.execute("DELETE FROM library_roots WHERE path = ?1", params![path])?;
         Ok(deleted > 0)
     }
 
     pub fn image_count(&self) -> Result<u32> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.query_row(
             "SELECT COUNT(DISTINCT i.id) FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL",
@@ -928,7 +965,7 @@ impl Database {
         if ids.is_empty() {
             return Ok(vec![]);
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let placeholders: Vec<String> = ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
         let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
@@ -978,7 +1015,7 @@ impl Database {
     }
 
     pub fn get_iteration_siblings(&self, parent_id: &str) -> Result<Vec<ImageWithFile>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
@@ -1028,7 +1065,7 @@ impl Database {
     // ---- Detection methods ----
 
     pub fn store_detections(&self, image_id: &str, model_name: &str, detections: &[super::detection::Detection]) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         // Clear previous detections for this image+model
         conn.execute(
             "DELETE FROM detections WHERE image_id = ?1 AND model_name = ?2",
@@ -1056,7 +1093,7 @@ impl Database {
     }
 
     pub fn get_detections(&self, image_id: &str, model_name: Option<&str>) -> Result<Vec<super::detection::Detection>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(mn) = model_name {
             (
                 "SELECT class_name, confidence, x, y, width, height FROM detections WHERE image_id = ?1 AND model_name = ?2 ORDER BY confidence DESC".to_string(),
@@ -1084,7 +1121,7 @@ impl Database {
     }
 
     pub fn search_by_class(&self, class_name: &str, limit: u32) -> Result<Vec<(String, f32)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT DISTINCT image_id, MAX(confidence) as max_conf
              FROM detections WHERE class_name = ?1
@@ -1097,7 +1134,7 @@ impl Database {
     }
 
     pub fn detection_count(&self, model_name: &str) -> Result<u32> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.query_row(
             "SELECT COUNT(DISTINCT image_id) FROM detections WHERE model_name = ?1",
             params![model_name],
@@ -1112,7 +1149,7 @@ impl Database {
         nl_query: Option<&str>,
         is_preset: bool,
     ) -> Result<String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
             "INSERT INTO projects (id, name, collection_type, filter_json, nl_query, is_preset, created_at)
@@ -1123,7 +1160,7 @@ impl Database {
     }
 
     pub fn list_smart_collections(&self) -> Result<Vec<SmartCollection>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, collection_type, filter_json, nl_query,
                     is_preset, sort_order, created_at
@@ -1173,7 +1210,7 @@ impl Database {
     }
 
     pub fn delete_smart_collection(&self, id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "DELETE FROM projects WHERE id = ?1 AND collection_type = 'smart' AND is_preset = 0",
             [id],
@@ -1182,7 +1219,7 @@ impl Database {
     }
 
     pub fn update_smart_collection(&self, id: &str, name: &str, filter_json: &str, nl_query: Option<&str>) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "UPDATE projects SET name = ?2, filter_json = ?3, nl_query = ?4
              WHERE id = ?1 AND collection_type = 'smart'",
@@ -1198,7 +1235,7 @@ impl Database {
         let (where_clause, params) = filter.to_sql_clause()
             .map_err(|e| rusqlite::Error::InvalidParameterName(e))?;
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
@@ -1263,7 +1300,7 @@ impl Database {
         orientation: &str,
         megapixels: f64,
     ) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "UPDATE images SET source_label = ?2, source_confidence = ?3,
              source_evidence_json = ?4, is_ai_generated = ?5, ai_prompt = ?6,
@@ -1286,7 +1323,7 @@ impl Database {
     }
 
     pub fn backfill_image_metadata(&self) -> Result<u32> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT id, width, height FROM images WHERE orientation IS NULL"
         )?;
@@ -1316,7 +1353,7 @@ impl Database {
     }
 
     pub fn update_image_dimensions(&self, image_id: &str, width: u32, height: u32) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let aspect = width as f64 / height as f64;
         let orientation = if width > height { "landscape" } else if height > width { "portrait" } else { "square" };
         let megapixels = (width as f64 * height as f64) / 1_000_000.0;
@@ -1328,7 +1365,7 @@ impl Database {
     }
 
     pub fn insert_generation_run(&self, run: &GenerationRun) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT OR IGNORE INTO generation_runs (id, prompt, negative_prompt, provider, model, settings_json, seed, parent_run_id, source_type, source_path, raw_metadata_json, created_at, imported_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
@@ -1338,7 +1375,7 @@ impl Database {
     }
 
     pub fn link_image_to_run(&self, image_id: &str, run_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "UPDATE images SET generation_run_id = ?1 WHERE id = ?2",
             rusqlite::params![run_id, image_id],
@@ -1347,7 +1384,7 @@ impl Database {
     }
 
     pub fn get_generation_run_for_image(&self, image_id: &str) -> Result<Option<GenerationRun>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT g.id, g.prompt, g.negative_prompt, g.provider, g.model, g.settings_json, g.seed, g.parent_run_id, g.source_type, g.source_path, g.raw_metadata_json, g.created_at, g.imported_at
              FROM generation_runs g
@@ -1375,7 +1412,7 @@ impl Database {
     }
 
     pub fn get_images_without_generation_run(&self) -> Result<Vec<(String, String)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT i.id, f.path
              FROM images i
@@ -1395,7 +1432,7 @@ impl Database {
     // ---- Undo/Redo helpers ----
 
     pub fn get_selection_for_image(&self, image_id: &str) -> Result<Option<Selection>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT image_id, project_id, star_rating, color_label, decision
              FROM selections WHERE image_id = ?1 AND project_id = '__global__'"
@@ -1412,7 +1449,7 @@ impl Database {
     }
 
     pub fn get_undo_record_by_seq(&self, seq: i64) -> Result<Option<UndoRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT seq, id, action_type, label, before_json, after_json, affected_image_ids, group_id, has_file_backup, created_at
              FROM undo_records WHERE seq = ?1"
@@ -1434,17 +1471,17 @@ impl Database {
     }
 
     pub fn get_max_undo_seq(&self) -> Result<Option<i64>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.query_row("SELECT MAX(seq) FROM undo_records", [], |row| row.get(0))
     }
 
     pub fn count_undo_records(&self) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.query_row("SELECT COUNT(*) FROM undo_records", [], |row| row.get(0))
     }
 
     pub fn list_undo_records(&self, limit: u32) -> Result<Vec<UndoRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT seq, id, action_type, label, before_json, after_json, affected_image_ids, group_id, has_file_backup, created_at
              FROM undo_records ORDER BY seq DESC LIMIT ?1"
@@ -1467,7 +1504,7 @@ impl Database {
     }
 
     pub fn prune_oldest_undo_records(&self, keep_count: usize) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "DELETE FROM undo_records WHERE seq NOT IN (
                 SELECT seq FROM undo_records ORDER BY seq DESC LIMIT ?1
@@ -1476,7 +1513,7 @@ impl Database {
     }
 
     fn migrate_sessions(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
 
         let project_columns = vec![
             ("folder_path", "TEXT"),
@@ -1557,6 +1594,8 @@ mod tests {
             path: format!("/tmp/{}.png", id),
             last_seen_at: "2026-05-07T00:00:00Z".to_string(),
             missing_at: None,
+            last_seen_size: None,
+            last_seen_mtime: None,
         };
         db.insert_image_file(&file).unwrap();
     }
@@ -1603,7 +1642,7 @@ mod tests {
         insert_test_image(&db, "child-2", "hash-c2");
 
         // Insert iteration records
-        let conn = db.conn.lock().unwrap();
+        let conn = db.conn.lock();
         conn.execute(
             "INSERT INTO iterations (id, parent_id, child_id, prompt, model_used, created_at)
              VALUES ('it-1', 'parent', 'child-1', 'make it blue', 'flux', '2026-05-07T00:00:00Z')",
@@ -1648,7 +1687,7 @@ mod session_tests {
     #[test]
     fn test_session_migration_creates_canvases_table() {
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
-        let conn = db.conn.lock().unwrap();
+        let conn = db.conn.lock();
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='canvases'",
             [], |row| row.get(0)
@@ -1659,7 +1698,7 @@ mod session_tests {
     #[test]
     fn test_session_migration_adds_project_columns() {
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
-        let conn = db.conn.lock().unwrap();
+        let conn = db.conn.lock();
         let mut stmt = conn.prepare("SELECT folder_path FROM projects LIMIT 0").unwrap();
         drop(stmt);
         stmt = conn.prepare("SELECT owning_session_id FROM projects LIMIT 0").unwrap();
@@ -1671,7 +1710,7 @@ mod session_tests {
     #[test]
     fn test_session_indexes_exist() {
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
-        let conn = db.conn.lock().unwrap();
+        let conn = db.conn.lock();
         let indexes: Vec<String> = conn.prepare(
             "SELECT name FROM sqlite_master WHERE type='index'"
         ).unwrap()
@@ -1713,6 +1752,8 @@ mod file_watcher_tests {
             path: format!("/tmp/{}.png", id),
             last_seen_at: "2026-05-07T00:00:00Z".to_string(),
             missing_at: None,
+            last_seen_size: None,
+            last_seen_mtime: None,
         };
         db.insert_image_file(&file).unwrap();
     }

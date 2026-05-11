@@ -16,6 +16,7 @@ pub struct MoveIntent {
 pub struct FileWatcher {
     watcher: Option<RecommendedWatcher>,
     intent_registry: Arc<DashMap<PathBuf, MoveIntent>>,
+    sync_queue: Arc<DashMap<PathBuf, Instant>>,
 }
 
 const INTENT_EXPIRY_SECS: u64 = 60;
@@ -63,6 +64,7 @@ impl FileWatcher {
         Self {
             watcher: None,
             intent_registry: Arc::new(DashMap::new()),
+            sync_queue: Arc::new(DashMap::new()),
         }
     }
 
@@ -86,17 +88,19 @@ impl FileWatcher {
         });
     }
 
-    pub fn start(&mut self, db: Database, app_handle: AppHandle, roots: Vec<String>) -> Result<(), String> {
+    pub fn start(&mut self, db: Database, app_handle: AppHandle, roots: Vec<String>, app_data_dir: PathBuf) -> Result<(), String> {
         eprintln!("[watcher] Starting with {} roots", roots.len());
         let db = Arc::new(db);
         let intent_reg = self.intent_registry.clone();
+        let sync_q = self.sync_queue.clone();
         let handle = app_handle.clone();
 
         let db_clone = db.clone();
+        let sync_q_clone = sync_q.clone();
         let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
             match res {
                 Ok(event) => {
-                    Self::handle_event(event, &db_clone, &handle, &intent_reg);
+                    Self::handle_event(event, &db_clone, &handle, &intent_reg, &sync_q_clone);
                 }
                 Err(e) => {
                     eprintln!("[watcher] Error: {}", e);
@@ -115,6 +119,42 @@ impl FileWatcher {
                 eprintln!("[watcher] Root does not exist, skipping: {}", root);
             }
         }
+
+        // Spawn background thread to process debounced sync queue
+        let sync_db = db.clone();
+        let sync_handle = app_handle.clone();
+        let sync_queue = self.sync_queue.clone();
+        std::thread::spawn(move || {
+            const DEBOUNCE_MS: u128 = 1500;
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                let now = Instant::now();
+                let ready: Vec<PathBuf> = sync_queue.iter()
+                    .filter(|e| now.duration_since(*e.value()).as_millis() >= DEBOUNCE_MS)
+                    .map(|e| e.key().clone())
+                    .collect();
+
+                let mut any_changed = false;
+                for path in ready {
+                    sync_queue.remove(&path);
+                    match crate::db_core::import::sync_file(&sync_db, &path, &app_data_dir) {
+                        Ok(outcome) => {
+                            match &outcome {
+                                crate::db_core::import::SyncOutcome::Unchanged => {}
+                                other => {
+                                    eprintln!("[watcher] Synced {:?}: {:?}", path.file_name().unwrap_or_default(), other);
+                                    any_changed = true;
+                                }
+                            }
+                        }
+                        Err(e) => eprintln!("[watcher] Sync error for {}: {}", path.display(), e),
+                    }
+                }
+                if any_changed {
+                    let _ = sync_handle.emit("images:changed", ());
+                }
+            }
+        });
 
         self.watcher = Some(watcher);
         eprintln!("[watcher] Started successfully");
@@ -167,6 +207,7 @@ impl FileWatcher {
         db: &Database,
         app_handle: &AppHandle,
         intent_registry: &DashMap<PathBuf, MoveIntent>,
+        sync_queue: &DashMap<PathBuf, Instant>,
     ) {
         let now = Instant::now();
         intent_registry.retain(|_, intent| {
@@ -202,32 +243,11 @@ impl FileWatcher {
                     }
                 }
             }
-            EventKind::Create(_) => {
+            EventKind::Create(_) | EventKind::Modify(notify::event::ModifyKind::Data(_)) => {
                 for path in &event.paths {
                     if !is_image_ext(path) { continue; }
-                    if intent_registry.remove(path).is_some() {
-                        continue;
-                    }
-                    // Use flexible lookup to handle macOS symlink paths
-                    match find_file_by_path_flexible(db, path) {
-                        Some(file) if file.missing_at.is_some() => {
-                            match db.restore_file(&file.path) {
-                                Ok(true) => {
-                                    eprintln!("[watcher] Restored: {}", file.path);
-                                    changed = true;
-                                }
-                                Ok(false) => {}
-                                Err(e) => eprintln!("[watcher] Error restoring: {}", e),
-                            }
-                        }
-                        Some(_) => {}
-                        None => {
-                            let path_str = path.to_string_lossy();
-                            eprintln!("[watcher] New file detected: {}", path_str);
-                            let _ = app_handle.emit("watcher:new-file", path_str.to_string());
-                            changed = true;
-                        }
-                    }
+                    if intent_registry.remove(path).is_some() { continue; }
+                    sync_queue.insert(path.clone(), Instant::now());
                 }
             }
             EventKind::Modify(notify::event::ModifyKind::Name(_)) => {

@@ -10,8 +10,9 @@ mod tray;
 mod watcher;
 
 use std::path::PathBuf;
-use std::sync::Mutex;
-use tauri::{Manager, Emitter, Listener};
+use std::panic::AssertUnwindSafe;
+use parking_lot::Mutex;
+use tauri::{AppHandle, Manager, Emitter, Listener};
 use tauri_plugin_dialog::DialogExt;
 use crate::db_core::db::Database;
 use crate::db_core::detection::DetectionEngine;
@@ -29,6 +30,49 @@ pub struct AppState {
     pub jobs: crate::services::jobs::JobRegistry,
     pub action_manager: services::undo::ActionManager,
     pub file_watcher: Mutex<watcher::FileWatcher>,
+}
+
+fn install_panic_hook(app: AppHandle) {
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
+        let msg = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "unknown panic".to_string()
+        };
+        let loc = info.location().map(|l| format!("{}:{}", l.file(), l.line()));
+        eprintln!("[panic] thread={} location={:?} message={}", thread, loc, msg);
+        let _ = app.emit("rust-panic", serde_json::json!({
+            "thread": thread, "location": loc, "message": msg
+        }));
+        prev(info);
+    }));
+}
+
+pub fn spawn_guarded<F, Fut>(app: AppHandle, task_name: &'static str, fut: F)
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()> + Send,
+{
+    tokio::spawn(async move {
+        let result = futures_util::FutureExt::catch_unwind(AssertUnwindSafe(fut())).await;
+        if let Err(payload) = result {
+            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown panic".to_string()
+            };
+            eprintln!("[guarded-spawn] task={} panicked: {}", task_name, msg);
+            let _ = app.emit("background-task-failed", serde_json::json!({
+                "task": task_name, "message": msg, "recoverable": true
+            }));
+        }
+    });
 }
 
 const IMAGE_EXTENSIONS: &[&str] = &[
@@ -127,6 +171,8 @@ pub fn run() {
             }
         }))
         .setup(move |app| {
+            install_panic_hook(app.handle().clone());
+
             let app_data_dir = app.path().app_data_dir()
                 .map_err(|e| format!("failed to get app data dir: {}", e))?;
             std::fs::create_dir_all(&app_data_dir)
@@ -170,8 +216,9 @@ pub fn run() {
                 let roots = state.db.list_library_roots().unwrap_or_default();
                 let db_clone = state.db.clone();
                 let app_handle_clone = app.handle().clone();
-                let mut fw = state.file_watcher.lock().unwrap();
-                if let Err(e) = fw.start(db_clone, app_handle_clone, roots) {
+                let data_dir_clone = state.app_data_dir.clone();
+                let mut fw = state.file_watcher.lock();
+                if let Err(e) = fw.start(db_clone, app_handle_clone, roots, data_dir_clone) {
                     eprintln!("[watcher] Failed to start: {}", e);
                 }
             }

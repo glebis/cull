@@ -425,6 +425,8 @@ fn save_image_bytes(
         path: file_path.to_string_lossy().to_string(),
         last_seen_at: now.clone(),
         missing_at: None,
+        last_seen_size: None,
+        last_seen_mtime: None,
     };
     db.insert_image_file(&file_record).map_err(|e| e.to_string())?;
 
