@@ -20,7 +20,7 @@
     import TrashConfirmDialog from '$lib/components/TrashConfirmDialog.svelte';
     import { handleKeydown } from '$lib/keys';
     import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections, showToast, settingsOpen, searchOpen } from '$lib/stores';
-    import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages, trashImages, deleteImagesPermanently, getAppSetting, setAppSetting } from '$lib/api';
+    import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages, trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
     import { saveAppState, restoreAppStateBeforeImages, applyRestoredViewState } from '$lib/persistence';
@@ -128,6 +128,27 @@
             await loadImages();
             applyRestoredViewState(restored);
             await initDeepLink();
+
+            try {
+                const health = await checkLibraryHealth();
+                if (health.purged > 0) {
+                    showToast(`Cleaned up library`, {
+                        detail: `Removed ${health.purged} image${health.purged === 1 ? '' : 's'} with missing source files`,
+                        type: 'info',
+                        duration: 7000,
+                    });
+                    await loadImages();
+                }
+                if (health.to_regenerate.length > 0) {
+                    regenerateThumbnailsByIds(health.to_regenerate).then((count) => {
+                        if (count > 0) {
+                            loadImages();
+                        }
+                    });
+                }
+            } catch (e) {
+                console.error('Library health check failed:', e);
+            }
         };
         init().catch(e => console.error('Failed to initialize app:', e));
         initMenu().catch(e => console.error('Failed to init menu:', e));
