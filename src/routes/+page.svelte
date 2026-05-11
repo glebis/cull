@@ -108,6 +108,8 @@
 
         window.addEventListener('trash-focused-image', handleTrash);
         window.addEventListener('delete-focused-image', handlePermanentDelete);
+        const handleReloadImages = () => loadImages().catch(e => console.error('Failed to reload:', e));
+        window.addEventListener('reload-images', handleReloadImages);
 
         let first = true;
         const unsub = minSizeFilter.subscribe(() => {
@@ -124,6 +126,7 @@
             dragUnlisten.then(fn => fn());
             window.removeEventListener('trash-focused-image', handleTrash);
             window.removeEventListener('delete-focused-image', handlePermanentDelete);
+            window.removeEventListener('reload-images', handleReloadImages);
             clearInterval(saveTimer);
             window.removeEventListener('beforeunload', handleBeforeUnload);
             saveAppState();

@@ -75,13 +75,13 @@ impl ActionManager {
         // 2. Lock cursor position, then perform mutation + undo record insert in one transaction
         let mut cursor = self.cursor_seq.lock().unwrap();
 
-        let conn = db.conn.lock().unwrap();
+        let mut conn = db.conn.lock().unwrap();
         let tx = conn.savepoint().map_err(|e| e.to_string())?;
 
         // Clear redo branch if cursor is pointing to an undone record
         if let Some(cur_seq) = *cursor {
             tx.execute(
-                "DELETE FROM undo_records WHERE seq > ?1",
+                "DELETE FROM undo_records WHERE seq >= ?1",
                 rusqlite::params![cur_seq],
             )
             .map_err(|e| e.to_string())?;
@@ -215,11 +215,9 @@ impl ActionManager {
             .map_err(|e| e.to_string())?;
         drop(conn);
 
-        let max_seq = db.get_max_undo_seq().map_err(|e| e.to_string())?;
-        if next_seq == max_seq || next_seq.is_none() {
-            *cursor = None; // Back to top
-        } else {
-            *cursor = next_seq;
+        match next_seq {
+            Some(ns) => *cursor = Some(ns),
+            None => *cursor = None,
         }
 
         Ok(Some(record.label))
@@ -289,6 +287,51 @@ impl ActionManager {
         }
     }
 
+    pub fn record_action(
+        &self,
+        db: &Database,
+        action_type: &str,
+        label: String,
+        before_json: String,
+        after_json: String,
+        affected_ids: String,
+        has_file_backup: bool,
+    ) -> Result<ActionResult, String> {
+        let mut cursor = self.cursor_seq.lock().unwrap();
+        let mut conn = db.conn.lock().unwrap();
+        let tx = conn.savepoint().map_err(|e| e.to_string())?;
+
+        if let Some(cur_seq) = *cursor {
+            tx.execute(
+                "DELETE FROM undo_records WHERE seq >= ?1",
+                rusqlite::params![cur_seq],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
+        let record_id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        let backup_flag: i32 = if has_file_backup { 1 } else { 0 };
+        tx.execute(
+            "INSERT INTO undo_records (id, action_type, label, before_json, after_json, affected_image_ids, has_file_backup, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![record_id, action_type, label, before_json, after_json, affected_ids, backup_flag, now],
+        )
+        .map_err(|e| e.to_string())?;
+
+        tx.commit().map_err(|e| e.to_string())?;
+        *cursor = None;
+        drop(conn);
+
+        let _ = db.prune_oldest_undo_records(self.max_depth);
+
+        Ok(ActionResult {
+            undo_record_id: record_id,
+            label: label.clone(),
+            can_undo: true,
+        })
+    }
+
     pub fn history(&self, db: &Database, limit: u32) -> Vec<UndoRecord> {
         db.list_undo_records(limit).unwrap_or_default()
     }
@@ -306,6 +349,41 @@ impl ActionManager {
                 let image_id = val["image_id"].as_str().ok_or("Missing image_id")?;
                 let decision = val["decision"].as_str().ok_or("Missing decision")?;
                 db.set_decision(image_id, decision).map_err(|e| e.to_string())
+            }
+            "trash_image" => {
+                let path = val["path"].as_str().ok_or("Missing path")?;
+                let trashed = val.get("trashed").and_then(|v| v.as_bool()).unwrap_or(false);
+                if trashed {
+                    // Redo: re-trash the file
+                    #[cfg(target_os = "macos")]
+                    {
+                        std::process::Command::new("osascript")
+                            .args(["-e", &format!(
+                                "tell application \"Finder\" to delete POSIX file \"{}\"",
+                                path.replace('"', "\\\"")
+                            )])
+                            .output()
+                            .map_err(|e| format!("Failed to re-trash: {}", e))?;
+                    }
+                    Ok(())
+                } else {
+                    // Undo: restore from Trash to original path
+                    let file_path = std::path::Path::new(path);
+                    let filename = file_path.file_name()
+                        .and_then(|n| n.to_str())
+                        .ok_or("Invalid filename in path")?;
+                    let trash_path = dirs::home_dir()
+                        .ok_or("Cannot find home directory")?
+                        .join(".Trash")
+                        .join(filename);
+                    if trash_path.exists() {
+                        std::fs::rename(&trash_path, path)
+                            .map_err(|e| format!("Failed to restore from Trash: {}", e))?;
+                    } else {
+                        return Err(format!("File not found in Trash: {}", filename));
+                    }
+                    Ok(())
+                }
             }
             _ => Err(format!("Unknown action type for undo: {}", action_type)),
         }

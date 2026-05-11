@@ -10,7 +10,8 @@ import {
 import { computeCompareSwap } from './compare-utils';
 import type { NsfwMode } from './stores';
 import type { ViewMode } from './stores';
-import { setRating, setDecision, createCollection, addToCollection, listCollections, listCollectionImages, rotateImage } from './api';
+import { setRating, setDecision, createCollection, addToCollection, listCollections, listCollectionImages, rotateImage, undo, redo } from './api';
+import { showToast } from './stores';
 
 let waitingForStar = false;
 
@@ -306,6 +307,30 @@ export function handleKeydown(e: KeyboardEvent) {
     if (VIEW_MODE_KEYS[e.key] && e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         navigateTo(VIEW_MODE_KEYS[e.key]);
+        return;
+    }
+
+    // Undo: Cmd+Z
+    if (e.key.toLowerCase() === 'z' && e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        undo().then(label => {
+            if (label) {
+                showToast(`Undone: ${label}`, { type: 'info', duration: 4000 });
+                window.dispatchEvent(new CustomEvent('reload-images'));
+            }
+        });
+        return;
+    }
+
+    // Redo: Cmd+Shift+Z
+    if (e.key.toLowerCase() === 'z' && e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        redo().then(label => {
+            if (label) {
+                showToast(`Redone: ${label}`, { type: 'info', duration: 4000 });
+                window.dispatchEvent(new CustomEvent('reload-images'));
+            }
+        });
         return;
     }
 

@@ -100,6 +100,20 @@ pub async fn trash_images(
                 if let Ok(output) = status {
                     if output.status.success() {
                         trashed += 1;
+                        let filename = std::path::Path::new(&img.path)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("file")
+                            .to_string();
+                        let _ = state.action_manager.record_action(
+                            &state.db,
+                            "trash_image",
+                            format!("Trash {}", filename),
+                            serde_json::json!({"image_id": image_id, "path": &img.path}).to_string(),
+                            serde_json::json!({"image_id": image_id, "path": &img.path, "trashed": true}).to_string(),
+                            image_id.clone(),
+                            true,
+                        );
                     }
                 }
             }
