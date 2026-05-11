@@ -5,7 +5,7 @@
     import PromptResubmitDialog from './PromptResubmitDialog.svelte';
     import GenerationResultsStrip from './GenerationResultsStrip.svelte';
     import { images, focusedIndex, focusedImage, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
-    import { getDetections, getVisionMetadata, cropImage, getImagesByIds, getGenerationRun } from '$lib/api';
+    import { getDetections, getVisionMetadata, cropImage, getImagesByIds, getGenerationRun, isRawFormat } from '$lib/api';
     import type { Detection, GenerationRun } from '$lib/api';
 
     let dragging = $state(false);
@@ -15,7 +15,8 @@
     let panStartY = $state(0);
 
     let image = $derived($focusedImage);
-    let src = $derived(image ? convertFileSrc(image.path) : '');
+    let isRaw = $derived(isRawFormat(image?.image.format ?? ''));
+    let src = $derived(image ? (isRaw ? convertFileSrc(image.thumbnail_path ?? image.path) : convertFileSrc(image.path)) : '');
     let filename = $derived(image?.path.split('/').pop() ?? '');
     let dimensions = $derived(image ? `${image.image.width}x${image.image.height}` : '');
     let format = $derived(image?.image.format ?? '');
@@ -189,6 +190,7 @@
     let cropping = $state(false);
 
     function enterCropMode() {
+        if (isRaw) return;
         cropMode = true;
         cropStart = null;
         cropEnd = null;

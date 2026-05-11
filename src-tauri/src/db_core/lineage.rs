@@ -131,7 +131,7 @@ impl Database {
     pub fn create_lineage_group(&self, name: &str, method: &str, score: f64) -> Result<String> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO lineage_groups (id, name, created_at, detection_method, detection_score)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -141,7 +141,7 @@ impl Database {
     }
 
     pub fn assign_to_lineage_group(&self, image_id: &str, group_id: &str, order: i32) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "UPDATE images SET lineage_group_id = ?1, lineage_order = ?2 WHERE id = ?3",
             params![group_id, order, image_id],
@@ -150,7 +150,7 @@ impl Database {
     }
 
     pub fn remove_from_lineage_group(&self, image_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "UPDATE images SET lineage_group_id = NULL, lineage_order = 0 WHERE id = ?1",
             params![image_id],
@@ -159,7 +159,7 @@ impl Database {
     }
 
     pub fn list_lineage_groups(&self) -> Result<Vec<LineageGroup>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT lg.id, lg.name, lg.created_at, lg.detection_method, lg.detection_score,
                     COUNT(i.id) as cnt
@@ -182,12 +182,12 @@ impl Database {
     }
 
     pub fn get_lineage_group_images(&self, group_id: &str) -> Result<Vec<ImageWithFile>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
-                    f.missing_at
+                    i.raw_metadata, f.missing_at
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -217,19 +217,20 @@ impl Database {
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
+                    raw_metadata: row.get(14)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
-                missing_at: row.get(14)?,
+                missing_at: row.get(15)?,
             })
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
     }
 
     pub fn merge_lineage_groups(&self, keep_id: &str, merge_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "UPDATE images SET lineage_group_id = ?1 WHERE lineage_group_id = ?2",
             params![keep_id, merge_id],
@@ -239,7 +240,7 @@ impl Database {
     }
 
     pub fn dissolve_lineage_group(&self, group_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "UPDATE images SET lineage_group_id = NULL, lineage_order = 0 WHERE lineage_group_id = ?1",
             params![group_id],
@@ -249,7 +250,7 @@ impl Database {
     }
 
     pub fn rename_lineage_group(&self, group_id: &str, name: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "UPDATE lineage_groups SET name = ?1 WHERE id = ?2",
             params![name, group_id],
@@ -262,7 +263,7 @@ impl Database {
     pub fn create_import_batch(&self, source: &str, count: u32, collection_id: Option<&str>) -> Result<String> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO import_batches (id, created_at, source, image_count, collection_id)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -272,7 +273,7 @@ impl Database {
     }
 
     pub fn set_image_batch(&self, image_id: &str, batch_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "UPDATE images SET import_batch_id = ?1 WHERE id = ?2",
             params![batch_id, image_id],
@@ -281,12 +282,12 @@ impl Database {
     }
 
     pub fn get_batch_images(&self, batch_id: &str) -> Result<Vec<ImageWithFile>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
-                    f.missing_at
+                    i.raw_metadata, f.missing_at
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
@@ -316,12 +317,13 @@ impl Database {
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
+                    raw_metadata: row.get(14)?,
                 },
                 path: row.get(8)?,
                 thumbnail_path: None,
                 selection,
                 source_label: row.get(12)?,
-                missing_at: row.get(14)?,
+                missing_at: row.get(15)?,
             })
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
@@ -385,7 +387,7 @@ impl Database {
 
             // Check if any image already has a lineage group
             let existing_group: Option<String> = indices.iter().find_map(|&i| {
-                let conn = self.conn.lock().unwrap();
+                let conn = self.conn.lock();
                 conn.query_row(
                     "SELECT lineage_group_id FROM images WHERE id = ?1 AND lineage_group_id IS NOT NULL",
                     params![images[i].image.id],

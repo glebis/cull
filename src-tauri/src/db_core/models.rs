@@ -11,6 +11,7 @@ pub struct Image {
     pub created_at: String,
     pub imported_at: String,
     pub ai_prompt: Option<String>,
+    pub raw_metadata: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

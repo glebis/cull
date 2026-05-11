@@ -2,7 +2,7 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { listen } from '@tauri-apps/api/event';
     import { images, focusedIndex, statusHint, navigateTo } from '$lib/stores';
-    import { setDecision } from '$lib/api';
+    import { setDecision, isRawFormat } from '$lib/api';
     import { onMount, onDestroy } from 'svelte';
     import type { ImageWithFile } from '$lib/api';
     import { parseVoiceCommand, filterByDecision } from '$lib/tinder-utils';
@@ -25,8 +25,8 @@
     let totalPairs = $derived(Math.ceil($images.length / 2));
     let leftImage = $derived(pair[0]);
     let rightImage = $derived(pair[1]);
-    let leftSrc = $derived(leftImage ? convertFileSrc(leftImage.path) : '');
-    let rightSrc = $derived(rightImage ? convertFileSrc(rightImage.path) : '');
+    let leftSrc = $derived(leftImage ? (isRawFormat(leftImage.image.format) ? convertFileSrc(leftImage.thumbnail_path ?? leftImage.path) : convertFileSrc(leftImage.path)) : '');
+    let rightSrc = $derived(rightImage ? (isRawFormat(rightImage.image.format) ? convertFileSrc(rightImage.thumbnail_path ?? rightImage.path) : convertFileSrc(rightImage.path)) : '');
 
     $effect(() => {
         if (done) {

@@ -165,6 +165,7 @@ fn create_image_record(
         created_at: now.clone(),
         imported_at: now,
         ai_prompt: None,
+        raw_metadata: None,
     };
     db.insert_image(&image).map_err(|e| e.to_string())?;
     Ok(image_id)
