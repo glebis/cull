@@ -130,6 +130,10 @@ pub struct Asset {
     pub width: u32,
     pub height: u32,
     pub provenance: Option<AssetProvenance>,
+    /// Simple source tag for non-AI provenance (e.g. "raw_preview" when a RAW
+    /// thumbnail is used in place of the original RAW file).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,7 +173,7 @@ impl ExportManifest {
     pub fn new(id: String, title: String) -> Self {
         let now = chrono::Utc::now().to_rfc3339();
         Self {
-            kind: "imageview-story/v1".to_string(),
+            kind: "cull-story/v1".to_string(),
             schema_version: 1,
             id,
             title,
@@ -177,7 +181,7 @@ impl ExportManifest {
             created_at: now.clone(),
             updated_at: now,
             source: ManifestSource {
-                app: "imageview".to_string(),
+                app: "cull".to_string(),
                 collection_id: None,
                 image_ids: vec![],
             },

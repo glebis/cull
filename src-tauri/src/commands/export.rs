@@ -57,16 +57,38 @@ pub async fn create_export_manifest(
     for (idx, img) in images.iter().enumerate() {
         let clean_id = img.image.id.replace("-", "");
         let asset_id = format!("asset_src_{}", &clean_id[..clean_id.len().min(8)]);
-        let uri = format!("imageview://images/{}/original", img.image.id);
+
+        let ext = std::path::Path::new(&img.path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        let is_raw = crate::extensions::is_raw_extension(ext);
+
+        // For RAW files, export the preview thumbnail (JPEG) rather than the
+        // original RAW file, since most consumers cannot render proprietary RAW.
+        let (uri, mime, source_kind) = if is_raw {
+            (
+                format!("cull://images/{}/preview", img.image.id),
+                "image/jpeg".to_string(),
+                Some("raw_preview".to_string()),
+            )
+        } else {
+            (
+                format!("cull://images/{}/original", img.image.id),
+                format!("image/{}", img.image.format),
+                None,
+            )
+        };
 
         manifest.assets.push(Asset {
             id: asset_id.clone(),
             kind: "source".to_string(),
             uri,
-            mime: format!("image/{}", img.image.format),
+            mime,
             width: img.image.width,
             height: img.image.height,
             provenance: None,
+            source_kind,
         });
 
         let slide_id = format!("slide_{:03}", idx + 1);
@@ -169,7 +191,7 @@ pub async fn get_export_asset(
 ) -> Result<AssetResponse, String> {
     let _ = (max_width, max_height); // reserved for future resize support
 
-    let stripped = uri.strip_prefix("imageview://images/")
+    let stripped = uri.strip_prefix("cull://images/")
         .ok_or_else(|| format!("Unsupported URI scheme: {}", uri))?;
 
     let parts: Vec<&str> = stripped.split('/').collect();
@@ -185,12 +207,30 @@ pub async fn get_export_asset(
 
     match variant_str {
         "original" => {
-            Ok(AssetResponse {
-                path: img.path.clone(),
-                mime: format!("image/{}", img.image.format),
-                width: img.image.width,
-                height: img.image.height,
-            })
+            // For RAW files, serving the original is not useful for most export
+            // consumers. Fall back to the 800 px preview thumbnail (JPEG).
+            let ext = std::path::Path::new(&img.path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+            if crate::extensions::is_raw_extension(ext) {
+                let thumb_path = crate::db_core::thumbnails::thumbnail_path(
+                    &state.app_data_dir, &img.image.id,
+                );
+                Ok(AssetResponse {
+                    path: thumb_path.to_string_lossy().to_string(),
+                    mime: "image/jpeg".to_string(),
+                    width: 800.min(img.image.width),
+                    height: 800.min(img.image.height),
+                })
+            } else {
+                Ok(AssetResponse {
+                    path: img.path.clone(),
+                    mime: format!("image/{}", img.image.format),
+                    width: img.image.width,
+                    height: img.image.height,
+                })
+            }
         }
         "thumbnail" => {
             let thumb_path = crate::db_core::thumbnails::sized_thumbnail_path(
