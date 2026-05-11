@@ -595,3 +595,7 @@ export async function renameImage(imageId: string, newName: string): Promise<str
 export async function createSubfolder(parentPath: string, name: string): Promise<string> {
     return invoke<string>('create_subfolder', { parentPath, name });
 }
+
+export async function backfillRawPreviews(): Promise<number> {
+    return invoke<number>('backfill_raw_previews');
+}

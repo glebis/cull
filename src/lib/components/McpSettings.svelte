@@ -1,7 +1,8 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { listMcpTokens, createMcpToken, revokeMcpToken, rotateMcpToken, getAppSetting, setAppSetting, hasApiKey, setApiKey, deleteApiKey, validateApiKey } from '$lib/api';
+    import { listMcpTokens, createMcpToken, revokeMcpToken, rotateMcpToken, getAppSetting, setAppSetting, hasApiKey, setApiKey, deleteApiKey, validateApiKey, backfillRawPreviews } from '$lib/api';
     import type { McpToken } from '$lib/api';
+    import { showToast } from '$lib/stores';
 
     let { onclose }: { onclose: () => void } = $props();
 
@@ -21,6 +22,7 @@
     let copied = $state(false);
 
     let autoPurge = $state(true);
+    let moduleRaw = $state(false);
 
     interface ApiKeyState {
         exists: boolean;
@@ -45,13 +47,14 @@
 
     onMount(async () => {
         try {
-            const [toks, ctSetting, trashSetting, httpSetting, portSetting, purgeSetting] = await Promise.all([
+            const [toks, ctSetting, trashSetting, httpSetting, portSetting, purgeSetting, rawSetting] = await Promise.all([
                 listMcpTokens(),
                 getAppSetting('close_to_tray'),
                 getAppSetting('skip_trash_confirm'),
                 getAppSetting('mcp_http_enabled'),
                 getAppSetting('mcp_http_port'),
                 getAppSetting('auto_purge_missing'),
+                getAppSetting('module_raw'),
             ]);
             tokens = toks;
             closeToTray = ctSetting !== 'false';
@@ -59,6 +62,7 @@
             httpEnabled = httpSetting === 'true';
             if (portSetting) httpPort = portSetting;
             autoPurge = purgeSetting !== 'false';
+            moduleRaw = rawSetting === 'true';
 
             const [hasOpenai, hasGoogle, hasOpenrouter] = await Promise.all([
                 hasApiKey('openai'),
@@ -102,6 +106,17 @@
     async function toggleAutoPurge() {
         autoPurge = !autoPurge;
         await setAppSetting('auto_purge_missing', autoPurge ? 'true' : 'false');
+    }
+
+    async function toggleModuleRaw() {
+        await setAppSetting('module_raw', moduleRaw ? 'true' : 'false');
+        if (moduleRaw) {
+            showToast('RAW support enabled.', {
+                type: 'success',
+                duration: 10000,
+                actions: [{ label: 'Rescan library', onclick: () => backfillRawPreviews() }],
+            });
+        }
     }
 
     async function handleApiKeyBlur(provider: string) {
@@ -193,8 +208,8 @@
     function copyConfig() {
         const config = JSON.stringify({
             mcpServers: {
-                imageview: {
-                    command: "/Applications/ImageView.app/Contents/MacOS/imageview",
+                cull: {
+                    command: "/Applications/Cull.app/Contents/MacOS/cull",
                     args: ["--mcp-stdio"]
                 }
             }
@@ -249,6 +264,19 @@
                     <button class="toggle" class:on={autoPurge} onclick={toggleAutoPurge}>
                         {autoPurge ? 'ON' : 'OFF'}
                     </button>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">Modules</div>
+                <div class="section-item">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" bind:checked={moduleRaw} onchange={toggleModuleRaw} />
+                        RAW File Support
+                    </label>
+                    <span class="text-secondary" style="font-size: 0.85em; margin-top: 4px;">
+                        Import and preview RAW camera files (RAF, CR2, NEF, ARW, DNG, etc.)
+                    </span>
                 </div>
             </div>
 
@@ -350,8 +378,8 @@
                 </div>
                 <pre class="config-snippet">{`{
   "mcpServers": {
-    "imageview": {
-      "command": "imageview",
+    "cull": {
+      "command": "cull",
       "args": ["--mcp-stdio"]
     }
   }
