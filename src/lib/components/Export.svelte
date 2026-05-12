@@ -15,6 +15,7 @@
     let template: 'terminal' | 'editorial' | 'bleed' = $state('bleed');
     let selectedPreset: string = $state('ig_carousel');
     let exporting = $state(false);
+    let exportProgress = $state({ current: 0, total: 0, label: '' });
     let renderRefs: Record<string, HTMLDivElement> = $state({});
 
     let selectedImages = $derived(
@@ -62,13 +63,15 @@
     async function exportSlides() {
         if (!manifest || !activeTarget) return;
         exporting = true;
+        exportProgress = { current: 0, total: manifest.slides.length + (activeTarget.mime === 'application/pdf' ? 1 : 0), label: 'Preparing export' };
 
         try {
             const pngPaths: string[] = [];
 
-            for (const slide of manifest.slides) {
+            for (const [index, slide] of manifest.slides.entries()) {
                 const el = renderRefs[slide.id];
                 if (!el) continue;
+                exportProgress = { ...exportProgress, current: index, label: `Rendering slide ${index + 1}` };
 
                 const dataUrl = await toPng(el, {
                     width: activeTarget.width,
@@ -85,11 +88,13 @@
                     manifestId: manifest.id,
                 });
                 pngPaths.push(path);
+                exportProgress = { ...exportProgress, current: index + 1, label: `Saved slide ${index + 1}` };
             }
 
             showToast(`Exported ${pngPaths.length} slides`, { type: 'success' });
 
             if (activeTarget.mime === 'application/pdf' && pngPaths.length > 0) {
+                exportProgress = { ...exportProgress, current: manifest.slides.length, label: 'Assembling PDF' };
                 const pdfPath = await invoke<string>('assemble_export_pdf', {
                     imagePaths: pngPaths,
                     widthPx: activeTarget.width,
@@ -97,12 +102,14 @@
                     manifestId: manifest.id,
                     targetId: activeTarget.id,
                 });
+                exportProgress = { ...exportProgress, current: exportProgress.total, label: 'PDF saved' };
                 showToast(`PDF saved: ${pdfPath.split('/').pop()}`, { type: 'success' });
             }
         } catch (e) {
             showToast(`Export failed: ${e}`, { type: 'error' });
         } finally {
             exporting = false;
+            exportProgress = { current: 0, total: 0, label: '' };
         }
     }
 
@@ -137,6 +144,16 @@
             {exporting ? 'Exporting...' : activeTarget?.mime === 'application/pdf' ? 'Export PDF' : 'Export PNGs'}
         </button>
     </div>
+
+    {#if exporting && exportProgress.total > 0}
+        <div class="export-progress" role="status" aria-live="polite">
+            <span>{exportProgress.label}</span>
+            <span>{exportProgress.current}/{exportProgress.total}</span>
+            <div class="export-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax={exportProgress.total} aria-valuenow={exportProgress.current}>
+                <div class="export-progress-fill" style="width: {(exportProgress.current / exportProgress.total) * 100}%"></div>
+            </div>
+        </div>
+    {/if}
 
     {#if selectedImages.length === 0}
         <div class="empty-state">
@@ -248,6 +265,30 @@
     .export-btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+    }
+
+    .export-progress {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 6px 12px;
+        padding: 8px 16px;
+        border-bottom: 1px solid var(--border);
+        color: var(--text-secondary);
+        font-size: 11px;
+    }
+
+    .export-progress-track {
+        grid-column: 1 / -1;
+        height: 4px;
+        background: var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+    }
+
+    .export-progress-fill {
+        height: 100%;
+        background: var(--green);
+        transition: width 0.2s ease;
     }
 
     .preview-grid {

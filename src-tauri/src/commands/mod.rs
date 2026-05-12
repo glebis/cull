@@ -8,6 +8,7 @@ pub mod export;
 pub mod files;
 pub mod generation;
 pub mod import;
+pub mod jobs;
 pub mod library;
 pub mod lineage;
 pub mod mcp;

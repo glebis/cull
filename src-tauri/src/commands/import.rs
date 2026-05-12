@@ -118,9 +118,24 @@ pub async fn import_files(
     let mut errors = Vec::new();
 
     let mut new_image_ids: Vec<String> = Vec::new();
+    let total = file_paths.len() as u32;
 
-    for path_str in file_paths {
-        match crate::db_core::import::import_file(db, Path::new(&path_str), app_data_dir) {
+    for (i, path_str) in file_paths.iter().enumerate() {
+        let filename = Path::new(path_str.as_str())
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| path_str.clone());
+
+        let _ = app.emit(
+            "import-progress",
+            ImportProgress {
+                current: (i + 1) as u32,
+                total,
+                filename,
+            },
+        );
+
+        match crate::db_core::import::import_file(db, Path::new(path_str.as_str()), app_data_dir) {
             Ok(Some(id)) => {
                 new_image_ids.push(id);
                 imported += 1;

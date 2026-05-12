@@ -136,6 +136,30 @@ export async function regenerateSingleThumbnail(imageId: string): Promise<string
     return invoke<string>('regenerate_single_thumbnail', { imageId });
 }
 
+export interface JobSnapshot {
+    job_id: string;
+    kind: string;
+    status: string;
+    current: number;
+    total: number;
+    message: string | null;
+    error: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export async function getJob(jobId: string): Promise<JobSnapshot | null> {
+    return invoke<JobSnapshot | null>('get_job', { jobId });
+}
+
+export async function listJobs(): Promise<JobSnapshot[]> {
+    return invoke<JobSnapshot[]>('list_jobs');
+}
+
+export async function cancelJob(jobId: string): Promise<void> {
+    return invoke<void>('cancel_job', { jobId });
+}
+
 export async function rescanSources(): Promise<number> {
     return invoke<number>('rescan_sources');
 }
