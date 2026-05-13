@@ -5,7 +5,7 @@ import {
     sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode,
     collections, collectMode, collectModeTarget, activeCollection,
     showDetectionBoxes, showDetectionInspector, nsfwMode,
-    navigateTo, navigateBack, searchOpen, focusedImage,
+    navigateTo, navigateBack, searchOpen, focusedImage, activeSession,
 } from './stores';
 import { computeCompareSwap } from './compare-utils';
 import type { NsfwMode } from './stores';
@@ -89,7 +89,7 @@ export async function handleStarRating(n: number, imageIndex?: number) {
     const img = imgs[idx];
     if (!img) return;
     try {
-        await setRating(img.image.id, n);
+        await setRating(img.image.id, n, get(activeSession)?.id ?? null);
         images.update(all => {
             const copy = [...all];
             const item = { ...copy[idx] };
@@ -114,7 +114,7 @@ export async function handleDecision(decision: string, imageIndex?: number) {
     const img = imgs[idx];
     if (!img) return;
     try {
-        await setDecision(img.image.id, decision);
+        await setDecision(img.image.id, decision, get(activeSession)?.id ?? null);
         images.update(all => {
             const copy = [...all];
             const item = { ...copy[idx] };

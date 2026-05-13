@@ -1,17 +1,13 @@
 use std::path::Path;
 
 pub const BASE_IMAGE_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif",
-    "heic", "heif", "avif", "svg", "ico", "psd",
+    "jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif", "heic", "heif", "avif", "svg",
+    "ico", "psd",
 ];
 
-pub const RAW_EXTENSIONS: &[&str] = &[
-    "cr2", "cr3", "nef", "arw", "dng", "orf", "raf", "rw2",
-];
+pub const RAW_EXTENSIONS: &[&str] = &["cr2", "cr3", "nef", "arw", "dng", "orf", "raf", "rw2"];
 
-pub const BASE_DECODABLE_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "webp", "gif",
-];
+pub const BASE_DECODABLE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif"];
 
 pub fn supported_extensions(module_raw: bool) -> Vec<&'static str> {
     let mut exts = BASE_IMAGE_EXTENSIONS.to_vec();

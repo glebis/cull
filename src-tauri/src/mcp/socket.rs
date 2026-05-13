@@ -1,9 +1,9 @@
+use rmcp::ServiceExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::net::UnixListener;
-use rmcp::ServiceExt;
 
-use super::tools::ImageViewMcp;
+use super::tools::CullMcp;
 
 static CONNECTION_COUNT: AtomicU32 = AtomicU32::new(0);
 
@@ -24,7 +24,9 @@ pub async fn start_socket_server(
     if sock_path.exists() {
         match tokio::net::UnixStream::connect(&sock_path).await {
             Ok(_) => return Err("Another MCP server is already running on this socket".into()),
-            Err(_) => { let _ = std::fs::remove_file(&sock_path); }
+            Err(_) => {
+                let _ = std::fs::remove_file(&sock_path);
+            }
         }
     }
 
@@ -45,9 +47,12 @@ pub async fn start_socket_server(
         CONNECTION_COUNT.fetch_add(1, Ordering::Relaxed);
 
         tokio::spawn(async move {
-            eprintln!("MCP client connected (active: {})", CONNECTION_COUNT.load(Ordering::Relaxed));
+            eprintln!(
+                "MCP client connected (active: {})",
+                CONNECTION_COUNT.load(Ordering::Relaxed)
+            );
 
-            let mcp = ImageViewMcp::new(handle);
+            let mcp = CullMcp::new(handle);
             let (read, write) = tokio::io::split(stream);
 
             match mcp.serve((read, write)).await {
@@ -62,7 +67,10 @@ pub async fn start_socket_server(
             }
 
             CONNECTION_COUNT.fetch_sub(1, Ordering::Relaxed);
-            eprintln!("MCP client disconnected (active: {})", CONNECTION_COUNT.load(Ordering::Relaxed));
+            eprintln!(
+                "MCP client disconnected (active: {})",
+                CONNECTION_COUNT.load(Ordering::Relaxed)
+            );
         });
     }
 }
@@ -95,12 +103,19 @@ mod tests {
 
         let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
 
-        let client = timeout(Duration::from_secs(5), tokio::net::UnixStream::connect(&sock_path))
-            .await.expect("connect timed out").unwrap();
+        let client = timeout(
+            Duration::from_secs(5),
+            tokio::net::UnixStream::connect(&sock_path),
+        )
+        .await
+        .expect("connect timed out")
+        .unwrap();
         assert!(client.peer_addr().is_ok());
 
         let (server_stream, _) = timeout(Duration::from_secs(5), listener.accept())
-            .await.expect("accept timed out").unwrap();
+            .await
+            .expect("accept timed out")
+            .unwrap();
         assert!(server_stream.peer_addr().is_ok());
     }
 
@@ -113,8 +128,12 @@ mod tests {
         std::fs::write(&sock_path, "").unwrap();
         assert!(sock_path.exists());
 
-        let result = timeout(Duration::from_secs(5), tokio::net::UnixStream::connect(&sock_path))
-            .await.expect("connect timed out");
+        let result = timeout(
+            Duration::from_secs(5),
+            tokio::net::UnixStream::connect(&sock_path),
+        )
+        .await
+        .expect("connect timed out");
         assert!(result.is_err());
     }
 
@@ -143,15 +162,29 @@ mod tests {
 
         let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
 
-        let c1 = timeout(Duration::from_secs(5), tokio::net::UnixStream::connect(&sock_path))
-            .await.expect("c1 connect timed out").unwrap();
-        let c2 = timeout(Duration::from_secs(5), tokio::net::UnixStream::connect(&sock_path))
-            .await.expect("c2 connect timed out").unwrap();
+        let c1 = timeout(
+            Duration::from_secs(5),
+            tokio::net::UnixStream::connect(&sock_path),
+        )
+        .await
+        .expect("c1 connect timed out")
+        .unwrap();
+        let c2 = timeout(
+            Duration::from_secs(5),
+            tokio::net::UnixStream::connect(&sock_path),
+        )
+        .await
+        .expect("c2 connect timed out")
+        .unwrap();
 
         let (s1, _) = timeout(Duration::from_secs(5), listener.accept())
-            .await.expect("s1 accept timed out").unwrap();
+            .await
+            .expect("s1 accept timed out")
+            .unwrap();
         let (s2, _) = timeout(Duration::from_secs(5), listener.accept())
-            .await.expect("s2 accept timed out").unwrap();
+            .await
+            .expect("s2 accept timed out")
+            .unwrap();
 
         assert!(c1.peer_addr().is_ok());
         assert!(c2.peer_addr().is_ok());

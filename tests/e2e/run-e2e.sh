@@ -1,5 +1,5 @@
 #!/bin/bash
-# E2E Test Runner for ImageView
+# E2E Test Runner for Cull
 # Uses agent-browser + Chrome Beta against localhost:1420 with mock Tauri layer
 #
 # Prerequisites:
@@ -8,7 +8,7 @@
 
 CDP=9222
 URL="http://localhost:1420"
-SHOTS="/tmp/imageview-e2e"
+SHOTS="/tmp/cull-e2e"
 S="e2e$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 4)"
 PASS=0; FAIL=0; ERRS=""
 
@@ -41,7 +41,7 @@ command -v agent-browser &> /dev/null || { echo -e "${R}No agent-browser${N}"; e
 
 echo ""
 echo -e "${B}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${N}"
-echo -e "${B}  ImageView E2E Tests ($S)${N}"
+echo -e "${B}  Cull E2E Tests ($S)${N}"
 echo -e "${B}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${N}"
 echo ""
 

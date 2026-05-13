@@ -1,14 +1,14 @@
-use sha2::{Sha256, Digest};
+use chrono::Utc;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
-use chrono::Utc;
 use uuid::Uuid;
 
 use super::db::Database;
 use super::models::*;
-use super::thumbnails;
-use super::source_detection::{detect_source, read_png_text_chunks};
 use super::sidecar;
+use super::source_detection::{detect_source, read_png_text_chunks};
+use super::thumbnails;
 
 fn is_module_raw_enabled(db: &Database) -> bool {
     db.get_setting("module_raw")
@@ -17,7 +17,6 @@ fn is_module_raw_enabled(db: &Database) -> bool {
         .map(|v| v == "true")
         .unwrap_or(false)
 }
-
 
 #[derive(Debug)]
 pub enum SyncOutcome {
@@ -34,7 +33,8 @@ pub fn sync_file(
     file_path: &Path,
     app_data_dir: &Path,
 ) -> Result<SyncOutcome, String> {
-    let ext = file_path.extension()
+    let ext = file_path
+        .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_lowercase())
         .unwrap_or_default();
@@ -46,16 +46,25 @@ pub fn sync_file(
 
     let metadata = fs::metadata(file_path).map_err(|e| format!("Stat error: {}", e))?;
     let file_size = metadata.len();
-    let mtime = metadata.modified()
+    let mtime = metadata
+        .modified()
         .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
         .unwrap_or_default();
 
     let path_str = file_path.to_string_lossy().to_string();
     let can_decode = crate::extensions::is_decodable(&ext, module_raw);
 
-    if let Some(existing_file) = db.get_image_file_by_path(&path_str).map_err(|e| e.to_string())? {
-        let size_match = existing_file.last_seen_size.map_or(false, |s| s == file_size);
-        let mtime_match = existing_file.last_seen_mtime.as_deref().map_or(false, |m| m == mtime);
+    if let Some(existing_file) = db
+        .get_image_file_by_path(&path_str)
+        .map_err(|e| e.to_string())?
+    {
+        let size_match = existing_file
+            .last_seen_size
+            .map_or(false, |s| s == file_size);
+        let mtime_match = existing_file
+            .last_seen_mtime
+            .as_deref()
+            .map_or(false, |m| m == mtime);
 
         if size_match && mtime_match && existing_file.missing_at.is_none() {
             let _ = db.touch_image_file(&existing_file.id, file_size, &mtime);
@@ -83,7 +92,11 @@ pub fn sync_file(
             if can_decode {
                 if crate::extensions::is_raw_extension(&ext) {
                     if let Ok(preview) = crate::raw::decode_raw_preview(file_path) {
-                        let _ = thumbnails::generate_thumbnail_from_image(&preview.image, app_data_dir, &img.id);
+                        let _ = thumbnails::generate_thumbnail_from_image(
+                            &preview.image,
+                            app_data_dir,
+                            &img.id,
+                        );
                     }
                 } else {
                     let _ = thumbnails::generate_thumbnail(file_path, app_data_dir, &img.id);
@@ -92,12 +105,19 @@ pub fn sync_file(
             return Ok(SyncOutcome::ContentChanged { image_id: img.id });
         }
 
-        let (image_id, raw_preview) = create_image_record(db, file_path, &hash, &ext, &data, can_decode)?;
+        let (image_id, raw_preview) =
+            create_image_record(db, file_path, &hash, &ext, &data, can_decode)?;
         let _ = db.repoint_image_file(&existing_file.id, &image_id, file_size, &mtime);
         if can_decode {
-            let raw_dims = raw_preview.as_ref().map(|p| (p.image.width(), p.image.height()));
+            let raw_dims = raw_preview
+                .as_ref()
+                .map(|p| (p.image.width(), p.image.height()));
             if let Some(preview) = &raw_preview {
-                let _ = thumbnails::generate_thumbnail_from_image(&preview.image, app_data_dir, &image_id);
+                let _ = thumbnails::generate_thumbnail_from_image(
+                    &preview.image,
+                    app_data_dir,
+                    &image_id,
+                );
                 if let Ok(meta_json) = serde_json::to_string(&preview.metadata) {
                     let _ = db.update_raw_metadata(&image_id, &meta_json);
                 }
@@ -124,11 +144,15 @@ pub fn sync_file(
             last_seen_size: Some(file_size),
             last_seen_mtime: Some(mtime),
         };
-        db.insert_image_file(&file_record).map_err(|e| e.to_string())?;
-        return Ok(SyncOutcome::NewImport { image_id: existing_img.id });
+        db.insert_image_file(&file_record)
+            .map_err(|e| e.to_string())?;
+        return Ok(SyncOutcome::NewImport {
+            image_id: existing_img.id,
+        });
     }
 
-    let (image_id, raw_preview) = create_image_record(db, file_path, &hash, &ext, &data, can_decode)?;
+    let (image_id, raw_preview) =
+        create_image_record(db, file_path, &hash, &ext, &data, can_decode)?;
     let file_record = ImageFile {
         id: Uuid::new_v4().to_string(),
         image_id: image_id.clone(),
@@ -138,12 +162,16 @@ pub fn sync_file(
         last_seen_size: Some(file_size),
         last_seen_mtime: Some(mtime),
     };
-    db.insert_image_file(&file_record).map_err(|e| e.to_string())?;
+    db.insert_image_file(&file_record)
+        .map_err(|e| e.to_string())?;
 
     if can_decode {
-        let raw_dims = raw_preview.as_ref().map(|p| (p.image.width(), p.image.height()));
+        let raw_dims = raw_preview
+            .as_ref()
+            .map(|p| (p.image.width(), p.image.height()));
         if let Some(preview) = &raw_preview {
-            let _ = thumbnails::generate_thumbnail_from_image(&preview.image, app_data_dir, &image_id);
+            let _ =
+                thumbnails::generate_thumbnail_from_image(&preview.image, app_data_dir, &image_id);
             if let Ok(meta_json) = serde_json::to_string(&preview.metadata) {
                 let _ = db.update_raw_metadata(&image_id, &meta_json);
             }
@@ -164,7 +192,9 @@ pub fn import_file(
     app_data_dir: &Path,
 ) -> Result<Option<String>, String> {
     match sync_file(db, file_path, app_data_dir)? {
-        SyncOutcome::NewImport { image_id } | SyncOutcome::ContentChanged { image_id } => Ok(Some(image_id)),
+        SyncOutcome::NewImport { image_id } | SyncOutcome::ContentChanged { image_id } => {
+            Ok(Some(image_id))
+        }
         _ => Ok(None),
     }
 }
@@ -216,7 +246,13 @@ fn compute_hash(data: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-fn run_source_detection(db: &Database, file_path: &Path, image_id: &str, ext: &str, override_dims: Option<(u32, u32)>) {
+fn run_source_detection(
+    db: &Database,
+    file_path: &Path,
+    image_id: &str,
+    ext: &str,
+    override_dims: Option<(u32, u32)>,
+) {
     let (width, height) = override_dims.unwrap_or_else(|| {
         image::open(file_path)
             .map(|i| (i.width(), i.height()))
@@ -225,15 +261,24 @@ fn run_source_detection(db: &Database, file_path: &Path, image_id: &str, ext: &s
 
     if crate::extensions::is_raw_extension(ext) {
         let aspect_ratio = width as f64 / height.max(1) as f64;
-        let orientation = if (aspect_ratio - 1.0).abs() < 0.05 { "square" }
-            else if aspect_ratio > 1.0 { "landscape" }
-            else { "portrait" };
+        let orientation = if (aspect_ratio - 1.0).abs() < 0.05 {
+            "square"
+        } else if aspect_ratio > 1.0 {
+            "landscape"
+        } else {
+            "portrait"
+        };
         let megapixels = (width as f64 * height as f64) / 1_000_000.0;
         let _ = db.update_source_detection(
-            image_id, Some("camera"), 1.0,
+            image_id,
+            Some("camera"),
+            1.0,
             &serde_json::json!({"method": "raw_format"}).to_string(),
-            Some(false), None,
-            aspect_ratio, orientation, megapixels,
+            Some(false),
+            None,
+            aspect_ratio,
+            orientation,
+            megapixels,
         );
         return;
     }
@@ -247,9 +292,13 @@ fn run_source_detection(db: &Database, file_path: &Path, image_id: &str, ext: &s
     let detection = detect_source(filename, &png_chunks, file_path);
 
     let aspect_ratio = width as f64 / height.max(1) as f64;
-    let orientation = if (aspect_ratio - 1.0).abs() < 0.05 { "square" }
-        else if aspect_ratio > 1.0 { "landscape" }
-        else { "portrait" };
+    let orientation = if (aspect_ratio - 1.0).abs() < 0.05 {
+        "square"
+    } else if aspect_ratio > 1.0 {
+        "landscape"
+    } else {
+        "portrait"
+    };
     let megapixels = (width as f64 * height as f64) / 1_000_000.0;
 
     let _ = db.update_source_detection(
@@ -259,7 +308,9 @@ fn run_source_detection(db: &Database, file_path: &Path, image_id: &str, ext: &s
         &detection.to_evidence_json(),
         detection.is_ai_generated,
         detection.ai_prompt.as_deref(),
-        aspect_ratio, orientation, megapixels,
+        aspect_ratio,
+        orientation,
+        megapixels,
     );
 }
 

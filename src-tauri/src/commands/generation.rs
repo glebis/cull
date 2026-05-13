@@ -1,7 +1,7 @@
-use tauri::State;
-use serde::{Deserialize, Serialize};
-use crate::AppState;
 use crate::services::generation;
+use crate::AppState;
+use serde::{Deserialize, Serialize};
+use tauri::State;
 
 #[derive(Debug, Deserialize)]
 pub struct ResubmitRequest {
@@ -36,8 +36,12 @@ pub async fn resubmit_prompt(
     request: ResubmitRequest,
 ) -> Result<ResubmitResponse, String> {
     let provider_cfg = generation::provider_config(&request.provider)?;
-    let api_key = state.secrets.get(provider_cfg.key_name)?
-        .ok_or_else(|| format!("{} API key not set. Go to Settings to add it.", request.provider))?;
+    let api_key = state.secrets.get(provider_cfg.key_name)?.ok_or_else(|| {
+        format!(
+            "{} API key not set. Go to Settings to add it.",
+            request.provider
+        )
+    })?;
     let base_url = provider_cfg.base_url.to_string();
     let api_style = provider_cfg.api_style;
 
@@ -78,7 +82,8 @@ pub async fn resubmit_prompt(
             &job_id_for_task,
             &cancel,
             &app_clone,
-        ).await;
+        )
+        .await;
     });
 
     Ok(ResubmitResponse { job_id })

@@ -86,14 +86,28 @@ mod tests {
         log_api_call(&db, "gemini", "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-exp-03-07:embedContent",
             "image", 1200000, None, Some("2048x1536"), Some("gemini-embedding-exp-03-07"), 200, "US - Google LLC").unwrap();
 
-        log_api_call(&db, "openai", "https://api.openai.com/v1/images/generations",
-            "prompt", 450, Some("a cat in watercolor style"), None, Some("gpt-image-2"), 200, "US - OpenAI Inc").unwrap();
+        log_api_call(
+            &db,
+            "openai",
+            "https://api.openai.com/v1/images/generations",
+            "prompt",
+            450,
+            Some("a cat in watercolor style"),
+            None,
+            Some("gpt-image-2"),
+            200,
+            "US - OpenAI Inc",
+        )
+        .unwrap();
 
         let entries = get_audit_log(&db, 10).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].provider, "openai");
         assert_eq!(entries[1].provider, "gemini");
-        assert_eq!(entries[0].prompt_preview.as_deref(), Some("a cat in watercolor style"));
+        assert_eq!(
+            entries[0].prompt_preview.as_deref(),
+            Some("a cat in watercolor style")
+        );
         assert_eq!(entries[1].image_dimensions.as_deref(), Some("2048x1536"));
     }
 
@@ -103,8 +117,19 @@ mod tests {
         let db = Database::open(&dir.path().join("test.db")).unwrap();
 
         for i in 0..5 {
-            log_api_call(&db, "gemini", "https://example.com", "image", i * 100,
-                None, None, None, 200, "US").unwrap();
+            log_api_call(
+                &db,
+                "gemini",
+                "https://example.com",
+                "image",
+                i * 100,
+                None,
+                None,
+                None,
+                200,
+                "US",
+            )
+            .unwrap();
         }
 
         let entries = get_audit_log(&db, 3).unwrap();
@@ -116,8 +141,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::open(&dir.path().join("test.db")).unwrap();
 
-        log_api_call(&db, "openai", "https://api.openai.com/v1/images/generations",
-            "prompt", 100, Some("test prompt"), None, Some("gpt-image-2"), 200, "US - OpenAI Inc").unwrap();
+        log_api_call(
+            &db,
+            "openai",
+            "https://api.openai.com/v1/images/generations",
+            "prompt",
+            100,
+            Some("test prompt"),
+            None,
+            Some("gpt-image-2"),
+            200,
+            "US - OpenAI Inc",
+        )
+        .unwrap();
 
         let json = export_audit_log_json(&db).unwrap();
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();

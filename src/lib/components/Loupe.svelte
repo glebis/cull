@@ -7,6 +7,14 @@
     import { images, focusedIndex, focusedImage, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
     import { getDetections, getVisionMetadata, cropImage, getImagesByIds, getGenerationRun, isRawFormat } from '$lib/api';
     import type { Detection, GenerationRun } from '$lib/api';
+    import {
+        clientToImagePoint,
+        cropRectFromImagePoints,
+        cropSelectionPercentFromImagePoints,
+        moveCropRect,
+        resizeCropRectFromHandle
+    } from '$lib/view-utils';
+    import type { CropPoint, CropRect, CropResizeHandle } from '$lib/view-utils';
 
     let dragging = $state(false);
     let dragStartX = $state(0);
@@ -33,6 +41,14 @@
         midjourney: 'Midjourney',
         nanobanana: 'Nanobanana',
     };
+    const MIN_CROP_SIZE = 10;
+    const CROP_HANDLES: CropResizeHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+
+    type CropDragState =
+        | { type: 'draw'; anchor: CropPoint }
+        | { type: 'move'; startPointer: CropPoint; startRect: CropRect }
+        | { type: 'resize'; handle: CropResizeHandle; startRect: CropRect };
+
     let sourceDisplay = $derived(image?.source_label ? SOURCE_DISPLAY[image.source_label] ?? image.source_label : null);
 
     let generationRun = $state<GenerationRun | null>(null);
@@ -185,9 +201,16 @@
 
     // Crop mode
     let cropMode = $state(false);
-    let cropStart = $state<{x: number, y: number} | null>(null);
-    let cropEnd = $state<{x: number, y: number} | null>(null);
+    let cropStart = $state<CropPoint | null>(null);
+    let cropEnd = $state<CropPoint | null>(null);
+    let cropDrag = $state<CropDragState | null>(null);
+    let cropSpaceHeld = $state(false);
     let cropping = $state(false);
+    let currentCropRect = $derived(getCropRect());
+    let cropSizeLabel = $derived(currentCropRect ? `${currentCropRect.width} x ${currentCropRect.height} px` : '');
+    let canApplyCrop = $derived(
+        !!currentCropRect && currentCropRect.width >= MIN_CROP_SIZE && currentCropRect.height >= MIN_CROP_SIZE
+    );
 
     function enterCropMode() {
         if (isRaw) return;
@@ -200,28 +223,39 @@
         cropMode = false;
         cropStart = null;
         cropEnd = null;
+        cropDrag = null;
+        cropSpaceHeld = false;
     }
 
     function getCropRect() {
-        if (!cropStart || !cropEnd || !imgEl || !image) return null;
-        const rect = imgEl.getBoundingClientRect();
-        const scaleX = image.image.width / rect.width;
-        const scaleY = image.image.height / rect.height;
-        const x1 = Math.min(cropStart.x, cropEnd.x);
-        const y1 = Math.min(cropStart.y, cropEnd.y);
-        const x2 = Math.max(cropStart.x, cropEnd.x);
-        const y2 = Math.max(cropStart.y, cropEnd.y);
-        return {
-            x: Math.round((x1 - rect.left) * scaleX),
-            y: Math.round((y1 - rect.top) * scaleY),
-            width: Math.round((x2 - x1) * scaleX),
-            height: Math.round((y2 - y1) * scaleY),
-        };
+        if (!cropStart || !cropEnd || !image) return null;
+        return cropRectFromImagePoints(cropStart, cropEnd, image.image.width, image.image.height);
+    }
+
+    function getCropSelectionPercent() {
+        if (!cropStart || !cropEnd || !image) return null;
+        return cropSelectionPercentFromImagePoints(cropStart, cropEnd, image.image.width, image.image.height);
+    }
+
+    function getCropPoint(e: MouseEvent): CropPoint | null {
+        if (!imgEl || !image) return null;
+        return clientToImagePoint(
+            e.clientX,
+            e.clientY,
+            imgEl.getBoundingClientRect(),
+            image.image.width,
+            image.image.height
+        );
+    }
+
+    function setCropRect(rect: CropRect) {
+        cropStart = { x: rect.x, y: rect.y };
+        cropEnd = { x: rect.x + rect.width, y: rect.y + rect.height };
     }
 
     async function applyCrop() {
-        const rect = getCropRect();
-        if (!rect || !image || rect.width < 10 || rect.height < 10) return;
+        const rect = currentCropRect;
+        if (!rect || !image || rect.width < MIN_CROP_SIZE || rect.height < MIN_CROP_SIZE) return;
         cropping = true;
         try {
             await cropImage(image.image.id, rect.x, rect.y, rect.width, rect.height, false);
@@ -236,30 +270,108 @@
 
     function handleCropMouseDown(e: MouseEvent) {
         if (!cropMode) return;
-        cropStart = { x: e.clientX, y: e.clientY };
-        cropEnd = { x: e.clientX, y: e.clientY };
+        e.preventDefault();
+        e.stopPropagation();
+        const point = getCropPoint(e);
+        if (!point) return;
+        const rect = currentCropRect;
+        if (cropSpaceHeld && rect) {
+            cropDrag = { type: 'move', startPointer: point, startRect: rect };
+            return;
+        }
+        cropDrag = { type: 'draw', anchor: point };
+        cropStart = point;
+        cropEnd = point;
     }
 
     function handleCropMouseMove(e: MouseEvent) {
-        if (!cropMode || !cropStart) return;
-        cropEnd = { x: e.clientX, y: e.clientY };
+        if (!cropMode || !cropDrag || !image) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const point = getCropPoint(e);
+        if (!point) return;
+        if (cropDrag.type === 'draw') {
+            cropStart = cropDrag.anchor;
+            cropEnd = point;
+            return;
+        }
+        if (cropDrag.type === 'move') {
+            setCropRect(moveCropRect(
+                cropDrag.startRect,
+                point.x - cropDrag.startPointer.x,
+                point.y - cropDrag.startPointer.y,
+                image.image.width,
+                image.image.height
+            ));
+            return;
+        }
+        setCropRect(resizeCropRectFromHandle(
+            cropDrag.startRect,
+            cropDrag.handle,
+            point,
+            image.image.width,
+            image.image.height,
+            MIN_CROP_SIZE
+        ));
     }
 
-    function handleCropMouseUp() {
+    function handleCropMouseUp(e: MouseEvent) {
+        e.preventDefault();
+        e.stopPropagation();
+        cropDrag = null;
         // Selection complete — user clicks Apply or Cancel
+    }
+
+    function handleCropSelectionMouseDown(e: MouseEvent) {
+        if (!cropMode || !currentCropRect) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const point = getCropPoint(e);
+        if (!point) return;
+        cropDrag = { type: 'move', startPointer: point, startRect: currentCropRect };
+    }
+
+    function handleCropHandleMouseDown(e: MouseEvent, handle: CropResizeHandle) {
+        if (!cropMode || !currentCropRect) return;
+        e.preventDefault();
+        e.stopPropagation();
+        cropDrag = { type: 'resize', handle, startRect: currentCropRect };
     }
 
     $effect(() => {
         if (!cropMode) return;
-        function handleEsc(e: KeyboardEvent) {
+        function handleCropKeyDown(e: KeyboardEvent) {
             if (e.key === 'Escape') {
                 e.preventDefault();
                 e.stopPropagation();
                 cancelCrop();
+                return;
+            }
+            if (e.code === 'Space') {
+                cropSpaceHeld = true;
+                if (currentCropRect) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+                return;
+            }
+            if (e.key === 'Enter' || e.key === 'Return' || (e.metaKey && e.key.toLowerCase() === 'k')) {
+                e.preventDefault();
+                e.stopPropagation();
+                void applyCrop();
             }
         }
-        window.addEventListener('keydown', handleEsc, true);
-        return () => window.removeEventListener('keydown', handleEsc, true);
+        function handleCropKeyUp(e: KeyboardEvent) {
+            if (e.code === 'Space') {
+                cropSpaceHeld = false;
+            }
+        }
+        window.addEventListener('keydown', handleCropKeyDown, true);
+        window.addEventListener('keyup', handleCropKeyUp, true);
+        return () => {
+            window.removeEventListener('keydown', handleCropKeyDown, true);
+            window.removeEventListener('keyup', handleCropKeyUp, true);
+        };
     });
 
     let isSelected = $derived(image ? $selectedIds.has(image.image.id) : false);
@@ -282,6 +394,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <svelte:window onkeydown={handleSpaceDown} onkeyup={handleSpaceUp} />
 <div class="loupe-wrapper" class:has-inspector={$showDetectionInspector}>
+<!-- svelte-ignore a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
 <div
     class="loupe-container"
     onwheel={handleWheel}
@@ -347,25 +460,65 @@
     {/if}
 
     {#if cropMode}
+        <!-- svelte-ignore a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
         <div
             class="crop-overlay"
+            class:space-move={cropSpaceHeld && currentCropRect}
             onmousedown={handleCropMouseDown}
             onmousemove={handleCropMouseMove}
             onmouseup={handleCropMouseUp}
+            onmouseleave={handleCropMouseUp}
         >
-            {#if cropStart && cropEnd}
-                {@const left = Math.min(cropStart.x, cropEnd.x)}
-                {@const top = Math.min(cropStart.y, cropEnd.y)}
-                {@const w = Math.abs(cropEnd.x - cropStart.x)}
-                {@const h = Math.abs(cropEnd.y - cropStart.y)}
-                <div class="crop-selection" style="left:{left}px;top:{top}px;width:{w}px;height:{h}px;"></div>
+            {#if cropStart && cropEnd && imgEl && image}
+                {@const cropSelection = getCropSelectionPercent()}
+                {#if cropSelection}
+                    <div
+                        class="crop-selection-layer"
+                        style="
+                            left: {imgEl.offsetLeft}px;
+                            top: {imgEl.offsetTop}px;
+                            width: {imgEl.offsetWidth}px;
+                            height: {imgEl.offsetHeight}px;
+                            transform: scale({$loupeScale}) translate({$loupePanX / $loupeScale}px, {$loupePanY / $loupeScale}px);
+                        "
+                    >
+                        <!-- svelte-ignore a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
+                        <div
+                            class="crop-selection"
+                            onmousedown={handleCropSelectionMouseDown}
+                            style="
+                                left: {cropSelection.left}%;
+                                top: {cropSelection.top}%;
+                                width: {cropSelection.width}%;
+                                height: {cropSelection.height}%;
+                            "
+                        >
+                            {#each CROP_HANDLES as handle}
+                                <button
+                                    type="button"
+                                    class="crop-handle crop-handle-{handle}"
+                                    aria-label="Resize crop {handle}"
+                                    title="Resize crop"
+                                    onmousedown={(e) => handleCropHandleMouseDown(e, handle)}
+                                ></button>
+                            {/each}
+                        </div>
+                    </div>
+                {/if}
             {/if}
-            <div class="crop-toolbar" onmousedown={(e) => e.stopPropagation()}>
-                <button onclick={applyCrop} disabled={cropping || !cropStart}>
-                    {cropping ? 'Cropping…' : '✓ Apply'}
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div
+                class="crop-toolbar"
+                onmousedown={(e) => e.stopPropagation()}
+                onmouseup={(e) => e.stopPropagation()}
+            >
+                {#if cropSizeLabel}
+                    <span class="crop-dimensions">{cropSizeLabel}</span>
+                {/if}
+                <button onclick={applyCrop} disabled={cropping || !canApplyCrop} title="Crop selection">
+                    {cropping ? 'Cropping…' : '✓ Crop'}
                 </button>
-                <button onclick={cancelCrop}>✕ Cancel</button>
-                <span class="crop-hint">Draw a rectangle to crop • Esc to cancel</span>
+                <button onclick={cancelCrop} title="Cancel crop">✕ Cancel</button>
             </div>
         </div>
     {/if}
@@ -899,43 +1052,79 @@
         cursor: crosshair;
         z-index: 20;
     }
-    .crop-selection {
-        position: fixed;
-        border: 2px dashed #4a9eff;
-        background: rgba(74, 158, 255, 0.1);
+    .crop-overlay.space-move {
+        cursor: move;
+    }
+    .crop-selection-layer {
+        position: absolute;
+        transform-origin: center center;
+        overflow: hidden;
         pointer-events: none;
+    }
+    .crop-selection {
+        position: absolute;
+        border: 2px dashed var(--blue);
+        background: color-mix(in srgb, var(--blue) 8%, transparent);
+        box-shadow: 0 0 0 9999px color-mix(in srgb, var(--bg) 58%, transparent);
+        cursor: move;
+        pointer-events: auto;
+    }
+    .crop-handle {
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        padding: 0;
+        border: 2px solid var(--bg);
+        border-radius: 50%;
+        background: var(--blue);
+        box-shadow: 0 0 0 1px var(--border);
+    }
+    .crop-handle-nw { top: -6px; left: -6px; cursor: nwse-resize; }
+    .crop-handle-n { top: -6px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+    .crop-handle-ne { top: -6px; right: -6px; cursor: nesw-resize; }
+    .crop-handle-e { top: 50%; right: -6px; transform: translateY(-50%); cursor: ew-resize; }
+    .crop-handle-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+    .crop-handle-s { bottom: -6px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+    .crop-handle-sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+    .crop-handle-w { top: 50%; left: -6px; transform: translateY(-50%); cursor: ew-resize; }
+    .crop-handle:focus-visible {
+        outline: 2px solid var(--text);
+        outline-offset: 2px;
     }
     .crop-toolbar {
         position: absolute;
         bottom: 48px;
         left: 50%;
         transform: translateX(-50%);
-        background: rgba(0,0,0,0.85);
+        background: color-mix(in srgb, var(--bg) 88%, transparent);
         padding: 8px 16px;
-        border-radius: 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
         display: flex;
         gap: 12px;
         align-items: center;
         backdrop-filter: blur(8px);
+        z-index: 1;
+    }
+    .crop-dimensions {
+        color: var(--blue);
+        font-size: 11px;
+        white-space: nowrap;
     }
     .crop-toolbar button {
         background: none;
-        border: 1px solid rgba(255,255,255,0.3);
-        color: #fff;
+        border: 1px solid color-mix(in srgb, var(--text) 30%, transparent);
+        color: var(--text);
         padding: 4px 12px;
-        border-radius: 4px;
+        border-radius: var(--radius);
         cursor: pointer;
         font-size: 0.8rem;
     }
     .crop-toolbar button:hover:not(:disabled) {
-        background: rgba(255,255,255,0.1);
+        background: color-mix(in srgb, var(--text) 10%, transparent);
     }
     .crop-toolbar button:disabled {
         opacity: 0.4;
-    }
-    .crop-hint {
-        color: rgba(255,255,255,0.5);
-        font-size: 0.75rem;
     }
     .prompt-action {
         background: var(--blue);

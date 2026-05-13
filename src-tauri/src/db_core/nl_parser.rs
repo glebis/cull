@@ -8,89 +8,65 @@ struct PatternRule {
     build: fn(&regex::Captures) -> Option<FilterNode>,
 }
 
-static RATING_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(\d)\s*\+?\s*stars?\s*(or\s*more|and\s*above|\+)?").unwrap()
-});
+static RATING_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)(\d)\s*\+?\s*stars?\s*(or\s*more|and\s*above|\+)?").unwrap());
 
-static MIDJOURNEY_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(midjourney|mj)\b").unwrap()
-});
+static MIDJOURNEY_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(midjourney|mj)\b").unwrap());
 
-static SD_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(stable\s*diffusion|sd|a1111|automatic1111)\b").unwrap()
-});
+static SD_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(stable\s*diffusion|sd|a1111|automatic1111)\b").unwrap());
 
 static GPT_IMAGE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(gpt[\s\-_]?image[\s\-_]?2?|image[\s\-_]?gen[\s\-_]?2)\b").unwrap()
 });
 
-static CHATGPT_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bchatgpt\b").unwrap()
-});
+static CHATGPT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bchatgpt\b").unwrap());
 
-static OPENAI_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bopenai\b").unwrap()
-});
+static OPENAI_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bopenai\b").unwrap());
 
-static DALLE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(dall[\-·\.]?e)\b").unwrap()
-});
+static DALLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(dall[\-·\.]?e)\b").unwrap());
 
-static COMFYUI_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(comfyui|comfy)\b").unwrap()
-});
+static COMFYUI_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(comfyui|comfy)\b").unwrap());
 
-static NANOBANANA_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bnanobanana\b").unwrap()
-});
+static NANOBANANA_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bnanobanana\b").unwrap());
 
-static LANDSCAPE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(landscape|horizontal|wide)\b").unwrap()
-});
+static LANDSCAPE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(landscape|horizontal|wide)\b").unwrap());
 
-static PORTRAIT_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(portrait|vertical|tall)\b").unwrap()
-});
+static PORTRAIT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(portrait|vertical|tall)\b").unwrap());
 
-static SQUARE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bsquare\b").unwrap()
-});
+static SQUARE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bsquare\b").unwrap());
 
-static FORMAT_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(png|jpg|jpeg|webp|gif|bmp|tiff)\b").unwrap()
-});
+static FORMAT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(png|jpg|jpeg|webp|gif|bmp|tiff)\b").unwrap());
 
-static RECENT_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(recent|today|new)\s*(imports?|images?)?").unwrap()
-});
+static RECENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(recent|today|new)\s*(imports?|images?)?").unwrap());
 
-static THIS_WEEK_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bthis\s*week\b").unwrap()
-});
+static THIS_WEEK_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bthis\s*week\b").unwrap());
 
-static THIS_MONTH_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bthis\s*month\b").unwrap()
-});
+static THIS_MONTH_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bthis\s*month\b").unwrap());
 
-static PICKS_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(picks?|accepted|selected)\b").unwrap()
-});
+static PICKS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(picks?|accepted|selected)\b").unwrap());
 
-static REJECTS_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(rejects?|rejected)\b").unwrap()
-});
+static REJECTS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(rejects?|rejected)\b").unwrap());
 
-static COLOR_LABEL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(red|green|blue|yellow)\s*(label)?\b").unwrap()
-});
+static COLOR_LABEL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(red|green|blue|yellow)\s*(label)?\b").unwrap());
 
-static AI_GENERATED_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(ai\s*generated|ai\s*images?|generated)\b").unwrap()
-});
+static AI_GENERATED_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(ai\s*generated|ai\s*images?|generated)\b").unwrap());
 
-static PHOTOS_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bphotos?\b").unwrap()
-});
+static PHOTOS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bphotos?\b").unwrap());
 
 fn get_patterns() -> Vec<PatternRule> {
     vec![
@@ -101,182 +77,226 @@ fn get_patterns() -> Vec<PatternRule> {
                 let has_plus = caps.get(2).is_some() || caps[0].contains('+');
                 Some(FilterNode::Rule {
                     field: Field::Rating,
-                    op: if has_plus || n >= 4.0 { RuleOp::Gte } else { RuleOp::Eq },
+                    op: if has_plus || n >= 4.0 {
+                        RuleOp::Gte
+                    } else {
+                        RuleOp::Eq
+                    },
                     value: FilterValue::Number(n),
                 })
             },
         },
         PatternRule {
             pattern: &MIDJOURNEY_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::SourceLabel,
-                op: RuleOp::Eq,
-                value: FilterValue::String("midjourney".to_string()),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::SourceLabel,
+                    op: RuleOp::Eq,
+                    value: FilterValue::String("midjourney".to_string()),
+                })
+            },
         },
         PatternRule {
             pattern: &SD_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::SourceLabel,
-                op: RuleOp::Eq,
-                value: FilterValue::String("stable_diffusion".to_string()),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::SourceLabel,
+                    op: RuleOp::Eq,
+                    value: FilterValue::String("stable_diffusion".to_string()),
+                })
+            },
         },
         PatternRule {
             pattern: &GPT_IMAGE_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::SourceLabel,
-                op: RuleOp::Eq,
-                value: FilterValue::String("gpt_image_2".to_string()),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::SourceLabel,
+                    op: RuleOp::Eq,
+                    value: FilterValue::String("gpt_image_2".to_string()),
+                })
+            },
         },
         PatternRule {
             pattern: &CHATGPT_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::SourceLabel,
-                op: RuleOp::In,
-                value: FilterValue::StringArray(vec![
-                    "gpt_image_2".to_string(),
-                    "dalle_3".to_string(),
-                    "dalle".to_string(),
-                ]),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::SourceLabel,
+                    op: RuleOp::In,
+                    value: FilterValue::StringArray(vec![
+                        "gpt_image_2".to_string(),
+                        "dalle_3".to_string(),
+                        "dalle".to_string(),
+                    ]),
+                })
+            },
         },
         PatternRule {
             pattern: &OPENAI_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::SourceLabel,
-                op: RuleOp::In,
-                value: FilterValue::StringArray(vec![
-                    "gpt_image_2".to_string(),
-                    "dalle_3".to_string(),
-                    "dalle".to_string(),
-                    "openai".to_string(),
-                ]),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::SourceLabel,
+                    op: RuleOp::In,
+                    value: FilterValue::StringArray(vec![
+                        "gpt_image_2".to_string(),
+                        "dalle_3".to_string(),
+                        "dalle".to_string(),
+                        "openai".to_string(),
+                    ]),
+                })
+            },
         },
         PatternRule {
             pattern: &DALLE_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::SourceLabel,
-                op: RuleOp::In,
-                value: FilterValue::StringArray(vec![
-                    "dalle_3".to_string(),
-                    "dalle".to_string(),
-                ]),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::SourceLabel,
+                    op: RuleOp::In,
+                    value: FilterValue::StringArray(vec![
+                        "dalle_3".to_string(),
+                        "dalle".to_string(),
+                    ]),
+                })
+            },
         },
         PatternRule {
             pattern: &COMFYUI_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::SourceLabel,
-                op: RuleOp::Eq,
-                value: FilterValue::String("comfyui".to_string()),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::SourceLabel,
+                    op: RuleOp::Eq,
+                    value: FilterValue::String("comfyui".to_string()),
+                })
+            },
         },
         PatternRule {
             pattern: &NANOBANANA_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::SourceLabel,
-                op: RuleOp::Eq,
-                value: FilterValue::String("nanobanana".to_string()),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::SourceLabel,
+                    op: RuleOp::Eq,
+                    value: FilterValue::String("nanobanana".to_string()),
+                })
+            },
         },
         PatternRule {
             pattern: &LANDSCAPE_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::Orientation,
-                op: RuleOp::Eq,
-                value: FilterValue::String("landscape".to_string()),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::Orientation,
+                    op: RuleOp::Eq,
+                    value: FilterValue::String("landscape".to_string()),
+                })
+            },
         },
         PatternRule {
             pattern: &PORTRAIT_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::Orientation,
-                op: RuleOp::Eq,
-                value: FilterValue::String("portrait".to_string()),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::Orientation,
+                    op: RuleOp::Eq,
+                    value: FilterValue::String("portrait".to_string()),
+                })
+            },
         },
         PatternRule {
             pattern: &SQUARE_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::Orientation,
-                op: RuleOp::Eq,
-                value: FilterValue::String("square".to_string()),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::Orientation,
+                    op: RuleOp::Eq,
+                    value: FilterValue::String("square".to_string()),
+                })
+            },
         },
         PatternRule {
             pattern: &FORMAT_RE,
-            build: |caps| Some(FilterNode::Rule {
-                field: Field::Format,
-                op: RuleOp::Eq,
-                value: FilterValue::String(caps[1].to_lowercase()),
-            }),
+            build: |caps| {
+                Some(FilterNode::Rule {
+                    field: Field::Format,
+                    op: RuleOp::Eq,
+                    value: FilterValue::String(caps[1].to_lowercase()),
+                })
+            },
         },
         PatternRule {
             pattern: &RECENT_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::ImportedAt,
-                op: RuleOp::LastNDays,
-                value: FilterValue::Number(7.0),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::ImportedAt,
+                    op: RuleOp::LastNDays,
+                    value: FilterValue::Number(7.0),
+                })
+            },
         },
         PatternRule {
             pattern: &THIS_WEEK_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::ImportedAt,
-                op: RuleOp::ThisWeek,
-                value: FilterValue::Bool(true),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::ImportedAt,
+                    op: RuleOp::ThisWeek,
+                    value: FilterValue::Bool(true),
+                })
+            },
         },
         PatternRule {
             pattern: &THIS_MONTH_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::ImportedAt,
-                op: RuleOp::ThisMonth,
-                value: FilterValue::Bool(true),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::ImportedAt,
+                    op: RuleOp::ThisMonth,
+                    value: FilterValue::Bool(true),
+                })
+            },
         },
         PatternRule {
             pattern: &PICKS_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::Decision,
-                op: RuleOp::Eq,
-                value: FilterValue::String("accept".to_string()),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::Decision,
+                    op: RuleOp::Eq,
+                    value: FilterValue::String("accept".to_string()),
+                })
+            },
         },
         PatternRule {
             pattern: &REJECTS_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::Decision,
-                op: RuleOp::Eq,
-                value: FilterValue::String("reject".to_string()),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::Decision,
+                    op: RuleOp::Eq,
+                    value: FilterValue::String("reject".to_string()),
+                })
+            },
         },
         PatternRule {
             pattern: &COLOR_LABEL_RE,
-            build: |caps| Some(FilterNode::Rule {
-                field: Field::ColorLabel,
-                op: RuleOp::Eq,
-                value: FilterValue::String(caps[1].to_lowercase()),
-            }),
+            build: |caps| {
+                Some(FilterNode::Rule {
+                    field: Field::ColorLabel,
+                    op: RuleOp::Eq,
+                    value: FilterValue::String(caps[1].to_lowercase()),
+                })
+            },
         },
         PatternRule {
             pattern: &AI_GENERATED_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::IsAiGenerated,
-                op: RuleOp::Eq,
-                value: FilterValue::Bool(true),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::IsAiGenerated,
+                    op: RuleOp::Eq,
+                    value: FilterValue::Bool(true),
+                })
+            },
         },
         PatternRule {
             pattern: &PHOTOS_RE,
-            build: |_| Some(FilterNode::Rule {
-                field: Field::IsAiGenerated,
-                op: RuleOp::Eq,
-                value: FilterValue::Bool(false),
-            }),
+            build: |_| {
+                Some(FilterNode::Rule {
+                    field: Field::IsAiGenerated,
+                    op: RuleOp::Eq,
+                    value: FilterValue::Bool(false),
+                })
+            },
         },
     ]
 }
@@ -318,9 +338,15 @@ pub fn parse_query(input: &str) -> FilterNode {
     }
 
     match rules.len() {
-        0 => FilterNode::Group { op: GroupOp::And, children: vec![] },
+        0 => FilterNode::Group {
+            op: GroupOp::And,
+            children: vec![],
+        },
         1 => rules.remove(0),
-        _ => FilterNode::Group { op: GroupOp::And, children: rules },
+        _ => FilterNode::Group {
+            op: GroupOp::And,
+            children: rules,
+        },
     }
 }
 
@@ -399,7 +425,11 @@ mod tests {
         let result = parse_query("gpt image 2");
         let (sql, params) = result.to_sql_clause().unwrap();
         assert!(sql.contains("source_label"), "sql: {}", sql);
-        assert!(params_contain(&params, "gpt_image_2"), "params: {:?}", params);
+        assert!(
+            params_contain(&params, "gpt_image_2"),
+            "params: {:?}",
+            params
+        );
     }
 
     #[test]
@@ -407,7 +437,11 @@ mod tests {
         let result = parse_query("gpt-image-2");
         let (sql, params) = result.to_sql_clause().unwrap();
         assert!(sql.contains("source_label"), "sql: {}", sql);
-        assert!(params_contain(&params, "gpt_image_2"), "params: {:?}", params);
+        assert!(
+            params_contain(&params, "gpt_image_2"),
+            "params: {:?}",
+            params
+        );
     }
 
     #[test]
@@ -415,7 +449,11 @@ mod tests {
         let result = parse_query("image gen 2");
         let (sql, params) = result.to_sql_clause().unwrap();
         assert!(sql.contains("source_label"), "sql: {}", sql);
-        assert!(params_contain(&params, "gpt_image_2"), "params: {:?}", params);
+        assert!(
+            params_contain(&params, "gpt_image_2"),
+            "params: {:?}",
+            params
+        );
     }
 
     #[test]
@@ -423,7 +461,11 @@ mod tests {
         let result = parse_query("openai");
         let (sql, params) = result.to_sql_clause().unwrap();
         assert!(sql.contains("source_label"), "sql: {}", sql);
-        assert!(params_contain(&params, "gpt_image_2"), "params: {:?}", params);
+        assert!(
+            params_contain(&params, "gpt_image_2"),
+            "params: {:?}",
+            params
+        );
         assert!(params_contain(&params, "dalle"), "params: {:?}", params);
     }
 
@@ -432,7 +474,11 @@ mod tests {
         let result = parse_query("chatgpt");
         let (sql, params) = result.to_sql_clause().unwrap();
         assert!(sql.contains("source_label"), "sql: {}", sql);
-        assert!(params_contain(&params, "gpt_image_2"), "params: {:?}", params);
+        assert!(
+            params_contain(&params, "gpt_image_2"),
+            "params: {:?}",
+            params
+        );
     }
 
     #[test]

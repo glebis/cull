@@ -1,13 +1,17 @@
 use crate::db_core::models::ImageWithFile;
 use crate::db_core::smart_collections::SmartCollection;
-use crate::services::{ServiceContext, ServiceError};
 use crate::services::library::enrich_thumbnails;
+use crate::services::{ServiceContext, ServiceError};
 
 pub fn set_rating(ctx: &ServiceContext, image_id: &str, rating: u8) -> Result<(), ServiceError> {
     Ok(ctx.db.set_rating(image_id, rating)?)
 }
 
-pub fn set_decision(ctx: &ServiceContext, image_id: &str, decision: &str) -> Result<(), ServiceError> {
+pub fn set_decision(
+    ctx: &ServiceContext,
+    image_id: &str,
+    decision: &str,
+) -> Result<(), ServiceError> {
     Ok(ctx.db.set_decision(image_id, decision)?)
 }
 
@@ -19,17 +23,28 @@ pub fn list_collections(ctx: &ServiceContext) -> Result<Vec<(String, String, u32
     Ok(ctx.db.list_collections()?)
 }
 
-pub fn add_to_collection(ctx: &ServiceContext, collection_id: &str, image_ids: &[&str]) -> Result<(), ServiceError> {
+pub fn add_to_collection(
+    ctx: &ServiceContext,
+    collection_id: &str,
+    image_ids: &[&str],
+) -> Result<(), ServiceError> {
     Ok(ctx.db.add_to_collection(collection_id, image_ids)?)
 }
 
-pub fn list_collection_images(ctx: &ServiceContext, collection_id: &str) -> Result<Vec<ImageWithFile>, ServiceError> {
+pub fn list_collection_images(
+    ctx: &ServiceContext,
+    collection_id: &str,
+) -> Result<Vec<ImageWithFile>, ServiceError> {
     let mut images = ctx.db.list_collection_images(collection_id)?;
     enrich_thumbnails(&mut images, ctx.app_data_dir);
     Ok(images)
 }
 
-pub fn remove_from_collection(ctx: &ServiceContext, collection_id: &str, image_ids: &[&str]) -> Result<(), ServiceError> {
+pub fn remove_from_collection(
+    ctx: &ServiceContext,
+    collection_id: &str,
+    image_ids: &[&str],
+) -> Result<(), ServiceError> {
     for id in image_ids {
         ctx.db.remove_from_collection(collection_id, id)?;
     }
@@ -46,14 +61,19 @@ pub fn create_smart_collection(
     filter_json: &str,
     nl_query: Option<&str>,
 ) -> Result<String, ServiceError> {
-    Ok(ctx.db.create_smart_collection(name, filter_json, nl_query, false)?)
+    Ok(ctx
+        .db
+        .create_smart_collection(name, filter_json, nl_query, false)?)
 }
 
 pub fn list_smart_collections(ctx: &ServiceContext) -> Result<Vec<SmartCollection>, ServiceError> {
     Ok(ctx.db.list_smart_collections()?)
 }
 
-pub fn evaluate_smart_collection(ctx: &ServiceContext, filter_json: &str) -> Result<Vec<ImageWithFile>, ServiceError> {
+pub fn evaluate_smart_collection(
+    ctx: &ServiceContext,
+    filter_json: &str,
+) -> Result<Vec<ImageWithFile>, ServiceError> {
     Ok(ctx.db.evaluate_smart_collection(filter_json)?)
 }
 
@@ -68,34 +88,67 @@ pub fn update_smart_collection(
     filter_json: &str,
     nl_query: Option<&str>,
 ) -> Result<(), ServiceError> {
-    Ok(ctx.db.update_smart_collection(id, name, filter_json, nl_query)?)
+    Ok(ctx
+        .db
+        .update_smart_collection(id, name, filter_json, nl_query)?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db_core::db::Database;
-    use crate::db_core::secrets::MemoryStore;
-    use crate::db_core::embeddings::EmbeddingEngine;
     use crate::db_core::detection::DetectionEngine;
+    use crate::db_core::embeddings::EmbeddingEngine;
+    use crate::db_core::secrets::MemoryStore;
+    use parking_lot::Mutex;
     use std::path::PathBuf;
-    use std::sync::Mutex;
 
-    fn make_ctx_parts() -> (Database, MemoryStore, PathBuf, Mutex<EmbeddingEngine>, Mutex<DetectionEngine>, Mutex<DetectionEngine>, tempfile::TempDir) {
+    fn make_ctx_parts() -> (
+        Database,
+        MemoryStore,
+        PathBuf,
+        Mutex<EmbeddingEngine>,
+        Mutex<DetectionEngine>,
+        Mutex<DetectionEngine>,
+        tempfile::TempDir,
+    ) {
         let tmp = tempfile::tempdir().unwrap();
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
         let secrets = MemoryStore::new();
         let dir = tmp.path().to_path_buf();
         let mdir = tmp.path().join("models");
-        (db, secrets, dir, Mutex::new(EmbeddingEngine::new(&mdir)), Mutex::new(DetectionEngine::new_yolo(&mdir)), Mutex::new(DetectionEngine::new_nudenet(&mdir)), tmp)
+        (
+            db,
+            secrets,
+            dir,
+            Mutex::new(EmbeddingEngine::new(&mdir)),
+            Mutex::new(DetectionEngine::new_yolo(&mdir)),
+            Mutex::new(DetectionEngine::new_nudenet(&mdir)),
+            tmp,
+        )
     }
 
-    fn ctx<'a>(db: &'a Database, s: &'a MemoryStore, d: &'a PathBuf, ee: &'a Mutex<EmbeddingEngine>, de: &'a Mutex<DetectionEngine>, se: &'a Mutex<DetectionEngine>) -> ServiceContext<'a> {
-        ServiceContext { db, app_data_dir: d, embedding_engine: ee, detection_engine: de, safety_engine: se, secrets: s, app_handle: None }
+    fn ctx<'a>(
+        db: &'a Database,
+        s: &'a MemoryStore,
+        d: &'a PathBuf,
+        ee: &'a Mutex<EmbeddingEngine>,
+        de: &'a Mutex<DetectionEngine>,
+        se: &'a Mutex<DetectionEngine>,
+    ) -> ServiceContext<'a> {
+        ServiceContext {
+            db,
+            app_data_dir: d,
+            embedding_engine: ee,
+            detection_engine: de,
+            safety_engine: se,
+            secrets: s,
+            app_handle: None,
+        }
     }
 
     fn insert_img(db: &Database, id: &str) {
-        let conn = db.conn.lock().unwrap();
+        let conn = db.conn.lock();
         conn.execute(
             "INSERT INTO images (id, sha256_hash, width, height, format, file_size, created_at, imported_at, ai_prompt) VALUES (?1, ?2, 100, 100, 'png', 1000, '2026-01-01', '2026-01-01', NULL)",
             rusqlite::params![id, format!("h_{}", id)],

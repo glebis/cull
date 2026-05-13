@@ -84,7 +84,9 @@ mod tests {
 
     #[test]
     fn test_detect_icloud_mobile_documents() {
-        let p = PathBuf::from("/Users/user/Library/Mobile Documents/com~apple~CloudDocs/Photos/test.png");
+        let p = PathBuf::from(
+            "/Users/user/Library/Mobile Documents/com~apple~CloudDocs/Photos/test.png",
+        );
         assert_eq!(detect_cloud_provider(&p), Some(CloudProvider::ICloud));
     }
 
@@ -102,7 +104,9 @@ mod tests {
 
     #[test]
     fn test_detect_google_drive_cloud_storage() {
-        let p = PathBuf::from("/Users/user/Library/CloudStorage/GoogleDrive-user@gmail.com/My Drive/photos/img.png");
+        let p = PathBuf::from(
+            "/Users/user/Library/CloudStorage/GoogleDrive-user@gmail.com/My Drive/photos/img.png",
+        );
         assert_eq!(detect_cloud_provider(&p), Some(CloudProvider::GoogleDrive));
     }
 
@@ -120,7 +124,9 @@ mod tests {
 
     #[test]
     fn test_icloud_stub_is_placeholder() {
-        let p = PathBuf::from("/Users/user/Library/Mobile Documents/com~apple~CloudDocs/.photo.png.icloud");
+        let p = PathBuf::from(
+            "/Users/user/Library/Mobile Documents/com~apple~CloudDocs/.photo.png.icloud",
+        );
         assert!(is_cloud_placeholder(&p));
     }
 
@@ -129,7 +135,9 @@ mod tests {
         assert!(is_cloud_internal_file(Path::new("/path/.dropbox")));
         assert!(is_cloud_internal_file(Path::new("/path/.dropbox.cache")));
         assert!(is_cloud_internal_file(Path::new("/path/.photo.png.icloud")));
-        assert!(is_cloud_internal_file(Path::new("/path/to/.dropbox.cache/some_file")));
+        assert!(is_cloud_internal_file(Path::new(
+            "/path/to/.dropbox.cache/some_file"
+        )));
         assert!(!is_cloud_internal_file(Path::new("/path/photo.png")));
     }
 }

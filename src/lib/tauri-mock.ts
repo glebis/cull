@@ -120,7 +120,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       locale: 'en',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      source: { app: 'imageview', collection_id: null, image_ids: args.imageIds },
+      source: { app: 'cull', collection_id: null, image_ids: args.imageIds },
       defaults: {
         template: tmpl,
         fonts: { serif: 'Georgia', mono: 'JetBrains Mono' },
@@ -139,7 +139,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       assets: args.imageIds.map((id: string) => ({
         id: `asset-${id}`,
         kind: 'source' as const,
-        uri: `imageview://image/${id}`,
+        uri: `cull://image/${id}`,
         mime: 'image/png',
         width: 1920,
         height: 1080,
@@ -151,7 +151,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   },
 
   get_export_asset: (_: any, args: { uri: string }) => {
-    const idMatch = args.uri.match(/imageview:\/\/image\/(.+)/);
+    const idMatch = args.uri.match(/cull:\/\/image\/(.+)/);
     const id = idMatch?.[1] ?? 'unknown';
     return { path: `/mock/export-${id}.png`, mime: 'image/png', width: 1920, height: 1080 };
   },

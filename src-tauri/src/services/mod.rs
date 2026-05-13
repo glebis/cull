@@ -2,27 +2,28 @@
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
 #[allow(dead_code)]
-pub mod library;
+pub mod ai;
+pub mod audit;
 #[allow(dead_code)]
 pub mod curation;
-pub mod export;
-#[allow(dead_code)]
-pub mod ai;
 pub mod display;
+pub mod export;
+pub mod generation;
 pub mod jobs;
+#[allow(dead_code)]
+pub mod library;
+pub mod model_pipeline;
+pub mod sessions;
 pub mod tokens;
 pub mod undo;
-pub mod generation;
-pub mod sessions;
-pub mod audit;
 
 use crate::db_core::db::Database;
-use crate::db_core::embeddings::EmbeddingEngine;
 use crate::db_core::detection::DetectionEngine;
+use crate::db_core::embeddings::EmbeddingEngine;
 use crate::db_core::secrets::SecretStore;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use parking_lot::Mutex;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Pagination {
@@ -32,7 +33,10 @@ pub struct Pagination {
 
 impl Default for Pagination {
     fn default() -> Self {
-        Self { offset: 0, limit: 50 }
+        Self {
+            offset: 0,
+            limit: 50,
+        }
     }
 }
 
@@ -48,7 +52,6 @@ impl Pagination {
 #[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PagedResult<T> {
-
     pub items: Vec<T>,
     pub total: u32,
     pub offset: u32,

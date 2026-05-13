@@ -28,6 +28,7 @@
     let unlisteners: Array<() => void> = [];
 
     let inputEl: HTMLInputElement | undefined = $state();
+    let nameInputEl: HTMLInputElement | undefined = $state();
     let barEl: HTMLDivElement | undefined = $state();
 
     let applyDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -36,6 +37,12 @@
     $effect(() => {
         if ($searchOpen) {
             tick().then(() => inputEl?.focus());
+        }
+    });
+
+    $effect(() => {
+        if (saving) {
+            tick().then(() => nameInputEl?.focus());
         }
     });
 
@@ -375,10 +382,10 @@
                 <span class="name-label">Name</span>
                 <input
                     type="text"
+                    bind:this={nameInputEl}
                     bind:value={collectionName}
                     onkeydown={handleNameKeydown}
                     class="name-input"
-                    autofocus
                 />
                 <button class="save-confirm-btn" onclick={handleSaveConfirm}>Save</button>
                 <button class="save-cancel-btn" onclick={handleSaveCancel}>Cancel</button>

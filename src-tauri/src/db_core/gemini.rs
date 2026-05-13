@@ -59,7 +59,8 @@ impl GeminiEmbeddingProvider {
             }
         });
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .json(&body)
             .send()

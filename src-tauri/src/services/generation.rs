@@ -1,12 +1,12 @@
 // Copyright (c) 2025-present Gleb Kalinin. Architecture and design by author.
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::Path;
-use sha2::{Sha256, Digest};
 use tauri::Emitter;
+use uuid::Uuid;
 
 use crate::db_core::db::Database;
 use crate::db_core::models::GenerationRun;
@@ -92,6 +92,7 @@ struct GeminiContent {
 struct GeminiPart {
     inline_data: Option<GeminiInlineData>,
     #[serde(default)]
+    #[allow(dead_code)]
     text: Option<String>,
 }
 #[derive(Debug, Deserialize)]
@@ -119,18 +120,27 @@ const PRICING: &[(&str, &str, &str, f64)] = &[
 ];
 
 pub fn estimate_cost(provider: &str, model: &str, size: &str, quality: &str, n: u8) -> f64 {
-    let base = PRICING.iter()
+    let base = PRICING
+        .iter()
         .find(|(p, m, s, _)| *p == provider && *m == model && *s == size)
-        .or_else(|| PRICING.iter().find(|(p, m, _, _)| *p == provider && *m == model))
+        .or_else(|| {
+            PRICING
+                .iter()
+                .find(|(p, m, _, _)| *p == provider && *m == model)
+        })
         .map(|(_, _, _, price)| *price)
         .unwrap_or(0.040);
-    let multiplier = if provider == "openai" && quality == "high" { 2.0 } else { 1.0 };
+    let multiplier = if provider == "openai" && quality == "high" {
+        2.0
+    } else {
+        1.0
+    };
     base * multiplier * n as f64
 }
 
 fn extract_images_openai(resp_body: &str) -> Result<Vec<Vec<u8>>, String> {
-    let api_resp: OpenAiImageResponse = serde_json::from_str(resp_body)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let api_resp: OpenAiImageResponse =
+        serde_json::from_str(resp_body).map_err(|e| format!("Parse error: {}", e))?;
     let mut images = Vec::new();
     for item in &api_resp.data {
         let b64 = item.b64_json.as_deref().ok_or("No b64_json in response")?;
@@ -142,16 +152,17 @@ fn extract_images_openai(resp_body: &str) -> Result<Vec<Vec<u8>>, String> {
 }
 
 fn extract_image_gemini(resp_body: &str) -> Result<Vec<u8>, String> {
-    let resp: GeminiResponse = serde_json::from_str(resp_body)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let resp: GeminiResponse =
+        serde_json::from_str(resp_body).map_err(|e| format!("Parse error: {}", e))?;
     let candidates = resp.candidates.ok_or("No candidates in response")?;
     let candidate = candidates.first().ok_or("Empty candidates")?;
     let content = candidate.content.as_ref().ok_or("No content")?;
     let parts = content.parts.as_ref().ok_or("No parts")?;
     for part in parts {
         if let Some(ref data) = part.inline_data {
-            let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data.data)
-                .map_err(|e| format!("Base64 decode: {}", e))?;
+            let bytes =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data.data)
+                    .map_err(|e| format!("Base64 decode: {}", e))?;
             return Ok(bytes);
         }
     }
@@ -170,13 +181,16 @@ pub async fn generate_images(
     cancel: &tokio_util::sync::CancellationToken,
     app_handle: &tauri::AppHandle,
 ) -> Result<GenerationResult, String> {
-    let _ = app_handle.emit("job-status-changed", serde_json::json!({
-        "job_id": job_id,
-        "kind": "generation",
-        "status": "running",
-        "current": 0,
-        "total": request.n,
-    }));
+    let _ = app_handle.emit(
+        "job-status-changed",
+        serde_json::json!({
+            "job_id": job_id,
+            "kind": "generation",
+            "status": "running",
+            "current": 0,
+            "total": request.n,
+        }),
+    );
 
     let generated_dir = app_data_dir.join("generated");
     std::fs::create_dir_all(&generated_dir).map_err(|e| format!("Dir create error: {}", e))?;
@@ -215,9 +229,12 @@ pub async fn generate_images(
                 .await
                 .map_err(|e| {
                     jobs.fail(job_id, &e.to_string());
-                    let _ = app_handle.emit("job-status-changed", serde_json::json!({
-                        "job_id": job_id, "kind": "generation", "status": "failed",
-                    }));
+                    let _ = app_handle.emit(
+                        "job-status-changed",
+                        serde_json::json!({
+                            "job_id": job_id, "kind": "generation", "status": "failed",
+                        }),
+                    );
                     format!("API request failed: {}", e)
                 })?;
 
@@ -230,57 +247,94 @@ pub async fn generate_images(
 
             if !resp_status.is_success() {
                 let _ = crate::services::audit::log_api_call(
-                    db, &request.provider,
+                    db,
+                    &request.provider,
                     &format!("{}/images/generations", base_url),
-                    if request.source_image_id.is_some() { "prompt+image" } else { "prompt" },
-                    request.prompt.len() as i64, Some(&request.prompt), None,
-                    Some(&request.model), resp_status.as_u16() as i32, jurisdiction,
+                    if request.source_image_id.is_some() {
+                        "prompt+image"
+                    } else {
+                        "prompt"
+                    },
+                    request.prompt.len() as i64,
+                    Some(&request.prompt),
+                    None,
+                    Some(&request.model),
+                    resp_status.as_u16() as i32,
+                    jurisdiction,
                 );
                 let body = resp.text().await.unwrap_or_default();
                 let msg = format!("API error {}: {}", resp_status, body);
                 jobs.fail(job_id, &msg);
-                let _ = app_handle.emit("job-status-changed", serde_json::json!({
-                    "job_id": job_id, "kind": "generation", "status": "failed",
-                }));
+                let _ = app_handle.emit(
+                    "job-status-changed",
+                    serde_json::json!({
+                        "job_id": job_id, "kind": "generation", "status": "failed",
+                    }),
+                );
                 return Err(msg);
             }
 
             let _ = crate::services::audit::log_api_call(
-                db, &request.provider,
+                db,
+                &request.provider,
                 &format!("{}/images/generations", base_url),
-                if request.source_image_id.is_some() { "prompt+image" } else { "prompt" },
-                request.prompt.len() as i64, Some(&request.prompt), None,
-                Some(&request.model), 200, jurisdiction,
+                if request.source_image_id.is_some() {
+                    "prompt+image"
+                } else {
+                    "prompt"
+                },
+                request.prompt.len() as i64,
+                Some(&request.prompt),
+                None,
+                Some(&request.model),
+                200,
+                jurisdiction,
             );
 
-            let resp_body = resp.text().await
-                .map_err(|e| {
-                    let msg = format!("Read error: {}", e);
-                    jobs.fail(job_id, &msg);
-                    let _ = app_handle.emit("job-status-changed", serde_json::json!({
+            let resp_body = resp.text().await.map_err(|e| {
+                let msg = format!("Read error: {}", e);
+                jobs.fail(job_id, &msg);
+                let _ = app_handle.emit(
+                    "job-status-changed",
+                    serde_json::json!({
                         "job_id": job_id, "kind": "generation", "status": "failed",
-                    }));
-                    msg
-                })?;
+                    }),
+                );
+                msg
+            })?;
 
             let decoded_images = extract_images_openai(&resp_body).map_err(|e| {
                 jobs.fail(job_id, &e);
-                let _ = app_handle.emit("job-status-changed", serde_json::json!({
-                    "job_id": job_id, "kind": "generation", "status": "failed",
-                }));
+                let _ = app_handle.emit(
+                    "job-status-changed",
+                    serde_json::json!({
+                        "job_id": job_id, "kind": "generation", "status": "failed",
+                    }),
+                );
                 e
             })?;
 
             for (i, bytes) in decoded_images.iter().enumerate() {
                 if cancel.is_cancelled() {
                     jobs.mark_cancelled(job_id);
-                    let _ = app_handle.emit("job-status-changed", serde_json::json!({
-                        "job_id": job_id, "kind": "generation", "status": "cancelled",
-                    }));
+                    let _ = app_handle.emit(
+                        "job-status-changed",
+                        serde_json::json!({
+                            "job_id": job_id, "kind": "generation", "status": "cancelled",
+                        }),
+                    );
                     break;
                 }
 
-                match save_image_bytes(bytes, i, request, &generated_dir, db, parent_run_id.as_deref(), &resp_body) {
+                match save_image_bytes(
+                    bytes,
+                    i,
+                    request,
+                    &generated_dir,
+                    db,
+                    parent_run_id.as_deref(),
+                    &resp_body,
+                ) {
                     Ok((image_id, run_id)) => {
                         image_ids.push(image_id);
                         run_ids.push(run_id);
@@ -288,19 +342,29 @@ pub async fn generate_images(
                     Err(e) => errors.push(format!("Image {}: {}", i, e)),
                 }
 
-                jobs.update_progress(job_id, (i + 1) as u32, Some(&format!("Saved image {}/{}", i + 1, request.n)));
-                let _ = app_handle.emit("generation-progress", serde_json::json!({
-                    "job_id": job_id, "current": i + 1, "total": request.n,
-                }));
+                jobs.update_progress(
+                    job_id,
+                    (i + 1) as u32,
+                    Some(&format!("Saved image {}/{}", i + 1, request.n)),
+                );
+                let _ = app_handle.emit(
+                    "generation-progress",
+                    serde_json::json!({
+                        "job_id": job_id, "current": i + 1, "total": request.n,
+                    }),
+                );
             }
         }
         ApiStyle::Gemini => {
             for i in 0..request.n as usize {
                 if cancel.is_cancelled() {
                     jobs.mark_cancelled(job_id);
-                    let _ = app_handle.emit("job-status-changed", serde_json::json!({
-                        "job_id": job_id, "kind": "generation", "status": "cancelled",
-                    }));
+                    let _ = app_handle.emit(
+                        "job-status-changed",
+                        serde_json::json!({
+                            "job_id": job_id, "kind": "generation", "status": "cancelled",
+                        }),
+                    );
                     break;
                 }
 
@@ -310,8 +374,15 @@ pub async fn generate_images(
                     if let Ok(images) = db.get_images_by_ids(&[src_id.as_str()]) {
                         if let Some(src_img) = images.first() {
                             if let Ok(img_bytes) = std::fs::read(&src_img.path) {
-                                let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &img_bytes);
-                                let mime = if src_img.path.ends_with(".png") { "image/png" } else { "image/jpeg" };
+                                let b64 = base64::Engine::encode(
+                                    &base64::engine::general_purpose::STANDARD,
+                                    &img_bytes,
+                                );
+                                let mime = if src_img.path.ends_with(".png") {
+                                    "image/png"
+                                } else {
+                                    "image/jpeg"
+                                };
                                 parts.push(serde_json::json!({
                                     "inlineData": {"mimeType": mime, "data": b64}
                                 }));
@@ -337,52 +408,94 @@ pub async fn generate_images(
                         let gemini_status = r.status();
                         if !gemini_status.is_success() {
                             let _ = crate::services::audit::log_api_call(
-                                db, "google", &url,
-                                if request.source_image_id.is_some() { "prompt+image" } else { "prompt" },
-                                request.prompt.len() as i64, Some(&request.prompt), None,
-                                Some(&request.model), gemini_status.as_u16() as i32, "US - Google LLC",
+                                db,
+                                "google",
+                                &url,
+                                if request.source_image_id.is_some() {
+                                    "prompt+image"
+                                } else {
+                                    "prompt"
+                                },
+                                request.prompt.len() as i64,
+                                Some(&request.prompt),
+                                None,
+                                Some(&request.model),
+                                gemini_status.as_u16() as i32,
+                                "US - Google LLC",
                             );
                             let body = r.text().await.unwrap_or_default();
-                            errors.push(format!("Image {}: Gemini API error {}: {}", i, gemini_status, body));
+                            errors.push(format!(
+                                "Image {}: Gemini API error {}: {}",
+                                i, gemini_status, body
+                            ));
                             continue;
                         }
                         let _ = crate::services::audit::log_api_call(
-                            db, "google", &url,
-                            if request.source_image_id.is_some() { "prompt+image" } else { "prompt" },
-                            request.prompt.len() as i64, Some(&request.prompt), None,
-                            Some(&request.model), 200, "US - Google LLC",
+                            db,
+                            "google",
+                            &url,
+                            if request.source_image_id.is_some() {
+                                "prompt+image"
+                            } else {
+                                "prompt"
+                            },
+                            request.prompt.len() as i64,
+                            Some(&request.prompt),
+                            None,
+                            Some(&request.model),
+                            200,
+                            "US - Google LLC",
                         );
                         match r.text().await {
-                            Ok(resp_body) => {
-                                match extract_image_gemini(&resp_body) {
-                                    Ok(bytes) => {
-                                        match save_image_bytes(&bytes, i, request, &generated_dir, db, parent_run_id.as_deref(), &resp_body) {
-                                            Ok((image_id, run_id)) => {
-                                                image_ids.push(image_id);
-                                                run_ids.push(run_id);
-                                            }
-                                            Err(e) => errors.push(format!("Image {}: {}", i, e)),
+                            Ok(resp_body) => match extract_image_gemini(&resp_body) {
+                                Ok(bytes) => {
+                                    match save_image_bytes(
+                                        &bytes,
+                                        i,
+                                        request,
+                                        &generated_dir,
+                                        db,
+                                        parent_run_id.as_deref(),
+                                        &resp_body,
+                                    ) {
+                                        Ok((image_id, run_id)) => {
+                                            image_ids.push(image_id);
+                                            run_ids.push(run_id);
                                         }
+                                        Err(e) => errors.push(format!("Image {}: {}", i, e)),
                                     }
-                                    Err(e) => errors.push(format!("Image {}: {}", i, e)),
                                 }
-                            }
+                                Err(e) => errors.push(format!("Image {}: {}", i, e)),
+                            },
                             Err(e) => errors.push(format!("Image {}: Read error: {}", i, e)),
                         }
                     }
                     Err(e) => errors.push(format!("Image {}: Request failed: {}", i, e)),
                 }
 
-                jobs.update_progress(job_id, (i + 1) as u32, Some(&format!("Saved image {}/{}", i + 1, request.n)));
-                let _ = app_handle.emit("generation-progress", serde_json::json!({
-                    "job_id": job_id, "current": i + 1, "total": request.n,
-                }));
+                jobs.update_progress(
+                    job_id,
+                    (i + 1) as u32,
+                    Some(&format!("Saved image {}/{}", i + 1, request.n)),
+                );
+                let _ = app_handle.emit(
+                    "generation-progress",
+                    serde_json::json!({
+                        "job_id": job_id, "current": i + 1, "total": request.n,
+                    }),
+                );
             }
         }
     }
 
     let lineage_group_id = if image_ids.len() > 1 || request.source_image_id.is_some() {
-        create_generation_lineage(db, &image_ids, request.source_image_id.as_deref(), &request.prompt).ok()
+        create_generation_lineage(
+            db,
+            &image_ids,
+            request.source_image_id.as_deref(),
+            &request.prompt,
+        )
+        .ok()
     } else {
         None
     };
@@ -395,20 +508,32 @@ pub async fn generate_images(
         jobs.complete(job_id);
     }
 
-    let status_str = if errors.is_empty() { "completed" } else if image_ids.is_empty() { "failed" } else { "completed" };
-    let _ = app_handle.emit("job-status-changed", serde_json::json!({
-        "job_id": job_id,
-        "kind": "generation",
-        "status": status_str,
-        "current": image_ids.len(),
-        "total": request.n,
-    }));
+    let status_str = if errors.is_empty() {
+        "completed"
+    } else if image_ids.is_empty() {
+        "failed"
+    } else {
+        "completed"
+    };
+    let _ = app_handle.emit(
+        "job-status-changed",
+        serde_json::json!({
+            "job_id": job_id,
+            "kind": "generation",
+            "status": status_str,
+            "current": image_ids.len(),
+            "total": request.n,
+        }),
+    );
 
-    let _ = app_handle.emit("generation-complete", serde_json::json!({
-        "job_id": job_id,
-        "image_ids": &image_ids,
-        "lineage_group_id": &lineage_group_id,
-    }));
+    let _ = app_handle.emit(
+        "generation-complete",
+        serde_json::json!({
+            "job_id": job_id,
+            "image_ids": &image_ids,
+            "lineage_group_id": &lineage_group_id,
+        }),
+    );
 
     Ok(GenerationResult {
         job_id: job_id.to_string(),
@@ -465,17 +590,30 @@ fn save_image_bytes(
         last_seen_size: None,
         last_seen_mtime: None,
     };
-    db.insert_image_file(&file_record).map_err(|e| e.to_string())?;
+    db.insert_image_file(&file_record)
+        .map_err(|e| e.to_string())?;
 
     let aspect = width as f64 / height.max(1) as f64;
-    let orientation = if (aspect - 1.0).abs() < 0.05 { "square" }
-        else if aspect > 1.0 { "landscape" } else { "portrait" };
+    let orientation = if (aspect - 1.0).abs() < 0.05 {
+        "square"
+    } else if aspect > 1.0 {
+        "landscape"
+    } else {
+        "portrait"
+    };
     let megapixels = (width as f64 * height as f64) / 1_000_000.0;
     db.update_source_detection(
-        &image_id, Some(&request.provider), 100.0,
-        &format!("{{\"source\":\"{}_api_generation\"}}", request.provider), Some(true),
-        Some(&request.prompt), aspect, orientation, megapixels,
-    ).map_err(|e| e.to_string())?;
+        &image_id,
+        Some(&request.provider),
+        100.0,
+        &format!("{{\"source\":\"{}_api_generation\"}}", request.provider),
+        Some(true),
+        Some(&request.prompt),
+        aspect,
+        orientation,
+        megapixels,
+    )
+    .map_err(|e| e.to_string())?;
 
     let run_id = Uuid::new_v4().to_string();
     let settings = serde_json::json!({
@@ -501,7 +639,8 @@ fn save_image_bytes(
         imported_at: now,
     };
     db.insert_generation_run(&run).map_err(|e| e.to_string())?;
-    db.link_image_to_run(&image_id, &run_id).map_err(|e| e.to_string())?;
+    db.link_image_to_run(&image_id, &run_id)
+        .map_err(|e| e.to_string())?;
 
     let _ = crate::db_core::thumbnails::generate_thumbnail(
         &file_path,
@@ -519,13 +658,18 @@ fn create_generation_lineage(
     prompt: &str,
 ) -> Result<String, String> {
     let truncated: &str = if prompt.chars().count() > 40 {
-        let end = prompt.char_indices().nth(40).map(|(i, _)| i).unwrap_or(prompt.len());
+        let end = prompt
+            .char_indices()
+            .nth(40)
+            .map(|(i, _)| i)
+            .unwrap_or(prompt.len());
         &prompt[..end]
     } else {
         prompt
     };
     let name = format!("Gen: {}", truncated);
-    let group_id = db.create_lineage_group(&name, "generation", 100.0)
+    let group_id = db
+        .create_lineage_group(&name, "generation", 100.0)
         .map_err(|e| e.to_string())?;
 
     let mut order = 0;

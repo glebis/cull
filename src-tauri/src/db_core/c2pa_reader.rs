@@ -8,16 +8,28 @@ pub struct C2paInfo {
 
 impl C2paInfo {
     pub fn openai_source_label(&self) -> Option<&'static str> {
-        let agents_lower: Vec<String> = self.software_agents.iter().map(|a| a.to_lowercase()).collect();
-        let is_openai = agents_lower.iter().any(|a| a.contains("openai") || a.contains("gpt") || a.contains("dall"));
+        let agents_lower: Vec<String> = self
+            .software_agents
+            .iter()
+            .map(|a| a.to_lowercase())
+            .collect();
+        let is_openai = agents_lower
+            .iter()
+            .any(|a| a.contains("openai") || a.contains("gpt") || a.contains("dall"));
 
         if !is_openai {
             return None;
         }
 
-        if agents_lower.iter().any(|a| a.contains("gpt-image") || a.contains("gpt_image") || a.contains("gpt image")) {
+        if agents_lower
+            .iter()
+            .any(|a| a.contains("gpt-image") || a.contains("gpt_image") || a.contains("gpt image"))
+        {
             Some("gpt_image_2")
-        } else if agents_lower.iter().any(|a| a.contains("dall-e") || a.contains("dall·e") || a.contains("dalle")) {
+        } else if agents_lower
+            .iter()
+            .any(|a| a.contains("dall-e") || a.contains("dall·e") || a.contains("dalle"))
+        {
             Some("dalle_3")
         } else {
             Some("openai")
@@ -89,7 +101,11 @@ fn extract_jumbf_from_jpeg(data: &[u8]) -> Option<Vec<u8>> {
         pos += 2 + seg_len;
     }
 
-    if jumbf.is_empty() { None } else { Some(jumbf) }
+    if jumbf.is_empty() {
+        None
+    } else {
+        Some(jumbf)
+    }
 }
 
 fn extract_jumbf_from_png(data: &[u8]) -> Option<Vec<u8>> {
@@ -101,7 +117,8 @@ fn extract_jumbf_from_png(data: &[u8]) -> Option<Vec<u8>> {
 
     let mut pos = 8;
     while pos + 12 <= data.len() {
-        let chunk_len = u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+        let chunk_len =
+            u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
         let chunk_type = &data[pos + 4..pos + 8];
         let chunk_data_start = pos + 8;
         let chunk_data_end = chunk_data_start + chunk_len;
@@ -118,7 +135,11 @@ fn extract_jumbf_from_png(data: &[u8]) -> Option<Vec<u8>> {
         pos = chunk_data_end + 4; // skip CRC
     }
 
-    if jumbf.is_empty() { None } else { Some(jumbf) }
+    if jumbf.is_empty() {
+        None
+    } else {
+        Some(jumbf)
+    }
 }
 
 fn extract_jumbf_from_riff(data: &[u8]) -> Option<Vec<u8>> {
@@ -130,7 +151,9 @@ fn extract_jumbf_from_riff(data: &[u8]) -> Option<Vec<u8>> {
     let mut pos = 12;
     while pos + 8 <= data.len() {
         let chunk_id = &data[pos..pos + 4];
-        let chunk_size = u32::from_le_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]]) as usize;
+        let chunk_size =
+            u32::from_le_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]])
+                as usize;
         let chunk_data_start = pos + 8;
         let chunk_data_end = chunk_data_start + chunk_size;
 
@@ -180,7 +203,10 @@ fn extract_software_agents(jumbf: &[u8]) -> Vec<String> {
                 (Some(n), None) => n,
                 _ => {
                     // Fallback: if it's a plain string (not a map), take first readable string
-                    strings.into_iter().find(|s| s.len() >= 3).unwrap_or_default()
+                    strings
+                        .into_iter()
+                        .find(|s| s.len() >= 3)
+                        .unwrap_or_default()
                 }
             };
 
@@ -192,7 +218,9 @@ fn extract_software_agents(jumbf: &[u8]) -> Vec<String> {
 
     // Also scan for "OpenAI" certificate issuer as a secondary signal
     let openai_needle = b"OpenAI";
-    let has_openai_cert = jumbf.windows(openai_needle.len()).any(|w| w == openai_needle);
+    let has_openai_cert = jumbf
+        .windows(openai_needle.len())
+        .any(|w| w == openai_needle);
     if has_openai_cert && agents.is_empty() {
         agents.push("OpenAI (certificate only)".to_string());
     }
@@ -216,10 +244,14 @@ fn extract_cbor_strings(data: &[u8]) -> Vec<String> {
             let (str_len, header_size) = match additional {
                 0..=23 => (additional as usize, 1),
                 24 if pos + 1 < data.len() => (data[pos + 1] as usize, 2),
-                25 if pos + 3 < data.len() => {
-                    (u16::from_be_bytes([data[pos + 1], data[pos + 2]]) as usize, 3)
+                25 if pos + 3 < data.len() => (
+                    u16::from_be_bytes([data[pos + 1], data[pos + 2]]) as usize,
+                    3,
+                ),
+                _ => {
+                    pos += 1;
+                    continue;
                 }
-                _ => { pos += 1; continue; }
             };
 
             let str_start = pos + header_size;
@@ -277,10 +309,7 @@ mod tests {
     #[test]
     fn test_openai_source_label_chatgpt() {
         let info = C2paInfo {
-            software_agents: vec![
-                "OpenAI GPT-image-2".to_string(),
-                "ChatGPT".to_string(),
-            ],
+            software_agents: vec!["OpenAI GPT-image-2".to_string(), "ChatGPT".to_string()],
             has_chatgpt_layer: true,
         };
         assert_eq!(info.openai_source_label(), Some("gpt_image_2"));

@@ -69,8 +69,7 @@ pub async fn analyze_image(
     ollama_url: &str,
     model: &str,
 ) -> Result<HashMap<String, String>, String> {
-    let image_data = std::fs::read(image_path)
-        .map_err(|e| format!("Read error: {}", e))?;
+    let image_data = std::fs::read(image_path).map_err(|e| format!("Read error: {}", e))?;
     let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &image_data);
 
     let request = OllamaRequest {
@@ -155,7 +154,10 @@ mod tests {
     fn test_parse_vision_response() {
         let text = "DESCRIPTION: A dog sitting on grass\nSCENE_TYPE: photo\nOBJECTS: dog, grass, ball\nMOOD: peaceful\nTAGS: dog, outdoor, grass, sunny, pet\nPEOPLE_COUNT: 0\nDOMINANT_COLORS: green, brown, white\nIMAGE_QUALITY: high\nINDOOR_OUTDOOR: outdoor\nTIME_OF_DAY: day\nACTIVITY: resting\nNSFW_SCORE: 0\nAESTHETIC_SCORE: 72\nFACES_COUNT: 0";
         let fields = parse_vision_response(text);
-        assert_eq!(fields.get("description"), Some(&"A dog sitting on grass".to_string()));
+        assert_eq!(
+            fields.get("description"),
+            Some(&"A dog sitting on grass".to_string())
+        );
         assert_eq!(fields.get("scene_type"), Some(&"photo".to_string()));
         assert_eq!(fields.get("nsfw_score"), Some(&"0".to_string()));
         assert_eq!(fields.len(), 14);

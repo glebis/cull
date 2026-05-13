@@ -28,7 +28,9 @@ pub fn list_images_by_folder(
     page: Pagination,
 ) -> Result<Vec<ImageWithFile>, ServiceError> {
     let page = Pagination::clamped(page.offset, page.limit);
-    let mut images = ctx.db.list_images_by_folder(folder, page.limit, page.offset)?;
+    let mut images = ctx
+        .db
+        .list_images_by_folder(folder, page.limit, page.offset)?;
     enrich_thumbnails(&mut images, ctx.app_data_dir);
     Ok(images)
 }
@@ -40,7 +42,9 @@ pub fn list_images_filtered(
     page: Pagination,
 ) -> Result<Vec<ImageWithFile>, ServiceError> {
     let page = Pagination::clamped(page.offset, page.limit);
-    let mut images = ctx.db.list_images_filtered(min_width, min_height, page.limit, page.offset)?;
+    let mut images = ctx
+        .db
+        .list_images_filtered(min_width, min_height, page.limit, page.offset)?;
     enrich_thumbnails(&mut images, ctx.app_data_dir);
     Ok(images)
 }
@@ -54,14 +58,13 @@ pub fn get_images_by_ids(
     Ok(images)
 }
 
-pub fn get_image(
-    ctx: &ServiceContext,
-    image_id: &str,
-) -> Result<ImageWithFile, ServiceError> {
+pub fn get_image(ctx: &ServiceContext, image_id: &str) -> Result<ImageWithFile, ServiceError> {
     let id_refs = vec![image_id];
     let mut images = ctx.db.get_images_by_ids(&id_refs)?;
     enrich_thumbnails(&mut images, ctx.app_data_dir);
-    images.into_iter().next()
+    images
+        .into_iter()
+        .next()
         .ok_or_else(|| ServiceError::NotFound(format!("Image '{}'", image_id)))
 }
 
@@ -86,12 +89,20 @@ pub fn get_iteration_siblings(
 mod tests {
     use super::*;
     use crate::db_core::db::Database;
-    use crate::db_core::secrets::MemoryStore;
-    use crate::db_core::embeddings::EmbeddingEngine;
     use crate::db_core::detection::DetectionEngine;
-    use std::sync::Mutex;
+    use crate::db_core::embeddings::EmbeddingEngine;
+    use crate::db_core::secrets::MemoryStore;
+    use parking_lot::Mutex;
 
-    fn make_ctx_parts() -> (Database, MemoryStore, PathBuf, Mutex<EmbeddingEngine>, Mutex<DetectionEngine>, Mutex<DetectionEngine>, tempfile::TempDir) {
+    fn make_ctx_parts() -> (
+        Database,
+        MemoryStore,
+        PathBuf,
+        Mutex<EmbeddingEngine>,
+        Mutex<DetectionEngine>,
+        Mutex<DetectionEngine>,
+        tempfile::TempDir,
+    ) {
         let tmp = tempfile::tempdir().unwrap();
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
         let secrets = MemoryStore::new();
@@ -104,14 +115,26 @@ mod tests {
     }
 
     fn make_ctx<'a>(
-        db: &'a Database, secrets: &'a MemoryStore, app_data_dir: &'a PathBuf,
-        ee: &'a Mutex<EmbeddingEngine>, de: &'a Mutex<DetectionEngine>, se: &'a Mutex<DetectionEngine>,
+        db: &'a Database,
+        secrets: &'a MemoryStore,
+        app_data_dir: &'a PathBuf,
+        ee: &'a Mutex<EmbeddingEngine>,
+        de: &'a Mutex<DetectionEngine>,
+        se: &'a Mutex<DetectionEngine>,
     ) -> crate::services::ServiceContext<'a> {
-        crate::services::ServiceContext { db, app_data_dir, embedding_engine: ee, detection_engine: de, safety_engine: se, secrets, app_handle: None }
+        crate::services::ServiceContext {
+            db,
+            app_data_dir,
+            embedding_engine: ee,
+            detection_engine: de,
+            safety_engine: se,
+            secrets,
+            app_handle: None,
+        }
     }
 
     fn insert_test_image(db: &Database, id: &str, path: &str) {
-        let conn = db.conn.lock().unwrap();
+        let conn = db.conn.lock();
         conn.execute(
             "INSERT INTO images (id, sha256_hash, width, height, format, file_size, created_at, imported_at, ai_prompt)
              VALUES (?1, ?2, 100, 100, 'png', 1000, '2026-01-01', '2026-01-01', NULL)",
@@ -121,7 +144,8 @@ mod tests {
             "INSERT INTO image_files (id, image_id, path, last_seen_at)
              VALUES (?1, ?2, ?3, '2026-01-01')",
             rusqlite::params![format!("tf_{}", id), id, path],
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     #[test]

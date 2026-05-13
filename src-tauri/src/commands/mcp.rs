@@ -1,7 +1,7 @@
-use tauri::State;
-use crate::AppState;
 use crate::db_core::models::{McpToken, TokenScope};
-use crate::services::{ServiceContext, tokens};
+use crate::services::{tokens, ServiceContext};
+use crate::AppState;
+use tauri::State;
 
 #[tauri::command]
 pub async fn create_mcp_token(
@@ -27,7 +27,10 @@ pub async fn revoke_mcp_token(state: State<'_, AppState>, token_id: String) -> R
 }
 
 #[tauri::command]
-pub async fn rotate_mcp_token(state: State<'_, AppState>, token_id: String) -> Result<String, String> {
+pub async fn rotate_mcp_token(
+    state: State<'_, AppState>,
+    token_id: String,
+) -> Result<String, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
     tokens::rotate_token(&ctx, &token_id).map_err(|e| e.to_string())
 }

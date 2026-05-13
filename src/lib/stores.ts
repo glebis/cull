@@ -31,7 +31,7 @@ export function navigateBack(): boolean {
 }
 
 // Window identity
-export const windowName = writable<string>('ImageView');
+export const windowName = writable<string>('Cull');
 export const windowLabel = writable<string>('main');
 
 export const thumbnailSize = writable<number>(160);

@@ -1,4 +1,4 @@
-# Contributing to ImageView
+# Contributing to Cull
 
 ## Prerequisites
 
@@ -9,8 +9,8 @@
 ## Development Setup
 
 ```bash
-git clone https://github.com/gastownhall/imageview.git
-cd imageview
+git clone https://github.com/gastownhall/cull.git
+cd cull
 npm install
 npm run tauri dev
 ```

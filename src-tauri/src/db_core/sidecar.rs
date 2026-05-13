@@ -32,22 +32,39 @@ pub fn find_sidecar(image_path: &Path) -> Option<std::path::PathBuf> {
 pub fn parse_sidecar(sidecar_path: &Path) -> Result<SidecarResult, String> {
     let content = std::fs::read_to_string(sidecar_path)
         .map_err(|e| format!("Failed to read sidecar: {}", e))?;
-    let json: Value = serde_json::from_str(&content)
-        .map_err(|e| format!("Invalid sidecar JSON: {}", e))?;
+    let json: Value =
+        serde_json::from_str(&content).map_err(|e| format!("Invalid sidecar JSON: {}", e))?;
 
     let obj = json.as_object().ok_or("Sidecar is not a JSON object")?;
 
     let prompt = obj.get("prompt").and_then(|v| v.as_str()).map(String::from);
-    let provider = obj.get("provider").and_then(|v| v.as_str()).map(String::from);
+    let provider = obj
+        .get("provider")
+        .and_then(|v| v.as_str())
+        .map(String::from);
     let model = obj.get("model").and_then(|v| v.as_str()).map(String::from);
     let seed = obj.get("seed").and_then(|v| {
-        v.as_i64().map(|n| n.to_string()).or_else(|| v.as_str().map(String::from))
+        v.as_i64()
+            .map(|n| n.to_string())
+            .or_else(|| v.as_str().map(String::from))
     });
-    let created_at = obj.get("timestamp").and_then(|v| v.as_str()).map(String::from);
+    let created_at = obj
+        .get("timestamp")
+        .and_then(|v| v.as_str())
+        .map(String::from);
 
     // Build settings from known fields
     let mut settings = serde_json::Map::new();
-    for key in &["quality", "thinking", "n", "platform", "preset", "estimated_cost", "duration_s", "edit_source"] {
+    for key in &[
+        "quality",
+        "thinking",
+        "n",
+        "platform",
+        "preset",
+        "estimated_cost",
+        "duration_s",
+        "edit_source",
+    ] {
         if let Some(val) = obj.get(*key) {
             settings.insert(key.to_string(), val.clone());
         }

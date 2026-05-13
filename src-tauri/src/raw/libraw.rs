@@ -1,5 +1,5 @@
+use super::{RawDecoder, RawMetadata, RawPreview};
 use std::path::Path;
-use super::{RawDecoder, RawPreview, RawMetadata};
 
 pub struct LibRawDecoder;
 
@@ -9,16 +9,17 @@ impl RawDecoder for LibRawDecoder {
     }
 
     fn extract_preview(&self, path: &Path) -> Result<RawPreview, String> {
-        let data = std::fs::read(path)
-            .map_err(|e| format!("Failed to read RAW file: {}", e))?;
+        let data = std::fs::read(path).map_err(|e| format!("Failed to read RAW file: {}", e))?;
 
-        let mut raw_image = rsraw::RawImage::open(&data)
-            .map_err(|e| format!("LibRaw failed to open: {}", e))?;
+        let mut raw_image =
+            rsraw::RawImage::open(&data).map_err(|e| format!("LibRaw failed to open: {}", e))?;
 
-        let thumbs = raw_image.extract_thumbs()
+        let thumbs = raw_image
+            .extract_thumbs()
             .map_err(|e| format!("LibRaw failed to extract thumbnails: {}", e))?;
 
-        let thumb = thumbs.into_iter()
+        let thumb = thumbs
+            .into_iter()
             .max_by_key(|t| t.width as u64 * t.height as u64)
             .ok_or_else(|| "No thumbnails found in RAW file".to_string())?;
 

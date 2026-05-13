@@ -4,8 +4,9 @@
     import type { McpToken } from '$lib/api';
     import { showToast } from '$lib/stores';
     import PrivacyDashboard from './PrivacyDashboard.svelte';
+    import StaticPublishingSettings from './StaticPublishingSettings.svelte';
 
-    let activeSettingsTab = $state<'general' | 'privacy'>('general');
+    let activeSettingsTab = $state<'general' | 'privacy' | 'static-publishing'>('general');
 
     let { onclose }: { onclose: () => void } = $props();
 
@@ -26,6 +27,7 @@
 
     let autoPurge = $state(true);
     let moduleRaw = $state(false);
+    let moduleStaticPublishing = $state(false);
 
     interface ApiKeyState {
         exists: boolean;
@@ -50,7 +52,7 @@
 
     onMount(async () => {
         try {
-            const [toks, ctSetting, trashSetting, httpSetting, portSetting, purgeSetting, rawSetting] = await Promise.all([
+            const [toks, ctSetting, trashSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting] = await Promise.all([
                 listMcpTokens(),
                 getAppSetting('close_to_tray'),
                 getAppSetting('skip_trash_confirm'),
@@ -58,6 +60,7 @@
                 getAppSetting('mcp_http_port'),
                 getAppSetting('auto_purge_missing'),
                 getAppSetting('module_raw'),
+                getAppSetting('module_static_publishing'),
             ]);
             tokens = toks;
             closeToTray = ctSetting !== 'false';
@@ -66,6 +69,7 @@
             if (portSetting) httpPort = portSetting;
             autoPurge = purgeSetting !== 'false';
             moduleRaw = rawSetting === 'true';
+            moduleStaticPublishing = staticPublishingSetting === 'true';
 
             const [hasOpenai, hasGoogle, hasOpenrouter] = await Promise.all([
                 hasApiKey('openai'),
@@ -120,6 +124,17 @@
                 actions: [{ label: 'Rescan library', onclick: () => backfillRawPreviews() }],
             });
         }
+    }
+
+    async function toggleModuleStaticPublishing() {
+        await setAppSetting('module_static_publishing', moduleStaticPublishing ? 'true' : 'false');
+        if (!moduleStaticPublishing && activeSettingsTab === 'static-publishing') {
+            activeSettingsTab = 'general';
+        }
+        showToast(
+            moduleStaticPublishing ? 'Static Publishing enabled' : 'Static Publishing disabled',
+            { type: moduleStaticPublishing ? 'success' : 'info', duration: 3000 },
+        );
     }
 
     async function handleApiKeyBlur(provider: string) {
@@ -222,6 +237,7 @@
 </script>
 
 <div class="overlay" onclick={onclose} onkeydown={(e) => e.key === 'Escape' && onclose()} role="dialog" tabindex="-1">
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
     <div class="panel" onclick={(e) => e.stopPropagation()} role="document">
         <div class="panel-header">
             <h2>Settings</h2>
@@ -231,12 +247,17 @@
         <div class="settings-tabs">
             <button class="settings-tab" class:active={activeSettingsTab === 'general'} onclick={() => activeSettingsTab = 'general'}>General</button>
             <button class="settings-tab" class:active={activeSettingsTab === 'privacy'} onclick={() => activeSettingsTab = 'privacy'}>Privacy & Data</button>
+            {#if moduleStaticPublishing}
+                <button class="settings-tab" class:active={activeSettingsTab === 'static-publishing'} onclick={() => activeSettingsTab = 'static-publishing'}>Static Publishing</button>
+            {/if}
         </div>
 
         {#if activeSettingsTab === 'privacy'}
             <div class="section">
                 <PrivacyDashboard />
             </div>
+        {:else if activeSettingsTab === 'static-publishing'}
+            <StaticPublishingSettings />
         {:else if loading}
             <p class="loading">Loading...</p>
         {:else}
@@ -288,6 +309,15 @@
                     </label>
                     <span class="text-secondary" style="font-size: 0.85em; margin-top: 4px;">
                         Import and preview RAW camera files (RAF, CR2, NEF, ARW, DNG, etc.)
+                    </span>
+                </div>
+                <div class="section-item">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" bind:checked={moduleStaticPublishing} onchange={toggleModuleStaticPublishing} />
+                        Static Publishing
+                    </label>
+                    <span class="text-secondary" style="font-size: 0.85em; margin-top: 4px;">
+                        Canvas packages, static gallery assets, Claude Code handoffs, and scheduled publish settings
                     </span>
                 </div>
             </div>

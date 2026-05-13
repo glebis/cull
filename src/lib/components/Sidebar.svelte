@@ -61,6 +61,8 @@
     }
 
     async function selectSmartCollection(sc: SmartCollection) {
+        activeSession.set(null);
+        sessionCanvases.set([]);
         activeSmartCollection.set(sc);
         activeFolder.set(null);
         activeCollection.set(null);
@@ -76,6 +78,8 @@
     }
 
     async function selectFolder(folder: string | null) {
+        activeSession.set(null);
+        sessionCanvases.set([]);
         activeFolder.set(folder);
         activeCollection.set(null);
         activeSmartCollection.set(null);
@@ -94,6 +98,8 @@
     }
 
     async function selectCollection(collectionId: string) {
+        activeSession.set(null);
+        sessionCanvases.set([]);
         activeCollection.set(collectionId);
         activeFolder.set(null);
         activeSmartCollection.set(null);
@@ -374,6 +380,8 @@
                 const imgs = await getImagesByIds(ids);
                 images.set(imgs);
                 focusedIndex.set(0);
+                activeSession.set(null);
+                sessionCanvases.set([]);
                 activeFolder.set(null);
                 activeCollection.set(null);
             }

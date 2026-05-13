@@ -1,6 +1,6 @@
-use tauri::State;
-use crate::AppState;
 use crate::services::undo::Action;
+use crate::AppState;
+use tauri::State;
 
 #[tauri::command]
 pub async fn set_rating(
@@ -8,7 +8,9 @@ pub async fn set_rating(
     image_id: String,
     rating: u8,
 ) -> Result<(), String> {
-    state.action_manager.execute(&state.db, Action::SetRating { image_id, rating })?;
+    state
+        .action_manager
+        .execute(&state.db, Action::SetRating { image_id, rating })?;
     Ok(())
 }
 
@@ -18,6 +20,8 @@ pub async fn set_decision(
     image_id: String,
     decision: String,
 ) -> Result<(), String> {
-    state.action_manager.execute(&state.db, Action::SetDecision { image_id, decision })?;
+    state
+        .action_manager
+        .execute(&state.db, Action::SetDecision { image_id, decision })?;
     Ok(())
 }

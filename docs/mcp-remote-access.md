@@ -1,6 +1,6 @@
 # MCP Remote Access
 
-ImageView exposes an MCP server that lets AI agents browse, curate, search, and export your image library. Three connection methods: local stdio, LAN HTTP, or tunneled HTTP.
+Cull exposes an MCP server that lets AI agents browse, curate, search, and export your image library. Three connection methods: local stdio, LAN HTTP, or tunneled HTTP.
 
 ## Local Access (Claude Code)
 
@@ -9,15 +9,15 @@ Add to your Claude Code MCP config (`~/.claude/settings.json` or project `.claud
 ```json
 {
   "mcpServers": {
-    "imageview": {
-      "command": "/Applications/ImageView.app/Contents/MacOS/imageview",
+    "cull": {
+      "command": "/Applications/Cull.app/Contents/MacOS/cull",
       "args": ["--mcp-stdio"]
     }
   }
 }
 ```
 
-The stdio bridge auto-launches ImageView in tray mode if it isn't already running. Local connections get full admin access with no token required — the Unix socket uses filesystem permissions (`0600`).
+The stdio bridge auto-launches Cull in tray mode if it isn't already running. Local connections get full admin access with no token required — the Unix socket uses filesystem permissions (`0600`).
 
 ## HTTP Access
 
@@ -26,8 +26,8 @@ The stdio bridge auto-launches ImageView in tray mode if it isn't already runnin
 Via CLI:
 
 ```bash
-imageview --mcp-http          # default port 9847
-imageview --mcp-http 8080     # custom port
+cull --mcp-http          # default port 9847
+cull --mcp-http 8080     # custom port
 ```
 
 Or toggle in **Settings > MCP Server > HTTP Server**.
@@ -115,6 +115,6 @@ Union semantics: an image is accessible if it matches any filter. Null scope mea
 |---|---|
 | "Connection refused" | HTTP server not enabled. Start with `--mcp-http` or toggle in Settings. |
 | "401 Unauthorized" | Token invalid, expired, or revoked. Create a new one in Settings. |
-| "Socket not found" (stdio) | App not running. Start with `imageview` or `imageview --tray`. |
+| "Socket not found" (stdio) | App not running. Start with `cull` or `cull --tray`. |
 | Tools return empty results | Token scope may restrict visible content. Check scope filters. |
 | "Permission denied" on a tool | Token role lacks the required capability. See role table above. |

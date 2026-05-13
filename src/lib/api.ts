@@ -3,6 +3,12 @@
 
 import { invoke } from '@tauri-apps/api/core';
 
+function emitSessionEventsRefresh() {
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('session-events-refresh'));
+    }
+}
+
 export interface Image {
     id: string;
     sha256_hash: string;
@@ -106,12 +112,16 @@ export async function getImageCount(): Promise<number> {
     return invoke<number>('get_image_count');
 }
 
-export async function importFolder(folderPath: string): Promise<ImportResponse> {
-    return invoke<ImportResponse>('import_folder', { folderPath });
+export async function importFolder(folderPath: string, sessionId?: string | null): Promise<ImportResponse> {
+    const result = await invoke<ImportResponse>('import_folder', { folderPath, sessionId: sessionId ?? null });
+    emitSessionEventsRefresh();
+    return result;
 }
 
-export async function importFiles(filePaths: string[]): Promise<ImportResponse> {
-    return invoke<ImportResponse>('import_files', { filePaths });
+export async function importFiles(filePaths: string[], sessionId?: string | null): Promise<ImportResponse> {
+    const result = await invoke<ImportResponse>('import_files', { filePaths, sessionId: sessionId ?? null });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function regenerateThumbnails(): Promise<number> {
@@ -164,12 +174,14 @@ export async function rescanSources(): Promise<number> {
     return invoke<number>('rescan_sources');
 }
 
-export async function setRating(imageId: string, rating: number): Promise<void> {
-    return invoke<void>('set_rating', { imageId, rating });
+export async function setRating(imageId: string, rating: number, sessionId?: string | null): Promise<void> {
+    await invoke<void>('set_rating', { imageId, rating, sessionId: sessionId ?? null });
+    emitSessionEventsRefresh();
 }
 
-export async function setDecision(imageId: string, decision: string): Promise<void> {
-    return invoke<void>('set_decision', { imageId, decision });
+export async function setDecision(imageId: string, decision: string, sessionId?: string | null): Promise<void> {
+    await invoke<void>('set_decision', { imageId, decision, sessionId: sessionId ?? null });
+    emitSessionEventsRefresh();
 }
 
 export async function getImagesByIds(imageIds: string[]): Promise<ImageWithFile[]> {
@@ -420,6 +432,54 @@ export async function setAppSetting(key: string, value: string): Promise<void> {
     return invoke('set_app_setting', { key, value });
 }
 
+export interface StaticPublishCanvasItem {
+    image_id: string;
+    x?: number | null;
+    y?: number | null;
+    width?: number | null;
+    height?: number | null;
+    hidden?: boolean | null;
+}
+
+export interface StaticPublishRequest {
+    canvas_name: string;
+    items: StaticPublishCanvasItem[];
+    layout_json?: string | null;
+    output_dir?: string | null;
+    share_url?: string | null;
+    include_thumbnails: boolean;
+    include_web: boolean;
+    include_full: boolean;
+}
+
+export interface StaticPublishResult {
+    export_dir: string;
+    site_dir: string;
+    manifest_path: string;
+    instructions_path: string;
+    qr_svg_path: string;
+    qr_target_url: string;
+    access_phrase: string;
+    image_count: number;
+    skipped_count: number;
+    warnings: string[];
+}
+
+export interface StaticPublishServerResult {
+    url: string;
+    host: string;
+    port: number;
+    site_dir: string;
+}
+
+export async function exportStaticPublishPackage(request: StaticPublishRequest): Promise<StaticPublishResult> {
+    return invoke('export_static_publish_package', { request });
+}
+
+export async function serveStaticPublishPackage(siteDir: string, host?: string | null, port?: number | null): Promise<StaticPublishServerResult> {
+    return invoke('serve_static_publish_package', { siteDir, host: host ?? null, port: port ?? null });
+}
+
 // Lineage commands
 export interface LineageGroup {
     id: string;
@@ -576,11 +636,44 @@ export interface Canvas {
     updated_at: string;
 }
 
+export interface SessionEvent {
+    id: string;
+    session_id: string | null;
+    event_type: string;
+    actor_type: 'user' | 'agent' | 'system';
+    actor_id: string | null;
+    subject_type: string | null;
+    subject_id: string | null;
+    payload_json: string;
+    created_at: string;
+}
+
+export interface ActivityLibrarySummary {
+    total_images: number;
+    scoped_images: number;
+    rated_images: number;
+    accepted_images: number;
+    rejected_images: number;
+    import_batches: number;
+}
+
+export interface ActivityContext {
+    session: Session | null;
+    library: ActivityLibrarySummary;
+    recent_events: SessionEvent[];
+}
+
 export async function createSession(name: string): Promise<Session> {
     return invoke<Session>('create_session', { name });
 }
 export async function listSessions(): Promise<Session[]> {
     return invoke<Session[]>('list_sessions');
+}
+export async function listSessionEvents(sessionId?: string | null, limit = 50): Promise<SessionEvent[]> {
+    return invoke<SessionEvent[]>('list_session_events', { sessionId: sessionId ?? null, limit });
+}
+export async function getActivityContext(sessionId?: string | null): Promise<ActivityContext> {
+    return invoke<ActivityContext>('get_activity_context', { sessionId: sessionId ?? null });
 }
 export async function getSession(sessionId: string): Promise<Session> {
     return invoke<Session>('get_session', { sessionId });

@@ -1,9 +1,9 @@
+use chrono::Utc;
 use regex::Regex;
 use rusqlite::{params, Result};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use uuid::Uuid;
-use chrono::Utc;
 
 use super::db::Database;
 use super::models::ImageWithFile;
@@ -15,12 +15,14 @@ static VERSION_SUFFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static DALLE_TIMESTAMP_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^DALL[\-·\.]?E[\s_]?(\d{4}[-.]?\d{2}[-.]?\d{2})[\s_]?(\d{2})[.\-](\d{2})[.\-](\d{2})").unwrap()
+    Regex::new(
+        r"^DALL[\-·\.]?E[\s_]?(\d{4}[-.]?\d{2}[-.]?\d{2})[\s_]?(\d{2})[.\-](\d{2})[.\-](\d{2})",
+    )
+    .unwrap()
 });
 
-static COMFYUI_BATCH_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(ComfyUI)_\d+_?$").unwrap()
-});
+static COMFYUI_BATCH_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(ComfyUI)_\d+_?$").unwrap());
 
 static TRAILING_LETTER_RE: LazyLock<Regex> = LazyLock::new(|| {
     // Match trailing letter variant: icon-v5a, icon-v5-a, thing_3b
@@ -69,7 +71,7 @@ pub fn extract_stem(filename: &str) -> String {
 pub struct LineageSignals {
     pub filename_stem_match: bool,
     pub same_import_batch: bool,
-    pub temporal_proximity: bool,  // created within 60s
+    pub temporal_proximity: bool, // created within 60s
     pub same_dimensions: bool,
     pub clip_similarity: Option<f64>,
     pub prompt_match: bool,
@@ -78,14 +80,26 @@ pub struct LineageSignals {
 impl LineageSignals {
     pub fn score(&self) -> u32 {
         let mut s = 0u32;
-        if self.prompt_match { s += 50; }
-        if self.filename_stem_match { s += 25; }
-        if self.same_import_batch { s += 10; }
-        if self.temporal_proximity { s += 10; }
-        if let Some(sim) = self.clip_similarity {
-            if sim > 0.85 { s += 15; }
+        if self.prompt_match {
+            s += 50;
         }
-        if self.same_dimensions { s += 5; }
+        if self.filename_stem_match {
+            s += 25;
+        }
+        if self.same_import_batch {
+            s += 10;
+        }
+        if self.temporal_proximity {
+            s += 10;
+        }
+        if let Some(sim) = self.clip_similarity {
+            if sim > 0.85 {
+                s += 15;
+            }
+        }
+        if self.same_dimensions {
+            s += 5;
+        }
         s
     }
 }
@@ -140,7 +154,12 @@ impl Database {
         Ok(id)
     }
 
-    pub fn assign_to_lineage_group(&self, image_id: &str, group_id: &str, order: i32) -> Result<()> {
+    pub fn assign_to_lineage_group(
+        &self,
+        image_id: &str,
+        group_id: &str,
+        order: i32,
+    ) -> Result<()> {
         let conn = self.conn.lock();
         conn.execute(
             "UPDATE images SET lineage_group_id = ?1, lineage_order = ?2 WHERE id = ?3",
@@ -166,7 +185,7 @@ impl Database {
              FROM lineage_groups lg
              LEFT JOIN images i ON i.lineage_group_id = lg.id
              GROUP BY lg.id
-             ORDER BY lg.created_at DESC"
+             ORDER BY lg.created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(LineageGroup {
@@ -178,7 +197,8 @@ impl Database {
                 image_count: row.get(5)?,
             })
         })?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     pub fn get_lineage_group_images(&self, group_id: &str) -> Result<Vec<ImageWithFile>> {
@@ -193,7 +213,7 @@ impl Database {
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
              WHERE i.lineage_group_id = ?1
              GROUP BY i.id
-             ORDER BY i.lineage_order ASC, i.created_at ASC"
+             ORDER BY i.lineage_order ASC, i.created_at ASC",
         )?;
         let rows = stmt.query_map(params![group_id], |row| {
             let star: Option<u8> = row.get(9)?;
@@ -226,7 +246,8 @@ impl Database {
                 missing_at: row.get(15)?,
             })
         })?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     pub fn merge_lineage_groups(&self, keep_id: &str, merge_id: &str) -> Result<()> {
@@ -235,7 +256,10 @@ impl Database {
             "UPDATE images SET lineage_group_id = ?1 WHERE lineage_group_id = ?2",
             params![keep_id, merge_id],
         )?;
-        conn.execute("DELETE FROM lineage_groups WHERE id = ?1", params![merge_id])?;
+        conn.execute(
+            "DELETE FROM lineage_groups WHERE id = ?1",
+            params![merge_id],
+        )?;
         Ok(())
     }
 
@@ -245,7 +269,10 @@ impl Database {
             "UPDATE images SET lineage_group_id = NULL, lineage_order = 0 WHERE lineage_group_id = ?1",
             params![group_id],
         )?;
-        conn.execute("DELETE FROM lineage_groups WHERE id = ?1", params![group_id])?;
+        conn.execute(
+            "DELETE FROM lineage_groups WHERE id = ?1",
+            params![group_id],
+        )?;
         Ok(())
     }
 
@@ -260,7 +287,12 @@ impl Database {
 
     // --- Import batch methods ---
 
-    pub fn create_import_batch(&self, source: &str, count: u32, collection_id: Option<&str>) -> Result<String> {
+    pub fn create_import_batch(
+        &self,
+        source: &str,
+        count: u32,
+        collection_id: Option<&str>,
+    ) -> Result<String> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
         let conn = self.conn.lock();
@@ -293,7 +325,7 @@ impl Database {
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
              WHERE i.import_batch_id = ?1
              GROUP BY i.id
-             ORDER BY i.imported_at ASC"
+             ORDER BY i.imported_at ASC",
         )?;
         let rows = stmt.query_map(params![batch_id], |row| {
             let star: Option<u8> = row.get(9)?;
@@ -326,7 +358,8 @@ impl Database {
                 missing_at: row.get(15)?,
             })
         })?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     // --- Lineage detection pipeline ---
@@ -340,13 +373,16 @@ impl Database {
         let images = self.get_images_by_ids(&id_refs)?;
 
         // Extract stems for all images
-        let stems: Vec<String> = images.iter().map(|img| {
-            let filename = std::path::Path::new(&img.path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
-            extract_stem(filename)
-        }).collect();
+        let stems: Vec<String> = images
+            .iter()
+            .map(|img| {
+                let filename = std::path::Path::new(&img.path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+                extract_stem(filename)
+            })
+            .collect();
 
         // Group by stem
         let mut stem_groups: HashMap<String, Vec<usize>> = HashMap::new();
@@ -380,7 +416,11 @@ impl Database {
                 }
             }
 
-            let avg_score = if pair_count > 0 { total_score / pair_count } else { 0 };
+            let avg_score = if pair_count > 0 {
+                total_score / pair_count
+            } else {
+                0
+            };
             if avg_score < 25 {
                 continue;
             }

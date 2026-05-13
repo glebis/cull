@@ -1,4 +1,4 @@
-# ImageView
+# Cull
 
 Agent-friendly AI image viewer for macOS. Built to replace Preview.app for power users.
 
@@ -39,7 +39,7 @@ Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 | Gemini Embedding 2 via API | Done |
 | Cosine similarity search | Done |
 | UMAP visualization with auto-clustering | Done |
-| Deep link URL scheme (`imageview://`) | Done |
+| Deep link URL scheme (`cull://`) | Done |
 | Native macOS menu bar (File/Edit/View/Window/Help) | Done |
 | Drag-and-drop from Finder | Done |
 | File type associations (Open With in Finder) | Done |
@@ -103,7 +103,7 @@ Planned: HEIC/HEIF, TIFF, BMP, SVG, AVIF, JPEG XL, RAW (CR2, CR3, NEF, ARW, DNG,
 
 ### P2 — Full platform
 
-- [ ] Services menu integration ("Open in ImageView" system-wide)
+- [ ] Services menu integration ("Open in Cull" system-wide)
 - [ ] AppleScript / Apple Events support
 - [ ] Color management (ICC profiles, monitor matching)
 - [ ] Print support with layout options
@@ -123,13 +123,13 @@ Planned: HEIC/HEIF, TIFF, BMP, SVG, AVIF, JPEG XL, RAW (CR2, CR3, NEF, ARW, DNG,
 Every GUI operation will have a CLI equivalent:
 
 ```bash
-imageview ~/photos                              # open folder in GUI
-imageview contact-sheet ./shoot --columns 6     # generate contact sheet
-imageview search "sunset landscape" --top 20    # semantic search
-imageview similar photo.jpg --top 10            # find visually similar
-imageview export favorites --format webp        # batch export collection
-imageview metadata photo.jpg                    # dump EXIF as JSON
-find . -name "*.png" | imageview pipe --resize 800x0 --format webp
+cull ~/photos                              # open folder in GUI
+cull contact-sheet ./shoot --columns 6     # generate contact sheet
+cull search "sunset landscape" --top 20    # semantic search
+cull similar photo.jpg --top 10            # find visually similar
+cull export favorites --format webp        # batch export collection
+cull metadata photo.jpg                    # dump EXIF as JSON
+find . -name "*.png" | cull pipe --resize 800x0 --format webp
 ```
 
 See [docs/cli-and-url-scheme.md](docs/cli-and-url-scheme.md) for the full specification.
@@ -137,10 +137,10 @@ See [docs/cli-and-url-scheme.md](docs/cli-and-url-scheme.md) for the full specif
 ## URL Scheme
 
 ```
-imageview://open?path=/path/to/image.jpg&view=loupe
-imageview://import?folder=/path/to/photos&recursive=true
-imageview://search?q=sunset+landscape&view=grid
-imageview://contact-sheet?folder=./photos&columns=4&output=/tmp/sheet.png
+cull://open?path=/path/to/image.jpg&view=loupe
+cull://import?folder=/path/to/photos&recursive=true
+cull://search?q=sunset+landscape&view=grid
+cull://contact-sheet?folder=./photos&columns=4&output=/tmp/sheet.png
 ```
 
 ## Keyboard Shortcuts
@@ -183,8 +183,8 @@ imageview://contact-sheet?folder=./photos&columns=4&output=/tmp/sheet.png
 ## Quick Start
 
 ```bash
-git clone https://github.com/gastownhall/imageview.git
-cd imageview
+git clone https://github.com/gastownhall/cull.git
+cd cull
 npm install
 npm run tauri dev
 ```

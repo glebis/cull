@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "imageview",
+  "productName": "Cull",
   "version": "0.1.0",
-  "identifier": "com.glebkalinin.imageview",
+  "identifier": "com.glebkalinin.cull",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "ImageView",
+        "title": "Cull",
         "width": 1200,
         "height": 800,
         "titleBarStyle": "Overlay",
@@ -30,7 +30,7 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["imageview"]
+        "schemes": ["cull"]
       }
     },
     "updater": {

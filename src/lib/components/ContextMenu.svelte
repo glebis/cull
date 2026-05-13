@@ -1,9 +1,8 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { revealItemInDir } from '@tauri-apps/plugin-opener';
     import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, listCollectionImages, moveImage, renameImage, listFolders } from '$lib/api';
     import type { ImageWithFile } from '$lib/api';
-    import { images, focusedIndex, selectedIds, activeCollection, collections, showToast } from '$lib/stores';
+    import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, showToast } from '$lib/stores';
 
     interface Props {
         image: ImageWithFile;
@@ -18,8 +17,8 @@
     let openSubmenu = $state<string | null>(null);
     let collectionList = $state<[string, string, number][]>([]);
     let folderList = $state<[string, number][]>([]);
-    let menuX = $state(x);
-    let menuY = $state(y);
+    let menuX = $state(0);
+    let menuY = $state(0);
     let activeIndex = $state(0);
 
     let currentRating = $derived(image.selection?.star_rating ?? 0);
@@ -40,6 +39,8 @@
     );
 
     onMount(() => {
+        menuX = x;
+        menuY = y;
         if (menuEl) {
             const rect = menuEl.getBoundingClientRect();
             if (rect.right > window.innerWidth) menuX = window.innerWidth - rect.width - 8;
@@ -61,6 +62,11 @@
             window.removeEventListener('contextmenu', handleClickOutside);
         };
     });
+
+    async function revealInFinder(path: string) {
+        const { revealItemInDir } = await import('@tauri-apps/plugin-opener');
+        await revealItemInDir(path);
+    }
 
     $effect(() => {
         if (menuEl) {
@@ -120,13 +126,13 @@
 
     async function handleRate(n: number) {
         onclose();
-        await setRating(image.image.id, n);
+        await setRating(image.image.id, n, $activeSession?.id ?? null);
         if (image.selection) image.selection.star_rating = n;
     }
 
     async function handleDecision(d: string) {
         onclose();
-        await setDecision(image.image.id, d);
+        await setDecision(image.image.id, d, $activeSession?.id ?? null);
         if (image.selection) image.selection.decision = d;
     }
 
@@ -374,7 +380,7 @@
     <!-- File actions -->
     <button
         class="context-menu-item"
-        onclick={act(() => revealItemInDir(image.path))}
+        onclick={act(() => revealInFinder(image.path))}
         role="menuitem"
         data-menu-index="8"
         tabindex={activeIndex === 8 ? 0 : -1}

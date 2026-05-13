@@ -23,7 +23,7 @@
 </script>
 
 <div class="tabbar">
-    {#if $windowName && $windowName !== 'ImageView'}
+    {#if $windowName && $windowName !== 'Cull'}
         <span class="window-name">{$windowName}</span>
     {/if}
     <div class="tabs">

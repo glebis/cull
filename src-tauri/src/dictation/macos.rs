@@ -7,8 +7,8 @@ use objc2::AllocAnyThread;
 use objc2_avf_audio::{AVAudioEngine, AVAudioPCMBuffer, AVAudioTime};
 use objc2_foundation::{NSError, NSLocale, NSString};
 use objc2_speech::{
-    SFSpeechAudioBufferRecognitionRequest, SFSpeechRecognitionResult,
-    SFSpeechRecognitionTask, SFSpeechRecognizer, SFSpeechRecognizerAuthorizationStatus,
+    SFSpeechAudioBufferRecognitionRequest, SFSpeechRecognitionResult, SFSpeechRecognitionTask,
+    SFSpeechRecognizer, SFSpeechRecognizerAuthorizationStatus,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -64,19 +64,17 @@ pub fn start_dictation_native(app: &AppHandle, locale: &str) -> Result<(), Strin
         }
 
         let ns_locale_id = NSString::from_str(locale);
-        let ns_locale = NSLocale::initWithLocaleIdentifier(
-            NSLocale::alloc(),
-            &ns_locale_id,
-        );
+        let ns_locale = NSLocale::initWithLocaleIdentifier(NSLocale::alloc(), &ns_locale_id);
 
-        let recognizer = SFSpeechRecognizer::initWithLocale(
-            SFSpeechRecognizer::alloc(),
-            &ns_locale,
-        )
-        .ok_or("Failed to create speech recognizer for locale")?;
+        let recognizer =
+            SFSpeechRecognizer::initWithLocale(SFSpeechRecognizer::alloc(), &ns_locale)
+                .ok_or("Failed to create speech recognizer for locale")?;
 
         if !recognizer.isAvailable() {
-            return Err(format!("Speech recognizer not available for locale: {}", locale));
+            return Err(format!(
+                "Speech recognizer not available for locale: {}",
+                locale
+            ));
         }
 
         let request = SFSpeechAudioBufferRecognitionRequest::new();
@@ -92,9 +90,11 @@ pub fn start_dictation_native(app: &AppHandle, locale: &str) -> Result<(), Strin
 
         let request_for_tap = request.clone();
         let tap_block: RcBlock<dyn Fn(NonNull<AVAudioPCMBuffer>, NonNull<AVAudioTime>)> =
-            RcBlock::new(move |buffer: NonNull<AVAudioPCMBuffer>, _time: NonNull<AVAudioTime>| {
-                request_for_tap.appendAudioPCMBuffer(buffer.as_ref());
-            });
+            RcBlock::new(
+                move |buffer: NonNull<AVAudioPCMBuffer>, _time: NonNull<AVAudioTime>| {
+                    request_for_tap.appendAudioPCMBuffer(buffer.as_ref());
+                },
+            );
 
         input_node.installTapOnBus_bufferSize_format_block(
             0,
@@ -109,17 +109,16 @@ pub fn start_dictation_native(app: &AppHandle, locale: &str) -> Result<(), Strin
                 move |result: *mut SFSpeechRecognitionResult, error: *mut NSError| {
                     if let Some(err) = error.as_ref() {
                         let desc = err.localizedDescription().to_string();
-                        let _ = app_handle.emit("dictation-error", DictationError { message: desc });
+                        let _ =
+                            app_handle.emit("dictation-error", DictationError { message: desc });
                         return;
                     }
                     if let Some(res) = result.as_ref() {
                         let is_final = res.isFinal();
                         let transcription = res.bestTranscription();
                         let text = transcription.formattedString().to_string();
-                        let _ = app_handle.emit(
-                            "dictation-result",
-                            DictationResult { text, is_final },
-                        );
+                        let _ =
+                            app_handle.emit("dictation-result", DictationResult { text, is_final });
                     }
                 },
             );

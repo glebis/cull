@@ -1,22 +1,21 @@
-use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::body::Incoming;
 use hyper_util::rt::TokioIo;
 use rmcp::transport::streamable_http_server::{
-    StreamableHttpServerConfig, StreamableHttpService,
-    session::local::LocalSessionManager,
+    session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
 };
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tauri::Manager;
 use tokio::sync::Mutex;
 
-use crate::AppState;
-use crate::services::{ServiceContext, tokens};
 use super::auth::AuthContext;
-use super::tools::ImageViewMcp;
+use super::tools::CullMcp;
+use crate::services::{tokens, ServiceContext};
+use crate::AppState;
 
 struct RateLimiter {
     failures: HashMap<IpAddr, (u32, Instant)>,
@@ -57,15 +56,12 @@ impl RateLimiter {
 
     fn cleanup(&mut self) {
         let cutoff = self.lockout_duration;
-        self.failures.retain(|_, (_, first)| first.elapsed() < cutoff);
+        self.failures
+            .retain(|_, (_, first)| first.elapsed() < cutoff);
     }
 }
 
-pub fn start_http_server(
-    app_handle: tauri::AppHandle,
-    host: String,
-    port: u16,
-) {
+pub fn start_http_server(app_handle: tauri::AppHandle, host: String, port: u16) {
     tauri::async_runtime::spawn(async move {
         if let Err(e) = run_http_server(app_handle, host, port).await {
             eprintln!("MCP HTTP server error: {}", e);
@@ -80,9 +76,10 @@ async fn run_http_server(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
 
-    let rate_limiter = Arc::new(Mutex::new(
-        RateLimiter::new(10, Duration::from_secs(15 * 60))
-    ));
+    let rate_limiter = Arc::new(Mutex::new(RateLimiter::new(
+        10,
+        Duration::from_secs(15 * 60),
+    )));
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     eprintln!("MCP HTTP server listening on {}", addr);
@@ -108,14 +105,17 @@ async fn run_http_server(
                                 hyper::Response::builder()
                                     .status(429)
                                     .header("Retry-After", "900")
-                                    .body(Full::new(Bytes::from("Too Many Requests: account locked for 15 minutes")))
-                                    .unwrap()
+                                    .body(Full::new(Bytes::from(
+                                        "Too Many Requests: account locked for 15 minutes",
+                                    )))
+                                    .unwrap(),
                             );
                         }
                     }
 
                     // Extract and validate bearer token
-                    let auth_header = req.headers()
+                    let auth_header = req
+                        .headers()
                         .get(http::header::AUTHORIZATION)
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
@@ -124,13 +124,13 @@ async fn run_http_server(
                         Some(ref h) if h.starts_with("Bearer ") => &h[7..],
                         _ => {
                             limiter.lock().await.record_failure(remote_ip);
-                            return Ok(
-                                hyper::Response::builder()
-                                    .status(401)
-                                    .header("WWW-Authenticate", "Bearer")
-                                    .body(Full::new(Bytes::from("Unauthorized: Bearer token required")))
-                                    .unwrap()
-                            );
+                            return Ok(hyper::Response::builder()
+                                .status(401)
+                                .header("WWW-Authenticate", "Bearer")
+                                .body(Full::new(Bytes::from(
+                                    "Unauthorized: Bearer token required",
+                                )))
+                                .unwrap());
                         }
                     };
 
@@ -140,28 +140,29 @@ async fn run_http_server(
                         Ok(Some(t)) => t,
                         Ok(None) => {
                             limiter.lock().await.record_failure(remote_ip);
-                            return Ok(
-                                hyper::Response::builder()
-                                    .status(401)
-                                    .header("WWW-Authenticate", "Bearer error=\"invalid_token\"")
-                                    .body(Full::new(Bytes::from("Unauthorized: Invalid or expired token")))
-                                    .unwrap()
-                            );
+                            return Ok(hyper::Response::builder()
+                                .status(401)
+                                .header("WWW-Authenticate", "Bearer error=\"invalid_token\"")
+                                .body(Full::new(Bytes::from(
+                                    "Unauthorized: Invalid or expired token",
+                                )))
+                                .unwrap());
                         }
                         Err(e) => {
                             eprintln!("Token validation error: {}", e);
-                            return Ok(
-                                hyper::Response::builder()
-                                    .status(500)
-                                    .body(Full::new(Bytes::from("Internal Server Error")))
-                                    .unwrap()
-                            );
+                            return Ok(hyper::Response::builder()
+                                .status(500)
+                                .body(Full::new(Bytes::from("Internal Server Error")))
+                                .unwrap());
                         }
                     };
 
                     limiter.lock().await.record_success(&remote_ip);
 
-                    eprintln!("MCP HTTP: authenticated as '{}' (role: {}) from {}", token.name, token.role, remote_addr);
+                    eprintln!(
+                        "MCP HTTP: authenticated as '{}' (role: {}) from {}",
+                        token.name, token.role, remote_addr
+                    );
 
                     // Create per-request MCP service with the validated token's auth context
                     let auth = AuthContext::Authenticated(token);
@@ -171,7 +172,7 @@ async fn run_http_server(
                         .with_json_response(true);
                     let session_manager = Arc::new(LocalSessionManager::default());
                     let mut mcp_service = StreamableHttpService::new(
-                        move || Ok(ImageViewMcp::with_auth(handle_for_mcp.clone(), auth.clone())),
+                        move || Ok(CullMcp::with_auth(handle_for_mcp.clone(), auth.clone())),
                         session_manager,
                         config,
                     );
@@ -179,18 +180,18 @@ async fn run_http_server(
                     let resp = match tower_service::Service::call(&mut mcp_service, req).await {
                         Ok(r) => r,
                         Err(_) => {
-                            return Ok(
-                                hyper::Response::builder()
-                                    .status(500)
-                                    .body(Full::new(Bytes::from("Internal Server Error")))
-                                    .unwrap()
-                            );
+                            return Ok(hyper::Response::builder()
+                                .status(500)
+                                .body(Full::new(Bytes::from("Internal Server Error")))
+                                .unwrap());
                         }
                     };
 
                     use http_body_util::BodyExt;
                     let (parts, body) = resp.into_parts();
-                    let body_bytes = body.collect().await
+                    let body_bytes = body
+                        .collect()
+                        .await
                         .map(|c| c.to_bytes())
                         .unwrap_or_default();
                     Ok(hyper::Response::from_parts(parts, Full::new(body_bytes)))

@@ -852,6 +852,65 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52560adf09603e58c9a7ee1fe1dcb95a16927b17c127f0ac02d6e768a0e25bc1"
 
 [[package]]
+name = "cull"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "block2",
+ "bytes",
+ "chrono",
+ "clap",
+ "dashmap",
+ "dirs 5.0.1",
+ "futures-util",
+ "hex",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "image",
+ "keyring",
+ "ndarray 0.15.6",
+ "notify",
+ "objc2",
+ "objc2-avf-audio",
+ "objc2-foundation",
+ "objc2-speech",
+ "ort",
+ "parking_lot",
+ "png 0.17.16",
+ "printpdf",
+ "qrcode",
+ "rand 0.8.6",
+ "regex",
+ "reqwest 0.12.28",
+ "rmcp",
+ "rsraw",
+ "rusqlite",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-deep-link",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-process",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "tower-service",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
 name = "darling"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2204,64 +2263,6 @@ checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
 dependencies = [
  "byteorder-lite",
  "quick-error",
-]
-
-[[package]]
-name = "imageview"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "block2",
- "bytes",
- "chrono",
- "clap",
- "dashmap",
- "dirs 5.0.1",
- "futures-util",
- "hex",
- "http",
- "http-body-util",
- "hyper",
- "hyper-util",
- "image",
- "keyring",
- "ndarray 0.15.6",
- "notify",
- "objc2",
- "objc2-avf-audio",
- "objc2-foundation",
- "objc2-speech",
- "ort",
- "parking_lot",
- "png 0.17.16",
- "printpdf",
- "rand 0.8.6",
- "regex",
- "reqwest 0.12.28",
- "rmcp",
- "rsraw",
- "rusqlite",
- "schemars 1.2.1",
- "serde",
- "serde_json",
- "sha2",
- "subtle",
- "tauri",
- "tauri-build",
- "tauri-plugin-deep-link",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-process",
- "tauri-plugin-single-instance",
- "tauri-plugin-updater",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tokio-util",
- "tower-service",
- "uuid",
- "walkdir",
 ]
 
 [[package]]
@@ -3771,6 +3772,15 @@ name = "pxfm"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0c5ccf5294c6ccd63a74f1565028353830a9c2f5eb0c682c355c471726a6e3f"
+
+[[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
+dependencies = [
+ "image",
+]
 
 [[package]]
 name = "quick-error"

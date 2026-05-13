@@ -1,5 +1,5 @@
-use tauri::{AppHandle, Emitter, Manager, State};
 use crate::AppState;
+use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
 pub async fn backfill_raw_previews(
@@ -9,7 +9,8 @@ pub async fn backfill_raw_previews(
     let db = &state.db;
     let app_data_dir = &state.app_data_dir;
 
-    let raw_exts: Vec<String> = crate::extensions::RAW_EXTENSIONS.iter()
+    let raw_exts: Vec<String> = crate::extensions::RAW_EXTENSIONS
+        .iter()
         .map(|e| format!("'{}'", e))
         .collect();
     let in_clause = raw_exts.join(",");
@@ -24,9 +25,11 @@ pub async fn backfill_raw_previews(
             in_clause
         );
         let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        }).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
         rows.filter_map(|r| r.ok()).collect()
     };
 
@@ -35,14 +38,18 @@ pub async fn backfill_raw_previews(
 
     for (i, (image_id, path_str)) in images.iter().enumerate() {
         let path = std::path::Path::new(path_str);
-        if !path.exists() { continue; }
+        if !path.exists() {
+            continue;
+        }
 
         match crate::raw::decode_raw_preview(path) {
             Ok(preview) => {
                 let w = preview.image.width();
                 let h = preview.image.height();
                 let _ = crate::db_core::thumbnails::generate_thumbnail_from_image(
-                    &preview.image, app_data_dir, image_id,
+                    &preview.image,
+                    app_data_dir,
+                    image_id,
                 );
                 {
                     let conn = db.conn.lock();
@@ -61,9 +68,12 @@ pub async fn backfill_raw_previews(
             }
         }
 
-        let _ = app.emit("backfill-progress", serde_json::json!({
-            "current": i + 1, "total": total
-        }));
+        let _ = app.emit(
+            "backfill-progress",
+            serde_json::json!({
+                "current": i + 1, "total": total
+            }),
+        );
     }
 
     Ok(backfilled)

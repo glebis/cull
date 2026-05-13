@@ -79,11 +79,28 @@ CREATE TABLE IF NOT EXISTS collection_items (
 
 CREATE INDEX IF NOT EXISTS collection_items_pos_idx ON collection_items(collection_id, position);
 
+-- Session activity ledger
+CREATE TABLE IF NOT EXISTS session_events (
+    id TEXT PRIMARY KEY,
+    session_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+    event_type TEXT NOT NULL,
+    actor_type TEXT NOT NULL CHECK (actor_type IN ('user', 'agent', 'system')),
+    actor_id TEXT,
+    subject_type TEXT,
+    subject_id TEXT,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_events_session_created_idx ON session_events(session_id, created_at);
+CREATE INDEX IF NOT EXISTS session_events_type_created_idx ON session_events(event_type, created_at);
+CREATE INDEX IF NOT EXISTS session_events_subject_idx ON session_events(subject_type, subject_id);
+
 -- Embeddings
 CREATE TABLE IF NOT EXISTS embeddings (
     id TEXT PRIMARY KEY,
     image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
     model_name TEXT NOT NULL,
+    model_run_id TEXT,
     vector BLOB NOT NULL,
     dims INTEGER NOT NULL,
     dtype TEXT NOT NULL DEFAULT 'float32',
@@ -91,6 +108,71 @@ CREATE TABLE IF NOT EXISTS embeddings (
     created_at TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS embeddings_image_model_uq ON embeddings(image_id, model_name);
+CREATE INDEX IF NOT EXISTS embeddings_model_run_idx ON embeddings(model_run_id);
+
+-- Model processing provenance
+CREATE TABLE IF NOT EXISTS model_profiles (
+    id TEXT PRIMARY KEY,
+    slug TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    task TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    runtime TEXT NOT NULL,
+    source TEXT NOT NULL,
+    privacy_class TEXT NOT NULL DEFAULT 'local',
+    config_json TEXT NOT NULL DEFAULT '{}',
+    license_class TEXT NOT NULL DEFAULT 'unknown',
+    license_acknowledged_at TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS model_runs (
+    id TEXT PRIMARY KEY,
+    job_id TEXT,
+    parent_run_id TEXT REFERENCES model_runs(id),
+    profile_id TEXT REFERENCES model_profiles(id),
+    task TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    model_revision TEXT,
+    status TEXT NOT NULL,
+    input_scope_json TEXT NOT NULL,
+    params_json TEXT NOT NULL DEFAULT '{}',
+    output_summary_json TEXT NOT NULL DEFAULT '{}',
+    cost_estimate_usd REAL,
+    cost_actual_usd REAL,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS model_run_items (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES model_runs(id) ON DELETE CASCADE,
+    image_id TEXT REFERENCES images(id),
+    input_asset_uri TEXT NOT NULL,
+    input_hash TEXT,
+    status TEXT NOT NULL,
+    output_ref_kind TEXT,
+    output_ref_id TEXT,
+    audit_payload_json TEXT,
+    cost_usd REAL,
+    attempt_count INTEGER NOT NULL DEFAULT 1,
+    error TEXT,
+    started_at TEXT,
+    completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS model_runs_job_idx ON model_runs(job_id);
+CREATE INDEX IF NOT EXISTS model_runs_status_idx ON model_runs(status);
+CREATE INDEX IF NOT EXISTS model_runs_parent_idx ON model_runs(parent_run_id);
+CREATE INDEX IF NOT EXISTS model_run_items_run_status_idx ON model_run_items(run_id, status);
+CREATE INDEX IF NOT EXISTS model_run_items_image_run_idx ON model_run_items(image_id, run_id);
+CREATE INDEX IF NOT EXISTS model_run_items_input_hash_idx ON model_run_items(input_hash);
 
 -- App Settings
 CREATE TABLE IF NOT EXISTS app_settings (

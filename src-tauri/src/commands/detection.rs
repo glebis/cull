@@ -1,6 +1,6 @@
-use tauri::{AppHandle, Emitter, State};
-use crate::AppState;
 use crate::db_core::detection::{Detection, YoloVariant};
+use crate::AppState;
+use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
 pub async fn download_yolo_model(
@@ -11,7 +11,8 @@ pub async fn download_yolo_model(
     use futures_util::StreamExt;
     use std::io::Write;
 
-    let variant = YoloVariant::from_str(&variant).ok_or("Invalid variant. Use: nano, small, medium")?;
+    let variant =
+        YoloVariant::from_str(&variant).ok_or("Invalid variant. Use: nano, small, medium")?;
 
     let model_path = {
         let engine = state.detection_engine.lock();
@@ -24,20 +25,26 @@ pub async fn download_yolo_model(
 
     let url = variant.download_url();
     let client = reqwest::Client::new();
-    let response = client.get(url).send().await.map_err(|e| format!("Request error: {}", e))?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Request error: {}", e))?;
     let total_size = response.content_length().unwrap_or(0);
 
     let _ = app.emit("yolo-download-progress", serde_json::json!({
         "downloaded": 0u64, "total": total_size, "variant": variant.model_name(), "status": "downloading"
     }));
 
-    let mut file = std::fs::File::create(&model_path).map_err(|e| format!("File create error: {}", e))?;
+    let mut file =
+        std::fs::File::create(&model_path).map_err(|e| format!("File create error: {}", e))?;
     let mut downloaded: u64 = 0;
     let mut stream = response.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("Download error: {}", e))?;
-        file.write_all(&chunk).map_err(|e| format!("Write error: {}", e))?;
+        file.write_all(&chunk)
+            .map_err(|e| format!("Write error: {}", e))?;
         downloaded += chunk.len() as u64;
         if downloaded % (512 * 1024) < chunk.len() as u64 || downloaded == total_size {
             let _ = app.emit("yolo-download-progress", serde_json::json!({
@@ -77,31 +84,46 @@ pub async fn download_nudenet_model(
 
     let url = "https://huggingface.co/vladmandic/nudenet/resolve/main/nudenet.onnx";
     let client = reqwest::Client::new();
-    let response = client.get(url).send().await.map_err(|e| format!("Request error: {}", e))?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Request error: {}", e))?;
     let total_size = response.content_length().unwrap_or(0);
 
-    let _ = app.emit("nudenet-download-progress", serde_json::json!({
-        "downloaded": 0u64, "total": total_size, "status": "downloading"
-    }));
+    let _ = app.emit(
+        "nudenet-download-progress",
+        serde_json::json!({
+            "downloaded": 0u64, "total": total_size, "status": "downloading"
+        }),
+    );
 
-    let mut file = std::fs::File::create(&model_path).map_err(|e| format!("File create error: {}", e))?;
+    let mut file =
+        std::fs::File::create(&model_path).map_err(|e| format!("File create error: {}", e))?;
     let mut downloaded: u64 = 0;
     let mut stream = response.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("Download error: {}", e))?;
-        file.write_all(&chunk).map_err(|e| format!("Write error: {}", e))?;
+        file.write_all(&chunk)
+            .map_err(|e| format!("Write error: {}", e))?;
         downloaded += chunk.len() as u64;
         if downloaded % (512 * 1024) < chunk.len() as u64 || downloaded == total_size {
-            let _ = app.emit("nudenet-download-progress", serde_json::json!({
-                "downloaded": downloaded, "total": total_size, "status": "downloading"
-            }));
+            let _ = app.emit(
+                "nudenet-download-progress",
+                serde_json::json!({
+                    "downloaded": downloaded, "total": total_size, "status": "downloading"
+                }),
+            );
         }
     }
 
-    let _ = app.emit("nudenet-download-progress", serde_json::json!({
-        "downloaded": total_size, "total": total_size, "status": "complete"
-    }));
+    let _ = app.emit(
+        "nudenet-download-progress",
+        serde_json::json!({
+            "downloaded": total_size, "total": total_size, "status": "complete"
+        }),
+    );
 
     {
         let mut engine = state.safety_engine.lock();
@@ -126,8 +148,7 @@ pub async fn detect_objects(
 
     {
         let mut engine = state.detection_engine.lock();
-        let needs_load = engine.session.is_none()
-            || engine.loaded_variant != Some(variant);
+        let needs_load = engine.session.is_none() || engine.loaded_variant != Some(variant);
         if needs_load {
             if !engine.is_variant_available(variant) {
                 return Err(format!("Model {} not downloaded", variant.model_name()));
@@ -141,7 +162,10 @@ pub async fn detect_objects(
 
     for (i, image_id) in image_ids.iter().enumerate() {
         let id_refs: Vec<&str> = vec![image_id.as_str()];
-        let images = state.db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
+        let images = state
+            .db
+            .get_images_by_ids(&id_refs)
+            .map_err(|e| e.to_string())?;
         let img = images.first().ok_or("Image not found")?;
 
         let detect_path = crate::commands::resolve_image_path_for_ml(img, &state.app_data_dir);
@@ -149,7 +173,9 @@ pub async fn detect_objects(
         match engine.detect(&detect_path) {
             Ok(detections) => {
                 drop(engine);
-                state.db.store_detections(image_id, variant.model_name(), &detections)
+                state
+                    .db
+                    .store_detections(image_id, variant.model_name(), &detections)
                     .map_err(|e| e.to_string())?;
                 detected += 1;
             }
@@ -159,9 +185,12 @@ pub async fn detect_objects(
             }
         }
 
-        let _ = app.emit("detection-progress", serde_json::json!({
-            "current": i + 1, "total": total, "model": variant.model_name()
-        }));
+        let _ = app.emit(
+            "detection-progress",
+            serde_json::json!({
+                "current": i + 1, "total": total, "model": variant.model_name()
+            }),
+        );
     }
 
     Ok(detected)
@@ -188,7 +217,10 @@ pub async fn detect_nsfw(
 
     for (i, image_id) in image_ids.iter().enumerate() {
         let id_refs: Vec<&str> = vec![image_id.as_str()];
-        let images = state.db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
+        let images = state
+            .db
+            .get_images_by_ids(&id_refs)
+            .map_err(|e| e.to_string())?;
         let img = images.first().ok_or("Image not found")?;
 
         let detect_path = crate::commands::resolve_image_path_for_ml(img, &state.app_data_dir);
@@ -196,7 +228,9 @@ pub async fn detect_nsfw(
         match engine.detect(&detect_path) {
             Ok(detections) => {
                 drop(engine);
-                state.db.store_detections(image_id, "nudenet", &detections)
+                state
+                    .db
+                    .store_detections(image_id, "nudenet", &detections)
                     .map_err(|e| e.to_string())?;
                 detected += 1;
             }
@@ -206,9 +240,12 @@ pub async fn detect_nsfw(
             }
         }
 
-        let _ = app.emit("nsfw-progress", serde_json::json!({
-            "current": i + 1, "total": total
-        }));
+        let _ = app.emit(
+            "nsfw-progress",
+            serde_json::json!({
+                "current": i + 1, "total": total
+            }),
+        );
     }
 
     Ok(detected)
@@ -221,7 +258,8 @@ pub async fn get_detections(
     model: Option<String>,
 ) -> Result<Vec<Detection>, String> {
     let ctx = crate::services::ServiceContext::from_app_state(&state, None);
-    crate::services::ai::get_detections(&ctx, &image_id, model.as_deref()).map_err(|e| e.to_string())
+    crate::services::ai::get_detections(&ctx, &image_id, model.as_deref())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -231,7 +269,8 @@ pub async fn search_by_detected_class(
     limit: Option<u32>,
 ) -> Result<Vec<(String, f32)>, String> {
     let ctx = crate::services::ServiceContext::from_app_state(&state, None);
-    crate::services::ai::search_by_detected_class(&ctx, &class_name, limit.unwrap_or(100)).map_err(|e| e.to_string())
+    crate::services::ai::search_by_detected_class(&ctx, &class_name, limit.unwrap_or(100))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -255,10 +294,7 @@ pub async fn is_nudenet_available(state: State<'_, AppState>) -> Result<bool, St
 }
 
 #[tauri::command]
-pub async fn get_detection_count(
-    state: State<'_, AppState>,
-    model: String,
-) -> Result<u32, String> {
+pub async fn get_detection_count(state: State<'_, AppState>, model: String) -> Result<u32, String> {
     let ctx = crate::services::ServiceContext::from_app_state(&state, None);
     crate::services::ai::get_detection_count(&ctx, &model).map_err(|e| e.to_string())
 }

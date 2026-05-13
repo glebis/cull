@@ -1,5 +1,5 @@
+use super::{RawDecoder, RawMetadata, RawPreview};
 use std::path::Path;
-use super::{RawDecoder, RawPreview, RawMetadata};
 
 pub struct FujiRafDecoder;
 
@@ -27,12 +27,12 @@ fn parse_raf_header(data: &[u8]) -> Result<RafHeader, String> {
     let jpeg_offset = u32::from_be_bytes(
         data[JPEG_OFFSET_POS..JPEG_OFFSET_POS + 4]
             .try_into()
-            .map_err(|_| "Failed to read JPEG offset")?
+            .map_err(|_| "Failed to read JPEG offset")?,
     );
     let jpeg_length = u32::from_be_bytes(
         data[JPEG_LENGTH_POS..JPEG_LENGTH_POS + 4]
             .try_into()
-            .map_err(|_| "Failed to read JPEG length")?
+            .map_err(|_| "Failed to read JPEG length")?,
     );
 
     let model_bytes = &data[28..60];
@@ -65,7 +65,9 @@ fn extract_embedded_jpeg<'a>(data: &'a [u8], header: &RafHeader) -> Result<&'a [
     if end > data.len() {
         return Err(format!(
             "JPEG range {}..{} exceeds file size {}",
-            start, end, data.len()
+            start,
+            end,
+            data.len()
         ));
     }
 
@@ -88,8 +90,7 @@ impl RawDecoder for FujiRafDecoder {
     }
 
     fn extract_preview(&self, path: &Path) -> Result<RawPreview, String> {
-        let data = std::fs::read(path)
-            .map_err(|e| format!("Failed to read RAF file: {}", e))?;
+        let data = std::fs::read(path).map_err(|e| format!("Failed to read RAF file: {}", e))?;
 
         let header = parse_raf_header(&data)?;
         let jpeg_data = extract_embedded_jpeg(&data, &header)?;
@@ -98,7 +99,11 @@ impl RawDecoder for FujiRafDecoder {
             .map_err(|e| format!("Failed to decode embedded JPEG: {}", e))?;
 
         let metadata = RawMetadata {
-            camera_model: if header.camera_model.is_empty() { None } else { Some(header.camera_model) },
+            camera_model: if header.camera_model.is_empty() {
+                None
+            } else {
+                Some(header.camera_model)
+            },
             lens: None,
             shutter_speed: None,
             aperture: None,
@@ -182,7 +187,7 @@ mod tests {
     #[ignore] // requires real RAF file on disk
     fn test_real_gfx_raf() {
         let path = std::path::Path::new(
-            "/Users/glebkalinin/Documents/Pictures/20210317 a53/Capture/20210317 a53 0028.RAF"
+            "/Users/glebkalinin/Documents/Pictures/20210317 a53/Capture/20210317 a53 0028.RAF",
         );
         if !path.exists() {
             eprintln!("Skipping: test RAF file not found");
@@ -191,8 +196,16 @@ mod tests {
         let preview = FujiRafDecoder.extract_preview(path).unwrap();
         assert!(preview.image.width() > 0, "Preview width should be > 0");
         assert!(preview.image.height() > 0, "Preview height should be > 0");
-        assert!(preview.image.width() >= 1000, "Preview should be at least 1000px wide, got {}", preview.image.width());
-        eprintln!("Preview: {}x{}", preview.image.width(), preview.image.height());
+        assert!(
+            preview.image.width() >= 1000,
+            "Preview should be at least 1000px wide, got {}",
+            preview.image.width()
+        );
+        eprintln!(
+            "Preview: {}x{}",
+            preview.image.width(),
+            preview.image.height()
+        );
         eprintln!("Camera: {:?}", preview.metadata.camera_model);
         assert_eq!(preview.metadata.camera_model.as_deref(), Some("GFX 50R"));
     }
@@ -201,11 +214,17 @@ mod tests {
     #[ignore]
     fn test_real_gfx_raf_via_libraw() {
         let path = std::path::Path::new(
-            "/Users/glebkalinin/Documents/Pictures/20210317 a53/Capture/20210317 a53 0028.RAF"
+            "/Users/glebkalinin/Documents/Pictures/20210317 a53/Capture/20210317 a53 0028.RAF",
         );
-        if !path.exists() { return; }
+        if !path.exists() {
+            return;
+        }
         let preview = super::super::decode_raw_preview(path).unwrap();
         assert!(preview.image.width() > 0);
-        eprintln!("decode_raw_preview: {}x{}", preview.image.width(), preview.image.height());
+        eprintln!(
+            "decode_raw_preview: {}x{}",
+            preview.image.width(),
+            preview.image.height()
+        );
     }
 }

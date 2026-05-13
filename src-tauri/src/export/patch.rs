@@ -162,8 +162,7 @@ pub fn apply_patches(manifest: ExportManifest, patches: Vec<JsonPatch>) -> Patch
         }
     }
 
-    let patched_manifest: ExportManifest = serde_json::from_value(json_value)
-        .unwrap_or(manifest);
+    let patched_manifest: ExportManifest = serde_json::from_value(json_value).unwrap_or(manifest);
 
     PatchResult {
         manifest: patched_manifest,
@@ -172,7 +171,10 @@ pub fn apply_patches(manifest: ExportManifest, patches: Vec<JsonPatch>) -> Patch
     }
 }
 
-fn resolve_pointer_mut<'a>(value: &'a mut serde_json::Value, pointer: &str) -> Option<&'a mut serde_json::Value> {
+fn resolve_pointer_mut<'a>(
+    value: &'a mut serde_json::Value,
+    pointer: &str,
+) -> Option<&'a mut serde_json::Value> {
     if pointer.is_empty() || pointer == "/" {
         return Some(value);
     }

@@ -7,6 +7,11 @@ import {
     formatLoupeInfo,
     computeWheelZoom,
     computePanDrag,
+    clientToImagePoint,
+    cropRectFromImagePoints,
+    cropSelectionPercentFromImagePoints,
+    moveCropRect,
+    resizeCropRectFromHandle,
 } from './view-utils';
 
 describe('getFilename', () => {
@@ -281,5 +286,90 @@ describe('computePanDrag', () => {
             { x: 150, y: 150 }
         );
         expect(result).toEqual({ x: 50, y: 50 });
+    });
+});
+
+describe('loupe crop coordinates', () => {
+    it('maps client coordinates through the displayed image bounds', () => {
+        const point = clientToImagePoint(
+            250,
+            175,
+            { left: 100, top: 50, width: 300, height: 250 },
+            1200,
+            1000
+        );
+
+        expect(point).toEqual({ x: 600, y: 500 });
+    });
+
+    it('clamps crop pointer positions to the image', () => {
+        const point = clientToImagePoint(
+            500,
+            0,
+            { left: 100, top: 50, width: 300, height: 250 },
+            1200,
+            1000
+        );
+
+        expect(point).toEqual({ x: 1200, y: 0 });
+    });
+
+    it('builds rounded image-pixel crop rectangles from either drag direction', () => {
+        const rect = cropRectFromImagePoints(
+            { x: 900.4, y: 700.6 },
+            { x: 100.2, y: 50.1 },
+            1200,
+            1000
+        );
+
+        expect(rect).toEqual({ x: 100, y: 50, width: 800, height: 651 });
+    });
+
+    it('keeps crop selection geometry in image percentages', () => {
+        const rect = cropSelectionPercentFromImagePoints(
+            { x: 100, y: 50 },
+            { x: 900, y: 550 },
+            1000,
+            1000
+        );
+
+        expect(rect).toEqual({ left: 10, top: 5, width: 80, height: 50 });
+    });
+
+    it('returns null for invalid image dimensions', () => {
+        expect(clientToImagePoint(0, 0, { left: 0, top: 0, width: 0, height: 10 }, 100, 100)).toBeNull();
+        expect(cropSelectionPercentFromImagePoints({ x: 0, y: 0 }, { x: 1, y: 1 }, 0, 100)).toBeNull();
+    });
+
+    it('moves crop rectangles while keeping them inside the image', () => {
+        expect(moveCropRect({ x: 100, y: 100, width: 300, height: 200 }, 50, -25, 1000, 800)).toEqual({
+            x: 150,
+            y: 75,
+            width: 300,
+            height: 200,
+        });
+        expect(moveCropRect({ x: 800, y: 650, width: 300, height: 200 }, 100, 100, 1000, 800)).toEqual({
+            x: 700,
+            y: 600,
+            width: 300,
+            height: 200,
+        });
+    });
+
+    it('resizes crop rectangles from handles with minimum dimensions', () => {
+        const rect = { x: 100, y: 100, width: 300, height: 200 };
+
+        expect(resizeCropRectFromHandle(rect, 'nw', { x: 50, y: 75 }, 1000, 800, 10)).toEqual({
+            x: 50,
+            y: 75,
+            width: 350,
+            height: 225,
+        });
+        expect(resizeCropRectFromHandle(rect, 'se', { x: 105, y: 105 }, 1000, 800, 10)).toEqual({
+            x: 100,
+            y: 100,
+            width: 10,
+            height: 10,
+        });
     });
 });

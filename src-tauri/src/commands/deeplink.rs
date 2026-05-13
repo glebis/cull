@@ -1,5 +1,5 @@
-use tauri::{AppHandle, Emitter};
 use serde::Serialize;
+use tauri::{AppHandle, Emitter};
 
 #[derive(Serialize, Clone)]
 pub struct OpenParams {
@@ -58,7 +58,7 @@ pub fn parse_deep_link(url: &str) -> OpenParams {
     };
 
     // Extract the action from the URL (e.g., "open", "grid", "loupe")
-    // imageview://open?path=... or imageview://grid?size=280
+    // cull://open?path=... or cull://grid?size=280
     let action = if let Some(scheme_end) = url.find("://") {
         let after_scheme = &url[scheme_end + 3..];
         let action_end = after_scheme.find('?').unwrap_or(after_scheme.len());
@@ -85,9 +85,7 @@ pub fn parse_deep_link(url: &str) -> OpenParams {
             match key {
                 "path" => params.path = Some(decoded),
                 "paths" => {
-                    params.paths = Some(
-                        decoded.split(',').map(|s| s.to_string()).collect(),
-                    );
+                    params.paths = Some(decoded.split(',').map(|s| s.to_string()).collect());
                 }
                 "folder" => params.folder = Some(decoded),
                 "view" => params.view = Some(decoded),

@@ -3,27 +3,27 @@ import { parseDeepLinkUrl, inferViewFromAction } from './deeplink';
 
 describe('parseDeepLinkUrl', () => {
     it('parses view mode', () => {
-        const params = parseDeepLinkUrl('imageview://open?view=loupe');
+        const params = parseDeepLinkUrl('cull://open?view=loupe');
         expect(params.view).toBe('loupe');
     });
 
     it('parses folder path', () => {
-        const params = parseDeepLinkUrl('imageview://open?folder=/Users/test/Photos');
+        const params = parseDeepLinkUrl('cull://open?folder=/Users/test/Photos');
         expect(params.folder).toBe('/Users/test/Photos');
     });
 
     it('parses single path', () => {
-        const params = parseDeepLinkUrl('imageview://open?path=/Users/test/img.jpg');
+        const params = parseDeepLinkUrl('cull://open?path=/Users/test/img.jpg');
         expect(params.path).toBe('/Users/test/img.jpg');
     });
 
     it('parses multiple paths', () => {
-        const params = parseDeepLinkUrl('imageview://open?paths=/a.jpg,/b.png,/c.tiff');
+        const params = parseDeepLinkUrl('cull://open?paths=/a.jpg,/b.png,/c.tiff');
         expect(params.paths).toEqual(['/a.jpg', '/b.png', '/c.tiff']);
     });
 
     it('parses numeric params', () => {
-        const params = parseDeepLinkUrl('imageview://open?size=120&zoom=200&focus=5&gap=4');
+        const params = parseDeepLinkUrl('cull://open?size=120&zoom=200&focus=5&gap=4');
         expect(params.size).toBe(120);
         expect(params.zoom).toBe(200);
         expect(params.focus).toBe(5);
@@ -31,7 +31,7 @@ describe('parseDeepLinkUrl', () => {
     });
 
     it('parses fullscreen flag', () => {
-        const params = parseDeepLinkUrl('imageview://open?fullscreen=true');
+        const params = parseDeepLinkUrl('cull://open?fullscreen=true');
         expect(params.fullscreen).toBe(true);
     });
 
@@ -41,12 +41,12 @@ describe('parseDeepLinkUrl', () => {
     });
 
     it('infers view from hostname action', () => {
-        const params = parseDeepLinkUrl('imageview://grid');
+        const params = parseDeepLinkUrl('cull://grid');
         expect(params.view).toBe('grid');
     });
 
     it('handles combined params', () => {
-        const params = parseDeepLinkUrl('imageview://loupe?folder=/test&size=200&zoom=150');
+        const params = parseDeepLinkUrl('cull://loupe?folder=/test&size=200&zoom=150');
         expect(params.view).toBe('loupe');
         expect(params.folder).toBe('/test');
         expect(params.size).toBe(200);
@@ -54,7 +54,7 @@ describe('parseDeepLinkUrl', () => {
     });
 
     it('returns null for missing optional params', () => {
-        const params = parseDeepLinkUrl('imageview://open');
+        const params = parseDeepLinkUrl('cull://open');
         expect(params.path).toBeNull();
         expect(params.folder).toBeNull();
         expect(params.size).toBeNull();
@@ -64,33 +64,33 @@ describe('parseDeepLinkUrl', () => {
     });
 
     it('returns NaN for non-numeric size', () => {
-        const params = parseDeepLinkUrl('imageview://open?size=abc');
+        const params = parseDeepLinkUrl('cull://open?size=abc');
         expect(params.size).toBeNaN();
     });
 
     it('parseInt truncates trailing text (size=12px → 12)', () => {
-        const params = parseDeepLinkUrl('imageview://open?size=12px');
+        const params = parseDeepLinkUrl('cull://open?size=12px');
         expect(params.size).toBe(12);
     });
 
     it('handles paths with trailing comma', () => {
-        const params = parseDeepLinkUrl('imageview://open?paths=/a.jpg,/b.png,');
+        const params = parseDeepLinkUrl('cull://open?paths=/a.jpg,/b.png,');
         expect(params.paths).toEqual(['/a.jpg', '/b.png', '']);
     });
 
     it('fullscreen=false is not truthy', () => {
-        const params = parseDeepLinkUrl('imageview://open?fullscreen=false');
+        const params = parseDeepLinkUrl('cull://open?fullscreen=false');
         expect(params.fullscreen).toBe(false);
     });
 
     it('fullscreen missing defaults to false', () => {
-        const params = parseDeepLinkUrl('imageview://open');
+        const params = parseDeepLinkUrl('cull://open');
         expect(params.fullscreen).toBe(false);
     });
 
     it('accepts all VALID_VIEWS via ?view= param', () => {
         for (const view of ['grid', 'compare', 'loupe', 'canvas', 'lineage', 'embeddings', 'export']) {
-            const params = parseDeepLinkUrl(`imageview://open?view=${view}`);
+            const params = parseDeepLinkUrl(`cull://open?view=${view}`);
             expect(params.view).toBe(view);
         }
     });

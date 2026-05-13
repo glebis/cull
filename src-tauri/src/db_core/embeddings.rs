@@ -1,5 +1,5 @@
-use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
+use ort::session::Session;
 use ort::value::Tensor;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -46,13 +46,16 @@ impl EmbeddingEngine {
     }
 
     pub fn generate_embedding(&self, image_path: &Path) -> Result<Vec<f32>, String> {
-        let session = self.session.as_ref()
-            .ok_or("Model not loaded")?;
+        let session = self.session.as_ref().ok_or("Model not loaded")?;
         let mut session = session.lock().unwrap();
 
         // Load and preprocess
         let img = image::open(image_path).map_err(|e| format!("Image open error: {}", e))?;
-        let resized = img.resize_exact(CLIP_INPUT_SIZE, CLIP_INPUT_SIZE, image::imageops::FilterType::Lanczos3);
+        let resized = img.resize_exact(
+            CLIP_INPUT_SIZE,
+            CLIP_INPUT_SIZE,
+            image::imageops::FilterType::Lanczos3,
+        );
         let rgb = resized.to_rgb8();
 
         // Convert to NCHW tensor with normalization
@@ -68,13 +71,15 @@ impl EmbeddingEngine {
         let input_tensor = Tensor::from_array(([1usize, 3, 224, 224], tensor_data))
             .map_err(|e| format!("Tensor creation error: {}", e))?;
 
-        let outputs = session.run(ort::inputs![input_tensor])
+        let outputs = session
+            .run(ort::inputs![input_tensor])
             .map_err(|e| format!("Inference error: {}", e))?;
 
         // Extract embedding
-        let output = outputs.iter().next()
-            .ok_or("No output from model")?;
-        let (_shape, data) = output.1.try_extract_tensor::<f32>()
+        let output = outputs.iter().next().ok_or("No output from model")?;
+        let (_shape, data) = output
+            .1
+            .try_extract_tensor::<f32>()
             .map_err(|e| format!("Extract error: {}", e))?;
 
         let embedding: Vec<f32> = data.to_vec();

@@ -13,18 +13,20 @@ pub struct KeychainStore {
 
 impl KeychainStore {
     pub fn new(service: &str) -> Self {
-        Self { service: service.to_string() }
+        Self {
+            service: service.to_string(),
+        }
     }
 
     fn entry(&self, key: &str) -> Result<keyring::Entry, String> {
-        keyring::Entry::new(&self.service, key)
-            .map_err(|e| format!("keyring error: {}", e))
+        keyring::Entry::new(&self.service, key).map_err(|e| format!("keyring error: {}", e))
     }
 }
 
 impl SecretStore for KeychainStore {
     fn set(&self, key: &str, value: &str) -> Result<(), String> {
-        self.entry(key)?.set_password(value)
+        self.entry(key)?
+            .set_password(value)
             .map_err(|e| format!("Failed to store in OS keychain: {}", e))
     }
 
@@ -53,13 +55,18 @@ pub struct MemoryStore {
 #[allow(dead_code)]
 impl MemoryStore {
     pub fn new() -> Self {
-        Self { data: Mutex::new(HashMap::new()) }
+        Self {
+            data: Mutex::new(HashMap::new()),
+        }
     }
 }
 
 impl SecretStore for MemoryStore {
     fn set(&self, key: &str, value: &str) -> Result<(), String> {
-        self.data.lock().unwrap().insert(key.to_string(), value.to_string());
+        self.data
+            .lock()
+            .unwrap()
+            .insert(key.to_string(), value.to_string());
         Ok(())
     }
 
@@ -83,7 +90,10 @@ mod tests {
         assert_eq!(store.get("api_key_google").unwrap(), None);
 
         store.set("api_key_google", "AIza_test_key_123").unwrap();
-        assert_eq!(store.get("api_key_google").unwrap(), Some("AIza_test_key_123".to_string()));
+        assert_eq!(
+            store.get("api_key_google").unwrap(),
+            Some("AIza_test_key_123".to_string())
+        );
     }
 
     #[test]
@@ -91,7 +101,10 @@ mod tests {
         let store = MemoryStore::new();
         store.set("api_key_google", "key_v1").unwrap();
         store.set("api_key_google", "key_v2").unwrap();
-        assert_eq!(store.get("api_key_google").unwrap(), Some("key_v2".to_string()));
+        assert_eq!(
+            store.get("api_key_google").unwrap(),
+            Some("key_v2".to_string())
+        );
     }
 
     #[test]
@@ -114,7 +127,13 @@ mod tests {
         store.set("api_key_google", "google_key").unwrap();
         store.set("api_key_openai", "openai_key").unwrap();
 
-        assert_eq!(store.get("api_key_google").unwrap(), Some("google_key".to_string()));
-        assert_eq!(store.get("api_key_openai").unwrap(), Some("openai_key".to_string()));
+        assert_eq!(
+            store.get("api_key_google").unwrap(),
+            Some("google_key".to_string())
+        );
+        assert_eq!(
+            store.get("api_key_openai").unwrap(),
+            Some("openai_key".to_string())
+        );
     }
 }

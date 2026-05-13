@@ -91,6 +91,109 @@ pub struct GenerationRun {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewModelRun {
+    pub id: String,
+    pub job_id: Option<String>,
+    pub parent_run_id: Option<String>,
+    pub profile_id: Option<String>,
+    pub task: String,
+    pub provider: String,
+    pub model_id: String,
+    pub model_revision: Option<String>,
+    pub status: String,
+    pub input_scope_json: String,
+    pub params_json: String,
+    pub output_summary_json: String,
+    pub cost_estimate_usd: Option<f64>,
+    pub cost_actual_usd: Option<f64>,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelRun {
+    pub id: String,
+    pub job_id: Option<String>,
+    pub parent_run_id: Option<String>,
+    pub profile_id: Option<String>,
+    pub task: String,
+    pub provider: String,
+    pub model_id: String,
+    pub model_revision: Option<String>,
+    pub status: String,
+    pub input_scope_json: String,
+    pub params_json: String,
+    pub output_summary_json: String,
+    pub cost_estimate_usd: Option<f64>,
+    pub cost_actual_usd: Option<f64>,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewModelRunItem {
+    pub id: String,
+    pub run_id: String,
+    pub image_id: Option<String>,
+    pub input_asset_uri: String,
+    pub input_hash: Option<String>,
+    pub status: String,
+    pub output_ref_kind: Option<String>,
+    pub output_ref_id: Option<String>,
+    pub audit_payload_json: Option<String>,
+    pub cost_usd: Option<f64>,
+    pub attempt_count: u32,
+    pub error: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewSessionEvent {
+    pub session_id: Option<String>,
+    pub event_type: String,
+    pub actor_type: String,
+    pub actor_id: Option<String>,
+    pub subject_type: Option<String>,
+    pub subject_id: Option<String>,
+    pub payload_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionEvent {
+    pub id: String,
+    pub session_id: Option<String>,
+    pub event_type: String,
+    pub actor_type: String,
+    pub actor_id: Option<String>,
+    pub subject_type: Option<String>,
+    pub subject_id: Option<String>,
+    pub payload_json: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityLibrarySummary {
+    pub total_images: u32,
+    pub scoped_images: u32,
+    pub rated_images: u32,
+    pub accepted_images: u32,
+    pub rejected_images: u32,
+    pub import_batches: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityContext {
+    pub session: Option<Session>,
+    pub library: ActivityLibrarySummary,
+    pub recent_events: Vec<SessionEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UndoRecord {
     pub seq: i64,
     pub id: String,

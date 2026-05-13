@@ -1,6 +1,6 @@
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -164,7 +164,8 @@ impl JobRegistry {
             for snapshot in snapshots {
                 let cancel = CancellationToken::new();
                 cancel.cancel();
-                jobs.entry(snapshot.job_id.clone()).or_insert(JobState { snapshot, cancel });
+                jobs.entry(snapshot.job_id.clone())
+                    .or_insert(JobState { snapshot, cancel });
             }
         }
     }
@@ -196,8 +197,11 @@ impl JobRegistry {
                 .map(|(id, s)| (id.clone(), s.snapshot.updated_at.clone()))
                 .collect();
             terminal_ids.sort_by(|a, b| b.1.cmp(&a.1));
-            let to_remove: Vec<String> =
-                terminal_ids.into_iter().skip(100).map(|(id, _)| id).collect();
+            let to_remove: Vec<String> = terminal_ids
+                .into_iter()
+                .skip(100)
+                .map(|(id, _)| id)
+                .collect();
             for id in to_remove {
                 jobs.remove(&id);
             }
@@ -258,10 +262,7 @@ mod tests {
 
         let snapshot = registry.get(&job_id).unwrap();
         assert_eq!(snapshot.status, "failed");
-        assert_eq!(
-            snapshot.error.as_deref(),
-            Some("Ollama connection refused")
-        );
+        assert_eq!(snapshot.error.as_deref(), Some("Ollama connection refused"));
     }
 
     #[test]
@@ -458,7 +459,7 @@ mod tests {
 
         // Manually insert a "running" job into DB (simulates crash)
         {
-            let conn = db.conn.lock().unwrap();
+            let conn = db.conn.lock();
             conn.execute(
                 "INSERT INTO mcp_jobs (job_id, kind, status, current, total, created_at, updated_at)
                  VALUES ('job_crashed123', 'import', 'running', 5, 10, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
@@ -478,7 +479,7 @@ mod tests {
         let db = test_db();
 
         {
-            let conn = db.conn.lock().unwrap();
+            let conn = db.conn.lock();
             conn.execute(
                 "INSERT INTO mcp_jobs (job_id, kind, status, current, total, created_at, updated_at)
                  VALUES ('job_cancel_stale', 'detection', 'cancelling', 3, 10, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
@@ -517,7 +518,7 @@ mod tests {
 
         // Insert a job with old timestamp
         {
-            let conn = db.conn.lock().unwrap();
+            let conn = db.conn.lock();
             conn.execute(
                 "INSERT INTO mcp_jobs (job_id, kind, status, current, total, created_at, updated_at)
                  VALUES ('job_old_one', 'import', 'completed', 10, 10, '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z')",

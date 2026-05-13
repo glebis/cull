@@ -27,10 +27,10 @@ pub fn validate_manifest(manifest: &ExportManifest) -> ValidationResult {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
 
-    if manifest.kind != "imageview-story/v1" {
+    if manifest.kind != "cull-story/v1" {
         errors.push(ValidationError {
             path: "/kind".to_string(),
-            message: format!("Expected 'imageview-story/v1', got '{}'", manifest.kind),
+            message: format!("Expected 'cull-story/v1', got '{}'", manifest.kind),
         });
     }
 
@@ -117,7 +117,10 @@ pub fn validate_manifest(manifest: &ExportManifest) -> ValidationResult {
             if !VALID_TEMPLATES.contains(&tmpl.as_str()) {
                 errors.push(ValidationError {
                     path: format!("/slides/{}/template", i),
-                    message: format!("Invalid template '{}', expected one of: {:?}", tmpl, VALID_TEMPLATES),
+                    message: format!(
+                        "Invalid template '{}', expected one of: {:?}",
+                        tmpl, VALID_TEMPLATES
+                    ),
                 });
             }
         }

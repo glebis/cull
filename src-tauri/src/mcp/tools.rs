@@ -2,18 +2,18 @@
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
 use rmcp::{
-    ServerHandler,
     handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
-    model::{ServerCapabilities, ServerInfo, CallToolRequestParams, CallToolResult},
-    schemars, tool, tool_router, ErrorData,
-    service::RequestContext, RoleServer,
+    model::{CallToolRequestParams, CallToolResult, ServerCapabilities, ServerInfo},
+    schemars,
+    service::RequestContext,
+    tool, tool_router, ErrorData, RoleServer, ServerHandler,
 };
-use tauri::{Manager, Emitter};
+use tauri::{Emitter, Manager};
 
-use crate::AppState;
+use super::auth::{require_capability, AuthContext};
 use crate::db_core::models::TokenScope;
 use crate::services::tokens;
-use super::auth::{AuthContext, require_capability};
+use crate::AppState;
 
 fn redact_path(path: &str) -> String {
     std::path::Path::new(path)
@@ -34,14 +34,23 @@ fn is_valid_decision(decision: &str) -> bool {
     matches!(decision, "selected" | "rejected" | "none")
 }
 
+fn required_module_for_tool(tool_name: &str) -> Option<&'static str> {
+    match tool_name {
+        "export_static_publish_package" | "serve_static_publish_package" => {
+            Some("module_static_publishing")
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct ImageViewMcp {
+pub struct CullMcp {
     pub app_handle: tauri::AppHandle,
     pub auth: AuthContext,
     tool_router: ToolRouter<Self>,
 }
 
-impl ImageViewMcp {
+impl CullMcp {
     pub fn new(app_handle: tauri::AppHandle) -> Self {
         Self::with_auth(app_handle, AuthContext::Local)
     }
@@ -67,12 +76,17 @@ impl ImageViewMcp {
     }
 
     #[allow(dead_code)]
-    fn filter_images_by_scope(&self, images: Vec<serde_json::Value>, paths: &[String]) -> Vec<serde_json::Value> {
+    fn filter_images_by_scope(
+        &self,
+        images: Vec<serde_json::Value>,
+        paths: &[String],
+    ) -> Vec<serde_json::Value> {
         let scope = self.token_scope();
         if scope.is_none() {
             return images;
         }
-        images.into_iter()
+        images
+            .into_iter()
             .zip(paths.iter())
             .filter(|(_, path)| tokens::image_in_scope(&scope, path, &[]))
             .map(|(img, _)| img)
@@ -109,12 +123,40 @@ impl ImageViewMcp {
 
     fn log_tool_call(&self, tool_name: &str, params_json: Option<&str>, status: &str) {
         let state = self.app_handle.state::<AppState>();
-        let ctx = crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
+        let ctx =
+            crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
         let token_id = match &self.auth {
             AuthContext::Local => None,
             AuthContext::Authenticated(t) => Some(t.id.as_str()),
         };
         let _ = crate::services::tokens::log_audit(&ctx, token_id, tool_name, params_json, status);
+    }
+
+    fn module_enabled(&self, module_key: &str) -> bool {
+        let state = self.app_handle.state::<AppState>();
+        state
+            .db
+            .get_setting(module_key)
+            .ok()
+            .flatten()
+            .map(|value| value == "true")
+            .unwrap_or(false)
+    }
+
+    fn tool_enabled_by_module(&self, tool_name: &str) -> bool {
+        required_module_for_tool(tool_name)
+            .map(|module_key| self.module_enabled(module_key))
+            .unwrap_or(true)
+    }
+
+    fn require_tool_module_enabled(&self, tool_name: &str) -> Result<(), String> {
+        match required_module_for_tool(tool_name) {
+            Some(module_key) if !self.module_enabled(module_key) => Err(format!(
+                "Tool '{}' is disabled because module '{}' is not enabled in Settings",
+                tool_name, module_key
+            )),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -185,7 +227,9 @@ pub struct CollectionIdParams {
 pub struct CreateSmartCollectionParams {
     #[schemars(description = "Name for the smart collection")]
     pub name: String,
-    #[schemars(description = "Natural language query like 'landscape photos rated 4+' or raw filter JSON")]
+    #[schemars(
+        description = "Natural language query like 'landscape photos rated 4+' or raw filter JSON"
+    )]
     pub query: String,
 }
 
@@ -311,8 +355,18 @@ pub struct PruneAuditParams {
     pub retention_days: Option<u32>,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ServeStaticPublishParams {
+    #[schemars(description = "Absolute path to a generated static publishing site directory")]
+    pub site_dir: String,
+    #[schemars(description = "Host to bind, e.g. 127.0.0.1 or 0.0.0.0 (default 127.0.0.1)")]
+    pub host: Option<String>,
+    #[schemars(description = "Port to bind (default 8000)")]
+    pub port: Option<u16>,
+}
+
 #[tool_router]
-impl ImageViewMcp {
+impl CullMcp {
     #[tool(description = "Get library statistics: image count, folder count, collection count")]
     fn get_library_stats(&self, Parameters(_): Parameters<EmptyParams>) -> String {
         let state = self.app_handle.state::<AppState>();
@@ -324,10 +378,13 @@ impl ImageViewMcp {
             "image_count": image_count,
             "folder_count": folders.len(),
             "collection_count": collections.len(),
-        }).to_string()
+        })
+        .to_string()
     }
 
-    #[tool(description = "List images with pagination. Returns id, path, dimensions, format, rating, decision.")]
+    #[tool(
+        description = "List images with pagination. Returns id, path, dimensions, format, rating, decision."
+    )]
     fn list_images(&self, Parameters(params): Parameters<ListImagesParams>) -> String {
         let state = self.app_handle.state::<AppState>();
         let offset = params.offset.unwrap_or(0);
@@ -337,21 +394,23 @@ impl ImageViewMcp {
 
         match state.db.list_images(fetch_limit, offset) {
             Ok(images) => {
-                let result: Vec<serde_json::Value> = images.iter()
+                let result: Vec<serde_json::Value> = images
+                    .iter()
                     .filter(|img| tokens::image_in_scope(&scope, &img.path, &[]))
                     .take(limit as usize)
                     .map(|img| {
-                    serde_json::json!({
-                        "id": img.image.id,
-                        "path": self.maybe_redact_path(&img.path),
-                        "width": img.image.width,
-                        "height": img.image.height,
-                        "format": img.image.format,
-                        "file_size": img.image.file_size,
-                        "rating": img.selection.as_ref().and_then(|s| s.star_rating),
-                        "decision": img.selection.as_ref().map(|s| &s.decision),
+                        serde_json::json!({
+                            "id": img.image.id,
+                            "path": self.maybe_redact_path(&img.path),
+                            "width": img.image.width,
+                            "height": img.image.height,
+                            "format": img.image.format,
+                            "file_size": img.image.file_size,
+                            "rating": img.selection.as_ref().and_then(|s| s.star_rating),
+                            "decision": img.selection.as_ref().map(|s| &s.decision),
+                        })
                     })
-                }).collect();
+                    .collect();
                 serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
             }
             Err(e) => format!("Error: {}", e),
@@ -380,7 +439,8 @@ impl ImageViewMcp {
                         "imported_at": img.image.imported_at,
                         "rating": img.selection.as_ref().and_then(|s| s.star_rating),
                         "decision": img.selection.as_ref().map(|s| &s.decision),
-                    }).to_string()
+                    })
+                    .to_string()
                 }
                 None => format!("Error: Image '{}' not found", params.image_id),
             },
@@ -440,21 +500,26 @@ impl ImageViewMcp {
         let offset = params.offset.unwrap_or(0);
         let limit = clamp_limit(params.limit.unwrap_or(50));
 
-        match state.db.list_images_by_folder(&params.folder_path, limit, offset) {
+        match state
+            .db
+            .list_images_by_folder(&params.folder_path, limit, offset)
+        {
             Ok(images) => {
-                let result: Vec<serde_json::Value> = images.iter()
+                let result: Vec<serde_json::Value> = images
+                    .iter()
                     .filter(|img| tokens::image_in_scope(&scope, &img.path, &[]))
                     .map(|img| {
-                    serde_json::json!({
-                        "id": img.image.id,
-                        "path": self.maybe_redact_path(&img.path),
-                        "width": img.image.width,
-                        "height": img.image.height,
-                        "format": img.image.format,
-                        "rating": img.selection.as_ref().and_then(|s| s.star_rating),
-                        "decision": img.selection.as_ref().map(|s| &s.decision),
+                        serde_json::json!({
+                            "id": img.image.id,
+                            "path": self.maybe_redact_path(&img.path),
+                            "width": img.image.width,
+                            "height": img.image.height,
+                            "format": img.image.format,
+                            "rating": img.selection.as_ref().and_then(|s| s.star_rating),
+                            "decision": img.selection.as_ref().map(|s| &s.decision),
+                        })
                     })
-                }).collect();
+                    .collect();
                 serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
             }
             Err(e) => format!("Error: {}", e),
@@ -510,7 +575,12 @@ impl ImageViewMcp {
     fn add_to_collection(&self, Parameters(params): Parameters<AddToCollectionParams>) -> String {
         for image_id in &params.image_ids {
             match self.check_image_id_scope(image_id) {
-                Ok(false) => return format!("Error: Access denied — image '{}' outside token scope", image_id),
+                Ok(false) => {
+                    return format!(
+                        "Error: Access denied — image '{}' outside token scope",
+                        image_id
+                    )
+                }
                 Err(e) => return format!("Error: {}", e),
                 _ => {}
             }
@@ -518,7 +588,9 @@ impl ImageViewMcp {
         let state = self.app_handle.state::<AppState>();
         let refs: Vec<&str> = params.image_ids.iter().map(|s| s.as_str()).collect();
         match state.db.add_to_collection(&params.collection_id, &refs) {
-            Ok(()) => serde_json::json!({"status": "ok", "added": params.image_ids.len()}).to_string(),
+            Ok(()) => {
+                serde_json::json!({"status": "ok", "added": params.image_ids.len()}).to_string()
+            }
             Err(e) => format!("Error: {}", e),
         }
     }
@@ -545,47 +617,62 @@ impl ImageViewMcp {
         let scope = self.token_scope();
         match state.db.list_collection_images(&params.collection_id) {
             Ok(images) => {
-                let result: Vec<serde_json::Value> = images.iter()
+                let result: Vec<serde_json::Value> = images
+                    .iter()
                     .filter(|img| tokens::image_in_scope(&scope, &img.path, &[]))
                     .map(|img| {
-                    serde_json::json!({
-                        "id": img.image.id,
-                        "path": self.maybe_redact_path(&img.path),
-                        "width": img.image.width,
-                        "height": img.image.height,
-                        "format": img.image.format,
-                        "rating": img.selection.as_ref().and_then(|s| s.star_rating),
-                        "decision": img.selection.as_ref().map(|s| &s.decision),
+                        serde_json::json!({
+                            "id": img.image.id,
+                            "path": self.maybe_redact_path(&img.path),
+                            "width": img.image.width,
+                            "height": img.image.height,
+                            "format": img.image.format,
+                            "rating": img.selection.as_ref().and_then(|s| s.star_rating),
+                            "decision": img.selection.as_ref().map(|s| &s.decision),
+                        })
                     })
-                }).collect();
+                    .collect();
                 serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
             }
             Err(e) => format!("Error: {}", e),
         }
     }
 
-    #[tool(description = "Create a smart collection from a natural language query (e.g. 'landscape photos rated 4+ from Midjourney')")]
-    fn create_smart_collection(&self, Parameters(params): Parameters<CreateSmartCollectionParams>) -> String {
+    #[tool(
+        description = "Create a smart collection from a natural language query (e.g. 'landscape photos rated 4+ from Midjourney')"
+    )]
+    fn create_smart_collection(
+        &self,
+        Parameters(params): Parameters<CreateSmartCollectionParams>,
+    ) -> String {
         let filter = crate::db_core::nl_parser::parse_query(&params.query);
         let filter_json = match serde_json::to_string(&filter) {
             Ok(j) => j,
             Err(e) => return format!("Error parsing query: {}", e),
         };
         let state = self.app_handle.state::<AppState>();
-        match state.db.create_smart_collection(&params.name, &filter_json, Some(&params.query), false) {
+        match state.db.create_smart_collection(
+            &params.name,
+            &filter_json,
+            Some(&params.query),
+            false,
+        ) {
             Ok(id) => serde_json::json!({
                 "collection_id": id,
                 "name": params.name,
                 "filter": filter_json,
                 "query": params.query,
-            }).to_string(),
+            })
+            .to_string(),
             Err(e) => format!("Error: {}", e),
         }
     }
 
     // --- Search / AI tools ---
 
-    #[tool(description = "Find visually similar images using CLIP embeddings. Requires embeddings to be generated first.")]
+    #[tool(
+        description = "Find visually similar images using CLIP embeddings. Requires embeddings to be generated first."
+    )]
     fn find_similar(&self, Parameters(params): Parameters<FindSimilarParams>) -> String {
         match self.check_image_id_scope(&params.image_id) {
             Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
@@ -601,25 +688,30 @@ impl ImageViewMcp {
         };
         let query = match all.iter().find(|(id, _)| id == &params.image_id) {
             Some(q) => q,
-            None => return format!("Error: Image '{}' has no embedding. Run generate_embeddings first.", params.image_id),
+            None => {
+                return format!(
+                    "Error: Image '{}' has no embedding. Run generate_embeddings first.",
+                    params.image_id
+                )
+            }
         };
         match state.db.find_similar(&query.1, "clip-vit-b32", top_k * 2) {
             Ok(results) => {
-                let r: Vec<serde_json::Value> = results.iter()
-                    .filter(|(id, _)| {
-                        self.check_image_id_scope(id).unwrap_or(false)
-                    })
+                let r: Vec<serde_json::Value> = results
+                    .iter()
+                    .filter(|(id, _)| self.check_image_id_scope(id).unwrap_or(false))
                     .take(top_k)
-                    .map(|(id, score)| {
-                        serde_json::json!({"image_id": id, "similarity": score})
-                    }).collect();
+                    .map(|(id, score)| serde_json::json!({"image_id": id, "similarity": score}))
+                    .collect();
                 serde_json::to_string(&r).unwrap_or_else(|_| "[]".to_string())
             }
             Err(e) => format!("Error: {}", e),
         }
     }
 
-    #[tool(description = "Search for images containing a detected object class (e.g. 'person', 'car', 'dog'). Requires object detection to have been run.")]
+    #[tool(
+        description = "Search for images containing a detected object class (e.g. 'person', 'car', 'dog'). Requires object detection to have been run."
+    )]
     fn search_by_object(&self, Parameters(params): Parameters<SearchByObjectParams>) -> String {
         let state = self.app_handle.state::<AppState>();
         let limit = clamp_limit(params.limit.unwrap_or(50));
@@ -637,7 +729,9 @@ impl ImageViewMcp {
         }
     }
 
-    #[tool(description = "Get object detections for an image (bounding boxes, classes, confidence scores)")]
+    #[tool(
+        description = "Get object detections for an image (bounding boxes, classes, confidence scores)"
+    )]
     fn get_detections(&self, Parameters(params): Parameters<ImageIdParams>) -> String {
         match self.check_image_id_scope(&params.image_id) {
             Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
@@ -646,12 +740,16 @@ impl ImageViewMcp {
         }
         let state = self.app_handle.state::<AppState>();
         match state.db.get_detections(&params.image_id, None) {
-            Ok(detections) => serde_json::to_string(&detections).unwrap_or_else(|_| "[]".to_string()),
+            Ok(detections) => {
+                serde_json::to_string(&detections).unwrap_or_else(|_| "[]".to_string())
+            }
             Err(e) => format!("Error: {}", e),
         }
     }
 
-    #[tool(description = "Get AI vision descriptions for an image (generated by Ollama vision models)")]
+    #[tool(
+        description = "Get AI vision descriptions for an image (generated by Ollama vision models)"
+    )]
     fn get_vision_metadata(&self, Parameters(params): Parameters<ImageIdParams>) -> String {
         match self.check_image_id_scope(&params.image_id) {
             Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
@@ -685,8 +783,13 @@ impl ImageViewMcp {
         }
     }
 
-    #[tool(description = "Manually attach AI generation metadata to an image (creates a generation run record)")]
-    fn set_generation_metadata(&self, Parameters(params): Parameters<SetGenerationMetadataParams>) -> String {
+    #[tool(
+        description = "Manually attach AI generation metadata to an image (creates a generation run record)"
+    )]
+    fn set_generation_metadata(
+        &self,
+        Parameters(params): Parameters<SetGenerationMetadataParams>,
+    ) -> String {
         match self.check_image_id_scope(&params.image_id) {
             Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
             Err(e) => return format!("Error: {}", e),
@@ -715,10 +818,15 @@ impl ImageViewMcp {
         if let Err(e) = state.db.link_image_to_run(&params.image_id, &run_id) {
             return format!("Error linking image: {}", e);
         }
-        format!("Created generation run {} for image {}", run_id, params.image_id)
+        format!(
+            "Created generation run {} for image {}",
+            run_id, params.image_id
+        )
     }
 
-    #[tool(description = "Rescan all images for sidecar JSON files and backfill generation metadata. Returns the number of images linked.")]
+    #[tool(
+        description = "Rescan all images for sidecar JSON files and backfill generation metadata. Returns the number of images linked."
+    )]
     fn rescan_sidecars(&self) -> String {
         let state = self.app_handle.state::<AppState>();
         let images = match state.db.get_images_without_generation_run() {
@@ -754,7 +862,11 @@ impl ImageViewMcp {
                 }
             }
         }
-        format!("Rescanned {} images, linked {} sidecars", images.len(), linked)
+        format!(
+            "Rescanned {} images, linked {} sidecars",
+            images.len(),
+            linked
+        )
     }
 
     // --- Display / Navigation tools ---
@@ -779,7 +891,9 @@ impl ImageViewMcp {
             return "Error: Access denied — folder outside token scope".to_string();
         }
         match crate::services::display::navigate_to_folder(&self.app_handle, &params.folder_path) {
-            Ok(()) => serde_json::json!({"status": "ok", "action": "navigated to folder"}).to_string(),
+            Ok(()) => {
+                serde_json::json!({"status": "ok", "action": "navigated to folder"}).to_string()
+            }
             Err(e) => format!("Error: {}", e),
         }
     }
@@ -794,14 +908,18 @@ impl ImageViewMcp {
             }
         }
         match crate::services::display::show_collection(&self.app_handle, &params.collection_id) {
-            Ok(()) => serde_json::json!({"status": "ok", "action": "showing collection"}).to_string(),
+            Ok(()) => {
+                serde_json::json!({"status": "ok", "action": "showing collection"}).to_string()
+            }
             Err(e) => format!("Error: {}", e),
         }
     }
 
     // --- Import tools ---
 
-    #[tool(description = "Import all images from a folder into the library. Returns imported/skipped/error counts.")]
+    #[tool(
+        description = "Import all images from a folder into the library. Returns imported/skipped/error counts."
+    )]
     fn import_folder(&self, Parameters(params): Parameters<ImportFolderParams>) -> String {
         let scope = self.token_scope();
         if !tokens::folder_in_scope(&scope, &params.folder_path) {
@@ -816,7 +934,8 @@ impl ImageViewMcp {
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().is_file())
             .filter(|e| {
-                e.path().extension()
+                e.path()
+                    .extension()
                     .and_then(|ext| ext.to_str())
                     .map(|ext| extensions.contains(&ext.to_lowercase().as_str()))
                     .unwrap_or(false)
@@ -838,32 +957,48 @@ impl ImageViewMcp {
                 if cancel_token.is_cancelled() {
                     state.jobs.mark_cancelled(&job_id);
                     state.jobs.persist_terminal(&job_id, &state.db);
-                    let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "cancelled"}));
+                    let _ = app.emit(
+                        "job-status-changed",
+                        serde_json::json!({"job_id": &job_id, "status": "cancelled"}),
+                    );
                     return;
                 }
 
-                let filename = path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+                let filename = path
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_default();
                 match crate::db_core::import::import_file(&state.db, path, &state.app_data_dir) {
                     Ok(Some(_)) => imported += 1,
                     Ok(None) => skipped += 1,
                     Err(_) => errors += 1,
                 }
-                state.jobs.update_progress(&job_id, (i + 1) as u32, Some(&filename));
-                let _ = app.emit("import-progress", serde_json::json!({"current": i + 1, "total": total, "filename": filename}));
+                state
+                    .jobs
+                    .update_progress(&job_id, (i + 1) as u32, Some(&filename));
+                let _ = app.emit(
+                    "import-progress",
+                    serde_json::json!({"current": i + 1, "total": total, "filename": filename}),
+                );
             }
 
             state.jobs.complete(&job_id);
-                state.jobs.persist_terminal(&job_id, &state.db);
-            let _ = app.emit("job-status-changed", serde_json::json!({
-                "job_id": &job_id, "status": "completed",
-                "imported": imported, "skipped": skipped, "errors": errors,
-            }));
+            state.jobs.persist_terminal(&job_id, &state.db);
+            let _ = app.emit(
+                "job-status-changed",
+                serde_json::json!({
+                    "job_id": &job_id, "status": "completed",
+                    "imported": imported, "skipped": skipped, "errors": errors,
+                }),
+            );
         });
 
         serde_json::json!({"job_id": job_id_ret, "total_files": total}).to_string()
     }
 
-    #[tool(description = "Rescan all imported source folders for new/changed/missing files. Returns count of updated metadata.")]
+    #[tool(
+        description = "Rescan all imported source folders for new/changed/missing files. Returns count of updated metadata."
+    )]
     fn rescan_sources(&self, Parameters(_): Parameters<EmptyParams>) -> String {
         let state = self.app_handle.state::<AppState>();
         let app = self.app_handle.clone();
@@ -885,7 +1020,10 @@ impl ImageViewMcp {
                 if cancel_token.is_cancelled() {
                     state.jobs.mark_cancelled(&job_id);
                     state.jobs.persist_terminal(&job_id, &state.db);
-                    let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "cancelled"}));
+                    let _ = app.emit(
+                        "job-status-changed",
+                        serde_json::json!({"job_id": &job_id, "status": "cancelled"}),
+                    );
                     return;
                 }
 
@@ -896,20 +1034,30 @@ impl ImageViewMcp {
                 }
 
                 let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                let ext = path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.to_lowercase())
+                    .unwrap_or_default();
                 let png_chunks = if ext == "png" {
                     crate::db_core::source_detection::read_png_text_chunks(path).unwrap_or_default()
                 } else {
                     vec![]
                 };
 
-                let detection = crate::db_core::source_detection::detect_source(filename, &png_chunks, path);
+                let detection =
+                    crate::db_core::source_detection::detect_source(filename, &png_chunks, path);
                 if detection.source_label.is_some() {
                     let aspect_ratio = img.image.width as f64 / img.image.height.max(1) as f64;
-                    let orientation = if (aspect_ratio - 1.0).abs() < 0.05 { "square" }
-                        else if aspect_ratio > 1.0 { "landscape" }
-                        else { "portrait" };
-                    let megapixels = (img.image.width as f64 * img.image.height as f64) / 1_000_000.0;
+                    let orientation = if (aspect_ratio - 1.0).abs() < 0.05 {
+                        "square"
+                    } else if aspect_ratio > 1.0 {
+                        "landscape"
+                    } else {
+                        "portrait"
+                    };
+                    let megapixels =
+                        (img.image.width as f64 * img.image.height as f64) / 1_000_000.0;
 
                     let _ = state.db.update_source_detection(
                         &img.image.id,
@@ -924,12 +1072,17 @@ impl ImageViewMcp {
                     );
                     updated += 1;
                 }
-                state.jobs.update_progress(&job_id, (i + 1) as u32, Some(filename));
+                state
+                    .jobs
+                    .update_progress(&job_id, (i + 1) as u32, Some(filename));
             }
 
             state.jobs.complete(&job_id);
-                state.jobs.persist_terminal(&job_id, &state.db);
-            let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "completed", "updated": updated}));
+            state.jobs.persist_terminal(&job_id, &state.db);
+            let _ = app.emit(
+                "job-status-changed",
+                serde_json::json!({"job_id": &job_id, "status": "completed", "updated": updated}),
+            );
         });
 
         serde_json::json!({"job_id": job_id_ret, "total_images": total}).to_string()
@@ -937,11 +1090,21 @@ impl ImageViewMcp {
 
     // --- AI / Processing tools ---
 
-    #[tool(description = "Generate CLIP visual embeddings for images (required for find_similar). Returns count processed.")]
-    fn generate_embeddings(&self, Parameters(params): Parameters<GenerateEmbeddingsParams>) -> String {
+    #[tool(
+        description = "Generate CLIP visual embeddings for images (required for find_similar). Returns count processed."
+    )]
+    fn generate_embeddings(
+        &self,
+        Parameters(params): Parameters<GenerateEmbeddingsParams>,
+    ) -> String {
         for image_id in &params.image_ids {
             match self.check_image_id_scope(image_id) {
-                Ok(false) => return format!("Error: Access denied — image '{}' outside token scope", image_id),
+                Ok(false) => {
+                    return format!(
+                        "Error: Access denied — image '{}' outside token scope",
+                        image_id
+                    )
+                }
                 Err(e) => return format!("Error: {}", e),
                 _ => {}
             }
@@ -952,7 +1115,8 @@ impl ImageViewMcp {
             let mut engine = state.embedding_engine.lock();
             if engine.session.is_none() {
                 if !engine.is_model_available() {
-                    return "Error: Model not downloaded. Run download_clip_model first.".to_string();
+                    return "Error: Model not downloaded. Run download_clip_model first."
+                        .to_string();
                 }
                 if let Err(e) = engine.load_model() {
                     return format!("Error loading model: {}", e);
@@ -974,25 +1138,36 @@ impl ImageViewMcp {
                 if cancel_token.is_cancelled() {
                     state.jobs.mark_cancelled(&job_id);
                     state.jobs.persist_terminal(&job_id, &state.db);
-                    let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "cancelled"}));
+                    let _ = app.emit(
+                        "job-status-changed",
+                        serde_json::json!({"job_id": &job_id, "status": "cancelled"}),
+                    );
                     return;
                 }
 
                 let id_refs: Vec<&str> = vec![image_id.as_str()];
                 let images = match state.db.get_images_by_ids(&id_refs) {
                     Ok(imgs) => imgs,
-                    Err(_) => { state.jobs.update_progress(&job_id, (i + 1) as u32, None); continue; },
+                    Err(_) => {
+                        state.jobs.update_progress(&job_id, (i + 1) as u32, None);
+                        continue;
+                    }
                 };
                 let img = match images.first() {
                     Some(img) => img,
-                    None => { state.jobs.update_progress(&job_id, (i + 1) as u32, None); continue; },
+                    None => {
+                        state.jobs.update_progress(&job_id, (i + 1) as u32, None);
+                        continue;
+                    }
                 };
 
                 let engine = state.embedding_engine.lock();
                 match engine.generate_embedding(std::path::Path::new(&img.path)) {
                     Ok(embedding) => {
                         drop(engine);
-                        let _ = state.db.store_embedding(image_id, "clip-vit-b32", &embedding);
+                        let _ = state
+                            .db
+                            .store_embedding(image_id, "clip-vit-b32", &embedding);
                         generated += 1;
                     }
                     Err(e) => {
@@ -1000,12 +1175,17 @@ impl ImageViewMcp {
                         eprintln!("Embedding error for {}: {}", image_id, e);
                     }
                 }
-                state.jobs.update_progress(&job_id, (i + 1) as u32, Some(image_id));
-                let _ = app.emit("embedding-progress", serde_json::json!({"current": i + 1, "total": total}));
+                state
+                    .jobs
+                    .update_progress(&job_id, (i + 1) as u32, Some(image_id));
+                let _ = app.emit(
+                    "embedding-progress",
+                    serde_json::json!({"current": i + 1, "total": total}),
+                );
             }
 
             state.jobs.complete(&job_id);
-                state.jobs.persist_terminal(&job_id, &state.db);
+            state.jobs.persist_terminal(&job_id, &state.db);
             let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "completed", "processed": generated}));
         });
 
@@ -1016,7 +1196,12 @@ impl ImageViewMcp {
     fn detect_objects(&self, Parameters(params): Parameters<DetectObjectsParams>) -> String {
         for image_id in &params.image_ids {
             match self.check_image_id_scope(image_id) {
-                Ok(false) => return format!("Error: Access denied — image '{}' outside token scope", image_id),
+                Ok(false) => {
+                    return format!(
+                        "Error: Access denied — image '{}' outside token scope",
+                        image_id
+                    )
+                }
                 Err(e) => return format!("Error: {}", e),
                 _ => {}
             }
@@ -1026,7 +1211,12 @@ impl ImageViewMcp {
         let variant = match params.variant.as_deref() {
             Some(v) => match crate::db_core::detection::YoloVariant::from_str(v) {
                 Some(var) => var,
-                None => return format!("Error: Invalid variant '{}'. Use 'nano', 'small', or 'medium'.", v),
+                None => {
+                    return format!(
+                        "Error: Invalid variant '{}'. Use 'nano', 'small', or 'medium'.",
+                        v
+                    )
+                }
             },
             None => crate::db_core::detection::YoloVariant::Medium,
         };
@@ -1058,25 +1248,37 @@ impl ImageViewMcp {
                 if cancel_token.is_cancelled() {
                     state.jobs.mark_cancelled(&job_id);
                     state.jobs.persist_terminal(&job_id, &state.db);
-                    let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "cancelled"}));
+                    let _ = app.emit(
+                        "job-status-changed",
+                        serde_json::json!({"job_id": &job_id, "status": "cancelled"}),
+                    );
                     return;
                 }
 
                 let id_refs: Vec<&str> = vec![image_id.as_str()];
                 let images = match state.db.get_images_by_ids(&id_refs) {
                     Ok(imgs) => imgs,
-                    Err(_) => { state.jobs.update_progress(&job_id, (i + 1) as u32, None); continue; },
+                    Err(_) => {
+                        state.jobs.update_progress(&job_id, (i + 1) as u32, None);
+                        continue;
+                    }
                 };
                 let img = match images.first() {
                     Some(img) => img,
-                    None => { state.jobs.update_progress(&job_id, (i + 1) as u32, None); continue; },
+                    None => {
+                        state.jobs.update_progress(&job_id, (i + 1) as u32, None);
+                        continue;
+                    }
                 };
 
                 let engine = state.detection_engine.lock();
                 match engine.detect(std::path::Path::new(&img.path)) {
                     Ok(detections) => {
                         drop(engine);
-                        let _ = state.db.store_detections(image_id, variant.model_name(), &detections);
+                        let _ =
+                            state
+                                .db
+                                .store_detections(image_id, variant.model_name(), &detections);
                         detected += 1;
                     }
                     Err(e) => {
@@ -1084,33 +1286,46 @@ impl ImageViewMcp {
                         eprintln!("Detection error for {}: {}", image_id, e);
                     }
                 }
-                state.jobs.update_progress(&job_id, (i + 1) as u32, Some(image_id));
+                state
+                    .jobs
+                    .update_progress(&job_id, (i + 1) as u32, Some(image_id));
                 let _ = app.emit("detection-progress", serde_json::json!({"current": i + 1, "total": total, "model": variant.model_name()}));
             }
 
             state.jobs.complete(&job_id);
-                state.jobs.persist_terminal(&job_id, &state.db);
+            state.jobs.persist_terminal(&job_id, &state.db);
             let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "completed", "processed": detected}));
         });
 
         serde_json::json!({"job_id": job_id_ret, "total_images": total}).to_string()
     }
 
-    #[tool(description = "Analyze images with Ollama vision model for natural language descriptions. Returns count processed.")]
+    #[tool(
+        description = "Analyze images with Ollama vision model for natural language descriptions. Returns count processed."
+    )]
     fn analyze_images(&self, Parameters(params): Parameters<AnalyzeImagesParams>) -> String {
         for image_id in &params.image_ids {
             match self.check_image_id_scope(image_id) {
-                Ok(false) => return format!("Error: Access denied — image '{}' outside token scope", image_id),
+                Ok(false) => {
+                    return format!(
+                        "Error: Access denied — image '{}' outside token scope",
+                        image_id
+                    )
+                }
                 Err(e) => return format!("Error: {}", e),
                 _ => {}
             }
         }
         let state = self.app_handle.state::<AppState>();
 
-        let url = state.db.get_setting("ollama_url")
+        let url = state
+            .db
+            .get_setting("ollama_url")
             .unwrap_or(None)
             .unwrap_or_else(|| crate::db_core::vision::default_ollama_url().to_string());
-        let model = state.db.get_setting("ollama_model")
+        let model = state
+            .db
+            .get_setting("ollama_model")
             .unwrap_or(None)
             .unwrap_or_else(|| "minicpm-v".to_string());
 
@@ -1128,18 +1343,27 @@ impl ImageViewMcp {
                 if cancel_token.is_cancelled() {
                     state.jobs.mark_cancelled(&job_id);
                     state.jobs.persist_terminal(&job_id, &state.db);
-                    let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "cancelled"}));
+                    let _ = app.emit(
+                        "job-status-changed",
+                        serde_json::json!({"job_id": &job_id, "status": "cancelled"}),
+                    );
                     return;
                 }
 
                 let id_refs: Vec<&str> = vec![image_id.as_str()];
                 let images = match state.db.get_images_by_ids(&id_refs) {
                     Ok(imgs) => imgs,
-                    Err(_) => { state.jobs.update_progress(&job_id, (i + 1) as u32, None); continue; },
+                    Err(_) => {
+                        state.jobs.update_progress(&job_id, (i + 1) as u32, None);
+                        continue;
+                    }
                 };
                 let img = match images.first() {
                     Some(img) => img,
-                    None => { state.jobs.update_progress(&job_id, (i + 1) as u32, None); continue; },
+                    None => {
+                        state.jobs.update_progress(&job_id, (i + 1) as u32, None);
+                        continue;
+                    }
                 };
 
                 let path = img.path.clone();
@@ -1147,8 +1371,11 @@ impl ImageViewMcp {
                 let model_clone = model.clone();
 
                 let result = crate::db_core::vision::analyze_image(
-                    std::path::Path::new(&path), &url_clone, &model_clone
-                ).await;
+                    std::path::Path::new(&path),
+                    &url_clone,
+                    &model_clone,
+                )
+                .await;
 
                 if cancel_token.is_cancelled() {
                     state.jobs.mark_cancelled(&job_id);
@@ -1163,12 +1390,17 @@ impl ImageViewMcp {
                     }
                     Err(e) => eprintln!("Vision error for {}: {}", image_id, e),
                 }
-                state.jobs.update_progress(&job_id, (i + 1) as u32, Some(image_id));
-                let _ = app.emit("vision-progress", serde_json::json!({"current": i + 1, "total": total, "model": model}));
+                state
+                    .jobs
+                    .update_progress(&job_id, (i + 1) as u32, Some(image_id));
+                let _ = app.emit(
+                    "vision-progress",
+                    serde_json::json!({"current": i + 1, "total": total, "model": model}),
+                );
             }
 
             state.jobs.complete(&job_id);
-                state.jobs.persist_terminal(&job_id, &state.db);
+            state.jobs.persist_terminal(&job_id, &state.db);
             let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "completed", "processed": analyzed}));
         });
 
@@ -1186,36 +1418,47 @@ impl ImageViewMcp {
         }
     }
 
-    #[tool(description = "List all background jobs (running and recent completed/failed/cancelled)")]
+    #[tool(
+        description = "List all background jobs (running and recent completed/failed/cancelled)"
+    )]
     fn list_jobs(&self, Parameters(_): Parameters<EmptyParams>) -> String {
         let state = self.app_handle.state::<AppState>();
         let jobs = state.jobs.list();
         serde_json::to_string(&jobs).unwrap_or_else(|_| "[]".to_string())
     }
 
-    #[tool(description = "Cancel a running background job. Sets status to 'cancelling', job stops after current item.")]
+    #[tool(
+        description = "Cancel a running background job. Sets status to 'cancelling', job stops after current item."
+    )]
     fn cancel_job(&self, Parameters(params): Parameters<CancelJobParams>) -> String {
         let state = self.app_handle.state::<AppState>();
         match state.jobs.cancel(&params.job_id) {
-            Ok(()) => serde_json::json!({"status": "cancelling", "job_id": params.job_id}).to_string(),
+            Ok(()) => {
+                serde_json::json!({"status": "cancelling", "job_id": params.job_id}).to_string()
+            }
             Err(e) => format!("Error: {}", e),
         }
     }
 
     // --- Token management tools ---
 
-    #[tool(description = "Create a new MCP access token. Returns token ID and secret (shown only once).")]
+    #[tool(
+        description = "Create a new MCP access token. Returns token ID and secret (shown only once)."
+    )]
     fn create_token(&self, Parameters(params): Parameters<CreateTokenParams>) -> String {
         let state = self.app_handle.state::<AppState>();
-        let ctx = crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
-        match crate::services::tokens::create_token(&ctx, &params.name, &params.role, params.scope) {
+        let ctx =
+            crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
+        match crate::services::tokens::create_token(&ctx, &params.name, &params.role, params.scope)
+        {
             Ok((token, secret)) => serde_json::json!({
                 "token_id": token.id,
                 "name": token.name,
                 "role": token.role,
                 "secret": secret,
                 "warning": "Store the secret securely — it cannot be retrieved again"
-            }).to_string(),
+            })
+            .to_string(),
             Err(e) => format!("Error: {}", e),
         }
     }
@@ -1223,15 +1466,19 @@ impl ImageViewMcp {
     #[tool(description = "List all active (non-revoked) MCP tokens")]
     fn list_tokens(&self, Parameters(_): Parameters<EmptyParams>) -> String {
         let state = self.app_handle.state::<AppState>();
-        let ctx = crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
+        let ctx =
+            crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
         match crate::services::tokens::list_tokens(&ctx) {
             Ok(tokens_list) => {
-                let result: Vec<serde_json::Value> = tokens_list.iter().map(|t| {
-                    serde_json::json!({
-                        "id": t.id, "name": t.name, "role": t.role,
-                        "created_at": t.created_at, "last_used_at": t.last_used_at,
+                let result: Vec<serde_json::Value> = tokens_list
+                    .iter()
+                    .map(|t| {
+                        serde_json::json!({
+                            "id": t.id, "name": t.name, "role": t.role,
+                            "created_at": t.created_at, "last_used_at": t.last_used_at,
+                        })
                     })
-                }).collect();
+                    .collect();
                 serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
             }
             Err(e) => format!("Error: {}", e),
@@ -1241,7 +1488,8 @@ impl ImageViewMcp {
     #[tool(description = "Revoke an MCP token permanently")]
     fn revoke_token(&self, Parameters(params): Parameters<TokenIdParams>) -> String {
         let state = self.app_handle.state::<AppState>();
-        let ctx = crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
+        let ctx =
+            crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
         match crate::services::tokens::revoke_token(&ctx, &params.token_id) {
             Ok(()) => serde_json::json!({"status": "ok", "revoked": params.token_id}).to_string(),
             Err(e) => format!("Error: {}", e),
@@ -1251,13 +1499,15 @@ impl ImageViewMcp {
     #[tool(description = "Rotate a token's secret. Returns new secret (old becomes invalid).")]
     fn rotate_token(&self, Parameters(params): Parameters<TokenIdParams>) -> String {
         let state = self.app_handle.state::<AppState>();
-        let ctx = crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
+        let ctx =
+            crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
         match crate::services::tokens::rotate_token(&ctx, &params.token_id) {
             Ok(new_secret) => serde_json::json!({
                 "token_id": params.token_id,
                 "new_secret": new_secret,
                 "warning": "Store the new secret securely"
-            }).to_string(),
+            })
+            .to_string(),
             Err(e) => format!("Error: {}", e),
         }
     }
@@ -1267,17 +1517,21 @@ impl ImageViewMcp {
     #[tool(description = "Get recent MCP audit log entries")]
     fn get_audit_log(&self, Parameters(params): Parameters<AuditLogParams>) -> String {
         let state = self.app_handle.state::<AppState>();
-        let ctx = crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
+        let ctx =
+            crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
         let limit = params.limit.unwrap_or(50).min(500);
         match crate::services::tokens::get_recent_audit(&ctx, limit) {
             Ok(entries) => {
-                let result: Vec<serde_json::Value> = entries.iter().map(|e| {
-                    serde_json::json!({
-                        "id": e.id, "token_id": e.token_id,
-                        "tool_name": e.tool_name, "result_status": e.result_status,
-                        "timestamp": e.timestamp,
+                let result: Vec<serde_json::Value> = entries
+                    .iter()
+                    .map(|e| {
+                        serde_json::json!({
+                            "id": e.id, "token_id": e.token_id,
+                            "tool_name": e.tool_name, "result_status": e.result_status,
+                            "timestamp": e.timestamp,
+                        })
                     })
-                }).collect();
+                    .collect();
                 serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
             }
             Err(e) => format!("Error: {}", e),
@@ -1287,10 +1541,13 @@ impl ImageViewMcp {
     #[tool(description = "Delete old audit log entries. Returns count deleted.")]
     fn prune_audit_log(&self, Parameters(params): Parameters<PruneAuditParams>) -> String {
         let state = self.app_handle.state::<AppState>();
-        let ctx = crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
+        let ctx =
+            crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
         let days = params.retention_days.unwrap_or(30);
         match crate::services::tokens::prune_audit_log(&ctx, days) {
-            Ok(deleted) => serde_json::json!({"deleted": deleted, "retention_days": days}).to_string(),
+            Ok(deleted) => {
+                serde_json::json!({"deleted": deleted, "retention_days": days}).to_string()
+            }
             Err(e) => format!("Error: {}", e),
         }
     }
@@ -1302,12 +1559,64 @@ impl ImageViewMcp {
         let presets = crate::services::export::list_presets();
         serde_json::to_string(&presets).unwrap_or_else(|_| "[]".to_string())
     }
+
+    #[tool(
+        description = "Export a read-only static presentation package from canvas image IDs. Requires the Static Publishing module to be enabled."
+    )]
+    fn export_static_publish_package(
+        &self,
+        Parameters(params): Parameters<crate::commands::static_publishing::StaticPublishRequest>,
+    ) -> String {
+        for item in &params.items {
+            match self.check_image_id_scope(&item.image_id) {
+                Ok(false) => {
+                    return format!(
+                        "Error: Access denied — image '{}' outside token scope",
+                        item.image_id
+                    )
+                }
+                Err(e) => return format!("Error: {}", e),
+                _ => {}
+            }
+        }
+
+        let state = self.app_handle.state::<AppState>();
+        match crate::commands::static_publishing::export_static_publish_package_inner(
+            state.inner(),
+            params,
+        ) {
+            Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(
+        description = "Serve a generated static publishing site over a local read-only HTTP server. Requires the Static Publishing module and settings/admin permission."
+    )]
+    async fn serve_static_publish_package(
+        &self,
+        Parameters(params): Parameters<ServeStaticPublishParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match crate::commands::static_publishing::serve_static_publish_package_inner(
+            state.inner(),
+            params.site_dir,
+            params.host,
+            params.port,
+        )
+        .await
+        {
+            Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
 }
 
-impl ServerHandler for ImageViewMcp {
+impl ServerHandler for CullMcp {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions("ImageView MCP server — browse, curate, and manage an AI art image library")
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
+            "Cull MCP server — browse, curate, and manage an AI art image library",
+        )
     }
 
     async fn list_tools(
@@ -1315,7 +1624,12 @@ impl ServerHandler for ImageViewMcp {
         _request: Option<rmcp::model::PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
-        let tools = self.tool_router.list_all();
+        let tools: Vec<_> = self
+            .tool_router
+            .list_all()
+            .into_iter()
+            .filter(|tool| self.tool_enabled_by_module(tool.name.as_ref()))
+            .collect();
         eprintln!("MCP list_tools: returning {} tools", tools.len());
         Ok(rmcp::model::ListToolsResult {
             tools,
@@ -1331,11 +1645,18 @@ impl ServerHandler for ImageViewMcp {
     ) -> impl std::future::Future<Output = Result<CallToolResult, ErrorData>> + Send + '_ {
         async move {
             let tool_name = request.name.to_string();
-            let params_json = request.arguments.as_ref()
+            let params_json = request
+                .arguments
+                .as_ref()
                 .and_then(|args| serde_json::to_string(args).ok());
 
             if let Err(msg) = require_capability(&self.auth, &tool_name) {
                 self.log_tool_call(&tool_name, None, "denied");
+                return Err(ErrorData::invalid_request(msg, None));
+            }
+
+            if let Err(msg) = self.require_tool_module_enabled(&tool_name) {
+                self.log_tool_call(&tool_name, None, "disabled");
                 return Err(ErrorData::invalid_request(msg, None));
             }
 
@@ -1345,7 +1666,11 @@ impl ServerHandler for ImageViewMcp {
             let status = match &result {
                 Err(_) => "error",
                 Ok(r) => {
-                    if r.is_error.unwrap_or(false) { "error" } else { "ok" }
+                    if r.is_error.unwrap_or(false) {
+                        "error"
+                    } else {
+                        "ok"
+                    }
                 }
             };
             self.log_tool_call(&tool_name, params_json.as_deref(), status);
@@ -1357,15 +1682,18 @@ impl ServerHandler for ImageViewMcp {
 
 #[cfg(test)]
 mod tests {
+    use super::AuthContext;
     use crate::db_core::models::{McpToken, TokenScope};
     use crate::services::tokens;
-    use super::AuthContext;
 
     // --- Path redaction (tests production `redact_path`) ---
 
     #[test]
     fn test_redact_path_extracts_filename() {
-        assert_eq!(super::redact_path("/Users/gleb/art/midjourney/image_001.png"), "image_001.png");
+        assert_eq!(
+            super::redact_path("/Users/gleb/art/midjourney/image_001.png"),
+            "image_001.png"
+        );
     }
 
     #[test]
@@ -1385,7 +1713,10 @@ mod tests {
 
     #[test]
     fn test_redact_path_handles_spaces() {
-        assert_eq!(super::redact_path("/Users/gleb/My Art/image 001.png"), "image 001.png");
+        assert_eq!(
+            super::redact_path("/Users/gleb/My Art/image 001.png"),
+            "image 001.png"
+        );
     }
 
     // --- is_remote logic ---
@@ -1417,8 +1748,16 @@ mod tests {
             collections: None,
             tags: None,
         });
-        assert!(tokens::image_in_scope(&scope, "/art/midjourney/img1.png", &[]));
-        assert!(tokens::image_in_scope(&scope, "/art/midjourney/sub/img2.png", &[]));
+        assert!(tokens::image_in_scope(
+            &scope,
+            "/art/midjourney/img1.png",
+            &[]
+        ));
+        assert!(tokens::image_in_scope(
+            &scope,
+            "/art/midjourney/sub/img2.png",
+            &[]
+        ));
         assert!(!tokens::image_in_scope(&scope, "/art/dalle/img3.png", &[]));
         assert!(!tokens::image_in_scope(&scope, "/photos/vacation.jpg", &[]));
     }
@@ -1426,11 +1765,18 @@ mod tests {
     #[test]
     fn test_scope_multiple_folders() {
         let scope = Some(TokenScope {
-            folders: Some(vec!["/art/midjourney".to_string(), "/art/dalle".to_string()]),
+            folders: Some(vec![
+                "/art/midjourney".to_string(),
+                "/art/dalle".to_string(),
+            ]),
             collections: None,
             tags: None,
         });
-        assert!(tokens::image_in_scope(&scope, "/art/midjourney/img.png", &[]));
+        assert!(tokens::image_in_scope(
+            &scope,
+            "/art/midjourney/img.png",
+            &[]
+        ));
         assert!(tokens::image_in_scope(&scope, "/art/dalle/img.png", &[]));
         assert!(!tokens::image_in_scope(&scope, "/art/stable/img.png", &[]));
     }
@@ -1454,9 +1800,21 @@ mod tests {
             collections: Some(vec!["col_abc".to_string(), "col_def".to_string()]),
             tags: None,
         });
-        assert!(tokens::image_in_scope(&scope, "/any/path.jpg", &["col_abc".to_string()]));
-        assert!(tokens::image_in_scope(&scope, "/any/path.jpg", &["col_def".to_string()]));
-        assert!(!tokens::image_in_scope(&scope, "/any/path.jpg", &["col_xyz".to_string()]));
+        assert!(tokens::image_in_scope(
+            &scope,
+            "/any/path.jpg",
+            &["col_abc".to_string()]
+        ));
+        assert!(tokens::image_in_scope(
+            &scope,
+            "/any/path.jpg",
+            &["col_def".to_string()]
+        ));
+        assert!(!tokens::image_in_scope(
+            &scope,
+            "/any/path.jpg",
+            &["col_xyz".to_string()]
+        ));
         assert!(!tokens::image_in_scope(&scope, "/any/path.jpg", &[]));
     }
 
@@ -1470,7 +1828,11 @@ mod tests {
         // Folder match alone
         assert!(tokens::image_in_scope(&scope, "/art/img.png", &[]));
         // Collection match alone
-        assert!(tokens::image_in_scope(&scope, "/photos/img.png", &["col_abc".to_string()]));
+        assert!(tokens::image_in_scope(
+            &scope,
+            "/photos/img.png",
+            &["col_abc".to_string()]
+        ));
         // Neither
         assert!(!tokens::image_in_scope(&scope, "/photos/img.png", &[]));
     }
@@ -1556,15 +1918,31 @@ mod tests {
             tags: None,
         });
         // image_in_scope with collection membership
-        assert!(tokens::image_in_scope(&scope, "/any.jpg", &["col_abc".to_string()]));
-        assert!(!tokens::image_in_scope(&scope, "/any.jpg", &["col_def".to_string()]));
-        assert!(!tokens::image_in_scope(&scope, "/any.jpg", &["col_ghi".to_string()]));
+        assert!(tokens::image_in_scope(
+            &scope,
+            "/any.jpg",
+            &["col_abc".to_string()]
+        ));
+        assert!(!tokens::image_in_scope(
+            &scope,
+            "/any.jpg",
+            &["col_def".to_string()]
+        ));
+        assert!(!tokens::image_in_scope(
+            &scope,
+            "/any.jpg",
+            &["col_ghi".to_string()]
+        ));
     }
 
     #[test]
     fn test_no_collection_scope_allows_all() {
         let scope: Option<TokenScope> = None;
-        assert!(tokens::image_in_scope(&scope, "/any.jpg", &["col_abc".to_string()]));
+        assert!(tokens::image_in_scope(
+            &scope,
+            "/any.jpg",
+            &["col_abc".to_string()]
+        ));
         assert!(tokens::image_in_scope(&scope, "/any.jpg", &[]));
     }
 
@@ -1632,14 +2010,22 @@ mod tests {
     #[test]
     fn test_read_tools_map_to_library_read() {
         let read_tools = [
-            "list_images", "get_image", "list_folders", "list_folder_images",
-            "list_collections", "list_collection_images", "get_library_stats",
-            "get_detections", "get_vision_metadata",
+            "list_images",
+            "get_image",
+            "list_folders",
+            "list_folder_images",
+            "list_collections",
+            "list_collection_images",
+            "get_library_stats",
+            "get_detections",
+            "get_vision_metadata",
         ];
         for tool in &read_tools {
             assert_eq!(
-                tokens::tool_capability(tool), "library:read",
-                "Tool '{}' should map to library:read", tool
+                tokens::tool_capability(tool),
+                "library:read",
+                "Tool '{}' should map to library:read",
+                tool
             );
         }
     }
@@ -1649,8 +2035,10 @@ mod tests {
         let search_tools = ["find_similar", "search_by_object", "search_images"];
         for tool in &search_tools {
             assert_eq!(
-                tokens::tool_capability(tool), "library:search",
-                "Tool '{}' should map to library:search", tool
+                tokens::tool_capability(tool),
+                "library:search",
+                "Tool '{}' should map to library:search",
+                tool
             );
         }
     }
@@ -1658,13 +2046,19 @@ mod tests {
     #[test]
     fn test_curation_tools_map_to_curation_write() {
         let curation_tools = [
-            "set_rating", "set_decision", "create_collection",
-            "add_to_collection", "delete_collection", "create_smart_collection",
+            "set_rating",
+            "set_decision",
+            "create_collection",
+            "add_to_collection",
+            "delete_collection",
+            "create_smart_collection",
         ];
         for tool in &curation_tools {
             assert_eq!(
-                tokens::tool_capability(tool), "curation:write",
-                "Tool '{}' should map to curation:write", tool
+                tokens::tool_capability(tool),
+                "curation:write",
+                "Tool '{}' should map to curation:write",
+                tool
             );
         }
     }
@@ -1676,12 +2070,27 @@ mod tests {
     }
 
     #[test]
+    fn test_export_tools_map_to_export_read() {
+        let export_tools = ["list_export_presets", "export_static_publish_package"];
+        for tool in &export_tools {
+            assert_eq!(
+                tokens::tool_capability(tool),
+                "export:read",
+                "Tool '{}' should map to export:read",
+                tool
+            );
+        }
+    }
+
+    #[test]
     fn test_display_tools_map_to_display_navigate() {
         let display_tools = ["show_image", "navigate_to_folder", "show_collection"];
         for tool in &display_tools {
             assert_eq!(
-                tokens::tool_capability(tool), "display:navigate",
-                "Tool '{}' should map to display:navigate", tool
+                tokens::tool_capability(tool),
+                "display:navigate",
+                "Tool '{}' should map to display:navigate",
+                tool
             );
         }
     }
@@ -1691,8 +2100,10 @@ mod tests {
         let ai_tools = ["generate_embeddings", "detect_objects", "analyze_images"];
         for tool in &ai_tools {
             assert_eq!(
-                tokens::tool_capability(tool), "ai:run",
-                "Tool '{}' should map to ai:run", tool
+                tokens::tool_capability(tool),
+                "ai:run",
+                "Tool '{}' should map to ai:run",
+                tool
             );
         }
     }
@@ -1700,33 +2111,63 @@ mod tests {
     #[test]
     fn test_token_tools_map_to_tokens_manage() {
         let token_tools = [
-            "create_token", "list_tokens", "revoke_token", "rotate_token",
-            "get_audit_log", "prune_audit_log",
+            "create_token",
+            "list_tokens",
+            "revoke_token",
+            "rotate_token",
+            "get_audit_log",
+            "prune_audit_log",
         ];
         for tool in &token_tools {
             assert_eq!(
-                tokens::tool_capability(tool), "tokens:manage",
-                "Tool '{}' should map to tokens:manage", tool
+                tokens::tool_capability(tool),
+                "tokens:manage",
+                "Tool '{}' should map to tokens:manage",
+                tool
             );
         }
     }
 
     #[test]
     fn test_admin_only_tools_map_to_settings_manage() {
-        let admin_tools = ["rescan_sources", "get_job", "list_jobs", "cancel_job"];
+        let admin_tools = [
+            "rescan_sources",
+            "get_job",
+            "list_jobs",
+            "cancel_job",
+            "serve_static_publish_package",
+        ];
         for tool in &admin_tools {
             assert_eq!(
-                tokens::tool_capability(tool), "settings:manage",
-                "Tool '{}' should map to settings:manage", tool
+                tokens::tool_capability(tool),
+                "settings:manage",
+                "Tool '{}' should map to settings:manage",
+                tool
             );
         }
     }
 
     #[test]
     fn test_unknown_tool_maps_to_settings_manage() {
-        assert_eq!(tokens::tool_capability("nonexistent_tool"), "settings:manage");
+        assert_eq!(
+            tokens::tool_capability("nonexistent_tool"),
+            "settings:manage"
+        );
         assert_eq!(tokens::tool_capability(""), "settings:manage");
         assert_eq!(tokens::tool_capability("drop_database"), "settings:manage");
+    }
+
+    #[test]
+    fn test_static_publish_tools_are_module_gated() {
+        assert_eq!(
+            super::required_module_for_tool("export_static_publish_package"),
+            Some("module_static_publishing")
+        );
+        assert_eq!(
+            super::required_module_for_tool("serve_static_publish_package"),
+            Some("module_static_publishing")
+        );
+        assert_eq!(super::required_module_for_tool("list_images"), None);
     }
 
     // --- Auth + scope integration ---

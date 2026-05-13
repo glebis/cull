@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-ImageView is a Tauri 2 + SvelteKit 5 + Rust desktop image viewer focused on AI-generated art. Uses SQLite (rusqlite), CLIP embeddings (ONNX), and Svelte 5 runes.
+Cull is a Tauri 2 + SvelteKit 5 + Rust desktop image viewer focused on AI-generated art. Uses SQLite (rusqlite), CLIP embeddings (ONNX), and Svelte 5 runes.
 
 ## Architecture
 
@@ -44,9 +44,9 @@ Tokyo Night dark theme. All components MUST use these tokens, never hardcode col
 - `src/lib/tauri-mock.ts` exists for E2E browser testing ONLY — it must never be imported from `api.ts` or any component
 
 ### Data Safety
-- **NEVER delete, trash, or reset `imageview.db`** — it contains real user data (ratings, selections, collections) accumulated over many sessions
+- **NEVER delete, trash, or reset `cull.db`** — it contains real user data (ratings, selections, collections) accumulated over many sessions
 - When the UI shows wrong data, the bug is in the code, not the database
-- The database path: `~/Library/Application Support/com.glebkalinin.imageview/imageview.db`
+- The database path: `~/Library/Application Support/com.glebkalinin.cull/cull.db`
 
 ## E2E Testing with agent-browser
 

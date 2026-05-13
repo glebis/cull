@@ -78,3 +78,149 @@ export function computePanDrag(
         y: startPan.y + (currentMouse.y - startMouse.y),
     };
 }
+
+export interface RectLike {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+}
+
+export interface CropPoint {
+    x: number;
+    y: number;
+}
+
+export interface CropRect {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+export interface CropSelectionPercent {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+}
+
+export type CropResizeHandle = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se';
+
+function clamp(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
+}
+
+function cropRectFromSides(left: number, top: number, right: number, bottom: number): CropRect {
+    return {
+        x: Math.round(left),
+        y: Math.round(top),
+        width: Math.round(right - left),
+        height: Math.round(bottom - top),
+    };
+}
+
+export function clientToImagePoint(
+    clientX: number,
+    clientY: number,
+    imageRect: RectLike,
+    imageWidth: number,
+    imageHeight: number
+): CropPoint | null {
+    if (imageRect.width <= 0 || imageRect.height <= 0 || imageWidth <= 0 || imageHeight <= 0) {
+        return null;
+    }
+
+    const x = ((clientX - imageRect.left) / imageRect.width) * imageWidth;
+    const y = ((clientY - imageRect.top) / imageRect.height) * imageHeight;
+
+    return {
+        x: clamp(x, 0, imageWidth),
+        y: clamp(y, 0, imageHeight),
+    };
+}
+
+export function cropRectFromImagePoints(
+    start: CropPoint,
+    end: CropPoint,
+    imageWidth: number,
+    imageHeight: number
+): CropRect {
+    const x1 = clamp(Math.min(start.x, end.x), 0, imageWidth);
+    const y1 = clamp(Math.min(start.y, end.y), 0, imageHeight);
+    const x2 = clamp(Math.max(start.x, end.x), 0, imageWidth);
+    const y2 = clamp(Math.max(start.y, end.y), 0, imageHeight);
+
+    return cropRectFromSides(x1, y1, x2, y2);
+}
+
+export function cropSelectionPercentFromImagePoints(
+    start: CropPoint,
+    end: CropPoint,
+    imageWidth: number,
+    imageHeight: number
+): CropSelectionPercent | null {
+    if (imageWidth <= 0 || imageHeight <= 0) return null;
+
+    const x1 = clamp(Math.min(start.x, end.x), 0, imageWidth);
+    const y1 = clamp(Math.min(start.y, end.y), 0, imageHeight);
+    const x2 = clamp(Math.max(start.x, end.x), 0, imageWidth);
+    const y2 = clamp(Math.max(start.y, end.y), 0, imageHeight);
+
+    return {
+        left: (x1 / imageWidth) * 100,
+        top: (y1 / imageHeight) * 100,
+        width: ((x2 - x1) / imageWidth) * 100,
+        height: ((y2 - y1) / imageHeight) * 100,
+    };
+}
+
+export function moveCropRect(
+    rect: CropRect,
+    deltaX: number,
+    deltaY: number,
+    imageWidth: number,
+    imageHeight: number
+): CropRect {
+    const width = clamp(rect.width, 0, imageWidth);
+    const height = clamp(rect.height, 0, imageHeight);
+
+    return {
+        x: Math.round(clamp(rect.x + deltaX, 0, imageWidth - width)),
+        y: Math.round(clamp(rect.y + deltaY, 0, imageHeight - height)),
+        width: Math.round(width),
+        height: Math.round(height),
+    };
+}
+
+export function resizeCropRectFromHandle(
+    rect: CropRect,
+    handle: CropResizeHandle,
+    point: CropPoint,
+    imageWidth: number,
+    imageHeight: number,
+    minSize: number = 1
+): CropRect {
+    let left = rect.x;
+    let top = rect.y;
+    let right = rect.x + rect.width;
+    let bottom = rect.y + rect.height;
+
+    const minWidth = Math.min(minSize, imageWidth);
+    const minHeight = Math.min(minSize, imageHeight);
+
+    if (handle.includes('w')) {
+        left = clamp(point.x, 0, right - minWidth);
+    }
+    if (handle.includes('e')) {
+        right = clamp(point.x, left + minWidth, imageWidth);
+    }
+    if (handle.includes('n')) {
+        top = clamp(point.y, 0, bottom - minHeight);
+    }
+    if (handle.includes('s')) {
+        bottom = clamp(point.y, top + minHeight, imageHeight);
+    }
+
+    return cropRectFromSides(left, top, right, bottom);
+}

@@ -214,7 +214,7 @@ describe('initDeepLink', () => {
     it('processes launch URLs from getCurrent', async () => {
         vi.mocked(listen).mockResolvedValue(vi.fn() as never);
         vi.mocked(onOpenUrl).mockResolvedValue(undefined as never);
-        vi.mocked(getCurrent).mockResolvedValue(['imageview://loupe?size=200']);
+        vi.mocked(getCurrent).mockResolvedValue(['cull://loupe?size=200']);
 
         await initDeepLink();
 

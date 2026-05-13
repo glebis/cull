@@ -2,7 +2,7 @@
 
 Version: 0.1.0 — Draft, 2026-05-07
 
-ImageView ships a single `imageview` binary. With no subcommand it launches the GUI. With a subcommand it runs headless and exits. Every operation available in the GUI has a CLI equivalent and a URL scheme equivalent.
+Cull ships a single `cull` binary. With no subcommand it launches the GUI. With a subcommand it runs headless and exits. Every operation available in the GUI has a CLI equivalent and a URL scheme equivalent.
 
 ---
 
@@ -11,15 +11,15 @@ ImageView ships a single `imageview` binary. With no subcommand it launches the 
 ### Invocation
 
 ```
-imageview [FLAGS] [SUBCOMMAND]
+cull [FLAGS] [SUBCOMMAND]
 ```
 
 With no subcommand, launches the GUI. A bare path argument is shorthand for `open`.
 
 ```bash
-imageview                        # launch GUI
-imageview ~/photos               # open folder in GUI (same as: imageview open ~/photos)
-imageview shot.png               # open file in GUI
+cull                        # launch GUI
+cull ~/photos               # open folder in GUI (same as: cull open ~/photos)
+cull shot.png               # open file in GUI
 ```
 
 ### Global Flags
@@ -37,7 +37,7 @@ imageview shot.png               # open file in GUI
 #### `open` — Open in viewer
 
 ```bash
-imageview open <path|folder> [--view grid|loupe|compare|embeddings] [--fullscreen]
+cull open <path|folder> [--view grid|loupe|compare|embeddings] [--fullscreen]
 ```
 
 Opens the GUI with the given path focused. If the path is a folder, imports and displays its contents.
@@ -53,7 +53,7 @@ Opens the GUI with the given path focused. If the path is a folder, imports and 
 #### `import` — Import to library
 
 ```bash
-imageview import <folder> [--recursive] [--dry-run]
+cull import <folder> [--recursive] [--dry-run]
 ```
 
 Scans a folder for images, generates thumbnails, adds to the database. Prints count of imported files.
@@ -67,13 +67,13 @@ Scans a folder for images, generates thumbnails, adds to the database. Prints co
 #### `search` — Semantic text search
 
 ```bash
-imageview search <query> [--top N] [--threshold FLOAT]
+cull search <query> [--top N] [--threshold FLOAT]
 ```
 
 Search the library using CLIP text-to-image similarity. Requires embeddings to have been generated.
 
 ```bash
-imageview search "sunset over mountains" --top 10
+cull search "sunset over mountains" --top 10
 # /Users/me/photos/DSC_4021.jpg  0.34
 # /Users/me/photos/DSC_4055.jpg  0.31
 # ...
@@ -89,7 +89,7 @@ Output: one line per result — `<path>\t<score>`. With `--json`: array of `{"pa
 #### `similar` — Find visually similar images
 
 ```bash
-imageview similar <image-path> [--top N] [--threshold FLOAT]
+cull similar <image-path> [--top N] [--threshold FLOAT]
 ```
 
 Find images in the library visually similar to the given image (cosine similarity on CLIP embeddings).
@@ -99,7 +99,7 @@ Same output format as `search`.
 #### `contact-sheet` — Generate contact sheet
 
 ```bash
-imageview contact-sheet <folder|collection-name> [OPTIONS] --output <path.png>
+cull contact-sheet <folder|collection-name> [OPTIONS] --output <path.png>
 ```
 
 Renders a grid of thumbnails as a single image. The flagship automation command.
@@ -119,14 +119,14 @@ Renders a grid of thumbnails as a single image. The flagship automation command.
 | `--title` | | Optional title rendered at top |
 
 ```bash
-imageview contact-sheet ./shoot-042 --columns 8 --size 150x150 --labels metadata --output proof.png
-imageview contact-sheet favorites --filter-stars 4 --output best-of.jpg
+cull contact-sheet ./shoot-042 --columns 8 --size 150x150 --labels metadata --output proof.png
+cull contact-sheet favorites --filter-stars 4 --output best-of.jpg
 ```
 
 #### `export` — Batch export
 
 ```bash
-imageview export <folder|collection> [OPTIONS] --output <dir>
+cull export <folder|collection> [OPTIONS] --output <dir>
 ```
 
 Export images with optional format conversion and resizing.
@@ -143,7 +143,7 @@ Export images with optional format conversion and resizing.
 #### `resize` — Batch resize
 
 ```bash
-imageview resize <path|glob> --width <W> [--height <H>] [--output <dir>]
+cull resize <path|glob> --width <W> [--height <H>] [--output <dir>]
 ```
 
 Resize images. If only width or height is given, aspect ratio is preserved.
@@ -158,7 +158,7 @@ Resize images. If only width or height is given, aspect ratio is preserved.
 #### `convert` — Batch format conversion
 
 ```bash
-imageview convert <path|glob> --format <fmt> [--quality <Q>] [--output <dir>]
+cull convert <path|glob> --format <fmt> [--quality <Q>] [--output <dir>]
 ```
 
 Convert image format. Supports all formats the app can read.
@@ -166,20 +166,20 @@ Convert image format. Supports all formats the app can read.
 #### `metadata` — Read metadata
 
 ```bash
-imageview metadata <path> [--format json|yaml|table]
+cull metadata <path> [--format json|yaml|table]
 ```
 
 Dump EXIF, IPTC, XMP as structured data. Default output is JSON.
 
 ```bash
-imageview metadata DSC_4021.jpg
+cull metadata DSC_4021.jpg
 # {"camera": "Nikon Z6III", "lens": "24-70mm f/2.8", "focal_length": "35mm", ...}
 ```
 
 #### `rate` — Set star rating
 
 ```bash
-imageview rate <path|glob> --stars <0-5>
+cull rate <path|glob> --stars <0-5>
 ```
 
 Set star rating in the library database. `--stars 0` clears the rating.
@@ -187,20 +187,20 @@ Set star rating in the library database. `--stars 0` clears the rating.
 #### `accept` / `reject` / `undecide` — Set curation status
 
 ```bash
-imageview accept <path|glob>
-imageview reject <path|glob>
-imageview undecide <path|glob>
+cull accept <path|glob>
+cull reject <path|glob>
+cull undecide <path|glob>
 ```
 
 #### `collection` — Manage collections
 
 ```bash
-imageview collection create <name>
-imageview collection add <name> <path|glob...>
-imageview collection remove <name> <path|glob...>
-imageview collection list [name]
-imageview collection delete <name>
-imageview collection export <name> --output <dir> [--format ...] [--resize ...]
+cull collection create <name>
+cull collection add <name> <path|glob...>
+cull collection remove <name> <path|glob...>
+cull collection list [name]
+cull collection delete <name>
+cull collection export <name> --output <dir> [--format ...] [--resize ...]
 ```
 
 `collection list` with no name lists all collections. With a name, lists images in that collection.
@@ -208,7 +208,7 @@ imageview collection export <name> --output <dir> [--format ...] [--resize ...]
 #### `detect` — Object detection
 
 ```bash
-imageview detect <path|glob> [--model yolo|florence] [--threshold FLOAT]
+cull detect <path|glob> [--model yolo|florence] [--threshold FLOAT]
 ```
 
 Run object detection. Output: JSON array of `{"path", "objects": [{"label", "confidence", "bbox"}]}`.
@@ -216,7 +216,7 @@ Run object detection. Output: JSON array of `{"path", "objects": [{"label", "con
 #### `embed` — Generate embeddings
 
 ```bash
-imageview embed <path|folder> [--provider clip|gemini|dinov2] [--force]
+cull embed <path|folder> [--provider clip|gemini|dinov2] [--force]
 ```
 
 Generate or regenerate vector embeddings for images.
@@ -229,7 +229,7 @@ Generate or regenerate vector embeddings for images.
 #### `serve` — MCP server
 
 ```bash
-imageview serve [--transport stdio|sse] [--port PORT]
+cull serve [--transport stdio|sse] [--port PORT]
 ```
 
 Start the MCP (Model Context Protocol) server. Default transport is `stdio` for agent piping.
@@ -237,15 +237,15 @@ Start the MCP (Model Context Protocol) server. Default transport is `stdio` for 
 #### `pipe` — Stdin/stdout pipeline
 
 ```bash
-imageview pipe [ACTION-FLAGS]
+cull pipe [ACTION-FLAGS]
 ```
 
 Read file paths from stdin (one per line), apply the specified action, write results to stdout. Composable with Unix tools.
 
 ```bash
-find . -name "*.png" | imageview pipe --resize 800x0 --format webp --output ./web/
-cat paths.txt | imageview pipe --rate --stars 5
-find . -name "*.jpg" | imageview pipe --detect --json > detections.json
+find . -name "*.png" | cull pipe --resize 800x0 --format webp --output ./web/
+cat paths.txt | cull pipe --rate --stars 5
+find . -name "*.jpg" | cull pipe --detect --json > detections.json
 ```
 
 Action flags mirror the subcommands: `--resize WxH`, `--format fmt`, `--detect`, `--embed`, `--metadata`, `--rate --stars N`, `--accept`, `--reject`.
@@ -254,7 +254,7 @@ Action flags mirror the subcommands: `--resize WxH`, `--format fmt`, `--detect`,
 
 ## URL Scheme
 
-Scheme: `imageview://`
+Scheme: `cull://`
 
 The host portion is the action verb. Parameters are query string key-value pairs. Every CLI subcommand maps 1:1 to a URL scheme action.
 
@@ -262,18 +262,18 @@ The host portion is the action verb. Parameters are query string key-value pairs
 
 | CLI | URL Scheme |
 |-----|-----------|
-| `imageview open ~/photo.jpg --view loupe` | `imageview://open?path=~/photo.jpg&view=loupe` |
-| `imageview import ~/photos --recursive` | `imageview://import?folder=~/photos&recursive=true` |
-| `imageview search "sunset"` | `imageview://search?q=sunset` |
-| `imageview similar ~/ref.jpg --top 5` | `imageview://similar?path=~/ref.jpg&top=5` |
-| `imageview contact-sheet ~/folder -o out.png` | `imageview://contact-sheet?folder=~/folder&output=out.png` |
-| `imageview export faves --format webp` | `imageview://export?collection=faves&format=webp` |
-| `imageview rate ~/img.jpg --stars 4` | `imageview://rate?path=~/img.jpg&stars=4` |
-| `imageview accept ~/img.jpg` | `imageview://accept?path=~/img.jpg` |
-| `imageview collection create picks` | `imageview://collection/create?name=picks` |
-| `imageview collection add picks ~/a.jpg` | `imageview://collection/add?name=picks&paths=~/a.jpg` |
-| `imageview detect ~/img.jpg` | `imageview://detect?path=~/img.jpg` |
-| `imageview embed ~/photos` | `imageview://embed?folder=~/photos` |
+| `cull open ~/photo.jpg --view loupe` | `cull://open?path=~/photo.jpg&view=loupe` |
+| `cull import ~/photos --recursive` | `cull://import?folder=~/photos&recursive=true` |
+| `cull search "sunset"` | `cull://search?q=sunset` |
+| `cull similar ~/ref.jpg --top 5` | `cull://similar?path=~/ref.jpg&top=5` |
+| `cull contact-sheet ~/folder -o out.png` | `cull://contact-sheet?folder=~/folder&output=out.png` |
+| `cull export faves --format webp` | `cull://export?collection=faves&format=webp` |
+| `cull rate ~/img.jpg --stars 4` | `cull://rate?path=~/img.jpg&stars=4` |
+| `cull accept ~/img.jpg` | `cull://accept?path=~/img.jpg` |
+| `cull collection create picks` | `cull://collection/create?name=picks` |
+| `cull collection add picks ~/a.jpg` | `cull://collection/add?name=picks&paths=~/a.jpg` |
+| `cull detect ~/img.jpg` | `cull://detect?path=~/img.jpg` |
+| `cull embed ~/photos` | `cull://embed?folder=~/photos` |
 
 ### URL Parameters
 
@@ -297,21 +297,21 @@ An agent curating AI-generated images:
 
 ```bash
 # Import a batch of generated images
-imageview import ~/generations/run-042 --recursive
+cull import ~/generations/run-042 --recursive
 
 # Find the best sunset images
-imageview search "dramatic sunset, warm colors" --top 20 --json | jq -r '.[].path'
+cull search "dramatic sunset, warm colors" --top 20 --json | jq -r '.[].path'
 
 # Auto-rate based on detection results
 for img in ~/generations/run-042/*.png; do
-    objects=$(imageview detect "$img" --json | jq '.objects | length')
+    objects=$(cull detect "$img" --json | jq '.objects | length')
     if [ "$objects" -gt 0 ]; then
-        imageview rate "$img" --stars 3
+        cull rate "$img" --stars 3
     fi
 done
 
 # Create a proof sheet for review
-imageview contact-sheet ~/generations/run-042 \
+cull contact-sheet ~/generations/run-042 \
     --columns 8 --filter-stars 3 --output ~/proofs/run-042.png
 ```
 
@@ -319,23 +319,23 @@ imageview contact-sheet ~/generations/run-042 \
 
 ```bash
 # Convert all PNGs in a tree to WebP at 80% quality, preserving structure
-find ~/assets -name "*.png" | imageview pipe --format webp --quality 80 --output ~/assets-web/
+find ~/assets -name "*.png" | cull pipe --format webp --quality 80 --output ~/assets-web/
 
 # Resize for social media
-find . -name "*.jpg" | imageview pipe --resize 1200x0 --output ./social/
+find . -name "*.jpg" | cull pipe --resize 1200x0 --output ./social/
 ```
 
 ### 3. Contact sheet from folder
 
 ```bash
 # Quick proof sheet
-imageview contact-sheet ./photos --columns 6 --output overview.png
+cull contact-sheet ./photos --columns 6 --output overview.png
 
 # Film strip (single row, wide)
-imageview contact-sheet ./frames --columns 24 --size 120x80 --gap 2 --output strip.png
+cull contact-sheet ./frames --columns 24 --size 120x80 --gap 2 --output strip.png
 
 # Curated best-of with metadata labels
-imageview contact-sheet my-collection \
+cull contact-sheet my-collection \
     --filter-stars 4 \
     --labels metadata \
     --title "Best of 2026" \
@@ -347,44 +347,44 @@ imageview contact-sheet my-collection \
 Create a macOS Shortcut that accepts image files from the share sheet:
 
 1. **Receive input**: Files (images)
-2. **Run Shell Script**: `imageview import "$@" && imageview contact-sheet imported --output ~/Desktop/sheet.png`
+2. **Run Shell Script**: `cull import "$@" && cull contact-sheet imported --output ~/Desktop/sheet.png`
 3. **Open File**: `~/Desktop/sheet.png`
 
 Or use URL scheme directly via "Open URL" action:
 
 ```
-imageview://import?folder=/path/to/files
-imageview://contact-sheet?folder=/path/to/files&columns=4&output=~/Desktop/sheet.png
+cull://import?folder=/path/to/files
+cull://contact-sheet?folder=/path/to/files&columns=4&output=~/Desktop/sheet.png
 ```
 
 ### 5. AppleScript
 
 ```applescript
--- Open a folder in ImageView
-do shell script "/Applications/ImageView.app/Contents/MacOS/imageview open ~/photos --view grid"
+-- Open a folder in Cull
+do shell script "/Applications/Cull.app/Contents/MacOS/cull open ~/photos --view grid"
 
 -- Generate a contact sheet
-do shell script "/Applications/ImageView.app/Contents/MacOS/imageview contact-sheet ~/photos --columns 5 --output /tmp/proof.png"
+do shell script "/Applications/Cull.app/Contents/MacOS/cull contact-sheet ~/photos --columns 5 --output /tmp/proof.png"
 
 -- Get metadata
-set meta to do shell script "/Applications/ImageView.app/Contents/MacOS/imageview metadata ~/photos/DSC_001.jpg"
+set meta to do shell script "/Applications/Cull.app/Contents/MacOS/cull metadata ~/photos/DSC_001.jpg"
 ```
 
 ### 6. MCP server for agents
 
 ```bash
 # Start MCP server on stdio (for Claude Code, Cursor, etc.)
-imageview serve
+cull serve
 
 # The MCP server exposes all CLI operations as tools:
-# - imageview_import(folder, recursive)
-# - imageview_search(query, top)
-# - imageview_similar(path, top)
-# - imageview_contact_sheet(source, columns, output, ...)
-# - imageview_rate(path, stars)
-# - imageview_detect(path)
-# - imageview_collection_*(...)
-# - imageview_export(...)
+# - cull_import(folder, recursive)
+# - cull_search(query, top)
+# - cull_similar(path, top)
+# - cull_contact_sheet(source, columns, output, ...)
+# - cull_rate(path, stars)
+# - cull_detect(path)
+# - cull_collection_*(...)
+# - cull_export(...)
 ```
 
 ### 7. Watch folder (combine with fswatch)
@@ -392,9 +392,9 @@ imageview serve
 ```bash
 # Auto-import new images dropped into a folder
 fswatch -0 ~/incoming-images | while IFS= read -r -d '' file; do
-    imageview import "$file"
-    imageview embed "$file" --provider clip
-    imageview detect "$file"
+    cull import "$file"
+    cull embed "$file" --provider clip
+    cull detect "$file"
 done
 ```
 
@@ -408,7 +408,7 @@ done
 
 3. **JSON by default for machines**: `--json` flag for structured output. Human-readable table format is the default for interactive use.
 
-4. **Headless by default for subcommands**: Running `imageview contact-sheet` does not open a window. Running `imageview open` does.
+4. **Headless by default for subcommands**: Running `cull contact-sheet` does not open a window. Running `cull open` does.
 
 5. **Paths are first-class**: Commands accept individual files, globs, folders, and collection names. The app resolves what you mean.
 

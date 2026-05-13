@@ -1,10 +1,10 @@
-use tauri::State;
-use crate::AppState;
-use crate::db_core::smart_collections::SmartCollection;
 use crate::db_core::models::ImageWithFile;
 use crate::db_core::nl_parser::parse_query;
-use crate::services::ServiceContext;
+use crate::db_core::smart_collections::SmartCollection;
 use crate::services::curation as svc;
+use crate::services::ServiceContext;
+use crate::AppState;
+use tauri::State;
 
 #[tauri::command]
 pub async fn create_smart_collection(
@@ -36,10 +36,7 @@ pub async fn evaluate_smart_collection(
 }
 
 #[tauri::command]
-pub async fn delete_smart_collection(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
+pub async fn delete_smart_collection(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let ctx = ServiceContext::from_app_state(&state, None);
     svc::delete_smart_collection(&ctx, &id).map_err(|e| e.to_string())
 }
@@ -64,9 +61,9 @@ pub async fn parse_nl_query(query: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn backfill_image_metadata(
-    state: State<'_, AppState>,
-) -> Result<u32, String> {
-    state.db.backfill_image_metadata()
+pub async fn backfill_image_metadata(state: State<'_, AppState>) -> Result<u32, String> {
+    state
+        .db
+        .backfill_image_metadata()
         .map_err(|e| e.to_string())
 }

@@ -1,8 +1,8 @@
-use tauri::{AppHandle, Emitter, State};
-use crate::AppState;
 use crate::db_core::models::ImageWithFile;
-use crate::services::{Pagination, ServiceContext};
 use crate::services::library as svc;
+use crate::services::{Pagination, ServiceContext};
+use crate::AppState;
+use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
 pub async fn list_folders(state: State<'_, AppState>) -> Result<Vec<(String, u32)>, String> {
@@ -29,16 +29,15 @@ pub async fn list_images(
     offset: u32,
 ) -> Result<Vec<ImageWithFile>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::list_images(&ctx, Pagination::clamped(offset, limit))
-        .map_err(|e| e.to_string())
+    svc::list_images(&ctx, Pagination::clamped(offset, limit)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn delete_folder(
-    state: State<'_, AppState>,
-    folder: String,
-) -> Result<u32, String> {
-    state.db.delete_images_by_folder(&folder).map_err(|e| e.to_string())
+pub async fn delete_folder(state: State<'_, AppState>, folder: String) -> Result<u32, String> {
+    state
+        .db
+        .delete_images_by_folder(&folder)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -50,8 +49,13 @@ pub async fn list_images_filtered(
     offset: u32,
 ) -> Result<Vec<ImageWithFile>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::list_images_filtered(&ctx, min_width, min_height, Pagination::clamped(offset, limit))
-        .map_err(|e| e.to_string())
+    svc::list_images_filtered(
+        &ctx,
+        min_width,
+        min_height,
+        Pagination::clamped(offset, limit),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -87,15 +91,21 @@ pub async fn trash_images(
     let mut trashed = 0u32;
     for image_id in &image_ids {
         let id_refs: Vec<&str> = vec![image_id.as_str()];
-        let found = state.db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
+        let found = state
+            .db
+            .get_images_by_ids(&id_refs)
+            .map_err(|e| e.to_string())?;
         if let Some(img) = found.first() {
             #[cfg(target_os = "macos")]
             {
                 let status = std::process::Command::new("osascript")
-                    .args(["-e", &format!(
-                        "tell application \"Finder\" to delete POSIX file \"{}\"",
-                        img.path.replace('"', "\\\"")
-                    )])
+                    .args([
+                        "-e",
+                        &format!(
+                            "tell application \"Finder\" to delete POSIX file \"{}\"",
+                            img.path.replace('"', "\\\"")
+                        ),
+                    ])
                     .output();
                 if let Ok(output) = status {
                     if output.status.success() {
@@ -131,7 +141,10 @@ pub async fn delete_images_permanently(
     let mut deleted = 0u32;
     for image_id in &image_ids {
         let id_refs: Vec<&str> = vec![image_id.as_str()];
-        let found = state.db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
+        let found = state
+            .db
+            .get_images_by_ids(&id_refs)
+            .map_err(|e| e.to_string())?;
         if let Some(img) = found.first() {
             let path = std::path::Path::new(&img.path);
             if path.exists() && std::fs::remove_file(path).is_ok() {
@@ -157,10 +170,17 @@ pub async fn set_app_setting(
     key: String,
     value: String,
 ) -> Result<(), String> {
-    state.db.set_setting(&key, &value).map_err(|e| e.to_string())?;
+    state
+        .db
+        .set_setting(&key, &value)
+        .map_err(|e| e.to_string())?;
     if key == "module_raw" {
         let enabled = value == "true";
-        state.file_watcher.lock().module_raw.store(enabled, std::sync::atomic::Ordering::Relaxed);
+        state
+            .file_watcher
+            .lock()
+            .module_raw
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
     Ok(())
 }
@@ -180,7 +200,8 @@ pub async fn check_library_health(
     let db = &state.db;
     let app_data_dir = &state.app_data_dir;
 
-    let auto_purge = db.get_setting("auto_purge_missing")
+    let auto_purge = db
+        .get_setting("auto_purge_missing")
         .unwrap_or(None)
         .unwrap_or_else(|| "true".to_string());
     let auto_purge = auto_purge == "true";
@@ -205,24 +226,30 @@ pub async fn check_library_health(
         }
 
         if i % 100 == 0 {
-            let _ = app.emit("health-check-progress", serde_json::json!({
-                "current": i + 1, "total": total
-            }));
+            let _ = app.emit(
+                "health-check-progress",
+                serde_json::json!({
+                    "current": i + 1, "total": total
+                }),
+            );
         }
     }
 
     // Phase 2: purge records that have been missing longer than the threshold
     if auto_purge {
-        let purge_days: i64 = db.get_setting("purge_after_days")
-            .ok().flatten()
+        let purge_days: i64 = db
+            .get_setting("purge_after_days")
+            .ok()
+            .flatten()
             .and_then(|v| v.parse().ok())
             .unwrap_or(30);
 
         let threshold = format!("-{} days", purge_days);
         let ids_to_purge: Vec<String> = {
             let conn = db.conn.lock();
-            let mut stmt = conn.prepare(
-                "SELECT DISTINCT i.id FROM images i
+            let mut stmt = conn
+                .prepare(
+                    "SELECT DISTINCT i.id FROM images i
                  WHERE NOT EXISTS (
                      SELECT 1 FROM image_files f
                      WHERE f.image_id = i.id AND f.missing_at IS NULL
@@ -231,9 +258,11 @@ pub async fn check_library_health(
                      SELECT 1 FROM image_files f
                      WHERE f.image_id = i.id
                      AND f.missing_at > datetime('now', ?1)
-                 )"
-            ).map_err(|e| e.to_string())?;
-            let rows = stmt.query_map(rusqlite::params![threshold], |row| row.get::<_, String>(0))
+                 )",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(rusqlite::params![threshold], |row| row.get::<_, String>(0))
                 .map_err(|e| e.to_string())?;
             let mut result = Vec::new();
             for row in rows {
@@ -253,7 +282,8 @@ pub async fn check_library_health(
                 let _ = std::fs::remove_file(&thumb);
             }
             for &size in &crate::db_core::thumbnails::THUMBNAIL_SIZES {
-                let sized = crate::db_core::thumbnails::sized_thumbnail_path(app_data_dir, id, size);
+                let sized =
+                    crate::db_core::thumbnails::sized_thumbnail_path(app_data_dir, id, size);
                 if sized.exists() {
                     let _ = std::fs::remove_file(&sized);
                 }
@@ -262,5 +292,9 @@ pub async fn check_library_health(
         }
     }
 
-    Ok(LibraryHealthResult { purged, missing_sources, to_regenerate })
+    Ok(LibraryHealthResult {
+        purged,
+        missing_sources,
+        to_regenerate,
+    })
 }

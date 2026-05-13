@@ -1,12 +1,12 @@
 // Copyright (c) 2025-present Gleb Kalinin. Architecture and design by author.
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
-use rusqlite::{Connection, Result, params, OptionalExtension};
-use std::path::Path;
-use std::sync::Arc;
-use parking_lot::Mutex;
 use super::models::*;
 use super::smart_collections::{FilterNode, SmartCollection};
+use parking_lot::Mutex;
+use rusqlite::{params, Connection, OptionalExtension, Result};
+use std::path::Path;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct Database {
@@ -16,7 +16,9 @@ pub struct Database {
 impl Database {
     pub fn open(db_path: &Path) -> Result<Self> {
         let conn = Connection::open(db_path)?;
-        let db = Database { conn: Arc::new(Mutex::new(conn)) };
+        let db = Database {
+            conn: Arc::new(Mutex::new(conn)),
+        };
         db.run_migrations()?;
         Ok(db)
     }
@@ -30,9 +32,11 @@ impl Database {
         self.seed_preset_collections()?;
         self.migrate_lineage_tables()?;
         self.migrate_mcp_tables()?;
+        self.migrate_model_processing()?;
         self.migrate_generation_runs()?;
         self.migrate_undo_tables()?;
         self.migrate_sessions()?;
+        self.migrate_session_events()?;
         self.migrate_library_roots()?;
         self.migrate_image_file_stat_columns()?;
         self.migrate_raw_metadata()?;
@@ -66,7 +70,7 @@ impl Database {
                 model TEXT,
                 response_status INTEGER,
                 jurisdiction TEXT
-            );"
+            );",
         )?;
         Ok(())
     }
@@ -78,7 +82,7 @@ impl Database {
                 id TEXT PRIMARY KEY,
                 path TEXT NOT NULL UNIQUE,
                 added_at TEXT NOT NULL
-            );"
+            );",
         )?;
         Ok(())
     }
@@ -116,8 +120,8 @@ impl Database {
         for (name, typ) in &columns {
             let sql = format!("ALTER TABLE images ADD COLUMN {} {}", name, typ);
             match conn.execute(&sql, []) {
-                Ok(_) => {},
-                Err(e) if e.to_string().contains("duplicate column") => {},
+                Ok(_) => {}
+                Err(e) if e.to_string().contains("duplicate column") => {}
                 Err(e) => return Err(e),
             }
         }
@@ -133,8 +137,8 @@ impl Database {
         for (name, typ) in &project_columns {
             let sql = format!("ALTER TABLE projects ADD COLUMN {} {}", name, typ);
             match conn.execute(&sql, []) {
-                Ok(_) => {},
-                Err(e) if e.to_string().contains("duplicate column") => {},
+                Ok(_) => {}
+                Err(e) if e.to_string().contains("duplicate column") => {}
                 Err(e) => return Err(e),
             }
         }
@@ -156,28 +160,116 @@ impl Database {
         }
 
         let presets: Vec<(&str, &str, i32)> = vec![
-            ("5 Stars", r#"{"type":"rule","field":"rating","op":"eq","value":5.0}"#, 1),
-            ("4 Stars+", r#"{"type":"rule","field":"rating","op":"gte","value":4.0}"#, 2),
-            ("Picks", r#"{"type":"rule","field":"decision","op":"eq","value":"accept"}"#, 3),
-            ("Rejects", r#"{"type":"rule","field":"decision","op":"eq","value":"reject"}"#, 4),
-            ("Unrated", r#"{"type":"group","op":"and","children":[{"type":"rule","field":"rating","op":"eq","value":0.0},{"type":"rule","field":"decision","op":"eq","value":"undecided"}]}"#, 5),
-            ("Recent Imports", r#"{"type":"rule","field":"imported_at","op":"last_n_days","value":7.0}"#, 6),
-            ("Imported Today", r#"{"type":"rule","field":"imported_at","op":"last_n_days","value":1.0}"#, 7),
-            ("This Week", r#"{"type":"rule","field":"imported_at","op":"this_week","value":true}"#, 8),
-            ("This Month", r#"{"type":"rule","field":"imported_at","op":"this_month","value":true}"#, 9),
-            ("Landscape", r#"{"type":"rule","field":"orientation","op":"eq","value":"landscape"}"#, 10),
-            ("Portrait", r#"{"type":"rule","field":"orientation","op":"eq","value":"portrait"}"#, 11),
-            ("Square", r#"{"type":"rule","field":"orientation","op":"eq","value":"square"}"#, 12),
-            ("Panoramic", r#"{"type":"rule","field":"aspect_ratio","op":"gt","value":2.0}"#, 13),
-            ("PNG", r#"{"type":"rule","field":"format","op":"eq","value":"png"}"#, 14),
-            ("WebP", r#"{"type":"rule","field":"format","op":"eq","value":"webp"}"#, 15),
-            ("Large (>4K)", r#"{"type":"rule","field":"width","op":"gte","value":3840.0}"#, 16),
-            ("Small (<1024px)", r#"{"type":"rule","field":"width","op":"lt","value":1024.0}"#, 17),
-            ("AI Generated", r#"{"type":"rule","field":"is_ai_generated","op":"eq","value":true}"#, 18),
-            ("Red Label", r#"{"type":"rule","field":"color_label","op":"eq","value":"red"}"#, 19),
-            ("Green Label", r#"{"type":"rule","field":"color_label","op":"eq","value":"green"}"#, 20),
-            ("Blue Label", r#"{"type":"rule","field":"color_label","op":"eq","value":"blue"}"#, 21),
-            ("Yellow Label", r#"{"type":"rule","field":"color_label","op":"eq","value":"yellow"}"#, 22),
+            (
+                "5 Stars",
+                r#"{"type":"rule","field":"rating","op":"eq","value":5.0}"#,
+                1,
+            ),
+            (
+                "4 Stars+",
+                r#"{"type":"rule","field":"rating","op":"gte","value":4.0}"#,
+                2,
+            ),
+            (
+                "Picks",
+                r#"{"type":"rule","field":"decision","op":"eq","value":"accept"}"#,
+                3,
+            ),
+            (
+                "Rejects",
+                r#"{"type":"rule","field":"decision","op":"eq","value":"reject"}"#,
+                4,
+            ),
+            (
+                "Unrated",
+                r#"{"type":"group","op":"and","children":[{"type":"rule","field":"rating","op":"eq","value":0.0},{"type":"rule","field":"decision","op":"eq","value":"undecided"}]}"#,
+                5,
+            ),
+            (
+                "Recent Imports",
+                r#"{"type":"rule","field":"imported_at","op":"last_n_days","value":7.0}"#,
+                6,
+            ),
+            (
+                "Imported Today",
+                r#"{"type":"rule","field":"imported_at","op":"last_n_days","value":1.0}"#,
+                7,
+            ),
+            (
+                "This Week",
+                r#"{"type":"rule","field":"imported_at","op":"this_week","value":true}"#,
+                8,
+            ),
+            (
+                "This Month",
+                r#"{"type":"rule","field":"imported_at","op":"this_month","value":true}"#,
+                9,
+            ),
+            (
+                "Landscape",
+                r#"{"type":"rule","field":"orientation","op":"eq","value":"landscape"}"#,
+                10,
+            ),
+            (
+                "Portrait",
+                r#"{"type":"rule","field":"orientation","op":"eq","value":"portrait"}"#,
+                11,
+            ),
+            (
+                "Square",
+                r#"{"type":"rule","field":"orientation","op":"eq","value":"square"}"#,
+                12,
+            ),
+            (
+                "Panoramic",
+                r#"{"type":"rule","field":"aspect_ratio","op":"gt","value":2.0}"#,
+                13,
+            ),
+            (
+                "PNG",
+                r#"{"type":"rule","field":"format","op":"eq","value":"png"}"#,
+                14,
+            ),
+            (
+                "WebP",
+                r#"{"type":"rule","field":"format","op":"eq","value":"webp"}"#,
+                15,
+            ),
+            (
+                "Large (>4K)",
+                r#"{"type":"rule","field":"width","op":"gte","value":3840.0}"#,
+                16,
+            ),
+            (
+                "Small (<1024px)",
+                r#"{"type":"rule","field":"width","op":"lt","value":1024.0}"#,
+                17,
+            ),
+            (
+                "AI Generated",
+                r#"{"type":"rule","field":"is_ai_generated","op":"eq","value":true}"#,
+                18,
+            ),
+            (
+                "Red Label",
+                r#"{"type":"rule","field":"color_label","op":"eq","value":"red"}"#,
+                19,
+            ),
+            (
+                "Green Label",
+                r#"{"type":"rule","field":"color_label","op":"eq","value":"green"}"#,
+                20,
+            ),
+            (
+                "Blue Label",
+                r#"{"type":"rule","field":"color_label","op":"eq","value":"blue"}"#,
+                21,
+            ),
+            (
+                "Yellow Label",
+                r#"{"type":"rule","field":"color_label","op":"eq","value":"yellow"}"#,
+                22,
+            ),
         ];
 
         for (name, filter, order) in presets {
@@ -210,7 +302,7 @@ impl Database {
                 source TEXT,
                 image_count INTEGER,
                 collection_id TEXT
-            );"
+            );",
         )?;
 
         let image_columns = vec![
@@ -228,7 +320,8 @@ impl Database {
 
     fn migrate_mcp_tables(&self) -> Result<()> {
         let conn = self.conn.lock();
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             CREATE TABLE IF NOT EXISTS mcp_tokens (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -259,7 +352,8 @@ impl Database {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-        ")?;
+        ",
+        )?;
         Ok(())
     }
 
@@ -286,7 +380,7 @@ impl Database {
                 backup_path TEXT NOT NULL,
                 file_hash TEXT,
                 created_at TEXT NOT NULL
-            );"
+            );",
         )?;
         Ok(())
     }
@@ -308,10 +402,111 @@ impl Database {
                 raw_metadata_json TEXT,
                 created_at TEXT,
                 imported_at TEXT NOT NULL
-            );"
+            );",
         )?;
-        let sql = "ALTER TABLE images ADD COLUMN generation_run_id TEXT REFERENCES generation_runs(id)";
+        let sql =
+            "ALTER TABLE images ADD COLUMN generation_run_id TEXT REFERENCES generation_runs(id)";
         let _ = conn.execute(sql, []);
+        Ok(())
+    }
+
+    fn migrate_session_events(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS session_events (
+                id TEXT PRIMARY KEY,
+                session_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+                event_type TEXT NOT NULL,
+                actor_type TEXT NOT NULL CHECK (actor_type IN ('user', 'agent', 'system')),
+                actor_id TEXT,
+                subject_type TEXT,
+                subject_id TEXT,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS session_events_session_created_idx ON session_events(session_id, created_at);
+            CREATE INDEX IF NOT EXISTS session_events_type_created_idx ON session_events(event_type, created_at);
+            CREATE INDEX IF NOT EXISTS session_events_subject_idx ON session_events(subject_type, subject_id);",
+        )?;
+        Ok(())
+    }
+
+    fn migrate_model_processing(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS model_profiles (
+                id TEXT PRIMARY KEY,
+                slug TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                task TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                runtime TEXT NOT NULL,
+                source TEXT NOT NULL,
+                privacy_class TEXT NOT NULL DEFAULT 'local',
+                config_json TEXT NOT NULL DEFAULT '{}',
+                license_class TEXT NOT NULL DEFAULT 'unknown',
+                license_acknowledged_at TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS model_runs (
+                id TEXT PRIMARY KEY,
+                job_id TEXT,
+                parent_run_id TEXT REFERENCES model_runs(id),
+                profile_id TEXT REFERENCES model_profiles(id),
+                task TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                model_revision TEXT,
+                status TEXT NOT NULL,
+                input_scope_json TEXT NOT NULL,
+                params_json TEXT NOT NULL DEFAULT '{}',
+                output_summary_json TEXT NOT NULL DEFAULT '{}',
+                cost_estimate_usd REAL,
+                cost_actual_usd REAL,
+                error TEXT,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS model_run_items (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL REFERENCES model_runs(id) ON DELETE CASCADE,
+                image_id TEXT REFERENCES images(id),
+                input_asset_uri TEXT NOT NULL,
+                input_hash TEXT,
+                status TEXT NOT NULL,
+                output_ref_kind TEXT,
+                output_ref_id TEXT,
+                audit_payload_json TEXT,
+                cost_usd REAL,
+                attempt_count INTEGER NOT NULL DEFAULT 1,
+                error TEXT,
+                started_at TEXT,
+                completed_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS model_runs_job_idx ON model_runs(job_id);
+            CREATE INDEX IF NOT EXISTS model_runs_status_idx ON model_runs(status);
+            CREATE INDEX IF NOT EXISTS model_runs_parent_idx ON model_runs(parent_run_id);
+            CREATE INDEX IF NOT EXISTS model_run_items_run_status_idx ON model_run_items(run_id, status);
+            CREATE INDEX IF NOT EXISTS model_run_items_image_run_idx ON model_run_items(image_id, run_id);
+            CREATE INDEX IF NOT EXISTS model_run_items_input_hash_idx ON model_run_items(input_hash);",
+        )?;
+        let sql = "ALTER TABLE embeddings ADD COLUMN model_run_id TEXT";
+        match conn.execute(sql, []) {
+            Ok(_) => {}
+            Err(e) if e.to_string().contains("duplicate column") => {}
+            Err(e) => return Err(e),
+        }
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS embeddings_model_run_idx ON embeddings(model_run_id)",
+            [],
+        )?;
         Ok(())
     }
 
@@ -334,21 +529,23 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT job_id, kind, status, current, total, message, error, created_at, updated_at
              FROM mcp_jobs WHERE status IN ('completed', 'failed', 'cancelled')
-             ORDER BY updated_at DESC LIMIT 100"
+             ORDER BY updated_at DESC LIMIT 100",
         )?;
-        let jobs = stmt.query_map([], |row| {
-            Ok(crate::services::jobs::JobSnapshot {
-                job_id: row.get(0)?,
-                kind: row.get(1)?,
-                status: row.get(2)?,
-                current: row.get(3)?,
-                total: row.get(4)?,
-                message: row.get(5)?,
-                error: row.get(6)?,
-                created_at: row.get(7)?,
-                updated_at: row.get(8)?,
-            })
-        })?.collect::<Result<Vec<_>>>()?;
+        let jobs = stmt
+            .query_map([], |row| {
+                Ok(crate::services::jobs::JobSnapshot {
+                    job_id: row.get(0)?,
+                    kind: row.get(1)?,
+                    status: row.get(2)?,
+                    current: row.get(3)?,
+                    total: row.get(4)?,
+                    message: row.get(5)?,
+                    error: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>>>()?;
         Ok(jobs)
     }
 
@@ -371,6 +568,118 @@ impl Database {
             params![now],
         )?;
         Ok(updated as u32)
+    }
+
+    pub fn insert_model_run(&self, run: &NewModelRun) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO model_runs (
+                id, job_id, parent_run_id, profile_id, task, provider, model_id,
+                model_revision, status, input_scope_json, params_json, output_summary_json,
+                cost_estimate_usd, cost_actual_usd, error, created_at, started_at, completed_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            params![
+                run.id,
+                run.job_id,
+                run.parent_run_id,
+                run.profile_id,
+                run.task,
+                run.provider,
+                run.model_id,
+                run.model_revision,
+                run.status,
+                run.input_scope_json,
+                run.params_json,
+                run.output_summary_json,
+                run.cost_estimate_usd,
+                run.cost_actual_usd,
+                run.error,
+                run.created_at,
+                run.started_at,
+                run.completed_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_model_run_terminal(
+        &self,
+        run_id: &str,
+        status: &str,
+        output_summary_json: &str,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE model_runs
+             SET status = ?2, output_summary_json = ?3, error = ?4, completed_at = ?5
+             WHERE id = ?1",
+            params![run_id, status, output_summary_json, error, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn insert_model_run_item(&self, item: &NewModelRunItem) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO model_run_items (
+                id, run_id, image_id, input_asset_uri, input_hash, status,
+                output_ref_kind, output_ref_id, audit_payload_json, cost_usd,
+                attempt_count, error, started_at, completed_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            params![
+                item.id,
+                item.run_id,
+                item.image_id,
+                item.input_asset_uri,
+                item.input_hash,
+                item.status,
+                item.output_ref_kind,
+                item.output_ref_id,
+                item.audit_payload_json,
+                item.cost_usd,
+                item.attempt_count,
+                item.error,
+                item.started_at,
+                item.completed_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_model_run(&self, run_id: &str) -> Result<Option<ModelRun>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT id, job_id, parent_run_id, profile_id, task, provider, model_id,
+                    model_revision, status, input_scope_json, params_json, output_summary_json,
+                    cost_estimate_usd, cost_actual_usd, error, created_at, started_at, completed_at
+             FROM model_runs WHERE id = ?1",
+            params![run_id],
+            |row| {
+                Ok(ModelRun {
+                    id: row.get(0)?,
+                    job_id: row.get(1)?,
+                    parent_run_id: row.get(2)?,
+                    profile_id: row.get(3)?,
+                    task: row.get(4)?,
+                    provider: row.get(5)?,
+                    model_id: row.get(6)?,
+                    model_revision: row.get(7)?,
+                    status: row.get(8)?,
+                    input_scope_json: row.get(9)?,
+                    params_json: row.get(10)?,
+                    output_summary_json: row.get(11)?,
+                    cost_estimate_usd: row.get(12)?,
+                    cost_actual_usd: row.get(13)?,
+                    error: row.get(14)?,
+                    created_at: row.get(15)?,
+                    started_at: row.get(16)?,
+                    completed_at: row.get(17)?,
+                })
+            },
+        )
+        .optional()
     }
 
     pub fn insert_image(&self, image: &Image) -> Result<()> {
@@ -432,7 +741,7 @@ impl Database {
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
              GROUP BY i.id
              ORDER BY i.imported_at DESC
-             LIMIT ?1 OFFSET ?2"
+             LIMIT ?1 OFFSET ?2",
         )?;
         let rows = stmt.query_map(params![limit, offset], |row| {
             let star: Option<u8> = row.get(9)?;
@@ -494,14 +803,14 @@ impl Database {
 
     pub fn list_folders(&self) -> Result<Vec<(String, u32)>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT f.path, f.image_id FROM image_files f WHERE f.missing_at IS NULL"
-        )?;
+        let mut stmt = conn
+            .prepare("SELECT f.path, f.image_id FROM image_files f WHERE f.missing_at IS NULL")?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
 
-        let mut folder_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        let mut folder_counts: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
         for row in rows {
             let (path, _) = row?;
             if let Some(parent) = std::path::Path::new(&path).parent() {
@@ -515,7 +824,12 @@ impl Database {
         Ok(result)
     }
 
-    pub fn list_images_by_folder(&self, folder: &str, limit: u32, offset: u32) -> Result<Vec<ImageWithFile>> {
+    pub fn list_images_by_folder(
+        &self,
+        folder: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<ImageWithFile>> {
         let conn = self.conn.lock();
         let pattern = format!("{}/%", folder);
         let mut stmt = conn.prepare(
@@ -529,7 +843,7 @@ impl Database {
              WHERE f.path LIKE ?1
              GROUP BY i.id
              ORDER BY i.imported_at DESC
-             LIMIT ?2 OFFSET ?3"
+             LIMIT ?2 OFFSET ?3",
         )?;
         let rows = stmt.query_map(params![pattern, limit, offset], |row| {
             let star: Option<u8> = row.get(9)?;
@@ -565,7 +879,13 @@ impl Database {
         rows.collect::<Result<Vec<_>>>()
     }
 
-    pub fn list_images_filtered(&self, min_width: Option<u32>, min_height: Option<u32>, limit: u32, offset: u32) -> Result<Vec<ImageWithFile>> {
+    pub fn list_images_filtered(
+        &self,
+        min_width: Option<u32>,
+        min_height: Option<u32>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<ImageWithFile>> {
         let conn = self.conn.lock();
         let mut sql = String::from(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
@@ -575,7 +895,7 @@ impl Database {
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE 1=1"
+             WHERE 1=1",
         );
         if let Some(w) = min_width {
             sql.push_str(&format!(" AND i.width >= {}", w));
@@ -641,11 +961,9 @@ impl Database {
              LEFT JOIN collection_items ci ON ci.collection_id = p.id
              WHERE (p.collection_type IS NULL OR p.collection_type = 'manual')
              GROUP BY p.id
-             ORDER BY p.created_at DESC"
+             ORDER BY p.created_at DESC",
         )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        })?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
         rows.collect::<Result<Vec<_>>>()
     }
 
@@ -678,7 +996,7 @@ impl Database {
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
              WHERE ci.collection_id = ?1
              GROUP BY i.id
-             ORDER BY ci.position ASC"
+             ORDER BY ci.position ASC",
         )?;
         let rows = stmt.query_map(params![collection_id], |row| {
             let star: Option<u8> = row.get(9)?;
@@ -716,7 +1034,10 @@ impl Database {
 
     pub fn delete_collection(&self, collection_id: &str) -> Result<()> {
         let conn = self.conn.lock();
-        conn.execute("DELETE FROM collection_items WHERE collection_id = ?1", params![collection_id])?;
+        conn.execute(
+            "DELETE FROM collection_items WHERE collection_id = ?1",
+            params![collection_id],
+        )?;
         conn.execute("DELETE FROM projects WHERE id = ?1", params![collection_id])?;
         Ok(())
     }
@@ -745,33 +1066,46 @@ impl Database {
     // ---- Embedding methods ----
 
     pub fn store_embedding(&self, image_id: &str, model_name: &str, vector: &[f32]) -> Result<()> {
+        self.store_embedding_with_model_run(image_id, model_name, vector, None)
+            .map(|_| ())
+    }
+
+    pub fn store_embedding_with_model_run(
+        &self,
+        image_id: &str,
+        model_name: &str,
+        vector: &[f32],
+        model_run_id: Option<&str>,
+    ) -> Result<String> {
         let conn = self.conn.lock();
         let bytes: Vec<u8> = vector.iter().flat_map(|f| f.to_le_bytes()).collect();
+        let embedding_id = uuid::Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT OR REPLACE INTO embeddings (id, image_id, model_name, vector, dims, dtype, normalized, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, 'float32', 1, ?6)",
+            "INSERT OR REPLACE INTO embeddings (id, image_id, model_name, model_run_id, vector, dims, dtype, normalized, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'float32', 1, ?7)",
             params![
-                uuid::Uuid::new_v4().to_string(),
+                embedding_id,
                 image_id,
                 model_name,
+                model_run_id,
                 bytes,
                 vector.len() as u32,
                 chrono::Utc::now().to_rfc3339(),
             ],
         )?;
-        Ok(())
+        Ok(embedding_id)
     }
 
     pub fn get_all_embeddings(&self, model_name: &str) -> Result<Vec<(String, Vec<f32>)>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT image_id, vector, dims FROM embeddings WHERE model_name = ?1"
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT image_id, vector, dims FROM embeddings WHERE model_name = ?1")?;
         let rows = stmt.query_map(params![model_name], |row| {
             let image_id: String = row.get(0)?;
             let bytes: Vec<u8> = row.get(1)?;
             let _dims: u32 = row.get(2)?;
-            let vector: Vec<f32> = bytes.chunks(4)
+            let vector: Vec<f32> = bytes
+                .chunks(4)
                 .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
                 .collect();
             Ok((image_id, vector))
@@ -779,12 +1113,20 @@ impl Database {
         rows.collect::<Result<Vec<_>>>()
     }
 
-    pub fn find_similar(&self, vector: &[f32], model_name: &str, top_k: usize) -> Result<Vec<(String, f32)>> {
+    pub fn find_similar(
+        &self,
+        vector: &[f32],
+        model_name: &str,
+        top_k: usize,
+    ) -> Result<Vec<(String, f32)>> {
         let all = self.get_all_embeddings(model_name)?;
-        let mut scores: Vec<(String, f32)> = all.iter().map(|(id, emb)| {
-            let score = cosine_similarity(vector, emb);
-            (id.clone(), score)
-        }).collect();
+        let mut scores: Vec<(String, f32)> = all
+            .iter()
+            .map(|(id, emb)| {
+                let score = cosine_similarity(vector, emb);
+                (id.clone(), score)
+            })
+            .collect();
         scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scores.truncate(top_k);
         Ok(scores)
@@ -819,11 +1161,12 @@ impl Database {
              AND f.image_id NOT IN (
                  SELECT image_id FROM image_files
                  WHERE path NOT LIKE ?1 AND missing_at IS NULL
-             )"
+             )",
         )?;
-        let image_ids: Vec<String> = stmt.query_map(params![pattern], |row| {
-            row.get(0)
-        })?.filter_map(|r| r.ok()).collect();
+        let image_ids: Vec<String> = stmt
+            .query_map(params![pattern], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
 
         let count = image_ids.len() as u32;
 
@@ -843,7 +1186,12 @@ impl Database {
 
     // ---- Vision metadata methods ----
 
-    pub fn store_vision_metadata(&self, image_id: &str, source: &str, fields: &std::collections::HashMap<String, String>) -> Result<()> {
+    pub fn store_vision_metadata(
+        &self,
+        image_id: &str,
+        source: &str,
+        fields: &std::collections::HashMap<String, String>,
+    ) -> Result<()> {
         let conn = self.conn.lock();
         for (key, value) in fields {
             conn.execute(
@@ -857,10 +1205,14 @@ impl Database {
     pub fn get_vision_metadata(&self, image_id: &str) -> Result<Vec<(String, String, String)>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT key, value, source FROM image_metadata WHERE image_id = ?1 ORDER BY key"
+            "SELECT key, value, source FROM image_metadata WHERE image_id = ?1 ORDER BY key",
         )?;
         let rows = stmt.query_map(params![image_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })?;
         rows.collect::<Result<Vec<_>>>()
     }
@@ -905,14 +1257,16 @@ impl Database {
 
     pub fn restore_or_move_file_by_hash(&self, sha256: &str, new_path: &str) -> Result<bool> {
         let conn = self.conn.lock();
-        let file_id: Option<String> = conn.query_row(
-            "SELECT f.id FROM image_files f
+        let file_id: Option<String> = conn
+            .query_row(
+                "SELECT f.id FROM image_files f
              JOIN images i ON i.id = f.image_id
              WHERE i.sha256_hash = ?1 AND f.missing_at IS NOT NULL
              ORDER BY f.missing_at DESC LIMIT 1",
-            params![sha256],
-            |row| row.get(0),
-        ).optional()?;
+                params![sha256],
+                |row| row.get(0),
+            )
+            .optional()?;
 
         if let Some(fid) = file_id {
             conn.execute(
@@ -957,7 +1311,13 @@ impl Database {
         Ok(())
     }
 
-    pub fn repoint_image_file(&self, file_id: &str, new_image_id: &str, size: u64, mtime: &str) -> Result<()> {
+    pub fn repoint_image_file(
+        &self,
+        file_id: &str,
+        new_image_id: &str,
+        size: u64,
+        mtime: &str,
+    ) -> Result<()> {
         let conn = self.conn.lock();
         conn.execute(
             "UPDATE image_files SET image_id = ?2, last_seen_at = datetime('now'), missing_at = NULL,
@@ -1007,7 +1367,11 @@ impl Database {
             return Ok(vec![]);
         }
         let conn = self.conn.lock();
-        let placeholders: Vec<String> = ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+        let placeholders: Vec<String> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect();
         let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
@@ -1020,7 +1384,10 @@ impl Database {
              GROUP BY i.id",
             placeholders.join(", ")
         );
-        let params: Vec<&dyn rusqlite::types::ToSql> = ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let params: Vec<&dyn rusqlite::types::ToSql> = ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params.as_slice(), |row| {
             let star: Option<u8> = row.get(9)?;
@@ -1069,7 +1436,7 @@ impl Database {
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
              WHERE it.parent_id = ?1
              GROUP BY i.id
-             ORDER BY it.created_at ASC"
+             ORDER BY it.created_at ASC",
         )?;
         let rows = stmt.query_map(params![parent_id], |row| {
             let star: Option<u8> = row.get(9)?;
@@ -1107,7 +1474,12 @@ impl Database {
 
     // ---- Detection methods ----
 
-    pub fn store_detections(&self, image_id: &str, model_name: &str, detections: &[super::detection::Detection]) -> Result<()> {
+    pub fn store_detections(
+        &self,
+        image_id: &str,
+        model_name: &str,
+        detections: &[super::detection::Detection],
+    ) -> Result<()> {
         let conn = self.conn.lock();
         // Clear previous detections for this image+model
         conn.execute(
@@ -1135,9 +1507,15 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_detections(&self, image_id: &str, model_name: Option<&str>) -> Result<Vec<super::detection::Detection>> {
+    pub fn get_detections(
+        &self,
+        image_id: &str,
+        model_name: Option<&str>,
+    ) -> Result<Vec<super::detection::Detection>> {
         let conn = self.conn.lock();
-        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(mn) = model_name {
+        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(mn) =
+            model_name
+        {
             (
                 "SELECT class_name, confidence, x, y, width, height FROM detections WHERE image_id = ?1 AND model_name = ?2 ORDER BY confidence DESC".to_string(),
                 vec![Box::new(image_id.to_string()), Box::new(mn.to_string())],
@@ -1149,7 +1527,8 @@ impl Database {
             )
         };
         let mut stmt = conn.prepare(&sql)?;
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
         let rows = stmt.query_map(params_refs.as_slice(), |row| {
             Ok(super::detection::Detection {
                 class_name: row.get(0)?,
@@ -1168,7 +1547,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT DISTINCT image_id, MAX(confidence) as max_conf
              FROM detections WHERE class_name = ?1
-             GROUP BY image_id ORDER BY max_conf DESC LIMIT ?2"
+             GROUP BY image_id ORDER BY max_conf DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![class_name, limit], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, f32>(1)?))
@@ -1209,22 +1588,24 @@ impl Database {
                     is_preset, sort_order, created_at
              FROM projects
              WHERE collection_type = 'smart'
-             ORDER BY sort_order ASC, created_at DESC"
+             ORDER BY sort_order ASC, created_at DESC",
         )?;
-        let mut collections: Vec<SmartCollection> = stmt.query_map([], |row| {
-            Ok(SmartCollection {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                description: row.get(2)?,
-                collection_type: row.get(3)?,
-                filter_json: row.get(4)?,
-                nl_query: row.get(5)?,
-                is_preset: row.get::<_, i32>(6)? != 0,
-                sort_order: row.get(7)?,
-                created_at: row.get(8)?,
-                image_count: None,
-            })
-        })?.collect::<Result<Vec<_>>>()?;
+        let mut collections: Vec<SmartCollection> = stmt
+            .query_map([], |row| {
+                Ok(SmartCollection {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    collection_type: row.get(3)?,
+                    filter_json: row.get(4)?,
+                    nl_query: row.get(5)?,
+                    is_preset: row.get::<_, i32>(6)? != 0,
+                    sort_order: row.get(7)?,
+                    created_at: row.get(8)?,
+                    image_count: None,
+                })
+            })?
+            .collect::<Result<Vec<_>>>()?;
 
         for sc in &mut collections {
             if let Some(ref filter_json) = sc.filter_json {
@@ -1238,10 +1619,13 @@ impl Database {
                              WHERE ({})",
                             where_clause
                         );
-                        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter()
+                        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params
+                            .iter()
                             .map(|p| p as &dyn rusqlite::types::ToSql)
                             .collect();
-                        if let Ok(count) = conn.query_row(&sql, param_refs.as_slice(), |row| row.get::<_, i64>(0)) {
+                        if let Ok(count) =
+                            conn.query_row(&sql, param_refs.as_slice(), |row| row.get::<_, i64>(0))
+                        {
                             sc.image_count = Some(count);
                         }
                     }
@@ -1261,7 +1645,13 @@ impl Database {
         Ok(())
     }
 
-    pub fn update_smart_collection(&self, id: &str, name: &str, filter_json: &str, nl_query: Option<&str>) -> Result<()> {
+    pub fn update_smart_collection(
+        &self,
+        id: &str,
+        name: &str,
+        filter_json: &str,
+        nl_query: Option<&str>,
+    ) -> Result<()> {
         let conn = self.conn.lock();
         conn.execute(
             "UPDATE projects SET name = ?2, filter_json = ?3, nl_query = ?4
@@ -1275,7 +1665,8 @@ impl Database {
         let filter: FilterNode = serde_json::from_str(filter_json)
             .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
 
-        let (where_clause, params) = filter.to_sql_clause()
+        let (where_clause, params) = filter
+            .to_sql_clause()
             .map_err(|e| rusqlite::Error::InvalidParameterName(e))?;
 
         let conn = self.conn.lock();
@@ -1293,7 +1684,8 @@ impl Database {
             where_clause
         );
 
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter()
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params
+            .iter()
             .map(|p| p as &dyn rusqlite::types::ToSql)
             .collect();
 
@@ -1377,12 +1769,12 @@ impl Database {
 
     pub fn backfill_image_metadata(&self) -> Result<u32> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT id, width, height FROM images WHERE orientation IS NULL"
-        )?;
-        let rows: Vec<(String, u32, u32)> = stmt.query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        })?.filter_map(|r| r.ok()).collect();
+        let mut stmt =
+            conn.prepare("SELECT id, width, height FROM images WHERE orientation IS NULL")?;
+        let rows: Vec<(String, u32, u32)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
         drop(stmt);
 
         let mut count = 0u32;
@@ -1408,7 +1800,13 @@ impl Database {
     pub fn update_image_dimensions(&self, image_id: &str, width: u32, height: u32) -> Result<()> {
         let conn = self.conn.lock();
         let aspect = width as f64 / height as f64;
-        let orientation = if width > height { "landscape" } else if height > width { "portrait" } else { "square" };
+        let orientation = if width > height {
+            "landscape"
+        } else if height > width {
+            "portrait"
+        } else {
+            "square"
+        };
         let megapixels = (width as f64 * height as f64) / 1_000_000.0;
         conn.execute(
             "UPDATE images SET width = ?2, height = ?3, aspect_ratio = ?4, orientation = ?5, megapixels = ?6 WHERE id = ?1",
@@ -1444,23 +1842,25 @@ impl Database {
              JOIN images i ON i.generation_run_id = g.id
              WHERE i.id = ?1"
         )?;
-        let run = stmt.query_row(rusqlite::params![image_id], |row| {
-            Ok(GenerationRun {
-                id: row.get(0)?,
-                prompt: row.get(1)?,
-                negative_prompt: row.get(2)?,
-                provider: row.get(3)?,
-                model: row.get(4)?,
-                settings_json: row.get(5)?,
-                seed: row.get(6)?,
-                parent_run_id: row.get(7)?,
-                source_type: row.get(8)?,
-                source_path: row.get(9)?,
-                raw_metadata_json: row.get(10)?,
-                created_at: row.get(11)?,
-                imported_at: row.get(12)?,
+        let run = stmt
+            .query_row(rusqlite::params![image_id], |row| {
+                Ok(GenerationRun {
+                    id: row.get(0)?,
+                    prompt: row.get(1)?,
+                    negative_prompt: row.get(2)?,
+                    provider: row.get(3)?,
+                    model: row.get(4)?,
+                    settings_json: row.get(5)?,
+                    seed: row.get(6)?,
+                    parent_run_id: row.get(7)?,
+                    source_type: row.get(8)?,
+                    source_path: row.get(9)?,
+                    raw_metadata_json: row.get(10)?,
+                    created_at: row.get(11)?,
+                    imported_at: row.get(12)?,
+                })
             })
-        }).optional()?;
+            .optional()?;
         Ok(run)
     }
 
@@ -1470,7 +1870,7 @@ impl Database {
             "SELECT i.id, f.path
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
-             WHERE i.generation_run_id IS NULL"
+             WHERE i.generation_run_id IS NULL",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -1488,7 +1888,7 @@ impl Database {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT image_id, project_id, star_rating, color_label, decision
-             FROM selections WHERE image_id = ?1 AND project_id = '__global__'"
+             FROM selections WHERE image_id = ?1 AND project_id = '__global__'",
         )?;
         stmt.query_row(params![image_id], |row| {
             Ok(Selection {
@@ -1498,7 +1898,8 @@ impl Database {
                 color_label: row.get(3)?,
                 decision: row.get(4).unwrap_or_else(|_| "undecided".to_string()),
             })
-        }).optional()
+        })
+        .optional()
     }
 
     pub fn get_undo_record_by_seq(&self, seq: i64) -> Result<Option<UndoRecord>> {
@@ -1520,7 +1921,8 @@ impl Database {
                 has_file_backup: row.get::<_, i32>(8)? != 0,
                 created_at: row.get(9)?,
             })
-        }).optional()
+        })
+        .optional()
     }
 
     pub fn get_max_undo_seq(&self) -> Result<Option<i64>> {
@@ -1561,7 +1963,9 @@ impl Database {
         conn.execute(
             "DELETE FROM undo_records WHERE seq NOT IN (
                 SELECT seq FROM undo_records ORDER BY seq DESC LIMIT ?1
-            )", params![keep_count])?;
+            )",
+            params![keep_count],
+        )?;
         Ok(())
     }
 
@@ -1576,8 +1980,8 @@ impl Database {
         for (name, typ) in &project_columns {
             let sql = format!("ALTER TABLE projects ADD COLUMN {} {}", name, typ);
             match conn.execute(&sql, []) {
-                Ok(_) => {},
-                Err(e) if e.to_string().contains("duplicate column") => {},
+                Ok(_) => {}
+                Err(e) if e.to_string().contains("duplicate column") => {}
                 Err(e) => return Err(e),
             }
         }
@@ -1596,14 +2000,14 @@ impl Database {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases(session_id);"
+            CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases(session_id);",
         )?;
 
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_collection_items_image ON collection_items(image_id);
              CREATE INDEX IF NOT EXISTS idx_selections_project ON selections(project_id);
              CREATE INDEX IF NOT EXISTS idx_embeddings_image ON embeddings(image_id);
-             CREATE INDEX IF NOT EXISTS idx_images_import_batch ON images(import_batch_id);"
+             CREATE INDEX IF NOT EXISTS idx_images_import_batch ON images(import_batch_id);",
         )?;
 
         Ok(())
@@ -1611,17 +2015,22 @@ impl Database {
 }
 
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    if a.len() != b.len() { return 0.0; }
+    if a.len() != b.len() {
+        return 0.0;
+    }
     let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm_a == 0.0 || norm_b == 0.0 { 0.0 } else { dot / (norm_a * norm_b) }
+    if norm_a == 0.0 || norm_b == 0.0 {
+        0.0
+    } else {
+        dot / (norm_a * norm_b)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     fn test_db() -> Database {
         let db = Database::open(Path::new(":memory:")).unwrap();
@@ -1701,12 +2110,14 @@ mod tests {
             "INSERT INTO iterations (id, parent_id, child_id, prompt, model_used, created_at)
              VALUES ('it-1', 'parent', 'child-1', 'make it blue', 'flux', '2026-05-07T00:00:00Z')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO iterations (id, parent_id, child_id, prompt, model_used, created_at)
              VALUES ('it-2', 'parent', 'child-2', 'make it red', 'flux', '2026-05-07T00:00:00Z')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         drop(conn);
 
         let results = db.get_iteration_siblings("parent").unwrap();
@@ -1732,6 +2143,120 @@ mod tests {
         let result = db.update_image_dimensions("nonexistent", 100, 100);
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_model_processing_migration_creates_tables_and_indexes() {
+        let db = test_db();
+        let conn = db.conn.lock();
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert!(tables.contains(&"model_profiles".to_string()));
+        assert!(tables.contains(&"model_runs".to_string()));
+        assert!(tables.contains(&"model_run_items".to_string()));
+
+        let stmt = conn
+            .prepare("SELECT model_run_id FROM embeddings LIMIT 0")
+            .unwrap();
+        drop(stmt);
+
+        let indexes: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='index'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert!(indexes.contains(&"embeddings_model_run_idx".to_string()));
+        assert!(indexes.contains(&"model_run_items_run_status_idx".to_string()));
+    }
+
+    #[test]
+    fn test_model_run_item_and_embedding_link_round_trip() {
+        let db = test_db();
+        insert_test_image(&db, "img-1", "hash-1");
+        let now = "2026-05-13T00:00:00Z".to_string();
+        let run = NewModelRun {
+            id: "mr-test".to_string(),
+            job_id: Some("job-test".to_string()),
+            parent_run_id: None,
+            profile_id: None,
+            task: "embedding".to_string(),
+            provider: "local".to_string(),
+            model_id: "clip-vit-b32".to_string(),
+            model_revision: None,
+            status: "running".to_string(),
+            input_scope_json: "{\"type\":\"image_ids\",\"image_ids\":[\"img-1\"]}".to_string(),
+            params_json: "{\"runtime\":\"onnx\"}".to_string(),
+            output_summary_json: "{}".to_string(),
+            cost_estimate_usd: None,
+            cost_actual_usd: None,
+            error: None,
+            created_at: now.clone(),
+            started_at: Some(now.clone()),
+            completed_at: None,
+        };
+        db.insert_model_run(&run).unwrap();
+
+        let embedding_id = db
+            .store_embedding_with_model_run(
+                "img-1",
+                "clip-vit-b32",
+                &[0.1, 0.2, 0.3],
+                Some("mr-test"),
+            )
+            .unwrap();
+        db.insert_model_run_item(&NewModelRunItem {
+            id: "mri-test".to_string(),
+            run_id: "mr-test".to_string(),
+            image_id: Some("img-1".to_string()),
+            input_asset_uri: "cull://images/img-1/ml-input".to_string(),
+            input_hash: Some("hash-1".to_string()),
+            status: "completed".to_string(),
+            output_ref_kind: Some("embedding".to_string()),
+            output_ref_id: Some(embedding_id.clone()),
+            audit_payload_json: None,
+            cost_usd: None,
+            attempt_count: 1,
+            error: None,
+            started_at: Some(now.clone()),
+            completed_at: Some(now),
+        })
+        .unwrap();
+        db.update_model_run_terminal(
+            "mr-test",
+            "completed",
+            "{\"generated\":1,\"failed\":0,\"total\":1}",
+            None,
+        )
+        .unwrap();
+
+        let loaded = db.get_model_run("mr-test").unwrap().unwrap();
+        assert_eq!(loaded.status, "completed");
+        assert!(loaded.output_summary_json.contains("\"generated\":1"));
+
+        let conn = db.conn.lock();
+        let linked_run: String = conn
+            .query_row(
+                "SELECT model_run_id FROM embeddings WHERE id = ?1",
+                params![embedding_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(linked_run, "mr-test");
+        let item_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM model_run_items WHERE run_id = 'mr-test'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(item_count, 1);
+    }
 }
 
 #[cfg(test)]
@@ -1742,10 +2267,13 @@ mod session_tests {
     fn test_session_migration_creates_canvases_table() {
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
         let conn = db.conn.lock();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='canvases'",
-            [], |row| row.get(0)
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='canvases'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1, "canvases table should exist after migration");
     }
 
@@ -1753,11 +2281,17 @@ mod session_tests {
     fn test_session_migration_adds_project_columns() {
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
         let conn = db.conn.lock();
-        let mut stmt = conn.prepare("SELECT folder_path FROM projects LIMIT 0").unwrap();
+        let mut stmt = conn
+            .prepare("SELECT folder_path FROM projects LIMIT 0")
+            .unwrap();
         drop(stmt);
-        stmt = conn.prepare("SELECT owning_session_id FROM projects LIMIT 0").unwrap();
+        stmt = conn
+            .prepare("SELECT owning_session_id FROM projects LIMIT 0")
+            .unwrap();
         drop(stmt);
-        stmt = conn.prepare("SELECT settings_json FROM projects LIMIT 0").unwrap();
+        stmt = conn
+            .prepare("SELECT settings_json FROM projects LIMIT 0")
+            .unwrap();
         drop(stmt);
     }
 
@@ -1765,12 +2299,13 @@ mod session_tests {
     fn test_session_indexes_exist() {
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
         let conn = db.conn.lock();
-        let indexes: Vec<String> = conn.prepare(
-            "SELECT name FROM sqlite_master WHERE type='index'"
-        ).unwrap()
-        .query_map([], |row| row.get(0)).unwrap()
-        .filter_map(|r| r.ok())
-        .collect();
+        let indexes: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='index'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
         assert!(indexes.contains(&"idx_canvases_session".to_string()));
         assert!(indexes.contains(&"idx_collection_items_image".to_string()));
         assert!(indexes.contains(&"idx_selections_project".to_string()));
@@ -1824,7 +2359,11 @@ mod file_watcher_tests {
         assert!(result);
 
         let images = db.list_images(100, 0).unwrap();
-        assert_eq!(images.len(), 0, "missing image should be excluded from list_images");
+        assert_eq!(
+            images.len(),
+            0,
+            "missing image should be excluded from list_images"
+        );
     }
 
     #[test]
@@ -1840,7 +2379,10 @@ mod file_watcher_tests {
         insert_test_image(&db, "img-1", "hash-1");
 
         assert!(db.mark_file_missing("/tmp/img-1.png").unwrap());
-        assert!(!db.mark_file_missing("/tmp/img-1.png").unwrap(), "second call should return false");
+        assert!(
+            !db.mark_file_missing("/tmp/img-1.png").unwrap(),
+            "second call should return false"
+        );
     }
 
     // -- restore_file --
@@ -1874,7 +2416,8 @@ mod file_watcher_tests {
         let db = test_db();
         insert_test_image(&db, "img-1", "hash-1");
 
-        db.update_image_file_path("f-img-1", "/new/location/img-1.png").unwrap();
+        db.update_image_file_path("f-img-1", "/new/location/img-1.png")
+            .unwrap();
 
         let images = db.list_images(100, 0).unwrap();
         assert_eq!(images.len(), 1);
@@ -1888,7 +2431,8 @@ mod file_watcher_tests {
         db.mark_file_missing("/tmp/img-1.png").unwrap();
         assert_eq!(db.list_images(100, 0).unwrap().len(), 0);
 
-        db.update_image_file_path("f-img-1", "/new/img-1.png").unwrap();
+        db.update_image_file_path("f-img-1", "/new/img-1.png")
+            .unwrap();
 
         let images = db.list_images(100, 0).unwrap();
         assert_eq!(images.len(), 1, "path update should clear missing_at");
@@ -1903,7 +2447,9 @@ mod file_watcher_tests {
         insert_test_image(&db, "img-1", "hash-abc");
         db.mark_file_missing("/tmp/img-1.png").unwrap();
 
-        let moved = db.restore_or_move_file_by_hash("hash-abc", "/new/path.png").unwrap();
+        let moved = db
+            .restore_or_move_file_by_hash("hash-abc", "/new/path.png")
+            .unwrap();
         assert!(moved);
 
         let images = db.list_images(100, 0).unwrap();
@@ -1915,7 +2461,9 @@ mod file_watcher_tests {
     #[test]
     fn test_restore_by_hash_returns_false_no_match() {
         let db = test_db();
-        let result = db.restore_or_move_file_by_hash("unknown-hash", "/some/path.png").unwrap();
+        let result = db
+            .restore_or_move_file_by_hash("unknown-hash", "/some/path.png")
+            .unwrap();
         assert!(!result);
     }
 
@@ -1924,7 +2472,9 @@ mod file_watcher_tests {
         let db = test_db();
         insert_test_image(&db, "img-1", "hash-abc");
         // Not marked missing
-        let result = db.restore_or_move_file_by_hash("hash-abc", "/new/path.png").unwrap();
+        let result = db
+            .restore_or_move_file_by_hash("hash-abc", "/new/path.png")
+            .unwrap();
         assert!(!result, "should not operate on non-missing files");
     }
 

@@ -158,6 +158,16 @@
         }
     }
 
+    function handleItemKeydown(e: KeyboardEvent, item: CanvasItem) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleItemDblClick(item);
+        } else if (e.key === ' ') {
+            e.preventDefault();
+            handleItemClick(new MouseEvent('click'), item);
+        }
+    }
+
     function handleWheel(e: WheelEvent) {
         e.preventDefault();
         const factor = e.deltaY > 0 ? 0.9 : 1.1;
@@ -178,6 +188,7 @@
     });
 </script>
 
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <div
     class="canvas-viewport"
     bind:this={canvasEl}
@@ -188,6 +199,7 @@
     onwheel={handleWheel}
     role="application"
     aria-label="Image canvas"
+    tabindex="0"
 >
     <div class="canvas-layer" style="transform: translate({panX}px, {panY}px) scale({zoom});">
         {#each canvasItems as item (item.id)}
@@ -202,8 +214,10 @@
                 onclick={(e) => handleItemClick(e, item)}
                 ondblclick={() => handleItemDblClick(item)}
                 oncontextmenu={(e) => handleItemContextMenu(e, item)}
-                role="img"
+                role="button"
                 aria-label={item.image.path.split('/').pop()}
+                tabindex="0"
+                onkeydown={(e) => handleItemKeydown(e, item)}
             >
                 <img
                     src={item.image.thumbnail_path ? convertFileSrc(item.image.thumbnail_path) : convertFileSrc(item.image.path)}
@@ -220,6 +234,7 @@
                 {/if}
                 <div
                     class="resize-handle"
+                    role="presentation"
                     onmousedown={(e) => handleResizeMouseDown(e, item)}
                 ></div>
             </div>

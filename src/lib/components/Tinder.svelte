@@ -1,7 +1,7 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { listen } from '@tauri-apps/api/event';
-    import { images, focusedIndex, statusHint, navigateTo } from '$lib/stores';
+    import { images, focusedIndex, statusHint, navigateTo, activeSession } from '$lib/stores';
     import { setDecision, isRawFormat } from '$lib/api';
     import { onMount, onDestroy } from 'svelte';
     import type { ImageWithFile } from '$lib/api';
@@ -45,15 +45,16 @@
 
         const leftId = leftImage.image.id;
         const rightId = rightImage.image.id;
+        const sessionId = $activeSession?.id ?? null;
 
         if (side === 'left') {
-            setDecision(leftId, 'accept').catch(console.error);
-            setDecision(rightId, 'reject').catch(console.error);
+            setDecision(leftId, 'accept', sessionId).catch(console.error);
+            setDecision(rightId, 'reject', sessionId).catch(console.error);
             stats.accepted++;
             stats.rejected++;
         } else if (side === 'right') {
-            setDecision(rightId, 'accept').catch(console.error);
-            setDecision(leftId, 'reject').catch(console.error);
+            setDecision(rightId, 'accept', sessionId).catch(console.error);
+            setDecision(leftId, 'reject', sessionId).catch(console.error);
             stats.accepted++;
             stats.rejected++;
         } else {
@@ -112,8 +113,9 @@
         if (!last) return;
         pairIndex = last.index;
         focusedIndex.set(pairIndex * 2);
-        setDecision(last.leftId, 'undecided').catch(console.error);
-        setDecision(last.rightId, 'undecided').catch(console.error);
+        const sessionId = $activeSession?.id ?? null;
+        setDecision(last.leftId, 'undecided', sessionId).catch(console.error);
+        setDecision(last.rightId, 'undecided', sessionId).catch(console.error);
     }
 
     let unlisteners: Array<() => void> = [];

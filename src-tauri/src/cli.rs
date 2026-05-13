@@ -1,7 +1,7 @@
 use clap::Parser;
 
 #[derive(Parser, Debug, Clone)]
-#[command(name = "imageview")]
+#[command(name = "cull")]
 pub struct CliArgs {
     /// Start in tray-only mode (no window)
     #[arg(long)]
@@ -27,7 +27,7 @@ mod tests {
 
     #[test]
     fn test_default_args() {
-        let args = CliArgs::try_parse_from(["imageview"]).unwrap();
+        let args = CliArgs::try_parse_from(["cull"]).unwrap();
         assert!(!args.tray);
         assert!(!args.mcp_stdio);
         assert!(args.mcp_http.is_none());
@@ -36,42 +36,48 @@ mod tests {
 
     #[test]
     fn test_tray_flag() {
-        let args = CliArgs::try_parse_from(["imageview", "--tray"]).unwrap();
+        let args = CliArgs::try_parse_from(["cull", "--tray"]).unwrap();
         assert!(args.tray);
         assert!(!args.mcp_stdio);
     }
 
     #[test]
     fn test_mcp_stdio_flag() {
-        let args = CliArgs::try_parse_from(["imageview", "--mcp-stdio"]).unwrap();
+        let args = CliArgs::try_parse_from(["cull", "--mcp-stdio"]).unwrap();
         assert!(args.mcp_stdio);
         assert!(!args.tray);
     }
 
     #[test]
     fn test_mcp_http_no_port() {
-        let args = CliArgs::try_parse_from(["imageview", "--mcp-http"]).unwrap();
+        let args = CliArgs::try_parse_from(["cull", "--mcp-http"]).unwrap();
         assert!(args.mcp_http.is_some());
         assert_eq!(args.mcp_http.unwrap(), None);
     }
 
     #[test]
     fn test_mcp_http_with_port() {
-        let args = CliArgs::try_parse_from(["imageview", "--mcp-http", "8080"]).unwrap();
+        let args = CliArgs::try_parse_from(["cull", "--mcp-http", "8080"]).unwrap();
         assert_eq!(args.mcp_http, Some(Some(8080)));
     }
 
     #[test]
     fn test_mcp_http_host_custom() {
-        let args = CliArgs::try_parse_from(["imageview", "--mcp-http-host", "0.0.0.0"]).unwrap();
+        let args = CliArgs::try_parse_from(["cull", "--mcp-http-host", "0.0.0.0"]).unwrap();
         assert_eq!(args.mcp_http_host, "0.0.0.0");
     }
 
     #[test]
     fn test_combined_flags() {
         let args = CliArgs::try_parse_from([
-            "imageview", "--tray", "--mcp-http", "9847", "--mcp-http-host", "0.0.0.0",
-        ]).unwrap();
+            "cull",
+            "--tray",
+            "--mcp-http",
+            "9847",
+            "--mcp-http-host",
+            "0.0.0.0",
+        ])
+        .unwrap();
         assert!(args.tray);
         assert_eq!(args.mcp_http, Some(Some(9847)));
         assert_eq!(args.mcp_http_host, "0.0.0.0");
@@ -79,7 +85,7 @@ mod tests {
 
     #[test]
     fn test_unknown_flag_errors() {
-        let result = CliArgs::try_parse_from(["imageview", "--bogus"]);
+        let result = CliArgs::try_parse_from(["cull", "--bogus"]);
         assert!(result.is_err());
     }
 }

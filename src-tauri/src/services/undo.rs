@@ -1,9 +1,9 @@
-use std::sync::Mutex;
-use chrono::Utc;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use crate::db_core::db::Database;
 use crate::db_core::models::UndoRecord;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UndoStatus {
@@ -47,7 +47,9 @@ impl ActionManager {
         // 1. Read before state — must happen BEFORE locking conn for the transaction
         let (action_type, label, before_json, after_json, affected_ids) = match &action {
             Action::SetRating { image_id, rating } => {
-                let sel = db.get_selection_for_image(image_id).map_err(|e| e.to_string())?;
+                let sel = db
+                    .get_selection_for_image(image_id)
+                    .map_err(|e| e.to_string())?;
                 let before_rating = sel.as_ref().and_then(|s| s.star_rating).unwrap_or(0);
                 (
                     "set_rating",
@@ -58,14 +60,17 @@ impl ActionManager {
                 )
             }
             Action::SetDecision { image_id, decision } => {
-                let sel = db.get_selection_for_image(image_id).map_err(|e| e.to_string())?;
+                let sel = db
+                    .get_selection_for_image(image_id)
+                    .map_err(|e| e.to_string())?;
                 let before_decision = sel
                     .map(|s| s.decision)
                     .unwrap_or_else(|| "undecided".to_string());
                 (
                     "set_decision",
                     format!("Set decision to {}", decision),
-                    serde_json::json!({"image_id": image_id, "decision": before_decision}).to_string(),
+                    serde_json::json!({"image_id": image_id, "decision": before_decision})
+                        .to_string(),
                     serde_json::json!({"image_id": image_id, "decision": decision}).to_string(),
                     image_id.clone(),
                 )
@@ -75,7 +80,7 @@ impl ActionManager {
         // 2. Lock cursor position, then perform mutation + undo record insert in one transaction
         let mut cursor = self.cursor_seq.lock().unwrap();
 
-        let mut conn = db.conn.lock().unwrap();
+        let mut conn = db.conn.lock();
         let tx = conn.savepoint().map_err(|e| e.to_string())?;
 
         // Clear redo branch if cursor is pointing to an undone record
@@ -149,7 +154,7 @@ impl ActionManager {
             }
             Some(cur) => {
                 // Find the record just below current cursor
-                let conn = db.conn.lock().unwrap();
+                let conn = db.conn.lock();
                 let seq: Option<i64> = conn
                     .query_row(
                         "SELECT MAX(seq) FROM undo_records WHERE seq < ?1",
@@ -205,7 +210,7 @@ impl ActionManager {
         self.apply_state(db, &record.action_type, &record.after_json)?;
 
         // Move cursor up — find next record above current, or go to None (top)
-        let conn = db.conn.lock().unwrap();
+        let conn = db.conn.lock();
         let next_seq: Option<i64> = conn
             .query_row(
                 "SELECT MIN(seq) FROM undo_records WHERE seq > ?1",
@@ -244,7 +249,7 @@ impl ActionManager {
             }
             Some(cur) => {
                 // Can undo if there's a record below cursor
-                let conn = db.conn.lock().unwrap();
+                let conn = db.conn.lock();
                 let below: Option<i64> = conn
                     .query_row(
                         "SELECT MAX(seq) FROM undo_records WHERE seq < ?1",
@@ -298,7 +303,7 @@ impl ActionManager {
         has_file_backup: bool,
     ) -> Result<ActionResult, String> {
         let mut cursor = self.cursor_seq.lock().unwrap();
-        let mut conn = db.conn.lock().unwrap();
+        let mut conn = db.conn.lock();
         let tx = conn.savepoint().map_err(|e| e.to_string())?;
 
         if let Some(cur_seq) = *cursor {
@@ -336,7 +341,12 @@ impl ActionManager {
         db.list_undo_records(limit).unwrap_or_default()
     }
 
-    fn apply_state(&self, db: &Database, action_type: &str, state_json: &str) -> Result<(), String> {
+    fn apply_state(
+        &self,
+        db: &Database,
+        action_type: &str,
+        state_json: &str,
+    ) -> Result<(), String> {
         let val: serde_json::Value = serde_json::from_str(state_json)
             .map_err(|e| format!("Invalid undo state JSON: {}", e))?;
         match action_type {
@@ -348,20 +358,27 @@ impl ActionManager {
             "set_decision" => {
                 let image_id = val["image_id"].as_str().ok_or("Missing image_id")?;
                 let decision = val["decision"].as_str().ok_or("Missing decision")?;
-                db.set_decision(image_id, decision).map_err(|e| e.to_string())
+                db.set_decision(image_id, decision)
+                    .map_err(|e| e.to_string())
             }
             "trash_image" => {
                 let path = val["path"].as_str().ok_or("Missing path")?;
-                let trashed = val.get("trashed").and_then(|v| v.as_bool()).unwrap_or(false);
+                let trashed = val
+                    .get("trashed")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 if trashed {
                     // Redo: re-trash the file
                     #[cfg(target_os = "macos")]
                     {
                         std::process::Command::new("osascript")
-                            .args(["-e", &format!(
-                                "tell application \"Finder\" to delete POSIX file \"{}\"",
-                                path.replace('"', "\\\"")
-                            )])
+                            .args([
+                                "-e",
+                                &format!(
+                                    "tell application \"Finder\" to delete POSIX file \"{}\"",
+                                    path.replace('"', "\\\"")
+                                ),
+                            ])
                             .output()
                             .map_err(|e| format!("Failed to re-trash: {}", e))?;
                     }
@@ -369,7 +386,8 @@ impl ActionManager {
                 } else {
                     // Undo: restore from Trash to original path
                     let file_path = std::path::Path::new(path);
-                    let filename = file_path.file_name()
+                    let filename = file_path
+                        .file_name()
                         .and_then(|n| n.to_str())
                         .ok_or("Invalid filename in path")?;
                     let trash_path = dirs::home_dir()

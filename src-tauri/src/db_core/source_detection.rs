@@ -37,17 +37,12 @@ impl SourceDetectionResult {
     }
 }
 
-static DALLE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)DALL[\-·\.]?E[\s_]?\d{4}").unwrap()
-});
+static DALLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)DALL[\-·\.]?E[\s_]?\d{4}").unwrap());
 
-static COMFYUI_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^ComfyUI_\d+").unwrap()
-});
+static COMFYUI_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^ComfyUI_\d+").unwrap());
 
-static SD_SEED_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\d{5,10}-\d+\.png$").unwrap()
-});
+static SD_SEED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{5,10}-\d+\.png$").unwrap());
 
 pub fn detect_from_filename(filename: &str) -> SourceDetectionResult {
     let name = std::path::Path::new(filename)
@@ -198,7 +193,9 @@ pub fn combine_detection_results(results: Vec<SourceDetectionResult>) -> SourceD
     }
 }
 
-pub fn read_png_text_chunks(path: &std::path::Path) -> std::result::Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
+pub fn read_png_text_chunks(
+    path: &std::path::Path,
+) -> std::result::Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
     let file = std::fs::File::open(path)?;
     let decoder = png::Decoder::new(file);
     let reader = decoder.read_info()?;
@@ -231,15 +228,24 @@ pub fn detect_from_c2pa(path: &std::path::Path) -> SourceDetectionResult {
                 detector: "c2pa".to_string(),
                 source_label: None,
                 confidence: 0.0,
-                details: format!("C2PA found but non-OpenAI agent: {:?}", info.software_agents),
+                details: format!(
+                    "C2PA found but non-OpenAI agent: {:?}",
+                    info.software_agents
+                ),
             }],
         };
     };
 
     let details = if info.has_chatgpt_layer {
-        format!("C2PA manifest: {} (via ChatGPT), agents: {:?}", label, info.software_agents)
+        format!(
+            "C2PA manifest: {} (via ChatGPT), agents: {:?}",
+            label, info.software_agents
+        )
     } else {
-        format!("C2PA manifest: {}, agents: {:?}", label, info.software_agents)
+        format!(
+            "C2PA manifest: {}, agents: {:?}",
+            label, info.software_agents
+        )
     };
 
     SourceDetectionResult {
@@ -256,7 +262,11 @@ pub fn detect_from_c2pa(path: &std::path::Path) -> SourceDetectionResult {
     }
 }
 
-pub fn detect_source(filename: &str, png_text_chunks: &[(String, String)], file_path: &std::path::Path) -> SourceDetectionResult {
+pub fn detect_source(
+    filename: &str,
+    png_text_chunks: &[(String, String)],
+    file_path: &std::path::Path,
+) -> SourceDetectionResult {
     let c2pa_result = detect_from_c2pa(file_path);
     let filename_result = detect_from_filename(filename);
     let png_result = detect_from_png_text_chunks(png_text_chunks);
@@ -295,9 +305,11 @@ mod tests {
 
     #[test]
     fn test_png_text_stable_diffusion() {
-        let chunks = vec![
-            ("parameters".to_string(), "masterpiece, best quality\nNegative prompt: bad\nSteps: 20, Sampler: Euler".to_string()),
-        ];
+        let chunks = vec![(
+            "parameters".to_string(),
+            "masterpiece, best quality\nNegative prompt: bad\nSteps: 20, Sampler: Euler"
+                .to_string(),
+        )];
         let result = detect_from_png_text_chunks(&chunks);
         assert_eq!(result.source_label, Some("stable_diffusion".to_string()));
         assert!(result.confidence > 0.8);
@@ -307,7 +319,10 @@ mod tests {
     #[test]
     fn test_png_text_comfyui_workflow() {
         let chunks = vec![
-            ("prompt".to_string(), r#"{"3": {"class_type": "KSampler"}}"#.to_string()),
+            (
+                "prompt".to_string(),
+                r#"{"3": {"class_type": "KSampler"}}"#.to_string(),
+            ),
             ("workflow".to_string(), r#"{"nodes": []}"#.to_string()),
         ];
         let result = detect_from_png_text_chunks(&chunks);

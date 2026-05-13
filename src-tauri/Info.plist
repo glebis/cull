@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
     <key>NSMicrophoneUsageDescription</key>
-    <string>ImageView uses the microphone for voice search dictation.</string>
+    <string>Cull uses the microphone for voice search dictation.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>ImageView uses speech recognition for voice-powered image search.</string>
+    <string>Cull uses speech recognition for voice-powered image search.</string>
 </dict>
 </plist>

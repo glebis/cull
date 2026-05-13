@@ -17,7 +17,8 @@ fn save_jpeg(img: &image::DynamicImage, path: &Path) -> Result<(), String> {
     let file = File::create(path).map_err(|e| format!("Failed to create thumbnail file: {}", e))?;
     let writer = BufWriter::new(file);
     let encoder = JpegEncoder::new_with_quality(writer, JPEG_QUALITY);
-    img.write_with_encoder(encoder).map_err(|e| format!("Failed to save thumbnail: {}", e))?;
+    img.write_with_encoder(encoder)
+        .map_err(|e| format!("Failed to save thumbnail: {}", e))?;
     Ok(())
 }
 

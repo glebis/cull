@@ -2,29 +2,29 @@
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
 mod cli;
+mod cloud;
 mod commands;
 mod db_core;
 mod dictation;
 mod export;
+pub mod extensions;
 mod mcp;
 mod menu;
+pub mod raw;
 mod services;
 mod tray;
-mod cloud;
-pub mod extensions;
-pub mod raw;
 mod watcher;
 
-use std::path::PathBuf;
-use std::panic::AssertUnwindSafe;
-use parking_lot::Mutex;
-use tauri::{AppHandle, Manager, Emitter, Listener};
-use tauri_plugin_dialog::DialogExt;
+use crate::commands::deeplink::parse_deep_link;
 use crate::db_core::db::Database;
 use crate::db_core::detection::DetectionEngine;
 use crate::db_core::embeddings::EmbeddingEngine;
-use crate::db_core::secrets::{SecretStore, KeychainStore};
-use crate::commands::deeplink::parse_deep_link;
+use crate::db_core::secrets::{KeychainStore, SecretStore};
+use parking_lot::Mutex;
+use std::panic::AssertUnwindSafe;
+use std::path::PathBuf;
+use tauri::{AppHandle, Emitter, Listener, Manager};
+use tauri_plugin_dialog::DialogExt;
 
 pub struct AppState {
     pub db: Database,
@@ -41,7 +41,10 @@ pub struct AppState {
 fn install_panic_hook(app: AppHandle) {
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
+        let thread = std::thread::current()
+            .name()
+            .unwrap_or("unnamed")
+            .to_string();
         let msg = if let Some(s) = info.payload().downcast_ref::<&str>() {
             s.to_string()
         } else if let Some(s) = info.payload().downcast_ref::<String>() {
@@ -49,11 +52,19 @@ fn install_panic_hook(app: AppHandle) {
         } else {
             "unknown panic".to_string()
         };
-        let loc = info.location().map(|l| format!("{}:{}", l.file(), l.line()));
-        eprintln!("[panic] thread={} location={:?} message={}", thread, loc, msg);
-        let _ = app.emit("rust-panic", serde_json::json!({
-            "thread": thread, "location": loc, "message": msg
-        }));
+        let loc = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()));
+        eprintln!(
+            "[panic] thread={} location={:?} message={}",
+            thread, loc, msg
+        );
+        let _ = app.emit(
+            "rust-panic",
+            serde_json::json!({
+                "thread": thread, "location": loc, "message": msg
+            }),
+        );
         prev(info);
     }));
 }
@@ -74,13 +85,15 @@ where
                 "unknown panic".to_string()
             };
             eprintln!("[guarded-spawn] task={} panicked: {}", task_name, msg);
-            let _ = app.emit("background-task-failed", serde_json::json!({
-                "task": task_name, "message": msg, "recoverable": true
-            }));
+            let _ = app.emit(
+                "background-task-failed",
+                serde_json::json!({
+                    "task": task_name, "message": msg, "recoverable": true
+                }),
+            );
         }
     });
 }
-
 
 fn run_stdio_bridge() {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -110,7 +123,9 @@ fn run_stdio_bridge() {
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                     match tokio::net::UnixStream::connect(&sock_path).await {
                         Ok(s) => break s,
-                        Err(_) if attempts < 20 => { attempts += 1; }
+                        Err(_) if attempts < 20 => {
+                            attempts += 1;
+                        }
                         Err(e) => {
                             eprintln!("Failed to connect to MCP socket after 10s: {}", e);
                             std::process::exit(1);
@@ -167,7 +182,9 @@ pub fn run() {
         .setup(move |app| {
             install_panic_hook(app.handle().clone());
 
-            let app_data_dir = app.path().app_data_dir()
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
                 .map_err(|e| format!("failed to get app data dir: {}", e))?;
             std::fs::create_dir_all(&app_data_dir)
                 .map_err(|e| format!("failed to create app data dir: {}", e))?;
@@ -196,7 +213,17 @@ pub fn run() {
 
             let secrets = Box::new(KeychainStore::new("cull"));
             let jobs = crate::services::jobs::JobRegistry::default();
-            app.manage(AppState { db, app_data_dir, embedding_engine, detection_engine, safety_engine, secrets, jobs, action_manager: services::undo::ActionManager::new(), file_watcher: Mutex::new(watcher::FileWatcher::new()) });
+            app.manage(AppState {
+                db,
+                app_data_dir,
+                embedding_engine,
+                detection_engine,
+                safety_engine,
+                secrets,
+                jobs,
+                action_manager: services::undo::ActionManager::new(),
+                file_watcher: Mutex::new(watcher::FileWatcher::new()),
+            });
 
             // Load persisted job history from DB
             {
@@ -212,9 +239,15 @@ pub fn run() {
                 let app_handle_clone = app.handle().clone();
                 let data_dir_clone = state.app_data_dir.clone();
                 let mut fw = state.file_watcher.lock();
-                let module_raw = state.db.get_setting("module_raw")
-                    .ok().flatten().map(|v| v == "true").unwrap_or(false);
-                fw.module_raw.store(module_raw, std::sync::atomic::Ordering::Relaxed);
+                let module_raw = state
+                    .db
+                    .get_setting("module_raw")
+                    .ok()
+                    .flatten()
+                    .map(|v| v == "true")
+                    .unwrap_or(false);
+                fw.module_raw
+                    .store(module_raw, std::sync::atomic::Ordering::Relaxed);
                 if let Err(e) = fw.start(db_clone, app_handle_clone, roots, data_dir_clone) {
                     eprintln!("[watcher] Failed to start: {}", e);
                 }
@@ -236,7 +269,9 @@ pub fn run() {
             {
                 let http_enabled = args.mcp_http.is_some() || {
                     let state: tauri::State<'_, AppState> = app.state();
-                    state.db.get_setting("mcp_http_enabled")
+                    state
+                        .db
+                        .get_setting("mcp_http_enabled")
                         .ok()
                         .flatten()
                         .map(|v| v == "true")
@@ -264,7 +299,10 @@ pub fn run() {
             {
                 let handle = app.handle().clone();
                 app.listen("deep-link://new-url", move |event: tauri::Event| {
-                    eprintln!("[deep-link] Rust received deep-link://new-url: {}", event.payload());
+                    eprintln!(
+                        "[deep-link] Rust received deep-link://new-url: {}",
+                        event.payload()
+                    );
                     if let Ok(urls) = serde_json::from_str::<Vec<String>>(event.payload()) {
                         for url in urls {
                             eprintln!("[deep-link] Processing URL: {}", url);
@@ -370,6 +408,8 @@ pub fn run() {
             commands::mcp::list_mcp_tokens,
             commands::mcp::revoke_mcp_token,
             commands::mcp::rotate_mcp_token,
+            commands::static_publishing::export_static_publish_package,
+            commands::static_publishing::serve_static_publish_package,
             commands::transform::crop_image,
             commands::transform::rotate_image,
             commands::dictation::start_dictation,
@@ -382,6 +422,8 @@ pub fn run() {
             commands::generation::estimate_generation_cost,
             commands::sessions::create_session,
             commands::sessions::list_sessions,
+            commands::sessions::list_session_events,
+            commands::sessions::get_activity_context,
             commands::sessions::get_session,
             commands::sessions::delete_session,
             commands::sessions::convert_session_to_collection,
@@ -406,9 +448,12 @@ pub fn run() {
                 event: tauri::WindowEvent::CloseRequested { api, .. },
                 label,
                 ..
-            } = &event {
+            } = &event
+            {
                 if label == "main" {
-                    let close_to_tray = app.state::<AppState>().db
+                    let close_to_tray = app
+                        .state::<AppState>()
+                        .db
                         .get_setting("close_to_tray")
                         .ok()
                         .flatten()
@@ -431,7 +476,9 @@ pub fn run() {
                     .iter()
                     .filter_map(|url| {
                         if url.scheme() == "file" {
-                            url.to_file_path().ok().map(|p| p.to_string_lossy().into_owned())
+                            url.to_file_path()
+                                .ok()
+                                .map(|p| p.to_string_lossy().into_owned())
                         } else {
                             None
                         }
@@ -440,8 +487,16 @@ pub fn run() {
 
                 if !file_paths.is_empty() {
                     let params = crate::commands::deeplink::OpenParams {
-                        path: if file_paths.len() == 1 { Some(file_paths[0].clone()) } else { None },
-                        paths: if file_paths.len() > 1 { Some(file_paths) } else { None },
+                        path: if file_paths.len() == 1 {
+                            Some(file_paths[0].clone())
+                        } else {
+                            None
+                        },
+                        paths: if file_paths.len() > 1 {
+                            Some(file_paths)
+                        } else {
+                            None
+                        },
                         folder: None,
                         view: Some("loupe".to_string()),
                         size: None,
@@ -462,10 +517,16 @@ pub fn run() {
             }
 
             // Handle drag-and-drop from Finder
-            if let tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::DragDrop(ref drag_event), .. } = event {
+            if let tauri::RunEvent::WindowEvent {
+                event: tauri::WindowEvent::DragDrop(ref drag_event),
+                ..
+            } = event
+            {
                 match drag_event {
                     tauri::DragDropEvent::Enter { paths, .. } => {
-                        let has_images = paths.iter().any(|p| crate::extensions::is_image_path(p, false));
+                        let has_images = paths
+                            .iter()
+                            .any(|p| crate::extensions::is_image_path(p, false));
                         let has_dirs = paths.iter().any(|p| p.is_dir());
                         if has_images || has_dirs {
                             let _ = app.emit("drag-hover", true);
@@ -478,7 +539,8 @@ pub fn run() {
                         let _ = app.emit("drag-hover", false);
 
                         let dirs: Vec<&PathBuf> = paths.iter().filter(|p| p.is_dir()).collect();
-                        let files: Vec<String> = paths.iter()
+                        let files: Vec<String> = paths
+                            .iter()
                             .filter(|p| !p.is_dir() && crate::extensions::is_image_path(p, false))
                             .map(|p| p.to_string_lossy().into_owned())
                             .collect();
@@ -498,10 +560,20 @@ pub fn run() {
                             let _ = app.emit("open-with-params", params);
                         } else if !files.is_empty() {
                             let params = crate::commands::deeplink::OpenParams {
-                                path: if files.len() == 1 { Some(files[0].clone()) } else { None },
-                                paths: if files.len() > 1 { Some(files.clone()) } else { None },
+                                path: if files.len() == 1 {
+                                    Some(files[0].clone())
+                                } else {
+                                    None
+                                },
+                                paths: if files.len() > 1 {
+                                    Some(files.clone())
+                                } else {
+                                    None
+                                },
                                 folder: None,
-                                view: Some(if files.len() == 1 { "loupe" } else { "grid" }.to_string()),
+                                view: Some(
+                                    if files.len() == 1 { "loupe" } else { "grid" }.to_string(),
+                                ),
                                 size: None,
                                 zoom: None,
                                 fullscreen: None,

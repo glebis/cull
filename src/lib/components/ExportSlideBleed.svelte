@@ -8,14 +8,14 @@
 		imageSrc: string;
 	} = $props();
 
-	const scrimDirection = slide.overlay.scrim.direction.replace(/-/g, ' ');
-	const scrimGradient = `linear-gradient(${scrimDirection}, ${slide.overlay.scrim.from}, ${slide.overlay.scrim.to})`;
+	const scrimDirection = $derived(slide.overlay.scrim.direction.replace(/-/g, ' '));
+	const scrimGradient = $derived(`linear-gradient(${scrimDirection}, ${slide.overlay.scrim.from}, ${slide.overlay.scrim.to})`);
 
-	const objectPosition = slide.image.focal_point
+	const objectPosition = $derived(slide.image.focal_point
 		? `${slide.image.focal_point.x * 100}% ${slide.image.focal_point.y * 100}%`
-		: '50% 50%';
+		: '50% 50%');
 
-	const positionClass = slide.overlay.position || 'bottom-left';
+	const positionClass = $derived(slide.overlay.position || 'bottom-left');
 </script>
 
 <div

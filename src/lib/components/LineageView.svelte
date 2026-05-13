@@ -72,6 +72,12 @@
         navigateTo('loupe');
     }
 
+    function openInLoupeByKey(e: KeyboardEvent, index: number) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        openInLoupe(index);
+    }
+
     function findGlobalIndex(imageId: string): number {
         return $images.findIndex(img => img.image.id === imageId);
     }
@@ -140,7 +146,13 @@
                     </div>
                     <div class="strip-images">
                         {#each imgs as img, i (img.image.id)}
-                            <div class="strip-thumb" onclick={() => openInLoupe(findGlobalIndex(img.image.id))}>
+                            <div
+                                class="strip-thumb"
+                                onclick={() => openInLoupe(findGlobalIndex(img.image.id))}
+                                onkeydown={(e) => openInLoupeByKey(e, findGlobalIndex(img.image.id))}
+                                role="button"
+                                tabindex="0"
+                            >
                                 <img
                                     src={thumbnailUrl(img)}
                                     alt=""
@@ -183,7 +195,13 @@
                 {@const imgs = groupImages.get(selectedGroupId) ?? []}
                 <div class="comparison-grid" style="--cols: {Math.min(imgs.length, Math.ceil(Math.sqrt(imgs.length)))}">
                     {#each imgs as img (img.image.id)}
-                        <div class="comparison-cell" onclick={() => openInLoupe(findGlobalIndex(img.image.id))}>
+                        <div
+                            class="comparison-cell"
+                            onclick={() => openInLoupe(findGlobalIndex(img.image.id))}
+                            onkeydown={(e) => openInLoupeByKey(e, findGlobalIndex(img.image.id))}
+                            role="button"
+                            tabindex="0"
+                        >
                             <img
                                 src={thumbnailUrl(img)}
                                 alt=""

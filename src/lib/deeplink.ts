@@ -21,7 +21,7 @@ import {
     collections,
     type ViewMode,
 } from './stores';
-import { importFolder, importFiles, listImagesByFolder, listImages, addToCollection, listCollections, getBatchImages } from './api';
+import { importFolder, importFiles, listImagesByFolder, listImages, addToCollection, listCollections, getBatchImages, listFolders, listCollectionImages } from './api';
 
 interface OpenParams {
     path?: string | null;
@@ -69,7 +69,6 @@ export async function handleParams(params: OpenParams) {
             images.set(imgs);
             focusedIndex.set(0);
             // Refresh folder list in sidebar
-            const { listFolders } = await import('./api');
             const f = await listFolders();
             folders.set(f);
             if (result.imported > 0) {
@@ -120,7 +119,6 @@ export async function handleParams(params: OpenParams) {
                 collections.set(c);
 
                 // Reload collection images
-                const { listCollectionImages } = await import('./api');
                 const imgs = await listCollectionImages(pinned);
                 images.set(imgs);
                 focusedIndex.set(Math.max(0, imgs.length - result.image_ids.length));

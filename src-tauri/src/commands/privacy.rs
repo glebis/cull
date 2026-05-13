@@ -1,10 +1,10 @@
 // Copyright (c) 2025-present Gleb Kalinin. Architecture and design by author.
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
-use tauri::State;
-use serde::Serialize;
-use crate::AppState;
 use crate::services::audit;
+use crate::AppState;
+use serde::Serialize;
+use tauri::State;
 
 #[derive(Debug, Serialize)]
 pub struct DataFlowEntry {
@@ -15,7 +15,9 @@ pub struct DataFlowEntry {
 }
 
 #[tauri::command]
-pub async fn get_data_flow_status(state: State<'_, AppState>) -> Result<Vec<DataFlowEntry>, String> {
+pub async fn get_data_flow_status(
+    state: State<'_, AppState>,
+) -> Result<Vec<DataFlowEntry>, String> {
     let mut entries = Vec::new();
 
     let clip_available = {
@@ -36,46 +38,97 @@ pub async fn get_data_flow_status(state: State<'_, AppState>) -> Result<Vec<Data
         data_sent: "Nothing".into(),
     });
 
-    let ollama_url = state.db.get_setting("ollama_url")
-        .ok().flatten()
+    let ollama_url = state
+        .db
+        .get_setting("ollama_url")
+        .ok()
+        .flatten()
         .unwrap_or_else(|| "http://localhost:11434/api/generate".to_string());
     let ollama_is_local = ollama_url.contains("localhost") || ollama_url.contains("127.0.0.1");
     entries.push(DataFlowEntry {
         feature: "Ollama vision".into(),
         status: if ollama_is_local { "local" } else { "active" }.into(),
-        server: if ollama_is_local { "localhost".into() } else { "remote".into() },
+        server: if ollama_is_local {
+            "localhost".into()
+        } else {
+            "remote".into()
+        },
         data_sent: "Images".into(),
     });
 
-    let gemini_key = state.db.get_setting("api_key_exists_google")
-        .ok().flatten().map(|v| v == "true").unwrap_or(false);
+    let gemini_key = state
+        .db
+        .get_setting("api_key_exists_google")
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false);
     entries.push(DataFlowEntry {
         feature: "Gemini embeddings".into(),
         status: if gemini_key { "active" } else { "off" }.into(),
-        server: if gemini_key { "US 🇺🇸".into() } else { "—".into() },
-        data_sent: if gemini_key { "Images + API key".into() } else { "Nothing".into() },
+        server: if gemini_key {
+            "US 🇺🇸".into()
+        } else {
+            "—".into()
+        },
+        data_sent: if gemini_key {
+            "Images + API key".into()
+        } else {
+            "Nothing".into()
+        },
     });
 
-    let openai_key = state.db.get_setting("api_key_exists_openai")
-        .ok().flatten().map(|v| v == "true").unwrap_or(false);
+    let openai_key = state
+        .db
+        .get_setting("api_key_exists_openai")
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false);
     entries.push(DataFlowEntry {
         feature: "OpenAI generation".into(),
         status: if openai_key { "configured" } else { "off" }.into(),
-        server: if openai_key { "US 🇺🇸".into() } else { "—".into() },
-        data_sent: if openai_key { "Prompts + images".into() } else { "Nothing".into() },
+        server: if openai_key {
+            "US 🇺🇸".into()
+        } else {
+            "—".into()
+        },
+        data_sent: if openai_key {
+            "Prompts + images".into()
+        } else {
+            "Nothing".into()
+        },
     });
 
-    let openrouter_key = state.db.get_setting("api_key_exists_openrouter")
-        .ok().flatten().map(|v| v == "true").unwrap_or(false);
+    let openrouter_key = state
+        .db
+        .get_setting("api_key_exists_openrouter")
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false);
     entries.push(DataFlowEntry {
         feature: "OpenRouter generation".into(),
         status: if openrouter_key { "configured" } else { "off" }.into(),
-        server: if openrouter_key { "US 🇺🇸".into() } else { "—".into() },
-        data_sent: if openrouter_key { "Prompts + images".into() } else { "Nothing".into() },
+        server: if openrouter_key {
+            "US 🇺🇸".into()
+        } else {
+            "—".into()
+        },
+        data_sent: if openrouter_key {
+            "Prompts + images".into()
+        } else {
+            "Nothing".into()
+        },
     });
 
-    let mcp_http = state.db.get_setting("mcp_http_enabled")
-        .ok().flatten().map(|v| v == "true").unwrap_or(false);
+    let mcp_http = state
+        .db
+        .get_setting("mcp_http_enabled")
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false);
     entries.push(DataFlowEntry {
         feature: "MCP (local)".into(),
         status: "local".into(),
@@ -85,7 +138,11 @@ pub async fn get_data_flow_status(state: State<'_, AppState>) -> Result<Vec<Data
     entries.push(DataFlowEntry {
         feature: "MCP (HTTP)".into(),
         status: if mcp_http { "active" } else { "off" }.into(),
-        server: if mcp_http { "network".into() } else { "—".into() },
+        server: if mcp_http {
+            "network".into()
+        } else {
+            "—".into()
+        },
         data_sent: "Metadata".into(),
     });
 
@@ -93,7 +150,10 @@ pub async fn get_data_flow_status(state: State<'_, AppState>) -> Result<Vec<Data
 }
 
 #[tauri::command]
-pub async fn get_api_audit_log(state: State<'_, AppState>, limit: u32) -> Result<Vec<audit::AuditLogEntry>, String> {
+pub async fn get_api_audit_log(
+    state: State<'_, AppState>,
+    limit: u32,
+) -> Result<Vec<audit::AuditLogEntry>, String> {
     let clamped = limit.min(100).max(1);
     audit::get_audit_log(&state.db, clamped).map_err(|e| e.to_string())
 }

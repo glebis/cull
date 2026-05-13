@@ -1,12 +1,18 @@
-use std::path::{Path, PathBuf};
 use crate::db_core::models::*;
 use crate::services::{ServiceContext, ServiceError};
+use std::path::{Path, PathBuf};
 
 pub fn sanitize_folder_name(name: &str) -> String {
     name.trim()
         .to_lowercase()
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .split('-')
         .filter(|s| !s.is_empty())
@@ -14,29 +20,35 @@ pub fn sanitize_folder_name(name: &str) -> String {
         .join("-")
 }
 
+#[allow(dead_code)]
 pub fn compute_sha256(path: &Path) -> Result<String, ServiceError> {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
     std::io::copy(&mut file, &mut hasher)?;
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+#[allow(dead_code)]
 pub fn validate_file_hash(path: &Path, expected_hash: &str) -> Result<bool, ServiceError> {
     let actual = compute_sha256(path)?;
     Ok(actual == expected_hash)
 }
 
+#[allow(dead_code)]
 pub fn copy_file_to_session(source: &Path, dest_dir: &Path) -> Result<PathBuf, ServiceError> {
-    let filename = source.file_name()
+    let filename = source
+        .file_name()
         .ok_or_else(|| ServiceError::InvalidInput("No filename".into()))?;
     let dest = dest_dir.join(filename);
     std::fs::copy(source, &dest)?;
     Ok(dest)
 }
 
+#[allow(dead_code)]
 pub fn move_file_to_session(source: &Path, dest_dir: &Path) -> Result<PathBuf, ServiceError> {
-    let filename = source.file_name()
+    let filename = source
+        .file_name()
         .ok_or_else(|| ServiceError::InvalidInput("No filename".into()))?;
     let dest = dest_dir.join(filename);
     if std::fs::rename(source, &dest).is_err() {
@@ -46,7 +58,11 @@ pub fn move_file_to_session(source: &Path, dest_dir: &Path) -> Result<PathBuf, S
     Ok(dest)
 }
 
-pub fn create_session(ctx: &ServiceContext, name: &str, sessions_root: &Path) -> Result<Session, ServiceError> {
+pub fn create_session(
+    ctx: &ServiceContext,
+    name: &str,
+    sessions_root: &Path,
+) -> Result<Session, ServiceError> {
     let date = chrono::Local::now().format("%Y-%m-%d").to_string();
     let folder_name = format!("{}-{}", date, sanitize_folder_name(name));
     let folder_path = sessions_root.join(&folder_name);
@@ -68,7 +84,11 @@ pub fn get_session(ctx: &ServiceContext, id: &str) -> Result<Session, ServiceErr
     Ok(ctx.db.get_session(id)?)
 }
 
-pub fn delete_session(ctx: &ServiceContext, id: &str, delete_files: bool) -> Result<(), ServiceError> {
+pub fn delete_session(
+    ctx: &ServiceContext,
+    id: &str,
+    delete_files: bool,
+) -> Result<(), ServiceError> {
     if delete_files {
         let session = ctx.db.get_session(id)?;
         let folder = Path::new(&session.folder_path);
@@ -88,13 +108,23 @@ pub fn validate_session_folder(ctx: &ServiceContext, id: &str) -> Result<bool, S
     Ok(Path::new(&session.folder_path).exists())
 }
 
-pub fn create_canvas(ctx: &ServiceContext, session_id: &str, name: &str, canvas_type: &str) -> Result<Canvas, ServiceError> {
+pub fn create_canvas(
+    ctx: &ServiceContext,
+    session_id: &str,
+    name: &str,
+    canvas_type: &str,
+) -> Result<Canvas, ServiceError> {
     if canvas_type != "manual" && canvas_type != "query" {
-        return Err(ServiceError::InvalidInput(format!("Invalid canvas type: {}", canvas_type)));
+        return Err(ServiceError::InvalidInput(format!(
+            "Invalid canvas type: {}",
+            canvas_type
+        )));
     }
     let id = ctx.db.create_canvas(session_id, name, canvas_type)?;
     let canvases = ctx.db.list_canvases(session_id)?;
-    canvases.into_iter().find(|c| c.id == id)
+    canvases
+        .into_iter()
+        .find(|c| c.id == id)
         .ok_or_else(|| ServiceError::NotFound("Canvas not found after creation".into()))
 }
 
@@ -102,7 +132,11 @@ pub fn list_canvases(ctx: &ServiceContext, session_id: &str) -> Result<Vec<Canva
     Ok(ctx.db.list_canvases(session_id)?)
 }
 
-pub fn update_canvas_layout(ctx: &ServiceContext, canvas_id: &str, layout_json: &str) -> Result<(), ServiceError> {
+pub fn update_canvas_layout(
+    ctx: &ServiceContext,
+    canvas_id: &str,
+    layout_json: &str,
+) -> Result<(), ServiceError> {
     Ok(ctx.db.update_canvas_layout(canvas_id, layout_json)?)
 }
 

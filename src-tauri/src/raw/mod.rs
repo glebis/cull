@@ -1,8 +1,8 @@
 pub mod fuji;
 pub mod libraw;
 
+use serde::{Deserialize, Serialize};
 use std::path::Path;
-use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RawMetadata {
@@ -30,9 +30,7 @@ pub trait RawDecoder: Send + Sync {
 }
 
 pub fn decode_raw_preview(path: &Path) -> Result<RawPreview, String> {
-    let ext = path.extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     if ext.eq_ignore_ascii_case("raf") {
         match fuji::FujiRafDecoder.extract_preview(path) {

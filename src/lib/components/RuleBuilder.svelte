@@ -199,12 +199,14 @@
 
         {#if editingIndex === i}
             <!-- Edit mode: chip expands into inline form -->
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
             <div
                 class="chip-edit-container"
                 style="--chip-color: {color}"
                 onkeydown={onEditKeydown}
                 role="group"
                 aria-label="Edit rule"
+                tabindex="0"
             >
                 {#if wr.negated}
                     <span class="not-badge">NOT</span>

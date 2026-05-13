@@ -1,7 +1,7 @@
 use crate::db_core::models::{McpToken, TokenScope};
 use crate::services::{ServiceContext, ServiceError};
 use rand::Rng;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
 pub const ROLE_VIEWER: &str = "viewer";
@@ -17,19 +17,29 @@ pub fn capabilities_for_role(role: &str) -> Vec<&'static str> {
     match role {
         ROLE_VIEWER => vec!["library:read", "library:search"],
         ROLE_CURATOR => vec![
-            "library:read", "library:search",
-            "curation:write", "export:read",
+            "library:read",
+            "library:search",
+            "curation:write",
+            "export:read",
         ],
         ROLE_OPERATOR => vec![
-            "library:read", "library:search",
-            "curation:write", "export:read",
-            "import:write", "ai:run",
+            "library:read",
+            "library:search",
+            "curation:write",
+            "export:read",
+            "import:write",
+            "ai:run",
         ],
         ROLE_ADMIN => vec![
-            "library:read", "library:search",
-            "curation:write", "export:read",
-            "import:write", "ai:run",
-            "display:navigate", "tokens:manage", "settings:manage",
+            "library:read",
+            "library:search",
+            "curation:write",
+            "export:read",
+            "import:write",
+            "ai:run",
+            "display:navigate",
+            "tokens:manage",
+            "settings:manage",
         ],
         _ => vec![],
     }
@@ -41,28 +51,43 @@ pub fn has_capability(role: &str, capability: &str) -> bool {
 
 pub fn tool_capability(tool_name: &str) -> &'static str {
     match tool_name {
-        "list_images" | "get_image" | "list_folders" | "list_folder_images"
-        | "list_collections" | "list_collection_images" | "get_library_stats"
-        | "get_detections" | "get_vision_metadata" => "library:read",
+        "list_images"
+        | "get_image"
+        | "list_folders"
+        | "list_folder_images"
+        | "list_collections"
+        | "list_collection_images"
+        | "get_library_stats"
+        | "get_detections"
+        | "get_vision_metadata" => "library:read",
 
         "search_images" | "find_similar" | "search_by_object" => "library:search",
 
-        "set_rating" | "set_decision" | "create_collection" | "add_to_collection"
-        | "delete_collection" | "create_smart_collection" => "curation:write",
+        "set_rating"
+        | "set_decision"
+        | "create_collection"
+        | "add_to_collection"
+        | "delete_collection"
+        | "create_smart_collection" => "curation:write",
 
         "import_folder" | "import_files" => "import:write",
         "rescan_sources" => "settings:manage",
 
-        "export_images" | "list_export_presets" | "assemble_pdf" => "export:read",
+        "export_images"
+        | "list_export_presets"
+        | "assemble_pdf"
+        | "export_static_publish_package" => "export:read",
 
         "show_image" | "navigate_to_folder" | "show_collection" => "display:navigate",
 
         "generate_embeddings" | "detect_objects" | "analyze_images" => "ai:run",
 
-        "create_token" | "list_tokens" | "revoke_token" | "rotate_token"
-        | "get_audit_log" | "prune_audit_log" => "tokens:manage",
+        "create_token" | "list_tokens" | "revoke_token" | "rotate_token" | "get_audit_log"
+        | "prune_audit_log" => "tokens:manage",
 
-        "get_job" | "list_jobs" | "cancel_job" => "settings:manage",
+        "get_job" | "list_jobs" | "cancel_job" | "serve_static_publish_package" => {
+            "settings:manage"
+        }
 
         _ => "settings:manage",
     }
@@ -73,7 +98,11 @@ fn generate_token_id() -> String {
     let chars: String = (0..12)
         .map(|_| {
             let idx = rng.gen_range(0..36u8);
-            if idx < 10 { (b'0' + idx) as char } else { (b'a' + idx - 10) as char }
+            if idx < 10 {
+                (b'0' + idx) as char
+            } else {
+                (b'a' + idx - 10) as char
+            }
         })
         .collect();
     format!("{}{}", TOKEN_PREFIX, chars)
@@ -96,7 +125,9 @@ fn verify_secret(pepper: &str, secret: &str, stored_hash: &str) -> bool {
     let computed = hash_secret(pepper, secret);
     let a = computed.as_bytes();
     let b = stored_hash.as_bytes();
-    if a.len() != b.len() { return false; }
+    if a.len() != b.len() {
+        return false;
+    }
     a.ct_eq(b).into()
 }
 
@@ -105,7 +136,8 @@ fn get_or_create_pepper(ctx: &ServiceContext) -> Result<String, ServiceError> {
         Ok(Some(p)) => Ok(p),
         Ok(None) => {
             let new_pepper = generate_secret();
-            ctx.secrets.set("mcp_pepper", &new_pepper)
+            ctx.secrets
+                .set("mcp_pepper", &new_pepper)
                 .map_err(|e| ServiceError::Engine(e))?;
             Ok(new_pepper)
         }
@@ -120,7 +152,10 @@ pub fn create_token(
     scope: Option<TokenScope>,
 ) -> Result<(McpToken, String), ServiceError> {
     if !VALID_ROLES.contains(&role) {
-        return Err(ServiceError::InvalidInput(format!("Invalid role: {}", role)));
+        return Err(ServiceError::InvalidInput(format!(
+            "Invalid role: {}",
+            role
+        )));
     }
 
     let id = generate_token_id();
@@ -130,7 +165,7 @@ pub fn create_token(
     let scope_json = scope.as_ref().map(|s| serde_json::to_string(s).unwrap());
     let now = chrono::Utc::now().to_rfc3339();
 
-    let conn = ctx.db.conn.lock().unwrap();
+    let conn = ctx.db.conn.lock();
     conn.execute(
         "INSERT INTO mcp_tokens (id, name, secret_hash, role, scope_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![id, name, secret_hash, role, scope_json, now],
@@ -150,10 +185,13 @@ pub fn create_token(
     Ok((token, secret))
 }
 
-pub fn validate_token(ctx: &ServiceContext, secret: &str) -> Result<Option<McpToken>, ServiceError> {
+pub fn validate_token(
+    ctx: &ServiceContext,
+    secret: &str,
+) -> Result<Option<McpToken>, ServiceError> {
     let pepper = get_or_create_pepper(ctx)?;
     let computed_hash = hash_secret(&pepper, secret);
-    let conn = ctx.db.conn.lock().unwrap();
+    let conn = ctx.db.conn.lock();
 
     let result = conn.query_row(
         "SELECT id, name, secret_hash, role, scope_json, created_at, expires_at, last_used_at
@@ -173,11 +211,12 @@ pub fn validate_token(ctx: &ServiceContext, secret: &str) -> Result<Option<McpTo
         },
     );
 
-    let (id, name, stored_hash, role, scope_json, created_at, expires_at, _last_used_at) = match result {
-        Ok(row) => row,
-        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
-        Err(e) => return Err(ServiceError::Database(e)),
-    };
+    let (id, name, stored_hash, role, scope_json, created_at, expires_at, _last_used_at) =
+        match result {
+            Ok(row) => row,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+            Err(e) => return Err(ServiceError::Database(e)),
+        };
 
     if !verify_secret(&pepper, secret, &stored_hash) {
         return Ok(None);
@@ -198,34 +237,42 @@ pub fn validate_token(ctx: &ServiceContext, secret: &str) -> Result<Option<McpTo
     );
 
     Ok(Some(McpToken {
-        id, name, role, scope_json, created_at, expires_at,
-        last_used_at: Some(now), revoked: false,
+        id,
+        name,
+        role,
+        scope_json,
+        created_at,
+        expires_at,
+        last_used_at: Some(now),
+        revoked: false,
     }))
 }
 
 pub fn list_tokens(ctx: &ServiceContext) -> Result<Vec<McpToken>, ServiceError> {
-    let conn = ctx.db.conn.lock().unwrap();
+    let conn = ctx.db.conn.lock();
     let mut stmt = conn.prepare(
         "SELECT id, name, role, scope_json, created_at, expires_at, last_used_at, revoked
-         FROM mcp_tokens WHERE revoked = 0"
+         FROM mcp_tokens WHERE revoked = 0",
     )?;
-    let tokens = stmt.query_map([], |row| {
-        Ok(McpToken {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            role: row.get(2)?,
-            scope_json: row.get(3)?,
-            created_at: row.get(4)?,
-            expires_at: row.get(5)?,
-            last_used_at: row.get(6)?,
-            revoked: row.get::<_, i32>(7)? != 0,
-        })
-    })?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let tokens = stmt
+        .query_map([], |row| {
+            Ok(McpToken {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                role: row.get(2)?,
+                scope_json: row.get(3)?,
+                created_at: row.get(4)?,
+                expires_at: row.get(5)?,
+                last_used_at: row.get(6)?,
+                revoked: row.get::<_, i32>(7)? != 0,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(tokens)
 }
 
 pub fn revoke_token(ctx: &ServiceContext, token_id: &str) -> Result<(), ServiceError> {
-    let conn = ctx.db.conn.lock().unwrap();
+    let conn = ctx.db.conn.lock();
     let updated = conn.execute(
         "UPDATE mcp_tokens SET revoked = 1 WHERE id = ?1",
         rusqlite::params![token_id],
@@ -241,7 +288,7 @@ pub fn rotate_token(ctx: &ServiceContext, token_id: &str) -> Result<String, Serv
     let new_secret = generate_secret();
     let new_hash = hash_secret(&pepper, &new_secret);
 
-    let conn = ctx.db.conn.lock().unwrap();
+    let conn = ctx.db.conn.lock();
     let updated = conn.execute(
         "UPDATE mcp_tokens SET secret_hash = ?1 WHERE id = ?2 AND revoked = 0",
         rusqlite::params![new_hash, token_id],
@@ -260,7 +307,7 @@ pub fn log_audit(
     result_status: &str,
 ) -> Result<(), ServiceError> {
     let now = chrono::Utc::now().to_rfc3339();
-    let conn = ctx.db.conn.lock().unwrap();
+    let conn = ctx.db.conn.lock();
     conn.execute(
         "INSERT INTO mcp_audit_log (token_id, tool_name, params_json, result_status, timestamp)
          VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -271,7 +318,7 @@ pub fn log_audit(
 
 pub fn prune_audit_log(ctx: &ServiceContext, retention_days: u32) -> Result<u32, ServiceError> {
     let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days as i64);
-    let conn = ctx.db.conn.lock().unwrap();
+    let conn = ctx.db.conn.lock();
     let deleted = conn.execute(
         "DELETE FROM mcp_audit_log WHERE timestamp < ?1",
         rusqlite::params![cutoff.to_rfc3339()],
@@ -279,27 +326,33 @@ pub fn prune_audit_log(ctx: &ServiceContext, retention_days: u32) -> Result<u32,
     Ok(deleted as u32)
 }
 
-pub fn get_recent_audit(ctx: &ServiceContext, limit: u32) -> Result<Vec<crate::db_core::models::AuditEntry>, ServiceError> {
-    let conn = ctx.db.conn.lock().unwrap();
+pub fn get_recent_audit(
+    ctx: &ServiceContext,
+    limit: u32,
+) -> Result<Vec<crate::db_core::models::AuditEntry>, ServiceError> {
+    let conn = ctx.db.conn.lock();
     let mut stmt = conn.prepare(
         "SELECT id, token_id, tool_name, params_json, result_status, timestamp
-         FROM mcp_audit_log ORDER BY id DESC LIMIT ?1"
+         FROM mcp_audit_log ORDER BY id DESC LIMIT ?1",
     )?;
-    let entries = stmt.query_map(rusqlite::params![limit], |row| {
-        Ok(crate::db_core::models::AuditEntry {
-            id: row.get(0)?,
-            token_id: row.get(1)?,
-            tool_name: row.get(2)?,
-            params_json: row.get(3)?,
-            result_status: row.get(4)?,
-            timestamp: row.get(5)?,
-        })
-    })?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let entries = stmt
+        .query_map(rusqlite::params![limit], |row| {
+            Ok(crate::db_core::models::AuditEntry {
+                id: row.get(0)?,
+                token_id: row.get(1)?,
+                tool_name: row.get(2)?,
+                params_json: row.get(3)?,
+                result_status: row.get(4)?,
+                timestamp: row.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(entries)
 }
 
 pub fn parse_scope(scope_json: &Option<String>) -> Option<TokenScope> {
-    scope_json.as_ref()
+    scope_json
+        .as_ref()
         .and_then(|s| serde_json::from_str(s).ok())
 }
 
@@ -310,7 +363,11 @@ fn is_path_under(path: &str, ancestor: &str) -> bool {
     path.starts_with(ancestor)
 }
 
-pub fn image_in_scope(scope: &Option<TokenScope>, image_path: &str, image_collections: &[String]) -> bool {
+pub fn image_in_scope(
+    scope: &Option<TokenScope>,
+    image_path: &str,
+    image_collections: &[String],
+) -> bool {
     let s = match scope {
         None => return true,
         Some(s) => s,
@@ -360,13 +417,21 @@ pub fn folder_in_scope(scope: &Option<TokenScope>, folder_path: &str) -> bool {
 mod tests {
     use super::*;
     use crate::db_core::db::Database;
-    use crate::db_core::secrets::{MemoryStore, SecretStore};
-    use crate::db_core::embeddings::EmbeddingEngine;
     use crate::db_core::detection::DetectionEngine;
+    use crate::db_core::embeddings::EmbeddingEngine;
+    use crate::db_core::secrets::{MemoryStore, SecretStore};
+    use parking_lot::Mutex;
     use std::path::PathBuf;
-    use std::sync::Mutex;
 
-    fn test_context() -> (Database, MemoryStore, PathBuf, Mutex<EmbeddingEngine>, Mutex<DetectionEngine>, Mutex<DetectionEngine>, tempfile::TempDir) {
+    fn test_context() -> (
+        Database,
+        MemoryStore,
+        PathBuf,
+        Mutex<EmbeddingEngine>,
+        Mutex<DetectionEngine>,
+        Mutex<DetectionEngine>,
+        tempfile::TempDir,
+    ) {
         let tmp = tempfile::tempdir().unwrap();
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
         let secrets = MemoryStore::new();
@@ -375,7 +440,15 @@ mod tests {
         let embedding_engine = Mutex::new(EmbeddingEngine::new(&model_dir));
         let detection_engine = Mutex::new(DetectionEngine::new_yolo(&model_dir));
         let safety_engine = Mutex::new(DetectionEngine::new_nudenet(&model_dir));
-        (db, secrets, app_data_dir, embedding_engine, detection_engine, safety_engine, tmp)
+        (
+            db,
+            secrets,
+            app_data_dir,
+            embedding_engine,
+            detection_engine,
+            safety_engine,
+            tmp,
+        )
     }
 
     fn make_ctx<'a>(
@@ -446,6 +519,14 @@ mod tests {
         assert_eq!(tool_capability("create_collection"), "curation:write");
         assert_eq!(tool_capability("import_folder"), "import:write");
         assert_eq!(tool_capability("list_export_presets"), "export:read");
+        assert_eq!(
+            tool_capability("export_static_publish_package"),
+            "export:read"
+        );
+        assert_eq!(
+            tool_capability("serve_static_publish_package"),
+            "settings:manage"
+        );
         assert_eq!(tool_capability("show_image"), "display:navigate");
         assert_eq!(tool_capability("generate_embeddings"), "ai:run");
         assert_eq!(tool_capability("create_token"), "tokens:manage");
@@ -625,9 +706,23 @@ mod tests {
         let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
-        log_audit(&ctx, Some("tok_abc"), "list_images", Some(r#"{"limit":10}"#), "ok").unwrap();
+        log_audit(
+            &ctx,
+            Some("tok_abc"),
+            "list_images",
+            Some(r#"{"limit":10}"#),
+            "ok",
+        )
+        .unwrap();
         log_audit(&ctx, None, "get_library_stats", None, "ok").unwrap();
-        log_audit(&ctx, Some("tok_abc"), "set_rating", Some(r#"{"image_id":"img1"}"#), "denied").unwrap();
+        log_audit(
+            &ctx,
+            Some("tok_abc"),
+            "set_rating",
+            Some(r#"{"image_id":"img1"}"#),
+            "denied",
+        )
+        .unwrap();
 
         let entries = get_recent_audit(&ctx, 10).unwrap();
         assert_eq!(entries.len(), 3);
@@ -645,7 +740,7 @@ mod tests {
 
         // Insert an entry with an old timestamp
         {
-            let conn = ctx.db.conn.lock().unwrap();
+            let conn = ctx.db.conn.lock();
             conn.execute(
                 "INSERT INTO mcp_audit_log (token_id, tool_name, params_json, result_status, timestamp) VALUES (?1, ?2, ?3, ?4, ?5)",
                 rusqlite::params![None::<String>, "old_tool", None::<String>, "ok", "2020-01-01T00:00:00+00:00"],
@@ -686,7 +781,8 @@ mod tests {
 
     #[test]
     fn test_parse_scope_valid() {
-        let json = Some(r#"{"collections":["col_a"],"folders":["/art"],"tags":["public"]}"#.to_string());
+        let json =
+            Some(r#"{"collections":["col_a"],"folders":["/art"],"tags":["public"]}"#.to_string());
         let scope = parse_scope(&json).unwrap();
         assert_eq!(scope.collections.unwrap(), vec!["col_a"]);
         assert_eq!(scope.folders.unwrap(), vec!["/art"]);
@@ -712,7 +808,11 @@ mod tests {
             tags: None,
         });
         assert!(image_in_scope(&scope, "/art/midjourney/img001.png", &[]));
-        assert!(image_in_scope(&scope, "/art/midjourney/subfolder/img.jpg", &[]));
+        assert!(image_in_scope(
+            &scope,
+            "/art/midjourney/subfolder/img.jpg",
+            &[]
+        ));
     }
 
     #[test]
@@ -733,8 +833,16 @@ mod tests {
             folders: None,
             tags: None,
         });
-        assert!(image_in_scope(&scope, "/any/path.png", &["col_abc".to_string()]));
-        assert!(!image_in_scope(&scope, "/any/path.png", &["col_other".to_string()]));
+        assert!(image_in_scope(
+            &scope,
+            "/any/path.png",
+            &["col_abc".to_string()]
+        ));
+        assert!(!image_in_scope(
+            &scope,
+            "/any/path.png",
+            &["col_other".to_string()]
+        ));
         assert!(!image_in_scope(&scope, "/any/path.png", &[]));
     }
 
@@ -748,7 +856,11 @@ mod tests {
         // Matches folder
         assert!(image_in_scope(&scope, "/art/dalle/img.png", &[]));
         // Matches collection
-        assert!(image_in_scope(&scope, "/other/path.png", &["col_abc".to_string()]));
+        assert!(image_in_scope(
+            &scope,
+            "/other/path.png",
+            &["col_abc".to_string()]
+        ));
         // Matches neither
         assert!(!image_in_scope(&scope, "/other/path.png", &[]));
     }
@@ -760,7 +872,11 @@ mod tests {
             folders: Some(vec!["/art".to_string()]),
             tags: Some(vec!["public".to_string()]),
         });
-        assert!(!image_in_scope(&scope, "/photos/vacation.jpg", &["col_other".to_string()]));
+        assert!(!image_in_scope(
+            &scope,
+            "/photos/vacation.jpg",
+            &["col_other".to_string()]
+        ));
     }
 
     #[test]

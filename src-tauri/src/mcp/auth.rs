@@ -102,10 +102,15 @@ mod tests {
         "get_audit_log",
         "prune_audit_log",
         "list_export_presets",
+        "export_static_publish_package",
     ];
 
     const ADMIN_ONLY_TOOLS: &[&str] = &[
-        "get_job", "list_jobs", "cancel_job", "rescan_sources",
+        "get_job",
+        "list_jobs",
+        "cancel_job",
+        "rescan_sources",
+        "serve_static_publish_package",
     ];
 
     const READ_TOOLS: &[&str] = &[
@@ -131,7 +136,12 @@ mod tests {
     ];
 
     const IMPORT_TOOLS: &[&str] = &["import_folder", "import_files"];
-    const EXPORT_TOOLS: &[&str] = &["export_images", "list_export_presets", "assemble_pdf"];
+    const EXPORT_TOOLS: &[&str] = &[
+        "export_images",
+        "list_export_presets",
+        "assemble_pdf",
+        "export_static_publish_package",
+    ];
     const DISPLAY_TOOLS: &[&str] = &["show_image", "navigate_to_folder", "show_collection"];
     const AI_TOOLS: &[&str] = &["generate_embeddings", "detect_objects", "analyze_images"];
     const TOKEN_TOOLS: &[&str] = &[
@@ -459,6 +469,7 @@ mod tests {
             .chain(DISPLAY_TOOLS.iter())
             .chain(AI_TOOLS.iter())
             .chain(TOKEN_TOOLS.iter())
+            .chain(ADMIN_ONLY_TOOLS.iter())
             .collect();
 
         for tool in all_tool_lists {

@@ -1,15 +1,22 @@
-use serde::{Deserialize, Serialize};
 use rusqlite::types::Value as SqlValue;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum FilterNode {
     #[serde(rename = "group")]
-    Group { op: GroupOp, children: Vec<FilterNode> },
+    Group {
+        op: GroupOp,
+        children: Vec<FilterNode>,
+    },
     #[serde(rename = "not")]
     Not { child: Box<FilterNode> },
     #[serde(rename = "rule")]
-    Rule { field: Field, op: RuleOp, value: FilterValue },
+    Rule {
+        field: Field,
+        op: RuleOp,
+        value: FilterValue,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -70,9 +77,18 @@ pub enum FilterValue {
     Number(f64),
     Bool(bool),
     StringArray(Vec<String>),
-    Range { from: String, to: String },
-    ClipImage { image_id: i64, threshold: Option<f64> },
-    ClipText { text: String, threshold: f64 },
+    Range {
+        from: String,
+        to: String,
+    },
+    ClipImage {
+        image_id: i64,
+        threshold: Option<f64>,
+    },
+    ClipText {
+        text: String,
+        threshold: f64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,7 +156,10 @@ impl FilterNode {
             FilterNode::Rule { field, op, value } => {
                 let col = field.to_column();
                 if col == "unsupported" {
-                    return Err(format!("Field {:?} requires embedding search, not SQL filtering", field));
+                    return Err(format!(
+                        "Field {:?} requires embedding search, not SQL filtering",
+                        field
+                    ));
                 }
 
                 match (op, value) {
@@ -153,12 +172,14 @@ impl FilterNode {
                     (RuleOp::Eq, FilterValue::Bool(v)) => {
                         Ok((format!("{} = ?", col), vec![SqlValue::Integer(*v as i64)]))
                     }
-                    (RuleOp::Neq, FilterValue::String(v)) => {
-                        Ok((format!("({} IS NULL OR {} != ?)", col, col), vec![SqlValue::Text(v.clone())]))
-                    }
-                    (RuleOp::Neq, FilterValue::Number(v)) => {
-                        Ok((format!("({} IS NULL OR {} != ?)", col, col), vec![SqlValue::Real(*v)]))
-                    }
+                    (RuleOp::Neq, FilterValue::String(v)) => Ok((
+                        format!("({} IS NULL OR {} != ?)", col, col),
+                        vec![SqlValue::Text(v.clone())],
+                    )),
+                    (RuleOp::Neq, FilterValue::Number(v)) => Ok((
+                        format!("({} IS NULL OR {} != ?)", col, col),
+                        vec![SqlValue::Real(*v)],
+                    )),
                     (RuleOp::Gt, FilterValue::Number(v)) => {
                         Ok((format!("{} > ?", col), vec![SqlValue::Real(*v)]))
                     }
@@ -171,26 +192,33 @@ impl FilterNode {
                     (RuleOp::Lte, FilterValue::Number(v)) => {
                         Ok((format!("{} <= ?", col), vec![SqlValue::Real(*v)]))
                     }
-                    (RuleOp::Contains, FilterValue::String(v)) => {
-                        Ok((format!("{} LIKE ?", col), vec![SqlValue::Text(format!("%{}%", v))]))
-                    }
-                    (RuleOp::NotContains, FilterValue::String(v)) => {
-                        Ok((format!("({} IS NULL OR {} NOT LIKE ?)", col, col),
-                         vec![SqlValue::Text(format!("%{}%", v))]))
-                    }
+                    (RuleOp::Contains, FilterValue::String(v)) => Ok((
+                        format!("{} LIKE ?", col),
+                        vec![SqlValue::Text(format!("%{}%", v))],
+                    )),
+                    (RuleOp::NotContains, FilterValue::String(v)) => Ok((
+                        format!("({} IS NULL OR {} NOT LIKE ?)", col, col),
+                        vec![SqlValue::Text(format!("%{}%", v))],
+                    )),
                     (RuleOp::In, FilterValue::StringArray(vals)) => {
                         let placeholders: Vec<&str> = vals.iter().map(|_| "?").collect();
-                        let params: Vec<SqlValue> = vals.iter()
-                            .map(|v| SqlValue::Text(v.clone()))
-                            .collect();
+                        let params: Vec<SqlValue> =
+                            vals.iter().map(|v| SqlValue::Text(v.clone())).collect();
                         Ok((format!("{} IN ({})", col, placeholders.join(",")), params))
                     }
                     (RuleOp::NotIn, FilterValue::StringArray(vals)) => {
                         let placeholders: Vec<&str> = vals.iter().map(|_| "?").collect();
-                        let params: Vec<SqlValue> = vals.iter()
-                            .map(|v| SqlValue::Text(v.clone()))
-                            .collect();
-                        Ok((format!("({} IS NULL OR {} NOT IN ({}))", col, col, placeholders.join(",")), params))
+                        let params: Vec<SqlValue> =
+                            vals.iter().map(|v| SqlValue::Text(v.clone())).collect();
+                        Ok((
+                            format!(
+                                "({} IS NULL OR {} NOT IN ({}))",
+                                col,
+                                col,
+                                placeholders.join(",")
+                            ),
+                            params,
+                        ))
                     }
                     (RuleOp::IsEmpty, _) => {
                         Ok((format!("({} IS NULL OR {} = '')", col, col), vec![]))
@@ -198,20 +226,26 @@ impl FilterNode {
                     (RuleOp::IsNotEmpty, _) => {
                         Ok((format!("({} IS NOT NULL AND {} != '')", col, col), vec![]))
                     }
-                    (RuleOp::LastNDays, FilterValue::Number(days)) => {
-                        Ok((format!("{} >= datetime('now', '-{} days')", col, *days as i64), vec![]))
-                    }
-                    (RuleOp::ThisWeek, _) => {
-                        Ok((format!("{} >= datetime('now', 'weekday 0', '-7 days')", col), vec![]))
-                    }
-                    (RuleOp::ThisMonth, _) => {
-                        Ok((format!("{} >= datetime('now', 'start of month')", col), vec![]))
-                    }
-                    (RuleOp::Between, FilterValue::Range { from, to }) => {
-                        Ok((format!("{} BETWEEN ? AND ?", col),
-                         vec![SqlValue::Text(from.clone()), SqlValue::Text(to.clone())]))
-                    }
-                    _ => Err(format!("Unsupported operator {:?} for field {:?}", op, field)),
+                    (RuleOp::LastNDays, FilterValue::Number(days)) => Ok((
+                        format!("{} >= datetime('now', '-{} days')", col, *days as i64),
+                        vec![],
+                    )),
+                    (RuleOp::ThisWeek, _) => Ok((
+                        format!("{} >= datetime('now', 'weekday 0', '-7 days')", col),
+                        vec![],
+                    )),
+                    (RuleOp::ThisMonth, _) => Ok((
+                        format!("{} >= datetime('now', 'start of month')", col),
+                        vec![],
+                    )),
+                    (RuleOp::Between, FilterValue::Range { from, to }) => Ok((
+                        format!("{} BETWEEN ? AND ?", col),
+                        vec![SqlValue::Text(from.clone()), SqlValue::Text(to.clone())],
+                    )),
+                    _ => Err(format!(
+                        "Unsupported operator {:?} for field {:?}",
+                        op, field
+                    )),
                 }
             }
         }

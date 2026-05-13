@@ -1,5 +1,5 @@
-use tauri::Manager;
 use crate::AppState;
+use tauri::Manager;
 
 pub fn start_mcp_server(app_handle: tauri::AppHandle) {
     let state = app_handle.state::<AppState>();

@@ -7,7 +7,7 @@ import {
     type ViewMode, type LineageLayout, type NsfwMode, type EmbeddingViewState,
 } from './stores';
 
-const STORAGE_KEY = 'imageview-app-state';
+const STORAGE_KEY = 'cull-app-state';
 const SCHEMA_VERSION = 1;
 
 interface PersistedState {

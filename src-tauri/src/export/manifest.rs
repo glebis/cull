@@ -197,7 +197,12 @@ impl ExportManifest {
                     foreground: "#171717".to_string(),
                     accent: "#c6422b".to_string(),
                 },
-                safe_area: SafeArea { top: 96, right: 72, bottom: 96, left: 72 },
+                safe_area: SafeArea {
+                    top: 96,
+                    right: 72,
+                    bottom: 96,
+                    left: 72,
+                },
             },
             targets: vec![],
             slides: vec![],

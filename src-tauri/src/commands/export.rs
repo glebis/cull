@@ -1,11 +1,11 @@
-use tauri::State;
-use crate::AppState;
 use crate::export::manifest::*;
+use crate::export::patch::{self, JsonPatch, PatchResult};
+use crate::export::pdf;
 use crate::export::presets;
 use crate::export::validate;
-use crate::export::pdf;
+use crate::AppState;
 use base64::Engine;
-use crate::export::patch::{self, JsonPatch, PatchResult};
+use tauri::State;
 
 #[derive(serde::Serialize)]
 pub struct PresetInfo {
@@ -33,7 +33,10 @@ pub async fn create_export_manifest(
     target_presets: Vec<String>,
     template: Option<String>,
 ) -> Result<ExportManifest, String> {
-    let id = format!("story_{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string());
+    let id = format!(
+        "story_{}",
+        uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string()
+    );
     let mut manifest = ExportManifest::new(id, "Untitled Story".to_string());
 
     manifest.source.image_ids = image_ids.clone();
@@ -52,7 +55,10 @@ pub async fn create_export_manifest(
     }
 
     let id_refs: Vec<&str> = image_ids.iter().map(|s| s.as_str()).collect();
-    let images = state.db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
+    let images = state
+        .db
+        .get_images_by_ids(&id_refs)
+        .map_err(|e| e.to_string())?;
 
     for (idx, img) in images.iter().enumerate() {
         let clean_id = img.image.id.replace("-", "");
@@ -191,7 +197,8 @@ pub async fn get_export_asset(
 ) -> Result<AssetResponse, String> {
     let _ = (max_width, max_height); // reserved for future resize support
 
-    let stripped = uri.strip_prefix("cull://images/")
+    let stripped = uri
+        .strip_prefix("cull://images/")
         .ok_or_else(|| format!("Unsupported URI scheme: {}", uri))?;
 
     let parts: Vec<&str> = stripped.split('/').collect();
@@ -202,8 +209,13 @@ pub async fn get_export_asset(
     let variant_str = variant.as_deref().unwrap_or("preview");
 
     let id_refs = vec![image_id];
-    let images = state.db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
-    let img = images.first().ok_or_else(|| format!("Image '{}' not found", image_id))?;
+    let images = state
+        .db
+        .get_images_by_ids(&id_refs)
+        .map_err(|e| e.to_string())?;
+    let img = images
+        .first()
+        .ok_or_else(|| format!("Image '{}' not found", image_id))?;
 
     match variant_str {
         "original" => {
@@ -214,9 +226,8 @@ pub async fn get_export_asset(
                 .and_then(|e| e.to_str())
                 .unwrap_or("");
             if crate::extensions::is_raw_extension(ext) {
-                let thumb_path = crate::db_core::thumbnails::thumbnail_path(
-                    &state.app_data_dir, &img.image.id,
-                );
+                let thumb_path =
+                    crate::db_core::thumbnails::thumbnail_path(&state.app_data_dir, &img.image.id);
                 Ok(AssetResponse {
                     path: thumb_path.to_string_lossy().to_string(),
                     mime: "image/jpeg".to_string(),
@@ -234,7 +245,9 @@ pub async fn get_export_asset(
         }
         "thumbnail" => {
             let thumb_path = crate::db_core::thumbnails::sized_thumbnail_path(
-                &state.app_data_dir, &img.image.id, 256
+                &state.app_data_dir,
+                &img.image.id,
+                256,
             );
             Ok(AssetResponse {
                 path: thumb_path.to_string_lossy().to_string(),
@@ -245,9 +258,8 @@ pub async fn get_export_asset(
         }
         _ => {
             // "preview" default — 800px thumbnail
-            let thumb_path = crate::db_core::thumbnails::thumbnail_path(
-                &state.app_data_dir, &img.image.id
-            );
+            let thumb_path =
+                crate::db_core::thumbnails::thumbnail_path(&state.app_data_dir, &img.image.id);
             Ok(AssetResponse {
                 path: thumb_path.to_string_lossy().to_string(),
                 mime: "image/jpeg".to_string(),
@@ -266,7 +278,11 @@ pub async fn save_export_image(
     target_id: String,
     manifest_id: String,
 ) -> Result<String, String> {
-    let export_dir = state.app_data_dir.join("exports").join(&manifest_id).join(&target_id);
+    let export_dir = state
+        .app_data_dir
+        .join("exports")
+        .join(&manifest_id)
+        .join(&target_id);
     std::fs::create_dir_all(&export_dir)
         .map_err(|e| format!("Failed to create export dir: {}", e))?;
 
@@ -277,8 +293,7 @@ pub async fn save_export_image(
         .decode(&base64_data)
         .map_err(|e| format!("Failed to decode base64: {}", e))?;
 
-    std::fs::write(&path, &bytes)
-        .map_err(|e| format!("Failed to write image: {}", e))?;
+    std::fs::write(&path, &bytes).map_err(|e| format!("Failed to write image: {}", e))?;
 
     Ok(path.to_string_lossy().to_string())
 }
@@ -292,7 +307,11 @@ pub async fn assemble_export_pdf(
     manifest_id: String,
     target_id: String,
 ) -> Result<String, String> {
-    let export_dir = state.app_data_dir.join("exports").join(&manifest_id).join(&target_id);
+    let export_dir = state
+        .app_data_dir
+        .join("exports")
+        .join(&manifest_id)
+        .join(&target_id);
     std::fs::create_dir_all(&export_dir)
         .map_err(|e| format!("Failed to create export dir: {}", e))?;
 

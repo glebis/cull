@@ -21,6 +21,7 @@ dist/
 .env
 .env.*
 !.env.example
+.venv/
 
 # App data
 thumbnails/

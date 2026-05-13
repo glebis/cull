@@ -1,5 +1,5 @@
-use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
+use ort::session::Session;
 use ort::value::Tensor;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -39,9 +39,15 @@ impl YoloVariant {
 
     pub fn download_url(&self) -> &str {
         match self {
-            YoloVariant::Nano => "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo11n.onnx",
-            YoloVariant::Small => "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo11s.onnx",
-            YoloVariant::Medium => "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo11m.onnx",
+            YoloVariant::Nano => {
+                "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo11n.onnx"
+            }
+            YoloVariant::Small => {
+                "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo11s.onnx"
+            }
+            YoloVariant::Medium => {
+                "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo11m.onnx"
+            }
         }
     }
 
@@ -326,23 +332,105 @@ fn nms(detections: Vec<Detection>, confidences: Vec<f32>, iou_threshold: f32) ->
 }
 
 const COCO_CLASSES: &[&str] = &[
-    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
-    "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat",
-    "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack",
-    "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball",
-    "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
-    "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
-    "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
-    "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote",
-    "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book",
-    "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
+    "person",
+    "bicycle",
+    "car",
+    "motorcycle",
+    "airplane",
+    "bus",
+    "train",
+    "truck",
+    "boat",
+    "traffic light",
+    "fire hydrant",
+    "stop sign",
+    "parking meter",
+    "bench",
+    "bird",
+    "cat",
+    "dog",
+    "horse",
+    "sheep",
+    "cow",
+    "elephant",
+    "bear",
+    "zebra",
+    "giraffe",
+    "backpack",
+    "umbrella",
+    "handbag",
+    "tie",
+    "suitcase",
+    "frisbee",
+    "skis",
+    "snowboard",
+    "sports ball",
+    "kite",
+    "baseball bat",
+    "baseball glove",
+    "skateboard",
+    "surfboard",
+    "tennis racket",
+    "bottle",
+    "wine glass",
+    "cup",
+    "fork",
+    "knife",
+    "spoon",
+    "bowl",
+    "banana",
+    "apple",
+    "sandwich",
+    "orange",
+    "broccoli",
+    "carrot",
+    "hot dog",
+    "pizza",
+    "donut",
+    "cake",
+    "chair",
+    "couch",
+    "potted plant",
+    "bed",
+    "dining table",
+    "toilet",
+    "tv",
+    "laptop",
+    "mouse",
+    "remote",
+    "keyboard",
+    "cell phone",
+    "microwave",
+    "oven",
+    "toaster",
+    "sink",
+    "refrigerator",
+    "book",
+    "clock",
+    "vase",
+    "scissors",
+    "teddy bear",
+    "hair drier",
+    "toothbrush",
 ];
 
 const NUDENET_CLASSES: &[&str] = &[
-    "FEMALE_GENITALIA_COVERED", "FACE_FEMALE", "BUTTOCKS_EXPOSED",
-    "FEMALE_BREAST_EXPOSED", "FEMALE_GENITALIA_EXPOSED", "MALE_BREAST_EXPOSED",
-    "ANUS_EXPOSED", "FEET_EXPOSED", "BELLY_COVERED", "FEET_COVERED",
-    "ARMPITS_COVERED", "ARMPITS_EXPOSED", "FACE_MALE", "BELLY_EXPOSED",
-    "MALE_GENITALIA_EXPOSED", "ANUS_COVERED", "FEMALE_BREAST_COVERED",
+    "FEMALE_GENITALIA_COVERED",
+    "FACE_FEMALE",
+    "BUTTOCKS_EXPOSED",
+    "FEMALE_BREAST_EXPOSED",
+    "FEMALE_GENITALIA_EXPOSED",
+    "MALE_BREAST_EXPOSED",
+    "ANUS_EXPOSED",
+    "FEET_EXPOSED",
+    "BELLY_COVERED",
+    "FEET_COVERED",
+    "ARMPITS_COVERED",
+    "ARMPITS_EXPOSED",
+    "FACE_MALE",
+    "BELLY_EXPOSED",
+    "MALE_GENITALIA_EXPOSED",
+    "ANUS_COVERED",
+    "FEMALE_BREAST_COVERED",
     "BUTTOCKS_COVERED",
 ];

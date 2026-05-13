@@ -13,7 +13,10 @@ pub async fn crop_image(
     height: u32,
     save_as_copy: bool,
 ) -> Result<String, String> {
-    let images = state.db.get_images_by_ids(&[&image_id]).map_err(|e| e.to_string())?;
+    let images = state
+        .db
+        .get_images_by_ids(&[&image_id])
+        .map_err(|e| e.to_string())?;
     let img_record = images.first().ok_or("Image not found")?;
     let path = PathBuf::from(&img_record.path);
 
@@ -35,7 +38,10 @@ pub async fn crop_image(
     let cropped = img.crop_imm(x, y, width, height);
 
     let output_path = if save_as_copy {
-        let stem = path.file_stem().ok_or("Invalid file path: no stem")?.to_string_lossy();
+        let stem = path
+            .file_stem()
+            .ok_or("Invalid file path: no stem")?
+            .to_string_lossy();
         let ext = path.extension().unwrap_or_default().to_string_lossy();
         let parent = path.parent().ok_or("Invalid file path: no parent")?;
         let new_name = format!("{stem}_crop.{ext}");
@@ -65,7 +71,10 @@ pub async fn rotate_image(
     image_id: String,
     degrees: i32,
 ) -> Result<(), String> {
-    let images = state.db.get_images_by_ids(&[&image_id]).map_err(|e| e.to_string())?;
+    let images = state
+        .db
+        .get_images_by_ids(&[&image_id])
+        .map_err(|e| e.to_string())?;
     let img_record = images.first().ok_or("Image not found")?;
     let path = PathBuf::from(&img_record.path);
 

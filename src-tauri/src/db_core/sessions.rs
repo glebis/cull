@@ -1,21 +1,35 @@
-use rusqlite::{params, Result};
 use super::db::Database;
 use super::models::*;
+use rusqlite::{params, OptionalExtension, Result};
 
 impl Database {
     pub fn create_session(&self, name: &str, folder_path: &str) -> Result<String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
             "INSERT INTO projects (id, name, collection_type, folder_path, created_at)
              VALUES (?1, ?2, 'session', ?3, datetime('now'))",
             params![id, name, folder_path],
         )?;
+        drop(conn);
+        let _ = self.log_session_event(&NewSessionEvent {
+            session_id: Some(id.clone()),
+            event_type: "session_created".to_string(),
+            actor_type: "user".to_string(),
+            actor_id: None,
+            subject_type: Some("session".to_string()),
+            subject_id: Some(id.clone()),
+            payload_json: serde_json::json!({
+                "name": name,
+                "folder_path": folder_path,
+            })
+            .to_string(),
+        });
         Ok(id)
     }
 
     pub fn list_sessions(&self) -> Result<Vec<Session>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT p.id, p.name, p.description, p.folder_path, p.settings_json, p.created_at,
                     (SELECT COUNT(*) FROM collection_items ci WHERE ci.collection_id = p.id) as image_count
@@ -38,7 +52,7 @@ impl Database {
     }
 
     pub fn get_session(&self, id: &str) -> Result<Session> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.query_row(
             "SELECT p.id, p.name, p.description, p.folder_path, p.settings_json, p.created_at,
                     (SELECT COUNT(*) FROM collection_items ci WHERE ci.collection_id = p.id) as image_count
@@ -60,15 +74,39 @@ impl Database {
     }
 
     pub fn delete_session(&self, id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let _ = self.log_session_event(&NewSessionEvent {
+            session_id: Some(id.to_string()),
+            event_type: "session_deleted".to_string(),
+            actor_type: "user".to_string(),
+            actor_id: None,
+            subject_type: Some("session".to_string()),
+            subject_id: Some(id.to_string()),
+            payload_json: "{}".to_string(),
+        });
+        let conn = self.conn.lock();
         conn.execute("DELETE FROM canvases WHERE session_id = ?1", params![id])?;
-        conn.execute("DELETE FROM collection_items WHERE collection_id = ?1", params![id])?;
-        conn.execute("DELETE FROM projects WHERE id = ?1 AND collection_type = 'session'", params![id])?;
+        conn.execute(
+            "DELETE FROM collection_items WHERE collection_id = ?1",
+            params![id],
+        )?;
+        conn.execute(
+            "DELETE FROM projects WHERE id = ?1 AND collection_type = 'session'",
+            params![id],
+        )?;
         Ok(())
     }
 
     pub fn convert_session_to_collection(&self, id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let _ = self.log_session_event(&NewSessionEvent {
+            session_id: Some(id.to_string()),
+            event_type: "session_converted_to_collection".to_string(),
+            actor_type: "user".to_string(),
+            actor_id: None,
+            subject_type: Some("session".to_string()),
+            subject_id: Some(id.to_string()),
+            payload_json: "{}".to_string(),
+        });
+        let conn = self.conn.lock();
         conn.execute("DELETE FROM canvases WHERE session_id = ?1", params![id])?;
         conn.execute(
             "UPDATE projects SET collection_type = 'manual', folder_path = NULL, settings_json = NULL
@@ -79,7 +117,7 @@ impl Database {
     }
 
     pub fn create_canvas(&self, session_id: &str, name: &str, canvas_type: &str) -> Result<String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let id = uuid::Uuid::new_v4().to_string();
         let max_order: i32 = conn.query_row(
             "SELECT COALESCE(MAX(sort_order), -1) FROM canvases WHERE session_id = ?1",
@@ -91,11 +129,25 @@ impl Database {
              VALUES (?1, ?2, ?3, ?4, '{}', ?5, datetime('now'), datetime('now'))",
             params![id, session_id, name, canvas_type, max_order + 1],
         )?;
+        drop(conn);
+        let _ = self.log_session_event(&NewSessionEvent {
+            session_id: Some(session_id.to_string()),
+            event_type: "canvas_created".to_string(),
+            actor_type: "user".to_string(),
+            actor_id: None,
+            subject_type: Some("canvas".to_string()),
+            subject_id: Some(id.clone()),
+            payload_json: serde_json::json!({
+                "name": name,
+                "canvas_type": canvas_type,
+            })
+            .to_string(),
+        });
         Ok(id)
     }
 
     pub fn list_canvases(&self, session_id: &str) -> Result<Vec<Canvas>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT id, session_id, name, canvas_type, layout_json, filter_json, grid_config_json, sort_order, created_at, updated_at
              FROM canvases WHERE session_id = ?1 ORDER BY sort_order"
@@ -118,22 +170,63 @@ impl Database {
     }
 
     pub fn update_canvas_layout(&self, canvas_id: &str, layout_json: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
+        let session_id: Option<String> = conn
+            .query_row(
+                "SELECT session_id FROM canvases WHERE id = ?1",
+                params![canvas_id],
+                |row| row.get(0),
+            )
+            .optional()?;
         conn.execute(
             "UPDATE canvases SET layout_json = ?1, updated_at = datetime('now') WHERE id = ?2",
             params![layout_json, canvas_id],
         )?;
+        drop(conn);
+        if let Some(session_id) = session_id {
+            let _ = self.log_session_event(&NewSessionEvent {
+                session_id: Some(session_id),
+                event_type: "canvas_layout_updated".to_string(),
+                actor_type: "user".to_string(),
+                actor_id: None,
+                subject_type: Some("canvas".to_string()),
+                subject_id: Some(canvas_id.to_string()),
+                payload_json: serde_json::json!({
+                    "layout_bytes": layout_json.len(),
+                })
+                .to_string(),
+            });
+        }
         Ok(())
     }
 
     pub fn delete_canvas(&self, canvas_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
+        let session_id: Option<String> = conn
+            .query_row(
+                "SELECT session_id FROM canvases WHERE id = ?1",
+                params![canvas_id],
+                |row| row.get(0),
+            )
+            .optional()?;
         conn.execute("DELETE FROM canvases WHERE id = ?1", params![canvas_id])?;
+        drop(conn);
+        if let Some(session_id) = session_id {
+            let _ = self.log_session_event(&NewSessionEvent {
+                session_id: Some(session_id),
+                event_type: "canvas_deleted".to_string(),
+                actor_type: "user".to_string(),
+                actor_id: None,
+                subject_type: Some("canvas".to_string()),
+                subject_id: Some(canvas_id.to_string()),
+                payload_json: "{}".to_string(),
+            });
+        }
         Ok(())
     }
 
     pub fn cleanup_old_batches(&self, max_age_days: u32) -> Result<u32> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let cutoff = format!("-{} days", max_age_days);
         conn.execute(
             "UPDATE images SET import_batch_id = NULL WHERE import_batch_id IN
@@ -159,7 +252,9 @@ mod tests {
     #[test]
     fn test_create_session() {
         let db = test_db();
-        let id = db.create_session("Portrait Shoot", "/tmp/sessions/portrait").unwrap();
+        let id = db
+            .create_session("Portrait Shoot", "/tmp/sessions/portrait")
+            .unwrap();
         assert!(!id.is_empty());
     }
 
@@ -196,11 +291,15 @@ mod tests {
     #[test]
     fn test_convert_session_to_collection() {
         let db = test_db();
-        let id = db.create_session("Convert Me", "/tmp/sessions/conv").unwrap();
+        let id = db
+            .create_session("Convert Me", "/tmp/sessions/conv")
+            .unwrap();
         db.create_canvas(&id, "Test Canvas", "manual").unwrap();
         db.convert_session_to_collection(&id).unwrap();
         let cols = db.list_collections().unwrap();
-        assert!(cols.iter().any(|(cid, name, _)| cid == &id && name == "Convert Me"));
+        assert!(cols
+            .iter()
+            .any(|(cid, name, _)| cid == &id && name == "Convert Me"));
         let canvases = db.list_canvases(&id).unwrap();
         assert!(canvases.is_empty());
     }
@@ -208,7 +307,9 @@ mod tests {
     #[test]
     fn test_create_and_list_canvases() {
         let db = test_db();
-        let sid = db.create_session("Canvas Test", "/tmp/sessions/canvas").unwrap();
+        let sid = db
+            .create_session("Canvas Test", "/tmp/sessions/canvas")
+            .unwrap();
         db.create_canvas(&sid, "Layout A", "manual").unwrap();
         db.create_canvas(&sid, "Query View", "query").unwrap();
         let canvases = db.list_canvases(&sid).unwrap();
@@ -220,7 +321,9 @@ mod tests {
     #[test]
     fn test_update_canvas_layout() {
         let db = test_db();
-        let sid = db.create_session("Layout Test", "/tmp/sessions/layout").unwrap();
+        let sid = db
+            .create_session("Layout Test", "/tmp/sessions/layout")
+            .unwrap();
         let cid = db.create_canvas(&sid, "My Canvas", "manual").unwrap();
         let layout = r#"{"images":[{"id":"img1","x":10,"y":20}]}"#;
         db.update_canvas_layout(&cid, layout).unwrap();
@@ -231,9 +334,12 @@ mod tests {
     #[test]
     fn test_delete_canvas() {
         let db = test_db();
-        let sid = db.create_session("Del Canvas", "/tmp/sessions/delc").unwrap();
+        let sid = db
+            .create_session("Del Canvas", "/tmp/sessions/delc")
+            .unwrap();
         db.create_canvas(&sid, "To Remove", "manual").unwrap();
-        db.delete_canvas(&db.list_canvases(&sid).unwrap()[0].id.clone()).unwrap();
+        db.delete_canvas(&db.list_canvases(&sid).unwrap()[0].id.clone())
+            .unwrap();
         let canvases = db.list_canvases(&sid).unwrap();
         assert!(canvases.is_empty());
     }
@@ -241,7 +347,7 @@ mod tests {
     #[test]
     fn test_cleanup_old_batches() {
         let db = test_db();
-        let conn = db.conn.lock().unwrap();
+        let conn = db.conn.lock();
         conn.execute(
             "INSERT INTO import_batches (id, created_at, source, image_count) VALUES ('old1', datetime('now', '-30 days'), 'test', 5)",
             [],

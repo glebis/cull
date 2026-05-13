@@ -1,7 +1,7 @@
-use std::sync::atomic::{AtomicU32, Ordering};
-use tauri::{AppHandle, Emitter, Manager};
-use tauri::webview::WebviewWindowBuilder;
 use serde::Serialize;
+use std::sync::atomic::{AtomicU32, Ordering};
+use tauri::webview::WebviewWindowBuilder;
+use tauri::{AppHandle, Emitter, Manager};
 
 static WINDOW_COUNTER: AtomicU32 = AtomicU32::new(2);
 
@@ -36,10 +36,13 @@ pub async fn create_window(app: AppHandle, name: Option<String>) -> Result<Strin
     let label_clone = label.clone();
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let _ = window.emit("set-window-name", serde_json::json!({
-            "label": label_clone,
-            "name": title_clone,
-        }));
+        let _ = window.emit(
+            "set-window-name",
+            serde_json::json!({
+                "label": label_clone,
+                "name": title_clone,
+            }),
+        );
     });
 
     Ok(label)
@@ -69,10 +72,13 @@ pub async fn rename_window(app: AppHandle, label: String, new_name: String) -> R
         .set_title(&new_name)
         .map_err(|e| format!("Failed to set title: {}", e))?;
     // Notify the window's frontend of the name change
-    let _ = window.emit("set-window-name", serde_json::json!({
-        "label": label,
-        "name": new_name,
-    }));
+    let _ = window.emit(
+        "set-window-name",
+        serde_json::json!({
+            "label": label,
+            "name": new_name,
+        }),
+    );
     Ok(())
 }
 
@@ -87,11 +93,10 @@ pub async fn send_to_window(
 ) -> Result<String, String> {
     // Try to find window by title first, then by label
     let windows = app.webview_windows();
-    let target = windows.values().find(|w| {
-        w.title().map(|t| t == window_name).unwrap_or(false)
-    }).or_else(|| {
-        windows.get(&window_name)
-    });
+    let target = windows
+        .values()
+        .find(|w| w.title().map(|t| t == window_name).unwrap_or(false))
+        .or_else(|| windows.get(&window_name));
 
     let (window, label) = if let Some(w) = target {
         let l = w.label().to_string();

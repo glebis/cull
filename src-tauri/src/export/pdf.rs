@@ -12,31 +12,30 @@ pub fn assemble_pdf(
     let width_mm = Mm((width_px as f32 / dpi) * 25.4);
     let height_mm = Mm((height_px as f32 / dpi) * 25.4);
 
-    let (doc, mut page_idx, mut layer_idx) = PdfDocument::new(
-        "ImageView Export",
-        width_mm,
-        height_mm,
-        "Layer 1",
-    );
+    let (doc, mut page_idx, mut layer_idx) =
+        PdfDocument::new("Cull Export", width_mm, height_mm, "Layer 1");
 
     for (i, img_path) in image_paths.iter().enumerate() {
         if i > 0 {
-            let (new_page, new_layer) = doc.add_page(width_mm, height_mm, &format!("Layer {}", i + 1));
+            let (new_page, new_layer) =
+                doc.add_page(width_mm, height_mm, &format!("Layer {}", i + 1));
             page_idx = new_page;
             layer_idx = new_layer;
         }
 
         let current_layer = doc.get_page(page_idx).get_layer(layer_idx);
 
-        let png_bytes = std::fs::read(img_path)
-            .map_err(|e| format!("Failed to read '{}': {}", img_path, e))?;
+        let png_bytes =
+            std::fs::read(img_path).map_err(|e| format!("Failed to read '{}': {}", img_path, e))?;
 
         let decoder = png::Decoder::new(std::io::Cursor::new(&png_bytes));
-        let mut reader = decoder.read_info()
+        let mut reader = decoder
+            .read_info()
             .map_err(|e| format!("Failed to decode PNG '{}': {}", img_path, e))?;
 
         let mut buf = vec![0; reader.output_buffer_size()];
-        let info = reader.next_frame(&mut buf)
+        let info = reader
+            .next_frame(&mut buf)
             .map_err(|e| format!("Failed to read PNG frame: {}", e))?;
         buf.truncate(info.buffer_size());
 
@@ -84,8 +83,8 @@ pub fn assemble_pdf(
         );
     }
 
-    let output = File::create(output_path)
-        .map_err(|e| format!("Failed to create output file: {}", e))?;
+    let output =
+        File::create(output_path).map_err(|e| format!("Failed to create output file: {}", e))?;
     doc.save(&mut BufWriter::new(output))
         .map_err(|e| format!("Failed to save PDF: {}", e))?;
 
