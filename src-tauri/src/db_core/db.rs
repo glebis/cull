@@ -41,6 +41,7 @@ impl Database {
         self.migrate_image_file_stat_columns()?;
         self.migrate_raw_metadata()?;
         self.migrate_audit_log()?;
+        self.migrate_asset_load_events()?;
         Ok(())
     }
 
@@ -71,6 +72,31 @@ impl Database {
                 response_status INTEGER,
                 jurisdiction TEXT
             );",
+        )?;
+        Ok(())
+    }
+
+    fn migrate_asset_load_events(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS asset_load_events (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                view TEXT NOT NULL,
+                image_id TEXT,
+                asset_kind TEXT NOT NULL,
+                image_format TEXT,
+                fallback_used INTEGER NOT NULL DEFAULT 0,
+                fallback_succeeded INTEGER,
+                path_basename TEXT,
+                path_hash TEXT,
+                error_kind TEXT NOT NULL,
+                details_json TEXT
+            );
+            CREATE INDEX IF NOT EXISTS asset_load_events_created_idx ON asset_load_events(created_at);
+            CREATE INDEX IF NOT EXISTS asset_load_events_image_created_idx ON asset_load_events(image_id, created_at);
+            CREATE INDEX IF NOT EXISTS asset_load_events_error_idx ON asset_load_events(error_kind, created_at);",
         )?;
         Ok(())
     }

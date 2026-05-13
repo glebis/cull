@@ -750,3 +750,40 @@ export async function getApiAuditLog(limit: number): Promise<AuditLogEntry[]> {
 export async function exportAuditLog(): Promise<string> {
     return invoke('export_audit_log');
 }
+
+// Local diagnostics
+export interface AssetLoadEventRequest {
+    view: string;
+    imageId: string | null;
+    assetKind: string;
+    imageFormat: string | null;
+    fallbackUsed: boolean;
+    fallbackSucceeded: boolean | null;
+    pathBasename: string | null;
+    pathHash: string | null;
+    errorKind: string;
+    detailsJson: string | null;
+}
+
+export interface AssetLoadEvent {
+    id: string;
+    created_at: string;
+    view: string;
+    image_id: string | null;
+    asset_kind: string;
+    image_format: string | null;
+    fallback_used: boolean;
+    fallback_succeeded: boolean | null;
+    path_basename: string | null;
+    path_hash: string | null;
+    error_kind: string;
+    details_json: string | null;
+}
+
+export async function recordAssetLoadEvent(event: AssetLoadEventRequest): Promise<AssetLoadEvent> {
+    return invoke<AssetLoadEvent>('record_asset_load_event', { event });
+}
+
+export async function getAssetLoadEvents(limit: number): Promise<AssetLoadEvent[]> {
+    return invoke<AssetLoadEvent[]>('get_asset_load_events', { limit });
+}

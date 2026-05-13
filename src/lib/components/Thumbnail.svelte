@@ -2,6 +2,7 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import type { ImageWithFile } from '$lib/api';
     import { regenerateSingleThumbnail } from '$lib/api';
+    import { recordImageLoadFailure } from '$lib/diagnostics';
     import ContextMenu from './ContextMenu.svelte';
 
     interface Props {
@@ -47,11 +48,29 @@
 
     async function handleImgError() {
         if (regenerating) return;
+        recordImageLoadFailure({
+            view: 'thumbnail',
+            image: item,
+            assetKind: 'thumbnail',
+            errorKind: 'img_onerror',
+            fallbackUsed: false,
+            fallbackSucceeded: null,
+            phase: 'thumbnail',
+        });
         regenerating = true;
         try {
             const newPath = await regenerateSingleThumbnail(item.image.id);
             item.thumbnail_path = newPath;
         } catch {
+            recordImageLoadFailure({
+                view: 'thumbnail',
+                image: item,
+                assetKind: 'thumbnail',
+                errorKind: 'thumbnail_regeneration_failed',
+                fallbackUsed: false,
+                fallbackSucceeded: false,
+                phase: 'regenerate',
+            });
             imgError = true;
         } finally {
             regenerating = false;

@@ -1,0 +1,2 @@
+{"id":"int-225926b4","kind":"field_change","created_at":"2026-05-13T22:30:23.882331Z","actor":"glebis","issue_id":"imageview-tcc","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+{"id":"int-2889d22c","kind":"field_change","created_at":"2026-05-13T22:38:39.274478Z","actor":"glebis","issue_id":"imageview-tcc","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Implemented local asset load event logging, loupe thumbnail fallback, Tauri commands/API, and focused coverage."}}

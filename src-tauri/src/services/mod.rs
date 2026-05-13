@@ -3,6 +3,7 @@
 
 #[allow(dead_code)]
 pub mod ai;
+pub mod asset_events;
 pub mod audit;
 #[allow(dead_code)]
 pub mod curation;

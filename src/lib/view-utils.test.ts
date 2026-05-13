@@ -12,6 +12,7 @@ import {
     cropSelectionPercentFromImagePoints,
     moveCropRect,
     resizeCropRectFromHandle,
+    chooseLoupeImagePath,
 } from './view-utils';
 
 describe('getFilename', () => {
@@ -51,6 +52,25 @@ describe('getThumbnailBorderClass', () => {
 
     it('returns empty string when neither', () => {
         expect(getThumbnailBorderClass(false, false)).toBe('');
+    });
+});
+
+describe('chooseLoupeImagePath', () => {
+    const item = {
+        path: '/Users/test/Pictures/full.png',
+        thumbnail_path: '/Users/test/Library/Application Support/com.glebkalinin.cull/thumbs/img-1.jpg',
+    };
+
+    it('uses the full image before a source load failure', () => {
+        expect(chooseLoupeImagePath(item, false, false)).toBe(item.path);
+    });
+
+    it('falls back to the thumbnail after a source load failure', () => {
+        expect(chooseLoupeImagePath(item, false, true)).toBe(item.thumbnail_path);
+    });
+
+    it('uses the thumbnail for RAW images', () => {
+        expect(chooseLoupeImagePath(item, true, false)).toBe(item.thumbnail_path);
     });
 });
 

@@ -9,12 +9,14 @@
     import type { Detection, GenerationRun } from '$lib/api';
     import {
         clientToImagePoint,
+        chooseLoupeImagePath,
         cropRectFromImagePoints,
         cropSelectionPercentFromImagePoints,
         moveCropRect,
         resizeCropRectFromHandle
     } from '$lib/view-utils';
     import type { CropPoint, CropRect, CropResizeHandle } from '$lib/view-utils';
+    import { recordImageLoadFailure } from '$lib/diagnostics';
 
     let dragging = $state(false);
     let dragStartX = $state(0);
@@ -24,7 +26,8 @@
 
     let image = $derived($focusedImage);
     let isRaw = $derived(isRawFormat(image?.image.format ?? ''));
-    let src = $derived(image ? (isRaw ? convertFileSrc(image.thumbnail_path ?? image.path) : convertFileSrc(image.path)) : '');
+    let sourceLoadFailed = $state(false);
+    let src = $derived(image ? convertFileSrc(chooseLoupeImagePath(image, isRaw, sourceLoadFailed)) : '');
     let filename = $derived(image?.path.split('/').pop() ?? '');
     let dimensions = $derived(image ? `${image.image.width}x${image.image.height}` : '');
     let format = $derived(image?.image.format ?? '');
@@ -158,10 +161,32 @@
         const id = image?.image.id ?? '';
         if (id !== prevImageId) {
             prevImageId = id;
+            sourceLoadFailed = false;
             loupePanX.set(0);
             loupePanY.set(0);
         }
     });
+
+    function handleImageError() {
+        const current = image;
+        if (!current) return;
+
+        const canFallbackToThumbnail = !isRaw && !sourceLoadFailed && !!current.thumbnail_path;
+        const thumbnailWasShown = isRaw || sourceLoadFailed;
+        recordImageLoadFailure({
+            view: 'loupe',
+            image: current,
+            assetKind: thumbnailWasShown ? 'thumbnail' : 'source',
+            errorKind: 'img_onerror',
+            fallbackUsed: canFallbackToThumbnail || sourceLoadFailed,
+            fallbackSucceeded: sourceLoadFailed ? false : null,
+            phase: thumbnailWasShown ? 'thumbnail' : 'source',
+        });
+
+        if (canFallbackToThumbnail) {
+            sourceLoadFailed = true;
+        }
+    }
 
     function handleWheel(e: WheelEvent) {
         e.preventDefault();
@@ -414,6 +439,7 @@
                 {src}
                 alt={filename}
                 draggable="false"
+                onerror={handleImageError}
                 class:blurred={shouldBlur}
                 class:unblurring={detectionsLoaded}
                 class:pixel-zoom={$loupeScale > 4}

@@ -95,6 +95,27 @@ CREATE INDEX IF NOT EXISTS session_events_session_created_idx ON session_events(
 CREATE INDEX IF NOT EXISTS session_events_type_created_idx ON session_events(event_type, created_at);
 CREATE INDEX IF NOT EXISTS session_events_subject_idx ON session_events(subject_type, subject_id);
 
+-- Local UI diagnostics for asset rendering failures.
+-- Stores only privacy-safe identifiers, never full filesystem paths.
+CREATE TABLE IF NOT EXISTS asset_load_events (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    view TEXT NOT NULL,
+    image_id TEXT,
+    asset_kind TEXT NOT NULL,
+    image_format TEXT,
+    fallback_used INTEGER NOT NULL DEFAULT 0,
+    fallback_succeeded INTEGER,
+    path_basename TEXT,
+    path_hash TEXT,
+    error_kind TEXT NOT NULL,
+    details_json TEXT
+);
+CREATE INDEX IF NOT EXISTS asset_load_events_created_idx ON asset_load_events(created_at);
+CREATE INDEX IF NOT EXISTS asset_load_events_image_created_idx ON asset_load_events(image_id, created_at);
+CREATE INDEX IF NOT EXISTS asset_load_events_error_idx ON asset_load_events(error_kind, created_at);
+
 -- Embeddings
 CREATE TABLE IF NOT EXISTS embeddings (
     id TEXT PRIMARY KEY,

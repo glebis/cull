@@ -8,6 +8,22 @@ export function getThumbnailBorderClass(focused: boolean, selected: boolean): st
     return '';
 }
 
+export interface LoupeImagePathCandidate {
+    path: string;
+    thumbnail_path?: string | null;
+}
+
+export function chooseLoupeImagePath(
+    image: LoupeImagePathCandidate,
+    isRaw: boolean,
+    sourceLoadFailed: boolean
+): string {
+    if ((isRaw || sourceLoadFailed) && image.thumbnail_path) {
+        return image.thumbnail_path;
+    }
+    return image.path;
+}
+
 export function computeGridLayout(
     containerWidth: number,
     thumbSize: number,

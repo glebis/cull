@@ -439,6 +439,8 @@ pub fn run() {
             commands::privacy::get_data_flow_status,
             commands::privacy::get_api_audit_log,
             commands::privacy::export_audit_log,
+            commands::diagnostics::record_asset_load_event,
+            commands::diagnostics::get_asset_load_events,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
