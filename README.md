@@ -191,6 +191,10 @@ npm run tauri dev
 
 Prerequisites: Rust 1.78+, Node.js 20+
 
+## Distribution
+
+See [docs/cross-platform-distribution.md](docs/cross-platform-distribution.md) for platform support, release builds, CI matrix planning, and smoke-test checklists.
+
 ## Design
 
 Dark terminal aesthetic. Monospace typography. 8px spacing grid. No decorative elements.
