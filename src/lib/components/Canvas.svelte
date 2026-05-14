@@ -341,32 +341,47 @@
     }
     .badge {
         position: absolute;
-        font-size: 0.65rem;
-        padding: 1px 4px;
-        border-radius: 2px;
         pointer-events: none;
-        line-height: 1.2;
     }
     .decision-badge {
-        top: 4px;
-        left: 4px;
-        font-size: 0.8rem;
-        font-weight: bold;
+        top: 0;
+        left: 0;
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 22px;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-top: 0;
+        border-left: 0;
+        border-radius: 0 0 var(--radius) 0;
+        background: var(--surface);
+        color: var(--text-secondary);
+        box-shadow: 0 0 0 1px var(--bg);
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1;
+        opacity: 0.96;
     }
     .decision-badge.accept {
-        background: rgba(34, 197, 94, 0.85);
-        color: #fff;
+        border-right-color: var(--green);
+        border-bottom-color: var(--green);
+        color: var(--green);
     }
     .decision-badge.reject {
-        background: rgba(239, 68, 68, 0.85);
-        color: #fff;
+        border-right-color: var(--red);
+        border-bottom-color: var(--red);
+        color: var(--red);
     }
     .rating-badge {
         top: 4px;
         right: 4px;
+        padding: 1px 4px;
+        border-radius: 2px;
         color: #fbbf24;
         background: rgba(0,0,0,0.6);
         font-size: 0.7rem;
+        line-height: 1.2;
         letter-spacing: -1px;
     }
 </style>

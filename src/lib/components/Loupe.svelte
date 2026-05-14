@@ -883,21 +883,26 @@
         z-index: 20;
         display: grid;
         place-items: center;
-        width: 30px;
-        height: 30px;
-        border-radius: 50%;
-        font-size: 17px;
-        font-weight: 800;
+        width: 32px;
+        height: 28px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        color: var(--text-secondary);
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1;
         pointer-events: none;
-        box-shadow: 0 0 0 1px rgba(8, 8, 12, 0.8), 0 8px 22px rgba(0, 0, 0, 0.34);
+        box-shadow: 0 0 0 1px var(--bg);
+        opacity: 0.96;
     }
     .mini-status.mini-accept {
-        background: var(--green);
-        color: var(--bg);
+        border-color: var(--green);
+        color: var(--green);
     }
     .mini-status.mini-reject {
-        background: var(--red);
-        color: var(--bg);
+        border-color: var(--red);
+        color: var(--red);
     }
     /* Decision toast (transient) */
     .status-toast {

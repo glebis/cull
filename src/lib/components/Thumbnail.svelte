@@ -224,28 +224,37 @@
     }
     .badge {
         position: absolute;
-        top: 6px;
-        right: 6px;
-        width: 22px;
+        top: 0;
+        right: 0;
+        width: 24px;
         height: 22px;
-        border-radius: 50%;
+        border: 1px solid var(--border);
+        border-top: 0;
+        border-right: 0;
+        border-radius: 0 0 0 var(--radius);
+        background: var(--surface);
+        color: var(--text-secondary);
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(0, 0, 0, 0.2);
-        backdrop-filter: blur(4px);
+        box-shadow: 0 0 0 1px var(--bg);
+        opacity: 0.96;
+        pointer-events: none;
     }
     .badge svg {
-        width: 14px;
-        height: 14px;
+        width: 12px;
+        height: 12px;
+        stroke-width: 2.4;
     }
     .badge.accept {
-        background: var(--green);
-        color: var(--bg);
+        border-left-color: var(--green);
+        border-bottom-color: var(--green);
+        color: var(--green);
     }
     .badge.reject {
-        background: var(--red);
-        color: var(--bg);
+        border-left-color: var(--red);
+        border-bottom-color: var(--red);
+        color: var(--red);
     }
     .missing-overlay {
         position: absolute;
