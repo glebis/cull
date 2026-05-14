@@ -182,6 +182,7 @@ export const embeddingViewState = writable<EmbeddingViewState>({
 export const sessions = writable<Session[]>([]);
 export const activeSession = writable<Session | null>(null);
 export const sessionCanvases = writable<Canvas[]>([]);
+export const activeCanvas = writable<Canvas | null>(null);
 
 // Settings panel
 export const settingsOpen = writable<boolean>(false);

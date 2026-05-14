@@ -19,8 +19,8 @@
 
     import { buildDisplayFolders } from '$lib/sidebar-utils';
     import SessionSwitcher from './SessionSwitcher.svelte';
-    import { activeSession, sessionCanvases } from '$lib/stores';
-    import { createCanvas } from '$lib/api';
+    import { activeCanvas, activeSession, navigateTo, sessionCanvases } from '$lib/stores';
+    import { createCanvas, type Canvas } from '$lib/api';
 
     let displayFolders = $derived(buildDisplayFolders($folders));
 
@@ -64,6 +64,7 @@
     async function selectSmartCollection(sc: SmartCollection) {
         activeSession.set(null);
         sessionCanvases.set([]);
+        activeCanvas.set(null);
         activeSmartCollection.set(sc);
         activeFolder.set(null);
         activeCollection.set(null);
@@ -80,6 +81,7 @@
     async function selectFolder(folder: string | null) {
         activeSession.set(null);
         sessionCanvases.set([]);
+        activeCanvas.set(null);
         activeFolder.set(folder);
         activeCollection.set(null);
         activeSmartCollection.set(null);
@@ -94,6 +96,7 @@
     async function selectCollection(collectionId: string) {
         activeSession.set(null);
         sessionCanvases.set([]);
+        activeCanvas.set(null);
         activeCollection.set(collectionId);
         activeFolder.set(null);
         activeSmartCollection.set(null);
@@ -368,6 +371,7 @@
             if (count === 0) return;
             activeSession.set(null);
             sessionCanvases.set([]);
+            activeCanvas.set(null);
             activeSmartCollection.set(null);
             activeFolder.set(null);
             activeCollection.set(null);
@@ -376,6 +380,11 @@
         } catch (e) {
             console.error('Filter by class error:', e);
         }
+    }
+
+    function selectCanvas(canvas: Canvas) {
+        activeCanvas.set(canvas);
+        navigateTo('canvas');
     }
 
     async function refreshImages() {
@@ -401,11 +410,16 @@
                     if ($activeSession) {
                         const canvas = await createCanvas($activeSession.id, 'New Canvas', 'manual');
                         sessionCanvases.update(c => [...c, canvas]);
+                        selectCanvas(canvas);
                     }
                 }}>+</button>
             </div>
             {#each $sessionCanvases as canvas}
-                <button class="section-item">
+                <button
+                    class="section-item"
+                    class:active={$activeCanvas?.id === canvas.id}
+                    onclick={() => selectCanvas(canvas)}
+                >
                     <span>{canvas.name}</span>
                     <span class="count">{canvas.canvas_type}</span>
                 </button>

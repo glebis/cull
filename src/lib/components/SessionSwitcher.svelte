@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { sessions, activeSession, sessionCanvases, showToast } from '$lib/stores';
+    import { sessions, activeSession, sessionCanvases, activeCanvas, showToast } from '$lib/stores';
     import { listSessions, createSession, listCanvases, validateSessionFolder } from '$lib/api';
     import { onMount } from 'svelte';
 
@@ -24,6 +24,7 @@
     });
 
     async function selectSession(session: typeof $sessions[0] | null) {
+        activeCanvas.set(null);
         if (session) {
             const valid = await validateSessionFolder(session.id);
             if (!valid) {

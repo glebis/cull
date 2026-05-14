@@ -1,19 +1,28 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
-    import { images, focusedIndex, focusedImage, selectedIds, statusHint, navigateTo } from '$lib/stores';
-    import type { ImageWithFile } from '$lib/api';
+    import {
+        activeCanvas,
+        focusedImage,
+        focusedIndex,
+        images,
+        navigateTo,
+        selectedIds,
+        sessionCanvases,
+        showToast,
+        statusHint,
+    } from '$lib/stores';
+    import { updateCanvasLayout, type ImageWithFile } from '$lib/api';
+    import { serializeCanvasDocumentLayout, type CanvasDocument } from '$lib/canvas-document';
+    import {
+        createCanvasDocumentFromLayoutJson,
+        createCanvasViewItems,
+        updateCanvasDocumentFromViewItems,
+        type CanvasViewItem,
+    } from '$lib/canvas-view-model';
     import ContextMenu from './ContextMenu.svelte';
 
-    interface CanvasItem {
-        id: string;
-        image: ImageWithFile;
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-    }
-
-    let canvasItems = $state<CanvasItem[]>([]);
+    let canvasItems = $state<CanvasViewItem[]>([]);
+    let canvasDocument = $state<CanvasDocument | null>(null);
     let canvasEl: HTMLDivElement | undefined = $state();
     let panX = $state(0);
     let panY = $state(0);
@@ -33,8 +42,10 @@
     let resizeStartY = $state(0);
     let resizeStartW = $state(0);
     let resizeStartH = $state(0);
+    let loadedCanvasKey = $state('');
+    let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-    function handleResizeMouseDown(e: MouseEvent, item: CanvasItem) {
+    function handleResizeMouseDown(e: MouseEvent, item: CanvasViewItem) {
         e.stopPropagation();
         e.preventDefault();
         resizeItem = item.id;
@@ -44,45 +55,62 @@
         resizeStartH = item.height;
     }
 
-    const ITEM_GAP = 20;
-    const ITEM_HEIGHT = 200;
-
-    let prevImageIds = $state('');
-
     $effect(() => {
         const imgs = $images;
-        const currentIds = imgs.map(i => i.image.id).join(',');
-        if (currentIds !== prevImageIds && imgs.length > 0) {
-            prevImageIds = currentIds;
-            layoutGrid(imgs);
+        const canvas = $activeCanvas;
+        const key = [
+            canvas?.id ?? '__ephemeral__',
+            canvas?.layout_json ?? '{}',
+            imgs.map(i => i.image.id).join(','),
+        ].join('|');
+        if (key !== loadedCanvasKey) {
+            loadedCanvasKey = key;
+            loadCanvasState(canvas?.layout_json ?? '{}', imgs);
         }
     });
 
-    function layoutGrid(imgs: ImageWithFile[]) {
-        const cols = Math.ceil(Math.sqrt(imgs.length));
-        const colWidths = new Array(cols).fill(0);
-        for (let i = 0; i < Math.min(cols, imgs.length); i++) {
-            const aspect = imgs[i].image.width / imgs[i].image.height;
-            colWidths[i] = ITEM_HEIGHT * aspect;
+    function loadCanvasState(layoutJson: string, imgs: ImageWithFile[]) {
+        try {
+            canvasDocument = createCanvasDocumentFromLayoutJson(layoutJson, imgs);
+        } catch (e) {
+            showToast('Canvas layout invalid', { detail: String(e), type: 'error', duration: 10000 });
+            canvasDocument = createCanvasDocumentFromLayoutJson('{}', imgs);
         }
-        let colX = [0];
-        for (let c = 1; c < cols; c++) {
-            colX[c] = colX[c - 1] + (colWidths[c - 1] || ITEM_HEIGHT) + ITEM_GAP;
-        }
-        canvasItems = imgs.map((img, i) => {
-            const aspect = img.image.width / img.image.height;
-            const w = ITEM_HEIGHT * aspect;
-            const col = i % cols;
-            const row = Math.floor(i / cols);
-            return {
-                id: img.image.id,
-                image: img,
-                x: colX[col],
-                y: row * (ITEM_HEIGHT + ITEM_GAP),
-                width: w,
-                height: ITEM_HEIGHT,
-            };
+        panX = canvasDocument.viewport.panX;
+        panY = canvasDocument.viewport.panY;
+        zoom = canvasDocument.viewport.zoom;
+        canvasItems = createCanvasViewItems(canvasDocument, imgs);
+    }
+
+    function queueCanvasSave() {
+        if (!$activeCanvas || !canvasDocument) return;
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+            saveTimer = null;
+            persistCanvasLayout();
+        }, 350);
+    }
+
+    async function persistCanvasLayout() {
+        const canvas = $activeCanvas;
+        if (!canvas || !canvasDocument) return;
+
+        const updatedDocument = updateCanvasDocumentFromViewItems(canvasDocument, canvasItems, {
+            panX,
+            panY,
+            zoom,
         });
+
+        try {
+            const layoutJson = serializeCanvasDocumentLayout(updatedDocument);
+            canvasDocument = updatedDocument;
+            await updateCanvasLayout(canvas.id, layoutJson);
+            const updatedCanvas = { ...canvas, layout_json: layoutJson };
+            activeCanvas.set(updatedCanvas);
+            sessionCanvases.update(list => list.map(item => item.id === updatedCanvas.id ? updatedCanvas : item));
+        } catch (e) {
+            showToast('Canvas save failed', { detail: String(e), type: 'error', duration: 10000 });
+        }
     }
 
     function handleCanvasMouseDown(e: MouseEvent) {
@@ -120,12 +148,14 @@
     }
 
     function handleCanvasMouseUp() {
+        const changed = panning || dragItem !== null || resizeItem !== null;
         panning = false;
         dragItem = null;
         resizeItem = null;
+        if (changed) queueCanvasSave();
     }
 
-    function handleItemMouseDown(e: MouseEvent, item: CanvasItem) {
+    function handleItemMouseDown(e: MouseEvent, item: CanvasViewItem) {
         if (e.button !== 0 || e.altKey) return;
         e.stopPropagation();
         dragItem = item.id;
@@ -137,28 +167,28 @@
         visible: false, x: 0, y: 0, image: null
     });
 
-    function handleItemContextMenu(e: MouseEvent, item: CanvasItem) {
+    function handleItemContextMenu(e: MouseEvent, item: CanvasViewItem) {
         e.preventDefault();
         e.stopPropagation();
-        const idx = $images.findIndex(img => img.image.id === item.id);
+        const idx = $images.findIndex(img => img.image.id === item.imageId);
         if (idx >= 0) focusedIndex.set(idx);
         ctxMenu = { visible: true, x: e.clientX, y: e.clientY, image: item.image };
     }
 
-    function handleItemClick(e: MouseEvent, item: CanvasItem) {
-        const idx = $images.findIndex(img => img.image.id === item.id);
+    function handleItemClick(e: MouseEvent, item: CanvasViewItem) {
+        const idx = $images.findIndex(img => img.image.id === item.imageId);
         if (idx >= 0) focusedIndex.set(idx);
     }
 
-    function handleItemDblClick(item: CanvasItem) {
-        const idx = $images.findIndex(img => img.image.id === item.id);
+    function handleItemDblClick(item: CanvasViewItem) {
+        const idx = $images.findIndex(img => img.image.id === item.imageId);
         if (idx >= 0) {
             focusedIndex.set(idx);
             navigateTo('loupe');
         }
     }
 
-    function handleItemKeydown(e: KeyboardEvent, item: CanvasItem) {
+    function handleItemKeydown(e: KeyboardEvent, item: CanvasViewItem) {
         if (e.key === 'Enter') {
             e.preventDefault();
             handleItemDblClick(item);
@@ -179,6 +209,7 @@
         panX = mx - (mx - panX) * (newZoom / zoom);
         panY = my - (my - panY) * (newZoom / zoom);
         zoom = newZoom;
+        queueCanvasSave();
     }
 
     $effect(() => {
@@ -207,8 +238,8 @@
             {@const decision = item.image.selection?.decision ?? 'undecided'}
             <div
                 class="canvas-item"
-                class:selected={$selectedIds.has(item.id)}
-                class:focused={$focusedImage?.image.id === item.id}
+                class:selected={$selectedIds.has(item.imageId)}
+                class:focused={$focusedImage?.image.id === item.imageId}
                 style="left: {item.x}px; top: {item.y}px; width: {item.width}px; height: {item.height}px;"
                 onmousedown={(e) => handleItemMouseDown(e, item)}
                 onclick={(e) => handleItemClick(e, item)}
