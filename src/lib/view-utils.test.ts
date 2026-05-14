@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     getFilename,
     getThumbnailBorderClass,
+    buildRangeSelectionIds,
     computeGridLayout,
     computeVisibleItems,
     formatLoupeInfo,
@@ -52,6 +53,26 @@ describe('getThumbnailBorderClass', () => {
 
     it('returns empty string when neither', () => {
         expect(getThumbnailBorderClass(false, false)).toBe('');
+    });
+});
+
+describe('buildRangeSelectionIds', () => {
+    const items = ['a', 'b', 'c', 'd', 'e'].map(id => ({ id }));
+
+    it('selects an inclusive forward range', () => {
+        expect(buildRangeSelectionIds(items, 1, 3, item => item.id)).toEqual(new Set(['b', 'c', 'd']));
+    });
+
+    it('selects an inclusive reverse range', () => {
+        expect(buildRangeSelectionIds(items, 4, 2, item => item.id)).toEqual(new Set(['c', 'd', 'e']));
+    });
+
+    it('clamps out-of-bounds endpoints', () => {
+        expect(buildRangeSelectionIds(items, -10, 99, item => item.id)).toEqual(new Set(['a', 'b', 'c', 'd', 'e']));
+    });
+
+    it('returns an empty selection when there are no items', () => {
+        expect(buildRangeSelectionIds([], 0, 2, item => item)).toEqual(new Set());
     });
 });
 

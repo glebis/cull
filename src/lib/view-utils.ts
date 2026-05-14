@@ -8,6 +8,23 @@ export function getThumbnailBorderClass(focused: boolean, selected: boolean): st
     return '';
 }
 
+export function buildRangeSelectionIds<T>(
+    items: T[],
+    anchorIndex: number,
+    targetIndex: number,
+    getId: (item: T) => string
+): Set<string> {
+    if (items.length === 0) return new Set();
+
+    const maxIndex = items.length - 1;
+    const anchor = Number.isFinite(anchorIndex) ? clamp(Math.trunc(anchorIndex), 0, maxIndex) : 0;
+    const target = Number.isFinite(targetIndex) ? clamp(Math.trunc(targetIndex), 0, maxIndex) : anchor;
+    const start = Math.min(anchor, target);
+    const end = Math.max(anchor, target);
+
+    return new Set(items.slice(start, end + 1).map(getId));
+}
+
 export interface LoupeImagePathCandidate {
     path: string;
     thumbnail_path?: string | null;

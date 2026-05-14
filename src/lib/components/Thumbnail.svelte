@@ -10,7 +10,7 @@
         size: number;
         focused: boolean;
         selected: boolean;
-        onclick: () => void;
+        onclick: (event: MouseEvent | KeyboardEvent) => void;
         ondblclick: () => void;
     }
 
@@ -94,7 +94,7 @@
     {onclick}
     {ondblclick}
     oncontextmenu={handleContextMenu}
-    onkeydown={(e) => { if (e.key === 'Enter') onclick(); }}
+    onkeydown={(e) => { if (e.key === 'Enter') onclick(e); }}
 >
     {#if imgError}
         <div class="fallback-text">{filename}</div>

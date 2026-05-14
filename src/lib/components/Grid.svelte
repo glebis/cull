@@ -1,7 +1,7 @@
 <script lang="ts">
     import { images, selectedIds, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState } from '$lib/stores';
     import { loadMoreImagesForCurrentScope } from '$lib/image-loading';
-    import { computeGridLayout, computeVisibleItems } from '$lib/view-utils';
+    import { buildRangeSelectionIds, computeGridLayout, computeVisibleItems } from '$lib/view-utils';
     import Thumbnail from './Thumbnail.svelte';
 
     let containerEl: HTMLDivElement | undefined = $state(undefined);
@@ -41,7 +41,10 @@
         maybeLoadMore();
     }
 
-    function handleClick(index: number) {
+    function handleClick(index: number, event: MouseEvent | KeyboardEvent) {
+        if (event.shiftKey) {
+            selectedIds.set(buildRangeSelectionIds($images, $focusedIndex, index, item => item.image.id));
+        }
         focusedIndex.set(index);
     }
 
@@ -119,7 +122,7 @@
                         {size}
                         focused={$focusedIndex === vi.index}
                         selected={$selectedIds.has(vi.item.image.id)}
-                        onclick={() => handleClick(vi.index)}
+                        onclick={(event) => handleClick(vi.index, event)}
                         ondblclick={() => handleDblClick(vi.index)}
                     />
                 </div>
