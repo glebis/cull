@@ -210,6 +210,15 @@ describe('computeVisibleItems', () => {
         expect(items[2].index).toBe(2);
     });
 
+    it('supports explicit overscan before and after the visible rows', () => {
+        const items = computeVisibleItems(500, 100, 1, 100, 20, {
+            overscanRowsBefore: 2,
+            overscanRowsAfter: 3,
+        });
+
+        expect(items.map(item => item.index)).toEqual([3, 4, 5, 6, 7, 8]);
+    });
+
     it('handles negative scrollTop', () => {
         const items = computeVisibleItems(-100, 300, 4, 100, 20);
         expect(items[0].index).toBe(0);

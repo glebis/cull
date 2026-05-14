@@ -1,6 +1,6 @@
 <script lang="ts">
     import { images, selectedIds, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState } from '$lib/stores';
-    import { loadMoreImagesForCurrentScope } from '$lib/image-loading';
+    import { IMAGE_PAGE_SIZE, loadMoreImagesForCurrentScope } from '$lib/image-loading';
     import { buildRangeSelectionIds, computeGridLayout, computeVisibleItems } from '$lib/view-utils';
     import Thumbnail from './Thumbnail.svelte';
 
@@ -20,17 +20,22 @@
     let cols = $derived(layout.cols);
     let cellSize = $derived(layout.cellSize);
     let totalHeight = $derived(layout.totalHeight);
+    let preloadRows = $derived(Math.max(2, Math.ceil(IMAGE_PAGE_SIZE / Math.max(cols, 1))));
 
     let visibleItems = $derived.by(() => {
         const imgs = $images;
-        return computeVisibleItems(scrollTop, containerHeight, layout.cols, layout.cellSize, imgs.length)
+        return computeVisibleItems(scrollTop, containerHeight, layout.cols, layout.cellSize, imgs.length, {
+            overscanRowsBefore: 2,
+            overscanRowsAfter: preloadRows,
+        })
             .map(({ index, x, y }) => ({ index, item: imgs[index], x, y }));
     });
 
     function maybeLoadMore() {
         if (!$imageLoadState.hasMore || $imageLoadState.loading || $imageLoadState.loadingMore) return;
+        if (cellSize <= 0) return;
         const remainingPx = totalHeight - (scrollTop + containerHeight);
-        if (remainingPx < cellSize * 4) {
+        if (remainingPx < cellSize * preloadRows) {
             void loadMoreImagesForCurrentScope();
         }
     }
@@ -63,6 +68,19 @@
         });
         ro.observe(containerEl);
         return () => ro.disconnect();
+    });
+
+    $effect(() => {
+        if (!containerEl) return;
+        totalHeight;
+        containerHeight;
+        cellSize;
+        preloadRows;
+        $images.length;
+        $imageLoadState.hasMore;
+        $imageLoadState.loading;
+        $imageLoadState.loadingMore;
+        maybeLoadMore();
     });
 
     $effect(() => {
@@ -124,6 +142,7 @@
                         selected={$selectedIds.has(vi.item.image.id)}
                         onclick={(event) => handleClick(vi.index, event)}
                         ondblclick={() => handleDblClick(vi.index)}
+                        loading="eager"
                     />
                 </div>
             {/each}

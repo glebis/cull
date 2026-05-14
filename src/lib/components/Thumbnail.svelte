@@ -12,9 +12,10 @@
         selected: boolean;
         onclick: (event: MouseEvent | KeyboardEvent) => void;
         ondblclick: () => void;
+        loading?: 'lazy' | 'eager';
     }
 
-    let { item, size, focused, selected, onclick, ondblclick }: Props = $props();
+    let { item, size, focused, selected, onclick, ondblclick, loading = 'lazy' }: Props = $props();
 
     let src = $derived(
         item.thumbnail_path
@@ -101,7 +102,7 @@
     {:else if regenerating}
         <div class="regenerating"></div>
     {:else}
-        <img {src} alt={filename} loading="lazy" draggable="false" onerror={handleImgError} />
+        <img {src} alt={filename} {loading} decoding="async" draggable="false" onerror={handleImgError} />
     {/if}
 
     {#if item.missing_at}

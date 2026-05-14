@@ -60,22 +60,37 @@ export interface VisibleItem {
     y: number;
 }
 
+export interface VisibleItemOptions {
+    overscanRowsBefore?: number;
+    overscanRowsAfter?: number;
+}
+
+function normalizeOverscanRows(value: number | undefined, fallback: number): number {
+    if (value === undefined) return fallback;
+    if (!Number.isFinite(value)) return fallback;
+    return Math.max(0, Math.trunc(value));
+}
+
 export function computeVisibleItems(
     scrollTop: number,
     containerHeight: number,
     cols: number,
     cellSize: number,
-    totalItems: number
+    totalItems: number,
+    options: VisibleItemOptions = {}
 ): VisibleItem[] {
     if (totalItems <= 0 || cols <= 0 || cellSize <= 0) return [];
 
     const firstVisibleRow = Math.max(0, Math.floor(scrollTop / cellSize));
-    const visibleRowCount = Math.ceil(containerHeight / cellSize) + 2;
+    const visibleRowCount = Math.max(0, Math.ceil(containerHeight / cellSize));
+    const overscanRowsBefore = normalizeOverscanRows(options.overscanRowsBefore, 0);
+    const overscanRowsAfter = normalizeOverscanRows(options.overscanRowsAfter, 2);
     const rows = Math.ceil(totalItems / cols);
-    const lastVisibleRow = Math.min(firstVisibleRow + visibleRowCount, rows);
+    const firstRenderedRow = Math.max(0, firstVisibleRow - overscanRowsBefore);
+    const lastVisibleRow = Math.min(firstVisibleRow + visibleRowCount + overscanRowsAfter, rows);
 
     const items: VisibleItem[] = [];
-    for (let row = firstVisibleRow; row < lastVisibleRow; row++) {
+    for (let row = firstRenderedRow; row < lastVisibleRow; row++) {
         for (let col = 0; col < cols; col++) {
             const index = row * cols + col;
             if (index >= totalItems) break;
