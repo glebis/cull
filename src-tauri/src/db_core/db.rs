@@ -2295,6 +2295,32 @@ mod tests {
     }
 
     #[test]
+    fn test_smart_collection_text_search_matches_filename_and_metadata_text() {
+        let db = test_db();
+        insert_test_image(&db, "astra-filename", "hash-astra-filename");
+        insert_test_image(&db, "ocr-match", "hash-ocr-match");
+        insert_test_image(&db, "plain-image", "hash-plain-image");
+
+        let mut fields = std::collections::HashMap::new();
+        fields.insert(
+            "ocr_text".to_string(),
+            "the ASTRA word is visible".to_string(),
+        );
+        db.store_vision_metadata("ocr-match", "ocr", &fields)
+            .unwrap();
+
+        let filter = r#"{"type":"rule","field":"search_text","op":"contains","value":"astra"}"#;
+        assert_eq!(db.count_smart_collection(filter).unwrap(), 2);
+
+        let results = db.evaluate_smart_collection(filter).unwrap();
+        let ids: Vec<&str> = results.iter().map(|r| r.image.id.as_str()).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&"astra-filename"));
+        assert!(ids.contains(&"ocr-match"));
+        assert!(!ids.contains(&"plain-image"));
+    }
+
+    #[test]
     fn test_get_iteration_siblings_returns_children() {
         let db = test_db();
         insert_test_image(&db, "parent", "hash-p");

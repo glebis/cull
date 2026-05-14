@@ -30,6 +30,7 @@
         is_ai_generated: { label: 'AI Generated',  type: 'boolean', ops: ['eq'] },
         imported_at:     { label: 'Imported',      type: 'date',    ops: ['last_n_days','this_week','this_month'] },
         ai_prompt:       { label: 'Prompt',        type: 'string',  ops: ['contains','is_empty'] },
+        search_text:     { label: 'Search',        type: 'string',  ops: ['contains','neq'] },
         aspect_ratio:    { label: 'Aspect Ratio',  type: 'number',  ops: ['gt','gte','lt','lte','eq'] },
     };
 

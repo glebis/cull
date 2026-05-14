@@ -41,6 +41,7 @@ pub enum Field {
     SourceConfidence,
     IsAiGenerated,
     AiPrompt,
+    SearchText,
     Folder,
     ImportedAt,
     OriginalDate,
@@ -120,6 +121,7 @@ impl Field {
             Field::SourceConfidence => "i.source_confidence",
             Field::IsAiGenerated => "i.is_ai_generated",
             Field::AiPrompt => "i.ai_prompt",
+            Field::SearchText => "search_text",
             Field::Folder => "f.path",
             Field::ImportedAt => "i.imported_at",
             Field::OriginalDate => "i.original_date",
@@ -154,6 +156,10 @@ impl FilterNode {
                 Ok((format!("NOT ({})", sql), params))
             }
             FilterNode::Rule { field, op, value } => {
+                if matches!(field, Field::SearchText) {
+                    return text_search_clause(op, value);
+                }
+
                 let col = field.to_column();
                 if col == "unsupported" {
                     return Err(format!(
@@ -249,6 +255,51 @@ impl FilterNode {
                 }
             }
         }
+    }
+}
+
+fn text_search_clause(
+    op: &RuleOp,
+    value: &FilterValue,
+) -> std::result::Result<(String, Vec<SqlValue>), String> {
+    let FilterValue::String(term) = value else {
+        return Err("search_text requires a string value".to_string());
+    };
+    if term.trim().is_empty() {
+        return Ok(("1=1".to_string(), vec![]));
+    }
+
+    let sql = "(
+        f.path LIKE ?
+        OR i.ai_prompt LIKE ?
+        OR i.raw_metadata LIKE ?
+        OR EXISTS (
+            SELECT 1 FROM image_metadata im
+            WHERE im.image_id = i.id
+              AND (im.key LIKE ? OR im.value LIKE ?)
+        )
+        OR EXISTS (
+            SELECT 1 FROM generation_runs gr
+            WHERE gr.id = i.generation_run_id
+              AND (
+                gr.prompt LIKE ?
+                OR gr.negative_prompt LIKE ?
+                OR gr.provider LIKE ?
+                OR gr.model LIKE ?
+                OR gr.raw_metadata_json LIKE ?
+              )
+        )
+    )";
+
+    let pattern = format!("%{}%", term.trim());
+    let params = std::iter::repeat(SqlValue::Text(pattern))
+        .take(10)
+        .collect();
+
+    match op {
+        RuleOp::Contains | RuleOp::Eq => Ok((sql.to_string(), params)),
+        RuleOp::NotContains | RuleOp::Neq => Ok((format!("NOT {}", sql), params)),
+        _ => Err(format!("Unsupported operator {:?} for search_text", op)),
     }
 }
 
@@ -386,6 +437,24 @@ mod tests {
         let (sql, params) = filter.to_sql_clause().unwrap();
         assert!(sql.contains("i.orientation"));
         assert_eq!(params.len(), 1);
+    }
+
+    #[test]
+    fn test_text_search_filter_matches_file_and_metadata_text() {
+        let filter: FilterNode = serde_json::from_str(
+            r#"{"type":"rule","field":"search_text","op":"contains","value":"astra"}"#,
+        )
+        .unwrap();
+        let (sql, params) = filter.to_sql_clause().unwrap();
+
+        assert!(sql.contains("f.path"), "sql: {}", sql);
+        assert!(sql.contains("image_metadata"), "sql: {}", sql);
+        assert!(sql.contains("generation_runs"), "sql: {}", sql);
+        assert_eq!(params.len(), 10);
+        assert!(params.iter().all(|p| match p {
+            SqlValue::Text(text) => text == "%astra%",
+            _ => false,
+        }));
     }
 
     #[test]

@@ -337,6 +337,14 @@ pub fn parse_query(input: &str) -> FilterNode {
         }
     }
 
+    if let Some(text) = remaining_search_text(&remaining) {
+        rules.push(FilterNode::Rule {
+            field: Field::SearchText,
+            op: RuleOp::Contains,
+            value: FilterValue::String(text),
+        });
+    }
+
     match rules.len() {
         0 => FilterNode::Group {
             op: GroupOp::And,
@@ -348,6 +356,48 @@ pub fn parse_query(input: &str) -> FilterNode {
             children: rules,
         },
     }
+}
+
+fn remaining_search_text(input: &str) -> Option<String> {
+    let terms: Vec<String> = input
+        .split_whitespace()
+        .map(|word| word.trim_matches(|c: char| c.is_ascii_punctuation() && c != '-' && c != '_'))
+        .filter(|word| !word.is_empty())
+        .filter(|word| !is_search_stopword(word))
+        .map(ToString::to_string)
+        .collect();
+
+    if terms.is_empty() {
+        None
+    } else {
+        Some(terms.join(" "))
+    }
+}
+
+fn is_search_stopword(word: &str) -> bool {
+    matches!(
+        word.to_ascii_lowercase().as_str(),
+        "a" | "an"
+            | "and"
+            | "file"
+            | "files"
+            | "find"
+            | "for"
+            | "image"
+            | "images"
+            | "in"
+            | "not"
+            | "of"
+            | "or"
+            | "photo"
+            | "photos"
+            | "picture"
+            | "pictures"
+            | "search"
+            | "show"
+            | "the"
+            | "with"
+    )
 }
 
 #[cfg(test)]
@@ -395,6 +445,40 @@ mod tests {
         let result = parse_query("png images");
         let (sql, _) = result.to_sql_clause().unwrap();
         assert!(sql.contains("format"));
+    }
+
+    #[test]
+    fn test_parse_plain_term_falls_back_to_text_search() {
+        let result = parse_query("astra");
+        let value = serde_json::to_value(result).unwrap();
+        assert_eq!(value["type"], "rule");
+        assert_eq!(value["field"], "search_text");
+        assert_eq!(value["op"], "contains");
+        assert_eq!(value["value"], "astra");
+    }
+
+    #[test]
+    fn test_parse_structured_query_keeps_remaining_text_search() {
+        let result = parse_query("landscape astra");
+        let value = serde_json::to_value(result).unwrap();
+        let children = value["children"].as_array().unwrap();
+
+        assert!(children.iter().any(|child| child["field"] == "orientation"));
+        assert!(children
+            .iter()
+            .any(|child| child["field"] == "search_text" && child["value"] == "astra"));
+    }
+
+    #[test]
+    fn test_parse_png_images_does_not_search_stopword_images() {
+        let result = parse_query("png images");
+        let value = serde_json::to_value(result).unwrap();
+        let serialized = value.to_string();
+        assert!(
+            !serialized.contains("search_text"),
+            "png images should stay a format filter: {}",
+            serialized
+        );
     }
 
     #[test]
