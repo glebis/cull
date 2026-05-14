@@ -155,6 +155,10 @@ pub fn run() {
     let args = <cli::CliArgs as clap::Parser>::parse();
     let start_hidden = args.tray;
 
+    if let Some(code) = cli::run_headless_if_requested(&args) {
+        std::process::exit(code);
+    }
+
     if args.mcp_stdio {
         run_stdio_bridge();
         return;

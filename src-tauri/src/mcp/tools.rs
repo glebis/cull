@@ -279,14 +279,6 @@ struct SetGenerationMetadataParams {
     settings_json: Option<String>,
 }
 
-// --- Import param structs ---
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct ImportFolderParams {
-    #[schemars(description = "Absolute path to folder to import")]
-    pub folder_path: String,
-}
-
 // --- Job param structs ---
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -920,80 +912,41 @@ impl CullMcp {
     #[tool(
         description = "Import all images from a folder into the library. Returns imported/skipped/error counts."
     )]
-    fn import_folder(&self, Parameters(params): Parameters<ImportFolderParams>) -> String {
+    fn import_folder(
+        &self,
+        Parameters(params): Parameters<crate::services::import::ImportFolderParams>,
+    ) -> String {
         let scope = self.token_scope();
         if !tokens::folder_in_scope(&scope, &params.folder_path) {
             return "Error: Access denied — folder outside token scope".to_string();
         }
         let state = self.app_handle.state::<AppState>();
-        let app = self.app_handle.clone();
+        match crate::services::import::import_folder(&state.db, &state.app_data_dir, params) {
+            Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
 
-        let extensions = ["jpg", "jpeg", "png", "webp", "gif"];
-        let entries: Vec<std::path::PathBuf> = walkdir::WalkDir::new(&params.folder_path)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(|ext| extensions.contains(&ext.to_lowercase().as_str()))
-                    .unwrap_or(false)
-            })
-            .map(|e| e.path().to_path_buf())
-            .collect();
-
-        let total = entries.len() as u32;
-        let (job_id, cancel_token) = state.jobs.create_job("import", total);
-        let job_id_ret = job_id.clone();
-
-        tauri::async_runtime::spawn(async move {
-            let state = app.state::<AppState>();
-            let mut imported = 0u32;
-            let mut skipped = 0u32;
-            let mut errors = 0u32;
-
-            for (i, path) in entries.iter().enumerate() {
-                if cancel_token.is_cancelled() {
-                    state.jobs.mark_cancelled(&job_id);
-                    state.jobs.persist_terminal(&job_id, &state.db);
-                    let _ = app.emit(
-                        "job-status-changed",
-                        serde_json::json!({"job_id": &job_id, "status": "cancelled"}),
-                    );
-                    return;
-                }
-
-                let filename = path
-                    .file_name()
-                    .map(|f| f.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                match crate::db_core::import::import_file(&state.db, path, &state.app_data_dir) {
-                    Ok(Some(_)) => imported += 1,
-                    Ok(None) => skipped += 1,
-                    Err(_) => errors += 1,
-                }
-                state
-                    .jobs
-                    .update_progress(&job_id, (i + 1) as u32, Some(&filename));
-                let _ = app.emit(
-                    "import-progress",
-                    serde_json::json!({"current": i + 1, "total": total, "filename": filename}),
-                );
-            }
-
-            state.jobs.complete(&job_id);
-            state.jobs.persist_terminal(&job_id, &state.db);
-            let _ = app.emit(
-                "job-status-changed",
-                serde_json::json!({
-                    "job_id": &job_id, "status": "completed",
-                    "imported": imported, "skipped": skipped, "errors": errors,
-                }),
-            );
-        });
-
-        serde_json::json!({"job_id": job_id_ret, "total_files": total}).to_string()
+    #[tool(
+        description = "Import specific image files into the library. Returns imported/skipped/error counts."
+    )]
+    fn import_files(
+        &self,
+        Parameters(params): Parameters<crate::services::import::ImportFilesParams>,
+    ) -> String {
+        let scope = self.token_scope();
+        if params
+            .file_paths
+            .iter()
+            .any(|path| !tokens::image_in_scope(&scope, path, &[]))
+        {
+            return "Error: Access denied — file outside token scope".to_string();
+        }
+        let state = self.app_handle.state::<AppState>();
+        match crate::services::import::import_files(&state.db, &state.app_data_dir, params) {
+            Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()),
+            Err(e) => format!("Error: {}", e),
+        }
     }
 
     #[tool(
@@ -1558,6 +1511,64 @@ impl CullMcp {
     fn list_export_presets(&self, Parameters(_): Parameters<EmptyParams>) -> String {
         let presets = crate::services::export::list_presets();
         serde_json::to_string(&presets).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    #[tool(
+        description = "Export images selected by image_ids, collection_id, or folder_path to an output directory."
+    )]
+    fn export_images(
+        &self,
+        Parameters(params): Parameters<crate::services::export::ExportImagesParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let scope = self.token_scope();
+
+        if let Some(image_ids) = params.image_ids.as_ref() {
+            for image_id in image_ids {
+                match self.check_image_id_scope(image_id) {
+                    Ok(false) => {
+                        return format!(
+                            "Error: Access denied — image '{}' outside token scope",
+                            image_id
+                        )
+                    }
+                    Err(e) => return format!("Error: {}", e),
+                    _ => {}
+                }
+            }
+        }
+        if let Some(folder_path) = params.folder_path.as_ref() {
+            if !tokens::folder_in_scope(&scope, folder_path) {
+                return "Error: Access denied — folder outside token scope".to_string();
+            }
+        }
+        if let Some(collection_id) = params.collection_id.as_ref() {
+            if scope.is_some() {
+                let collection_allowed = scope
+                    .as_ref()
+                    .and_then(|s| s.collections.as_ref())
+                    .map(|allowed| allowed.contains(collection_id))
+                    .unwrap_or(false);
+                if !collection_allowed {
+                    match state.db.list_collection_images(collection_id) {
+                        Ok(images)
+                            if images
+                                .iter()
+                                .all(|img| tokens::image_in_scope(&scope, &img.path, &[])) => {}
+                        Ok(_) => {
+                            return "Error: Access denied — collection outside token scope"
+                                .to_string()
+                        }
+                        Err(e) => return format!("Error: {}", e),
+                    }
+                }
+            }
+        }
+
+        match crate::services::export::export_images(&state.db, &state.app_data_dir, params) {
+            Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()),
+            Err(e) => format!("Error: {}", e),
+        }
     }
 
     #[tool(

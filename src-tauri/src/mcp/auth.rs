@@ -92,6 +92,7 @@ mod tests {
         "navigate_to_folder",
         "show_collection",
         "import_folder",
+        "import_files",
         "generate_embeddings",
         "detect_objects",
         "analyze_images",
@@ -101,6 +102,7 @@ mod tests {
         "rotate_token",
         "get_audit_log",
         "prune_audit_log",
+        "export_images",
         "list_export_presets",
         "export_static_publish_package",
     ];

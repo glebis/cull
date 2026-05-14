@@ -10,6 +10,7 @@ pub mod curation;
 pub mod display;
 pub mod export;
 pub mod generation;
+pub mod import;
 pub mod jobs;
 #[allow(dead_code)]
 pub mod library;

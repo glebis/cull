@@ -53,6 +53,20 @@ Currently: **JPEG, PNG, WebP, GIF**
 
 Planned: HEIC/HEIF, TIFF, BMP, SVG, AVIF, JPEG XL, RAW (CR2, CR3, NEF, ARW, DNG, ORF, RAF, RW2)
 
+### Agent CLI
+
+Cull has an initial MCP-aligned headless CLI slice. Commands use MCP tool names and JSON parameter field names so agents can reuse the same mental model across CLI and MCP:
+
+```bash
+cull --json get_library_stats
+cull --json import_folder --folder_path ~/renders
+cull --json import_files --file_paths ~/renders/a.png,~/renders/b.png
+cull --json export_images --collection_id <id> --output_dir ~/Desktop/export --format original
+cull --json call_tool import_folder --params_json '{"folder_path":"/Users/me/renders"}'
+```
+
+Implemented headless tools: `get_library_stats`, `list_images`, `list_folders`, `list_collections`, `import_folder`, `import_files`, `list_export_presets`, `export_images`.
+
 ## Roadmap
 
 ### P0 — Must-have for daily driver
@@ -79,7 +93,7 @@ Planned: HEIC/HEIF, TIFF, BMP, SVG, AVIF, JPEG XL, RAW (CR2, CR3, NEF, ARW, DNG,
 - [ ] AI generation metadata parsing (prompt, seed, model from PNG/EXIF)
 
 **Automation & CLI:**
-- [ ] CLI tool — headless access to import, search, export, detect, rate, convert
+- [ ] CLI tool — headless access to import, search, export, detect, rate, convert. Initial MCP-aligned import/export/listing slice is implemented.
 - [ ] MCP server (stdio) — expose all functionality to agents
 - [ ] Batch operations pipeline — composable resize, convert, rename, watermark, export
 - [ ] Contact sheet export — configurable grid with labels, ratings, metadata

@@ -4,9 +4,31 @@ Version: 0.1.0 — Draft, 2026-05-07
 
 Cull ships a single `cull` binary. With no subcommand it launches the GUI. With a subcommand it runs headless and exits. Every operation available in the GUI has a CLI equivalent and a URL scheme equivalent.
 
+> Current implementation note: the first shipped headless slice is MCP-aligned. Implemented commands use MCP tool names and JSON parameter field names: `get_library_stats`, `list_images`, `list_folders`, `list_collections`, `import_folder`, `import_files`, `list_export_presets`, and `export_images`. The broader CLI below remains the draft target.
+
 ---
 
 ## CLI
+
+### MCP-Aligned Headless Subset
+
+```bash
+cull --json get_library_stats
+cull --json list_images --limit 20 --offset 0
+cull --json import_folder --folder_path /path/to/images
+cull --json import_files --file_paths /path/a.png,/path/b.png
+cull --json list_export_presets
+cull --json export_images --image_ids id1,id2 --output_dir /tmp/cull-export --format original
+cull --json export_images --collection_id <collection-id> --output_dir /tmp/cull-export --format webp
+cull --json export_images --folder_path /path/to/images --output_dir /tmp/cull-export --format png --flatten false
+```
+
+For agents that already have MCP-shaped params, `call_tool` accepts the same tool name and JSON object:
+
+```bash
+cull --json call_tool import_folder --params_json '{"folder_path":"/path/to/images"}'
+cull --json call_tool export_images --params_json '{"collection_id":"<collection-id>","output_dir":"/tmp/cull-export","format":"original"}'
+```
 
 ### Invocation
 
