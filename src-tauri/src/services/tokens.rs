@@ -76,7 +76,8 @@ pub fn tool_capability(tool_name: &str) -> &'static str {
         "export_images"
         | "list_export_presets"
         | "assemble_pdf"
-        | "export_static_publish_package" => "export:read",
+        | "export_static_publish_package"
+        | "export_static_publish_canvas" => "export:read",
 
         "show_image" | "navigate_to_folder" | "show_collection" => "display:navigate",
 
@@ -521,6 +522,10 @@ mod tests {
         assert_eq!(tool_capability("list_export_presets"), "export:read");
         assert_eq!(
             tool_capability("export_static_publish_package"),
+            "export:read"
+        );
+        assert_eq!(
+            tool_capability("export_static_publish_canvas"),
             "export:read"
         );
         assert_eq!(

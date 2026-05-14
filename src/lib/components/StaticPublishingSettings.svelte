@@ -1,7 +1,8 @@
 <script lang="ts">
     import { getAppSetting, setAppSetting, exportStaticPublishPackage, serveStaticPublishPackage } from '$lib/api';
     import type { StaticPublishResult, StaticPublishServerResult } from '$lib/api';
-    import { activeSession, images, selectedIds, showToast } from '$lib/stores';
+    import { activeCanvas, activeSession, images, selectedIds, showToast } from '$lib/stores';
+    import { buildStaticPublishRequestFromSavedCanvas, countSavedCanvasItems } from '$lib/static-publishing';
     import { onMount } from 'svelte';
 
     type PublishPolicy = 'manual_review' | 'auto_checks' | 'auto_agent' | 'full_auto';
@@ -35,6 +36,9 @@
             ? $images.filter(img => $selectedIds.has(img.image.id))
             : $images
     );
+    const savedCanvasItemCount = $derived(countSavedCanvasItems($activeCanvas));
+    const exportSourceCount = $derived($activeCanvas ? savedCanvasItemCount : sourceImages.length);
+    const exportSourceLabel = $derived($activeCanvas ? $activeCanvas.name : 'Current view');
 
     function settingIsTrue(value: string | null, fallback: boolean): boolean {
         if (value === null) return fallback;
@@ -91,7 +95,7 @@
         bucket = savedBucket ?? '';
         prefix = savedPrefix ?? 'canvas';
         shareUrl = savedShareUrl ?? '';
-        canvasName = $activeSession?.name ? `${$activeSession.name} Canvas` : 'Current Canvas';
+        canvasName = $activeCanvas?.name || ($activeSession?.name ? `${$activeSession.name} Canvas` : 'Current Canvas');
         loading = false;
     });
 
@@ -104,23 +108,35 @@
     }
 
     async function exportPackage() {
-        if (sourceImages.length === 0) return;
+        if (exportSourceCount === 0) return;
         exporting = true;
         lastResult = null;
         try {
-            const result = await exportStaticPublishPackage({
-                canvas_name: canvasName.trim() || 'Current Canvas',
-                items: sourceImages.map(img => ({ image_id: img.image.id })),
-                layout_json: JSON.stringify({
-                    type: 'current_view_snapshot',
-                    image_ids: sourceImages.map(img => img.image.id),
-                }),
-                output_dir: outputDir.trim() || null,
-                share_url: shareUrl.trim() || null,
-                include_thumbnails: includeThumbnails,
-                include_web: includeWeb,
-                include_full: includeFull,
-            });
+            const result = await exportStaticPublishPackage(
+                $activeCanvas
+                    ? buildStaticPublishRequestFromSavedCanvas({
+                        canvas: $activeCanvas,
+                        canvasName,
+                        outputDir,
+                        shareUrl,
+                        includeThumbnails,
+                        includeWeb,
+                        includeFull,
+                    })
+                    : {
+                        canvas_name: canvasName.trim() || 'Current Canvas',
+                        items: sourceImages.map(img => ({ image_id: img.image.id })),
+                        layout_json: JSON.stringify({
+                            type: 'current_view_snapshot',
+                            image_ids: sourceImages.map(img => img.image.id),
+                        }),
+                        output_dir: outputDir.trim() || null,
+                        share_url: shareUrl.trim() || null,
+                        include_thumbnails: includeThumbnails,
+                        include_web: includeWeb,
+                        include_full: includeFull,
+                    }
+            );
             lastResult = result;
             serverResult = null;
             showToast('Static package exported', {
@@ -195,9 +211,9 @@
         </div>
         <div class="setting-row">
             <span>Canvas source</span>
-            <span class="count">{sourceImages.length} image{sourceImages.length === 1 ? '' : 's'}</span>
+            <span class="count">{exportSourceLabel} · {exportSourceCount} image{exportSourceCount === 1 ? '' : 's'}</span>
         </div>
-        <button class="primary-btn" onclick={exportPackage} disabled={exporting || sourceImages.length === 0}>
+        <button class="primary-btn" onclick={exportPackage} disabled={exporting || exportSourceCount === 0}>
             {exporting ? 'Exporting...' : 'Export Static Site Package'}
         </button>
     </div>

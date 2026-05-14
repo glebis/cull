@@ -36,9 +36,9 @@ fn is_valid_decision(decision: &str) -> bool {
 
 fn required_module_for_tool(tool_name: &str) -> Option<&'static str> {
     match tool_name {
-        "export_static_publish_package" | "serve_static_publish_package" => {
-            Some("module_static_publishing")
-        }
+        "export_static_publish_package"
+        | "export_static_publish_canvas"
+        | "serve_static_publish_package" => Some("module_static_publishing"),
         _ => None,
     }
 }
@@ -1602,6 +1602,56 @@ impl CullMcp {
     }
 
     #[tool(
+        description = "Export a read-only static presentation package from a saved Canvas record by canvas_id. Uses persisted canvas layout_json, not live UI state. Requires the Static Publishing module to be enabled."
+    )]
+    fn export_static_publish_canvas(
+        &self,
+        Parameters(params): Parameters<
+            crate::commands::static_publishing::StaticPublishCanvasRequest,
+        >,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let canvas = match state.db.get_canvas(&params.canvas_id) {
+            Ok(Some(canvas)) => canvas,
+            Ok(None) => return format!("Error: Canvas '{}' was not found", params.canvas_id),
+            Err(e) => return format!("Error: {}", e),
+        };
+        let document = match crate::db_core::canvas_document::CanvasDocument::from_layout_json(
+            &canvas.layout_json,
+        ) {
+            Ok(document) => document,
+            Err(e) => return format!("Error: Invalid canvas layout_json: {}", e),
+        };
+        let id_refs: Vec<&str> = document
+            .items
+            .iter()
+            .map(|item| item.image_id.as_str())
+            .collect();
+
+        match state.db.get_images_by_ids(&id_refs) {
+            Ok(images) => {
+                for image in images {
+                    if !self.check_image_scope(&image.path) {
+                        return format!(
+                            "Error: Access denied — image '{}' outside token scope",
+                            image.image.id
+                        );
+                    }
+                }
+            }
+            Err(e) => return format!("Error: {}", e),
+        }
+
+        match crate::commands::static_publishing::export_static_publish_canvas_inner(
+            state.inner(),
+            params,
+        ) {
+            Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(
         description = "Serve a generated static publishing site over a local read-only HTTP server. Requires the Static Publishing module and settings/admin permission."
     )]
     async fn serve_static_publish_package(
@@ -2082,7 +2132,11 @@ mod tests {
 
     #[test]
     fn test_export_tools_map_to_export_read() {
-        let export_tools = ["list_export_presets", "export_static_publish_package"];
+        let export_tools = [
+            "list_export_presets",
+            "export_static_publish_package",
+            "export_static_publish_canvas",
+        ];
         for tool in &export_tools {
             assert_eq!(
                 tokens::tool_capability(tool),
@@ -2172,6 +2226,10 @@ mod tests {
     fn test_static_publish_tools_are_module_gated() {
         assert_eq!(
             super::required_module_for_tool("export_static_publish_package"),
+            Some("module_static_publishing")
+        );
+        assert_eq!(
+            super::required_module_for_tool("export_static_publish_canvas"),
             Some("module_static_publishing")
         );
         assert_eq!(

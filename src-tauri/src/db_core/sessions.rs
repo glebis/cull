@@ -170,6 +170,30 @@ impl Database {
         rows.collect()
     }
 
+    pub fn get_canvas(&self, canvas_id: &str) -> Result<Option<Canvas>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT id, session_id, name, canvas_type, layout_json, filter_json, grid_config_json, sort_order, created_at, updated_at
+             FROM canvases WHERE id = ?1",
+            params![canvas_id],
+            |row| {
+                Ok(Canvas {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    name: row.get(2)?,
+                    canvas_type: row.get(3)?,
+                    layout_json: row.get(4)?,
+                    filter_json: row.get(5)?,
+                    grid_config_json: row.get(6)?,
+                    sort_order: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
+                })
+            },
+        )
+        .optional()
+    }
+
     pub fn update_canvas_layout(&self, canvas_id: &str, layout_json: &str) -> Result<()> {
         validate_versioned_canvas_layout(layout_json)?;
 

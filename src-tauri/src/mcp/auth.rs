@@ -105,6 +105,7 @@ mod tests {
         "export_images",
         "list_export_presets",
         "export_static_publish_package",
+        "export_static_publish_canvas",
     ];
 
     const ADMIN_ONLY_TOOLS: &[&str] = &[
@@ -143,6 +144,7 @@ mod tests {
         "list_export_presets",
         "assemble_pdf",
         "export_static_publish_package",
+        "export_static_publish_canvas",
     ];
     const DISPLAY_TOOLS: &[&str] = &["show_image", "navigate_to_folder", "show_collection"];
     const AI_TOOLS: &[&str] = &["generate_embeddings", "detect_objects", "analyze_images"];

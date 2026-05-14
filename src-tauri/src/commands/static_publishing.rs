@@ -18,7 +18,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::State;
 
-use crate::db_core::models::ImageWithFile;
+use crate::db_core::canvas_document::CanvasDocument;
+use crate::db_core::models::{Canvas, ImageWithFile};
 use crate::AppState;
 
 const MODULE_KEY: &str = "module_static_publishing";
@@ -39,6 +40,16 @@ pub struct StaticPublishRequest {
     pub canvas_name: String,
     pub items: Vec<StaticPublishCanvasItem>,
     pub layout_json: Option<String>,
+    pub output_dir: Option<String>,
+    pub share_url: Option<String>,
+    pub include_thumbnails: bool,
+    pub include_web: bool,
+    pub include_full: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct StaticPublishCanvasRequest {
+    pub canvas_id: String,
     pub output_dir: Option<String>,
     pub share_url: Option<String>,
     pub include_thumbnails: bool,
@@ -86,6 +97,59 @@ pub async fn export_static_publish_package(
 pub fn export_static_publish_package_inner(
     state: &AppState,
     request: StaticPublishRequest,
+) -> Result<StaticPublishResult, String> {
+    export_static_publish_package_with_canvas_inner(state, request, None)
+}
+
+pub fn export_static_publish_canvas_inner(
+    state: &AppState,
+    request: StaticPublishCanvasRequest,
+) -> Result<StaticPublishResult, String> {
+    ensure_module_enabled(state)?;
+
+    let canvas = state
+        .db
+        .get_canvas(&request.canvas_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Canvas '{}' was not found", request.canvas_id))?;
+    let document = CanvasDocument::from_layout_json(&canvas.layout_json)
+        .map_err(|e| format!("Invalid canvas layout_json: {}", e))?;
+    let layout_json = document
+        .to_layout_json()
+        .map_err(|e| format!("Invalid canvas layout_json: {}", e))?;
+    let items = document
+        .items
+        .iter()
+        .map(|item| StaticPublishCanvasItem {
+            image_id: item.image_id.clone(),
+            x: Some(item.x),
+            y: Some(item.y),
+            width: Some(item.width),
+            height: Some(item.height),
+            hidden: Some(item.hidden),
+        })
+        .collect();
+
+    export_static_publish_package_with_canvas_inner(
+        state,
+        StaticPublishRequest {
+            canvas_name: canvas.name.clone(),
+            items,
+            layout_json: Some(layout_json),
+            output_dir: request.output_dir,
+            share_url: request.share_url,
+            include_thumbnails: request.include_thumbnails,
+            include_web: request.include_web,
+            include_full: request.include_full,
+        },
+        Some(&canvas),
+    )
+}
+
+fn export_static_publish_package_with_canvas_inner(
+    state: &AppState,
+    request: StaticPublishRequest,
+    source_canvas: Option<&Canvas>,
 ) -> Result<StaticPublishResult, String> {
     ensure_module_enabled(state)?;
     if request.items.is_empty() {
@@ -196,6 +260,13 @@ pub fn export_static_publish_package_inner(
         "schema": SCHEMA_VERSION,
         "generated_at": Utc::now().to_rfc3339(),
         "canvas_name": request.canvas_name,
+        "canvas": source_canvas.map(|canvas| json!({
+            "id": canvas.id,
+            "session_id": canvas.session_id,
+            "name": canvas.name,
+            "type": canvas.canvas_type,
+            "updated_at": canvas.updated_at,
+        })),
         "share": {
             "url": share_url,
             "qr_svg": "qr.svg",
@@ -808,6 +879,105 @@ mod tests {
         assert!(site_dir.join(thumb).exists());
         assert!(site_dir.join(web).exists());
         assert!(first_image["files"]["full"].is_null());
+    }
+
+    #[test]
+    fn export_saved_canvas_uses_persisted_layout_items() {
+        let (state, tmp) = test_state();
+        state.db.set_setting(MODULE_KEY, "true").unwrap();
+
+        let source_path = tmp.path().join("source.jpg");
+        write_test_image(&source_path);
+        let image_id =
+            crate::db_core::import::import_file(&state.db, &source_path, &state.app_data_dir)
+                .unwrap()
+                .unwrap();
+        let session_id = state
+            .db
+            .create_session("Saved Canvas Session", &tmp.path().to_string_lossy())
+            .unwrap();
+        let canvas_id = state
+            .db
+            .create_canvas(&session_id, "Saved Canvas", "manual")
+            .unwrap();
+        let missing_image_id = "missing-image";
+        let layout_json = format!(
+            r#"{{
+                "version": 1,
+                "viewport": {{ "panX": 4, "panY": 8, "zoom": 1.2 }},
+                "items": [
+                    {{
+                        "id": "canvas-item-b",
+                        "imageId": "{}",
+                        "x": 220,
+                        "y": 40,
+                        "width": 320,
+                        "height": 180,
+                        "z": 2,
+                        "hidden": true,
+                        "label": "Hero",
+                        "groupId": null
+                    }},
+                    {{
+                        "id": "canvas-item-missing",
+                        "imageId": "{}",
+                        "x": 0,
+                        "y": 0,
+                        "width": 100,
+                        "height": 100,
+                        "z": 1,
+                        "hidden": false,
+                        "label": null,
+                        "groupId": null
+                    }}
+                ],
+                "groups": [],
+                "connectors": [],
+                "annotations": [],
+                "export": {{ "defaultPresetId": null, "background": "transparent", "bounds": "content" }}
+            }}"#,
+            image_id, missing_image_id
+        );
+        state
+            .db
+            .update_canvas_layout(&canvas_id, &layout_json)
+            .unwrap();
+
+        let result = export_static_publish_canvas_inner(
+            &state,
+            StaticPublishCanvasRequest {
+                canvas_id: canvas_id.clone(),
+                output_dir: Some(tmp.path().join("exports").to_string_lossy().to_string()),
+                share_url: None,
+                include_thumbnails: true,
+                include_web: false,
+                include_full: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.image_count, 1);
+        assert_eq!(result.skipped_count, 1);
+        assert!(result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains(missing_image_id)));
+
+        let manifest: Value = serde_json::from_str(
+            &fs::read_to_string(&result.manifest_path).expect("manifest should be readable"),
+        )
+        .unwrap();
+        assert_eq!(manifest["canvas"]["id"], canvas_id);
+        assert_eq!(manifest["canvas"]["name"], "Saved Canvas");
+        assert_eq!(manifest["layout"]["viewport"]["zoom"], 1.2);
+
+        let first_image = &manifest["images"][0];
+        assert_eq!(first_image["id"], image_id);
+        assert_eq!(first_image["canvas"]["x"], 220.0);
+        assert_eq!(first_image["canvas"]["y"], 40.0);
+        assert_eq!(first_image["canvas"]["width"], 320.0);
+        assert_eq!(first_image["canvas"]["height"], 180.0);
+        assert_eq!(first_image["canvas"]["hidden"], true);
     }
 
     #[test]
