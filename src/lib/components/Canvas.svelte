@@ -12,6 +12,13 @@
         statusHint,
     } from '$lib/stores';
     import { updateCanvasLayout, type ImageWithFile } from '$lib/api';
+    import {
+        computeCanvasItemDragPosition,
+        computeCanvasPanDrag,
+        computeCanvasResize,
+        computeCanvasWheelZoom,
+        isCanvasSpacePanKey,
+    } from '$lib/canvas-interactions';
     import { serializeCanvasDocumentLayout, type CanvasDocument } from '$lib/canvas-document';
     import {
         createCanvasDocumentFromLayoutJson,
@@ -32,6 +39,8 @@
     let panStartY = $state(0);
     let panOriginX = $state(0);
     let panOriginY = $state(0);
+    let spacePanActive = $state(false);
+    let suppressNextItemClick = $state(false);
 
     let dragItem = $state<string | null>(null);
     let dragOffsetX = $state(0);
@@ -114,8 +123,12 @@
     }
 
     function handleCanvasMouseDown(e: MouseEvent) {
-        if (e.button === 1 || (e.button === 0 && e.altKey)) {
+        canvasEl?.focus();
+        if (e.button === 1 || (e.button === 0 && (e.altKey || spacePanActive))) {
+            const target = e.target instanceof HTMLElement ? e.target : null;
+            const startedOnItem = target?.closest('.canvas-item') !== null;
             panning = true;
+            suppressNextItemClick = spacePanActive && e.button === 0 && startedOnItem;
             panStartX = e.clientX;
             panStartY = e.clientY;
             panOriginX = panX;
@@ -126,22 +139,39 @@
 
     function handleCanvasMouseMove(e: MouseEvent) {
         if (panning) {
-            panX = panOriginX + (e.clientX - panStartX);
-            panY = panOriginY + (e.clientY - panStartY);
+            const nextPan = computeCanvasPanDrag(
+                { panX: panOriginX, panY: panOriginY, zoom },
+                { x: panStartX, y: panStartY },
+                { x: e.clientX, y: e.clientY },
+            );
+            panX = nextPan.panX;
+            panY = nextPan.panY;
         } else if (resizeItem) {
             const item = canvasItems.find(it => it.id === resizeItem);
             if (item) {
-                const dx = (e.clientX - resizeStartX) / zoom;
-                const aspect = item.image.image.width / item.image.image.height;
-                item.width = Math.max(50, resizeStartW + dx);
-                item.height = item.width / aspect;
+                const nextSize = computeCanvasResize({
+                    startClientX: resizeStartX,
+                    currentClientX: e.clientX,
+                    startWidth: resizeStartW,
+                    startHeight: resizeStartH,
+                    imageWidth: item.image.image.width,
+                    imageHeight: item.image.image.height,
+                    zoom,
+                });
+                item.width = nextSize.width;
+                item.height = nextSize.height;
                 canvasItems = canvasItems;
             }
         } else if (dragItem) {
             const item = canvasItems.find(it => it.id === dragItem);
             if (item) {
-                item.x = (e.clientX - panX) / zoom - dragOffsetX;
-                item.y = (e.clientY - panY) / zoom - dragOffsetY;
+                const nextPosition = computeCanvasItemDragPosition(
+                    { x: e.clientX, y: e.clientY },
+                    { panX, panY, zoom },
+                    { x: dragOffsetX, y: dragOffsetY },
+                );
+                item.x = nextPosition.x;
+                item.y = nextPosition.y;
                 canvasItems = canvasItems;
             }
         }
@@ -156,6 +186,7 @@
     }
 
     function handleItemMouseDown(e: MouseEvent, item: CanvasViewItem) {
+        if (spacePanActive) return;
         if (e.button !== 0 || e.altKey) return;
         e.stopPropagation();
         dragItem = item.id;
@@ -176,6 +207,10 @@
     }
 
     function handleItemClick(e: MouseEvent, item: CanvasViewItem) {
+        if (suppressNextItemClick) {
+            suppressNextItemClick = false;
+            return;
+        }
         const idx = $images.findIndex(img => img.image.id === item.imageId);
         if (idx >= 0) focusedIndex.set(idx);
     }
@@ -200,16 +235,47 @@
 
     function handleWheel(e: WheelEvent) {
         e.preventDefault();
-        const factor = e.deltaY > 0 ? 0.9 : 1.1;
         const rect = canvasEl?.getBoundingClientRect();
         if (!rect) return;
-        const mx = e.clientX - rect.left;
-        const my = e.clientY - rect.top;
-        const newZoom = Math.max(0.1, Math.min(5, zoom * factor));
-        panX = mx - (mx - panX) * (newZoom / zoom);
-        panY = my - (my - panY) * (newZoom / zoom);
-        zoom = newZoom;
+        const nextViewport = computeCanvasWheelZoom(
+            { panX, panY, zoom },
+            { x: e.clientX - rect.left, y: e.clientY - rect.top },
+            e.deltaY,
+        );
+        panX = nextViewport.panX;
+        panY = nextViewport.panY;
+        zoom = nextViewport.zoom;
         queueCanvasSave();
+    }
+
+    function handleCanvasKeydown(e: KeyboardEvent) {
+        if (!isCanvasSpacePanKey(keyInputFromEvent(e))) return;
+        spacePanActive = true;
+        e.preventDefault();
+    }
+
+    function handleCanvasKeyup(e: KeyboardEvent) {
+        if (e.key !== ' ' && e.key !== 'Spacebar' && e.code !== 'Space') return;
+        spacePanActive = false;
+        e.preventDefault();
+    }
+
+    function handleCanvasBlur() {
+        spacePanActive = false;
+        if (panning) handleCanvasMouseUp();
+    }
+
+    function keyInputFromEvent(e: KeyboardEvent) {
+        const target = e.target instanceof HTMLElement ? e.target : null;
+        return {
+            key: e.key,
+            code: e.code,
+            altKey: e.altKey,
+            ctrlKey: e.ctrlKey,
+            metaKey: e.metaKey,
+            targetTagName: target?.tagName ?? null,
+            isContentEditable: target?.isContentEditable ?? false,
+        };
     }
 
     $effect(() => {
@@ -228,9 +294,14 @@
     onmouseup={handleCanvasMouseUp}
     onmouseleave={handleCanvasMouseUp}
     onwheel={handleWheel}
+    onkeydown={handleCanvasKeydown}
+    onkeyup={handleCanvasKeyup}
+    onblur={handleCanvasBlur}
     role="application"
     aria-label="Image canvas"
     tabindex="0"
+    class:space-pan={spacePanActive}
+    class:panning={panning}
 >
     <div class="canvas-layer" style="transform: translate({panX}px, {panY}px) scale({zoom});">
         {#each canvasItems as item (item.id)}
@@ -286,13 +357,21 @@
     .canvas-viewport {
         grid-area: main;
         overflow: hidden;
-        background: #111;
-        cursor: grab;
+        background: var(--bg);
+        cursor: default;
         position: relative;
         user-select: none;
+        outline: none;
     }
-    .canvas-viewport:active {
+    .canvas-viewport.space-pan {
+        cursor: grab;
+    }
+    .canvas-viewport.panning,
+    .canvas-viewport.space-pan:active {
         cursor: grabbing;
+    }
+    .canvas-viewport:focus-visible {
+        box-shadow: inset 0 0 0 1px var(--blue);
     }
     .canvas-layer {
         position: absolute;
@@ -308,14 +387,14 @@
         transition: border-color 0.1s;
     }
     .canvas-item.focused {
-        border-color: #4a9eff;
-        box-shadow: 0 0 0 1px #4a9eff;
+        border-color: var(--blue);
+        box-shadow: 0 0 0 1px var(--blue);
     }
     .canvas-item.selected {
-        border-color: #4a9eff;
+        border-color: var(--blue);
     }
     .canvas-item:hover {
-        border-color: rgba(255,255,255,0.4);
+        border-color: var(--text-secondary);
     }
     .canvas-item img {
         width: 100%;
@@ -330,7 +409,7 @@
         right: -4px;
         width: 12px;
         height: 12px;
-        background: #4a9eff;
+        background: var(--blue);
         border-radius: 2px;
         cursor: nwse-resize;
         opacity: 0;
@@ -378,8 +457,8 @@
         right: 4px;
         padding: 1px 4px;
         border-radius: 2px;
-        color: #fbbf24;
-        background: rgba(0,0,0,0.6);
+        color: var(--orange);
+        background: var(--surface);
         font-size: 0.7rem;
         line-height: 1.2;
         letter-spacing: -1px;
