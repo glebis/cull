@@ -2,6 +2,47 @@ use crate::AppState;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, State};
 
+#[derive(Debug, PartialEq, Eq)]
+enum DiskMove {
+    Rename,
+    CopyRemove,
+}
+
+fn move_file_on_disk(old_path: &Path, new_path: &Path) -> Result<DiskMove, String> {
+    match std::fs::rename(old_path, new_path) {
+        Ok(()) => Ok(DiskMove::Rename),
+        Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+            if let Err(copy_err) = std::fs::copy(old_path, new_path) {
+                let _ = std::fs::remove_file(new_path);
+                return Err(format!("Failed to copy file across volumes: {}", copy_err));
+            }
+            if let Err(remove_err) = std::fs::remove_file(old_path) {
+                let _ = std::fs::remove_file(new_path);
+                return Err(format!(
+                    "Failed to remove original after copy: {}",
+                    remove_err
+                ));
+            }
+            Ok(DiskMove::CopyRemove)
+        }
+        Err(e) => Err(format!("Failed to move file: {}", e)),
+    }
+}
+
+fn rollback_disk_move(kind: DiskMove, old_path: &Path, new_path: &Path) {
+    match kind {
+        DiskMove::Rename => {
+            let _ = std::fs::rename(new_path, old_path);
+        }
+        DiskMove::CopyRemove => {
+            if !old_path.exists() {
+                let _ = std::fs::copy(new_path, old_path);
+            }
+            let _ = std::fs::remove_file(new_path);
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn move_image(
     app: AppHandle,
@@ -19,24 +60,25 @@ pub async fn move_image(
 
     let old_path = PathBuf::from(&img.path);
     let filename = old_path.file_name().ok_or("Invalid source path")?;
-    let new_path = PathBuf::from(&destination_folder).join(filename);
+    let destination = PathBuf::from(&destination_folder);
+
+    if !destination.is_dir() {
+        return Err("Destination folder does not exist".to_string());
+    }
 
     let roots = state.db.list_library_roots().map_err(|e| e.to_string())?;
-    let dest_canonical = std::fs::canonicalize(&destination_folder)
-        .unwrap_or_else(|_| PathBuf::from(&destination_folder));
+    let dest_canonical =
+        std::fs::canonicalize(&destination).unwrap_or_else(|_| destination.clone());
     let in_library = roots.iter().any(|root| {
         let root_canonical = std::fs::canonicalize(root).unwrap_or_else(|_| PathBuf::from(root));
         dest_canonical.starts_with(&root_canonical)
     });
-    if !in_library {
-        return Err("Destination folder is not within a library root".to_string());
-    }
-
-    if !Path::new(&destination_folder).is_dir() {
-        return Err("Destination folder does not exist".to_string());
-    }
+    let new_path = destination.join(filename);
 
     if new_path.exists() {
+        if new_path == old_path {
+            return Ok(img.path.clone());
+        }
         return Err(format!("File already exists at {}", new_path.display()));
     }
 
@@ -51,15 +93,28 @@ pub async fn move_image(
         fw.register_move_intent(old_path.clone(), new_path.clone(), file_record.id.clone());
     }
 
-    std::fs::rename(&old_path, &new_path).map_err(|e| format!("Failed to move file: {}", e))?;
+    let disk_move = move_file_on_disk(&old_path, &new_path)?;
 
     let new_path_str = new_path.to_string_lossy().to_string();
     if let Err(e) = state
         .db
         .update_image_file_path(&file_record.id, &new_path_str)
     {
-        let _ = std::fs::rename(&new_path, &old_path);
+        rollback_disk_move(disk_move, &old_path, &new_path);
         return Err(format!("DB update failed, file moved back: {}", e));
+    }
+
+    if !in_library {
+        if let Err(e) = state.db.add_library_root(&destination_folder) {
+            eprintln!(
+                "[files] Failed to add move destination as library root: {}",
+                e
+            );
+        } else {
+            let mut fw = state.file_watcher.lock();
+            let _ = fw.watch_folder(&destination_folder);
+            let _ = app.emit("folders:changed", ());
+        }
     }
 
     let _ = app.emit("images:changed", ());
@@ -162,4 +217,40 @@ pub async fn create_subfolder(
     let _ = app.emit("folders:changed", ());
 
     Ok(new_folder.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn move_file_on_disk_renames_within_same_volume() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.png");
+        let dest = dir.path().join("dest.png");
+        {
+            let mut file = std::fs::File::create(&source).unwrap();
+            file.write_all(b"image").unwrap();
+        }
+
+        let kind = move_file_on_disk(&source, &dest).unwrap();
+
+        assert_eq!(kind, DiskMove::Rename);
+        assert!(!source.exists());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"image");
+    }
+
+    #[test]
+    fn rollback_disk_move_restores_rename() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.png");
+        let dest = dir.path().join("dest.png");
+        std::fs::write(&dest, b"image").unwrap();
+
+        rollback_disk_move(DiskMove::Rename, &source, &dest);
+
+        assert_eq!(std::fs::read(&source).unwrap(), b"image");
+        assert!(!dest.exists());
+    }
 }

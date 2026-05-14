@@ -1,9 +1,11 @@
 <script lang="ts">
     import { onMount } from 'svelte';
+    import { open as openDialog } from '@tauri-apps/plugin-dialog';
     import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, moveImage, renameImage, listFolders, getImagesByIds } from '$lib/api';
     import type { ImageWithFile } from '$lib/api';
-    import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, showToast } from '$lib/stores';
+    import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast } from '$lib/stores';
     import { clearImageScope, invalidateImageCache, loadImagesForCurrentScope, resetImagePaging } from '$lib/image-loading';
+    import { filterMoveFolders, folderDisplayName, folderParentPath } from '$lib/move-menu-utils';
 
     interface Props {
         image: ImageWithFile;
@@ -18,12 +20,14 @@
     let openSubmenu = $state<string | null>(null);
     let collectionList = $state<[string, string, number][]>([]);
     let folderList = $state<[string, number][]>([]);
+    let folderSearch = $state('');
     let menuX = $state(0);
     let menuY = $state(0);
     let activeIndex = $state(0);
 
     let currentRating = $derived(image.selection?.star_rating ?? 0);
     let currentDecision = $derived(image.selection?.decision ?? 'undecided');
+    let filteredFolderList = $derived(filterMoveFolders(folderList, folderSearch));
 
     let targetIds = $derived(
         $selectedIds.size > 0 && $selectedIds.has(image.image.id)
@@ -231,15 +235,75 @@
         folderList = await listFolders();
     }
 
-    async function handleMoveTo(folder: string) {
-        onclose();
+    function currentFolderPath() {
+        const parts = image.path.split('/');
+        parts.pop();
+        return parts.join('/') || undefined;
+    }
+
+    async function refreshAfterMove() {
+        await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
         try {
-            await moveImage(image.image.id, folder);
-            await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
-            const folderName = folder.split('/').pop() ?? folder;
-            showToast(`Moved to ${folderName}`, { type: 'success' });
+            folders.set(await listFolders());
         } catch (e) {
-            showToast(`Move failed: ${e}`, { type: 'error' });
+            console.error('Failed to refresh folders after move:', e);
+        }
+    }
+
+    async function moveImagesToFolder(ids: string[], folder: string) {
+        let moved = 0;
+        try {
+            for (const id of ids) {
+                await moveImage(id, folder);
+                moved += 1;
+            }
+        } catch (e) {
+            if (moved > 0) {
+                await refreshAfterMove();
+            }
+            showToast('Move incomplete', {
+                detail: `${moved}/${ids.length} moved. ${String(e)}`,
+                type: 'error',
+                duration: 10000,
+            });
+            return;
+        }
+
+        await refreshAfterMove();
+        const folderName = folderDisplayName(folder);
+        const movedLabel = moved === 1 ? '1 image' : `${moved} images`;
+        showToast(`Moved ${movedLabel} to ${folderName}`, { type: 'success' });
+    }
+
+    async function handleMoveTo(folder: string) {
+        const ids = [...new Set(targetIds)];
+        onclose();
+        await moveImagesToFolder(ids, folder);
+    }
+
+    async function handleChooseMoveFolder() {
+        const ids = [...new Set(targetIds)];
+        const defaultPath = currentFolderPath();
+        onclose();
+
+        const selected = await openDialog({
+            title: ids.length === 1 ? 'Move Image to Folder' : `Move ${ids.length} Images to Folder`,
+            directory: true,
+            multiple: false,
+            defaultPath,
+            canCreateDirectories: true,
+            fileAccessMode: 'scoped',
+        });
+        if (!selected || Array.isArray(selected)) return;
+
+        await moveImagesToFolder(ids, selected);
+    }
+
+    function handleFolderSearchKeydown(e: KeyboardEvent) {
+        e.stopPropagation();
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            folderSearch = '';
         }
     }
 </script>
@@ -424,15 +488,37 @@
             <span class="arrow">►</span>
         </button>
         {#if openSubmenu === 'moveto'}
-            <div class="submenu" role="menu">
-                {#each folderList as [folder, count]}
-                    <button class="context-menu-item" onclick={() => handleMoveTo(folder)} role="menuitem" tabindex="-1">
-                        {folder.split('/').pop()} <span class="count">({count})</span>
-                    </button>
-                {/each}
-                {#if folderList.length === 0}
-                    <div class="context-menu-item" style="color: var(--text-secondary); cursor: default;">No folders</div>
-                {/if}
+            <div class="submenu move-submenu" role="menu">
+                <button class="context-menu-item" onclick={handleChooseMoveFolder} role="menuitem" tabindex="-1">
+                    Choose Folder...
+                </button>
+                <div class="separator"></div>
+                <div class="folder-search-row">
+                    <input
+                        class="folder-search"
+                        type="search"
+                        placeholder="Search folders"
+                        aria-label="Search folders"
+                        bind:value={folderSearch}
+                        onkeydown={handleFolderSearchKeydown}
+                    />
+                </div>
+                <div class="folder-list">
+                    {#each filteredFolderList as [folder, count]}
+                        <button class="context-menu-item folder-item" onclick={() => handleMoveTo(folder)} role="menuitem" tabindex="-1" title={folder}>
+                            <span class="folder-text">
+                                <span class="folder-name">{folderDisplayName(folder)}</span>
+                                <span class="folder-path">{folderParentPath(folder)}</span>
+                            </span>
+                            <span class="count">({count})</span>
+                        </button>
+                    {/each}
+                    {#if filteredFolderList.length === 0}
+                        <div class="context-menu-item empty-menu-item">
+                            {folderList.length === 0 ? 'No folders' : 'No matching folders'}
+                        </div>
+                    {/if}
+                </div>
             </div>
         {/if}
     </div>
@@ -496,6 +582,12 @@
     .context-menu-item.has-submenu {
         padding-right: 8px;
     }
+    .context-menu-item:hover .count,
+    .context-menu-item:focus .count,
+    .context-menu-item:hover .folder-path,
+    .context-menu-item:focus .folder-path {
+        color: var(--bg);
+    }
     .separator {
         height: 1px;
         background: var(--border);
@@ -514,6 +606,64 @@
         padding: 4px 0;
         min-width: 180px;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    }
+    .move-submenu {
+        display: flex;
+        flex-direction: column;
+        min-width: 340px;
+        max-width: min(460px, calc(100vw - 32px));
+        max-height: min(420px, calc(100vh - 24px));
+        overflow: hidden;
+    }
+    .folder-search-row {
+        padding: 4px 8px 6px;
+    }
+    .folder-search {
+        box-sizing: border-box;
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg);
+        color: var(--text);
+        font: inherit;
+        outline: none;
+    }
+    .folder-search:focus {
+        border-color: var(--blue);
+    }
+    .folder-list {
+        min-height: 0;
+        overflow-y: auto;
+    }
+    .folder-item {
+        align-items: flex-start;
+    }
+    .folder-text {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        gap: 2px;
+    }
+    .folder-name,
+    .folder-path {
+        max-width: 260px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .folder-path {
+        color: var(--text-secondary);
+        font-size: 10px;
+    }
+    .empty-menu-item {
+        color: var(--text-secondary);
+        cursor: default;
+    }
+    .empty-menu-item:hover,
+    .empty-menu-item:focus {
+        background: none;
+        color: var(--text-secondary);
     }
     .current-value {
         font-size: 11px;
