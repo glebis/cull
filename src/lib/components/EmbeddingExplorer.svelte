@@ -2,7 +2,6 @@
     import { onMount } from 'svelte';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { convertFileSrc } from '@tauri-apps/api/core';
-    import { UMAP } from 'umap-js';
     import { images, focusedIndex, focusedImageOverride, viewMode, zenMode, navigateTo, embeddingViewState, settingsOpen } from '$lib/stores';
     import { get } from 'svelte/store';
     import { computeScatterThumbSize } from '$lib/embedding-utils';
@@ -12,7 +11,8 @@
         generateEmbeddings,
         getAllEmbeddings,
         getEmbeddingCount,
-        listImages,
+        getImageCount,
+        listImageIds,
         hasApiKey,
         generateGeminiEmbeddings,
         getImagesByIds,
@@ -36,6 +36,7 @@
     let configOpen = $state(false);
     let hasGoogleKey = $state(false);
     let geminiEmbeddingCount = $state(0);
+    let currentEmbeddingCount = $derived(selectedProvider === 'gemini' ? geminiEmbeddingCount : embeddingCount);
 
     // Download progress
     let downloadProgress = $state({ downloaded: 0, total: 0, status: '' });
@@ -45,15 +46,17 @@
     // UMAP projection
     type Point = { id: string; x: number; y: number; cluster: number };
     let points = $state<Point[]>([]);
-    let clusters = $state<{ id: number; label: string; count: number; color: string; previewPaths: string[] }[]>([]);
+    let clusters = $state<{ id: number; label: string; count: number; color: string; previewPaths: string[]; x: number; y: number }[]>([]);
     let hoveredPoint = $state<Point | null>(null);
     let selectedPoint = $state<Point | null>(null);
     let highlightedCluster = $state<number | null>(null);
 
     // Thumbnail images for scatter — keyed by "{id}_{size}"
     let thumbnailImages: Map<string, HTMLImageElement> = new Map();
+    let loadingThumbnailKeys: Set<string> = new Set();
     let failedThumbnailIds = $state<Set<string>>(new Set());
     const THUMB_SIZES = [64, 128, 256, 800];
+    const MAX_THUMBNAIL_CACHE = 600;
 
     // Canvas interaction
     let canvas: HTMLCanvasElement;
@@ -63,6 +66,7 @@
     let panY = $state(0);
     let scale = $state(1);
     let dragging = $state(false);
+    let drawQueued = false;
     let dragStartX = 0;
     let dragStartY = 0;
     let dragStartPanX = 0;
@@ -73,6 +77,11 @@
 
     // Image lookup for thumbnails
     let imageMap = $state<Map<string, ImageWithFile>>(new Map());
+    let projecting = $state(false);
+    let projectionWorker: Worker | null = null;
+    let cancelProjectionWork: (() => void) | null = null;
+    let projectionRequestId = 0;
+    let projectionLoadSeq = 0;
 
     const CLUSTER_COLORS = [
         '#7aa2f7', '#9ece6a', '#e0af68', '#bb9af7', '#f7768e',
@@ -81,12 +90,18 @@
         '#fab387', '#94e2d5', '#cba6f7',
     ];
 
-    onMount(async () => {
-        const savedState = get(embeddingViewState);
-        selectedProvider = savedState.provider;
-        await checkModel();
-        await loadEmbeddingState();
-        await loadApiKeyState();
+    onMount(() => {
+        void (async () => {
+            const savedState = get(embeddingViewState);
+            selectedProvider = savedState.provider;
+            await checkModel();
+            await loadApiKeyState();
+            await loadEmbeddingState();
+        })();
+
+        return () => {
+            resetProjectionWorker();
+        };
     });
 
     async function checkModel() {
@@ -99,10 +114,17 @@
 
     async function loadEmbeddingState() {
         try {
+            totalImages = await getImageCount();
             embeddingCount = await getEmbeddingCount();
-            totalImages = $images.length;
-            if (embeddingCount > 0) {
+            if (hasGoogleKey) {
+                geminiEmbeddingCount = await getEmbeddingCount('gemini-embedding-2');
+            }
+            if (currentEmbeddingCount > 0) {
                 await loadProjection();
+            } else {
+                points = [];
+                clusters = [];
+                resetThumbnailCache();
             }
         } catch (e) {
             console.error('Failed to load embedding state:', e);
@@ -129,6 +151,16 @@
         prevSettingsOpen = isOpen;
     });
 
+    async function handleProviderChange() {
+        resetProjectionWorker();
+        points = [];
+        clusters = [];
+        selectedPoint = null;
+        highlightedCluster = null;
+        resetThumbnailCache();
+        await loadEmbeddingState();
+    }
+
     async function handleGenerateGemini() {
         generating = true;
         genProgress = { current: 0, total: 0 };
@@ -141,8 +173,9 @@
         );
 
         try {
-            const imageIds = $images.map(img => img.image.id);
-            const count = await generateGeminiEmbeddings(imageIds);
+            const imageIds = await listImageIds();
+            totalImages = imageIds.length;
+            await generateGeminiEmbeddings(imageIds);
             geminiEmbeddingCount = await getEmbeddingCount('gemini-embedding-2');
             if (geminiEmbeddingCount > 0) {
                 await loadProjection();
@@ -205,8 +238,9 @@
         );
 
         try {
-            const imageIds = $images.map(img => img.image.id);
-            const count = await generateEmbeddings(imageIds);
+            const imageIds = await listImageIds();
+            totalImages = imageIds.length;
+            await generateEmbeddings(imageIds);
             embeddingCount = await getEmbeddingCount();
             if (embeddingCount > 0) {
                 await loadProjection();
@@ -236,79 +270,69 @@
         return basePath.replace(/\.jpg$/, `_${size}.jpg`);
     }
 
-    function preloadThumbnails() {
+    function resetThumbnailCache() {
         thumbnailImages.clear();
+        loadingThumbnailKeys.clear();
         failedThumbnailIds = new Set();
-        for (const point of points) {
-            const img = imageMap.get(point.id);
-            if (!img?.thumbnail_path) {
-                failedThumbnailIds.add(point.id);
-                continue;
-            }
-            let anyLoaded = false;
-            let loadAttempts = 0;
-            for (const size of THUMB_SIZES) {
-                const key = `${point.id}_${size}`;
-                const el = new Image();
-                el.src = convertFileSrc(sizedThumbPath(img.thumbnail_path, size));
-                el.onload = () => {
-                    anyLoaded = true;
-                    thumbnailImages.set(key, el);
-                    requestDraw();
-                };
-                el.onerror = () => {
-                    loadAttempts++;
-                    if (loadAttempts === THUMB_SIZES.length && !anyLoaded) {
-                        failedThumbnailIds = new Set([...failedThumbnailIds, point.id]);
-                    }
-                };
-            }
+    }
+
+    function preferredThumbSize(displayPx: number): number {
+        const dpr = window.devicePixelRatio || 1;
+        const physicalPx = displayPx * dpr * 1.5;
+        return THUMB_SIZES.find(size => size >= physicalPx) ?? THUMB_SIZES[THUMB_SIZES.length - 1];
+    }
+
+    function rememberThumbnail(key: string, el: HTMLImageElement) {
+        if (thumbnailImages.has(key)) thumbnailImages.delete(key);
+        thumbnailImages.set(key, el);
+        while (thumbnailImages.size > MAX_THUMBNAIL_CACHE) {
+            const oldest = thumbnailImages.keys().next().value;
+            if (!oldest) break;
+            thumbnailImages.delete(oldest);
         }
     }
 
-    function pickThumbnail(id: string, displayPx: number): HTMLImageElement | undefined {
-        const dpr = window.devicePixelRatio || 1;
-        const physicalPx = displayPx * dpr * 1.5;
-        for (const size of THUMB_SIZES) {
-            if (size >= physicalPx) {
-                const el = thumbnailImages.get(`${id}_${size}`);
-                if (el?.complete && el.naturalWidth > 0) return el;
-            }
+    function queueThumbnailLoad(id: string, size: number) {
+        const key = `${id}_${size}`;
+        if (thumbnailImages.has(key) || loadingThumbnailKeys.has(key)) return;
+        const img = imageMap.get(id);
+        if (!img?.thumbnail_path) {
+            failedThumbnailIds = new Set([...failedThumbnailIds, id]);
+            return;
         }
+
+        loadingThumbnailKeys.add(key);
+        const el = new Image();
+        el.onload = () => {
+            loadingThumbnailKeys.delete(key);
+            rememberThumbnail(key, el);
+            requestDraw();
+        };
+        el.onerror = () => {
+            loadingThumbnailKeys.delete(key);
+            if (!THUMB_SIZES.some(s => thumbnailImages.has(`${id}_${s}`))) {
+                failedThumbnailIds = new Set([...failedThumbnailIds, id]);
+            }
+        };
+        el.src = convertFileSrc(sizedThumbPath(img.thumbnail_path, size));
+    }
+
+    function pickThumbnail(id: string, displayPx: number): HTMLImageElement | undefined {
+        if (failedThumbnailIds.has(id)) return undefined;
+        const preferred = preferredThumbSize(displayPx);
+        const preferredEl = thumbnailImages.get(`${id}_${preferred}`);
+        if (preferredEl?.complete && preferredEl.naturalWidth > 0) {
+            thumbnailImages.delete(`${id}_${preferred}`);
+            thumbnailImages.set(`${id}_${preferred}`, preferredEl);
+            return preferredEl;
+        }
+        queueThumbnailLoad(id, preferred);
+
         for (let i = THUMB_SIZES.length - 1; i >= 0; i--) {
             const el = thumbnailImages.get(`${id}_${THUMB_SIZES[i]}`);
             if (el?.complete && el.naturalWidth > 0) return el;
         }
         return undefined;
-    }
-
-    function nameCluster(clusterPoints: Point[]): string {
-        const folderCounts: Map<string, number> = new Map();
-        for (const p of clusterPoints) {
-            const img = imageMap.get(p.id);
-            if (!img) continue;
-            const parts = img.path.split('/');
-            const folder = parts.length >= 2 ? parts[parts.length - 2] : 'unknown';
-            folderCounts.set(folder, (folderCounts.get(folder) || 0) + 1);
-        }
-        let best = 'cluster';
-        let bestCount = 0;
-        for (const [name, count] of folderCounts) {
-            if (count > bestCount) { best = name; bestCount = count; }
-        }
-        return best;
-    }
-
-    function getClusterPreviewPaths(clusterPoints: Point[]): string[] {
-        const paths: string[] = [];
-        for (const p of clusterPoints) {
-            if (paths.length >= 4) break;
-            const img = imageMap.get(p.id);
-            if (img?.thumbnail_path) {
-                paths.push(img.thumbnail_path);
-            }
-        }
-        return paths;
     }
 
     function focusCluster(clusterId: number) {
@@ -337,18 +361,99 @@
         saveViewState();
     }
 
+    interface ProjectionWorkerCluster {
+        id: number;
+        label: string;
+        count: number;
+        colorIndex: number;
+        previewPaths: string[];
+        x: number;
+        y: number;
+    }
+
+    interface ProjectionWorkerResponse {
+        requestId: number;
+        points: Point[];
+        clusters: ProjectionWorkerCluster[];
+        projectionKey: string;
+    }
+
+    function getProjectionWorker(): Worker {
+        if (!projectionWorker) {
+            projectionWorker = new Worker(new URL('../embedding-projection.worker.ts', import.meta.url), {
+                type: 'module',
+            });
+        }
+        return projectionWorker;
+    }
+
+    function runProjectionInWorker(
+        embeddings: [string, number[]][],
+        embeddingImages: ImageWithFile[],
+    ): Promise<ProjectionWorkerResponse> {
+        const worker = getProjectionWorker();
+        const requestId = ++projectionRequestId;
+
+        return new Promise((resolve, reject) => {
+            cancelProjectionWork = () => {
+                cleanup();
+                reject(new Error('Projection cancelled'));
+            };
+            const handleMessage = (event: MessageEvent<ProjectionWorkerResponse>) => {
+                if (event.data.requestId !== requestId) return;
+                cleanup();
+                resolve(event.data);
+            };
+            const handleError = (event: ErrorEvent) => {
+                cleanup();
+                reject(event.error ?? new Error(event.message));
+            };
+            const cleanup = () => {
+                if (cancelProjectionWork) cancelProjectionWork = null;
+                worker.removeEventListener('message', handleMessage as EventListener);
+                worker.removeEventListener('error', handleError);
+            };
+
+            worker.addEventListener('message', handleMessage as EventListener);
+            worker.addEventListener('error', handleError);
+            worker.postMessage({
+                requestId,
+                provider: selectedProvider,
+                embeddings,
+                images: embeddingImages.map(img => ({
+                    id: img.image.id,
+                    path: img.path,
+                    thumbnailPath: img.thumbnail_path,
+                })),
+            });
+        });
+    }
+
+    function resetProjectionWorker() {
+        const cancel = cancelProjectionWork;
+        cancelProjectionWork = null;
+        cancel?.();
+        projectionWorker?.terminate();
+        projectionWorker = null;
+    }
+
     async function loadProjection() {
+        const loadSeq = ++projectionLoadSeq;
         try {
             const modelName = selectedProvider === 'gemini' ? 'gemini-embedding-2' : undefined;
             const embeddings = await getAllEmbeddings(modelName);
+            if (loadSeq !== projectionLoadSeq) return;
             if (embeddings.length < 2) {
                 points = [];
+                clusters = [];
+                resetThumbnailCache();
                 return;
             }
 
             // Build image map from all embedded images (not just current filter)
             const embeddingIds = embeddings.map(([id]) => id);
             const embeddingImages = await getImagesByIds(embeddingIds);
+            if (loadSeq !== projectionLoadSeq) return;
             const map = new Map<string, ImageWithFile>();
             for (const img of embeddingImages) {
                 map.set(img.image.id, img);
@@ -356,45 +461,23 @@
             imageMap = map;
             staleEmbeddingCount = embeddingIds.length - embeddingImages.length;
 
-            // Run UMAP — tight clusters with clear separation
-            const vectors = embeddings.map(([_, vec]) => vec);
-            const nNeighbors = Math.min(15, Math.max(2, Math.floor(vectors.length / 5)));
-            const umap = new UMAP({ nNeighbors, minDist: 0.05, spread: 1.5, nComponents: 2 });
-            const projection = umap.fit(vectors);
+            resetProjectionWorker();
+            projecting = true;
+            const projection = await runProjectionInWorker(embeddings, embeddingImages);
+            if (loadSeq !== projectionLoadSeq) return;
 
-            // More clusters for richer structure
-            const k = Math.min(16, Math.max(3, Math.floor(Math.sqrt(projection.length))));
-            const clusterLabels = kMeans(projection, k);
-
-            // Build points
-            const newPoints: Point[] = embeddings.map(([id, _], i) => ({
-                id,
-                x: projection[i][0],
-                y: projection[i][1],
-                cluster: clusterLabels[i],
+            points = projection.points;
+            clusters = projection.clusters.map(cluster => ({
+                id: cluster.id,
+                label: cluster.label,
+                count: cluster.count,
+                color: CLUSTER_COLORS[cluster.colorIndex % CLUSTER_COLORS.length],
+                previewPaths: cluster.previewPaths,
+                x: cluster.x,
+                y: cluster.y,
             }));
 
-            points = newPoints;
-
-            // Build cluster info with named labels and preview thumbnails
-            const clusterGroups = new Map<number, Point[]>();
-            for (const p of newPoints) {
-                if (!clusterGroups.has(p.cluster)) clusterGroups.set(p.cluster, []);
-                clusterGroups.get(p.cluster)!.push(p);
-            }
-            clusters = Array.from(clusterGroups.entries())
-                .sort((a, b) => b[1].length - a[1].length)
-                .map(([idx, pts]) => ({
-                    id: idx,
-                    label: nameCluster(pts),
-                    count: pts.length,
-                    color: CLUSTER_COLORS[idx % CLUSTER_COLORS.length],
-                    previewPaths: getClusterPreviewPaths(pts),
-                }));
-
-            // Compute projection key for view state validation
-            const sortedIds = embeddings.map(([id]) => id).sort();
-            const newProjectionKey = `${selectedProvider}:${sortedIds.length}:${sortedIds.join('|')}`;
+            const newProjectionKey = projection.projectionKey;
             projectionKey = newProjectionKey;
 
             // Restore view state if it matches the current projection
@@ -412,55 +495,14 @@
                 fitView();
             }
 
-            preloadThumbnails();
+            resetThumbnailCache();
             requestDraw();
         } catch (e) {
+            if (e instanceof Error && e.message === 'Projection cancelled') return;
             console.error('Failed to load projection:', e);
+        } finally {
+            if (loadSeq === projectionLoadSeq) projecting = false;
         }
-    }
-
-    function kMeans(data: number[][], k: number): number[] {
-        if (data.length === 0) return [];
-
-        // Initialize centroids randomly
-        const indices = new Set<number>();
-        while (indices.size < k && indices.size < data.length) {
-            indices.add(Math.floor(Math.random() * data.length));
-        }
-        let centroids = Array.from(indices).map(i => [...data[i]]);
-        let labels = new Array(data.length).fill(0);
-
-        for (let iter = 0; iter < 20; iter++) {
-            // Assign
-            for (let i = 0; i < data.length; i++) {
-                let minDist = Infinity;
-                for (let c = 0; c < centroids.length; c++) {
-                    const dx = data[i][0] - centroids[c][0];
-                    const dy = data[i][1] - centroids[c][1];
-                    const dist = dx * dx + dy * dy;
-                    if (dist < minDist) {
-                        minDist = dist;
-                        labels[i] = c;
-                    }
-                }
-            }
-
-            // Update centroids
-            const sums = centroids.map(() => [0, 0]);
-            const counts = new Array(centroids.length).fill(0);
-            for (let i = 0; i < data.length; i++) {
-                sums[labels[i]][0] += data[i][0];
-                sums[labels[i]][1] += data[i][1];
-                counts[labels[i]]++;
-            }
-            for (let c = 0; c < centroids.length; c++) {
-                if (counts[c] > 0) {
-                    centroids[c] = [sums[c][0] / counts[c], sums[c][1] / counts[c]];
-                }
-            }
-        }
-
-        return labels;
     }
 
     function fitView() {
@@ -490,8 +532,13 @@
     }
 
     function requestDraw() {
+        if (drawQueued) return;
         if (typeof requestAnimationFrame !== 'undefined') {
-            requestAnimationFrame(draw);
+            drawQueued = true;
+            requestAnimationFrame(() => {
+                drawQueued = false;
+                draw();
+            });
         }
     }
 
@@ -563,11 +610,7 @@
             ctx.font = 'bold 11px JetBrains Mono, monospace';
             ctx.textAlign = 'center';
             for (const cluster of clusters) {
-                const clusterPts = points.filter(p => p.cluster === cluster.id);
-                if (clusterPts.length === 0) continue;
-                const cx = clusterPts.reduce((s, p) => s + p.x, 0) / clusterPts.length;
-                const cy = clusterPts.reduce((s, p) => s + p.y, 0) / clusterPts.length;
-                const [sx, sy] = worldToScreen(cx, cy);
+                const [sx, sy] = worldToScreen(cluster.x, cluster.y);
                 // Background pill
                 const text = cluster.label;
                 const tw = ctx.measureText(text).width;
@@ -789,7 +832,7 @@
                     &#9881;
                 </button>
             </div>
-            <select class="provider-select" bind:value={selectedProvider} onchange={() => loadProjection()}>
+            <select class="provider-select" bind:value={selectedProvider} onchange={handleProviderChange}>
                 <option value="clip">CLIP ViT-B/32 (local)</option>
                 <option value="gemini">Gemini Embedding 2 (API)</option>
             </select>
@@ -798,10 +841,10 @@
                     {#if !modelAvailable}
                         Model not downloaded
                     {:else}
-                        {embeddingCount}/{$images.length} images
+                        {embeddingCount}/{totalImages} images
                     {/if}
                 {:else}
-                    {geminiEmbeddingCount}/{$images.length} images
+                    {geminiEmbeddingCount}/{totalImages} images
                 {/if}
             </div>
         </div>
@@ -856,7 +899,7 @@
                 <div class="panel-section">
                     <div class="stat-row">
                         <span class="stat-label">Images</span>
-                        <span class="stat-value">{$images.length}</span>
+                        <span class="stat-value">{totalImages}</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Embeddings</span>
@@ -865,8 +908,8 @@
                     <button class="action-btn" onclick={handleGenerate} disabled={generating}>
                         {#if generating}
                             Generating {genProgress.current}/{genProgress.total}...
-                        {:else if embeddingCount < $images.length}
-                            Generate Embeddings ({$images.length - embeddingCount} remaining)
+                        {:else if embeddingCount < totalImages}
+                            Generate Embeddings ({Math.max(0, totalImages - embeddingCount)} remaining)
                         {:else}
                             Regenerate All
                         {/if}
@@ -877,7 +920,7 @@
             <div class="panel-section">
                 <div class="stat-row">
                     <span class="stat-label">Images</span>
-                    <span class="stat-value">{$images.length}</span>
+                    <span class="stat-value">{totalImages}</span>
                 </div>
                 <div class="stat-row">
                     <span class="stat-label">Embeddings</span>
@@ -888,8 +931,8 @@
                         Generating {genProgress.current}/{genProgress.total}...
                     {:else if !hasGoogleKey}
                         Set API Key First
-                    {:else if geminiEmbeddingCount < $images.length}
-                        Generate Embeddings ({$images.length - geminiEmbeddingCount} remaining)
+                    {:else if geminiEmbeddingCount < totalImages}
+                        Generate Embeddings ({Math.max(0, totalImages - geminiEmbeddingCount)} remaining)
                     {:else}
                         Regenerate All
                     {/if}
@@ -975,11 +1018,14 @@
     <div class="right-panel" use:handleResize>
         {#if points.length === 0}
             <div class="empty-state">
-                {#if !modelAvailable}
+                {#if projecting}
+                    <div class="empty-icon">&#8987;</div>
+                    <div class="empty-title">Projecting...</div>
+                {:else if !modelAvailable && selectedProvider === 'clip'}
                     <div class="empty-icon">&#9881;</div>
                     <div class="empty-title">Model Required</div>
                     <div class="empty-text">Download the CLIP model to generate embeddings</div>
-                {:else if embeddingCount === 0}
+                {:else if currentEmbeddingCount === 0}
                     <div class="empty-icon">&#9673;</div>
                     <div class="empty-title">No Embeddings Yet</div>
                     <div class="empty-text">Generate embeddings for your images to visualize them in 2D space</div>

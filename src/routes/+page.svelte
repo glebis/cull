@@ -21,15 +21,14 @@
     import JobProgressPanel from '$lib/components/JobProgressPanel.svelte';
     import TrashConfirmDialog from '$lib/components/TrashConfirmDialog.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, activeFolder, minSizeFilter, activeCollection, collections, showToast, settingsOpen, searchOpen, showMissing } from '$lib/stores';
-    import { getImageCount, listImages, listImagesByFolder, listImagesFiltered, listCollectionImages, trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds } from '$lib/api';
-    import type { ImageWithFile } from '$lib/api';
+    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, searchOpen, showMissing } from '$lib/stores';
+    import { trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
     import { saveAppState, restoreAppStateBeforeImages, applyRestoredViewState } from '$lib/persistence';
+    import { loadImagesForCurrentScope } from '$lib/image-loading';
     import { listen } from '@tauri-apps/api/event';
     import { onMount } from 'svelte';
-    import { get } from 'svelte/store';
 
     let dragOver = $state(false);
     let trashConfirmVisible = $state(false);
@@ -39,39 +38,8 @@
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
     let noSidebar = $derived(immersive || !$sidebarVisible);
 
-    function filterMissing(imgs: ImageWithFile[]): ImageWithFile[] {
-        if (get(showMissing)) return imgs;
-        return imgs.filter(img => !img.missing_at);
-    }
-
     async function loadImages() {
-        const count = await getImageCount();
-        totalCount.set(count);
-        const collection = $activeCollection;
-        if (collection !== null) {
-            const imgs = await listCollectionImages(collection);
-            images.set(filterMissing(imgs));
-            focusedIndex.set(0);
-            return;
-        }
-        if (count > 0) {
-            const folder = $activeFolder;
-            const minSize = $minSizeFilter;
-            let imgs;
-            if (folder !== null) {
-                imgs = await listImagesByFolder(folder, 100000, 0);
-                // Client-side size filter when combined with folder
-                if (minSize > 0) {
-                    imgs = imgs.filter(img => img.image.width >= minSize && img.image.height >= minSize);
-                }
-            } else if (minSize > 0) {
-                imgs = await listImagesFiltered(minSize, minSize, 100000, 0);
-            } else {
-                imgs = await listImages(100000, 0);
-            }
-            images.set(filterMissing(imgs));
-            focusedIndex.set(0);
-        }
+        await loadImagesForCurrentScope();
     }
 
     async function executeTrash() {

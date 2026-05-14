@@ -76,6 +76,10 @@ pub fn get_image_count(ctx: &ServiceContext) -> Result<u32, ServiceError> {
     Ok(ctx.db.image_count()?)
 }
 
+pub fn list_image_ids(ctx: &ServiceContext) -> Result<Vec<String>, ServiceError> {
+    Ok(ctx.db.list_image_ids()?)
+}
+
 pub fn get_iteration_siblings(
     ctx: &ServiceContext,
     parent_id: &str,
@@ -150,8 +154,8 @@ mod tests {
 
     #[test]
     fn test_pagination_clamped() {
-        let p = Pagination::clamped(0, 200);
-        assert_eq!(p.limit, 100);
+        let p = Pagination::clamped(0, 300);
+        assert_eq!(p.limit, 250);
         assert_eq!(p.offset, 0);
 
         let p = Pagination::clamped(10, 0);

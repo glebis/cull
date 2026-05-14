@@ -1,15 +1,28 @@
 <script lang="ts">
-    import { viewMode, totalCount, images, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections, showDetectionBoxes, nsfwMode } from '$lib/stores';
+    import { viewMode, totalCount, images, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections, activeFolder, folders, activeSmartCollection, activeDetectedClass, imageLoadState, showDetectionBoxes, nsfwMode } from '$lib/stores';
     import { derived } from 'svelte/store';
 
     const displayCount = derived(
-        [images, totalCount],
-        ([$imgs, $total]) => {
+        [images, totalCount, activeCollection, collections, activeFolder, folders, activeSmartCollection, activeDetectedClass, imageLoadState],
+        ([$imgs, $total, $activeCollection, $collections, $activeFolder, $folders, $activeSmartCollection, $activeDetectedClass, $imageLoadState]) => {
             const showing = $imgs.length;
-            if (showing < $total && showing > 0) {
-                return `${showing} / ${$total} images`;
+            let scopeTotal: number | null = $total;
+            if ($activeCollection) {
+                scopeTotal = $collections.find(c => c[0] === $activeCollection)?.[2] ?? null;
+            } else if ($activeFolder) {
+                scopeTotal = $folders.find(f => f[0] === $activeFolder)?.[1] ?? null;
+            } else if ($activeSmartCollection) {
+                scopeTotal = $activeSmartCollection.image_count;
+            } else if ($activeDetectedClass) {
+                scopeTotal = null;
             }
-            return `${$total} images`;
+            if (scopeTotal !== null) {
+                if (showing < scopeTotal && showing > 0) {
+                    return `${showing} / ${scopeTotal} images`;
+                }
+                return `${scopeTotal} images`;
+            }
+            return $imageLoadState.hasMore ? `${showing}+ images` : `${showing} images`;
         }
     );
 

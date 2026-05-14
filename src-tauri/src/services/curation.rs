@@ -1,7 +1,7 @@
 use crate::db_core::models::ImageWithFile;
 use crate::db_core::smart_collections::SmartCollection;
 use crate::services::library::enrich_thumbnails;
-use crate::services::{ServiceContext, ServiceError};
+use crate::services::{Pagination, ServiceContext, ServiceError};
 
 pub fn set_rating(ctx: &ServiceContext, image_id: &str, rating: u8) -> Result<(), ServiceError> {
     Ok(ctx.db.set_rating(image_id, rating)?)
@@ -36,6 +36,19 @@ pub fn list_collection_images(
     collection_id: &str,
 ) -> Result<Vec<ImageWithFile>, ServiceError> {
     let mut images = ctx.db.list_collection_images(collection_id)?;
+    enrich_thumbnails(&mut images, ctx.app_data_dir);
+    Ok(images)
+}
+
+pub fn list_collection_images_page(
+    ctx: &ServiceContext,
+    collection_id: &str,
+    page: Pagination,
+) -> Result<Vec<ImageWithFile>, ServiceError> {
+    let page = Pagination::clamped(page.offset, page.limit);
+    let mut images = ctx
+        .db
+        .list_collection_images_page(collection_id, page.limit, page.offset)?;
     enrich_thumbnails(&mut images, ctx.app_data_dir);
     Ok(images)
 }
@@ -75,6 +88,26 @@ pub fn evaluate_smart_collection(
     filter_json: &str,
 ) -> Result<Vec<ImageWithFile>, ServiceError> {
     Ok(ctx.db.evaluate_smart_collection(filter_json)?)
+}
+
+pub fn count_smart_collection(
+    ctx: &ServiceContext,
+    filter_json: &str,
+) -> Result<i64, ServiceError> {
+    Ok(ctx.db.count_smart_collection(filter_json)?)
+}
+
+pub fn evaluate_smart_collection_page(
+    ctx: &ServiceContext,
+    filter_json: &str,
+    page: Pagination,
+) -> Result<Vec<ImageWithFile>, ServiceError> {
+    let page = Pagination::clamped(page.offset, page.limit);
+    let mut images =
+        ctx.db
+            .evaluate_smart_collection_page(filter_json, Some(page.limit), Some(page.offset))?;
+    enrich_thumbnails(&mut images, ctx.app_data_dir);
+    Ok(images)
 }
 
 pub fn delete_smart_collection(ctx: &ServiceContext, id: &str) -> Result<(), ServiceError> {

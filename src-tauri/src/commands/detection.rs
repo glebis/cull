@@ -1,4 +1,6 @@
 use crate::db_core::detection::{Detection, YoloVariant};
+use crate::db_core::models::ImageWithFile;
+use crate::services::Pagination;
 use crate::AppState;
 use tauri::{AppHandle, Emitter, State};
 
@@ -271,6 +273,31 @@ pub async fn search_by_detected_class(
     let ctx = crate::services::ServiceContext::from_app_state(&state, None);
     crate::services::ai::search_by_detected_class(&ctx, &class_name, limit.unwrap_or(100))
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn count_by_detected_class(
+    state: State<'_, AppState>,
+    class_name: String,
+) -> Result<u32, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::count_by_detected_class(&ctx, &class_name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_images_by_detected_class(
+    state: State<'_, AppState>,
+    class_name: String,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<ImageWithFile>, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::list_images_by_detected_class(
+        &ctx,
+        &class_name,
+        Pagination::clamped(offset, limit),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

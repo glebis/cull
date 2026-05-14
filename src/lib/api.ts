@@ -112,6 +112,10 @@ export async function getImageCount(): Promise<number> {
     return invoke<number>('get_image_count');
 }
 
+export async function listImageIds(): Promise<string[]> {
+    return invoke<string[]>('list_image_ids');
+}
+
 export async function importFolder(folderPath: string, sessionId?: string | null): Promise<ImportResponse> {
     const result = await invoke<ImportResponse>('import_folder', { folderPath, sessionId: sessionId ?? null });
     emitSessionEventsRefresh();
@@ -220,8 +224,8 @@ export async function addToCollection(collectionId: string, imageIds: string[]):
     return invoke('add_to_collection', { collectionId, imageIds });
 }
 
-export async function listCollectionImages(collectionId: string): Promise<ImageWithFile[]> {
-    return invoke('list_collection_images', { collectionId });
+export async function listCollectionImages(collectionId: string, limit?: number, offset?: number): Promise<ImageWithFile[]> {
+    return invoke('list_collection_images', { collectionId, limit: limit ?? null, offset: offset ?? null });
 }
 
 export async function removeFromCollection(collectionId: string, imageIds: string[]): Promise<void> {
@@ -246,8 +250,12 @@ export async function createSmartCollection(
     return invoke('create_smart_collection', { name, filterJson, nlQuery });
 }
 
-export async function evaluateSmartCollection(filterJson: string): Promise<ImageWithFile[]> {
-    return invoke('evaluate_smart_collection', { filterJson });
+export async function evaluateSmartCollection(filterJson: string, limit?: number, offset?: number): Promise<ImageWithFile[]> {
+    return invoke('evaluate_smart_collection', { filterJson, limit: limit ?? null, offset: offset ?? null });
+}
+
+export async function countSmartCollection(filterJson: string): Promise<number> {
+    return invoke<number>('count_smart_collection', { filterJson });
 }
 
 export async function deleteSmartCollectionApi(id: string): Promise<void> {
@@ -352,6 +360,14 @@ export async function getDetections(imageId: string, model?: string): Promise<De
 
 export async function searchByDetectedClass(className: string, limit?: number): Promise<[string, number][]> {
     return invoke('search_by_detected_class', { className, limit: limit ?? 100 });
+}
+
+export async function countByDetectedClass(className: string): Promise<number> {
+    return invoke('count_by_detected_class', { className });
+}
+
+export async function listImagesByDetectedClass(className: string, limit: number, offset: number): Promise<ImageWithFile[]> {
+    return invoke('list_images_by_detected_class', { className, limit, offset });
 }
 
 export async function isYoloAvailable(variant?: string): Promise<boolean> {

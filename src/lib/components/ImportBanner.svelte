@@ -1,6 +1,7 @@
 <script lang="ts">
-    import { importBatchFilter, importBatchImageIds, images, focusedIndex, pinnedCollection, collections, activeCollection, showToast } from '$lib/stores';
-    import { listImages, createCollection, addToCollection, listCollections, getBatchImages } from '$lib/api';
+    import { importBatchFilter, importBatchImageIds, pinnedCollection, collections, activeCollection, showToast } from '$lib/stores';
+    import { createCollection, addToCollection, listCollections } from '$lib/api';
+    import { loadAllImages } from '$lib/image-loading';
     import { get } from 'svelte/store';
 
     let count = $derived($importBatchImageIds.length);
@@ -9,9 +10,7 @@
     async function showAll() {
         importBatchFilter.set(null);
         importBatchImageIds.set([]);
-        const allImgs = await listImages(100000, 0);
-        images.set(allImgs);
-        focusedIndex.set(0);
+        await loadAllImages();
     }
 
     async function saveAsCollection() {

@@ -1,11 +1,12 @@
 <script lang="ts">
-    import { parseNlQuery, evaluateSmartCollection, createSmartCollection, listSmartCollections } from '$lib/api';
+    import { parseNlQuery, countSmartCollection, createSmartCollection, listSmartCollections } from '$lib/api';
     import { invoke } from '@tauri-apps/api/core';
     import { listen } from '@tauri-apps/api/event';
-    import { images, smartCollections, activeSmartCollection, activeFolder, activeCollection, searchOpen, viewMode, navigateTo, navigateBack } from '$lib/stores';
+    import { smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, searchOpen, viewMode, navigateTo, navigateBack } from '$lib/stores';
     import type { FilterNode } from '$lib/api';
     import RuleBuilder from './RuleBuilder.svelte';
     import { onMount, onDestroy, tick } from 'svelte';
+    import { loadImagesForCurrentScope } from '$lib/image-loading';
 
     let query = $state('');
     let parsedFilter: FilterNode | null = $state(null);
@@ -32,6 +33,36 @@
     let barEl: HTMLDivElement | undefined = $state();
 
     let applyDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function activateAdHocFilter(filterJson: string, count: number | null) {
+        $activeSmartCollection = {
+            id: '__adhoc__',
+            name: query.trim() || 'Search',
+            description: null,
+            collection_type: 'smart',
+            filter_json: filterJson,
+            nl_query: query.trim() || null,
+            is_preset: false,
+            sort_order: 0,
+            created_at: new Date().toISOString(),
+            image_count: count,
+        };
+        $activeFolder = null;
+        $activeCollection = null;
+        $activeDetectedClass = null;
+    }
+
+    async function applyFilter(filterJson: string, reqId: number) {
+        activateAdHocFilter(filterJson, null);
+        const [count] = await Promise.all([
+            countSmartCollection(filterJson),
+            loadImagesForCurrentScope(),
+        ]);
+        if (reqId !== applyRequestId) return;
+        matchCount = count;
+        activateAdHocFilter(filterJson, count);
+        applied = true;
+    }
 
     // Open when searchOpen store becomes true
     $effect(() => {
@@ -130,13 +161,16 @@
 
     async function handleApply() {
         if (!parsedFilter) return;
+        const reqId = ++applyRequestId;
+        isApplying = true;
         const filterJson = JSON.stringify(parsedFilter);
-        const results = await evaluateSmartCollection(filterJson);
-        $images = results;
-        matchCount = results.length;
-        applied = true;
-        if ($viewMode !== 'grid') {
-            navigateTo('grid');
+        try {
+            await applyFilter(filterJson, reqId);
+            if ($viewMode !== 'grid') {
+                navigateTo('grid');
+            }
+        } finally {
+            if (reqId === applyRequestId) isApplying = false;
         }
     }
 
@@ -147,12 +181,7 @@
             isApplying = true;
             try {
                 const filterJson = JSON.stringify(parsedFilter);
-                const results = await evaluateSmartCollection(filterJson);
-                if (reqId === applyRequestId) {
-                    $images = results;
-                    matchCount = results.length;
-                    applied = true;
-                }
+                await applyFilter(filterJson, reqId);
             } finally {
                 if (reqId === applyRequestId) isApplying = false;
             }
@@ -255,6 +284,8 @@
                 $activeSmartCollection = saved;
                 $activeFolder = null;
                 $activeCollection = null;
+                $activeDetectedClass = null;
+                await loadImagesForCurrentScope({ resetFocus: false });
             }
 
             savedMessage = `Saved as "${collectionName.trim()}" — ${matchCount} images`;

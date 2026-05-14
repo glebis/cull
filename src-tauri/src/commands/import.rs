@@ -237,49 +237,55 @@ pub async fn regenerate_thumbnails(
 ) -> Result<u32, String> {
     let db = &state.db;
     let app_data_dir = &state.app_data_dir;
-    let images = db.list_images(100000, 0).map_err(|e| e.to_string())?;
-    let total = images.len() as u32;
+    let image_ids = db.list_image_ids().map_err(|e| e.to_string())?;
+    let total = image_ids.len() as u32;
     let mut regenerated = 0u32;
+    let mut processed = 0u32;
 
-    for (i, img) in images.iter().enumerate() {
-        let source_path = std::path::Path::new(&img.path);
-        if source_path.exists() {
-            let ext = source_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
-            if crate::extensions::is_raw_extension(ext) {
-                match crate::raw::decode_raw_preview(source_path) {
-                    Ok(preview) => {
-                        match crate::db_core::thumbnails::generate_thumbnail_from_image(
-                            &preview.image,
-                            app_data_dir,
-                            &img.image.id,
-                        ) {
-                            Ok(_) => regenerated += 1,
-                            Err(e) => eprintln!("RAW thumbnail failed for {}: {}", img.path, e),
+    for chunk in image_ids.chunks(250) {
+        let id_refs: Vec<&str> = chunk.iter().map(|id| id.as_str()).collect();
+        let images = db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
+        for img in images {
+            let source_path = std::path::Path::new(&img.path);
+            if source_path.exists() {
+                let ext = source_path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("");
+                if crate::extensions::is_raw_extension(ext) {
+                    match crate::raw::decode_raw_preview(source_path) {
+                        Ok(preview) => {
+                            match crate::db_core::thumbnails::generate_thumbnail_from_image(
+                                &preview.image,
+                                app_data_dir,
+                                &img.image.id,
+                            ) {
+                                Ok(_) => regenerated += 1,
+                                Err(e) => eprintln!("RAW thumbnail failed for {}: {}", img.path, e),
+                            }
                         }
+                        Err(e) => eprintln!("RAW decode failed for {}: {}", img.path, e),
                     }
-                    Err(e) => eprintln!("RAW decode failed for {}: {}", img.path, e),
-                }
-            } else {
-                match crate::db_core::thumbnails::generate_thumbnail(
-                    source_path,
-                    app_data_dir,
-                    &img.image.id,
-                ) {
-                    Ok(_) => regenerated += 1,
-                    Err(e) => eprintln!("Thumbnail failed for {}: {}", img.path, e),
+                } else {
+                    match crate::db_core::thumbnails::generate_thumbnail(
+                        source_path,
+                        app_data_dir,
+                        &img.image.id,
+                    ) {
+                        Ok(_) => regenerated += 1,
+                        Err(e) => eprintln!("Thumbnail failed for {}: {}", img.path, e),
+                    }
                 }
             }
+            processed += 1;
+            let _ = app.emit(
+                "thumbnail-progress",
+                ThumbnailProgress {
+                    current: processed,
+                    total,
+                },
+            );
         }
-        let _ = app.emit(
-            "thumbnail-progress",
-            ThumbnailProgress {
-                current: (i + 1) as u32,
-                total,
-            },
-        );
     }
 
     Ok(regenerated)
@@ -384,62 +390,75 @@ pub async fn regenerate_single_thumbnail(
 #[tauri::command]
 pub async fn rescan_sources(app: AppHandle, state: State<'_, AppState>) -> Result<u32, String> {
     let db = &state.db;
-    let images = db.list_images(100000, 0).map_err(|e| e.to_string())?;
-    let total = images.len() as u32;
+    let image_ids = db.list_image_ids().map_err(|e| e.to_string())?;
+    let total = image_ids.len() as u32;
     let mut updated = 0u32;
+    let mut processed = 0u32;
 
-    for (i, img) in images.iter().enumerate() {
-        let path = std::path::Path::new(&img.path);
-        if !path.exists() {
-            continue;
-        }
+    for chunk in image_ids.chunks(250) {
+        let id_refs: Vec<&str> = chunk.iter().map(|id| id.as_str()).collect();
+        let images = db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
+        for img in images {
+            let path = std::path::Path::new(&img.path);
+            if !path.exists() {
+                processed += 1;
+                let _ = app.emit(
+                    "rescan-progress",
+                    serde_json::json!({
+                        "current": processed, "total": total
+                    }),
+                );
+                continue;
+            }
 
-        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_lowercase())
-            .unwrap_or_default();
-        let png_chunks = if ext == "png" {
-            crate::db_core::source_detection::read_png_text_chunks(path).unwrap_or_default()
-        } else {
-            vec![]
-        };
-
-        let detection =
-            crate::db_core::source_detection::detect_source(filename, &png_chunks, path);
-
-        if detection.source_label.is_some() {
-            let aspect_ratio = img.image.width as f64 / img.image.height.max(1) as f64;
-            let orientation = if (aspect_ratio - 1.0).abs() < 0.05 {
-                "square"
-            } else if aspect_ratio > 1.0 {
-                "landscape"
+            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_lowercase())
+                .unwrap_or_default();
+            let png_chunks = if ext == "png" {
+                crate::db_core::source_detection::read_png_text_chunks(path).unwrap_or_default()
             } else {
-                "portrait"
+                vec![]
             };
-            let megapixels = (img.image.width as f64 * img.image.height as f64) / 1_000_000.0;
 
-            let _ = db.update_source_detection(
-                &img.image.id,
-                detection.source_label.as_deref(),
-                detection.confidence,
-                &detection.to_evidence_json(),
-                detection.is_ai_generated,
-                detection.ai_prompt.as_deref(),
-                aspect_ratio,
-                orientation,
-                megapixels,
+            let detection =
+                crate::db_core::source_detection::detect_source(filename, &png_chunks, path);
+
+            if detection.source_label.is_some() {
+                let aspect_ratio = img.image.width as f64 / img.image.height.max(1) as f64;
+                let orientation = if (aspect_ratio - 1.0).abs() < 0.05 {
+                    "square"
+                } else if aspect_ratio > 1.0 {
+                    "landscape"
+                } else {
+                    "portrait"
+                };
+                let megapixels = (img.image.width as f64 * img.image.height as f64) / 1_000_000.0;
+
+                let _ = db.update_source_detection(
+                    &img.image.id,
+                    detection.source_label.as_deref(),
+                    detection.confidence,
+                    &detection.to_evidence_json(),
+                    detection.is_ai_generated,
+                    detection.ai_prompt.as_deref(),
+                    aspect_ratio,
+                    orientation,
+                    megapixels,
+                );
+                updated += 1;
+            }
+
+            processed += 1;
+            let _ = app.emit(
+                "rescan-progress",
+                serde_json::json!({
+                    "current": processed, "total": total
+                }),
             );
-            updated += 1;
         }
-
-        let _ = app.emit(
-            "rescan-progress",
-            serde_json::json!({
-                "current": i + 1, "total": total
-            }),
-        );
     }
 
     Ok(updated)

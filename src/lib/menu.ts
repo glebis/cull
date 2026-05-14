@@ -1,18 +1,21 @@
 import { listen } from '@tauri-apps/api/event';
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
-import { importFolder, importFiles, listImages, listImagesByFolder } from './api';
+import { importFolder, importFiles } from './api';
 import {
     viewMode,
-    images,
     focusedIndex,
     sidebarVisible,
     thumbnailSize,
     activeFolder,
+    activeCollection,
+    activeSmartCollection,
+    activeDetectedClass,
     selectedIds,
     loupeScale,
     settingsOpen,
     type ViewMode,
 } from './stores';
+import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 
 const IMAGE_FILTERS = [
     { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'tif', 'heic', 'heif', 'avif', 'svg'] },
@@ -26,11 +29,15 @@ async function handleOpenFile() {
     if (!selected) return;
     const paths = Array.isArray(selected) ? selected : [selected];
     if (paths.length === 0) return;
-    await importFiles(paths);
-    const allImgs = await listImages(100000, 0);
-    images.set(allImgs);
-    const idx = allImgs.findIndex((img) => img.path === paths[0]);
-    focusedIndex.set(idx >= 0 ? idx : 0);
+    const result = await importFiles(paths);
+    await loadAllImages();
+    const firstId = result.image_ids[0];
+    if (firstId) {
+        const idx = await loadImagesUntil((img) => img.image.id === firstId);
+        focusedIndex.set(idx >= 0 ? idx : 0);
+    } else {
+        focusedIndex.set(0);
+    }
     if (paths.length === 1) {
         viewMode.set('loupe');
     }
@@ -40,9 +47,11 @@ async function handleOpenFolder() {
     const selected = await dialogOpen({ directory: true });
     if (!selected || Array.isArray(selected)) return;
     await importFolder(selected);
+    activeSmartCollection.set(null);
+    activeCollection.set(null);
+    activeDetectedClass.set(null);
     activeFolder.set(selected);
-    const imgs = await listImagesByFolder(selected, 100000, 0);
-    images.set(imgs);
+    await loadImagesForCurrentScope();
     focusedIndex.set(0);
     viewMode.set('grid');
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { images, selectedIds, focusedIndex, thumbnailSize, viewMode, gridGap, navigateTo } from '$lib/stores';
+    import { images, selectedIds, focusedIndex, thumbnailSize, viewMode, gridGap, navigateTo, imageLoadState } from '$lib/stores';
+    import { loadMoreImagesForCurrentScope } from '$lib/image-loading';
     import Thumbnail from './Thumbnail.svelte';
 
     let containerEl: HTMLDivElement | undefined = $state(undefined);
@@ -47,8 +48,17 @@
         return items;
     });
 
+    function maybeLoadMore() {
+        if (!$imageLoadState.hasMore || $imageLoadState.loading || $imageLoadState.loadingMore) return;
+        const remainingPx = totalHeight - (scrollTop + containerHeight);
+        if (remainingPx < cellSize * 4) {
+            void loadMoreImagesForCurrentScope();
+        }
+    }
+
     function onScroll(e: Event) {
         scrollTop = (e.target as HTMLDivElement).scrollTop;
+        maybeLoadMore();
     }
 
     function handleClick(index: number) {
@@ -79,6 +89,9 @@
         prevFocusedIndex = idx;
         const el = containerEl?.querySelector('[tabindex="0"]') as HTMLElement | null;
         el?.focus();
+        if (idx >= $images.length - cols * 4) {
+            maybeLoadMore();
+        }
     });
 </script>
 
@@ -113,6 +126,9 @@
                 </div>
             {/each}
         </div>
+        {#if $imageLoadState.loadingMore}
+            <div class="load-indicator" aria-live="polite">Loading</div>
+        {/if}
     {/if}
 </div>
 
@@ -147,5 +163,19 @@
         font-size: 12px;
         color: var(--text-secondary);
         opacity: 0.6;
+    }
+    .load-indicator {
+        position: sticky;
+        bottom: 8px;
+        left: 50%;
+        width: max-content;
+        margin: 0 auto;
+        padding: 4px 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        color: var(--text-secondary);
+        font-size: 11px;
+        pointer-events: none;
     }
 </style>

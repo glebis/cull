@@ -2,7 +2,7 @@ use crate::db_core::models::ImageWithFile;
 use crate::db_core::nl_parser::parse_query;
 use crate::db_core::smart_collections::SmartCollection;
 use crate::services::curation as svc;
-use crate::services::ServiceContext;
+use crate::services::{Pagination, ServiceContext};
 use crate::AppState;
 use tauri::State;
 
@@ -30,9 +30,29 @@ pub async fn list_smart_collections(
 pub async fn evaluate_smart_collection(
     state: State<'_, AppState>,
     filter_json: String,
+    limit: Option<u32>,
+    offset: Option<u32>,
 ) -> Result<Vec<ImageWithFile>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::evaluate_smart_collection(&ctx, &filter_json).map_err(|e| e.to_string())
+    if let Some(limit) = limit {
+        svc::evaluate_smart_collection_page(
+            &ctx,
+            &filter_json,
+            Pagination::clamped(offset.unwrap_or(0), limit),
+        )
+        .map_err(|e| e.to_string())
+    } else {
+        svc::evaluate_smart_collection(&ctx, &filter_json).map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn count_smart_collection(
+    state: State<'_, AppState>,
+    filter_json: String,
+) -> Result<i64, String> {
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::count_smart_collection(&ctx, &filter_json).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

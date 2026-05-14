@@ -123,8 +123,7 @@ pub async fn scan_lineage(
     state: State<'_, AppState>,
 ) -> Result<u32, String> {
     use tauri::Emitter;
-    let all_images = state.db.list_images(100000, 0).map_err(|e| e.to_string())?;
-    let image_ids: Vec<String> = all_images.iter().map(|img| img.image.id.clone()).collect();
+    let image_ids = state.db.list_image_ids().map_err(|e| e.to_string())?;
     let groups = state
         .db
         .detect_lineage_for_batch(&image_ids)

@@ -10,8 +10,9 @@ import {
 import { computeCompareSwap } from './compare-utils';
 import type { NsfwMode } from './stores';
 import type { ViewMode } from './stores';
-import { setRating, setDecision, createCollection, addToCollection, listCollections, listCollectionImages, rotateImage, undo, redo } from './api';
+import { setRating, setDecision, createCollection, addToCollection, listCollections, rotateImage, undo, redo } from './api';
 import { showToast } from './stores';
+import { loadImagesForCurrentScope } from './image-loading';
 
 let waitingForStar = false;
 
@@ -594,8 +595,7 @@ async function handleCollectModeAdd() {
         collections.set(c);
         // If we're viewing this collection, refresh
         if (get(activeCollection) === target) {
-            const updated = await listCollectionImages(target);
-            images.set(updated);
+            await loadImagesForCurrentScope({ resetFocus: false });
         }
         statusHint.set(`Added to collection. Space for next, B to exit`);
     } catch (err) {

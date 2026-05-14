@@ -9,11 +9,15 @@ vi.mock('./stores', () => ({
     gridGap: { set: vi.fn() },
     loupeScale: { set: vi.fn() },
     activeFolder: { set: vi.fn() },
+    activeCollection: { set: vi.fn(), subscribe: vi.fn((run) => { run(null); return vi.fn(); }) },
+    activeSmartCollection: { set: vi.fn() },
+    activeDetectedClass: { set: vi.fn() },
+    collections: { set: vi.fn() },
     windowName: { set: vi.fn() },
     windowLabel: { set: vi.fn() },
     navigateTo: vi.fn(),
     showToast: vi.fn(),
-    pinnedCollection: { subscribe: vi.fn(() => vi.fn()) },
+    pinnedCollection: { subscribe: vi.fn((run) => { run(null); return vi.fn(); }) },
     importBatchFilter: { set: vi.fn() },
     importBatchImageIds: { set: vi.fn() },
     embeddingViewState: { set: vi.fn(), subscribe: vi.fn(() => vi.fn()) },
@@ -22,12 +26,18 @@ vi.mock('./stores', () => ({
 vi.mock('./api', () => ({
     importFolder: vi.fn(),
     importFiles: vi.fn(),
-    listImagesByFolder: vi.fn(),
-    listImages: vi.fn(),
     addToCollection: vi.fn(),
     listCollections: vi.fn(),
-    listCollectionImages: vi.fn(),
+    listFolders: vi.fn(),
     getBatchImages: vi.fn(),
+}));
+
+vi.mock('./image-loading', () => ({
+    clearImageScope: vi.fn(),
+    loadAllImages: vi.fn(),
+    loadImagesForCurrentScope: vi.fn(),
+    loadImagesUntil: vi.fn(),
+    resetImagePaging: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -41,12 +51,17 @@ vi.mock('@tauri-apps/plugin-deep-link', () => ({
 
 import { handleParams, initDeepLink } from './deeplink';
 import { thumbnailSize, focusedIndex, images, gridGap, loupeScale, activeFolder, navigateTo } from './stores';
-import { importFolder, importFiles, listImagesByFolder, listImages, getBatchImages } from './api';
+import { importFolder, importFiles, getBatchImages, listFolders } from './api';
+import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { listen } from '@tauri-apps/api/event';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 
 beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(importFolder).mockResolvedValue({ imported: 0, skipped: 0, errors: [], batch_id: null, image_ids: [] } as never);
+    vi.mocked(importFiles).mockResolvedValue({ imported: 0, skipped: 0, errors: [], batch_id: null, image_ids: [] } as never);
+    vi.mocked(listFolders).mockResolvedValue([] as never);
+    vi.mocked(loadImagesUntil).mockResolvedValue(-1);
 });
 
 describe('handleParams', () => {
@@ -76,38 +91,31 @@ describe('handleParams', () => {
     });
 
     it('imports folder and updates stores', async () => {
-        const fakeImages = [{ path: '/test/a.jpg', image: { id: '1' } }];
-        vi.mocked(importFolder).mockResolvedValue(undefined as never);
-        vi.mocked(listImagesByFolder).mockResolvedValue(fakeImages as never);
+        vi.mocked(importFolder).mockResolvedValue({ imported: 1, skipped: 0, errors: [], batch_id: null, image_ids: ['1'] } as never);
+        vi.mocked(listFolders).mockResolvedValue([['/test', 1]] as never);
 
         await handleParams({ folder: '/test' });
 
         expect(importFolder).toHaveBeenCalledWith('/test');
         expect(activeFolder.set).toHaveBeenCalledWith('/test');
-        expect(listImagesByFolder).toHaveBeenCalledWith('/test', 100000, 0);
-        expect(images.set).toHaveBeenCalledWith(fakeImages);
+        expect(loadImagesForCurrentScope).toHaveBeenCalled();
         expect(focusedIndex.set).toHaveBeenCalledWith(0);
     });
 
     it('imports single path and focuses the imported image', async () => {
-        const fakeImages = [
-            { path: '/other.jpg', image: { id: '1' } },
-            { path: '/target.jpg', image: { id: '2' } },
-        ];
-        vi.mocked(importFiles).mockResolvedValue(undefined as never);
-        vi.mocked(listImages).mockResolvedValue(fakeImages as never);
+        vi.mocked(importFiles).mockResolvedValue({ imported: 1, skipped: 0, errors: [], batch_id: null, image_ids: ['2'] } as never);
+        vi.mocked(loadImagesUntil).mockResolvedValue(1);
 
         await handleParams({ path: '/target.jpg' });
 
         expect(importFiles).toHaveBeenCalledWith(['/target.jpg']);
-        expect(images.set).toHaveBeenCalledWith(fakeImages);
+        expect(loadAllImages).toHaveBeenCalled();
         expect(focusedIndex.set).toHaveBeenCalledWith(1);
     });
 
     it('does not set focusedIndex if imported image not found in list', async () => {
-        const fakeImages = [{ path: '/other.jpg', image: { id: '1' } }];
-        vi.mocked(importFiles).mockResolvedValue(undefined as never);
-        vi.mocked(listImages).mockResolvedValue(fakeImages as never);
+        vi.mocked(importFiles).mockResolvedValue({ imported: 1, skipped: 0, errors: [], batch_id: null, image_ids: ['missing'] } as never);
+        vi.mocked(loadImagesUntil).mockResolvedValue(-1);
 
         await handleParams({ path: '/missing.jpg' });
 
@@ -166,9 +174,8 @@ describe('handleParams', () => {
     });
 
     it('handles multiple params together', async () => {
-        const fakeImages = [{ path: '/test/a.jpg', image: { id: '1' } }];
-        vi.mocked(importFolder).mockResolvedValue(undefined as never);
-        vi.mocked(listImagesByFolder).mockResolvedValue(fakeImages as never);
+        vi.mocked(importFolder).mockResolvedValue({ imported: 1, skipped: 0, errors: [], batch_id: null, image_ids: ['1'] } as never);
+        vi.mocked(listFolders).mockResolvedValue([['/test', 1]] as never);
 
         await handleParams({
             view: 'grid',

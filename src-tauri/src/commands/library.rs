@@ -65,6 +65,12 @@ pub async fn get_image_count(state: State<'_, AppState>) -> Result<u32, String> 
 }
 
 #[tauri::command]
+pub async fn list_image_ids(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::list_image_ids(&ctx).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn get_images_by_ids(
     state: State<'_, AppState>,
     image_ids: Vec<String>,
@@ -206,32 +212,38 @@ pub async fn check_library_health(
         .unwrap_or_else(|| "true".to_string());
     let auto_purge = auto_purge == "true";
 
-    let images = db.list_images(100000, 0).map_err(|e| e.to_string())?;
-    let total = images.len() as u32;
+    let image_ids = db.list_image_ids().map_err(|e| e.to_string())?;
+    let total = image_ids.len() as u32;
     let mut purged = 0u32;
     let mut missing_sources = 0u32;
     let mut to_regenerate = Vec::new();
+    let mut processed = 0u32;
 
     // Phase 1: soft-mark missing files
-    for (i, img) in images.iter().enumerate() {
-        let source_path = std::path::Path::new(&img.path);
-        if !source_path.exists() {
-            let _ = db.mark_file_missing(&img.path);
-            missing_sources += 1;
-        } else {
-            let thumb = crate::db_core::thumbnails::thumbnail_path(app_data_dir, &img.image.id);
-            if !thumb.exists() {
-                to_regenerate.push(img.image.id.clone());
+    for chunk in image_ids.chunks(250) {
+        let id_refs: Vec<&str> = chunk.iter().map(|id| id.as_str()).collect();
+        let images = db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
+        for img in images {
+            let source_path = std::path::Path::new(&img.path);
+            if !source_path.exists() {
+                let _ = db.mark_file_missing(&img.path);
+                missing_sources += 1;
+            } else {
+                let thumb = crate::db_core::thumbnails::thumbnail_path(app_data_dir, &img.image.id);
+                if !thumb.exists() {
+                    to_regenerate.push(img.image.id.clone());
+                }
             }
-        }
 
-        if i % 100 == 0 {
-            let _ = app.emit(
-                "health-check-progress",
-                serde_json::json!({
-                    "current": i + 1, "total": total
-                }),
-            );
+            processed += 1;
+            if processed % 100 == 0 || processed == total {
+                let _ = app.emit(
+                    "health-check-progress",
+                    serde_json::json!({
+                        "current": processed, "total": total
+                    }),
+                );
+            }
         }
     }
 

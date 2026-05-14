@@ -18,10 +18,13 @@ import {
     importBatchImageIds,
     pinnedCollection,
     activeCollection,
+    activeSmartCollection,
+    activeDetectedClass,
     collections,
     type ViewMode,
 } from './stores';
-import { importFolder, importFiles, listImagesByFolder, listImages, addToCollection, listCollections, getBatchImages, listFolders, listCollectionImages } from './api';
+import { importFolder, importFiles, addToCollection, listCollections, getBatchImages, listFolders } from './api';
+import { clearImageScope, loadAllImages, loadImagesForCurrentScope, loadImagesUntil, resetImagePaging } from './image-loading';
 
 interface OpenParams {
     path?: string | null;
@@ -63,17 +66,20 @@ export async function handleParams(params: OpenParams) {
     if (params.folder) {
         try {
             const result = await importFolder(params.folder);
+            activeSmartCollection.set(null);
+            activeCollection.set(null);
+            activeDetectedClass.set(null);
             activeFolder.set(params.folder);
             const folderName = params.folder.split('/').filter(Boolean).pop() ?? params.folder;
-            const imgs = await listImagesByFolder(params.folder, 100000, 0);
-            images.set(imgs);
+            await loadImagesForCurrentScope();
             focusedIndex.set(0);
             // Refresh folder list in sidebar
             const f = await listFolders();
             folders.set(f);
+            const folderTotal = f.find(([path]) => path === params.folder)?.[1] ?? result.imported;
             if (result.imported > 0) {
                 showToast(`Imported "${folderName}"`, {
-                    detail: `+${result.imported} new, ${result.skipped} skipped · ${imgs.length} total in folder`,
+                    detail: `+${result.imported} new, ${result.skipped} skipped · ${folderTotal} total in folder`,
                     type: 'success',
                     duration: 8000,
                 });
@@ -97,10 +103,16 @@ export async function handleParams(params: OpenParams) {
                 showToast(`Image added to active collection`, { type: 'success', duration: 5000 });
             }
 
-            const allImgs = await listImages(100000, 0);
-            images.set(allImgs);
-            const idx = allImgs.findIndex((img) => img.path === params.path);
-            if (idx >= 0) focusedIndex.set(idx);
+            if (pinned && get(activeCollection) === pinned) {
+                await loadImagesForCurrentScope();
+            } else {
+                await loadAllImages();
+            }
+            const firstId = result.image_ids[0];
+            if (firstId) {
+                const idx = await loadImagesUntil((img) => img.image.id === firstId);
+                if (idx >= 0) focusedIndex.set(idx);
+            }
         } catch (e) {
             console.error('Deep link: failed to import path', e);
         }
@@ -118,10 +130,18 @@ export async function handleParams(params: OpenParams) {
                 const c = await listCollections();
                 collections.set(c);
 
-                // Reload collection images
-                const imgs = await listCollectionImages(pinned);
-                images.set(imgs);
-                focusedIndex.set(Math.max(0, imgs.length - result.image_ids.length));
+                activeCollection.set(pinned);
+                activeSmartCollection.set(null);
+                activeDetectedClass.set(null);
+                activeFolder.set(null);
+                await loadImagesForCurrentScope();
+                const firstId = result.image_ids[0];
+                if (firstId) {
+                    const idx = await loadImagesUntil((img) => img.image.id === firstId);
+                    focusedIndex.set(idx >= 0 ? idx : 0);
+                } else {
+                    focusedIndex.set(0);
+                }
 
                 const collName = c.find(([id]) => id === pinned)?.[1] ?? 'collection';
                 showToast(`${result.imported} images added to "${collName}"`, {
@@ -131,13 +151,14 @@ export async function handleParams(params: OpenParams) {
             } else if (result.batch_id) {
                 // No active collection — filter to batch
                 const batchImgs = await getBatchImages(result.batch_id);
+                clearImageScope();
+                resetImagePaging();
                 images.set(batchImgs);
                 importBatchFilter.set(result.batch_id);
                 importBatchImageIds.set(result.image_ids);
                 focusedIndex.set(0);
             } else {
-                const allImgs = await listImages(100000, 0);
-                images.set(allImgs);
+                await loadAllImages();
                 focusedIndex.set(0);
             }
         } catch (e) {

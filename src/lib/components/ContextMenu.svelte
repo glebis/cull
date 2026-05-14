@@ -1,8 +1,9 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, listCollectionImages, moveImage, renameImage, listFolders } from '$lib/api';
+    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, moveImage, renameImage, listFolders, getImagesByIds } from '$lib/api';
     import type { ImageWithFile } from '$lib/api';
     import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, showToast } from '$lib/stores';
+    import { clearImageScope, loadImagesForCurrentScope, resetImagePaging } from '$lib/image-loading';
 
     interface Props {
         image: ImageWithFile;
@@ -163,9 +164,8 @@
         if (!colId) return;
         onclose();
         await removeFromCollection(colId, targetIds);
-        const updated = await listCollectionImages(colId);
-        images.set(updated);
-        focusedIndex.update(i => Math.min(i, updated.length - 1));
+        await loadImagesForCurrentScope({ resetFocus: false });
+        focusedIndex.update(i => Math.min(i, $images.length - 1));
         const c = await listCollections();
         collections.set(c);
     }
@@ -175,9 +175,12 @@
         try {
             const results = await findSimilarImages(image.image.id, 20);
             const similarIds = results.map(([id]) => id);
-            const allImages = [...$images];
-            const similar = allImages.filter(img => similarIds.includes(img.image.id));
+            const idOrder = new Map(similarIds.map((id, index) => [id, index]));
+            const similar = (await getImagesByIds(similarIds))
+                .sort((a, b) => (idOrder.get(a.image.id) ?? 0) - (idOrder.get(b.image.id) ?? 0));
             if (similar.length > 0) {
+                clearImageScope();
+                resetImagePaging();
                 images.set(similar);
                 focusedIndex.set(0);
             }

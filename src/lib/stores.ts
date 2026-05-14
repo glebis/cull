@@ -10,6 +10,18 @@ export const focusedImageOverride = writable<ImageWithFile | null>(null);
 export const totalCount = writable<number>(0);
 export const viewMode = writable<ViewMode>('grid');
 
+export interface ImageLoadState {
+    loading: boolean;
+    loadingMore: boolean;
+    hasMore: boolean;
+}
+
+export const imageLoadState = writable<ImageLoadState>({
+    loading: false,
+    loadingMore: false,
+    hasMore: false,
+});
+
 // Navigation history stack
 export const viewHistory = writable<{ mode: ViewMode; focusedIndex: number }[]>([]);
 
@@ -64,6 +76,7 @@ export const folders = writable<[string, number][]>([]);
 export const activeFolder = writable<string | null>(null);
 export const minSizeFilter = writable<number>(0);
 export const showMissing = writable<boolean>(false);
+export const activeDetectedClass = writable<string | null>(null);
 
 // Collections
 export const collections = writable<[string, string, number][]>([]); // [id, name, count]

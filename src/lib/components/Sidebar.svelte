@@ -1,8 +1,9 @@
 <script lang="ts">
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, images, focusedIndex, folders, activeFolder, minSizeFilter, collections, activeCollection, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, showMissing } from '$lib/stores';
-    import { importFolder as apiImportFolder, listImages, listImagesByFolder, listImagesFiltered, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, listCollectionImages, deleteCollectionApi, listSmartCollections, evaluateSmartCollection, isYoloAvailable, isNudenetAvailable, downloadYoloModel, downloadNudenetModel, getDetectionCount, searchByDetectedClass, detectObjects, detectNsfw, getImagesByIds, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount } from '$lib/api';
+    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, showMissing } from '$lib/stores';
+    import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, deleteCollectionApi, listSmartCollections, isYoloAvailable, isNudenetAvailable, downloadYoloModel, downloadNudenetModel, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount } from '$lib/api';
+    import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { SmartCollection } from '$lib/api';
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
@@ -66,11 +67,10 @@
         activeSmartCollection.set(sc);
         activeFolder.set(null);
         activeCollection.set(null);
+        activeDetectedClass.set(null);
         if (sc.filter_json) {
             try {
-                const results = await evaluateSmartCollection(sc.filter_json);
-                images.set(results);
-                focusedIndex.set(0);
+                await loadImagesForCurrentScope();
             } catch (e) {
                 console.error('Failed to evaluate smart collection:', e);
             }
@@ -83,15 +83,9 @@
         activeFolder.set(folder);
         activeCollection.set(null);
         activeSmartCollection.set(null);
+        activeDetectedClass.set(null);
         try {
-            if (folder === null) {
-                const imgs = await listImages(100000, 0);
-                images.set(imgs);
-            } else {
-                const imgs = await listImagesByFolder(folder, 100000, 0);
-                images.set(imgs);
-            }
-            focusedIndex.set(0);
+            await loadImagesForCurrentScope();
         } catch (e) {
             console.error('Failed to load images for folder:', e);
         }
@@ -103,10 +97,9 @@
         activeCollection.set(collectionId);
         activeFolder.set(null);
         activeSmartCollection.set(null);
+        activeDetectedClass.set(null);
         try {
-            const imgs = await listCollectionImages(collectionId);
-            images.set(imgs);
-            focusedIndex.set(0);
+            await loadImagesForCurrentScope();
         } catch (e) {
             console.error('Failed to load collection images:', e);
         }
@@ -131,9 +124,8 @@
             await deleteCollectionApi(collectionId);
             if (get(activeCollection) === collectionId) {
                 activeCollection.set(null);
-                const imgs = await listImages(100000, 0);
-                images.set(imgs);
-                focusedIndex.set(0);
+                activeDetectedClass.set(null);
+                await loadImagesForCurrentScope();
             }
             const c = await listCollections();
             collections.set(c);
@@ -295,8 +287,7 @@
         if (analyzingBatch) return;
         analyzingBatch = true;
         try {
-            const allImgs = await listImages(100000, 0);
-            const allIds = allImgs.map(i => i.image.id);
+            const allIds = await listImageIds();
             await analyzeImages(allIds);
             await loadAiState();
         } catch (e) {
@@ -311,11 +302,8 @@
         const results: [string, number][] = [];
         for (const cls of commonClasses) {
             try {
-                const matches = await searchByDetectedClass(cls, 1);
-                if (matches.length > 0) {
-                    const count = await searchByDetectedClass(cls, 100000);
-                    results.push([cls, count.length]);
-                }
+                const count = await countByDetectedClass(cls);
+                if (count > 0) results.push([cls, count]);
             } catch (_) {}
         }
         results.sort((a, b) => b[1] - a[1]);
@@ -360,8 +348,7 @@
         if (detectingBatch) return;
         detectingBatch = true;
         try {
-            const allImgs = await listImages(100000, 0);
-            const allIds = allImgs.map(i => i.image.id);
+            const allIds = await listImageIds();
             if (yoloReady) await detectObjects(allIds, selectedYoloVariant);
             if (nudenetReady) await detectNsfw(allIds);
             await loadAiState();
@@ -374,17 +361,15 @@
 
     async function filterByClass(className: string) {
         try {
-            const matches = await searchByDetectedClass(className, 100000);
-            const ids = matches.map(m => m[0]);
-            if (ids.length > 0) {
-                const imgs = await getImagesByIds(ids);
-                images.set(imgs);
-                focusedIndex.set(0);
-                activeSession.set(null);
-                sessionCanvases.set([]);
-                activeFolder.set(null);
-                activeCollection.set(null);
-            }
+            const count = await countByDetectedClass(className);
+            if (count === 0) return;
+            activeSession.set(null);
+            sessionCanvases.set([]);
+            activeSmartCollection.set(null);
+            activeFolder.set(null);
+            activeCollection.set(null);
+            activeDetectedClass.set(className);
+            await loadImagesForCurrentScope();
         } catch (e) {
             console.error('Filter by class error:', e);
         }
@@ -393,15 +378,7 @@
     async function refreshImages() {
         const count = await getImageCount();
         totalCount.set(count);
-        const currentFolder = get(activeFolder);
-        if (currentFolder === null) {
-            const imgs = await listImages(100000, 0);
-            images.set(imgs);
-        } else {
-            const imgs = await listImagesByFolder(currentFolder, 100000, 0);
-            images.set(imgs);
-        }
-        focusedIndex.set(0);
+        await loadImagesForCurrentScope();
         // Refresh folders too
         try {
             const f = await listFolders();

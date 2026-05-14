@@ -1,5 +1,7 @@
 use crate::db_core::detection::Detection;
-use crate::services::{ServiceContext, ServiceError};
+use crate::db_core::models::ImageWithFile;
+use crate::services::library::enrich_thumbnails;
+use crate::services::{Pagination, ServiceContext, ServiceError};
 
 pub fn find_similar_images(
     ctx: &ServiceContext,
@@ -48,6 +50,26 @@ pub fn search_by_detected_class(
     limit: u32,
 ) -> Result<Vec<(String, f32)>, ServiceError> {
     Ok(ctx.db.search_by_class(class_name, limit)?)
+}
+
+pub fn count_by_detected_class(
+    ctx: &ServiceContext,
+    class_name: &str,
+) -> Result<u32, ServiceError> {
+    Ok(ctx.db.count_by_class(class_name)?)
+}
+
+pub fn list_images_by_detected_class(
+    ctx: &ServiceContext,
+    class_name: &str,
+    page: Pagination,
+) -> Result<Vec<ImageWithFile>, ServiceError> {
+    let page = Pagination::clamped(page.offset, page.limit);
+    let mut images = ctx
+        .db
+        .list_images_by_class(class_name, page.limit, page.offset)?;
+    enrich_thumbnails(&mut images, ctx.app_data_dir);
+    Ok(images)
 }
 
 pub fn get_detection_count(ctx: &ServiceContext, model: &str) -> Result<u32, ServiceError> {

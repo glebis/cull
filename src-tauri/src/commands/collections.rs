@@ -1,6 +1,6 @@
 use crate::db_core::models::{ImageWithFile, NewSessionEvent};
 use crate::services::curation as svc;
-use crate::services::ServiceContext;
+use crate::services::{Pagination, ServiceContext};
 use crate::AppState;
 use tauri::State;
 
@@ -53,9 +53,20 @@ pub async fn add_to_collection(
 pub async fn list_collection_images(
     state: State<'_, AppState>,
     collection_id: String,
+    limit: Option<u32>,
+    offset: Option<u32>,
 ) -> Result<Vec<ImageWithFile>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::list_collection_images(&ctx, &collection_id).map_err(|e| e.to_string())
+    if let Some(limit) = limit {
+        svc::list_collection_images_page(
+            &ctx,
+            &collection_id,
+            Pagination::clamped(offset.unwrap_or(0), limit),
+        )
+        .map_err(|e| e.to_string())
+    } else {
+        svc::list_collection_images(&ctx, &collection_id).map_err(|e| e.to_string())
+    }
 }
 
 #[tauri::command]
