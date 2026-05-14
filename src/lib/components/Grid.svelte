@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { images, selectedIds, focusedIndex, thumbnailSize, viewMode, gridGap, navigateTo, imageLoadState } from '$lib/stores';
+    import { images, selectedIds, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState } from '$lib/stores';
     import { loadMoreImagesForCurrentScope } from '$lib/image-loading';
     import Thumbnail from './Thumbnail.svelte';
 
@@ -7,6 +7,7 @@
     let containerWidth = $state(800);
     let containerHeight = $state(600);
     let scrollTop = $state(0);
+    let scrollRestoreSeq = 0;
 
     let size = $state(160);
     thumbnailSize.subscribe(v => size = v);
@@ -58,6 +59,7 @@
 
     function onScroll(e: Event) {
         scrollTop = (e.target as HTMLDivElement).scrollTop;
+        gridScrollTop.set(scrollTop);
         maybeLoadMore();
     }
 
@@ -80,6 +82,25 @@
         });
         ro.observe(containerEl);
         return () => ro.disconnect();
+    });
+
+    $effect(() => {
+        if (!containerEl) return;
+        const target = $gridScrollTop;
+        $images.length;
+        if (Math.abs(containerEl.scrollTop - target) <= 1) {
+            scrollTop = containerEl.scrollTop;
+            return;
+        }
+        const seq = ++scrollRestoreSeq;
+        requestAnimationFrame(() => {
+            if (!containerEl) return;
+            if (seq !== scrollRestoreSeq) return;
+            if (Math.abs(containerEl.scrollTop - target) > 1) {
+                containerEl.scrollTop = target;
+                scrollTop = containerEl.scrollTop;
+            }
+        });
     });
 
     let prevFocusedIndex = $state<number | null>(null);

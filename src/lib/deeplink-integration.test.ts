@@ -34,6 +34,7 @@ vi.mock('./api', () => ({
 
 vi.mock('./image-loading', () => ({
     clearImageScope: vi.fn(),
+    invalidateImageCache: vi.fn(),
     loadAllImages: vi.fn(),
     loadImagesForCurrentScope: vi.fn(),
     loadImagesUntil: vi.fn(),

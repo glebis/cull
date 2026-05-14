@@ -56,7 +56,7 @@
         activateAdHocFilter(filterJson, null);
         const [count] = await Promise.all([
             countSmartCollection(filterJson),
-            loadImagesForCurrentScope(),
+            loadImagesForCurrentScope({ force: true }),
         ]);
         if (reqId !== applyRequestId) return;
         matchCount = count;

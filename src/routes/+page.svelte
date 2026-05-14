@@ -21,12 +21,12 @@
     import JobProgressPanel from '$lib/components/JobProgressPanel.svelte';
     import TrashConfirmDialog from '$lib/components/TrashConfirmDialog.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, searchOpen, showMissing } from '$lib/stores';
-    import { trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds } from '$lib/api';
+    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass } from '$lib/stores';
+    import { trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
-    import { saveAppState, restoreAppStateBeforeImages, applyRestoredViewState } from '$lib/persistence';
-    import { loadImagesForCurrentScope } from '$lib/image-loading';
+    import { saveAppState, restoreAppStateBeforeImages, applyRestoredViewState, type PersistedState } from '$lib/persistence';
+    import { loadImagesForCurrentScope, type ImageLoadOptions } from '$lib/image-loading';
     import { listen } from '@tauri-apps/api/event';
     import { onMount } from 'svelte';
 
@@ -38,8 +38,20 @@
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
     let noSidebar = $derived(immersive || !$sidebarVisible);
 
-    async function loadImages() {
-        await loadImagesForCurrentScope();
+    async function loadImages(options: ImageLoadOptions = {}) {
+        await loadImagesForCurrentScope(options);
+    }
+
+    async function restoreSmartCollectionScope(restored: PersistedState | null) {
+        if (!restored?.activeSmartCollectionId) return;
+        const restoredSmartCollections = await listSmartCollections();
+        smartCollections.set(restoredSmartCollections);
+        const active = restoredSmartCollections.find(sc => sc.id === restored.activeSmartCollectionId);
+        if (!active) return;
+        activeSmartCollection.set(active);
+        activeFolder.set(null);
+        activeCollection.set(null);
+        activeDetectedClass.set(null);
     }
 
     async function executeTrash() {
@@ -102,7 +114,13 @@
     onMount(() => {
         const init = async () => {
             const restored = restoreAppStateBeforeImages();
-            await loadImages();
+            await restoreSmartCollectionScope(restored);
+            const restoredLoadedCount = restored?.loadedImageCount ?? 0;
+            const restoredFocusCount = (restored?.focusedIndex ?? 0) + 1;
+            await loadImages({
+                resetFocus: false,
+                minItems: Math.max(restoredLoadedCount, restoredFocusCount),
+            });
             applyRestoredViewState(restored);
             await initDeepLink();
 
@@ -114,12 +132,12 @@
                         type: 'info',
                         duration: 7000,
                     });
-                    await loadImages();
+                    await loadImages({ force: true, invalidateCache: true });
                 }
                 if (health.to_regenerate.length > 0) {
                     regenerateThumbnailsByIds(health.to_regenerate).then((count) => {
                         if (count > 0) {
-                            loadImages();
+                            loadImages({ force: true });
                         }
                     });
                 }
@@ -136,11 +154,11 @@
 
         window.addEventListener('trash-focused-image', handleTrash);
         window.addEventListener('delete-focused-image', handlePermanentDelete);
-        const handleReloadImages = () => loadImages().catch(e => console.error('Failed to reload:', e));
+        const handleReloadImages = () => loadImages({ force: true, invalidateCache: true }).catch(e => console.error('Failed to reload:', e));
         window.addEventListener('reload-images', handleReloadImages);
 
         const watcherUnlisten = listen<void>('images:changed', () => {
-            loadImages().catch(e => console.error('Failed to reload after fs change:', e));
+            loadImages({ force: true, invalidateCache: true }).catch(e => console.error('Failed to reload after fs change:', e));
         });
 
         const panicUnlisten = listen<{thread: string, location: string | null, message: string}>('rust-panic', (event) => {
@@ -168,13 +186,13 @@
         let first = true;
         const unsub = minSizeFilter.subscribe(() => {
             if (first) { first = false; return; }
-            loadImages().catch(e => console.error('Failed to reload images with filter:', e));
+            loadImages({ force: true }).catch(e => console.error('Failed to reload images with filter:', e));
         });
 
         let firstMissing = true;
         const unsubMissing = showMissing.subscribe(() => {
             if (firstMissing) { firstMissing = false; return; }
-            loadImages().catch(e => console.error('Failed to reload images with missing filter:', e));
+            loadImages({ force: true }).catch(e => console.error('Failed to reload images with missing filter:', e));
         });
 
         const saveTimer = setInterval(saveAppState, 5000);

@@ -9,6 +9,7 @@ export const focusedIndex = writable<number>(0);
 export const focusedImageOverride = writable<ImageWithFile | null>(null);
 export const totalCount = writable<number>(0);
 export const viewMode = writable<ViewMode>('grid');
+export const gridScrollTop = writable<number>(0);
 
 export interface ImageLoadState {
     loading: boolean;

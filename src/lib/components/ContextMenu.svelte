@@ -3,7 +3,7 @@
     import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, moveImage, renameImage, listFolders, getImagesByIds } from '$lib/api';
     import type { ImageWithFile } from '$lib/api';
     import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, showToast } from '$lib/stores';
-    import { clearImageScope, loadImagesForCurrentScope, resetImagePaging } from '$lib/image-loading';
+    import { clearImageScope, invalidateImageCache, loadImagesForCurrentScope, resetImagePaging } from '$lib/image-loading';
 
     interface Props {
         image: ImageWithFile;
@@ -128,12 +128,14 @@
     async function handleRate(n: number) {
         onclose();
         await setRating(image.image.id, n, $activeSession?.id ?? null);
+        invalidateImageCache();
         if (image.selection) image.selection.star_rating = n;
     }
 
     async function handleDecision(d: string) {
         onclose();
         await setDecision(image.image.id, d, $activeSession?.id ?? null);
+        invalidateImageCache();
         if (image.selection) image.selection.decision = d;
     }
 
@@ -145,6 +147,7 @@
     async function handleAddToCollection(colId: string) {
         onclose();
         await addToCollection(colId, targetIds);
+        invalidateImageCache();
         const c = await listCollections();
         collections.set(c);
     }
@@ -155,6 +158,7 @@
         if (!name?.trim()) return;
         const colId = await createCollection(name.trim());
         await addToCollection(colId, targetIds);
+        invalidateImageCache();
         const c = await listCollections();
         collections.set(c);
     }
@@ -164,8 +168,8 @@
         if (!colId) return;
         onclose();
         await removeFromCollection(colId, targetIds);
-        await loadImagesForCurrentScope({ resetFocus: false });
-        focusedIndex.update(i => Math.min(i, $images.length - 1));
+        await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
+        focusedIndex.update(i => Math.max(0, Math.min(i, $images.length - 1)));
         const c = await listCollections();
         collections.set(c);
     }
@@ -198,9 +202,14 @@
         onclose();
         const ids = new Set(targetIds);
         await trashImages([...ids]);
-        const allImages = $images.filter(img => !ids.has(img.image.id));
-        images.set(allImages);
-        if ($focusedIndex >= allImages.length) focusedIndex.set(Math.max(0, allImages.length - 1));
+        const remainingLoadedCount = $images.filter(img => !ids.has(img.image.id)).length;
+        await loadImagesForCurrentScope({
+            resetFocus: false,
+            force: true,
+            invalidateCache: true,
+            minItems: remainingLoadedCount,
+        });
+        if ($focusedIndex >= $images.length) focusedIndex.set(Math.max(0, $images.length - 1));
     }
 
     async function handleRename() {
@@ -210,6 +219,7 @@
         if (!newName?.trim() || newName.trim() === currentName) return;
         try {
             await renameImage(image.image.id, newName.trim());
+            await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
             showToast(`Renamed to ${newName.trim()}`, { type: 'success' });
         } catch (e) {
             showToast(`Rename failed: ${e}`, { type: 'error' });
@@ -225,6 +235,7 @@
         onclose();
         try {
             await moveImage(image.image.id, folder);
+            await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
             const folderName = folder.split('/').pop() ?? folder;
             showToast(`Moved to ${folderName}`, { type: 'success' });
         } catch (e) {

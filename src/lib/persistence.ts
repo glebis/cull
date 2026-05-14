@@ -1,26 +1,31 @@
 import { get } from 'svelte/store';
 import {
-    viewMode, thumbnailSize, gridPreset, gridGap,
+    viewMode, thumbnailSize, gridPreset, gridGap, gridScrollTop,
     sidebarVisible, zenMode, activeFolder, activeCollection,
-    activeSmartCollection, minSizeFilter, loupeScale, loupePanX, loupePanY,
+    activeSmartCollection, activeDetectedClass, minSizeFilter, loupeScale, loupePanX, loupePanY,
     lineageLayout, showDetectionBoxes, nsfwMode, embeddingViewState,
+    focusedIndex, images,
     type ViewMode, type LineageLayout, type NsfwMode, type EmbeddingViewState,
 } from './stores';
 
 const STORAGE_KEY = 'cull-app-state';
 const SCHEMA_VERSION = 1;
 
-interface PersistedState {
+export interface PersistedState {
     _version: number;
     viewMode: ViewMode;
     thumbnailSize: number;
     gridPreset: number;
     gridGap: number;
+    focusedIndex?: number;
+    gridScrollTop?: number;
+    loadedImageCount?: number;
     sidebarVisible: boolean;
     zenMode: boolean;
     activeFolder: string | null;
     activeCollection: string | null;
     activeSmartCollectionId: string | null;
+    activeDetectedClass?: string | null;
     minSizeFilter: number;
     loupeScale: number;
     loupePanX: number;
@@ -38,11 +43,15 @@ export function saveAppState(): void {
         thumbnailSize: get(thumbnailSize),
         gridPreset: get(gridPreset),
         gridGap: get(gridGap),
+        focusedIndex: get(focusedIndex),
+        gridScrollTop: get(gridScrollTop),
+        loadedImageCount: get(images).length,
         sidebarVisible: get(sidebarVisible),
         zenMode: get(zenMode),
         activeFolder: get(activeFolder),
         activeCollection: get(activeCollection),
         activeSmartCollectionId: get(activeSmartCollection)?.id ?? null,
+        activeDetectedClass: get(activeDetectedClass),
         minSizeFilter: get(minSizeFilter),
         loupeScale: get(loupeScale),
         loupePanX: get(loupePanX),
@@ -73,7 +82,10 @@ export function restoreAppStateBeforeImages(): PersistedState | null {
         zenMode.set(state.zenMode);
         activeFolder.set(state.activeFolder);
         activeCollection.set(state.activeCollection);
+        activeDetectedClass.set(state.activeDetectedClass ?? null);
         minSizeFilter.set(state.minSizeFilter);
+        focusedIndex.set(state.focusedIndex ?? 0);
+        gridScrollTop.set(state.gridScrollTop ?? 0);
         loupeScale.set(state.loupeScale);
         loupePanX.set(state.loupePanX);
         loupePanY.set(state.loupePanY);
@@ -90,4 +102,6 @@ export function restoreAppStateBeforeImages(): PersistedState | null {
 export function applyRestoredViewState(state: PersistedState | null): void {
     if (!state) return;
     viewMode.set(state.viewMode);
+    focusedIndex.set(state.focusedIndex ?? 0);
+    gridScrollTop.set(state.gridScrollTop ?? 0);
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
-    import { importBatchFilter, importBatchImageIds, pinnedCollection, collections, activeCollection, showToast } from '$lib/stores';
+    import { importBatchFilter, importBatchImageIds, pinnedCollection, collections, activeCollection, activeFolder, activeSmartCollection, activeDetectedClass, showToast } from '$lib/stores';
     import { createCollection, addToCollection, listCollections } from '$lib/api';
-    import { loadAllImages } from '$lib/image-loading';
+    import { invalidateImageCache, loadAllImages } from '$lib/image-loading';
     import { get } from 'svelte/store';
 
     let count = $derived($importBatchImageIds.length);
@@ -10,7 +10,7 @@
     async function showAll() {
         importBatchFilter.set(null);
         importBatchImageIds.set([]);
-        await loadAllImages();
+        await loadAllImages({ force: true, invalidateCache: true });
     }
 
     async function saveAsCollection() {
@@ -24,10 +24,14 @@
             const collectionId = await createCollection(name.trim());
             const ids = get(importBatchImageIds);
             await addToCollection(collectionId, ids);
+            invalidateImageCache();
 
             // Pin as active
             pinnedCollection.set(collectionId);
             activeCollection.set(collectionId);
+            activeFolder.set(null);
+            activeSmartCollection.set(null);
+            activeDetectedClass.set(null);
 
             // Refresh collections list
             const c = await listCollections();

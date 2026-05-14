@@ -24,7 +24,7 @@ import {
     type ViewMode,
 } from './stores';
 import { importFolder, importFiles, addToCollection, listCollections, getBatchImages, listFolders } from './api';
-import { clearImageScope, loadAllImages, loadImagesForCurrentScope, loadImagesUntil, resetImagePaging } from './image-loading';
+import { clearImageScope, invalidateImageCache, loadAllImages, loadImagesForCurrentScope, loadImagesUntil, resetImagePaging } from './image-loading';
 
 interface OpenParams {
     path?: string | null;
@@ -71,7 +71,7 @@ export async function handleParams(params: OpenParams) {
             activeDetectedClass.set(null);
             activeFolder.set(params.folder);
             const folderName = params.folder.split('/').filter(Boolean).pop() ?? params.folder;
-            await loadImagesForCurrentScope();
+            await loadImagesForCurrentScope({ force: true, invalidateCache: true });
             focusedIndex.set(0);
             // Refresh folder list in sidebar
             const f = await listFolders();
@@ -104,9 +104,9 @@ export async function handleParams(params: OpenParams) {
             }
 
             if (pinned && get(activeCollection) === pinned) {
-                await loadImagesForCurrentScope();
+                await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
             } else {
-                await loadAllImages();
+                await loadAllImages({ force: true, invalidateCache: true });
             }
             const firstId = result.image_ids[0];
             if (firstId) {
@@ -134,7 +134,7 @@ export async function handleParams(params: OpenParams) {
                 activeSmartCollection.set(null);
                 activeDetectedClass.set(null);
                 activeFolder.set(null);
-                await loadImagesForCurrentScope();
+                await loadImagesForCurrentScope({ force: true, invalidateCache: true });
                 const firstId = result.image_ids[0];
                 if (firstId) {
                     const idx = await loadImagesUntil((img) => img.image.id === firstId);
@@ -151,6 +151,7 @@ export async function handleParams(params: OpenParams) {
             } else if (result.batch_id) {
                 // No active collection — filter to batch
                 const batchImgs = await getBatchImages(result.batch_id);
+                invalidateImageCache();
                 clearImageScope();
                 resetImagePaging();
                 images.set(batchImgs);
@@ -158,7 +159,7 @@ export async function handleParams(params: OpenParams) {
                 importBatchImageIds.set(result.image_ids);
                 focusedIndex.set(0);
             } else {
-                await loadAllImages();
+                await loadAllImages({ force: true, invalidateCache: true });
                 focusedIndex.set(0);
             }
         } catch (e) {

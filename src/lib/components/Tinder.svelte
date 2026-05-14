@@ -6,6 +6,7 @@
     import { onMount, onDestroy } from 'svelte';
     import type { ImageWithFile } from '$lib/api';
     import { parseVoiceCommand, filterByDecision } from '$lib/tinder-utils';
+    import { invalidateImageCache } from '$lib/image-loading';
 
     let pairIndex = $state(0);
     let swipeDirection = $state<'left' | 'right' | 'skip' | null>(null);
@@ -60,6 +61,7 @@
         } else {
             stats.skipped += 2;
         }
+        if (side !== 'skip') invalidateImageCache();
 
         history.push({ index: pairIndex, leftId, rightId, choice: side });
 
@@ -116,6 +118,7 @@
         const sessionId = $activeSession?.id ?? null;
         setDecision(last.leftId, 'undecided', sessionId).catch(console.error);
         setDecision(last.rightId, 'undecided', sessionId).catch(console.error);
+        invalidateImageCache();
     }
 
     let unlisteners: Array<() => void> = [];

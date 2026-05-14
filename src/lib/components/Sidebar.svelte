@@ -125,7 +125,7 @@
             if (get(activeCollection) === collectionId) {
                 activeCollection.set(null);
                 activeDetectedClass.set(null);
-                await loadImagesForCurrentScope();
+                await loadImagesForCurrentScope({ force: true, invalidateCache: true });
             }
             const c = await listCollections();
             collections.set(c);
@@ -167,6 +167,7 @@
         try {
             const count = await rescanSources();
             lastResult = `Detected sources for ${count} images`;
+            await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
         } catch (e) {
             lastResult = `Rescan error: ${e}`;
         } finally {
@@ -290,6 +291,7 @@
             const allIds = await listImageIds();
             await analyzeImages(allIds);
             await loadAiState();
+            await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
         } catch (e) {
             console.error('Vision analysis error:', e);
         } finally {
@@ -352,6 +354,7 @@
             if (yoloReady) await detectObjects(allIds, selectedYoloVariant);
             if (nudenetReady) await detectNsfw(allIds);
             await loadAiState();
+            await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
         } catch (e) {
             console.error('Batch detection error:', e);
         } finally {
@@ -378,7 +381,7 @@
     async function refreshImages() {
         const count = await getImageCount();
         totalCount.set(count);
-        await loadImagesForCurrentScope();
+        await loadImagesForCurrentScope({ force: true, invalidateCache: true });
         // Refresh folders too
         try {
             const f = await listFolders();

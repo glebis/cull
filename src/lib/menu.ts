@@ -30,7 +30,7 @@ async function handleOpenFile() {
     const paths = Array.isArray(selected) ? selected : [selected];
     if (paths.length === 0) return;
     const result = await importFiles(paths);
-    await loadAllImages();
+    await loadAllImages({ force: true, invalidateCache: true });
     const firstId = result.image_ids[0];
     if (firstId) {
         const idx = await loadImagesUntil((img) => img.image.id === firstId);
@@ -51,7 +51,7 @@ async function handleOpenFolder() {
     activeCollection.set(null);
     activeDetectedClass.set(null);
     activeFolder.set(selected);
-    await loadImagesForCurrentScope();
+    await loadImagesForCurrentScope({ force: true, invalidateCache: true });
     focusedIndex.set(0);
     viewMode.set('grid');
 }

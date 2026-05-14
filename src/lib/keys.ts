@@ -12,7 +12,7 @@ import type { NsfwMode } from './stores';
 import type { ViewMode } from './stores';
 import { setRating, setDecision, createCollection, addToCollection, listCollections, rotateImage, undo, redo } from './api';
 import { showToast } from './stores';
-import { loadImagesForCurrentScope } from './image-loading';
+import { invalidateImageCache, loadImagesForCurrentScope } from './image-loading';
 
 let waitingForStar = false;
 
@@ -91,6 +91,7 @@ export async function handleStarRating(n: number, imageIndex?: number) {
     if (!img) return;
     try {
         await setRating(img.image.id, n, get(activeSession)?.id ?? null);
+        invalidateImageCache();
         images.update(all => {
             const copy = [...all];
             const item = { ...copy[idx] };
@@ -116,6 +117,7 @@ export async function handleDecision(decision: string, imageIndex?: number) {
     if (!img) return;
     try {
         await setDecision(img.image.id, decision, get(activeSession)?.id ?? null);
+        invalidateImageCache();
         images.update(all => {
             const copy = [...all];
             const item = { ...copy[idx] };
@@ -591,11 +593,12 @@ async function handleCollectModeAdd() {
 
     try {
         await addToCollection(target, [img.image.id]);
+        invalidateImageCache();
         const c = await listCollections();
         collections.set(c);
         // If we're viewing this collection, refresh
         if (get(activeCollection) === target) {
-            await loadImagesForCurrentScope({ resetFocus: false });
+            await loadImagesForCurrentScope({ resetFocus: false, force: true });
         }
         statusHint.set(`Added to collection. Space for next, B to exit`);
     } catch (err) {
