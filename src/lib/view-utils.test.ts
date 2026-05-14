@@ -190,21 +190,58 @@ describe('computeVisibleItems', () => {
     });
 
     it('handles negative scrollTop', () => {
-        // floor(-100/100) = -1, so firstVisibleRow = -1, but loop starts there
-        // rows are iterated from -1, but index = -1*4+col is negative → skipped by index >= totalItems check... no, it just produces negative indices
         const items = computeVisibleItems(-100, 300, 4, 100, 20);
-        // Should still produce items starting from row -1, but negative indices aren't in [0, totalItems)
-        // Actually index = -1*4+0 = -4, which is < totalItems but also < 0; implementation has no guard for this
-        expect(items.length).toBeGreaterThan(0);
-        // At least the non-negative indexed items should be present
-        const positiveItems = items.filter(i => i.index >= 0);
-        expect(positiveItems.length).toBeGreaterThan(0);
+        expect(items[0].index).toBe(0);
+        expect(items.every(i => i.index >= 0)).toBe(true);
     });
 
     it('handles containerHeight=0', () => {
         // ceil(0/100)+2 = 2 visible rows → up to 2*4=8 items
         const items = computeVisibleItems(0, 0, 4, 100, 20);
         expect(items.length).toBe(8);
+    });
+
+    it('returns empty for invalid layout inputs', () => {
+        expect(computeVisibleItems(0, 600, 0, 100, 20)).toEqual([]);
+        expect(computeVisibleItems(0, 600, 4, 0, 20)).toEqual([]);
+        expect(computeVisibleItems(0, 600, 4, 100, -1)).toEqual([]);
+    });
+});
+
+describe('grid rendering performance budget', () => {
+    const totalItems = 100_000;
+    const containerWidth = 3840;
+    const containerHeight = 2160;
+    const thumbSize = 120;
+    const gap = 4;
+
+    it('keeps the render plan bounded to visible thumbnails plus overscan', () => {
+        const layout = computeGridLayout(containerWidth, thumbSize, gap, totalItems);
+        const items = computeVisibleItems(520_000, containerHeight, layout.cols, layout.cellSize, totalItems);
+        const maxVisibleItems = layout.cols * (Math.ceil(containerHeight / layout.cellSize) + 2);
+
+        expect(items.length).toBeLessThanOrEqual(maxVisibleItems);
+        expect(items.length).toBeLessThan(700);
+    });
+
+    it('computes a large-library render window within the CPU budget', () => {
+        const layout = computeGridLayout(containerWidth, thumbSize, gap, totalItems);
+        const iterations = 1_000;
+        let checksum = 0;
+
+        for (let i = 0; i < 50; i++) {
+            checksum += computeVisibleItems(i * 997, containerHeight, layout.cols, layout.cellSize, totalItems).length;
+        }
+
+        const started = globalThis.performance.now();
+        for (let i = 0; i < iterations; i++) {
+            const items = computeVisibleItems(i * 997, containerHeight, layout.cols, layout.cellSize, totalItems);
+            checksum += items.length + (items[0]?.index ?? 0);
+        }
+        const elapsedMs = globalThis.performance.now() - started;
+
+        expect(checksum).toBeGreaterThan(0);
+        expect(elapsedMs).toBeLessThan(250);
     });
 });
 

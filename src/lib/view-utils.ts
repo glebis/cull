@@ -50,7 +50,9 @@ export function computeVisibleItems(
     cellSize: number,
     totalItems: number
 ): VisibleItem[] {
-    const firstVisibleRow = Math.floor(scrollTop / cellSize);
+    if (totalItems <= 0 || cols <= 0 || cellSize <= 0) return [];
+
+    const firstVisibleRow = Math.max(0, Math.floor(scrollTop / cellSize));
     const visibleRowCount = Math.ceil(containerHeight / cellSize) + 2;
     const rows = Math.ceil(totalItems / cols);
     const lastVisibleRow = Math.min(firstVisibleRow + visibleRowCount, rows);

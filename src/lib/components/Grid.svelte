@@ -1,6 +1,7 @@
 <script lang="ts">
     import { images, selectedIds, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState } from '$lib/stores';
     import { loadMoreImagesForCurrentScope } from '$lib/image-loading';
+    import { computeGridLayout, computeVisibleItems } from '$lib/view-utils';
     import Thumbnail from './Thumbnail.svelte';
 
     let containerEl: HTMLDivElement | undefined = $state(undefined);
@@ -15,38 +16,15 @@
     let gap = $state(4);
     gridGap.subscribe(v => gap = v);
 
-    let cols = $derived(Math.max(1, Math.floor((containerWidth + gap) / (size + gap))));
-    let cellSize = $derived(size + gap);
-    let rows = $derived(Math.ceil($images.length / cols));
-    let totalHeight = $derived(rows * cellSize);
-
-    let firstVisibleRow = $derived(Math.floor(scrollTop / cellSize));
-    let visibleRows = $derived(Math.ceil(containerHeight / cellSize) + 2);
-    let lastVisibleRow = $derived(Math.min(firstVisibleRow + visibleRows, rows));
-
-    interface VisibleItem {
-        index: number;
-        item: typeof $images[0];
-        x: number;
-        y: number;
-    }
+    let layout = $derived(computeGridLayout(containerWidth, size, gap, $images.length));
+    let cols = $derived(layout.cols);
+    let cellSize = $derived(layout.cellSize);
+    let totalHeight = $derived(layout.totalHeight);
 
     let visibleItems = $derived.by(() => {
-        const items: VisibleItem[] = [];
         const imgs = $images;
-        for (let row = firstVisibleRow; row < lastVisibleRow; row++) {
-            for (let col = 0; col < cols; col++) {
-                const index = row * cols + col;
-                if (index >= imgs.length) break;
-                items.push({
-                    index,
-                    item: imgs[index],
-                    x: col * cellSize,
-                    y: row * cellSize,
-                });
-            }
-        }
-        return items;
+        return computeVisibleItems(scrollTop, containerHeight, layout.cols, layout.cellSize, imgs.length)
+            .map(({ index, x, y }) => ({ index, item: imgs[index], x, y }));
     });
 
     function maybeLoadMore() {
