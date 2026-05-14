@@ -139,6 +139,9 @@ export function showToast(message: string, opts?: { detail?: string; type?: Toas
 }
 
 // Embedding view state (persists across tab switches)
+export type EmbeddingInteractionMode = 'map' | 'stack' | 'review' | 'text';
+export type EmbeddingZPreset = 'projection' | 'cluster' | 'source' | 'rating' | 'decision' | 'recency' | 'resolution';
+
 export interface EmbeddingViewState {
     panX: number;
     panY: number;
@@ -148,6 +151,13 @@ export interface EmbeddingViewState {
     provider: 'clip' | 'gemini';
     projectionKey: string | null;
     hasUserView: boolean;
+    interactionMode: EmbeddingInteractionMode;
+    zPreset: EmbeddingZPreset;
+    activeZLayerKey: string | null;
+    focusActiveLayer: boolean;
+    largePreviewOpen: boolean;
+    textOutputOpen: boolean;
+    canvasLabelsOpen: boolean;
 }
 
 export const embeddingViewState = writable<EmbeddingViewState>({
@@ -159,6 +169,13 @@ export const embeddingViewState = writable<EmbeddingViewState>({
     provider: 'clip',
     projectionKey: null,
     hasUserView: false,
+    interactionMode: 'map',
+    zPreset: 'cluster',
+    activeZLayerKey: null,
+    focusActiveLayer: false,
+    largePreviewOpen: true,
+    textOutputOpen: false,
+    canvasLabelsOpen: false,
 });
 
 // Sessions
