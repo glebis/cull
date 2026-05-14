@@ -67,6 +67,8 @@ cull --json call_tool import_folder --params_json '{"folder_path":"/Users/me/ren
 
 Implemented headless tools: `get_library_stats`, `list_images`, `list_folders`, `list_collections`, `import_folder`, `import_files`, `list_export_presets`, `export_images`.
 
+CLI module and output standards live in [docs/agent-cli-standards.md](docs/agent-cli-standards.md).
+
 ## Roadmap
 
 ### P0 — Must-have for daily driver

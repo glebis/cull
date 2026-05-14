@@ -5,6 +5,8 @@ Version: 0.1.0 — Draft, 2026-05-07
 Cull ships a single `cull` binary. With no subcommand it launches the GUI. With a subcommand it runs headless and exits. Every operation available in the GUI has a CLI equivalent and a URL scheme equivalent.
 
 > Current implementation note: the first shipped headless slice is MCP-aligned. Implemented commands use MCP tool names and JSON parameter field names: `get_library_stats`, `list_images`, `list_folders`, `list_collections`, `import_folder`, `import_files`, `list_export_presets`, and `export_images`. The broader CLI below remains the draft target.
+>
+> CLI implementation standards and module ownership rules live in [agent-cli-standards.md](agent-cli-standards.md).
 
 ---
 
