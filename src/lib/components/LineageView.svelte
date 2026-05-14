@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { convertFileSrc } from '@tauri-apps/api/core';
     import { onMount } from 'svelte';
     import { lineageLayout, images, focusedIndex, navigateTo, activeCollection, activeFolder, collections, showToast } from '$lib/stores';
     import { listLineageGroups, getLineageGroupImages, renameLineageGroup, dissolveLineageGroup, type LineageGroup, type ImageWithFile } from '$lib/api';
@@ -83,9 +84,7 @@
     }
 
     function thumbnailUrl(img: ImageWithFile): string {
-        return img.thumbnail_path
-            ? `asset://localhost/${img.thumbnail_path}`
-            : `asset://localhost/${img.path}`;
+        return convertFileSrc(img.thumbnail_path ?? img.path);
     }
 
     async function handleRename(groupId: string) {

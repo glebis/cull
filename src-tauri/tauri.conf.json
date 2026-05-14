@@ -23,7 +23,9 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": {
+          "allow": ["**", "$HOME/.codex/generated_images/**"]
+        }
       }
     }
   },

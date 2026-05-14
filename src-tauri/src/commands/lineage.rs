@@ -16,10 +16,12 @@ pub async fn get_lineage_group_images(
     state: State<'_, AppState>,
     group_id: String,
 ) -> Result<Vec<ImageWithFile>, String> {
-    state
+    let mut images = state
         .db
         .get_lineage_group_images(&group_id)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    crate::services::library::enrich_thumbnails(&mut images, &state.app_data_dir);
+    Ok(images)
 }
 
 #[tauri::command]
