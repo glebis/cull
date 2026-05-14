@@ -1,3 +1,4 @@
+use super::canvas_document::CanvasDocument;
 use super::db::Database;
 use super::models::*;
 use rusqlite::{params, OptionalExtension, Result};
@@ -170,6 +171,8 @@ impl Database {
     }
 
     pub fn update_canvas_layout(&self, canvas_id: &str, layout_json: &str) -> Result<()> {
+        validate_versioned_canvas_layout(layout_json)?;
+
         let conn = self.conn.lock();
         let session_id: Option<String> = conn
             .query_row(
@@ -239,6 +242,20 @@ impl Database {
         )?;
         Ok(deleted as u32)
     }
+}
+
+fn validate_versioned_canvas_layout(layout_json: &str) -> Result<()> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(layout_json) else {
+        return Ok(());
+    };
+    if value.get("version").is_none() {
+        return Ok(());
+    }
+
+    CanvasDocument::from_layout_json(layout_json).map_err(|error| {
+        rusqlite::Error::InvalidParameterName(format!("invalid canvas layout_json: {error}"))
+    })?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -329,6 +346,22 @@ mod tests {
         db.update_canvas_layout(&cid, layout).unwrap();
         let canvases = db.list_canvases(&sid).unwrap();
         assert_eq!(canvases[0].layout_json, layout);
+    }
+
+    #[test]
+    fn test_update_canvas_layout_rejects_invalid_v1_document() {
+        let db = test_db();
+        let sid = db
+            .create_session("Invalid Layout Test", "/tmp/sessions/invalid-layout")
+            .unwrap();
+        let cid = db.create_canvas(&sid, "My Canvas", "manual").unwrap();
+        let layout = r#"{"version":2}"#;
+
+        let err = db.update_canvas_layout(&cid, layout).unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("unsupported canvas document version 2"));
     }
 
     #[test]
