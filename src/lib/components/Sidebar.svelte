@@ -1,7 +1,7 @@
 <script lang="ts">
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, showMissing } from '$lib/stores';
+    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, showMissing, requestTextInput } from '$lib/stores';
     import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, deleteCollectionApi, listSmartCollections, isYoloAvailable, isNudenetAvailable, downloadYoloModel, downloadNudenetModel, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { SmartCollection } from '$lib/api';
@@ -109,7 +109,12 @@
     }
 
     async function handleNewCollection() {
-        const name = window.prompt('Collection name:');
+        const name = await requestTextInput({
+            title: 'New Collection',
+            label: 'Collection name',
+            placeholder: 'Collection name',
+            confirmLabel: 'Create',
+        });
         if (!name || !name.trim()) return;
         try {
             await createCollection(name.trim());

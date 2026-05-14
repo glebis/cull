@@ -6,6 +6,7 @@ import {
     collections, collectMode, collectModeTarget, activeCollection,
     showDetectionBoxes, showDetectionInspector, nsfwMode,
     navigateTo, navigateBack, searchOpen, focusedImage, activeSession,
+    requestTextInput, requestCollectionTarget,
 } from './stores';
 import { computeCompareSwap } from './compare-utils';
 import type { NsfwMode } from './stores';
@@ -516,7 +517,13 @@ async function handleCreateCollectionFromSelected(inverse: boolean) {
         return;
     }
 
-    const name = window.prompt(`Collection name (${imageIds.length} images):`);
+    const name = await requestTextInput({
+        title: inverse ? 'Create Collection from Unselected' : 'Create Collection from Selection',
+        label: 'Collection name',
+        description: `${imageIds.length} images will be added.`,
+        placeholder: 'Collection name',
+        confirmLabel: 'Create',
+    });
     if (!name || !name.trim()) return;
 
     try {
@@ -545,29 +552,21 @@ async function handleToggleCollectMode() {
     const cols = get(collections);
     let targetId: string | null = null;
 
-    if (cols.length > 0) {
-        const options = cols.map((c, i) => `${i + 1}. ${c[1]}`).join('\n');
-        const choice = window.prompt(`Pick collection (number) or type a new name:\n${options}`);
-        if (!choice || !choice.trim()) return;
-        const num = parseInt(choice.trim());
-        if (!isNaN(num) && num >= 1 && num <= cols.length) {
-            targetId = cols[num - 1][0];
-        } else {
-            // Create new
-            try {
-                targetId = await createCollection(choice.trim());
-                const c = await listCollections();
-                collections.set(c);
-            } catch (err) {
-                console.error('Failed to create collection:', err);
-                return;
-            }
-        }
+    const target = await requestCollectionTarget({
+        title: 'Collect Mode',
+        description: cols.length > 0
+            ? 'Choose the collection that Space will add images to, or create a new one.'
+            : 'Create a collection that Space will add images to.',
+        collections: cols,
+        confirmLabel: 'Start',
+    });
+    if (!target) return;
+
+    if (target.type === 'existing') {
+        targetId = target.collectionId;
     } else {
-        const name = window.prompt('No collections yet. Name for new collection:');
-        if (!name || !name.trim()) return;
         try {
-            targetId = await createCollection(name.trim());
+            targetId = await createCollection(target.name);
             const c = await listCollections();
             collections.set(c);
         } catch (err) {

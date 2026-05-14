@@ -3,7 +3,7 @@
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
     import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, moveImage, renameImage, listFolders, getImagesByIds } from '$lib/api';
     import type { ImageWithFile } from '$lib/api';
-    import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast } from '$lib/stores';
+    import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast, requestTextInput } from '$lib/stores';
     import { clearImageScope, invalidateImageCache, loadImagesForCurrentScope, resetImagePaging } from '$lib/image-loading';
     import { filterMoveFolders, folderDisplayName, folderParentPath } from '$lib/move-menu-utils';
 
@@ -158,7 +158,14 @@
 
     async function handleNewCollection() {
         onclose();
-        const name = window.prompt('Collection name:');
+        const imageLabel = targetIds.length === 1 ? '1 image' : `${targetIds.length} images`;
+        const name = await requestTextInput({
+            title: 'New Collection',
+            label: 'Collection name',
+            description: `${imageLabel} will be added.`,
+            placeholder: 'Collection name',
+            confirmLabel: 'Create and Add',
+        });
         if (!name?.trim()) return;
         const colId = await createCollection(name.trim());
         await addToCollection(colId, targetIds);
@@ -219,7 +226,12 @@
     async function handleRename() {
         onclose();
         const currentName = image.path.split('/').pop() ?? '';
-        const newName = window.prompt('Rename file:', currentName);
+        const newName = await requestTextInput({
+            title: 'Rename File',
+            label: 'File name',
+            initialValue: currentName,
+            confirmLabel: 'Rename',
+        });
         if (!newName?.trim() || newName.trim() === currentName) return;
         try {
             await renameImage(image.image.id, newName.trim());

@@ -79,6 +79,99 @@ export const minSizeFilter = writable<number>(0);
 export const showMissing = writable<boolean>(false);
 export const activeDetectedClass = writable<string | null>(null);
 
+// Custom dialogs
+export interface TextInputDialogOptions {
+    title: string;
+    label?: string;
+    description?: string;
+    initialValue?: string;
+    placeholder?: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+}
+
+export interface TextInputDialogRequest extends TextInputDialogOptions {
+    id: number;
+    resolve: (value: string | null) => void;
+}
+
+export type CollectionTargetDialogResult =
+    | { type: 'existing'; collectionId: string }
+    | { type: 'new'; name: string };
+
+export interface CollectionTargetDialogOptions {
+    title: string;
+    description?: string;
+    collections: [string, string, number][];
+    initialName?: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+}
+
+export interface CollectionTargetDialogRequest extends CollectionTargetDialogOptions {
+    id: number;
+    resolve: (value: CollectionTargetDialogResult | null) => void;
+}
+
+export const textInputDialog = writable<TextInputDialogRequest | null>(null);
+export const collectionTargetDialog = writable<CollectionTargetDialogRequest | null>(null);
+
+let textInputDialogId = 0;
+let collectionTargetDialogId = 0;
+
+function cancelActiveCollectionTargetDialog() {
+    const active = get(collectionTargetDialog);
+    if (!active) return;
+    collectionTargetDialog.set(null);
+    active.resolve(null);
+}
+
+function cancelActiveTextInputDialog() {
+    const active = get(textInputDialog);
+    if (!active) return;
+    textInputDialog.set(null);
+    active.resolve(null);
+}
+
+export function requestTextInput(options: TextInputDialogOptions): Promise<string | null> {
+    cancelActiveCollectionTargetDialog();
+    cancelActiveTextInputDialog();
+    return new Promise(resolve => {
+        textInputDialog.set({
+            id: ++textInputDialogId,
+            ...options,
+            resolve,
+        });
+    });
+}
+
+export function resolveTextInputDialog(value: string | null) {
+    const active = get(textInputDialog);
+    if (!active) return;
+    textInputDialog.set(null);
+    active.resolve(value);
+}
+
+export function requestCollectionTarget(options: CollectionTargetDialogOptions): Promise<CollectionTargetDialogResult | null> {
+    cancelActiveTextInputDialog();
+    cancelActiveCollectionTargetDialog();
+    return new Promise(resolve => {
+        collectionTargetDialog.set({
+            id: ++collectionTargetDialogId,
+            ...options,
+            collections: options.collections.map(([id, name, count]) => [id, name, count]),
+            resolve,
+        });
+    });
+}
+
+export function resolveCollectionTargetDialog(value: CollectionTargetDialogResult | null) {
+    const active = get(collectionTargetDialog);
+    if (!active) return;
+    collectionTargetDialog.set(null);
+    active.resolve(value);
+}
+
 // Collections
 export const collections = writable<[string, string, number][]>([]); // [id, name, count]
 export const activeCollection = writable<string | null>(null);

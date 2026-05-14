@@ -1,7 +1,7 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { onMount } from 'svelte';
-    import { lineageLayout, images, focusedIndex, navigateTo, activeCollection, activeFolder, collections, showToast } from '$lib/stores';
+    import { lineageLayout, images, focusedIndex, navigateTo, activeCollection, activeFolder, collections, showToast, requestTextInput } from '$lib/stores';
     import { listLineageGroups, getLineageGroupImages, renameLineageGroup, dissolveLineageGroup, type LineageGroup, type ImageWithFile } from '$lib/api';
     import type { LineageLayout } from '$lib/stores';
 
@@ -89,7 +89,12 @@
 
     async function handleRename(groupId: string) {
         const group = groups.find(g => g.id === groupId);
-        const name = window.prompt('Rename lineage group:', group?.name ?? '');
+        const name = await requestTextInput({
+            title: 'Rename Lineage Group',
+            label: 'Group name',
+            initialValue: group?.name ?? '',
+            confirmLabel: 'Rename',
+        });
         if (!name || !name.trim()) return;
         try {
             await renameLineageGroup(groupId, name.trim());

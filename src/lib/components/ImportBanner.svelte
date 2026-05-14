@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { importBatchFilter, importBatchImageIds, pinnedCollection, collections, activeCollection, activeFolder, activeSmartCollection, activeDetectedClass, showToast } from '$lib/stores';
+    import { importBatchFilter, importBatchImageIds, pinnedCollection, collections, activeCollection, activeFolder, activeSmartCollection, activeDetectedClass, showToast, requestTextInput } from '$lib/stores';
     import { createCollection, addToCollection, listCollections } from '$lib/api';
     import { invalidateImageCache, loadAllImages } from '$lib/image-loading';
     import { get } from 'svelte/store';
@@ -17,7 +17,12 @@
         const batchId = get(importBatchFilter);
         if (!batchId) return;
 
-        const name = window.prompt('Collection name:', `Import ${new Date().toLocaleString()}`);
+        const name = await requestTextInput({
+            title: 'Save Import as Collection',
+            label: 'Collection name',
+            initialValue: `Import ${new Date().toLocaleString()}`,
+            confirmLabel: 'Save',
+        });
         if (!name || !name.trim()) return;
 
         try {
