@@ -18,12 +18,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::State;
 
-use crate::db_core::canvas_document::CanvasDocument;
+use crate::db_core::canvas_document::{
+    CanvasDocument, CanvasExportBackground, CanvasExportBounds, CanvasItem, CanvasItemFit,
+};
 use crate::db_core::models::{Canvas, ImageWithFile};
 use crate::AppState;
 
 const MODULE_KEY: &str = "module_static_publishing";
 const SCHEMA_VERSION: &str = "cull.static_publishing.v1";
+const MAX_SNAPSHOT_LONG_EDGE: f64 = 4096.0;
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct StaticPublishCanvasItem {
@@ -64,6 +67,8 @@ pub struct StaticPublishResult {
     pub manifest_path: String,
     pub instructions_path: String,
     pub qr_svg_path: String,
+    pub snapshot_png_path: Option<String>,
+    pub snapshot_pdf_path: Option<String>,
     pub qr_target_url: String,
     pub access_phrase: String,
     pub image_count: usize,
@@ -84,6 +89,20 @@ struct VariantPaths {
     thumb: Option<String>,
     web: Option<String>,
     full: Option<String>,
+}
+
+struct SnapshotExport {
+    png_path: String,
+    pdf_path: String,
+    manifest: Value,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SnapshotBounds {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
 }
 
 #[tauri::command]
@@ -255,6 +274,15 @@ fn export_static_publish_package_with_canvas_inner(
         .as_deref()
         .and_then(|raw| serde_json::from_str(raw).ok())
         .unwrap_or_else(|| json!({ "type": "ordered_canvas_snapshot" }));
+    let snapshot = request
+        .layout_json
+        .as_deref()
+        .and_then(|raw| CanvasDocument::from_layout_json(raw).ok())
+        .and_then(|document| {
+            export_canvas_snapshot(state, &document, &images_by_id, &site_dir, &mut warnings)
+                .transpose()
+        })
+        .transpose()?;
 
     let manifest = json!({
         "schema": SCHEMA_VERSION,
@@ -279,6 +307,7 @@ fn export_static_publish_package_with_canvas_inner(
             "full": request.include_full
         },
         "layout": layout,
+        "snapshots": snapshot.as_ref().map(|snapshot| snapshot.manifest.clone()),
         "images": manifest_items,
         "warnings": warnings
     });
@@ -300,6 +329,8 @@ fn export_static_publish_package_with_canvas_inner(
         manifest_path: manifest_path.to_string_lossy().to_string(),
         instructions_path: instructions_path.to_string_lossy().to_string(),
         qr_svg_path: qr_svg_path.to_string_lossy().to_string(),
+        snapshot_png_path: snapshot.as_ref().map(|snapshot| snapshot.png_path.clone()),
+        snapshot_pdf_path: snapshot.as_ref().map(|snapshot| snapshot.pdf_path.clone()),
         qr_target_url: share_url,
         access_phrase,
         image_count: manifest["images"]
@@ -543,6 +574,260 @@ fn export_image_variants(
     Ok(VariantPaths { thumb, web, full })
 }
 
+fn export_canvas_snapshot(
+    state: &AppState,
+    document: &CanvasDocument,
+    images_by_id: &HashMap<String, ImageWithFile>,
+    site_dir: &Path,
+    warnings: &mut Vec<String>,
+) -> Result<Option<SnapshotExport>, String> {
+    let mut render_items: Vec<(&CanvasItem, &ImageWithFile)> = document
+        .items
+        .iter()
+        .filter(|item| !item.hidden)
+        .filter_map(|item| images_by_id.get(&item.image_id).map(|image| (item, image)))
+        .collect();
+
+    if render_items.is_empty() {
+        return Ok(None);
+    }
+
+    render_items.sort_by_key(|(item, _)| item.z);
+    let Some(bounds) = calculate_snapshot_bounds(&render_items, &document.export.bounds, warnings)
+    else {
+        return Ok(None);
+    };
+
+    let scale = snapshot_scale(bounds);
+    let output_width = scaled_dimension(bounds.width, scale);
+    let output_height = scaled_dimension(bounds.height, scale);
+    let background = background_pixel(&document.export.background);
+    let mut canvas = image::RgbaImage::from_pixel(output_width, output_height, background);
+
+    for (item, image) in render_items {
+        let source_path = crate::commands::resolve_image_path_for_ml(image, &state.app_data_dir);
+        if !source_path.exists() {
+            warnings.push(format!(
+                "Snapshot skipped image '{}' because source file does not exist at {}",
+                image.image.id,
+                source_path.display()
+            ));
+            continue;
+        }
+
+        let decoded = image::open(&source_path).map_err(|e| {
+            format!(
+                "Snapshot could not decode image '{}' at {}: {}",
+                image.image.id,
+                source_path.display(),
+                e
+            )
+        })?;
+        let decoded = if let Some(crop) = item.transform.crop.as_ref() {
+            crop_image(decoded, crop)
+        } else {
+            decoded
+        };
+
+        if item.transform.rotation_degrees.abs() > f64::EPSILON {
+            warnings.push(format!(
+                "Snapshot ignored rotation for canvas item '{}'",
+                item.id
+            ));
+        }
+
+        let target_width = scaled_dimension(item.width, scale);
+        let target_height = scaled_dimension(item.height, scale);
+        let rendered =
+            render_item_image(&decoded, target_width, target_height, &item.transform.fit);
+        let x = scaled_offset(item.x, bounds.x, scale);
+        let y = scaled_offset(item.y, bounds.y, scale);
+        image::imageops::overlay(&mut canvas, &rendered, x, y);
+    }
+
+    let exports_dir = site_dir.join("exports");
+    fs::create_dir_all(&exports_dir)
+        .map_err(|e| format!("Failed to create snapshot export dir: {}", e))?;
+    let png_path = exports_dir.join("canvas.png");
+    let pdf_path = exports_dir.join("canvas.pdf");
+
+    canvas
+        .save_with_format(&png_path, image::ImageFormat::Png)
+        .map_err(|e| format!("Failed to write canvas PNG snapshot: {}", e))?;
+
+    let png_path_str = png_path.to_string_lossy().to_string();
+    let pdf_path_str = pdf_path.to_string_lossy().to_string();
+    crate::export::pdf::assemble_pdf(
+        &[png_path_str.clone()],
+        output_width,
+        output_height,
+        &pdf_path_str,
+    )?;
+
+    Ok(Some(SnapshotExport {
+        png_path: png_path_str,
+        pdf_path: pdf_path_str,
+        manifest: json!({
+            "policy": {
+                "bounds": "content",
+                "requested_bounds": snapshot_bounds_name(&document.export.bounds),
+                "large_canvas": format!(
+                    "Full content bounds are scaled down when the longest edge exceeds {}px.",
+                    MAX_SNAPSHOT_LONG_EDGE as u32
+                )
+            },
+            "background": snapshot_background_name(&document.export.background),
+            "bounds": {
+                "x": bounds.x,
+                "y": bounds.y,
+                "width": bounds.width,
+                "height": bounds.height,
+            },
+            "output": {
+                "width": output_width,
+                "height": output_height,
+                "scale": scale,
+            },
+            "png": "exports/canvas.png",
+            "pdf": "exports/canvas.pdf",
+        }),
+    }))
+}
+
+fn calculate_snapshot_bounds(
+    render_items: &[(&CanvasItem, &ImageWithFile)],
+    requested_bounds: &CanvasExportBounds,
+    warnings: &mut Vec<String>,
+) -> Option<SnapshotBounds> {
+    match requested_bounds {
+        CanvasExportBounds::Content => {}
+        CanvasExportBounds::Viewport => warnings.push(
+            "Canvas snapshot bounds 'viewport' are not exportable without viewport dimensions; using full content bounds".to_string(),
+        ),
+        CanvasExportBounds::Selection => warnings.push(
+            "Canvas snapshot bounds 'selection' are not exportable without a saved selection frame; using full content bounds".to_string(),
+        ),
+    }
+
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+
+    for (item, _) in render_items {
+        min_x = min_x.min(item.x);
+        min_y = min_y.min(item.y);
+        max_x = max_x.max(item.x + item.width);
+        max_y = max_y.max(item.y + item.height);
+    }
+
+    let width = max_x - min_x;
+    let height = max_y - min_y;
+    if width <= 0.0 || height <= 0.0 {
+        None
+    } else {
+        Some(SnapshotBounds {
+            x: min_x,
+            y: min_y,
+            width,
+            height,
+        })
+    }
+}
+
+fn snapshot_scale(bounds: SnapshotBounds) -> f64 {
+    let longest_edge = bounds.width.max(bounds.height);
+    if longest_edge > MAX_SNAPSHOT_LONG_EDGE {
+        MAX_SNAPSHOT_LONG_EDGE / longest_edge
+    } else {
+        1.0
+    }
+}
+
+fn scaled_dimension(value: f64, scale: f64) -> u32 {
+    ((value * scale).round().max(1.0)) as u32
+}
+
+fn scaled_offset(value: f64, origin: f64, scale: f64) -> i64 {
+    ((value - origin) * scale).round() as i64
+}
+
+fn background_pixel(background: &CanvasExportBackground) -> image::Rgba<u8> {
+    match background {
+        CanvasExportBackground::Transparent => image::Rgba([0, 0, 0, 0]),
+        CanvasExportBackground::Canvas => image::Rgba([8, 8, 12, 255]),
+        CanvasExportBackground::White => image::Rgba([255, 255, 255, 255]),
+    }
+}
+
+fn crop_image(
+    image: image::DynamicImage,
+    crop: &crate::db_core::canvas_document::CanvasCrop,
+) -> image::DynamicImage {
+    let width = image.width() as f64;
+    let height = image.height() as f64;
+    let normalized = crop.x >= 0.0 && crop.y >= 0.0 && crop.width <= 1.0 && crop.height <= 1.0;
+
+    let x = if normalized { crop.x * width } else { crop.x }.clamp(0.0, width - 1.0);
+    let y = if normalized { crop.y * height } else { crop.y }.clamp(0.0, height - 1.0);
+    let crop_width = if normalized {
+        crop.width * width
+    } else {
+        crop.width
+    }
+    .clamp(1.0, width - x);
+    let crop_height = if normalized {
+        crop.height * height
+    } else {
+        crop.height
+    }
+    .clamp(1.0, height - y);
+
+    image.crop_imm(
+        x.round() as u32,
+        y.round() as u32,
+        crop_width.round() as u32,
+        crop_height.round() as u32,
+    )
+}
+
+fn render_item_image(
+    image: &image::DynamicImage,
+    width: u32,
+    height: u32,
+    fit: &CanvasItemFit,
+) -> image::RgbaImage {
+    let filter = image::imageops::FilterType::Lanczos3;
+    match fit {
+        CanvasItemFit::Stretch => image.resize_exact(width, height, filter).to_rgba8(),
+        CanvasItemFit::Cover => image.resize_to_fill(width, height, filter).to_rgba8(),
+        CanvasItemFit::Contain => {
+            let resized = image.resize(width, height, filter).to_rgba8();
+            let x = ((width.saturating_sub(resized.width())) / 2) as i64;
+            let y = ((height.saturating_sub(resized.height())) / 2) as i64;
+            let mut layer = image::RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
+            image::imageops::overlay(&mut layer, &resized, x, y);
+            layer
+        }
+    }
+}
+
+fn snapshot_bounds_name(bounds: &CanvasExportBounds) -> &'static str {
+    match bounds {
+        CanvasExportBounds::Content => "content",
+        CanvasExportBounds::Viewport => "viewport",
+        CanvasExportBounds::Selection => "selection",
+    }
+}
+
+fn snapshot_background_name(background: &CanvasExportBackground) -> &'static str {
+    match background {
+        CanvasExportBackground::Transparent => "transparent",
+        CanvasExportBackground::Canvas => "canvas",
+        CanvasExportBackground::White => "white",
+    }
+}
+
 fn write_json(path: &Path, value: &Value) -> Result<(), String> {
     let payload = serde_json::to_string_pretty(value)
         .map_err(|e| format!("Failed to serialize manifest: {}", e))?;
@@ -643,6 +928,10 @@ fn render_index_html() -> &'static str {
     .share img { width: 56px; height: 56px; border-radius: 4px; background: white; }
     .share a { color: var(--blue); overflow-wrap: anywhere; }
     main { padding: 18px; }
+    .snapshot { margin-bottom: 18px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); overflow: hidden; }
+    .snapshot-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    .snapshot-links { display: flex; gap: 10px; }
+    .snapshot img { display: block; width: 100%; height: auto; background: #ffffff; }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
     figure { margin: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); overflow: hidden; }
     figure img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: #050508; }
@@ -669,6 +958,16 @@ fn render_index_html() -> &'static str {
     </div>
   </header>
   <main>
+    <section id="snapshot" class="snapshot" hidden>
+      <div class="snapshot-head">
+        <strong>Canvas snapshot</strong>
+        <div class="snapshot-links">
+          <a id="snapshot-png" href="#">PNG</a>
+          <a id="snapshot-pdf" href="#">PDF</a>
+        </div>
+      </div>
+      <img id="snapshot-image" alt="Canvas snapshot" />
+    </section>
     <div id="grid" class="grid"></div>
     <p id="empty" class="empty" hidden>No images in this package.</p>
   </main>
@@ -678,6 +977,10 @@ fn render_index_html() -> &'static str {
     const title = document.getElementById('title');
     const summary = document.getElementById('summary');
     const shareUrl = document.getElementById('share-url');
+    const snapshot = document.getElementById('snapshot');
+    const snapshotImage = document.getElementById('snapshot-image');
+    const snapshotPng = document.getElementById('snapshot-png');
+    const snapshotPdf = document.getElementById('snapshot-pdf');
 
     fetch('./data/canvas.json')
       .then(response => response.json())
@@ -688,6 +991,12 @@ fn render_index_html() -> &'static str {
         shareUrl.textContent = data.share?.url || window.location.href;
         shareUrl.href = data.share?.url || window.location.href;
         empty.hidden = images.length !== 0;
+        if (data.snapshots?.png) {
+          snapshot.hidden = false;
+          snapshotImage.src = data.snapshots.png;
+          snapshotPng.href = data.snapshots.png;
+          snapshotPdf.href = data.snapshots.pdf || data.snapshots.png;
+        }
 
         for (const item of images) {
           const src = item.files?.web || item.files?.thumb || item.files?.full;
@@ -728,6 +1037,10 @@ fn render_claude_handoff(
         .as_array()
         .map(|items| items.len())
         .unwrap_or(0);
+    let snapshot_lines = manifest["snapshots"]
+        .as_object()
+        .map(|_| "- PNG snapshot: `exports/canvas.png`\n- PDF snapshot: `exports/canvas.pdf`\n")
+        .unwrap_or("");
     format!(
         r#"# Cull Static Publishing Handoff
 
@@ -742,6 +1055,7 @@ Build or publish this package as a read-only presentation site.
 - Share URL for QR: `{}`
 - Access phrase: `{}`
 - Images exported: `{}`
+{}
 
 ## Intended Workflow
 
@@ -764,7 +1078,8 @@ Build or publish this package as a read-only presentation site.
         site_dir.display(),
         share_url,
         access_phrase,
-        image_count
+        image_count,
+        snapshot_lines
     )
 }
 
@@ -825,7 +1140,7 @@ mod tests {
         let (state, tmp) = test_state();
         state.db.set_setting(MODULE_KEY, "true").unwrap();
 
-        let source_path = tmp.path().join("source.jpg");
+        let source_path = tmp.path().join("source.png");
         write_test_image(&source_path);
         let image_id =
             crate::db_core::import::import_file(&state.db, &source_path, &state.app_data_dir)
@@ -886,7 +1201,7 @@ mod tests {
         let (state, tmp) = test_state();
         state.db.set_setting(MODULE_KEY, "true").unwrap();
 
-        let source_path = tmp.path().join("source.jpg");
+        let source_path = tmp.path().join("source.png");
         write_test_image(&source_path);
         let image_id =
             crate::db_core::import::import_file(&state.db, &source_path, &state.app_data_dir)
@@ -978,6 +1293,106 @@ mod tests {
         assert_eq!(first_image["canvas"]["width"], 320.0);
         assert_eq!(first_image["canvas"]["height"], 180.0);
         assert_eq!(first_image["canvas"]["hidden"], true);
+    }
+
+    #[test]
+    fn export_saved_canvas_writes_full_content_png_and_pdf_snapshot() {
+        let (state, tmp) = test_state();
+        state.db.set_setting(MODULE_KEY, "true").unwrap();
+
+        let source_path = tmp.path().join("source.png");
+        write_test_image(&source_path);
+        let image_id =
+            crate::db_core::import::import_file(&state.db, &source_path, &state.app_data_dir)
+                .unwrap()
+                .unwrap();
+        let session_id = state
+            .db
+            .create_session("Snapshot Session", &tmp.path().to_string_lossy())
+            .unwrap();
+        let canvas_id = state
+            .db
+            .create_canvas(&session_id, "Snapshot Canvas", "manual")
+            .unwrap();
+        let layout_json = format!(
+            r#"{{
+                "version": 1,
+                "viewport": {{ "panX": 0, "panY": 0, "zoom": 1 }},
+                "items": [
+                    {{
+                        "id": "visible-item",
+                        "imageId": "{}",
+                        "x": 120,
+                        "y": 80,
+                        "width": 160,
+                        "height": 120,
+                        "z": 2,
+                        "hidden": false,
+                        "label": "Visible",
+                        "groupId": null
+                    }},
+                    {{
+                        "id": "hidden-item",
+                        "imageId": "{}",
+                        "x": -500,
+                        "y": -500,
+                        "width": 100,
+                        "height": 100,
+                        "z": 1,
+                        "hidden": true,
+                        "label": null,
+                        "groupId": null
+                    }}
+                ],
+                "groups": [],
+                "connectors": [],
+                "annotations": [],
+                "export": {{ "defaultPresetId": null, "background": "white", "bounds": "content" }}
+            }}"#,
+            image_id, image_id
+        );
+        state
+            .db
+            .update_canvas_layout(&canvas_id, &layout_json)
+            .unwrap();
+
+        let result = export_static_publish_canvas_inner(
+            &state,
+            StaticPublishCanvasRequest {
+                canvas_id,
+                output_dir: Some(tmp.path().join("exports").to_string_lossy().to_string()),
+                share_url: None,
+                include_thumbnails: true,
+                include_web: false,
+                include_full: false,
+            },
+        )
+        .unwrap();
+
+        let png_path = PathBuf::from(result.snapshot_png_path.unwrap());
+        let pdf_path = PathBuf::from(result.snapshot_pdf_path.unwrap());
+        assert!(png_path.exists());
+        assert!(pdf_path.exists());
+
+        let snapshot = image::open(&png_path).unwrap().to_rgba8();
+        assert_eq!(snapshot.dimensions(), (160, 120));
+        assert_eq!(snapshot.get_pixel(80, 60).0, [32, 96, 160, 255]);
+
+        let manifest: Value = serde_json::from_str(
+            &fs::read_to_string(&result.manifest_path).expect("manifest should be readable"),
+        )
+        .unwrap();
+        assert_eq!(manifest["snapshots"]["bounds"]["x"], 120.0);
+        assert_eq!(manifest["snapshots"]["bounds"]["y"], 80.0);
+        assert_eq!(manifest["snapshots"]["bounds"]["width"], 160.0);
+        assert_eq!(manifest["snapshots"]["bounds"]["height"], 120.0);
+        assert_eq!(manifest["snapshots"]["policy"]["bounds"], "content");
+        assert_eq!(
+            manifest["snapshots"]["policy"]["requested_bounds"],
+            "content"
+        );
+        assert_eq!(manifest["snapshots"]["png"], "exports/canvas.png");
+        assert_eq!(manifest["snapshots"]["pdf"], "exports/canvas.pdf");
     }
 
     #[test]
