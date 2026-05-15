@@ -1,10 +1,11 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    import { onMount, tick } from 'svelte';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
     import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, moveImage, renameImage, listFolders, getImagesByIds } from '$lib/api';
     import type { ImageWithFile } from '$lib/api';
     import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast, requestTextInput } from '$lib/stores';
     import { clearImageScope, invalidateImageCache, loadImagesForCurrentScope, resetImagePaging } from '$lib/image-loading';
+    import { clampFloatingPosition } from '$lib/floating-position';
     import { filterMoveFolders, folderDisplayName, folderParentPath } from '$lib/move-menu-utils';
 
     interface Props {
@@ -23,7 +24,9 @@
     let folderSearch = $state('');
     let menuX = $state(0);
     let menuY = $state(0);
+    let menuReady = $state(false);
     let activeIndex = $state(0);
+    let placementRun = 0;
 
     let currentRating = $derived(image.selection?.star_rating ?? 0);
     let currentDecision = $derived(image.selection?.decision ?? 'undecided');
@@ -43,28 +46,55 @@
             : []
     );
 
-    onMount(() => {
-        menuX = x;
-        menuY = y;
-        if (menuEl) {
-            const rect = menuEl.getBoundingClientRect();
-            if (rect.right > window.innerWidth) menuX = window.innerWidth - rect.width - 8;
-            if (rect.bottom > window.innerHeight) menuY = window.innerHeight - rect.height - 8;
-            if (menuX < 0) menuX = 8;
-            if (menuY < 0) menuY = 8;
-            menuEl.focus();
-        }
+    async function placeMenu(anchorX: number, anchorY: number) {
+        const run = ++placementRun;
+        menuReady = false;
+        menuX = anchorX;
+        menuY = anchorY;
+        await tick();
 
+        if (run !== placementRun || !menuEl) return;
+
+        const rect = menuEl.getBoundingClientRect();
+        const next = clampFloatingPosition(
+            { x: anchorX, y: anchorY },
+            { width: rect.width, height: rect.height },
+            { width: window.innerWidth, height: window.innerHeight },
+        );
+
+        menuX = next.x;
+        menuY = next.y;
+        await tick();
+
+        if (run === placementRun && menuEl) {
+            menuReady = true;
+            if (!menuEl.contains(document.activeElement)) {
+                menuEl.focus();
+            }
+        }
+    }
+
+    $effect(() => {
+        if (!menuEl) return;
+        void placeMenu(x, y);
+    });
+
+    onMount(() => {
         function handleClickOutside(e: MouseEvent) {
             if (menuEl && !menuEl.contains(e.target as Node)) onclose();
+        }
+        function handleResize() {
+            void placeMenu(x, y);
         }
         setTimeout(() => {
             window.addEventListener('click', handleClickOutside);
             window.addEventListener('contextmenu', handleClickOutside);
+            window.addEventListener('resize', handleResize);
         });
         return () => {
             window.removeEventListener('click', handleClickOutside);
             window.removeEventListener('contextmenu', handleClickOutside);
+            window.removeEventListener('resize', handleResize);
         };
     });
 
@@ -323,7 +353,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
     class="context-menu"
-    style="left: {menuX}px; top: {menuY}px;"
+    style="left: {menuX}px; top: {menuY}px; visibility: {menuReady ? 'visible' : 'hidden'};"
     role="menu"
     tabindex="-1"
     bind:this={menuEl}
