@@ -57,6 +57,7 @@ pub fn tool_capability(tool_name: &str) -> &'static str {
         | "list_folder_images"
         | "list_collections"
         | "list_collection_images"
+        | "list_session_canvases"
         | "get_library_stats"
         | "get_detections"
         | "get_vision_metadata" => "library:read",
@@ -513,6 +514,7 @@ mod tests {
         assert_eq!(tool_capability("list_images"), "library:read");
         assert_eq!(tool_capability("get_image"), "library:read");
         assert_eq!(tool_capability("list_collections"), "library:read");
+        assert_eq!(tool_capability("list_session_canvases"), "library:read");
         assert_eq!(tool_capability("get_library_stats"), "library:read");
         assert_eq!(tool_capability("search_images"), "library:search");
         assert_eq!(tool_capability("find_similar"), "library:search");

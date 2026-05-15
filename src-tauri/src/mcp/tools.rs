@@ -11,7 +11,7 @@ use rmcp::{
 use tauri::{Emitter, Manager};
 
 use super::auth::{require_capability, AuthContext};
-use crate::db_core::models::TokenScope;
+use crate::db_core::models::{Canvas, TokenScope};
 use crate::services::tokens;
 use crate::AppState;
 
@@ -41,6 +41,34 @@ fn required_module_for_tool(tool_name: &str) -> Option<&'static str> {
         | "serve_static_publish_package" => Some("module_static_publishing"),
         _ => None,
     }
+}
+
+fn canvas_summaries_for_mcp(
+    canvases: Vec<Canvas>,
+    canvas_name: Option<&str>,
+) -> Vec<serde_json::Value> {
+    let name_filter = canvas_name.map(str::trim).filter(|name| !name.is_empty());
+    canvases
+        .into_iter()
+        .filter(|canvas| name_filter.map(|name| canvas.name == name).unwrap_or(true))
+        .map(|canvas| {
+            let item_count = crate::db_core::canvas_document::CanvasDocument::from_layout_json(
+                &canvas.layout_json,
+            )
+            .map(|document| document.items.len())
+            .unwrap_or(0);
+            serde_json::json!({
+                "id": canvas.id,
+                "session_id": canvas.session_id,
+                "name": canvas.name,
+                "type": canvas.canvas_type,
+                "sort_order": canvas.sort_order,
+                "created_at": canvas.created_at,
+                "updated_at": canvas.updated_at,
+                "item_count": item_count,
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -162,6 +190,14 @@ impl CullMcp {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct EmptyParams {}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ListSessionCanvasesParams {
+    #[schemars(description = "Session ID whose saved canvases should be listed")]
+    pub session_id: String,
+    #[schemars(description = "Optional exact Canvas name filter")]
+    pub canvas_name: Option<String>,
+}
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ListImagesParams {
@@ -1514,6 +1550,23 @@ impl CullMcp {
     }
 
     #[tool(
+        description = "List saved Canvas records for a session, optionally filtered by exact canvas_name. Use this to resolve a canvas_id before exporting a saved Canvas."
+    )]
+    fn list_session_canvases(
+        &self,
+        Parameters(params): Parameters<ListSessionCanvasesParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state.db.list_canvases(&params.session_id) {
+            Ok(canvases) => {
+                let result = canvas_summaries_for_mcp(canvases, params.canvas_name.as_deref());
+                serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(
         description = "Export images selected by image_ids, collection_id, or folder_path to an output directory."
     )]
     fn export_images(
@@ -1744,7 +1797,7 @@ impl ServerHandler for CullMcp {
 #[cfg(test)]
 mod tests {
     use super::AuthContext;
-    use crate::db_core::models::{McpToken, TokenScope};
+    use crate::db_core::models::{Canvas, McpToken, TokenScope};
     use crate::services::tokens;
 
     // --- Path redaction (tests production `redact_path`) ---
@@ -2066,6 +2119,25 @@ mod tests {
         assert!(json.contains("\"status\":\"failed\""));
     }
 
+    #[test]
+    fn test_list_session_canvases_filters_by_exact_name() {
+        let canvases = vec![
+            canvas_fixture("canvas-a", "Board", 0),
+            canvas_fixture("canvas-b", "References", 1),
+            canvas_fixture("canvas-c", "Board", 2),
+        ];
+
+        let result = super::canvas_summaries_for_mcp(canvases, Some("Board"));
+        let ids: Vec<&str> = result
+            .iter()
+            .filter_map(|value| value["id"].as_str())
+            .collect();
+
+        assert_eq!(ids, vec!["canvas-a", "canvas-c"]);
+        assert_eq!(result[0]["item_count"], 0);
+        assert!(result[0].get("layout_json").is_none());
+    }
+
     // --- Tool capability mapping completeness ---
 
     #[test]
@@ -2077,6 +2149,7 @@ mod tests {
             "list_folder_images",
             "list_collections",
             "list_collection_images",
+            "list_session_canvases",
             "get_library_stats",
             "get_detections",
             "get_vision_metadata",
@@ -2144,6 +2217,21 @@ mod tests {
                 "Tool '{}' should map to export:read",
                 tool
             );
+        }
+    }
+
+    fn canvas_fixture(id: &str, name: &str, sort_order: i32) -> Canvas {
+        Canvas {
+            id: id.to_string(),
+            session_id: "session-1".to_string(),
+            name: name.to_string(),
+            canvas_type: "manual".to_string(),
+            layout_json: "{}".to_string(),
+            filter_json: None,
+            grid_config_json: None,
+            sort_order,
+            created_at: "2026-05-15T00:00:00Z".to_string(),
+            updated_at: "2026-05-15T01:00:00Z".to_string(),
         }
     }
 
