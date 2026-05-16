@@ -30,6 +30,12 @@ describe('parseDeepLinkUrl', () => {
         expect(params.gap).toBe(4);
     });
 
+    it('parses image_id focus params', () => {
+        const params = parseDeepLinkUrl('cull://loupe?image_id=img-123');
+        expect(params.view).toBe('loupe');
+        expect(params.image_id).toBe('img-123');
+    });
+
     it('parses fullscreen flag', () => {
         const params = parseDeepLinkUrl('cull://open?fullscreen=true');
         expect(params.fullscreen).toBe(true);

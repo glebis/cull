@@ -70,6 +70,7 @@ tempfile = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage"] }
 objc2-foundation = { version = "0.3", features = ["NSString", "NSLocale", "NSError", "NSThread", "block2"] }
 objc2-speech = "0.3"
 objc2-avf-audio = "0.3"

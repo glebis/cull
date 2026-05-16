@@ -5,6 +5,7 @@ import {
     viewMode,
     thumbnailSize,
     focusedIndex,
+    focusedImageOverride,
     images,
     gridGap,
     loupeScale,
@@ -23,7 +24,7 @@ import {
     collections,
     type ViewMode,
 } from './stores';
-import { importFolder, importFiles, addToCollection, listCollections, getBatchImages, listFolders } from './api';
+import { importFolder, importFiles, addToCollection, listCollections, getBatchImages, listFolders, getImagesByIds, getImageByPath, drainPendingOpenParams } from './api';
 import { clearImageScope, invalidateImageCache, loadAllImages, loadImagesForCurrentScope, loadImagesUntil, resetImagePaging } from './image-loading';
 
 interface OpenParams {
@@ -34,11 +35,53 @@ interface OpenParams {
     size?: number | null;
     zoom?: number | null;
     fullscreen?: boolean | null;
-    focus?: number | null;
+    focus?: number | string | null;
+    image_id?: string | null;
+    imageId?: string | null;
     gap?: number | null;
 }
 
 const VALID_VIEWS: ViewMode[] = ['grid', 'compare', 'loupe', 'canvas', 'lineage', 'embeddings', 'export'];
+
+function focusIndex(index: number) {
+    focusedImageOverride.set(null);
+    focusedIndex.set(index);
+}
+
+function imageIdFromParams(params: OpenParams): string | null {
+    if (params.image_id) return params.image_id;
+    if (params.imageId) return params.imageId;
+    if (typeof params.focus === 'string' && params.focus.trim() !== '') return params.focus;
+    return null;
+}
+
+async function focusImageById(imageId: string): Promise<boolean> {
+    const loaded = get(images) ?? [];
+    const loadedIndex = loaded.findIndex(img => img.image.id === imageId);
+    if (loadedIndex >= 0) {
+        focusIndex(loadedIndex);
+        return true;
+    }
+
+    const pagedIndex = await loadImagesUntil((img) => img.image.id === imageId);
+    if (pagedIndex >= 0) {
+        focusIndex(pagedIndex);
+        return true;
+    }
+
+    try {
+        const [img] = await getImagesByIds([imageId]);
+        if (img) {
+            focusedImageOverride.set(img);
+            return true;
+        }
+    } catch (e) {
+        console.error('Deep link: failed to load image by id', e);
+    }
+
+    showToast('Image not found', { detail: imageId, type: 'error', duration: 8000 });
+    return false;
+}
 
 export async function handleParams(params: OpenParams) {
     console.log('[deep-link] handleParams called:', JSON.stringify(params));
@@ -72,7 +115,7 @@ export async function handleParams(params: OpenParams) {
             activeFolder.set(params.folder);
             const folderName = params.folder.split('/').filter(Boolean).pop() ?? params.folder;
             await loadImagesForCurrentScope({ force: true, invalidateCache: true });
-            focusedIndex.set(0);
+            focusIndex(0);
             // Refresh folder list in sidebar
             const f = await listFolders();
             folders.set(f);
@@ -109,9 +152,16 @@ export async function handleParams(params: OpenParams) {
                 await loadAllImages({ force: true, invalidateCache: true });
             }
             const firstId = result.image_ids[0];
-            if (firstId) {
-                const idx = await loadImagesUntil((img) => img.image.id === firstId);
-                if (idx >= 0) focusedIndex.set(idx);
+            let targetImage = firstId ? null : await getImageByPath(params.path);
+            const targetId = firstId ?? targetImage?.image.id;
+            if (targetId) {
+                const idx = await loadImagesUntil((img) => img.image.id === targetId);
+                if (idx >= 0) {
+                    focusIndex(idx);
+                } else {
+                    targetImage = targetImage ?? await getImageByPath(params.path);
+                    if (targetImage) focusedImageOverride.set(targetImage);
+                }
             }
         } catch (e) {
             console.error('Deep link: failed to import path', e);
@@ -138,9 +188,9 @@ export async function handleParams(params: OpenParams) {
                 const firstId = result.image_ids[0];
                 if (firstId) {
                     const idx = await loadImagesUntil((img) => img.image.id === firstId);
-                    focusedIndex.set(idx >= 0 ? idx : 0);
+                    focusIndex(idx >= 0 ? idx : 0);
                 } else {
-                    focusedIndex.set(0);
+                    focusIndex(0);
                 }
 
                 const collName = c.find(([id]) => id === pinned)?.[1] ?? 'collection';
@@ -157,19 +207,22 @@ export async function handleParams(params: OpenParams) {
                 images.set(batchImgs);
                 importBatchFilter.set(result.batch_id);
                 importBatchImageIds.set(result.image_ids);
-                focusedIndex.set(0);
+                focusIndex(0);
             } else {
                 await loadAllImages({ force: true, invalidateCache: true });
-                focusedIndex.set(0);
+                focusIndex(0);
             }
         } catch (e) {
             console.error('Deep link: failed to import paths', e);
         }
     }
 
-    // Handle focus index
-    if (params.focus != null) {
-        focusedIndex.set(params.focus);
+    // Handle explicit image-id focus from MCP/display integrations, or numeric index focus from URLs.
+    const imageId = imageIdFromParams(params);
+    if (imageId) {
+        await focusImageById(imageId);
+    } else if (typeof params.focus === 'number' && Number.isFinite(params.focus)) {
+        focusIndex(params.focus);
     }
 
     // Handle fullscreen
@@ -197,6 +250,7 @@ export function parseDeepLinkUrl(url: string): OpenParams {
             zoom: p.has('zoom') ? parseInt(p.get('zoom')!) : null,
             fullscreen: p.get('fullscreen') === 'true',
             focus: p.has('focus') ? parseInt(p.get('focus')!) : null,
+            image_id: p.get('image_id') ?? p.get('imageId'),
             gap: p.has('gap') ? parseInt(p.get('gap')!) : null,
         };
     } catch (e) {
@@ -239,6 +293,15 @@ export async function initDeepLink() {
     await listen<OpenParams>('open-with-params', (event) => {
         deduplicatedHandleParams(event.payload, 'open-with-params');
     });
+
+    try {
+        const pending = await drainPendingOpenParams<OpenParams>();
+        for (const params of pending) {
+            deduplicatedHandleParams(params, 'pending-open-params');
+        }
+    } catch (e) {
+        console.warn('Deep link: pending open params not available', e);
+    }
 
     // Listen for deep link URLs opened while app is running (macOS)
     try {

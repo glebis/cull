@@ -1,12 +1,13 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { listMcpTokens, createMcpToken, revokeMcpToken, rotateMcpToken, getAppSetting, setAppSetting, hasApiKey, setApiKey, deleteApiKey, validateApiKey, backfillRawPreviews } from '$lib/api';
+    import { listMcpTokens, createMcpToken, revokeMcpToken, rotateMcpToken, getAppSetting, setAppSetting, applyAppIconVariant, hasApiKey, setApiKey, deleteApiKey, validateApiKey, backfillRawPreviews } from '$lib/api';
     import type { McpToken } from '$lib/api';
+    import { APP_ICON_VARIANTS, normalizeAppIconVariant, type AppIconVariantId } from '$lib/app-icons';
     import { showToast } from '$lib/stores';
     import PrivacyDashboard from './PrivacyDashboard.svelte';
     import StaticPublishingSettings from './StaticPublishingSettings.svelte';
 
-    let activeSettingsTab = $state<'general' | 'privacy' | 'static-publishing'>('general');
+    let activeSettingsTab = $state<'general' | 'appearance' | 'privacy' | 'static-publishing'>('general');
 
     let { onclose }: { onclose: () => void } = $props();
 
@@ -28,6 +29,7 @@
     let autoPurge = $state(true);
     let moduleRaw = $state(false);
     let moduleStaticPublishing = $state(false);
+    let appIconVariant = $state<AppIconVariantId>('primary');
 
     interface ApiKeyState {
         exists: boolean;
@@ -52,7 +54,7 @@
 
     onMount(async () => {
         try {
-            const [toks, ctSetting, trashSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting] = await Promise.all([
+            const [toks, ctSetting, trashSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting, iconSetting] = await Promise.all([
                 listMcpTokens(),
                 getAppSetting('close_to_tray'),
                 getAppSetting('skip_trash_confirm'),
@@ -61,6 +63,7 @@
                 getAppSetting('auto_purge_missing'),
                 getAppSetting('module_raw'),
                 getAppSetting('module_static_publishing'),
+                getAppSetting('app_icon_variant'),
             ]);
             tokens = toks;
             closeToTray = ctSetting !== 'false';
@@ -70,6 +73,7 @@
             autoPurge = purgeSetting === 'true';
             moduleRaw = rawSetting === 'true';
             moduleStaticPublishing = staticPublishingSetting === 'true';
+            appIconVariant = normalizeAppIconVariant(iconSetting);
 
             const [hasOpenai, hasGoogle, hasOpenrouter] = await Promise.all([
                 hasApiKey('openai'),
@@ -113,6 +117,22 @@
     async function toggleAutoPurge() {
         autoPurge = !autoPurge;
         await setAppSetting('auto_purge_missing', autoPurge ? 'true' : 'false');
+    }
+
+    async function selectAppIconVariant(variant: AppIconVariantId) {
+        if (appIconVariant === variant) return;
+        const previous = appIconVariant;
+        appIconVariant = variant;
+        try {
+            await applyAppIconVariant(variant);
+            await setAppSetting('app_icon_variant', variant);
+            const selected = APP_ICON_VARIANTS.find(icon => icon.id === variant);
+            showToast(`${selected?.label ?? 'App'} icon selected`, { type: 'success', duration: 2500 });
+        } catch (e) {
+            appIconVariant = previous;
+            console.error('Failed to apply app icon:', e);
+            showToast('Could not apply app icon', { detail: String(e), type: 'error', duration: 5000 });
+        }
     }
 
     async function toggleModuleRaw() {
@@ -246,6 +266,7 @@
 
         <div class="settings-tabs">
             <button class="settings-tab" class:active={activeSettingsTab === 'general'} onclick={() => activeSettingsTab = 'general'}>General</button>
+            <button class="settings-tab" class:active={activeSettingsTab === 'appearance'} onclick={() => activeSettingsTab = 'appearance'}>Appearance</button>
             <button class="settings-tab" class:active={activeSettingsTab === 'privacy'} onclick={() => activeSettingsTab = 'privacy'}>Privacy & Data</button>
             {#if moduleStaticPublishing}
                 <button class="settings-tab" class:active={activeSettingsTab === 'static-publishing'} onclick={() => activeSettingsTab = 'static-publishing'}>Static Publishing</button>
@@ -255,6 +276,30 @@
         {#if activeSettingsTab === 'privacy'}
             <div class="section">
                 <PrivacyDashboard />
+            </div>
+        {:else if activeSettingsTab === 'appearance'}
+            <div class="section">
+                <div class="section-header">Icon Color</div>
+                <div class="icon-grid">
+                    {#each APP_ICON_VARIANTS as variant}
+                        <button
+                            type="button"
+                            class="icon-option"
+                            class:active={appIconVariant === variant.id}
+                            aria-pressed={appIconVariant === variant.id}
+                            aria-label={`Use ${variant.label} app icon`}
+                            onclick={() => selectAppIconVariant(variant.id)}
+                        >
+                            <span class="icon-preview">
+                                <img src={variant.asset} alt="" />
+                            </span>
+                            <span class="icon-copy">
+                                <span class="icon-label">{variant.label}</span>
+                                <span class="icon-description">{variant.description}</span>
+                            </span>
+                        </button>
+                    {/each}
+                </div>
             </div>
         {:else if activeSettingsTab === 'static-publishing'}
             <StaticPublishingSettings />
@@ -518,6 +563,65 @@
         padding: 6px 0;
         font-size: 13px;
         color: var(--text);
+    }
+    .icon-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+    .icon-option {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text);
+        cursor: pointer;
+        font-family: inherit;
+        padding: 8px;
+        text-align: left;
+    }
+    .icon-option:hover,
+    .icon-option.active {
+        border-color: var(--blue);
+    }
+    .icon-option.active {
+        box-shadow: inset 0 0 0 1px var(--blue);
+    }
+    .icon-preview {
+        width: 48px;
+        height: 48px;
+        flex: 0 0 auto;
+        overflow: hidden;
+        border-radius: 12px;
+        background: var(--surface);
+    }
+    .icon-preview img {
+        width: 100%;
+        height: 100%;
+        display: block;
+    }
+    .icon-copy {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+    }
+    .icon-label {
+        font-size: 12px;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .icon-description {
+        font-size: 10px;
+        color: var(--text-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .row-right {
         display: flex;

@@ -1,11 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+const mockState = vi.hoisted(() => ({
+    images: [] as any[],
+}));
+
 vi.mock('./stores', () => ({
     viewMode: { set: vi.fn() },
     thumbnailSize: { set: vi.fn() },
     focusedIndex: { set: vi.fn() },
     focusedImageOverride: { set: vi.fn() },
-    images: { set: vi.fn(), subscribe: vi.fn(() => vi.fn()) },
+    images: {
+        set: vi.fn((value) => { mockState.images = value; }),
+        subscribe: vi.fn((run) => { run(mockState.images); return vi.fn(); }),
+    },
     gridGap: { set: vi.fn() },
     loupeScale: { set: vi.fn() },
     activeFolder: { set: vi.fn() },
@@ -30,6 +37,9 @@ vi.mock('./api', () => ({
     listCollections: vi.fn(),
     listFolders: vi.fn(),
     getBatchImages: vi.fn(),
+    getImagesByIds: vi.fn(),
+    getImageByPath: vi.fn(),
+    drainPendingOpenParams: vi.fn(),
 }));
 
 vi.mock('./image-loading', () => ({
@@ -51,17 +61,21 @@ vi.mock('@tauri-apps/plugin-deep-link', () => ({
 }));
 
 import { handleParams, initDeepLink } from './deeplink';
-import { thumbnailSize, focusedIndex, images, gridGap, loupeScale, activeFolder, navigateTo } from './stores';
-import { importFolder, importFiles, getBatchImages, listFolders } from './api';
+import { thumbnailSize, focusedIndex, focusedImageOverride, images, gridGap, loupeScale, activeFolder, navigateTo } from './stores';
+import { importFolder, importFiles, getBatchImages, listFolders, getImagesByIds, getImageByPath, drainPendingOpenParams } from './api';
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { listen } from '@tauri-apps/api/event';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 
 beforeEach(() => {
     vi.clearAllMocks();
+    mockState.images = [];
     vi.mocked(importFolder).mockResolvedValue({ imported: 0, skipped: 0, errors: [], batch_id: null, image_ids: [] } as never);
     vi.mocked(importFiles).mockResolvedValue({ imported: 0, skipped: 0, errors: [], batch_id: null, image_ids: [] } as never);
     vi.mocked(listFolders).mockResolvedValue([] as never);
+    vi.mocked(getImagesByIds).mockResolvedValue([] as never);
+    vi.mocked(getImageByPath).mockResolvedValue(null as never);
+    vi.mocked(drainPendingOpenParams).mockResolvedValue([] as never);
     vi.mocked(loadImagesUntil).mockResolvedValue(-1);
 });
 
@@ -112,6 +126,44 @@ describe('handleParams', () => {
         expect(importFiles).toHaveBeenCalledWith(['/target.jpg']);
         expect(loadAllImages).toHaveBeenCalled();
         expect(focusedIndex.set).toHaveBeenCalledWith(1);
+    });
+
+    it('focuses an already-imported single path by resolving the path after import skip', async () => {
+        const image = { image: { id: 'existing-1' }, path: '/target.jpg' };
+        vi.mocked(importFiles).mockResolvedValue({ imported: 0, skipped: 1, errors: [], batch_id: null, image_ids: [] } as never);
+        vi.mocked(getImageByPath).mockResolvedValue(image as never);
+        vi.mocked(loadImagesUntil).mockResolvedValue(4);
+
+        await handleParams({ path: '/target.jpg' });
+
+        expect(getImageByPath).toHaveBeenCalledWith('/target.jpg');
+        expect(loadImagesUntil).toHaveBeenCalled();
+        expect(focusedIndex.set).toHaveBeenCalledWith(4);
+    });
+
+    it('focuses explicit image_id when the image is already loaded', async () => {
+        mockState.images = [
+            { image: { id: 'img-1' }, path: '/one.jpg' },
+            { image: { id: 'img-2' }, path: '/two.jpg' },
+        ];
+
+        await handleParams({ image_id: 'img-2', view: 'loupe' });
+
+        expect(navigateTo).toHaveBeenCalledWith('loupe');
+        expect(focusedImageOverride.set).toHaveBeenCalledWith(null);
+        expect(focusedIndex.set).toHaveBeenCalledWith(1);
+        expect(getImagesByIds).not.toHaveBeenCalled();
+    });
+
+    it('focuses explicit image_id with an override when outside the loaded list', async () => {
+        const image = { image: { id: 'img-outside' }, path: '/outside.jpg' };
+        vi.mocked(getImagesByIds).mockResolvedValue([image] as never);
+
+        await handleParams({ image_id: 'img-outside', view: 'loupe' });
+
+        expect(navigateTo).toHaveBeenCalledWith('loupe');
+        expect(getImagesByIds).toHaveBeenCalledWith(['img-outside']);
+        expect(focusedImageOverride.set).toHaveBeenCalledWith(image);
     });
 
     it('does not set focusedIndex if imported image not found in list', async () => {

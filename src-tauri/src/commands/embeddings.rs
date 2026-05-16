@@ -53,6 +53,46 @@ pub async fn find_similar_images(
 }
 
 #[tauri::command]
+pub async fn generate_similarity_groups(
+    state: State<'_, AppState>,
+    model: Option<String>,
+    threshold: Option<f64>,
+    min_group_size: Option<u32>,
+) -> Result<crate::db_core::models::SimilarityGroupingResult, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::generate_similarity_groups(
+        &ctx,
+        model.as_deref(),
+        threshold.unwrap_or(0.88),
+        min_group_size.unwrap_or(2),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_similarity_groups(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<Vec<crate::db_core::models::SimilarityGroupSummary>, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::list_similarity_groups(
+        &ctx,
+        crate::services::Pagination::clamped(offset.unwrap_or(0), limit.unwrap_or(100)),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_similarity_group_images(
+    state: State<'_, AppState>,
+    group_id: String,
+) -> Result<Vec<crate::db_core::models::ImageWithFile>, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::list_similarity_group_images(&ctx, &group_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn download_clip_model(
     app: AppHandle,
     state: State<'_, AppState>,

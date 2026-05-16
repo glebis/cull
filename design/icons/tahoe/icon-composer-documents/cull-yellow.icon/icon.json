@@ -1,0 +1,14 @@
+{
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "foreground"
+        },
+        {
+          "image-name": "background"
+        }
+      ]
+    }
+  ]
+}

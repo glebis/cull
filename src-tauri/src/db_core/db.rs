@@ -8,7 +8,7 @@ use rusqlite::{ffi, params, Connection, Error as SqlError, OptionalExtension, Re
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 15;
+const CURRENT_SCHEMA_VERSION: i64 = 16;
 
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, "core_schema"),
@@ -26,6 +26,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (13, "raw_metadata"),
     (14, "api_audit_log"),
     (15, "asset_load_events"),
+    (16, "curation_analysis"),
 ];
 
 #[derive(Clone)]
@@ -130,6 +131,8 @@ impl Database {
         self.record_migration(14, "api_audit_log")?;
         self.migrate_asset_load_events()?;
         self.record_migration(15, "asset_load_events")?;
+        self.migrate_curation_analysis()?;
+        self.record_migration(16, "curation_analysis")?;
         self.set_schema_version(CURRENT_SCHEMA_VERSION)?;
         Ok(())
     }
@@ -212,6 +215,50 @@ impl Database {
             CREATE INDEX IF NOT EXISTS asset_load_events_created_idx ON asset_load_events(created_at);
             CREATE INDEX IF NOT EXISTS asset_load_events_image_created_idx ON asset_load_events(image_id, created_at);
             CREATE INDEX IF NOT EXISTS asset_load_events_error_idx ON asset_load_events(error_kind, created_at);",
+        )?;
+        Ok(())
+    }
+
+    fn migrate_curation_analysis(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS image_quality_metrics (
+                image_id TEXT PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+                analyzer_version TEXT NOT NULL,
+                focus_score REAL NOT NULL,
+                blur_score REAL NOT NULL,
+                exposure_score REAL NOT NULL,
+                clipped_shadow_pct REAL NOT NULL,
+                clipped_highlight_pct REAL NOT NULL,
+                mean_luma REAL NOT NULL,
+                contrast REAL NOT NULL,
+                analyzed_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS image_quality_focus_idx ON image_quality_metrics(focus_score);
+            CREATE INDEX IF NOT EXISTS image_quality_blur_idx ON image_quality_metrics(blur_score);
+            CREATE INDEX IF NOT EXISTS image_quality_exposure_idx ON image_quality_metrics(exposure_score);
+
+            CREATE TABLE IF NOT EXISTS image_similarity_groups (
+                id TEXT PRIMARY KEY,
+                model_name TEXT NOT NULL,
+                threshold REAL NOT NULL,
+                method TEXT NOT NULL,
+                representative_image_id TEXT REFERENCES images(id) ON DELETE SET NULL,
+                image_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS image_similarity_groups_model_idx ON image_similarity_groups(model_name, method);
+
+            CREATE TABLE IF NOT EXISTS image_similarity_group_items (
+                group_id TEXT NOT NULL REFERENCES image_similarity_groups(id) ON DELETE CASCADE,
+                image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+                score_to_representative REAL NOT NULL,
+                rank INTEGER NOT NULL,
+                PRIMARY KEY (group_id, image_id)
+            );
+            CREATE INDEX IF NOT EXISTS image_similarity_group_items_image_idx ON image_similarity_group_items(image_id);
+            CREATE INDEX IF NOT EXISTS image_similarity_group_items_rank_idx ON image_similarity_group_items(group_id, rank);",
         )?;
         Ok(())
     }
@@ -1418,6 +1465,204 @@ impl Database {
         )
     }
 
+    // ---- Curation analysis methods ----
+
+    pub fn store_image_quality_metrics(&self, metrics: &ImageQualityMetrics) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT OR REPLACE INTO image_quality_metrics (
+                image_id, analyzer_version, focus_score, blur_score, exposure_score,
+                clipped_shadow_pct, clipped_highlight_pct, mean_luma, contrast, analyzed_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                &metrics.image_id,
+                &metrics.analyzer_version,
+                metrics.focus_score,
+                metrics.blur_score,
+                metrics.exposure_score,
+                metrics.clipped_shadow_pct,
+                metrics.clipped_highlight_pct,
+                metrics.mean_luma,
+                metrics.contrast,
+                &metrics.analyzed_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_image_quality_metrics(&self, image_id: &str) -> Result<Option<ImageQualityMetrics>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT image_id, analyzer_version, focus_score, blur_score, exposure_score,
+                    clipped_shadow_pct, clipped_highlight_pct, mean_luma, contrast, analyzed_at
+             FROM image_quality_metrics
+             WHERE image_id = ?1",
+            params![image_id],
+            |row| {
+                Ok(ImageQualityMetrics {
+                    image_id: row.get(0)?,
+                    analyzer_version: row.get(1)?,
+                    focus_score: row.get(2)?,
+                    blur_score: row.get(3)?,
+                    exposure_score: row.get(4)?,
+                    clipped_shadow_pct: row.get(5)?,
+                    clipped_highlight_pct: row.get(6)?,
+                    mean_luma: row.get(7)?,
+                    contrast: row.get(8)?,
+                    analyzed_at: row.get(9)?,
+                })
+            },
+        )
+        .optional()
+    }
+
+    pub fn quality_metrics_count(&self) -> Result<u32> {
+        let conn = self.conn.lock();
+        conn.query_row("SELECT COUNT(*) FROM image_quality_metrics", [], |row| {
+            row.get(0)
+        })
+    }
+
+    pub fn replace_similarity_groups(
+        &self,
+        model_name: &str,
+        threshold: f64,
+        method: &str,
+        groups: &[Vec<(String, f32)>],
+        singleton_images: u32,
+    ) -> Result<SimilarityGroupingResult> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+
+        tx.execute(
+            "DELETE FROM image_similarity_groups WHERE model_name = ?1 AND method = ?2",
+            params![model_name, method],
+        )?;
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut images_grouped = 0u32;
+        for group in groups {
+            if group.is_empty() {
+                continue;
+            }
+            let group_id = format!("sg_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
+            let representative_image_id = group.first().map(|(id, _)| id.as_str());
+            tx.execute(
+                "INSERT INTO image_similarity_groups (
+                    id, model_name, threshold, method, representative_image_id,
+                    image_count, created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    &group_id,
+                    model_name,
+                    threshold,
+                    method,
+                    representative_image_id,
+                    group.len() as u32,
+                    &now,
+                    &now,
+                ],
+            )?;
+
+            for (rank, (image_id, score)) in group.iter().enumerate() {
+                tx.execute(
+                    "INSERT INTO image_similarity_group_items (
+                        group_id, image_id, score_to_representative, rank
+                     ) VALUES (?1, ?2, ?3, ?4)",
+                    params![&group_id, image_id, *score as f64, rank as u32],
+                )?;
+            }
+            images_grouped += group.len() as u32;
+        }
+
+        tx.commit()?;
+        Ok(SimilarityGroupingResult {
+            model_name: model_name.to_string(),
+            threshold,
+            method: method.to_string(),
+            groups_created: groups.len() as u32,
+            images_grouped,
+            singleton_images,
+        })
+    }
+
+    pub fn list_similarity_groups(
+        &self,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<SimilarityGroupSummary>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, model_name, threshold, method, representative_image_id,
+                    image_count, created_at, updated_at
+             FROM image_similarity_groups
+             ORDER BY image_count DESC, updated_at DESC
+             LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(params![limit, offset], |row| {
+            Ok(SimilarityGroupSummary {
+                id: row.get(0)?,
+                model_name: row.get(1)?,
+                threshold: row.get(2)?,
+                method: row.get(3)?,
+                representative_image_id: row.get(4)?,
+                image_count: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
+    pub fn list_similarity_group_images(&self, group_id: &str) -> Result<Vec<ImageWithFile>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
+                    i.created_at, i.imported_at, f.path,
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
+                    i.raw_metadata, f.missing_at
+             FROM image_similarity_group_items gi
+             JOIN images i ON i.id = gi.image_id
+             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+             LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             WHERE gi.group_id = ?1
+             GROUP BY i.id
+             ORDER BY gi.rank ASC",
+        )?;
+        let rows = stmt.query_map(params![group_id], |row| {
+            let star: Option<u8> = row.get(9)?;
+            let color: Option<String> = row.get(10)?;
+            let decision: Option<String> = row.get(11)?;
+            let selection = decision.map(|d| Selection {
+                image_id: row.get(0).unwrap(),
+                project_id: None,
+                star_rating: star,
+                color_label: color,
+                decision: d,
+            });
+            Ok(ImageWithFile {
+                image: Image {
+                    id: row.get(0)?,
+                    sha256_hash: row.get(1)?,
+                    width: row.get(2)?,
+                    height: row.get(3)?,
+                    format: row.get(4)?,
+                    file_size: row.get(5)?,
+                    created_at: row.get(6)?,
+                    imported_at: row.get(7)?,
+                    ai_prompt: row.get(13)?,
+                    raw_metadata: row.get(14)?,
+                },
+                path: row.get(8)?,
+                thumbnail_path: None,
+                selection,
+                source_label: row.get(12)?,
+                missing_at: row.get(15)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
     pub fn remove_from_collection(&self, collection_id: &str, image_id: &str) -> Result<()> {
         let conn = self.conn.lock();
         conn.execute(
@@ -1969,6 +2214,8 @@ impl Database {
                              FROM images i
                              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
                              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+                             LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
+                             LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
                              WHERE ({})",
                             where_clause
                         );
@@ -2032,6 +2279,8 @@ impl Database {
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
+             LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
              WHERE ({})",
             where_clause
         );
@@ -2065,6 +2314,8 @@ impl Database {
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
+             LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
              WHERE ({})
              GROUP BY i.id
              ORDER BY i.imported_at DESC",
@@ -2702,6 +2953,86 @@ mod tests {
         assert!(ids.contains(&"astra-filename"));
         assert!(ids.contains(&"ocr-match"));
         assert!(!ids.contains(&"plain-image"));
+    }
+
+    #[test]
+    fn test_quality_metrics_are_stored_and_filterable() {
+        let db = test_db();
+        insert_test_image(&db, "sharp", "hash-sharp");
+        insert_test_image(&db, "soft", "hash-soft");
+
+        db.store_image_quality_metrics(&ImageQualityMetrics {
+            image_id: "sharp".to_string(),
+            analyzer_version: "quality-v1".to_string(),
+            focus_score: 250.0,
+            blur_score: 0.2,
+            exposure_score: 0.9,
+            clipped_shadow_pct: 0.01,
+            clipped_highlight_pct: 0.01,
+            mean_luma: 0.5,
+            contrast: 0.4,
+            analyzed_at: "2026-05-07T00:00:00Z".to_string(),
+        })
+        .unwrap();
+        db.store_image_quality_metrics(&ImageQualityMetrics {
+            image_id: "soft".to_string(),
+            analyzer_version: "quality-v1".to_string(),
+            focus_score: 12.0,
+            blur_score: 0.9,
+            exposure_score: 0.7,
+            clipped_shadow_pct: 0.0,
+            clipped_highlight_pct: 0.0,
+            mean_luma: 0.45,
+            contrast: 0.1,
+            analyzed_at: "2026-05-07T00:00:00Z".to_string(),
+        })
+        .unwrap();
+
+        let metrics = db.get_image_quality_metrics("sharp").unwrap().unwrap();
+        assert_eq!(metrics.analyzer_version, "quality-v1");
+        assert_eq!(db.quality_metrics_count().unwrap(), 2);
+
+        let filter = r#"{"type":"rule","field":"focus_score","op":"gte","value":100.0}"#;
+        assert_eq!(db.count_smart_collection(filter).unwrap(), 1);
+        let results = db.evaluate_smart_collection(filter).unwrap();
+        assert_eq!(results[0].image.id, "sharp");
+    }
+
+    #[test]
+    fn test_similarity_groups_are_replaced_and_listed() {
+        let db = test_db();
+        insert_test_image(&db, "img-1", "hash-sg-1");
+        insert_test_image(&db, "img-2", "hash-sg-2");
+        insert_test_image(&db, "img-3", "hash-sg-3");
+
+        let groups = vec![vec![
+            ("img-1".to_string(), 1.0),
+            ("img-2".to_string(), 0.91),
+            ("img-3".to_string(), 0.89),
+        ]];
+        let result = db
+            .replace_similarity_groups("clip-vit-b32", 0.88, "test_method", &groups, 0)
+            .unwrap();
+        assert_eq!(result.groups_created, 1);
+        assert_eq!(result.images_grouped, 3);
+
+        let summaries = db.list_similarity_groups(10, 0).unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].image_count, 3);
+
+        let images = db.list_similarity_group_images(&summaries[0].id).unwrap();
+        let ids: Vec<&str> = images.iter().map(|img| img.image.id.as_str()).collect();
+        assert_eq!(ids, vec!["img-1", "img-2", "img-3"]);
+
+        let replacement = vec![vec![
+            ("img-1".to_string(), 1.0),
+            ("img-2".to_string(), 0.92),
+        ]];
+        db.replace_similarity_groups("clip-vit-b32", 0.9, "test_method", &replacement, 1)
+            .unwrap();
+        let summaries = db.list_similarity_groups(10, 0).unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].image_count, 2);
     }
 
     #[test]

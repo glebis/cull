@@ -45,6 +45,42 @@ pub struct ImageWithFile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageQualityMetrics {
+    pub image_id: String,
+    pub analyzer_version: String,
+    pub focus_score: f64,
+    pub blur_score: f64,
+    pub exposure_score: f64,
+    pub clipped_shadow_pct: f64,
+    pub clipped_highlight_pct: f64,
+    pub mean_luma: f64,
+    pub contrast: f64,
+    pub analyzed_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimilarityGroupSummary {
+    pub id: String,
+    pub model_name: String,
+    pub threshold: f64,
+    pub method: String,
+    pub representative_image_id: Option<String>,
+    pub image_count: u32,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimilarityGroupingResult {
+    pub model_name: String,
+    pub threshold: f64,
+    pub method: String,
+    pub groups_created: u32,
+    pub images_grouped: u32,
+    pub singleton_images: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingPage {
     pub ids: Vec<String>,
     pub vectors: Vec<f32>,

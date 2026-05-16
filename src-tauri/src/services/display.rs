@@ -1,30 +1,26 @@
+use crate::commands::deeplink::{emit_open_params, OpenParams};
 use crate::services::ServiceError;
 use tauri::Emitter;
 
 pub fn show_image(app_handle: &tauri::AppHandle, image_id: &str) -> Result<(), ServiceError> {
-    let params = serde_json::json!({
-        "path": null,
-        "paths": null,
-        "folder": null,
-        "view": "loupe",
-        "focus": image_id,
-    });
-    app_handle
-        .emit("open-with-params", params)
-        .map_err(|e| ServiceError::Engine(e.to_string()))
+    let params = OpenParams {
+        view: Some("loupe".to_string()),
+        image_id: Some(image_id.to_string()),
+        ..OpenParams::default()
+    };
+    emit_open_params(app_handle, params).map_err(|e| ServiceError::Engine(e.to_string()))
 }
 
 pub fn navigate_to_folder(
     app_handle: &tauri::AppHandle,
     folder_path: &str,
 ) -> Result<(), ServiceError> {
-    let params = serde_json::json!({
-        "folder": folder_path,
-        "view": "grid",
-    });
-    app_handle
-        .emit("open-with-params", params)
-        .map_err(|e| ServiceError::Engine(e.to_string()))
+    let params = OpenParams {
+        folder: Some(folder_path.to_string()),
+        view: Some("grid".to_string()),
+        ..OpenParams::default()
+    };
+    emit_open_params(app_handle, params).map_err(|e| ServiceError::Engine(e.to_string()))
 }
 
 pub fn show_collection(
@@ -51,10 +47,10 @@ mod tests {
             "paths": null,
             "folder": null,
             "view": "loupe",
-            "focus": image_id,
+            "image_id": image_id,
         });
         assert_eq!(payload["view"], "loupe");
-        assert_eq!(payload["focus"], "img_abc123");
+        assert_eq!(payload["image_id"], "img_abc123");
         assert!(payload["path"].is_null());
         assert!(payload["folder"].is_null());
     }
@@ -83,10 +79,10 @@ mod tests {
     fn test_show_image_payload_with_special_chars() {
         let image_id = "img_with spaces & stuff";
         let payload = serde_json::json!({
-            "focus": image_id,
+            "image_id": image_id,
             "view": "loupe",
         });
-        assert_eq!(payload["focus"], "img_with spaces & stuff");
+        assert_eq!(payload["image_id"], "img_with spaces & stuff");
     }
 
     #[test]

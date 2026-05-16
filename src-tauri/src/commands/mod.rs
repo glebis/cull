@@ -13,6 +13,7 @@ pub mod library;
 pub mod lineage;
 pub mod mcp;
 pub mod privacy;
+pub mod quality;
 pub mod raw;
 pub mod selection;
 pub mod sessions;

@@ -135,17 +135,20 @@
 <style>
     .compare-container {
         grid-area: main;
-        display: flex;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
         background: var(--bg);
         overflow: hidden;
     }
     .panel {
-        flex: 1;
         display: flex;
         flex-direction: column;
         align-items: center;
+        min-width: 0;
+        min-height: 0;
         padding: 8px;
         border: 2px solid transparent;
+        box-sizing: border-box;
         transition: border-color 0.15s;
         overflow: hidden;
         cursor: pointer;
@@ -156,7 +159,6 @@
     .divider {
         width: 1px;
         background: var(--border);
-        flex-shrink: 0;
     }
     .label {
         font-size: 11px;
@@ -172,13 +174,16 @@
         display: flex;
         align-items: center;
         justify-content: center;
+        min-width: 0;
+        min-height: 0;
         overflow: hidden;
         width: 100%;
     }
     .img-wrap img {
-        max-width: 100%;
-        max-height: 100%;
+        width: 100%;
+        height: 100%;
         object-fit: contain;
+        display: block;
     }
     .meta {
         display: flex;

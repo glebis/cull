@@ -45,6 +45,39 @@ export interface ImageWithFile {
     missing_at: string | null;
 }
 
+export interface ImageQualityMetrics {
+    image_id: string;
+    analyzer_version: string;
+    focus_score: number;
+    blur_score: number;
+    exposure_score: number;
+    clipped_shadow_pct: number;
+    clipped_highlight_pct: number;
+    mean_luma: number;
+    contrast: number;
+    analyzed_at: string;
+}
+
+export interface SimilarityGroupSummary {
+    id: string;
+    model_name: string;
+    threshold: number;
+    method: string;
+    representative_image_id: string | null;
+    image_count: number;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface SimilarityGroupingResult {
+    model_name: string;
+    threshold: number;
+    method: string;
+    groups_created: number;
+    images_grouped: number;
+    singleton_images: number;
+}
+
 export interface ImportResponse {
     imported: number;
     skipped: number;
@@ -192,6 +225,10 @@ export async function getImagesByIds(imageIds: string[]): Promise<ImageWithFile[
     return invoke<ImageWithFile[]>('get_images_by_ids', { imageIds });
 }
 
+export async function getImageByPath(path: string): Promise<ImageWithFile | null> {
+    return invoke<ImageWithFile | null>('get_image_by_path', { path });
+}
+
 export async function getIterationSiblings(parentId: string): Promise<ImageWithFile[]> {
     return invoke<ImageWithFile[]>('get_iteration_siblings', { parentId });
 }
@@ -310,6 +347,26 @@ export async function findSimilarImages(imageId: string, topK: number, model?: s
     return invoke('find_similar_images', { imageId, topK, model: model ?? null });
 }
 
+export async function generateSimilarityGroups(
+    model?: string,
+    threshold = 0.88,
+    minGroupSize = 2,
+): Promise<SimilarityGroupingResult> {
+    return invoke('generate_similarity_groups', {
+        model: model ?? null,
+        threshold,
+        minGroupSize,
+    });
+}
+
+export async function listSimilarityGroups(limit = 100, offset = 0): Promise<SimilarityGroupSummary[]> {
+    return invoke('list_similarity_groups', { limit, offset });
+}
+
+export async function listSimilarityGroupImages(groupId: string): Promise<ImageWithFile[]> {
+    return invoke('list_similarity_group_images', { groupId });
+}
+
 export async function getEmbeddingCount(model?: string): Promise<number> {
     return invoke('get_embedding_count', { model: model ?? null });
 }
@@ -397,9 +454,14 @@ export async function openWithParams(params: {
     zoom?: number;
     fullscreen?: boolean;
     focus?: number;
+    imageId?: string;
     gap?: number;
 }): Promise<void> {
     return invoke('open_with_params', params);
+}
+
+export async function drainPendingOpenParams<T>(): Promise<T[]> {
+    return invoke<T[]>('drain_pending_open_params');
 }
 
 // Vision / Ollama commands
@@ -427,6 +489,18 @@ export async function getVisionCount(source?: string): Promise<number> {
     return invoke('get_vision_count', { source: source ?? null });
 }
 
+export async function analyzeImageQuality(imageIds: string[]): Promise<number> {
+    return invoke('analyze_image_quality', { imageIds });
+}
+
+export async function getImageQuality(imageId: string): Promise<ImageQualityMetrics | null> {
+    return invoke('get_image_quality', { imageId });
+}
+
+export async function getQualityCount(): Promise<number> {
+    return invoke('get_quality_count');
+}
+
 // Delete commands
 export async function trashImages(imageIds: string[]): Promise<number> {
     return invoke('trash_images', { imageIds });
@@ -452,6 +526,10 @@ export async function getAppSetting(key: string): Promise<string | null> {
 
 export async function setAppSetting(key: string, value: string): Promise<void> {
     return invoke('set_app_setting', { key, value });
+}
+
+export async function applyAppIconVariant(variant: string): Promise<void> {
+    return invoke('apply_app_icon_variant', { variant });
 }
 
 export interface StaticPublishCanvasItem {

@@ -14,7 +14,7 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
 
     let menu = Menu::with_items(app, &[&show_hide, &sep1, &stats, &mcp_status, &sep2, &quit])?;
 
-    let _tray = TrayIconBuilder::new()
+    let _tray = TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
         .on_menu_event(move |app, event| match event.id().0.as_str() {

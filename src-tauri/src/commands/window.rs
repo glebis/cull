@@ -1,14 +1,126 @@
 use serde::Serialize;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tauri::webview::WebviewWindowBuilder;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{image::Image, AppHandle, Emitter, Manager};
 
 static WINDOW_COUNTER: AtomicU32 = AtomicU32::new(2);
+const TRAY_ID: &str = "main";
+const DEFAULT_ICON_VARIANT: &str = "primary";
 
 #[derive(Serialize, Clone)]
 pub struct WindowInfo {
     pub label: String,
     pub title: String,
+}
+
+struct IconVariant {
+    id: &'static str,
+    bytes: &'static [u8],
+}
+
+const ICON_VARIANTS: &[IconVariant] = &[
+    IconVariant {
+        id: "primary",
+        bytes: include_bytes!("../../icons/variants/cull-primary.png"),
+    },
+    IconVariant {
+        id: "red",
+        bytes: include_bytes!("../../icons/variants/cull-red.png"),
+    },
+    IconVariant {
+        id: "blue",
+        bytes: include_bytes!("../../icons/variants/cull-blue.png"),
+    },
+    IconVariant {
+        id: "dark",
+        bytes: include_bytes!("../../icons/variants/cull-dark.png"),
+    },
+    IconVariant {
+        id: "yellow",
+        bytes: include_bytes!("../../icons/variants/cull-yellow.png"),
+    },
+];
+
+fn icon_variant(id: &str) -> Option<&'static IconVariant> {
+    ICON_VARIANTS.iter().find(|variant| variant.id == id)
+}
+
+fn icon_variant_or_default(id: &str) -> &'static IconVariant {
+    icon_variant(id)
+        .or_else(|| icon_variant(DEFAULT_ICON_VARIANT))
+        .expect("default icon variant must exist")
+}
+
+fn tauri_icon_from_png_bytes(bytes: &[u8], id: &str) -> Result<Image<'static>, String> {
+    let rgba = image::load_from_memory(bytes)
+        .map_err(|e| format!("Failed to decode icon '{}': {}", id, e))?
+        .into_rgba8();
+    let width = rgba.width();
+    let height = rgba.height();
+    Ok(Image::new_owned(rgba.into_raw(), width, height))
+}
+
+pub fn apply_app_icon_variant_to_app(app: &AppHandle, variant_id: &str) -> Result<(), String> {
+    let variant = icon_variant_or_default(variant_id);
+    let icon = tauri_icon_from_png_bytes(variant.bytes, variant.id)?;
+
+    for window in app.webview_windows().values() {
+        window
+            .set_icon(icon.clone())
+            .map_err(|e| format!("Failed to set window icon: {}", e))?;
+    }
+
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        tray.set_icon(Some(icon.clone()))
+            .map_err(|e| format!("Failed to set tray icon: {}", e))?;
+    }
+
+    set_native_application_icon(app, variant.bytes)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn apply_app_icon_variant(app: AppHandle, variant: String) -> Result<(), String> {
+    if icon_variant(&variant).is_none() {
+        return Err(format!("Unknown icon variant '{}'", variant));
+    }
+    apply_app_icon_variant_to_app(&app, &variant)
+}
+
+#[cfg(target_os = "macos")]
+fn set_native_application_icon(app: &AppHandle, bytes: &'static [u8]) -> Result<(), String> {
+    if objc2::MainThreadMarker::new().is_some() {
+        return set_macos_application_icon_on_main(bytes);
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(set_macos_application_icon_on_main(bytes));
+    })
+    .map_err(|e| format!("Failed to schedule app icon update: {}", e))?;
+    rx.recv()
+        .map_err(|_| "Failed to receive app icon update result".to_string())?
+}
+
+#[cfg(target_os = "macos")]
+fn set_macos_application_icon_on_main(bytes: &'static [u8]) -> Result<(), String> {
+    use objc2::{AllocAnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+
+    let mtm = MainThreadMarker::new()
+        .ok_or_else(|| "macOS app icon update must run on the main thread".to_string())?;
+    let data = NSData::with_bytes(bytes);
+    let image = NSImage::initWithData(NSImage::alloc(), &data)
+        .ok_or_else(|| "Failed to decode macOS app icon image".to_string())?;
+    let app = NSApplication::sharedApplication(mtm);
+    unsafe { app.setApplicationIconImage(Some(&image)) };
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_native_application_icon(_app: &AppHandle, _bytes: &'static [u8]) -> Result<(), String> {
+    Ok(())
 }
 
 /// Create a new window with an optional name.
@@ -29,6 +141,15 @@ pub async fn create_window(app: AppHandle, name: Option<String>) -> Result<Strin
         .hidden_title(true)
         .build()
         .map_err(|e| format!("Failed to create window: {}", e))?;
+
+    let icon_variant = app
+        .state::<crate::AppState>()
+        .db
+        .get_setting("app_icon_variant")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| DEFAULT_ICON_VARIANT.to_string());
+    let _ = apply_app_icon_variant_to_app(&app, &icon_variant);
 
     // Tell the new window its name via an event after a short delay
     // (the JS runtime needs time to initialize)

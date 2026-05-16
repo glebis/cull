@@ -9,6 +9,7 @@ pub mod import;
 pub mod lineage;
 pub mod models;
 pub mod nl_parser;
+pub mod quality;
 pub mod secrets;
 pub mod sessions;
 pub mod sidecar;

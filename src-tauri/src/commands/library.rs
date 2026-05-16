@@ -81,6 +81,15 @@ pub async fn get_images_by_ids(
 }
 
 #[tauri::command]
+pub async fn get_image_by_path(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Option<ImageWithFile>, String> {
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::get_image_by_path(&ctx, &path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn get_iteration_siblings(
     state: State<'_, AppState>,
     parent_id: String,

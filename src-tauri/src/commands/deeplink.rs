@@ -1,7 +1,11 @@
 use serde::Serialize;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex, OnceLock,
+};
 use tauri::{AppHandle, Emitter};
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Default)]
 pub struct OpenParams {
     pub path: Option<String>,
     pub paths: Option<Vec<String>>,
@@ -11,7 +15,66 @@ pub struct OpenParams {
     pub zoom: Option<u32>,
     pub fullscreen: Option<bool>,
     pub focus: Option<u32>,
+    pub image_id: Option<String>,
     pub gap: Option<u32>,
+}
+
+static FRONTEND_OPEN_LISTENER_READY: AtomicBool = AtomicBool::new(false);
+static PENDING_OPEN_PARAMS: OnceLock<Mutex<Vec<OpenParams>>> = OnceLock::new();
+
+fn pending_open_params() -> &'static Mutex<Vec<OpenParams>> {
+    PENDING_OPEN_PARAMS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+pub fn emit_open_params(app: &AppHandle, params: OpenParams) -> tauri::Result<()> {
+    if !FRONTEND_OPEN_LISTENER_READY.load(Ordering::SeqCst) {
+        if let Ok(mut pending) = pending_open_params().lock() {
+            pending.push(params.clone());
+        }
+    }
+    app.emit("open-with-params", params)
+}
+
+pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams> {
+    if file_paths.is_empty() {
+        return None;
+    }
+
+    Some(OpenParams {
+        path: if file_paths.len() == 1 {
+            Some(file_paths[0].clone())
+        } else {
+            None
+        },
+        paths: if file_paths.len() > 1 {
+            Some(file_paths)
+        } else {
+            None
+        },
+        folder: None,
+        view: Some("loupe".to_string()),
+        size: None,
+        zoom: None,
+        fullscreen: None,
+        focus: None,
+        image_id: None,
+        gap: None,
+    })
+}
+
+pub fn file_path_from_url(url: &str) -> Option<String> {
+    let raw_path = url.strip_prefix("file://")?;
+    let without_host = raw_path.strip_prefix("localhost").unwrap_or(raw_path);
+    Some(percent_decode(without_host))
+}
+
+#[tauri::command]
+pub async fn drain_pending_open_params() -> Result<Vec<OpenParams>, String> {
+    FRONTEND_OPEN_LISTENER_READY.store(true, Ordering::SeqCst);
+    let mut pending = pending_open_params()
+        .lock()
+        .map_err(|_| "pending open params lock poisoned".to_string())?;
+    Ok(std::mem::take(&mut *pending))
 }
 
 /// Tauri command that agents can call via IPC to control the app.
@@ -26,6 +89,7 @@ pub async fn open_with_params(
     zoom: Option<u32>,
     fullscreen: Option<bool>,
     focus: Option<u32>,
+    image_id: Option<String>,
     gap: Option<u32>,
 ) -> Result<(), String> {
     let params = OpenParams {
@@ -37,10 +101,10 @@ pub async fn open_with_params(
         zoom,
         fullscreen,
         focus,
+        image_id,
         gap,
     };
-    app.emit("open-with-params", params)
-        .map_err(|e| e.to_string())
+    emit_open_params(&app, params).map_err(|e| e.to_string())
 }
 
 /// Parse a deep link URL into OpenParams.
@@ -54,6 +118,7 @@ pub fn parse_deep_link(url: &str) -> OpenParams {
         zoom: None,
         fullscreen: None,
         focus: None,
+        image_id: None,
         gap: None,
     };
 
@@ -93,6 +158,7 @@ pub fn parse_deep_link(url: &str) -> OpenParams {
                 "size" => params.size = decoded.parse().ok(),
                 "fullscreen" => params.fullscreen = Some(decoded == "true"),
                 "focus" => params.focus = decoded.parse().ok(),
+                "image_id" | "imageId" => params.image_id = Some(decoded),
                 "gap" => params.gap = decoded.parse().ok(),
                 _ => {}
             }
@@ -118,4 +184,30 @@ fn percent_decode(s: &str) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_file_url_into_path() {
+        assert_eq!(
+            file_path_from_url("file:///tmp/Cull%20Test/image.png").as_deref(),
+            Some("/tmp/Cull Test/image.png")
+        );
+    }
+
+    #[test]
+    fn ignores_non_file_url_for_file_path() {
+        assert!(file_path_from_url("cull://loupe?image_id=img-1").is_none());
+    }
+
+    #[test]
+    fn builds_loupe_params_for_opened_file() {
+        let params = open_params_for_file_paths(vec!["/tmp/image.png".to_string()]).unwrap();
+        assert_eq!(params.path.as_deref(), Some("/tmp/image.png"));
+        assert_eq!(params.view.as_deref(), Some("loupe"));
+        assert!(params.paths.is_none());
+    }
 }

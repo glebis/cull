@@ -68,6 +68,19 @@ pub fn get_image(ctx: &ServiceContext, image_id: &str) -> Result<ImageWithFile, 
         .ok_or_else(|| ServiceError::NotFound(format!("Image '{}'", image_id)))
 }
 
+pub fn get_image_by_path(
+    ctx: &ServiceContext,
+    path: &str,
+) -> Result<Option<ImageWithFile>, ServiceError> {
+    let Some(file) = ctx.db.get_image_file_by_path(path)? else {
+        return Ok(None);
+    };
+    let id_refs = vec![file.image_id.as_str()];
+    let mut images = ctx.db.get_images_by_ids(&id_refs)?;
+    enrich_thumbnails(&mut images, ctx.app_data_dir);
+    Ok(images.into_iter().next())
+}
+
 pub fn list_folders(ctx: &ServiceContext) -> Result<Vec<(String, u32)>, ServiceError> {
     Ok(ctx.db.list_folders()?)
 }

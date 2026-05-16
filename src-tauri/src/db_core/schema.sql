@@ -228,5 +228,45 @@ CREATE INDEX IF NOT EXISTS idx_detections_image ON detections(image_id);
 CREATE INDEX IF NOT EXISTS idx_detections_class ON detections(class_name);
 CREATE INDEX IF NOT EXISTS idx_detections_model ON detections(model_name);
 
+-- Deterministic local quality metrics used for culling and ranking.
+CREATE TABLE IF NOT EXISTS image_quality_metrics (
+    image_id TEXT PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+    analyzer_version TEXT NOT NULL,
+    focus_score REAL NOT NULL,
+    blur_score REAL NOT NULL,
+    exposure_score REAL NOT NULL,
+    clipped_shadow_pct REAL NOT NULL,
+    clipped_highlight_pct REAL NOT NULL,
+    mean_luma REAL NOT NULL,
+    contrast REAL NOT NULL,
+    analyzed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS image_quality_focus_idx ON image_quality_metrics(focus_score);
+CREATE INDEX IF NOT EXISTS image_quality_blur_idx ON image_quality_metrics(blur_score);
+CREATE INDEX IF NOT EXISTS image_quality_exposure_idx ON image_quality_metrics(exposure_score);
+
+-- Generated similarity groups from embedding vectors.
+CREATE TABLE IF NOT EXISTS image_similarity_groups (
+    id TEXT PRIMARY KEY,
+    model_name TEXT NOT NULL,
+    threshold REAL NOT NULL,
+    method TEXT NOT NULL,
+    representative_image_id TEXT REFERENCES images(id) ON DELETE SET NULL,
+    image_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS image_similarity_groups_model_idx ON image_similarity_groups(model_name, method);
+
+CREATE TABLE IF NOT EXISTS image_similarity_group_items (
+    group_id TEXT NOT NULL REFERENCES image_similarity_groups(id) ON DELETE CASCADE,
+    image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    score_to_representative REAL NOT NULL,
+    rank INTEGER NOT NULL,
+    PRIMARY KEY (group_id, image_id)
+);
+CREATE INDEX IF NOT EXISTS image_similarity_group_items_image_idx ON image_similarity_group_items(image_id);
+CREATE INDEX IF NOT EXISTS image_similarity_group_items_rank_idx ON image_similarity_group_items(group_id, rank);
+
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;

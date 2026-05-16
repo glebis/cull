@@ -32,6 +32,14 @@
         ai_prompt:       { label: 'Prompt',        type: 'string',  ops: ['contains','is_empty'] },
         search_text:     { label: 'Search',        type: 'string',  ops: ['contains','neq'] },
         aspect_ratio:    { label: 'Aspect Ratio',  type: 'number',  ops: ['gt','gte','lt','lte','eq'] },
+        focus_score:     { label: 'Focus',         type: 'number',  ops: ['gt','gte','lt','lte'] },
+        blur_score:      { label: 'Blur',          type: 'number',  ops: ['gt','gte','lt','lte'] },
+        exposure_score:  { label: 'Exposure',      type: 'number',  ops: ['gt','gte','lt','lte'] },
+        clipped_shadow_pct: { label: 'Shadows',    type: 'number',  ops: ['gt','gte','lt','lte'] },
+        clipped_highlight_pct: { label: 'Highlights', type: 'number', ops: ['gt','gte','lt','lte'] },
+        mean_luma:       { label: 'Luma',          type: 'number',  ops: ['gt','gte','lt','lte'] },
+        contrast:        { label: 'Contrast',      type: 'number',  ops: ['gt','gte','lt','lte'] },
+        similarity_group_id: { label: 'Group',     type: 'string',  ops: ['eq','neq','contains','is_empty'] },
     };
 
     const OP_LABELS: Record<string, string> = {

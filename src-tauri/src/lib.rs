@@ -15,7 +15,9 @@ mod services;
 mod tray;
 mod watcher;
 
-use crate::commands::deeplink::parse_deep_link;
+use crate::commands::deeplink::{
+    emit_open_params, file_path_from_url, open_params_for_file_paths, parse_deep_link,
+};
 use crate::db_core::db::Database;
 use crate::db_core::detection::DetectionEngine;
 use crate::db_core::embeddings::EmbeddingEngine;
@@ -175,12 +177,21 @@ pub fn run() {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_focus();
             }
+            let mut file_paths = Vec::new();
             for arg in &args {
                 if arg.starts_with("cull://") {
                     eprintln!("[single-instance] Forwarding deep link: {}", arg);
                     let params = parse_deep_link(arg);
-                    let _ = app.emit("open-with-params", params);
+                    let _ = emit_open_params(app, params);
+                } else {
+                    let path = PathBuf::from(arg);
+                    if path.is_file() && crate::extensions::is_image_path(&path, false) {
+                        file_paths.push(path.to_string_lossy().into_owned());
+                    }
                 }
+            }
+            if let Some(params) = open_params_for_file_paths(file_paths) {
+                let _ = emit_open_params(app, params);
             }
         }))
         .setup(move |app| {
@@ -298,6 +309,22 @@ pub fn run() {
             // Set up system tray
             tray::setup_tray(app.handle())?;
 
+            // Apply persisted app icon after tray creation so the window, Dock, and tray stay in sync.
+            {
+                let state: tauri::State<'_, AppState> = app.state();
+                let icon_variant = state
+                    .db
+                    .get_setting("app_icon_variant")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| "primary".to_string());
+                if let Err(e) =
+                    commands::window::apply_app_icon_variant_to_app(app.handle(), &icon_variant)
+                {
+                    eprintln!("[icon] Failed to apply app icon variant: {}", e);
+                }
+            }
+
             // Hide window if --tray mode
             if start_hidden {
                 if let Some(w) = app.get_webview_window("main") {
@@ -315,10 +342,20 @@ pub fn run() {
                         event.payload()
                     );
                     if let Ok(urls) = serde_json::from_str::<Vec<String>>(event.payload()) {
+                        let file_paths: Vec<String> = urls
+                            .iter()
+                            .filter_map(|url| file_path_from_url(url))
+                            .collect();
+                        if let Some(params) = open_params_for_file_paths(file_paths) {
+                            let _ = emit_open_params(&handle, params);
+                        }
+
                         for url in urls {
                             eprintln!("[deep-link] Processing URL: {}", url);
-                            let params = parse_deep_link(&url);
-                            let _ = handle.emit("open-with-params", params);
+                            if url.starts_with("cull://") {
+                                let params = parse_deep_link(&url);
+                                let _ = emit_open_params(&handle, params);
+                            }
                         }
                     }
                 });
@@ -333,6 +370,7 @@ pub fn run() {
             commands::import::regenerate_thumbnails_by_ids,
             commands::import::regenerate_single_thumbnail,
             commands::import::rescan_sources,
+            commands::deeplink::drain_pending_open_params,
             commands::jobs::get_job,
             commands::jobs::list_jobs,
             commands::jobs::cancel_job,
@@ -340,6 +378,7 @@ pub fn run() {
             commands::library::get_image_count,
             commands::library::list_image_ids,
             commands::library::get_images_by_ids,
+            commands::library::get_image_by_path,
             commands::library::get_iteration_siblings,
             commands::library::list_folders,
             commands::library::list_images_by_folder,
@@ -362,6 +401,9 @@ pub fn run() {
             commands::embeddings::generate_embeddings,
             commands::embeddings::get_embedding_page,
             commands::embeddings::find_similar_images,
+            commands::embeddings::generate_similarity_groups,
+            commands::embeddings::list_similarity_groups,
+            commands::embeddings::list_similarity_group_images,
             commands::embeddings::download_clip_model,
             commands::embeddings::is_model_available,
             commands::embeddings::get_embedding_count,
@@ -374,6 +416,7 @@ pub fn run() {
             commands::window::list_windows,
             commands::window::rename_window,
             commands::window::send_to_window,
+            commands::window::apply_app_icon_variant,
             commands::detection::download_yolo_model,
             commands::detection::download_nudenet_model,
             commands::detection::detect_objects,
@@ -385,6 +428,9 @@ pub fn run() {
             commands::detection::is_yolo_available,
             commands::detection::is_nudenet_available,
             commands::detection::get_detection_count,
+            commands::quality::analyze_image_quality,
+            commands::quality::get_image_quality,
+            commands::quality::get_quality_count,
             commands::smart_collections::create_smart_collection,
             commands::smart_collections::list_smart_collections,
             commands::smart_collections::evaluate_smart_collection,
@@ -501,33 +547,14 @@ pub fn run() {
                     })
                     .collect();
 
-                if !file_paths.is_empty() {
-                    let params = crate::commands::deeplink::OpenParams {
-                        path: if file_paths.len() == 1 {
-                            Some(file_paths[0].clone())
-                        } else {
-                            None
-                        },
-                        paths: if file_paths.len() > 1 {
-                            Some(file_paths)
-                        } else {
-                            None
-                        },
-                        folder: None,
-                        view: Some("loupe".to_string()),
-                        size: None,
-                        zoom: None,
-                        fullscreen: None,
-                        focus: None,
-                        gap: None,
-                    };
-                    let _ = app.emit("open-with-params", params);
+                if let Some(params) = open_params_for_file_paths(file_paths) {
+                    let _ = emit_open_params(app, params);
                 }
 
                 for url in urls {
                     if url.scheme() == "cull" {
                         let params = parse_deep_link(url.as_str());
-                        let _ = app.emit("open-with-params", params);
+                        let _ = emit_open_params(app, params);
                     }
                 }
             }
@@ -571,9 +598,10 @@ pub fn run() {
                                 zoom: None,
                                 fullscreen: None,
                                 focus: None,
+                                image_id: None,
                                 gap: None,
                             };
-                            let _ = app.emit("open-with-params", params);
+                            let _ = emit_open_params(app, params);
                         } else if !files.is_empty() {
                             let params = crate::commands::deeplink::OpenParams {
                                 path: if files.len() == 1 {
@@ -594,9 +622,10 @@ pub fn run() {
                                 zoom: None,
                                 fullscreen: None,
                                 focus: None,
+                                image_id: None,
                                 gap: None,
                             };
-                            let _ = app.emit("open-with-params", params);
+                            let _ = emit_open_params(app, params);
                         }
 
                         for dir in &dirs {
@@ -610,9 +639,10 @@ pub fn run() {
                                     zoom: None,
                                     fullscreen: None,
                                     focus: None,
+                                    image_id: None,
                                     gap: None,
                                 };
-                                let _ = app.emit("open-with-params", params);
+                                let _ = emit_open_params(app, params);
                             }
                         }
                     }

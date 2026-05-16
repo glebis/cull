@@ -1,9 +1,15 @@
 use crate::db_core::detection::Detection;
-use crate::db_core::models::{EmbeddingPage, ImageWithFile};
+use crate::db_core::models::{
+    EmbeddingPage, ImageQualityMetrics, ImageWithFile, SimilarityGroupSummary,
+    SimilarityGroupingResult,
+};
+use crate::db_core::quality;
 use crate::services::library::enrich_thumbnails;
 use crate::services::{Pagination, ServiceContext, ServiceError};
+use std::collections::HashSet;
 
 const MAX_EMBEDDING_PAGE_SIZE: u32 = 5000;
+const SIMILARITY_GROUPING_METHOD: &str = "greedy_threshold_v1";
 
 pub fn find_similar_images(
     ctx: &ServiceContext,
@@ -40,6 +46,85 @@ pub fn get_embedding_page(
 pub fn get_embedding_count(ctx: &ServiceContext, model: Option<&str>) -> Result<u32, ServiceError> {
     let model_name = model.unwrap_or("clip-vit-b32");
     Ok(ctx.db.embedding_count(model_name)?)
+}
+
+pub fn generate_similarity_groups(
+    ctx: &ServiceContext,
+    model: Option<&str>,
+    threshold: f64,
+    min_group_size: u32,
+) -> Result<SimilarityGroupingResult, ServiceError> {
+    if !(0.0..=1.0).contains(&threshold) {
+        return Err(ServiceError::InvalidInput(
+            "Similarity threshold must be between 0.0 and 1.0".to_string(),
+        ));
+    }
+
+    let model_name = model.unwrap_or("clip-vit-b32");
+    let min_group_size = min_group_size.max(2) as usize;
+    let embeddings = ctx.db.get_all_embeddings(model_name)?;
+    let mut assigned: HashSet<String> = HashSet::new();
+    let mut groups: Vec<Vec<(String, f32)>> = Vec::new();
+    let mut singleton_images = 0u32;
+
+    for (seed_id, seed_vector) in &embeddings {
+        if assigned.contains(seed_id) {
+            continue;
+        }
+
+        let mut members = vec![(seed_id.clone(), 1.0f32)];
+        for (candidate_id, candidate_vector) in &embeddings {
+            if candidate_id == seed_id || assigned.contains(candidate_id) {
+                continue;
+            }
+            let score = cosine_similarity(seed_vector, candidate_vector);
+            if score >= threshold as f32 {
+                members.push((candidate_id.clone(), score));
+            }
+        }
+
+        if members.len() >= min_group_size {
+            members.sort_by(|a, b| {
+                b.1.partial_cmp(&a.1)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.0.cmp(&b.0))
+            });
+            for (image_id, _) in &members {
+                assigned.insert(image_id.clone());
+            }
+            groups.push(members);
+        } else {
+            assigned.insert(seed_id.clone());
+            singleton_images += 1;
+        }
+    }
+
+    groups.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a[0].0.cmp(&b[0].0)));
+
+    Ok(ctx.db.replace_similarity_groups(
+        model_name,
+        threshold,
+        SIMILARITY_GROUPING_METHOD,
+        &groups,
+        singleton_images,
+    )?)
+}
+
+pub fn list_similarity_groups(
+    ctx: &ServiceContext,
+    page: Pagination,
+) -> Result<Vec<SimilarityGroupSummary>, ServiceError> {
+    let page = Pagination::clamped(page.offset, page.limit);
+    Ok(ctx.db.list_similarity_groups(page.limit, page.offset)?)
+}
+
+pub fn list_similarity_group_images(
+    ctx: &ServiceContext,
+    group_id: &str,
+) -> Result<Vec<ImageWithFile>, ServiceError> {
+    let mut images = ctx.db.list_similarity_group_images(group_id)?;
+    enrich_thumbnails(&mut images, ctx.app_data_dir);
+    Ok(images)
 }
 
 pub fn is_clip_available(ctx: &ServiceContext) -> Result<bool, ServiceError> {
@@ -97,6 +182,43 @@ pub fn get_vision_metadata(
 pub fn get_vision_count(ctx: &ServiceContext, source: Option<&str>) -> Result<u32, ServiceError> {
     let src = source.unwrap_or("minicpm-v");
     Ok(ctx.db.count_vision_processed(src)?)
+}
+
+pub fn analyze_image_quality(
+    ctx: &ServiceContext,
+    image_id: &str,
+) -> Result<ImageQualityMetrics, ServiceError> {
+    let image = crate::services::library::get_image(ctx, image_id)?;
+    let ml_path = crate::commands::resolve_image_path_for_ml(&image, ctx.app_data_dir);
+    let metrics =
+        quality::analyze_image_quality(image_id, &ml_path).map_err(ServiceError::Engine)?;
+    ctx.db.store_image_quality_metrics(&metrics)?;
+    Ok(metrics)
+}
+
+pub fn get_image_quality(
+    ctx: &ServiceContext,
+    image_id: &str,
+) -> Result<Option<ImageQualityMetrics>, ServiceError> {
+    Ok(ctx.db.get_image_quality_metrics(image_id)?)
+}
+
+pub fn get_quality_count(ctx: &ServiceContext) -> Result<u32, ServiceError> {
+    Ok(ctx.db.quality_metrics_count()?)
+}
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() {
+        return 0.0;
+    }
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm_a == 0.0 || norm_b == 0.0 {
+        0.0
+    } else {
+        dot / (norm_a * norm_b)
+    }
 }
 
 #[cfg(test)]
@@ -304,6 +426,39 @@ mod tests {
         assert_eq!(page.offset, 1);
         assert_eq!(page.limit, 1);
         assert!(page.has_more);
+    }
+
+    #[test]
+    fn test_generate_similarity_groups_from_embeddings() {
+        let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
+        insert_test_image(&db, "img1");
+        insert_test_image(&db, "img2");
+        insert_test_image(&db, "img3");
+        db.store_embedding("img1", "clip-vit-b32", &vec![1.0, 0.0])
+            .unwrap();
+        db.store_embedding("img2", "clip-vit-b32", &vec![0.99, 0.01])
+            .unwrap();
+        db.store_embedding("img3", "clip-vit-b32", &vec![0.0, 1.0])
+            .unwrap();
+
+        let c = ctx(&db, &s, &d, &ee, &de, &se);
+        let result = generate_similarity_groups(&c, None, 0.95, 2).unwrap();
+        assert_eq!(result.groups_created, 1);
+        assert_eq!(result.images_grouped, 2);
+        assert_eq!(result.singleton_images, 1);
+
+        let groups = list_similarity_groups(
+            &c,
+            Pagination {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .unwrap();
+        assert_eq!(groups.len(), 1);
+        let images = list_similarity_group_images(&c, &groups[0].id).unwrap();
+        let ids: Vec<&str> = images.iter().map(|img| img.image.id.as_str()).collect();
+        assert_eq!(ids, vec!["img1", "img2"]);
     }
 
     #[test]
