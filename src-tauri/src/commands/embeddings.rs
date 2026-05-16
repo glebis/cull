@@ -25,12 +25,19 @@ pub async fn generate_embeddings(
 }
 
 #[tauri::command]
-pub async fn get_all_embeddings(
+pub async fn get_embedding_page(
     state: State<'_, AppState>,
     model: Option<String>,
-) -> Result<Vec<(String, Vec<f32>)>, String> {
+    limit: u32,
+    offset: u32,
+) -> Result<crate::db_core::models::EmbeddingPage, String> {
     let ctx = crate::services::ServiceContext::from_app_state(&state, None);
-    crate::services::ai::get_all_embeddings(&ctx, model.as_deref()).map_err(|e| e.to_string())
+    crate::services::ai::get_embedding_page(
+        &ctx,
+        model.as_deref(),
+        crate::services::Pagination { offset, limit },
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

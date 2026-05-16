@@ -45,6 +45,17 @@ pub struct ImageWithFile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingPage {
+    pub ids: Vec<String>,
+    pub vectors: Vec<f32>,
+    pub dims: u32,
+    pub total: u32,
+    pub offset: u32,
+    pub limit: u32,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpToken {
     pub id: String,
     pub name: String,

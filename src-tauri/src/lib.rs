@@ -360,7 +360,7 @@ pub fn run() {
             commands::collections::remove_from_collection,
             commands::collections::delete_collection,
             commands::embeddings::generate_embeddings,
-            commands::embeddings::get_all_embeddings,
+            commands::embeddings::get_embedding_page,
             commands::embeddings::find_similar_images,
             commands::embeddings::download_clip_model,
             commands::embeddings::is_model_available,

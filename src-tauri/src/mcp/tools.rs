@@ -735,20 +735,20 @@ impl CullMcp {
         let state = self.app_handle.state::<AppState>();
         let top_k = clamp_limit(params.limit.unwrap_or(10)) as usize;
 
-        let all = match state.db.get_all_embeddings("clip-vit-b32") {
-            Ok(a) => a,
+        let query = match state
+            .db
+            .get_embedding_vector(&params.image_id, "clip-vit-b32")
+        {
+            Ok(Some(vector)) => vector,
             Err(e) => return format!("Error: {}", e),
-        };
-        let query = match all.iter().find(|(id, _)| id == &params.image_id) {
-            Some(q) => q,
-            None => {
+            Ok(None) => {
                 return format!(
                     "Error: Image '{}' has no embedding. Run generate_embeddings first.",
                     params.image_id
                 )
             }
         };
-        match state.db.find_similar(&query.1, "clip-vit-b32", top_k * 2) {
+        match state.db.find_similar(&query, "clip-vit-b32", top_k * 2) {
             Ok(results) => {
                 let r: Vec<serde_json::Value> = results
                     .iter()

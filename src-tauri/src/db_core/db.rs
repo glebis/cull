@@ -1300,13 +1300,75 @@ impl Database {
             let image_id: String = row.get(0)?;
             let bytes: Vec<u8> = row.get(1)?;
             let _dims: u32 = row.get(2)?;
-            let vector: Vec<f32> = bytes
-                .chunks(4)
-                .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-                .collect();
+            let vector = decode_embedding_bytes(&bytes);
             Ok((image_id, vector))
         })?;
         rows.collect::<Result<Vec<_>>>()
+    }
+
+    pub fn get_embedding_page(
+        &self,
+        model_name: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<EmbeddingPage> {
+        let conn = self.conn.lock();
+        let total: u32 = conn.query_row(
+            "SELECT COUNT(*) FROM embeddings WHERE model_name = ?1",
+            params![model_name],
+            |row| row.get(0),
+        )?;
+        let mut stmt = conn.prepare(
+            "SELECT image_id, vector, dims
+             FROM embeddings
+             WHERE model_name = ?1
+             ORDER BY image_id
+             LIMIT ?2 OFFSET ?3",
+        )?;
+        let rows = stmt.query_map(params![model_name, limit, offset], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, u32>(2)?,
+            ))
+        })?;
+
+        let mut ids = Vec::new();
+        let mut vectors = Vec::new();
+        let mut dims = 0;
+        for row in rows {
+            let (image_id, bytes, row_dims) = row?;
+            if dims == 0 {
+                dims = row_dims;
+            }
+            ids.push(image_id);
+            vectors.extend(decode_embedding_bytes(&bytes));
+        }
+        let returned = ids.len() as u32;
+        Ok(EmbeddingPage {
+            ids,
+            vectors,
+            dims,
+            total,
+            offset,
+            limit,
+            has_more: offset.saturating_add(returned) < total,
+        })
+    }
+
+    pub fn get_embedding_vector(
+        &self,
+        image_id: &str,
+        model_name: &str,
+    ) -> Result<Option<Vec<f32>>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT vector FROM embeddings WHERE image_id = ?1 AND model_name = ?2",
+            params![image_id, model_name],
+            |row| row.get::<_, Vec<u8>>(0),
+        )
+        .optional()
+        .map(|maybe_bytes| maybe_bytes.map(|bytes| decode_embedding_bytes(&bytes)))
     }
 
     pub fn find_similar(
@@ -1315,16 +1377,35 @@ impl Database {
         model_name: &str,
         top_k: usize,
     ) -> Result<Vec<(String, f32)>> {
-        let all = self.get_all_embeddings(model_name)?;
-        let mut scores: Vec<(String, f32)> = all
-            .iter()
-            .map(|(id, emb)| {
-                let score = cosine_similarity(vector, emb);
-                (id.clone(), score)
-            })
-            .collect();
+        if top_k == 0 {
+            return Ok(Vec::new());
+        }
+
+        let conn = self.conn.lock();
+        let mut stmt =
+            conn.prepare("SELECT image_id, vector FROM embeddings WHERE model_name = ?1")?;
+        let rows = stmt.query_map(params![model_name], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+        })?;
+
+        let mut scores: Vec<(String, f32)> = Vec::with_capacity(top_k);
+        for row in rows {
+            let (id, bytes) = row?;
+            let emb = decode_embedding_bytes(&bytes);
+            let score = cosine_similarity(vector, &emb);
+            if scores.len() < top_k {
+                scores.push((id, score));
+            } else if let Some((min_idx, (_, min_score))) = scores
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            {
+                if score > *min_score {
+                    scores[min_idx] = (id, score);
+                }
+            }
+        }
         scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        scores.truncate(top_k);
         Ok(scores)
     }
 
@@ -2403,6 +2484,13 @@ fn migration_checksum(version: i64, name: &str) -> String {
 
 fn migration_error(message: String) -> SqlError {
     SqlError::SqliteFailure(ffi::Error::new(ffi::SQLITE_ERROR), Some(message))
+}
+
+fn decode_embedding_bytes(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect()
 }
 
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {

@@ -292,8 +292,18 @@ export async function generateEmbeddings(imageIds: string[]): Promise<number> {
     return invoke('generate_embeddings', { imageIds });
 }
 
-export async function getAllEmbeddings(model?: string): Promise<[string, number[]][]> {
-    return invoke('get_all_embeddings', { model: model ?? null });
+export interface EmbeddingPage {
+    ids: string[];
+    vectors: number[];
+    dims: number;
+    total: number;
+    offset: number;
+    limit: number;
+    has_more: boolean;
+}
+
+export async function getEmbeddingPage(model?: string, limit = 5000, offset = 0): Promise<EmbeddingPage> {
+    return invoke('get_embedding_page', { model: model ?? null, limit, offset });
 }
 
 export async function findSimilarImages(imageId: string, topK: number, model?: string): Promise<[string, number][]> {

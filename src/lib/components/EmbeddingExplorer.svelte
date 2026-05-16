@@ -20,7 +20,7 @@
         isModelAvailable,
         downloadClipModel,
         generateEmbeddings,
-        getAllEmbeddings,
+        getEmbeddingPage,
         getEmbeddingCount,
         getImageCount,
         listImageIds,
@@ -30,7 +30,7 @@
         getGenerationRun,
         regenerateThumbnails,
     } from '$lib/api';
-    import type { GenerationRun, ImageWithFile } from '$lib/api';
+    import type { EmbeddingPage, GenerationRun, ImageWithFile } from '$lib/api';
 
     // State
     let modelAvailable = $state(false);
@@ -49,6 +49,7 @@
     let hasGoogleKey = $state(false);
     let geminiEmbeddingCount = $state(0);
     let currentEmbeddingCount = $derived(selectedProvider === 'gemini' ? geminiEmbeddingCount : embeddingCount);
+    const PROJECTION_EMBEDDING_LIMIT = 5000;
 
     // Visual embed interaction config
     type ZLayer = { key: string; label: string; count: number; rank: number; color: string | null };
@@ -872,11 +873,12 @@
     }
 
     function runProjectionInWorker(
-        embeddings: [string, number[]][],
+        embeddingPage: EmbeddingPage,
         embeddingImages: ImageWithFile[],
     ): Promise<ProjectionWorkerResponse> {
         const worker = getProjectionWorker();
         const requestId = ++projectionRequestId;
+        const vectors = new Float32Array(embeddingPage.vectors);
 
         return new Promise((resolve, reject) => {
             cancelProjectionWork = () => {
@@ -903,13 +905,15 @@
             worker.postMessage({
                 requestId,
                 provider: selectedProvider,
-                embeddings,
+                ids: embeddingPage.ids,
+                vectors,
+                dims: embeddingPage.dims,
                 images: embeddingImages.map(img => ({
                     id: img.image.id,
                     path: img.path,
                     thumbnailPath: img.thumbnail_path,
                 })),
-            });
+            }, [vectors.buffer]);
         });
     }
 
@@ -925,17 +929,17 @@
         const loadSeq = ++projectionLoadSeq;
         try {
             const modelName = selectedProvider === 'gemini' ? 'gemini-embedding-2' : undefined;
-            const embeddings = await getAllEmbeddings(modelName);
+            const embeddingPage = await getEmbeddingPage(modelName, PROJECTION_EMBEDDING_LIMIT, 0);
             if (loadSeq !== projectionLoadSeq) return;
-            if (embeddings.length < 2) {
+            if (embeddingPage.ids.length < 2) {
                 points = [];
                 clusters = [];
                 resetThumbnailCache();
                 return;
             }
 
-            // Build image map from all embedded images (not just current filter)
-            const embeddingIds = embeddings.map(([id]) => id);
+            // Build image map from the projected embedding page.
+            const embeddingIds = embeddingPage.ids;
             const embeddingImages = await getImagesByIds(embeddingIds);
             if (loadSeq !== projectionLoadSeq) return;
             const map = new Map<string, ImageWithFile>();
@@ -947,7 +951,7 @@
 
             resetProjectionWorker();
             projecting = true;
-            const projection = await runProjectionInWorker(embeddings, embeddingImages);
+            const projection = await runProjectionInWorker(embeddingPage, embeddingImages);
             if (loadSeq !== projectionLoadSeq) return;
 
             points = projection.points;

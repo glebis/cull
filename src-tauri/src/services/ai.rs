@@ -1,7 +1,9 @@
 use crate::db_core::detection::Detection;
-use crate::db_core::models::ImageWithFile;
+use crate::db_core::models::{EmbeddingPage, ImageWithFile};
 use crate::services::library::enrich_thumbnails;
 use crate::services::{Pagination, ServiceContext, ServiceError};
+
+const MAX_EMBEDDING_PAGE_SIZE: u32 = 5000;
 
 pub fn find_similar_images(
     ctx: &ServiceContext,
@@ -10,12 +12,11 @@ pub fn find_similar_images(
     model: Option<&str>,
 ) -> Result<Vec<(String, f32)>, ServiceError> {
     let model_name = model.unwrap_or("clip-vit-b32");
-    let all = ctx.db.get_all_embeddings(model_name)?;
-    let query = all
-        .iter()
-        .find(|(id, _)| id == image_id)
+    let query = ctx
+        .db
+        .get_embedding_vector(image_id, model_name)?
         .ok_or_else(|| ServiceError::NotFound("Image has no embedding".into()))?;
-    Ok(ctx.db.find_similar(&query.1, model_name, top_k)?)
+    Ok(ctx.db.find_similar(&query, model_name, top_k)?)
 }
 
 pub fn get_all_embeddings(
@@ -24,6 +25,16 @@ pub fn get_all_embeddings(
 ) -> Result<Vec<(String, Vec<f32>)>, ServiceError> {
     let model_name = model.unwrap_or("clip-vit-b32");
     Ok(ctx.db.get_all_embeddings(model_name)?)
+}
+
+pub fn get_embedding_page(
+    ctx: &ServiceContext,
+    model: Option<&str>,
+    page: Pagination,
+) -> Result<EmbeddingPage, ServiceError> {
+    let model_name = model.unwrap_or("clip-vit-b32");
+    let limit = page.limit.clamp(1, MAX_EMBEDDING_PAGE_SIZE);
+    Ok(ctx.db.get_embedding_page(model_name, limit, page.offset)?)
 }
 
 pub fn get_embedding_count(ctx: &ServiceContext, model: Option<&str>) -> Result<u32, ServiceError> {
@@ -260,6 +271,39 @@ mod tests {
         let c = ctx(&db, &s, &d, &ee, &de, &se);
         let embs = get_all_embeddings(&c, None).unwrap();
         assert_eq!(embs.len(), 2);
+    }
+
+    #[test]
+    fn test_get_embedding_page_returns_flat_limited_vectors() {
+        let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
+        insert_test_image(&db, "img1");
+        insert_test_image(&db, "img2");
+        insert_test_image(&db, "img3");
+        db.store_embedding("img1", "clip-vit-b32", &vec![0.1, 0.2])
+            .unwrap();
+        db.store_embedding("img2", "clip-vit-b32", &vec![0.3, 0.4])
+            .unwrap();
+        db.store_embedding("img3", "clip-vit-b32", &vec![0.5, 0.6])
+            .unwrap();
+        let c = ctx(&db, &s, &d, &ee, &de, &se);
+
+        let page = get_embedding_page(
+            &c,
+            None,
+            Pagination {
+                offset: 1,
+                limit: 1,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(page.ids, vec!["img2".to_string()]);
+        assert_eq!(page.vectors, vec![0.3, 0.4]);
+        assert_eq!(page.dims, 2);
+        assert_eq!(page.total, 3);
+        assert_eq!(page.offset, 1);
+        assert_eq!(page.limit, 1);
+        assert!(page.has_more);
     }
 
     #[test]

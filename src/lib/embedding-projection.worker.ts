@@ -9,7 +9,9 @@ interface ProjectionImageMeta {
 interface ProjectionRequest {
     requestId: number;
     provider: 'clip' | 'gemini';
-    embeddings: [string, number[]][];
+    ids: string[];
+    vectors: Float32Array;
+    dims: number;
     images: ProjectionImageMeta[];
 }
 
@@ -104,10 +106,11 @@ function folderName(path: string): string {
 }
 
 self.onmessage = (event: MessageEvent<ProjectionRequest>) => {
-    const { requestId, provider, embeddings, images } = event.data;
+    const { requestId, provider, ids, vectors: flatVectors, dims, images } = event.data;
     const imageMap = new Map(images.map(img => [img.id, img]));
-    const ids = embeddings.map(([id]) => id);
-    const vectors = embeddings.map(([, vector]) => vector);
+    const vectors = ids.map((_, i) =>
+        Array.from(flatVectors.subarray(i * dims, (i + 1) * dims))
+    );
 
     if (vectors.length < 2) {
         self.postMessage({
@@ -132,7 +135,7 @@ self.onmessage = (event: MessageEvent<ProjectionRequest>) => {
     const k = Math.min(16, Math.max(3, Math.floor(Math.sqrt(projection.length))));
     const clusterLabels = kMeans(projection, k);
 
-    const points: Point[] = embeddings.map(([id], i) => ({
+    const points: Point[] = ids.map((id, i) => ({
         id,
         x: projection[i][0],
         y: projection[i][1],
