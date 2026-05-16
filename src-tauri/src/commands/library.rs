@@ -209,7 +209,7 @@ pub async fn check_library_health(
     let auto_purge = db
         .get_setting("auto_purge_missing")
         .unwrap_or(None)
-        .unwrap_or_else(|| "true".to_string());
+        .unwrap_or_else(|| "false".to_string());
     let auto_purge = auto_purge == "true";
 
     let image_ids = db.list_image_ids().map_err(|e| e.to_string())?;

@@ -67,7 +67,7 @@
             confirmTrash = trashSetting !== 'true';
             httpEnabled = httpSetting === 'true';
             if (portSetting) httpPort = portSetting;
-            autoPurge = purgeSetting !== 'false';
+            autoPurge = purgeSetting === 'true';
             moduleRaw = rawSetting === 'true';
             moduleStaticPublishing = staticPublishingSetting === 'true';
 

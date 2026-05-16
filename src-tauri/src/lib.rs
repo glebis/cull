@@ -198,8 +198,8 @@ pub fn run() {
                 Ok(db) => db,
                 Err(e) => {
                     let msg = format!(
-                        "Failed to open database at {}:\n{}\n\nThe database file may be corrupted. \
-                         You can delete it and restart to start fresh.",
+                        "Failed to open database at {}:\n{}\n\nCull did not modify the database. \
+                         Back up this file before attempting repair, then run an integrity check or restore a known-good backup.",
                         db_path.display(), e
                     );
                     app.dialog()
@@ -209,6 +209,13 @@ pub fn run() {
                     return Err(format!("database open failed: {}", e).into());
                 }
             };
+
+            if let Ok(roots) = db.list_library_roots() {
+                let asset_scope = app.asset_protocol_scope();
+                for root in roots {
+                    let _ = asset_scope.allow_directory(root, true);
+                }
+            }
 
             let model_dir = app_data_dir.join("models");
             let embedding_engine = Mutex::new(EmbeddingEngine::new(&model_dir));
@@ -359,7 +366,6 @@ pub fn run() {
             commands::embeddings::is_model_available,
             commands::embeddings::get_embedding_count,
             commands::embeddings::set_api_key,
-            commands::embeddings::get_api_key,
             commands::embeddings::validate_api_key,
             commands::embeddings::delete_api_key,
             commands::embeddings::has_api_key,
@@ -411,7 +417,7 @@ pub fn run() {
             commands::lineage::get_batch_images,
             commands::lineage::scan_lineage,
             commands::lineage::get_generation_run,
-            // commands::lineage::rescan_sidecars, // TODO: not yet implemented
+            commands::lineage::rescan_sidecars,
             commands::mcp::create_mcp_token,
             commands::mcp::list_mcp_tokens,
             commands::mcp::revoke_mcp_token,

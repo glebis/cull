@@ -308,10 +308,6 @@ export async function setApiKey(provider: string, key: string): Promise<void> {
     return invoke('set_api_key', { provider, key });
 }
 
-export async function getApiKey(provider: string): Promise<string | null> {
-    return invoke('get_api_key', { provider });
-}
-
 export async function validateApiKey(provider: string, key: string): Promise<boolean> {
     return invoke('validate_api_key', { provider, key });
 }

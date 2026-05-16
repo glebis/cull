@@ -157,15 +157,6 @@ pub async fn set_api_key(
 }
 
 #[tauri::command]
-pub async fn get_api_key(
-    state: State<'_, AppState>,
-    provider: String,
-) -> Result<Option<String>, String> {
-    let secret_key = format!("api_key_{}", provider);
-    state.secrets.get(&secret_key)
-}
-
-#[tauri::command]
 pub async fn validate_api_key(provider: String, key: String) -> Result<bool, String> {
     let client = reqwest::Client::new();
     match provider.as_str() {

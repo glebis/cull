@@ -165,9 +165,6 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   set_api_key: (_: any, args: { provider: string; key: string }) => {
     mockApiKeys[`api_key_${args.provider}`] = args.key;
   },
-  get_api_key: (_: any, args: { provider: string }) => {
-    return mockApiKeys[`api_key_${args.provider}`] ?? null;
-  },
   has_api_key: (_: any, args: { provider: string }) => {
     const k = mockApiKeys[`api_key_${args.provider}`];
     return k !== undefined && k !== '';
