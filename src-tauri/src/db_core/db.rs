@@ -3,12 +3,14 @@
 
 use super::models::*;
 use super::smart_collections::{FilterNode, SmartCollection};
+use super::tags::{normalize_tag_name, split_tag_list};
 use parking_lot::Mutex;
 use rusqlite::{ffi, params, Connection, Error as SqlError, OptionalExtension, Result};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 16;
+const CURRENT_SCHEMA_VERSION: i64 = 17;
 
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, "core_schema"),
@@ -27,6 +29,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (14, "api_audit_log"),
     (15, "asset_load_events"),
     (16, "curation_analysis"),
+    (17, "image_tags"),
 ];
 
 #[derive(Clone)]
@@ -133,6 +136,8 @@ impl Database {
         self.record_migration(15, "asset_load_events")?;
         self.migrate_curation_analysis()?;
         self.record_migration(16, "curation_analysis")?;
+        self.migrate_image_tags()?;
+        self.record_migration(17, "image_tags")?;
         self.set_schema_version(CURRENT_SCHEMA_VERSION)?;
         Ok(())
     }
@@ -259,6 +264,33 @@ impl Database {
             );
             CREATE INDEX IF NOT EXISTS image_similarity_group_items_image_idx ON image_similarity_group_items(image_id);
             CREATE INDEX IF NOT EXISTS image_similarity_group_items_rank_idx ON image_similarity_group_items(group_id, rank);",
+        )?;
+        Ok(())
+    }
+
+    fn migrate_image_tags(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS tags (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                normalized_name TEXT NOT NULL UNIQUE,
+                tag_type TEXT NOT NULL DEFAULT 'keyword',
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS tags_type_idx ON tags(tag_type);
+
+            CREATE TABLE IF NOT EXISTS image_tags (
+                image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+                tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                source TEXT NOT NULL,
+                confidence REAL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (image_id, tag_id, source)
+            );
+            CREATE INDEX IF NOT EXISTS image_tags_image_idx ON image_tags(image_id);
+            CREATE INDEX IF NOT EXISTS image_tags_tag_idx ON image_tags(tag_id);
+            CREATE INDEX IF NOT EXISTS image_tags_source_idx ON image_tags(source);",
         )?;
         Ok(())
     }
@@ -1520,6 +1552,265 @@ impl Database {
         let conn = self.conn.lock();
         conn.query_row("SELECT COUNT(*) FROM image_quality_metrics", [], |row| {
             row.get(0)
+        })
+    }
+
+    // ---- Tag enrichment methods ----
+
+    pub fn add_image_tag(
+        &self,
+        image_id: &str,
+        name: &str,
+        tag_type: &str,
+        source: &str,
+        confidence: Option<f64>,
+    ) -> Result<bool> {
+        let Some(normalized_name) = normalize_tag_name(name) else {
+            return Ok(false);
+        };
+
+        let display_name = name.trim();
+        let now = chrono::Utc::now().to_rfc3339();
+        let tag_id = format!("tag_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
+        let conn = self.conn.lock();
+
+        conn.execute(
+            "INSERT OR IGNORE INTO tags (id, name, normalized_name, tag_type, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![&tag_id, display_name, &normalized_name, tag_type, &now],
+        )?;
+
+        let resolved_tag_id: String = conn.query_row(
+            "SELECT id FROM tags WHERE normalized_name = ?1",
+            params![&normalized_name],
+            |row| row.get(0),
+        )?;
+
+        let inserted = conn.execute(
+            "INSERT OR IGNORE INTO image_tags (image_id, tag_id, source, confidence, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![image_id, resolved_tag_id, source, confidence, &now],
+        )?;
+        Ok(inserted > 0)
+    }
+
+    pub fn list_image_tags(&self, image_id: &str) -> Result<Vec<ImageTag>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT t.id, it.image_id, t.name, t.normalized_name, t.tag_type,
+                    it.source, it.confidence, it.created_at
+             FROM image_tags it
+             JOIN tags t ON t.id = it.tag_id
+             WHERE it.image_id = ?1
+             ORDER BY t.tag_type ASC, t.name ASC, it.source ASC",
+        )?;
+        let rows = stmt.query_map(params![image_id], |row| {
+            Ok(ImageTag {
+                id: row.get(0)?,
+                image_id: row.get(1)?,
+                name: row.get(2)?,
+                normalized_name: row.get(3)?,
+                tag_type: row.get(4)?,
+                source: row.get(5)?,
+                confidence: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
+    pub fn list_tags(&self, limit: u32, offset: u32) -> Result<Vec<TagSummary>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT t.id, t.name, t.normalized_name, t.tag_type,
+                    COUNT(DISTINCT it.image_id) AS image_count
+             FROM tags t
+             LEFT JOIN image_tags it ON it.tag_id = t.id
+             GROUP BY t.id
+             ORDER BY image_count DESC, t.name ASC
+             LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(params![limit, offset], |row| {
+            Ok(TagSummary {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                normalized_name: row.get(2)?,
+                tag_type: row.get(3)?,
+                image_count: row.get(4)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
+    pub fn tag_count(&self) -> Result<u32> {
+        let conn = self.conn.lock();
+        conn.query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))
+    }
+
+    pub fn backfill_image_tags(&self) -> Result<TagBackfillResult> {
+        let before_count = self.tag_count()?;
+        let mut candidates: Vec<(String, String, String, String, Option<f64>)> = Vec::new();
+
+        {
+            let conn = self.conn.lock();
+
+            let mut stmt = conn.prepare(
+                "SELECT id, format, orientation, source_label
+                 FROM images",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (image_id, format, orientation, source_label) = row?;
+                candidates.push((
+                    image_id.clone(),
+                    format.to_lowercase(),
+                    "format".to_string(),
+                    "file:format".to_string(),
+                    None,
+                ));
+                if let Some(orientation) = orientation {
+                    candidates.push((
+                        image_id.clone(),
+                        orientation,
+                        "metadata".to_string(),
+                        "file:orientation".to_string(),
+                        None,
+                    ));
+                }
+                if let Some(source_label) = source_label {
+                    candidates.push((
+                        image_id,
+                        source_label,
+                        "source".to_string(),
+                        "source_detection".to_string(),
+                        None,
+                    ));
+                }
+            }
+            drop(stmt);
+
+            let mut stmt = conn.prepare(
+                "SELECT i.id, g.provider, g.model
+                 FROM images i
+                 JOIN generation_runs g ON g.id = i.generation_run_id",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })?;
+            for row in rows {
+                let (image_id, provider, model) = row?;
+                if let Some(provider) = provider {
+                    candidates.push((
+                        image_id.clone(),
+                        provider,
+                        "generation".to_string(),
+                        "generation:provider".to_string(),
+                        None,
+                    ));
+                }
+                if let Some(model) = model {
+                    candidates.push((
+                        image_id,
+                        model,
+                        "generation".to_string(),
+                        "generation:model".to_string(),
+                        None,
+                    ));
+                }
+            }
+            drop(stmt);
+
+            let mut stmt = conn.prepare(
+                "SELECT image_id, key, value, source
+                 FROM image_metadata",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (image_id, key, value, source) = row?;
+                let key_lower = key.to_lowercase();
+                let (tag_type, values) = match key_lower.as_str() {
+                    "tags" | "keywords" => ("vision", split_tag_list(&value)),
+                    "objects" | "object" => ("object", split_tag_list(&value)),
+                    "dominant_colors" | "colors" | "color_palette" => {
+                        ("color", split_tag_list(&value))
+                    }
+                    "scene_type" | "mood" | "indoor_outdoor" | "time_of_day" | "activity"
+                    | "image_quality" | "style" | "subject" => {
+                        ("vision", vec![value.trim().to_string()])
+                    }
+                    _ => continue,
+                };
+
+                for value in values {
+                    candidates.push((
+                        image_id.clone(),
+                        value,
+                        tag_type.to_string(),
+                        format!("metadata:{}:{}", source, key_lower),
+                        None,
+                    ));
+                }
+            }
+            drop(stmt);
+
+            let mut stmt = conn.prepare(
+                "SELECT image_id, class_name, model_name, MAX(confidence)
+                 FROM detections
+                 WHERE confidence >= 0.35
+                 GROUP BY image_id, class_name, model_name",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, f64>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (image_id, class_name, model_name, confidence) = row?;
+                candidates.push((
+                    image_id,
+                    class_name,
+                    "object".to_string(),
+                    format!("detection:{}", model_name),
+                    Some(confidence),
+                ));
+            }
+        }
+
+        let mut image_ids = HashSet::new();
+        let mut image_tags_created = 0u32;
+        for (image_id, name, tag_type, source, confidence) in candidates {
+            image_ids.insert(image_id.clone());
+            if self.add_image_tag(&image_id, &name, &tag_type, &source, confidence)? {
+                image_tags_created += 1;
+            }
+        }
+
+        let after_count = self.tag_count()?;
+        Ok(TagBackfillResult {
+            images_processed: image_ids.len() as u32,
+            tags_created: after_count.saturating_sub(before_count),
+            image_tags_created,
         })
     }
 
@@ -2953,6 +3244,129 @@ mod tests {
         assert!(ids.contains(&"astra-filename"));
         assert!(ids.contains(&"ocr-match"));
         assert!(!ids.contains(&"plain-image"));
+    }
+
+    #[test]
+    fn test_image_tags_are_stored_searchable_and_filterable() {
+        let db = test_db();
+        insert_test_image(&db, "tagged", "hash-tagged");
+        insert_test_image(&db, "plain", "hash-plain");
+
+        assert!(db
+            .add_image_tag("tagged", "Golden Hour", "vision", "manual", Some(0.9))
+            .unwrap());
+        assert!(!db
+            .add_image_tag("tagged", "golden hour", "vision", "manual", Some(0.9))
+            .unwrap());
+
+        let image_tags = db.list_image_tags("tagged").unwrap();
+        assert_eq!(image_tags.len(), 1);
+        assert_eq!(image_tags[0].normalized_name, "golden-hour");
+
+        let tags = db.list_tags(10, 0).unwrap();
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].image_count, 1);
+
+        let tag_filter = r#"{"type":"rule","field":"tag","op":"eq","value":"golden hour"}"#;
+        assert_eq!(db.count_smart_collection(tag_filter).unwrap(), 1);
+        let tag_results = db.evaluate_smart_collection(tag_filter).unwrap();
+        assert_eq!(tag_results[0].image.id, "tagged");
+
+        let search_filter =
+            r#"{"type":"rule","field":"search_text","op":"contains","value":"golden"}"#;
+        let ids: Vec<String> = db
+            .evaluate_smart_collection(search_filter)
+            .unwrap()
+            .into_iter()
+            .map(|img| img.image.id)
+            .collect();
+        assert_eq!(ids, vec!["tagged".to_string()]);
+    }
+
+    #[test]
+    fn test_backfill_image_tags_promotes_existing_enrichment() {
+        let db = test_db();
+        insert_test_image(&db, "enriched", "hash-enriched");
+        db.update_source_detection(
+            "enriched",
+            Some("midjourney"),
+            0.95,
+            "{}",
+            Some(true),
+            Some("a luminous portrait"),
+            1.0,
+            "portrait",
+            0.01,
+        )
+        .unwrap();
+
+        let run = GenerationRun {
+            id: "run-1".to_string(),
+            prompt: Some("a luminous portrait".to_string()),
+            negative_prompt: None,
+            provider: Some("openai".to_string()),
+            model: Some("gpt-image-1".to_string()),
+            settings_json: "{}".to_string(),
+            seed: None,
+            parent_run_id: None,
+            source_type: "sidecar".to_string(),
+            source_path: None,
+            raw_metadata_json: None,
+            created_at: Some("2026-05-07T00:00:00Z".to_string()),
+            imported_at: "2026-05-07T00:00:00Z".to_string(),
+        };
+        db.insert_generation_run(&run).unwrap();
+        db.link_image_to_run("enriched", "run-1").unwrap();
+
+        let mut fields = std::collections::HashMap::new();
+        fields.insert("tags".to_string(), "golden hour, editorial".to_string());
+        fields.insert("scene_type".to_string(), "studio portrait".to_string());
+        db.store_vision_metadata("enriched", "minicpm-v", &fields)
+            .unwrap();
+        db.store_detections(
+            "enriched",
+            "yolo11m",
+            &[
+                crate::db_core::detection::Detection {
+                    class_name: "person".to_string(),
+                    confidence: 0.91,
+                    x: 0.1,
+                    y: 0.1,
+                    width: 0.8,
+                    height: 0.8,
+                },
+                crate::db_core::detection::Detection {
+                    class_name: "chair".to_string(),
+                    confidence: 0.2,
+                    x: 0.0,
+                    y: 0.0,
+                    width: 0.2,
+                    height: 0.2,
+                },
+            ],
+        )
+        .unwrap();
+
+        let result = db.backfill_image_tags().unwrap();
+        assert_eq!(result.images_processed, 1);
+        assert!(result.tags_created >= 8);
+        assert!(result.image_tags_created >= 8);
+
+        let tags = db.list_image_tags("enriched").unwrap();
+        let normalized: Vec<&str> = tags
+            .iter()
+            .map(|tag| tag.normalized_name.as_str())
+            .collect();
+        assert!(normalized.contains(&"png"));
+        assert!(normalized.contains(&"portrait"));
+        assert!(normalized.contains(&"midjourney"));
+        assert!(normalized.contains(&"openai"));
+        assert!(normalized.contains(&"gpt-image-1"));
+        assert!(normalized.contains(&"golden-hour"));
+        assert!(normalized.contains(&"editorial"));
+        assert!(normalized.contains(&"studio-portrait"));
+        assert!(normalized.contains(&"person"));
+        assert!(!normalized.contains(&"chair"));
     }
 
     #[test]

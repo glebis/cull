@@ -31,6 +31,7 @@
         imported_at:     { label: 'Imported',      type: 'date',    ops: ['last_n_days','this_week','this_month'] },
         ai_prompt:       { label: 'Prompt',        type: 'string',  ops: ['contains','is_empty'] },
         search_text:     { label: 'Search',        type: 'string',  ops: ['contains','neq'] },
+        tag:             { label: 'Tag',           type: 'string',  ops: ['contains','eq','neq','is_empty','is_not_empty'] },
         aspect_ratio:    { label: 'Aspect Ratio',  type: 'number',  ops: ['gt','gte','lt','lte','eq'] },
         focus_score:     { label: 'Focus',         type: 'number',  ops: ['gt','gte','lt','lte'] },
         blur_score:      { label: 'Blur',          type: 'number',  ops: ['gt','gte','lt','lte'] },
@@ -44,8 +45,9 @@
 
     const OP_LABELS: Record<string, string> = {
         eq: '=', neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤',
-        contains: 'contains', last_n_days: 'last N days',
+        contains: 'contains', not_contains: 'does not contain', last_n_days: 'last N days',
         this_week: 'this week', this_month: 'this month', is_empty: 'is empty',
+        is_not_empty: 'is not empty',
     };
 
     const TYPE_COLOR: Record<FieldType, string> = {

@@ -19,6 +19,7 @@ pub mod selection;
 pub mod sessions;
 pub mod smart_collections;
 pub mod static_publishing;
+pub mod tags;
 pub mod transform;
 pub mod undo;
 pub mod vision;

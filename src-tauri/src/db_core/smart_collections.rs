@@ -1,3 +1,4 @@
+use super::tags::normalize_tag_name;
 use rusqlite::types::Value as SqlValue;
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +43,7 @@ pub enum Field {
     IsAiGenerated,
     AiPrompt,
     SearchText,
+    Tag,
     Folder,
     ImportedAt,
     OriginalDate,
@@ -130,6 +132,7 @@ impl Field {
             Field::IsAiGenerated => "i.is_ai_generated",
             Field::AiPrompt => "i.ai_prompt",
             Field::SearchText => "search_text",
+            Field::Tag => "tag",
             Field::Folder => "f.path",
             Field::ImportedAt => "i.imported_at",
             Field::OriginalDate => "i.original_date",
@@ -174,6 +177,9 @@ impl FilterNode {
             FilterNode::Rule { field, op, value } => {
                 if matches!(field, Field::SearchText) {
                     return text_search_clause(op, value);
+                }
+                if matches!(field, Field::Tag) {
+                    return tag_clause(op, value);
                 }
 
                 let col = field.to_column();
@@ -295,6 +301,16 @@ fn text_search_clause(
               AND (im.key LIKE ? OR im.value LIKE ?)
         )
         OR EXISTS (
+            SELECT 1 FROM image_tags it
+            JOIN tags t ON t.id = it.tag_id
+            WHERE it.image_id = i.id
+              AND (
+                t.name LIKE ?
+                OR t.normalized_name LIKE ?
+                OR it.source LIKE ?
+              )
+        )
+        OR EXISTS (
             SELECT 1 FROM generation_runs gr
             WHERE gr.id = i.generation_run_id
               AND (
@@ -309,13 +325,126 @@ fn text_search_clause(
 
     let pattern = format!("%{}%", term.trim());
     let params = std::iter::repeat(SqlValue::Text(pattern))
-        .take(10)
+        .take(13)
         .collect();
 
     match op {
         RuleOp::Contains | RuleOp::Eq => Ok((sql.to_string(), params)),
         RuleOp::NotContains | RuleOp::Neq => Ok((format!("NOT {}", sql), params)),
         _ => Err(format!("Unsupported operator {:?} for search_text", op)),
+    }
+}
+
+fn tag_clause(
+    op: &RuleOp,
+    value: &FilterValue,
+) -> std::result::Result<(String, Vec<SqlValue>), String> {
+    let exists_sql = "EXISTS (
+        SELECT 1 FROM image_tags it
+        JOIN tags t ON t.id = it.tag_id
+        WHERE it.image_id = i.id
+    )";
+
+    match (op, value) {
+        (RuleOp::IsEmpty, _) => Ok((format!("NOT {}", exists_sql), vec![])),
+        (RuleOp::IsNotEmpty, _) => Ok((exists_sql.to_string(), vec![])),
+        (RuleOp::Eq, FilterValue::String(v)) => {
+            let normalized = normalize_tag_name(v).unwrap_or_default();
+            Ok((
+                "EXISTS (
+                    SELECT 1 FROM image_tags it
+                    JOIN tags t ON t.id = it.tag_id
+                    WHERE it.image_id = i.id AND t.normalized_name = ?
+                )"
+                .to_string(),
+                vec![SqlValue::Text(normalized)],
+            ))
+        }
+        (RuleOp::Neq, FilterValue::String(v)) => {
+            let normalized = normalize_tag_name(v).unwrap_or_default();
+            Ok((
+                "NOT EXISTS (
+                    SELECT 1 FROM image_tags it
+                    JOIN tags t ON t.id = it.tag_id
+                    WHERE it.image_id = i.id AND t.normalized_name = ?
+                )"
+                .to_string(),
+                vec![SqlValue::Text(normalized)],
+            ))
+        }
+        (RuleOp::Contains, FilterValue::String(v)) => {
+            let normalized = normalize_tag_name(v).unwrap_or_else(|| v.trim().to_lowercase());
+            Ok((
+                "EXISTS (
+                    SELECT 1 FROM image_tags it
+                    JOIN tags t ON t.id = it.tag_id
+                    WHERE it.image_id = i.id
+                      AND (t.name LIKE ? OR t.normalized_name LIKE ? OR it.source LIKE ?)
+                )"
+                .to_string(),
+                vec![
+                    SqlValue::Text(format!("%{}%", v.trim())),
+                    SqlValue::Text(format!("%{}%", normalized)),
+                    SqlValue::Text(format!("%{}%", v.trim())),
+                ],
+            ))
+        }
+        (RuleOp::NotContains, FilterValue::String(v)) => {
+            let normalized = normalize_tag_name(v).unwrap_or_else(|| v.trim().to_lowercase());
+            Ok((
+                "NOT EXISTS (
+                    SELECT 1 FROM image_tags it
+                    JOIN tags t ON t.id = it.tag_id
+                    WHERE it.image_id = i.id
+                      AND (t.name LIKE ? OR t.normalized_name LIKE ? OR it.source LIKE ?)
+                )"
+                .to_string(),
+                vec![
+                    SqlValue::Text(format!("%{}%", v.trim())),
+                    SqlValue::Text(format!("%{}%", normalized)),
+                    SqlValue::Text(format!("%{}%", v.trim())),
+                ],
+            ))
+        }
+        (RuleOp::In, FilterValue::StringArray(vals)) => {
+            let normalized: Vec<String> =
+                vals.iter().filter_map(|v| normalize_tag_name(v)).collect();
+            if normalized.is_empty() {
+                return Ok(("0=1".to_string(), vec![]));
+            }
+            let placeholders: Vec<&str> = normalized.iter().map(|_| "?").collect();
+            Ok((
+                format!(
+                    "EXISTS (
+                        SELECT 1 FROM image_tags it
+                        JOIN tags t ON t.id = it.tag_id
+                        WHERE it.image_id = i.id AND t.normalized_name IN ({})
+                    )",
+                    placeholders.join(",")
+                ),
+                normalized.into_iter().map(SqlValue::Text).collect(),
+            ))
+        }
+        (RuleOp::NotIn, FilterValue::StringArray(vals)) => {
+            let normalized: Vec<String> =
+                vals.iter().filter_map(|v| normalize_tag_name(v)).collect();
+            if normalized.is_empty() {
+                return Ok(("1=1".to_string(), vec![]));
+            }
+            let placeholders: Vec<&str> = normalized.iter().map(|_| "?").collect();
+            Ok((
+                format!(
+                    "NOT EXISTS (
+                        SELECT 1 FROM image_tags it
+                        JOIN tags t ON t.id = it.tag_id
+                        WHERE it.image_id = i.id AND t.normalized_name IN ({})
+                    )",
+                    placeholders.join(",")
+                ),
+                normalized.into_iter().map(SqlValue::Text).collect(),
+            ))
+        }
+        _ => Err(format!("Unsupported operator {:?} for tag", op)),
     }
 }
 
@@ -465,12 +594,26 @@ mod tests {
 
         assert!(sql.contains("f.path"), "sql: {}", sql);
         assert!(sql.contains("image_metadata"), "sql: {}", sql);
+        assert!(sql.contains("image_tags"), "sql: {}", sql);
         assert!(sql.contains("generation_runs"), "sql: {}", sql);
-        assert_eq!(params.len(), 10);
+        assert_eq!(params.len(), 13);
         assert!(params.iter().all(|p| match p {
             SqlValue::Text(text) => text == "%astra%",
             _ => false,
         }));
+    }
+
+    #[test]
+    fn test_tag_filter_to_sql() {
+        let filter: FilterNode = serde_json::from_str(
+            r#"{"type":"rule","field":"tag","op":"eq","value":"Golden Hour"}"#,
+        )
+        .unwrap();
+        let (sql, params) = filter.to_sql_clause().unwrap();
+
+        assert!(sql.contains("image_tags"), "sql: {}", sql);
+        assert!(sql.contains("normalized_name"), "sql: {}", sql);
+        assert_eq!(params, vec![SqlValue::Text("golden-hour".to_string())]);
     }
 
     #[test]

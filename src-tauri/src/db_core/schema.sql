@@ -228,6 +228,29 @@ CREATE INDEX IF NOT EXISTS idx_detections_image ON detections(image_id);
 CREATE INDEX IF NOT EXISTS idx_detections_class ON detections(class_name);
 CREATE INDEX IF NOT EXISTS idx_detections_model ON detections(model_name);
 
+-- Normalized enrichment tags promoted from vision metadata, detections,
+-- source/generation metadata, and file facts.
+CREATE TABLE IF NOT EXISTS tags (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    normalized_name TEXT NOT NULL UNIQUE,
+    tag_type TEXT NOT NULL DEFAULT 'keyword',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tags_type_idx ON tags(tag_type);
+
+CREATE TABLE IF NOT EXISTS image_tags (
+    image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    confidence REAL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (image_id, tag_id, source)
+);
+CREATE INDEX IF NOT EXISTS image_tags_image_idx ON image_tags(image_id);
+CREATE INDEX IF NOT EXISTS image_tags_tag_idx ON image_tags(tag_id);
+CREATE INDEX IF NOT EXISTS image_tags_source_idx ON image_tags(source);
+
 -- Deterministic local quality metrics used for culling and ranking.
 CREATE TABLE IF NOT EXISTS image_quality_metrics (
     image_id TEXT PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,

@@ -78,6 +78,31 @@ export interface SimilarityGroupingResult {
     singleton_images: number;
 }
 
+export interface ImageTag {
+    id: string;
+    image_id: string;
+    name: string;
+    normalized_name: string;
+    tag_type: string;
+    source: string;
+    confidence: number | null;
+    created_at: string;
+}
+
+export interface TagSummary {
+    id: string;
+    name: string;
+    normalized_name: string;
+    tag_type: string;
+    image_count: number;
+}
+
+export interface TagBackfillResult {
+    images_processed: number;
+    tags_created: number;
+    image_tags_created: number;
+}
+
 export interface ImportResponse {
     imported: number;
     skipped: number;
@@ -314,6 +339,18 @@ export async function parseNlQuery(query: string): Promise<string> {
 
 export async function backfillImageMetadata(): Promise<number> {
     return invoke('backfill_image_metadata');
+}
+
+export async function backfillImageTags(): Promise<TagBackfillResult> {
+    return invoke('backfill_image_tags');
+}
+
+export async function listImageTags(imageId: string): Promise<ImageTag[]> {
+    return invoke('list_image_tags', { imageId });
+}
+
+export async function listTags(limit = 100, offset = 0): Promise<TagSummary[]> {
+    return invoke('list_tags', { limit, offset });
 }
 
 // Embedding commands

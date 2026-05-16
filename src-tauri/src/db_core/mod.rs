@@ -15,5 +15,6 @@ pub mod sessions;
 pub mod sidecar;
 pub mod smart_collections;
 pub mod source_detection;
+pub mod tags;
 pub mod thumbnails;
 pub mod vision;

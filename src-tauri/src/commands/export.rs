@@ -5,6 +5,7 @@ use crate::export::presets;
 use crate::export::validate;
 use crate::AppState;
 use base64::Engine;
+use std::collections::BTreeSet;
 use tauri::State;
 
 #[derive(serde::Serialize)]
@@ -98,6 +99,15 @@ pub async fn create_export_manifest(
         });
 
         let slide_id = format!("slide_{:03}", idx + 1);
+        let tags: Vec<String> = state
+            .db
+            .list_image_tags(&img.image.id)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|tag| tag.name)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
 
         manifest.slides.push(Slide {
             id: slide_id.clone(),
@@ -125,7 +135,7 @@ pub async fn create_export_manifest(
             },
             metadata: SlideMetadata {
                 rating: img.selection.as_ref().and_then(|s| s.star_rating),
-                tags: vec![],
+                tags,
                 alt: String::new(),
             },
         });

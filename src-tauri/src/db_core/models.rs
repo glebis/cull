@@ -81,6 +81,34 @@ pub struct SimilarityGroupingResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageTag {
+    pub id: String,
+    pub image_id: String,
+    pub name: String,
+    pub normalized_name: String,
+    pub tag_type: String,
+    pub source: String,
+    pub confidence: Option<f64>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagSummary {
+    pub id: String,
+    pub name: String,
+    pub normalized_name: String,
+    pub tag_type: String,
+    pub image_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagBackfillResult {
+    pub images_processed: u32,
+    pub tags_created: u32,
+    pub image_tags_created: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingPage {
     pub ids: Vec<String>,
     pub vectors: Vec<f32>,
