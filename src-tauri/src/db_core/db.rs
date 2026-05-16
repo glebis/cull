@@ -4,9 +4,29 @@
 use super::models::*;
 use super::smart_collections::{FilterNode, SmartCollection};
 use parking_lot::Mutex;
-use rusqlite::{params, Connection, OptionalExtension, Result};
-use std::path::Path;
+use rusqlite::{ffi, params, Connection, Error as SqlError, OptionalExtension, Result};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+const CURRENT_SCHEMA_VERSION: i64 = 15;
+
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, "core_schema"),
+    (2, "smart_collections"),
+    (3, "preset_collections"),
+    (4, "lineage_tables"),
+    (5, "mcp_tables"),
+    (6, "model_processing"),
+    (7, "generation_runs"),
+    (8, "undo_tables"),
+    (9, "sessions"),
+    (10, "session_events"),
+    (11, "library_roots"),
+    (12, "image_file_stat_columns"),
+    (13, "raw_metadata"),
+    (14, "api_audit_log"),
+    (15, "asset_load_events"),
+];
 
 #[derive(Clone)]
 pub struct Database {
@@ -15,33 +35,128 @@ pub struct Database {
 
 impl Database {
     pub fn open(db_path: &Path) -> Result<Self> {
+        let should_consider_backup = should_consider_migration_backup(db_path);
         let conn = Connection::open(db_path)?;
         let db = Database {
             conn: Arc::new(Mutex::new(conn)),
         };
+        db.preflight_migrations(db_path, should_consider_backup)?;
         db.run_migrations()?;
         Ok(db)
     }
 
+    fn preflight_migrations(&self, db_path: &Path, should_consider_backup: bool) -> Result<()> {
+        let (user_version, needs_backup) = {
+            let conn = self.conn.lock();
+            let user_version = user_version(&conn)?;
+            if user_version > CURRENT_SCHEMA_VERSION {
+                return Err(migration_error(format!(
+                    "future schema version {} is newer than supported version {}",
+                    user_version, CURRENT_SCHEMA_VERSION
+                )));
+            }
+
+            if should_consider_backup {
+                integrity_check(&conn)?;
+            }
+
+            let has_migration_history = table_exists(&conn, "schema_migrations")?;
+            let needs_backup = should_consider_backup
+                && (user_version < CURRENT_SCHEMA_VERSION || !has_migration_history);
+            (user_version, needs_backup)
+        };
+
+        if needs_backup {
+            self.create_pre_migration_backup(db_path, user_version)?;
+        }
+
+        Ok(())
+    }
+
+    fn create_pre_migration_backup(&self, db_path: &Path, from_version: i64) -> Result<()> {
+        let backup_path = next_migration_backup_path(db_path, from_version)?;
+        if let Some(parent) = backup_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                migration_error(format!(
+                    "failed to create migration backup directory {}: {}",
+                    parent.display(),
+                    e
+                ))
+            })?;
+        }
+
+        let backup_path = backup_path.to_string_lossy().to_string();
+        let conn = self.conn.lock();
+        conn.execute("VACUUM main INTO ?1", params![backup_path])?;
+        Ok(())
+    }
+
     fn run_migrations(&self) -> Result<()> {
+        debug_assert_eq!(
+            Some(CURRENT_SCHEMA_VERSION),
+            MIGRATIONS.last().map(|(version, _)| *version)
+        );
+
         let conn = self.conn.lock();
         let schema = include_str!("schema.sql");
         conn.execute_batch(schema)?;
         drop(conn);
+        self.record_migration(1, "core_schema")?;
         self.migrate_smart_collections()?;
+        self.record_migration(2, "smart_collections")?;
         self.seed_preset_collections()?;
+        self.record_migration(3, "preset_collections")?;
         self.migrate_lineage_tables()?;
+        self.record_migration(4, "lineage_tables")?;
         self.migrate_mcp_tables()?;
+        self.record_migration(5, "mcp_tables")?;
         self.migrate_model_processing()?;
+        self.record_migration(6, "model_processing")?;
         self.migrate_generation_runs()?;
+        self.record_migration(7, "generation_runs")?;
         self.migrate_undo_tables()?;
+        self.record_migration(8, "undo_tables")?;
         self.migrate_sessions()?;
+        self.record_migration(9, "sessions")?;
         self.migrate_session_events()?;
+        self.record_migration(10, "session_events")?;
         self.migrate_library_roots()?;
+        self.record_migration(11, "library_roots")?;
         self.migrate_image_file_stat_columns()?;
+        self.record_migration(12, "image_file_stat_columns")?;
         self.migrate_raw_metadata()?;
+        self.record_migration(13, "raw_metadata")?;
         self.migrate_audit_log()?;
+        self.record_migration(14, "api_audit_log")?;
         self.migrate_asset_load_events()?;
+        self.record_migration(15, "asset_load_events")?;
+        self.set_schema_version(CURRENT_SCHEMA_VERSION)?;
+        Ok(())
+    }
+
+    fn record_migration(&self, version: i64, name: &str) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let checksum = migration_checksum(version, name);
+        let conn = self.conn.lock();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL,
+                checksum TEXT NOT NULL
+            );",
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations (version, name, applied_at, checksum)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![version, name, now, checksum],
+        )?;
+        Ok(())
+    }
+
+    fn set_schema_version(&self, version: i64) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.pragma_update(None, "user_version", version)?;
         Ok(())
     }
 
@@ -2211,6 +2326,85 @@ impl Database {
     }
 }
 
+fn should_consider_migration_backup(db_path: &Path) -> bool {
+    if db_path == Path::new(":memory:") {
+        return false;
+    }
+
+    std::fs::metadata(db_path)
+        .map(|metadata| metadata.is_file() && metadata.len() > 0)
+        .unwrap_or(false)
+}
+
+fn user_version(conn: &Connection) -> Result<i64> {
+    conn.pragma_query_value(None, "user_version", |row| row.get(0))
+}
+
+fn table_exists(conn: &Connection, table_name: &str) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        params![table_name],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn integrity_check(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA integrity_check")?;
+    let results = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>>>()?;
+
+    if results.len() == 1 && results[0] == "ok" {
+        Ok(())
+    } else {
+        Err(migration_error(format!(
+            "database integrity check failed before migration: {}",
+            results.join("; ")
+        )))
+    }
+}
+
+fn next_migration_backup_path(db_path: &Path, from_version: i64) -> Result<PathBuf> {
+    let backup_dir = migration_backup_dir(db_path)?;
+    let file_name = db_path
+        .file_name()
+        .ok_or_else(|| migration_error(format!("invalid database path {}", db_path.display())))?
+        .to_string_lossy();
+    let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%S%.9fZ");
+    Ok(backup_dir.join(format!(
+        "{}-before-v{}-to-v{}-{}.sqlite",
+        file_name, from_version, CURRENT_SCHEMA_VERSION, timestamp
+    )))
+}
+
+fn migration_backup_dir(db_path: &Path) -> Result<PathBuf> {
+    let file_name = db_path
+        .file_name()
+        .ok_or_else(|| migration_error(format!("invalid database path {}", db_path.display())))?
+        .to_string_lossy();
+    Ok(db_path.with_file_name(format!("{}.backups", file_name)))
+}
+
+fn migration_checksum(version: i64, name: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in version
+        .to_le_bytes()
+        .iter()
+        .copied()
+        .chain(name.as_bytes().iter().copied())
+        .chain(include_str!("schema.sql").as_bytes().iter().copied())
+    {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{:016x}", hash)
+}
+
+fn migration_error(message: String) -> SqlError {
+    SqlError::SqliteFailure(ffi::Error::new(ffi::SQLITE_ERROR), Some(message))
+}
+
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() {
         return 0.0;
@@ -2222,6 +2416,108 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         0.0
     } else {
         dot / (norm_a * norm_b)
+    }
+}
+
+#[cfg(test)]
+mod migration_safety_tests {
+    use super::*;
+    use std::fs;
+
+    fn create_legacy_db(path: &Path) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch(
+            "
+            PRAGMA user_version = 0;
+            CREATE TABLE app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            INSERT INTO app_settings (key, value) VALUES ('legacy_marker', 'preserved');
+            ",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_open_records_schema_version_and_migration_history() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("cull.db");
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock();
+        let user_version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert!(user_version > 0);
+
+        let migration_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert!(migration_count > 0);
+
+        let latest_migration: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(latest_migration, user_version);
+    }
+
+    #[test]
+    fn test_open_creates_backup_before_migrating_existing_database() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("legacy.db");
+        create_legacy_db(&db_path);
+
+        Database::open(&db_path).unwrap();
+
+        let backup_dir = tmp.path().join("legacy.db.backups");
+        let backups: Vec<_> = fs::read_dir(&backup_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(backups.len(), 1);
+
+        let backup = Connection::open(&backups[0]).unwrap();
+        let marker: String = backup
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'legacy_marker'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(marker, "preserved");
+
+        let backup_version: i64 = backup
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(backup_version, 0);
+    }
+
+    #[test]
+    fn test_open_rejects_unknown_future_schema_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("future.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "
+            PRAGMA user_version = 999999;
+            CREATE TABLE app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            ",
+        )
+        .unwrap();
+        drop(conn);
+
+        match Database::open(&db_path) {
+            Ok(_) => panic!("future schema version should be rejected"),
+            Err(err) => assert!(err.to_string().contains("future schema version")),
+        }
     }
 }
 
