@@ -310,11 +310,18 @@ pub fn log_audit(
     result_status: &str,
 ) -> Result<(), ServiceError> {
     let now = chrono::Utc::now().to_rfc3339();
+    let redacted_params = params_json.and_then(redact_audit_params);
     let conn = ctx.db.conn.lock();
     conn.execute(
         "INSERT INTO mcp_audit_log (token_id, tool_name, params_json, result_status, timestamp)
          VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![token_id, tool_name, params_json, result_status, now],
+        rusqlite::params![
+            token_id,
+            tool_name,
+            redacted_params.as_deref(),
+            result_status,
+            now
+        ],
     )?;
     Ok(())
 }
@@ -359,10 +366,88 @@ pub fn parse_scope(scope_json: &Option<String>) -> Option<TokenScope> {
         .and_then(|s| serde_json::from_str(s).ok())
 }
 
+fn redact_audit_params(params_json: &str) -> Option<String> {
+    let mut value: serde_json::Value = serde_json::from_str(params_json).ok()?;
+    redact_json_value(&mut value, None);
+    serde_json::to_string(&value).ok()
+}
+
+fn redact_json_value(value: &mut serde_json::Value, key: Option<&str>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map.iter_mut() {
+                redact_json_value(v, Some(k));
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                redact_json_value(item, key);
+            }
+        }
+        serde_json::Value::String(s) => {
+            if let Some(replacement) = redaction_for_string(key, s) {
+                *s = replacement.to_string();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn redaction_for_string<'a>(key: Option<&str>, value: &str) -> Option<&'a str> {
+    let lower_key = key.unwrap_or_default().to_ascii_lowercase();
+    if lower_key.contains("key")
+        || lower_key.contains("secret")
+        || lower_key.contains("token")
+        || lower_key.contains("authorization")
+    {
+        Some("[redacted:secret]")
+    } else if lower_key.contains("path")
+        || lower_key.contains("dir")
+        || lower_key.contains("folder")
+        || looks_like_path(value)
+    {
+        Some("[redacted:path]")
+    } else if lower_key.contains("prompt") {
+        Some("[redacted:text]")
+    } else {
+        None
+    }
+}
+
+fn looks_like_path(value: &str) -> bool {
+    value.starts_with('/')
+        || value.starts_with("~/")
+        || value.starts_with("./")
+        || value.starts_with("../")
+        || value.contains(":\\")
+}
+
+fn normalized_path(path: &str) -> std::path::PathBuf {
+    let path = std::path::Path::new(path);
+    std::fs::canonicalize(path).unwrap_or_else(|_| normalize_path_components(path))
+}
+
+fn normalize_path_components(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::{Component, PathBuf};
+
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
 fn is_path_under(path: &str, ancestor: &str) -> bool {
-    use std::path::Path;
-    let path = Path::new(path);
-    let ancestor = Path::new(ancestor);
+    let path = normalized_path(path);
+    let ancestor = normalized_path(ancestor);
     path.starts_with(ancestor)
 }
 
@@ -403,7 +488,7 @@ pub fn folder_in_scope(scope: &Option<TokenScope>, folder_path: &str) -> bool {
 
     if let Some(folders) = &s.folders {
         for allowed in folders {
-            if is_path_under(folder_path, allowed) || is_path_under(allowed, folder_path) {
+            if is_path_under(folder_path, allowed) {
                 return true;
             }
         }
@@ -902,8 +987,7 @@ mod tests {
         });
         assert!(folder_in_scope(&scope, "/art/midjourney"));
         assert!(folder_in_scope(&scope, "/art/midjourney/subfolder"));
-        // Parent folder contains the allowed folder
-        assert!(folder_in_scope(&scope, "/art"));
+        assert!(!folder_in_scope(&scope, "/art"));
     }
 
     #[test]
@@ -935,6 +1019,83 @@ mod tests {
         // Same for folder_in_scope
         assert!(folder_in_scope(&scope, "/art/sub"));
         assert!(!folder_in_scope(&scope, "/artifacts"));
+    }
+
+    #[test]
+    fn test_image_scope_rejects_canonical_parent_and_symlink_escape() {
+        let tmp = tempfile::tempdir().unwrap();
+        let allowed = tmp.path().join("allowed");
+        let sibling = tmp.path().join("sibling");
+        std::fs::create_dir_all(&allowed).unwrap();
+        std::fs::create_dir_all(&sibling).unwrap();
+
+        let sibling_image = sibling.join("secret.jpg");
+        std::fs::write(&sibling_image, b"secret").unwrap();
+
+        let scope = Some(TokenScope {
+            folders: Some(vec![allowed.to_string_lossy().to_string()]),
+            collections: None,
+            tags: None,
+        });
+
+        let dotdot_escape = allowed.join("..").join("sibling").join("secret.jpg");
+        assert!(!image_in_scope(
+            &scope,
+            dotdot_escape.to_string_lossy().as_ref(),
+            &[]
+        ));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+
+            let link = allowed.join("external");
+            symlink(&sibling, &link).unwrap();
+            let symlink_escape = link.join("secret.jpg");
+            assert!(!image_in_scope(
+                &scope,
+                symlink_escape.to_string_lossy().as_ref(),
+                &[]
+            ));
+        }
+    }
+
+    #[test]
+    fn test_folder_scope_rejects_parent_of_allowed_folder() {
+        let scope = Some(TokenScope {
+            folders: Some(vec!["/art/midjourney".to_string()]),
+            collections: None,
+            tags: None,
+        });
+
+        assert!(!folder_in_scope(&scope, "/art"));
+    }
+
+    #[test]
+    fn test_audit_log_redacts_paths_prompts_and_secrets() {
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
+        let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
+
+        log_audit(
+            &ctx,
+            Some("tok_abc"),
+            "import_folder",
+            Some(
+                r#"{"folder_path":"/Users/alice/secret/art","prompt":"private prompt","api_key":"sk-test","limit":10}"#,
+            ),
+            "ok",
+        )
+        .unwrap();
+
+        let entries = get_recent_audit(&ctx, 1).unwrap();
+        let params = entries[0].params_json.as_deref().unwrap();
+        assert!(!params.contains("/Users/alice/secret/art"));
+        assert!(!params.contains("private prompt"));
+        assert!(!params.contains("sk-test"));
+        assert!(params.contains("\"limit\":10"));
+        assert!(params.contains("[redacted:path]"));
+        assert!(params.contains("[redacted:text]"));
+        assert!(params.contains("[redacted:secret]"));
     }
 
     #[test]

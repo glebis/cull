@@ -84,7 +84,9 @@ pub async fn import_folder(
     }
 
     let _ = state.db.add_library_root(&folder_path);
-    let _ = app.asset_protocol_scope().allow_directory(&folder_path, true);
+    let _ = app
+        .asset_protocol_scope()
+        .allow_directory(&folder_path, true);
 
     let batch_id = if !new_image_ids.is_empty() {
         let batch = db
