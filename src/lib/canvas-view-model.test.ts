@@ -11,6 +11,7 @@ import {
     createCanvasDocumentForImages,
     createCanvasDocumentFromLayoutJson,
     createCanvasViewItems,
+    rotateCanvasViewItemClockwise,
     updateCanvasDocumentFromViewItems,
 } from './canvas-view-model';
 
@@ -175,5 +176,48 @@ describe('canvas view model', () => {
         });
         expect(validateCanvasDocument(updated)).toEqual([]);
         expect(() => serializeCanvasDocumentLayout(updated)).not.toThrow();
+    });
+
+    it('round-trips non-destructive item rotation through view items', () => {
+        const doc: CanvasDocument = {
+            ...createEmptyCanvasDocument(),
+            items: [{
+                id: 'canvas-item-a',
+                imageId: 'img-a',
+                x: 0,
+                y: 0,
+                width: 200,
+                height: 120,
+                z: 0,
+                hidden: false,
+                label: null,
+                groupId: null,
+                transform: { crop: null, rotationDegrees: 270, fit: 'contain' },
+                source: { contentHash: 'hash-img-a', lastKnownPath: '/library/img-a.png' },
+            }],
+        };
+
+        const items = createCanvasViewItems(doc, [image('img-a')]);
+        expect(items[0].rotationDegrees).toBe(270);
+
+        items[0] = { ...items[0], rotationDegrees: 0 };
+        const updated = updateCanvasDocumentFromViewItems(doc, items, {
+            panX: 0,
+            panY: 0,
+            zoom: 1,
+        });
+
+        expect(updated.items[0].transform).toMatchObject({
+            crop: null,
+            rotationDegrees: 0,
+            fit: 'contain',
+        });
+    });
+
+    it('rotates canvas view items clockwise in 90 degree steps', () => {
+        const [item] = createCanvasViewItems(createCanvasDocumentForImages([image('img-a')]), [image('img-a')]);
+
+        expect(rotateCanvasViewItemClockwise({ ...item, rotationDegrees: 270 }).rotationDegrees).toBe(0);
+        expect(rotateCanvasViewItemClockwise({ ...item, rotationDegrees: -90 }).rotationDegrees).toBe(0);
     });
 });

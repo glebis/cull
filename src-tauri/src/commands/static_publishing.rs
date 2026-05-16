@@ -629,12 +629,7 @@ fn export_canvas_snapshot(
             decoded
         };
 
-        if item.transform.rotation_degrees.abs() > f64::EPSILON {
-            warnings.push(format!(
-                "Snapshot ignored rotation for canvas item '{}'",
-                item.id
-            ));
-        }
+        let decoded = rotate_snapshot_image(decoded, item.transform.rotation_degrees);
 
         let target_width = scaled_dimension(item.width, scale);
         let target_height = scaled_dimension(item.height, scale);
@@ -789,6 +784,16 @@ fn crop_image(
         crop_width.round() as u32,
         crop_height.round() as u32,
     )
+}
+
+fn rotate_snapshot_image(image: image::DynamicImage, rotation_degrees: f64) -> image::DynamicImage {
+    let normalized = ((rotation_degrees / 90.0).round() as i32 * 90).rem_euclid(360);
+    match normalized {
+        90 => image.rotate90(),
+        180 => image.rotate180(),
+        270 => image.rotate270(),
+        _ => image,
+    }
 }
 
 fn render_item_image(
@@ -1393,6 +1398,16 @@ mod tests {
         );
         assert_eq!(manifest["snapshots"]["png"], "exports/canvas.png");
         assert_eq!(manifest["snapshots"]["pdf"], "exports/canvas.pdf");
+    }
+
+    #[test]
+    fn snapshot_rotation_applies_quarter_turns() {
+        let image: image::RgbaImage =
+            image::ImageBuffer::from_pixel(2, 3, image::Rgba([32, 96, 160, 255]));
+        let rotated = rotate_snapshot_image(image::DynamicImage::ImageRgba8(image), 90.0);
+
+        assert_eq!(rotated.width(), 3);
+        assert_eq!(rotated.height(), 2);
     }
 
     #[test]

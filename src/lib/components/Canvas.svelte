@@ -23,6 +23,7 @@
     import {
         createCanvasDocumentFromLayoutJson,
         createCanvasViewItems,
+        rotateCanvasViewItemClockwise,
         updateCanvasDocumentFromViewItems,
         type CanvasViewItem,
     } from '$lib/canvas-view-model';
@@ -215,6 +216,13 @@
         if (idx >= 0) focusedIndex.set(idx);
     }
 
+    function rotateItemClockwise(item: CanvasViewItem) {
+        canvasItems = canvasItems.map(candidate =>
+            candidate.id === item.id ? rotateCanvasViewItemClockwise(candidate) : candidate
+        );
+        queueCanvasSave();
+    }
+
     function handleItemDblClick(item: CanvasViewItem) {
         const idx = $images.findIndex(img => img.image.id === item.imageId);
         if (idx >= 0) {
@@ -230,6 +238,9 @@
         } else if (e.key === ' ') {
             e.preventDefault();
             handleItemClick(new MouseEvent('click'), item);
+        } else if (e.key.toLowerCase() === 'r') {
+            e.preventDefault();
+            rotateItemClockwise(item);
         }
     }
 
@@ -312,6 +323,7 @@
                 class:selected={$selectedIds.has(item.imageId)}
                 class:focused={$focusedImage?.image.id === item.imageId}
                 style="left: {item.x}px; top: {item.y}px; width: {item.width}px; height: {item.height}px;"
+                style:--item-rotation={`${item.rotationDegrees}deg`}
                 onmousedown={(e) => handleItemMouseDown(e, item)}
                 onclick={(e) => handleItemClick(e, item)}
                 ondblclick={() => handleItemDblClick(item)}
@@ -326,6 +338,20 @@
                     alt=""
                     draggable="false"
                 />
+                <button
+                    class="rotate-btn"
+                    type="button"
+                    title="Rotate clockwise"
+                    aria-label="Rotate clockwise"
+                    onclick={(e) => {
+                        e.stopPropagation();
+                        rotateItemClockwise(item);
+                    }}
+                    onmousedown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                    }}
+                >↻</button>
                 {#if decision !== 'undecided'}
                     <div class="badge decision-badge" class:accept={decision === 'accept'} class:reject={decision === 'reject'}>
                         {decision === 'accept' ? '✓' : '×'}
@@ -385,6 +411,7 @@
         border-radius: 2px;
         cursor: move;
         transition: border-color 0.1s;
+        overflow: hidden;
     }
     .canvas-item.focused {
         border-color: var(--blue);
@@ -402,6 +429,37 @@
         object-fit: cover;
         pointer-events: none;
         display: block;
+        transform: rotate(var(--item-rotation, 0deg));
+        transform-origin: center;
+    }
+    .rotate-btn {
+        position: absolute;
+        bottom: 4px;
+        left: 4px;
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        color: var(--blue);
+        font-family: var(--font);
+        font-size: 13px;
+        line-height: 1;
+        opacity: 0;
+        cursor: pointer;
+        transition: opacity 0.15s, border-color 0.15s;
+    }
+    .rotate-btn:hover,
+    .rotate-btn:focus-visible {
+        border-color: var(--blue);
+        outline: none;
+    }
+    .canvas-item:hover .rotate-btn,
+    .canvas-item:focus-within .rotate-btn {
+        opacity: 1;
     }
     .resize-handle {
         position: absolute;

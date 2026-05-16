@@ -24,6 +24,7 @@ export interface CanvasViewItem {
     hidden: boolean;
     label: string | null;
     groupId: string | null;
+    rotationDegrees: number;
 }
 
 export function createCanvasDocumentForImages(
@@ -68,6 +69,7 @@ export function createCanvasViewItems(document: CanvasDocument, images: ImageWit
                 hidden: item.hidden,
                 label: item.label ?? null,
                 groupId: item.groupId ?? null,
+                rotationDegrees: normalizeRotation(item.transform.rotationDegrees),
             };
         })
         .filter((item): item is CanvasViewItem => item !== null);
@@ -98,6 +100,15 @@ export function updateCanvasDocumentFromViewItems(
             hidden: viewItem.hidden,
             label: viewItem.label,
             groupId: viewItem.groupId,
+            transform: {
+                ...(existing?.transform ?? createCanvasItem(viewItem.image, {
+                    x: viewItem.x,
+                    y: viewItem.y,
+                    width: viewItem.width,
+                    height: viewItem.height,
+                }, viewItem.z).transform),
+                rotationDegrees: normalizeRotation(viewItem.rotationDegrees),
+            },
             source: {
                 contentHash: viewItem.image.image.sha256_hash,
                 lastKnownPath: viewItem.image.path,
@@ -179,6 +190,18 @@ function gridLayout(images: ImageWithFile[]) {
 function safeAspect(image: ImageWithFile) {
     if (image.image.height <= 0) return 1;
     return image.image.width / image.image.height;
+}
+
+export function normalizeRotation(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    return ((Math.round(value / 90) * 90) % 360 + 360) % 360;
+}
+
+export function rotateCanvasViewItemClockwise(item: CanvasViewItem): CanvasViewItem {
+    return {
+        ...item,
+        rotationDegrees: normalizeRotation(item.rotationDegrees + 90),
+    };
 }
 
 function parseCanvasLayoutOrEmpty(layoutJson: string): CanvasDocument {
