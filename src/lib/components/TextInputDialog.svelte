@@ -176,6 +176,9 @@
         margin: 0 0 2px;
         color: var(--text-secondary);
         font-size: 12px;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+        word-break: break-word;
     }
 
     .field-label {

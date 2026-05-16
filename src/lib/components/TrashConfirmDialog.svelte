@@ -42,7 +42,7 @@
         </div>
 
         <div class="dialog-body">
-            <p class="confirm-text">Move <strong>{fileName}</strong> to Trash?</p>
+            <p class="confirm-text">Move <strong class="file-name" title={fileName}>{fileName}</strong> to Trash?</p>
 
             <label class="checkbox-row">
                 <input type="checkbox" bind:checked={dontAsk} />
@@ -119,9 +119,13 @@
         margin: 0;
         font-size: 13px;
         color: var(--text);
+        line-height: 1.45;
+        min-width: 0;
     }
-    .confirm-text strong {
+    .file-name {
         color: var(--blue);
+        overflow-wrap: anywhere;
+        word-break: break-word;
     }
     .checkbox-row, .radio-row {
         display: flex;
