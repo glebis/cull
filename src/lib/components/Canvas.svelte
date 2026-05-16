@@ -6,6 +6,7 @@
         focusedIndex,
         images,
         navigateTo,
+        requestTextInput,
         selectedIds,
         sessionCanvases,
         showToast,
@@ -21,13 +22,23 @@
     } from '$lib/canvas-interactions';
     import { serializeCanvasDocumentLayout, type CanvasDocument } from '$lib/canvas-document';
     import {
+        addCanvasItemAnnotation,
+        applyCanvasViewItemCrop,
+        canvasItemAnnotations,
         createCanvasDocumentFromLayoutJson,
         createCanvasViewItems,
         rotateCanvasViewItemClockwise,
+        setCanvasViewItemCropFromPoints,
         updateCanvasDocumentFromViewItems,
         type CanvasViewItem,
     } from '$lib/canvas-view-model';
+    import type { CanvasCrop } from '$lib/canvas-document';
     import ContextMenu from './ContextMenu.svelte';
+
+    type CropPoint = { x: number; y: number };
+    type CropDraft = { itemId: string; anchor: CropPoint; current: CropPoint };
+
+    const MIN_CROP_DRAG_SIZE = 0.02;
 
     let canvasItems = $state<CanvasViewItem[]>([]);
     let canvasDocument = $state<CanvasDocument | null>(null);
@@ -52,6 +63,8 @@
     let resizeStartY = $state(0);
     let resizeStartW = $state(0);
     let resizeStartH = $state(0);
+    let cropModeItemId = $state<string | null>(null);
+    let cropDraft = $state<CropDraft | null>(null);
     let loadedCanvasKey = $state('');
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -139,7 +152,15 @@
     }
 
     function handleCanvasMouseMove(e: MouseEvent) {
-        if (panning) {
+        if (cropDraft) {
+            const item = canvasItems.find(it => it.id === cropDraft?.itemId);
+            if (item) {
+                cropDraft = {
+                    ...cropDraft,
+                    current: cropPointFromPointer(e, item),
+                };
+            }
+        } else if (panning) {
             const nextPan = computeCanvasPanDrag(
                 { panX: panOriginX, panY: panOriginY, zoom },
                 { x: panStartX, y: panStartY },
@@ -179,6 +200,24 @@
     }
 
     function handleCanvasMouseUp() {
+        if (cropDraft) {
+            const draft = cropDraft;
+            if (Math.abs(draft.current.x - draft.anchor.x) < MIN_CROP_DRAG_SIZE
+                || Math.abs(draft.current.y - draft.anchor.y) < MIN_CROP_DRAG_SIZE) {
+                cropDraft = null;
+                return;
+            }
+            canvasItems = canvasItems.map(candidate =>
+                candidate.id === draft.itemId
+                    ? setCanvasViewItemCropFromPoints(candidate, draft.anchor, draft.current)
+                    : candidate
+            );
+            cropDraft = null;
+            cropModeItemId = null;
+            queueCanvasSave();
+            return;
+        }
+
         const changed = panning || dragItem !== null || resizeItem !== null;
         panning = false;
         dragItem = null;
@@ -187,6 +226,14 @@
     }
 
     function handleItemMouseDown(e: MouseEvent, item: CanvasViewItem) {
+        if (cropModeItemId === item.id) {
+            if (e.button !== 0) return;
+            e.stopPropagation();
+            e.preventDefault();
+            const point = cropPointFromPointer(e, item);
+            cropDraft = { itemId: item.id, anchor: point, current: point };
+            return;
+        }
         if (spacePanActive) return;
         if (e.button !== 0 || e.altKey) return;
         e.stopPropagation();
@@ -223,6 +270,49 @@
         queueCanvasSave();
     }
 
+    function beginItemCrop(item: CanvasViewItem) {
+        cropModeItemId = cropModeItemId === item.id ? null : item.id;
+        cropDraft = null;
+        const idx = $images.findIndex(img => img.image.id === item.imageId);
+        if (idx >= 0) focusedIndex.set(idx);
+    }
+
+    function resetItemCrop(item: CanvasViewItem) {
+        canvasItems = canvasItems.map(candidate =>
+            candidate.id === item.id ? applyCanvasViewItemCrop(candidate, null) : candidate
+        );
+        cropModeItemId = cropModeItemId === item.id ? null : cropModeItemId;
+        cropDraft = cropDraft?.itemId === item.id ? null : cropDraft;
+        queueCanvasSave();
+    }
+
+    async function addItemAnnotation(item: CanvasViewItem) {
+        if (!canvasDocument) return;
+        const body = await requestTextInput({
+            title: 'Add Canvas Note',
+            label: 'Note',
+            description: item.image.path.split('/').pop() ?? 'Canvas item',
+            placeholder: 'What should be remembered about this item?',
+            confirmLabel: 'Add Note',
+        });
+        if (!body || !canvasDocument) return;
+
+        try {
+            canvasDocument = addCanvasItemAnnotation(canvasDocument, item.id, body, {
+                x: 0.5,
+                y: 0.5,
+            });
+            queueCanvasSave();
+        } catch (e) {
+            showToast('Canvas note failed', { detail: String(e), type: 'error', duration: 10000 });
+        }
+    }
+
+    function cancelCropMode() {
+        cropModeItemId = null;
+        cropDraft = null;
+    }
+
     function handleItemDblClick(item: CanvasViewItem) {
         const idx = $images.findIndex(img => img.image.id === item.imageId);
         if (idx >= 0) {
@@ -241,6 +331,12 @@
         } else if (e.key.toLowerCase() === 'r') {
             e.preventDefault();
             rotateItemClockwise(item);
+        } else if (e.key.toLowerCase() === 'c') {
+            e.preventDefault();
+            beginItemCrop(item);
+        } else if (e.key === 'Escape' && cropModeItemId) {
+            e.preventDefault();
+            cancelCropMode();
         }
     }
 
@@ -260,6 +356,11 @@
     }
 
     function handleCanvasKeydown(e: KeyboardEvent) {
+        if (e.key === 'Escape' && cropModeItemId) {
+            cancelCropMode();
+            e.preventDefault();
+            return;
+        }
         if (!isCanvasSpacePanKey(keyInputFromEvent(e))) return;
         spacePanActive = true;
         e.preventDefault();
@@ -287,6 +388,65 @@
             targetTagName: target?.tagName ?? null,
             isContentEditable: target?.isContentEditable ?? false,
         };
+    }
+
+    function cropPointFromPointer(e: MouseEvent, item: CanvasViewItem): CropPoint {
+        const rect = canvasEl?.getBoundingClientRect();
+        const localX = rect ? e.clientX - rect.left : e.clientX;
+        const localY = rect ? e.clientY - rect.top : e.clientY;
+        return {
+            x: clamp(((localX - panX) / zoom - item.x) / item.width, 0, 1),
+            y: clamp(((localY - panY) / zoom - item.y) / item.height, 0, 1),
+        };
+    }
+
+    function cropImageStyle(item: CanvasViewItem) {
+        const crop = item.crop ?? { x: 0, y: 0, width: 1, height: 1 };
+        return [
+            `left: ${cropImageOffset(crop.x, crop.width)}%`,
+            `top: ${cropImageOffset(crop.y, crop.height)}%`,
+            `width: ${100 / crop.width}%`,
+            `height: ${100 / crop.height}%`,
+        ].join('; ');
+    }
+
+    function cropImageOffset(origin: number, size: number) {
+        return (-origin / size) * 100;
+    }
+
+    function cropSelectionForItem(item: CanvasViewItem): CanvasCrop | null {
+        if (cropDraft?.itemId === item.id) {
+            const x = Math.min(cropDraft.anchor.x, cropDraft.current.x);
+            const y = Math.min(cropDraft.anchor.y, cropDraft.current.y);
+            return {
+                x,
+                y,
+                width: Math.abs(cropDraft.current.x - cropDraft.anchor.x),
+                height: Math.abs(cropDraft.current.y - cropDraft.anchor.y),
+            };
+        }
+        return cropModeItemId === item.id ? item.crop : null;
+    }
+
+    function cropRectStyle(crop: CanvasCrop) {
+        return [
+            `left: ${crop.x * 100}%`,
+            `top: ${crop.y * 100}%`,
+            `width: ${crop.width * 100}%`,
+            `height: ${crop.height * 100}%`,
+        ].join('; ');
+    }
+
+    function clamp(value: number, min: number, max: number) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    function itemAnnotations(item: CanvasViewItem) {
+        return canvasItemAnnotations(canvasDocument, item.id);
+    }
+
+    function annotationTitle(item: CanvasViewItem) {
+        return itemAnnotations(item).map(annotation => annotation.body).join('\n');
     }
 
     $effect(() => {
@@ -318,10 +478,12 @@
         {#each canvasItems as item (item.id)}
             {@const rating = item.image.selection?.star_rating ?? 0}
             {@const decision = item.image.selection?.decision ?? 'undecided'}
+            {@const annotations = itemAnnotations(item)}
             <div
                 class="canvas-item"
                 class:selected={$selectedIds.has(item.imageId)}
                 class:focused={$focusedImage?.image.id === item.imageId}
+                class:crop-active={cropModeItemId === item.id}
                 style="left: {item.x}px; top: {item.y}px; width: {item.width}px; height: {item.height}px;"
                 style:--item-rotation={`${item.rotationDegrees}deg`}
                 onmousedown={(e) => handleItemMouseDown(e, item)}
@@ -333,25 +495,82 @@
                 tabindex="0"
                 onkeydown={(e) => handleItemKeydown(e, item)}
             >
-                <img
-                    src={item.image.thumbnail_path ? convertFileSrc(item.image.thumbnail_path) : convertFileSrc(item.image.path)}
-                    alt=""
-                    draggable="false"
-                />
-                <button
-                    class="rotate-btn"
-                    type="button"
-                    title="Rotate clockwise"
-                    aria-label="Rotate clockwise"
-                    onclick={(e) => {
-                        e.stopPropagation();
-                        rotateItemClockwise(item);
-                    }}
-                    onmousedown={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                    }}
-                >↻</button>
+                <div class="image-stage">
+                    <img
+                        src={item.image.thumbnail_path ? convertFileSrc(item.image.thumbnail_path) : convertFileSrc(item.image.path)}
+                        alt=""
+                        draggable="false"
+                        style={cropImageStyle(item)}
+                    />
+                </div>
+                {#if cropModeItemId === item.id}
+                    {@const cropSelection = cropSelectionForItem(item)}
+                    <div class="crop-overlay" aria-hidden="true">
+                        {#if cropSelection}
+                            <div class="crop-selection" style={cropRectStyle(cropSelection)}></div>
+                        {/if}
+                    </div>
+                {/if}
+                <div class="item-tools">
+                    <button
+                        class="tool-btn crop-btn"
+                        type="button"
+                        title={cropModeItemId === item.id ? 'Cancel crop' : 'Crop item'}
+                        aria-label={cropModeItemId === item.id ? 'Cancel crop' : 'Crop item'}
+                        onclick={(e) => {
+                            e.stopPropagation();
+                            beginItemCrop(item);
+                        }}
+                        onmousedown={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                        }}
+                    >{cropModeItemId === item.id ? '×' : 'C'}</button>
+                    {#if item.crop}
+                        <button
+                            class="tool-btn reset-crop-btn"
+                            type="button"
+                            title="Reset crop"
+                            aria-label="Reset crop"
+                            onclick={(e) => {
+                                e.stopPropagation();
+                                resetItemCrop(item);
+                            }}
+                            onmousedown={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                            }}
+                        >↺</button>
+                    {/if}
+                    <button
+                        class="tool-btn note-btn"
+                        type="button"
+                        title="Add note"
+                        aria-label="Add note"
+                        onclick={(e) => {
+                            e.stopPropagation();
+                            addItemAnnotation(item);
+                        }}
+                        onmousedown={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                        }}
+                    >✎</button>
+                    <button
+                        class="tool-btn rotate-btn"
+                        type="button"
+                        title="Rotate clockwise"
+                        aria-label="Rotate clockwise"
+                        onclick={(e) => {
+                            e.stopPropagation();
+                            rotateItemClockwise(item);
+                        }}
+                        onmousedown={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                        }}
+                    >↻</button>
+                </div>
                 {#if decision !== 'undecided'}
                     <div class="badge decision-badge" class:accept={decision === 'accept'} class:reject={decision === 'reject'}>
                         {decision === 'accept' ? '✓' : '×'}
@@ -359,6 +578,11 @@
                 {/if}
                 {#if rating > 0}
                     <div class="badge rating-badge">{'★'.repeat(rating)}</div>
+                {/if}
+                {#if annotations.length > 0}
+                    <div class="badge annotation-badge" title={annotationTitle(item)}>
+                        {annotations.length}
+                    </div>
                 {/if}
                 <div
                     class="resize-handle"
@@ -423,22 +647,51 @@
     .canvas-item:hover {
         border-color: var(--text-secondary);
     }
-    .canvas-item img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
+    .canvas-item.crop-active {
+        cursor: crosshair;
+        border-color: var(--orange);
+    }
+    .image-stage {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
         pointer-events: none;
-        display: block;
         transform: rotate(var(--item-rotation, 0deg));
         transform-origin: center;
     }
-    .rotate-btn {
+    .canvas-item img {
+        position: absolute;
+        object-fit: cover;
+        display: block;
+    }
+    .crop-overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: rgba(8, 8, 12, 0.42);
+        z-index: 2;
+    }
+    .crop-selection {
+        position: absolute;
+        border: 1px solid var(--orange);
+        background: rgba(224, 175, 104, 0.16);
+        box-shadow: 0 0 0 9999px rgba(8, 8, 12, 0.38);
+    }
+    .item-tools {
         position: absolute;
         bottom: 4px;
         left: 4px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        max-width: calc(100% - 8px);
+        opacity: 0;
+        transition: opacity 0.15s;
+        z-index: 3;
+    }
+    .tool-btn {
         display: grid;
         place-items: center;
-        width: 24px;
         height: 24px;
         padding: 0;
         border: 1px solid var(--border);
@@ -448,17 +701,26 @@
         font-family: var(--font);
         font-size: 13px;
         line-height: 1;
-        opacity: 0;
         cursor: pointer;
-        transition: opacity 0.15s, border-color 0.15s;
+        transition: border-color 0.15s, color 0.15s;
     }
-    .rotate-btn:hover,
-    .rotate-btn:focus-visible {
+    .crop-btn,
+    .reset-crop-btn,
+    .note-btn,
+    .rotate-btn {
+        width: 24px;
+    }
+    .tool-btn:hover,
+    .tool-btn:focus-visible {
         border-color: var(--blue);
         outline: none;
     }
-    .canvas-item:hover .rotate-btn,
-    .canvas-item:focus-within .rotate-btn {
+    .crop-btn {
+        color: var(--orange);
+    }
+    .canvas-item:hover .item-tools,
+    .canvas-item:focus-within .item-tools,
+    .canvas-item.crop-active .item-tools {
         opacity: 1;
     }
     .resize-handle {
@@ -472,6 +734,7 @@
         cursor: nwse-resize;
         opacity: 0;
         transition: opacity 0.15s;
+        z-index: 3;
     }
     .canvas-item:hover .resize-handle {
         opacity: 1;
@@ -519,6 +782,23 @@
         background: var(--surface);
         font-size: 0.7rem;
         line-height: 1.2;
-        letter-spacing: -1px;
+        letter-spacing: 0;
+    }
+    .annotation-badge {
+        right: 4px;
+        bottom: 4px;
+        display: grid;
+        place-items: center;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 4px;
+        border: 1px solid var(--purple);
+        border-radius: var(--radius);
+        background: var(--surface);
+        color: var(--purple);
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1;
+        z-index: 2;
     }
 </style>

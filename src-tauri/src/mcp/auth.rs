@@ -78,6 +78,7 @@ mod tests {
         "list_collections",
         "list_folder_images",
         "list_session_canvases",
+        "get_canvas_layout",
         "set_rating",
         "set_decision",
         "create_collection",
@@ -125,6 +126,7 @@ mod tests {
         "list_collections",
         "list_folder_images",
         "list_session_canvases",
+        "get_canvas_layout",
         "get_detections",
         "get_vision_metadata",
     ];

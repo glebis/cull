@@ -274,15 +274,19 @@ fn export_static_publish_package_with_canvas_inner(
         .as_deref()
         .and_then(|raw| serde_json::from_str(raw).ok())
         .unwrap_or_else(|| json!({ "type": "ordered_canvas_snapshot" }));
-    let snapshot = request
+    let canvas_document = request
         .layout_json
         .as_deref()
-        .and_then(|raw| CanvasDocument::from_layout_json(raw).ok())
+        .and_then(|raw| CanvasDocument::from_layout_json(raw).ok());
+    let snapshot = canvas_document
+        .as_ref()
         .and_then(|document| {
             export_canvas_snapshot(state, &document, &images_by_id, &site_dir, &mut warnings)
                 .transpose()
         })
         .transpose()?;
+    let annotation_export =
+        write_annotation_sidecar(&data_dir, source_canvas, canvas_document.as_ref())?;
 
     let manifest = json!({
         "schema": SCHEMA_VERSION,
@@ -307,6 +311,7 @@ fn export_static_publish_package_with_canvas_inner(
             "full": request.include_full
         },
         "layout": layout,
+        "annotations": annotation_export,
         "snapshots": snapshot.as_ref().map(|snapshot| snapshot.manifest.clone()),
         "images": manifest_items,
         "warnings": warnings
@@ -340,6 +345,49 @@ fn export_static_publish_package_with_canvas_inner(
         skipped_count,
         warnings,
     })
+}
+
+fn write_annotation_sidecar(
+    data_dir: &Path,
+    source_canvas: Option<&Canvas>,
+    document: Option<&CanvasDocument>,
+) -> Result<Value, String> {
+    let Some(document) = document else {
+        return Ok(json!({
+            "count": 0,
+            "file": Value::Null,
+            "policy": "No Canvas v1 annotation sidecar was generated because no valid Canvas document was available."
+        }));
+    };
+
+    let count = document.annotations.len();
+    if count == 0 {
+        return Ok(json!({
+            "count": 0,
+            "file": Value::Null,
+            "policy": "No Canvas annotations were present at export time."
+        }));
+    }
+
+    let sidecar = json!({
+        "schema": SCHEMA_VERSION,
+        "canvas": source_canvas.map(|canvas| json!({
+            "id": canvas.id,
+            "session_id": canvas.session_id,
+            "name": canvas.name,
+            "type": canvas.canvas_type,
+            "updated_at": canvas.updated_at,
+        })),
+        "annotations": &document.annotations,
+        "policy": "Read-only Canvas annotation sidecar. Add writable comments as a separate data file or service-backed layer."
+    });
+    write_json(&data_dir.join("annotations.json"), &sidecar)?;
+
+    Ok(json!({
+        "count": count,
+        "file": "data/annotations.json",
+        "policy": "Canvas annotations are exported as a read-only sidecar; writable comment layers must use a separate service or data file."
+    }))
 }
 
 #[tauri::command]
@@ -1055,6 +1103,7 @@ Build or publish this package as a read-only presentation site.
 
 - Site root: `{}`
 - Manifest: `data/canvas.json`
+- Annotation sidecar: `data/annotations.json` when Canvas notes are present
 - Images: `images/`
 - QR code: `qr.svg`
 - Share URL for QR: `{}`
@@ -1075,8 +1124,9 @@ Build or publish this package as a read-only presentation site.
 ## Agent Editing Contract
 
 - Preserve `data/canvas.json` as the source of truth.
+- Preserve `data/annotations.json` as the read-only annotation/comment sidecar when present.
 - Preserve original image filenames in captions unless asked to editorialize them.
-- Add annotation/commenting only as a separate data file or service-backed layer.
+- Add writable annotation/commenting only as a separate data file or service-backed layer.
 - Do not overwrite source library files.
 - When generating responsive assets, keep `images/*-thumb.jpg` and `images/*-web.jpg` naming stable.
 "#,
@@ -1398,6 +1448,89 @@ mod tests {
         );
         assert_eq!(manifest["snapshots"]["png"], "exports/canvas.png");
         assert_eq!(manifest["snapshots"]["pdf"], "exports/canvas.pdf");
+    }
+
+    #[test]
+    fn export_saved_canvas_writes_annotation_sidecar() {
+        let (state, tmp) = test_state();
+        state.db.set_setting(MODULE_KEY, "true").unwrap();
+
+        let source_path = tmp.path().join("source.png");
+        write_test_image(&source_path);
+        let image_id =
+            crate::db_core::import::import_file(&state.db, &source_path, &state.app_data_dir)
+                .unwrap()
+                .unwrap();
+        let session_id = state
+            .db
+            .create_session("Annotation Session", &tmp.path().to_string_lossy())
+            .unwrap();
+        let canvas_id = state
+            .db
+            .create_canvas(&session_id, "Annotation Canvas", "manual")
+            .unwrap();
+        let layout_json = format!(
+            r#"{{
+                "version": 1,
+                "viewport": {{ "panX": 0, "panY": 0, "zoom": 1 }},
+                "items": [{{
+                    "id": "visible-item",
+                    "imageId": "{}",
+                    "x": 0,
+                    "y": 0,
+                    "width": 160,
+                    "height": 120,
+                    "z": 0,
+                    "hidden": false,
+                    "label": null,
+                    "groupId": null
+                }}],
+                "groups": [],
+                "connectors": [],
+                "annotations": [{{
+                    "id": "note-a",
+                    "target": {{ "type": "item", "itemId": "visible-item" }},
+                    "body": "Use this crop",
+                    "x": 0.5,
+                    "y": 0.5,
+                    "createdAt": "2026-05-16T10:00:00Z",
+                    "author": null
+                }}],
+                "export": {{ "defaultPresetId": null, "background": "white", "bounds": "content" }}
+            }}"#,
+            image_id
+        );
+        state
+            .db
+            .update_canvas_layout(&canvas_id, &layout_json)
+            .unwrap();
+
+        let result = export_static_publish_canvas_inner(
+            &state,
+            StaticPublishCanvasRequest {
+                canvas_id,
+                output_dir: Some(tmp.path().join("exports").to_string_lossy().to_string()),
+                share_url: None,
+                include_thumbnails: true,
+                include_web: false,
+                include_full: false,
+            },
+        )
+        .unwrap();
+
+        let manifest: Value = serde_json::from_str(
+            &fs::read_to_string(&result.manifest_path).expect("manifest should be readable"),
+        )
+        .unwrap();
+        assert_eq!(manifest["annotations"]["count"], 1);
+        assert_eq!(manifest["annotations"]["file"], "data/annotations.json");
+
+        let sidecar_path = PathBuf::from(&result.site_dir).join("data/annotations.json");
+        let sidecar: Value = serde_json::from_str(
+            &fs::read_to_string(sidecar_path).expect("annotation sidecar should be readable"),
+        )
+        .unwrap();
+        assert_eq!(sidecar["annotations"][0]["body"], "Use this crop");
     }
 
     #[test]

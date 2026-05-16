@@ -11,6 +11,7 @@ use rmcp::{
 use tauri::{Emitter, Manager};
 
 use super::auth::{require_capability, AuthContext};
+use crate::db_core::canvas_document::CanvasDocument;
 use crate::db_core::models::{Canvas, TokenScope};
 use crate::services::tokens;
 use crate::AppState;
@@ -69,6 +70,24 @@ fn canvas_summaries_for_mcp(
             })
         })
         .collect()
+}
+
+fn canvas_layout_for_mcp(canvas: &Canvas) -> Result<serde_json::Value, String> {
+    let document = CanvasDocument::from_layout_json(&canvas.layout_json)
+        .map_err(|e| format!("Invalid canvas layout_json: {}", e))?;
+    let layout = serde_json::to_value(document)
+        .map_err(|e| format!("Failed to serialize canvas layout: {}", e))?;
+
+    Ok(serde_json::json!({
+        "id": canvas.id,
+        "session_id": canvas.session_id,
+        "name": canvas.name,
+        "type": canvas.canvas_type,
+        "sort_order": canvas.sort_order,
+        "created_at": canvas.created_at,
+        "updated_at": canvas.updated_at,
+        "layout": layout,
+    }))
 }
 
 #[derive(Debug, Clone)]
@@ -197,6 +216,12 @@ pub struct ListSessionCanvasesParams {
     pub session_id: String,
     #[schemars(description = "Optional exact Canvas name filter")]
     pub canvas_name: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct GetCanvasLayoutParams {
+    #[schemars(description = "Saved Canvas ID whose v1 layout document should be returned")]
+    pub canvas_id: String,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -1567,6 +1592,21 @@ impl CullMcp {
     }
 
     #[tool(
+        description = "Get a saved Canvas v1 layout document by canvas_id, including item transforms, crops, annotations, and comments."
+    )]
+    fn get_canvas_layout(&self, Parameters(params): Parameters<GetCanvasLayoutParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state.db.get_canvas(&params.canvas_id) {
+            Ok(Some(canvas)) => match canvas_layout_for_mcp(&canvas) {
+                Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()),
+                Err(e) => format!("Error: {}", e),
+            },
+            Ok(None) => format!("Error: Canvas '{}' was not found", params.canvas_id),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(
         description = "Export images selected by image_ids, collection_id, or folder_path to an output directory."
     )]
     fn export_images(
@@ -2138,6 +2178,56 @@ mod tests {
         assert!(result[0].get("layout_json").is_none());
     }
 
+    #[test]
+    fn test_canvas_layout_for_mcp_exposes_transforms_and_annotations() {
+        let mut canvas = canvas_fixture("canvas-a", "Board", 0);
+        canvas.layout_json = r#"{
+            "version": 1,
+            "viewport": { "panX": 0, "panY": 0, "zoom": 1 },
+            "items": [{
+                "id": "item-a",
+                "imageId": "img-a",
+                "x": 0,
+                "y": 0,
+                "width": 200,
+                "height": 120,
+                "z": 0,
+                "hidden": false,
+                "label": null,
+                "groupId": null,
+                "transform": {
+                    "crop": { "x": 0.25, "y": 0.2, "width": 0.5, "height": 0.6 },
+                    "rotationDegrees": 90,
+                    "fit": "contain"
+                },
+                "source": { "contentHash": "hash-a", "lastKnownPath": "/library/a.png" }
+            }],
+            "groups": [],
+            "connectors": [],
+            "annotations": [{
+                "id": "note-a",
+                "target": { "type": "item", "itemId": "item-a" },
+                "body": "Use this crop",
+                "x": 0.5,
+                "y": 0.5,
+                "createdAt": "2026-05-16T10:00:00Z",
+                "author": null
+            }],
+            "export": { "defaultPresetId": null, "background": "transparent", "bounds": "content" }
+        }"#
+        .to_string();
+
+        let result = super::canvas_layout_for_mcp(&canvas).unwrap();
+
+        assert_eq!(result["id"], "canvas-a");
+        assert_eq!(
+            result["layout"]["items"][0]["transform"]["rotationDegrees"],
+            90.0
+        );
+        assert_eq!(result["layout"]["items"][0]["transform"]["crop"]["x"], 0.25);
+        assert_eq!(result["layout"]["annotations"][0]["body"], "Use this crop");
+    }
+
     // --- Tool capability mapping completeness ---
 
     #[test]
@@ -2150,6 +2240,7 @@ mod tests {
             "list_collections",
             "list_collection_images",
             "list_session_canvases",
+            "get_canvas_layout",
             "get_library_stats",
             "get_detections",
             "get_vision_metadata",

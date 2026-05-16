@@ -8,10 +8,14 @@ import {
     type CanvasDocument,
 } from './canvas-document';
 import {
+    addCanvasItemAnnotation,
+    applyCanvasViewItemCrop,
+    canvasItemAnnotations,
     createCanvasDocumentForImages,
     createCanvasDocumentFromLayoutJson,
     createCanvasViewItems,
     rotateCanvasViewItemClockwise,
+    setCanvasViewItemCropFromPoints,
     updateCanvasDocumentFromViewItems,
 } from './canvas-view-model';
 
@@ -219,5 +223,73 @@ describe('canvas view model', () => {
 
         expect(rotateCanvasViewItemClockwise({ ...item, rotationDegrees: 270 }).rotationDegrees).toBe(0);
         expect(rotateCanvasViewItemClockwise({ ...item, rotationDegrees: -90 }).rotationDegrees).toBe(0);
+    });
+
+    it('round-trips non-destructive item crop through view items', () => {
+        const doc: CanvasDocument = {
+            ...createEmptyCanvasDocument(),
+            items: [{
+                id: 'canvas-item-a',
+                imageId: 'img-a',
+                x: 0,
+                y: 0,
+                width: 200,
+                height: 120,
+                z: 0,
+                hidden: false,
+                label: null,
+                groupId: null,
+                transform: { crop: { x: 0.2, y: 0.1, width: 0.5, height: 0.6 }, rotationDegrees: 0, fit: 'contain' },
+                source: { contentHash: 'hash-img-a', lastKnownPath: '/library/img-a.png' },
+            }],
+        };
+
+        const items = createCanvasViewItems(doc, [image('img-a')]);
+        expect(items[0].crop).toEqual({ x: 0.2, y: 0.1, width: 0.5, height: 0.6 });
+
+        items[0] = applyCanvasViewItemCrop(items[0], { x: 0.25, y: 0.2, width: 0.4, height: 0.5 });
+        const updated = updateCanvasDocumentFromViewItems(doc, items, {
+            panX: 0,
+            panY: 0,
+            zoom: 1,
+        });
+
+        expect(updated.items[0].transform.crop).toEqual({ x: 0.25, y: 0.2, width: 0.4, height: 0.5 });
+        expect(validateCanvasDocument(updated)).toEqual([]);
+    });
+
+    it('sets normalized crop rectangles from dragged item points', () => {
+        const [item] = createCanvasViewItems(createCanvasDocumentForImages([image('img-a')]), [image('img-a')]);
+
+        const cropped = setCanvasViewItemCropFromPoints(
+            item,
+            { x: 0.75, y: 0.8 },
+            { x: 0.25, y: 0.2 },
+        );
+
+        expect(cropped.crop).toEqual({ x: 0.25, y: 0.2, width: 0.5, height: 0.6 });
+    });
+
+    it('adds item annotations to the persisted canvas document', () => {
+        const doc = createCanvasDocumentForImages([image('img-a')]);
+
+        const updated = addCanvasItemAnnotation(doc, 'img-a', 'Use this as the hero crop', {
+            id: 'note-a',
+            x: 0.5,
+            y: 0.25,
+            createdAt: '2026-05-16T10:00:00.000Z',
+        });
+
+        expect(updated.annotations).toEqual([{
+            id: 'note-a',
+            target: { type: 'item', itemId: 'img-a' },
+            body: 'Use this as the hero crop',
+            x: 0.5,
+            y: 0.25,
+            createdAt: '2026-05-16T10:00:00.000Z',
+            author: null,
+        }]);
+        expect(canvasItemAnnotations(updated, 'img-a')).toHaveLength(1);
+        expect(validateCanvasDocument(updated)).toEqual([]);
     });
 });

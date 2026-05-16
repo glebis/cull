@@ -3,6 +3,7 @@ import {
     createEmptyCanvasDocument,
     parseCanvasDocumentLayout,
     type CanvasAnnotation,
+    type CanvasCrop,
     type CanvasDocument,
     type CanvasGroup,
     type CanvasItem,
@@ -25,6 +26,7 @@ export interface CanvasViewItem {
     label: string | null;
     groupId: string | null;
     rotationDegrees: number;
+    crop: CanvasCrop | null;
 }
 
 export function createCanvasDocumentForImages(
@@ -70,6 +72,7 @@ export function createCanvasViewItems(document: CanvasDocument, images: ImageWit
                 label: item.label ?? null,
                 groupId: item.groupId ?? null,
                 rotationDegrees: normalizeRotation(item.transform.rotationDegrees),
+                crop: normalizeCrop(item.transform.crop),
             };
         })
         .filter((item): item is CanvasViewItem => item !== null);
@@ -83,13 +86,15 @@ export function updateCanvasDocumentFromViewItems(
     const existingItems = new Map(document.items.map(item => [item.id, item]));
     const items = viewItems.map((viewItem) => {
         const existing = existingItems.get(viewItem.id);
+        const fallback = createCanvasItem(viewItem.image, {
+            x: viewItem.x,
+            y: viewItem.y,
+            width: viewItem.width,
+            height: viewItem.height,
+        }, viewItem.z);
+        const baseItem = existing ?? fallback;
         return {
-            ...(existing ?? createCanvasItem(viewItem.image, {
-                x: viewItem.x,
-                y: viewItem.y,
-                width: viewItem.width,
-                height: viewItem.height,
-            }, viewItem.z)),
+            ...baseItem,
             id: viewItem.id,
             imageId: viewItem.imageId,
             x: viewItem.x,
@@ -101,12 +106,8 @@ export function updateCanvasDocumentFromViewItems(
             label: viewItem.label,
             groupId: viewItem.groupId,
             transform: {
-                ...(existing?.transform ?? createCanvasItem(viewItem.image, {
-                    x: viewItem.x,
-                    y: viewItem.y,
-                    width: viewItem.width,
-                    height: viewItem.height,
-                }, viewItem.z).transform),
+                ...baseItem.transform,
+                crop: normalizeCrop(viewItem.crop),
                 rotationDegrees: normalizeRotation(viewItem.rotationDegrees),
             },
             source: {
@@ -202,6 +203,108 @@ export function rotateCanvasViewItemClockwise(item: CanvasViewItem): CanvasViewI
         ...item,
         rotationDegrees: normalizeRotation(item.rotationDegrees + 90),
     };
+}
+
+const MIN_CROP_SIZE = 0.02;
+
+export function applyCanvasViewItemCrop(item: CanvasViewItem, crop: CanvasCrop | null): CanvasViewItem {
+    return {
+        ...item,
+        crop: normalizeCrop(crop),
+    };
+}
+
+export function setCanvasViewItemCropFromPoints(
+    item: CanvasViewItem,
+    anchor: { x: number; y: number },
+    current: { x: number; y: number },
+): CanvasViewItem {
+    const crop = normalizeCrop({
+        x: Math.min(anchor.x, current.x),
+        y: Math.min(anchor.y, current.y),
+        width: Math.abs(current.x - anchor.x),
+        height: Math.abs(current.y - anchor.y),
+    });
+
+    return applyCanvasViewItemCrop(item, crop);
+}
+
+export interface AddCanvasItemAnnotationOptions {
+    id?: string;
+    x?: number | null;
+    y?: number | null;
+    createdAt?: string | null;
+    author?: string | null;
+}
+
+export function addCanvasItemAnnotation(
+    document: CanvasDocument,
+    itemId: string,
+    body: string,
+    options: AddCanvasItemAnnotationOptions = {},
+): CanvasDocument {
+    const trimmed = body.trim();
+    if (!trimmed) return document;
+    if (!document.items.some(item => item.id === itemId)) {
+        throw new Error(`Canvas item '${itemId}' does not exist`);
+    }
+
+    const annotation: CanvasAnnotation = {
+        id: options.id ?? createAnnotationId(),
+        target: { type: 'item', itemId },
+        body: trimmed,
+        x: options.x ?? null,
+        y: options.y ?? null,
+        createdAt: options.createdAt ?? new Date().toISOString(),
+        author: options.author ?? null,
+    };
+
+    return sanitizeCanvasDocumentReferences({
+        ...document,
+        annotations: [...document.annotations, annotation],
+    });
+}
+
+export function canvasItemAnnotations(document: CanvasDocument | null, itemId: string): CanvasAnnotation[] {
+    if (!document) return [];
+    return document.annotations.filter(annotation =>
+        annotation.target.type === 'item' && annotation.target.itemId === itemId
+    );
+}
+
+function createAnnotationId() {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+        return `note-${crypto.randomUUID()}`;
+    }
+    return `note-${Date.now().toString(36)}`;
+}
+
+function normalizeCrop(crop: CanvasCrop | null | undefined): CanvasCrop | null {
+    if (!crop) return null;
+    if (!Number.isFinite(crop.x) || !Number.isFinite(crop.y)
+        || !Number.isFinite(crop.width) || !Number.isFinite(crop.height)) {
+        return null;
+    }
+
+    const x = clamp(crop.x, 0, 1 - MIN_CROP_SIZE);
+    const y = clamp(crop.y, 0, 1 - MIN_CROP_SIZE);
+    const width = clamp(crop.width, MIN_CROP_SIZE, 1 - x);
+    const height = clamp(crop.height, MIN_CROP_SIZE, 1 - y);
+
+    return {
+        x: roundCropValue(x),
+        y: roundCropValue(y),
+        width: roundCropValue(width),
+        height: roundCropValue(height),
+    };
+}
+
+function roundCropValue(value: number) {
+    return Math.round(value * 10000) / 10000;
+}
+
+function clamp(value: number, min: number, max: number) {
+    return Math.max(min, Math.min(max, value));
 }
 
 function parseCanvasLayoutOrEmpty(layoutJson: string): CanvasDocument {
