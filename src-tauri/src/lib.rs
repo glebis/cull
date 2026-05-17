@@ -8,6 +8,7 @@ mod db_core;
 mod dictation;
 mod export;
 pub mod extensions;
+mod logging;
 mod mcp;
 mod menu;
 pub mod raw;
@@ -57,9 +58,11 @@ fn install_panic_hook(app: AppHandle) {
         let loc = info
             .location()
             .map(|l| format!("{}:{}", l.file(), l.line()));
-        eprintln!(
+        crate::safe_eprintln!(
             "[panic] thread={} location={:?} message={}",
-            thread, loc, msg
+            thread,
+            loc,
+            msg
         );
         let _ = app.emit(
             "rust-panic",
@@ -67,7 +70,7 @@ fn install_panic_hook(app: AppHandle) {
                 "thread": thread, "location": loc, "message": msg
             }),
         );
-        prev(info);
+        let _ = std::panic::catch_unwind(AssertUnwindSafe(|| prev(info)));
     }));
 }
 
@@ -86,7 +89,7 @@ where
             } else {
                 "unknown panic".to_string()
             };
-            eprintln!("[guarded-spawn] task={} panicked: {}", task_name, msg);
+            crate::safe_eprintln!("[guarded-spawn] task={} panicked: {}", task_name, msg);
             let _ = app.emit(
                 "background-task-failed",
                 serde_json::json!({
@@ -113,7 +116,7 @@ fn run_stdio_bridge() {
         let stream = match tokio::net::UnixStream::connect(&sock_path).await {
             Ok(s) => s,
             Err(_) => {
-                eprintln!("MCP socket not found, launching app in tray mode...");
+                crate::safe_eprintln!("MCP socket not found, launching app in tray mode...");
                 let exe = std::env::current_exe().expect("Can't find own executable");
                 std::process::Command::new(&exe)
                     .arg("--tray")
@@ -129,7 +132,10 @@ fn run_stdio_bridge() {
                             attempts += 1;
                         }
                         Err(e) => {
-                            eprintln!("Failed to connect to MCP socket after 10s: {}", e);
+                            crate::safe_eprintln!(
+                                "Failed to connect to MCP socket after 10s: {}",
+                                e
+                            );
                             std::process::exit(1);
                         }
                     }
@@ -143,10 +149,10 @@ fn run_stdio_bridge() {
 
         tokio::select! {
             r = tokio::io::copy(&mut stdin, &mut sock_write) => {
-                if let Err(e) = r { eprintln!("stdin->socket: {}", e); }
+                if let Err(e) = r { crate::safe_eprintln!("stdin->socket: {}", e); }
             }
             r = tokio::io::copy(&mut sock_read, &mut stdout) => {
-                if let Err(e) = r { eprintln!("socket->stdout: {}", e); }
+                if let Err(e) = r { crate::safe_eprintln!("socket->stdout: {}", e); }
             }
         }
     });
@@ -173,14 +179,14 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            eprintln!("[single-instance] Second instance args: {:?}", args);
+            crate::safe_eprintln!("[single-instance] Second instance args: {:?}", args);
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_focus();
             }
             let mut file_paths = Vec::new();
             for arg in &args {
                 if arg.starts_with("cull://") {
-                    eprintln!("[single-instance] Forwarding deep link: {}", arg);
+                    crate::safe_eprintln!("[single-instance] Forwarding deep link: {}", arg);
                     let params = parse_deep_link(arg);
                     let _ = emit_open_params(app, params);
                 } else {
@@ -271,7 +277,7 @@ pub fn run() {
                 fw.module_raw
                     .store(module_raw, std::sync::atomic::Ordering::Relaxed);
                 if let Err(e) = fw.start(db_clone, app_handle_clone, roots, data_dir_clone) {
-                    eprintln!("[watcher] Failed to start: {}", e);
+                    crate::safe_eprintln!("[watcher] Failed to start: {}", e);
                 }
             }
 
@@ -321,7 +327,7 @@ pub fn run() {
                 if let Err(e) =
                     commands::window::apply_app_icon_variant_to_app(app.handle(), &icon_variant)
                 {
-                    eprintln!("[icon] Failed to apply app icon variant: {}", e);
+                    crate::safe_eprintln!("[icon] Failed to apply app icon variant: {}", e);
                 }
             }
 
@@ -337,7 +343,7 @@ pub fn run() {
             {
                 let handle = app.handle().clone();
                 app.listen("deep-link://new-url", move |event: tauri::Event| {
-                    eprintln!(
+                    crate::safe_eprintln!(
                         "[deep-link] Rust received deep-link://new-url: {}",
                         event.payload()
                     );
@@ -351,7 +357,7 @@ pub fn run() {
                         }
 
                         for url in urls {
-                            eprintln!("[deep-link] Processing URL: {}", url);
+                            crate::safe_eprintln!("[deep-link] Processing URL: {}", url);
                             if url.starts_with("cull://") {
                                 let params = parse_deep_link(&url);
                                 let _ = emit_open_params(&handle, params);

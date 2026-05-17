@@ -155,7 +155,7 @@ impl JobRegistry {
     pub fn load_from_db(&self, db: &crate::db_core::db::Database) {
         if let Ok(stale) = db.mark_stale_running_jobs_failed() {
             if stale > 0 {
-                eprintln!("Marked {} stale jobs as failed", stale);
+                crate::safe_eprintln!("Marked {} stale jobs as failed", stale);
             }
         }
         let _ = db.prune_old_jobs(1);

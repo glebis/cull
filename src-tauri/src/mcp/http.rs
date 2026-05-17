@@ -64,7 +64,7 @@ impl RateLimiter {
 pub fn start_http_server(app_handle: tauri::AppHandle, host: String, port: u16) {
     tauri::async_runtime::spawn(async move {
         if let Err(e) = run_http_server(app_handle, host, port).await {
-            eprintln!("MCP HTTP server error: {}", e);
+            crate::safe_eprintln!("MCP HTTP server error: {}", e);
         }
     });
 }
@@ -82,7 +82,7 @@ async fn run_http_server(
     )));
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    eprintln!("MCP HTTP server listening on {}", addr);
+    crate::safe_eprintln!("MCP HTTP server listening on {}", addr);
 
     loop {
         let (stream, remote_addr) = listener.accept().await?;
@@ -149,7 +149,7 @@ async fn run_http_server(
                                 .unwrap());
                         }
                         Err(e) => {
-                            eprintln!("Token validation error: {}", e);
+                            crate::safe_eprintln!("Token validation error: {}", e);
                             return Ok(hyper::Response::builder()
                                 .status(500)
                                 .body(Full::new(Bytes::from("Internal Server Error")))
@@ -159,9 +159,11 @@ async fn run_http_server(
 
                     limiter.lock().await.record_success(&remote_ip);
 
-                    eprintln!(
+                    crate::safe_eprintln!(
                         "MCP HTTP: authenticated as '{}' (role: {}) from {}",
-                        token.name, token.role, remote_addr
+                        token.name,
+                        token.role,
+                        remote_addr
                     );
 
                     // Create per-request MCP service with the validated token's auth context
@@ -202,7 +204,7 @@ async fn run_http_server(
                 .serve_connection(io, service)
                 .await
             {
-                eprintln!("MCP HTTP connection error: {}", e);
+                crate::safe_eprintln!("MCP HTTP connection error: {}", e);
             }
         });
     }

@@ -64,7 +64,7 @@ pub async fn backfill_raw_previews(
                 backfilled += 1;
             }
             Err(e) => {
-                eprintln!("[backfill] Failed for {}: {}", path_str, e);
+                crate::safe_eprintln!("[backfill] Failed for {}: {}", path_str, e);
             }
         }
 

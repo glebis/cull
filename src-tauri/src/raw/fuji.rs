@@ -190,7 +190,7 @@ mod tests {
             "/Users/glebkalinin/Documents/Pictures/20210317 a53/Capture/20210317 a53 0028.RAF",
         );
         if !path.exists() {
-            eprintln!("Skipping: test RAF file not found");
+            crate::safe_eprintln!("Skipping: test RAF file not found");
             return;
         }
         let preview = FujiRafDecoder.extract_preview(path).unwrap();
@@ -201,12 +201,12 @@ mod tests {
             "Preview should be at least 1000px wide, got {}",
             preview.image.width()
         );
-        eprintln!(
+        crate::safe_eprintln!(
             "Preview: {}x{}",
             preview.image.width(),
             preview.image.height()
         );
-        eprintln!("Camera: {:?}", preview.metadata.camera_model);
+        crate::safe_eprintln!("Camera: {:?}", preview.metadata.camera_model);
         assert_eq!(preview.metadata.camera_model.as_deref(), Some("GFX 50R"));
     }
 
@@ -221,7 +221,7 @@ mod tests {
         }
         let preview = super::super::decode_raw_preview(path).unwrap();
         assert!(preview.image.width() > 0);
-        eprintln!(
+        crate::safe_eprintln!(
             "decode_raw_preview: {}x{}",
             preview.image.width(),
             preview.image.height()

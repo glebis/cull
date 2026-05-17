@@ -16,7 +16,7 @@ pub async fn analyze_image_quality(
         let ctx = ServiceContext::from_app_state(&state, None);
         match crate::services::ai::analyze_image_quality(&ctx, image_id) {
             Ok(_) => analyzed += 1,
-            Err(e) => eprintln!("Quality analysis error for {}: {}", image_id, e),
+            Err(e) => crate::safe_eprintln!("Quality analysis error for {}: {}", image_id, e),
         }
 
         let _ = app.emit(

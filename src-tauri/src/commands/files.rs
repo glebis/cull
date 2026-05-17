@@ -106,7 +106,7 @@ pub async fn move_image(
 
     if !in_library {
         if let Err(e) = state.db.add_library_root(&destination_folder) {
-            eprintln!(
+            crate::safe_eprintln!(
                 "[files] Failed to add move destination as library root: {}",
                 e
             );

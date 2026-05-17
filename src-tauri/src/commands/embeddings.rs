@@ -296,7 +296,7 @@ pub async fn generate_gemini_embeddings(
                     "image", file_size, None, Some(&dims),
                     Some("gemini-embedding-exp-03-07"), 500, "US - Google LLC",
                 );
-                eprintln!("Gemini embedding error for {}: {}", image_id, e);
+                crate::safe_eprintln!("Gemini embedding error for {}: {}", image_id, e);
             }
         }
 

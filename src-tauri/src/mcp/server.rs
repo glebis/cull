@@ -8,7 +8,7 @@ pub fn start_mcp_server(app_handle: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let sock_path = super::socket::socket_path(&app_data_dir);
         if let Err(e) = super::socket::start_socket_server(app_handle, sock_path).await {
-            eprintln!("MCP socket server error: {}", e);
+            crate::safe_eprintln!("MCP socket server error: {}", e);
         }
     });
 }

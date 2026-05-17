@@ -206,7 +206,7 @@ pub fn run_clip_embeddings(
                     Some(&e),
                 )
                 .map_err(|err| fail_run(request.db, &model_run_id, err))?;
-                eprintln!("Embedding error for {}: {}", image_id, e);
+                crate::safe_eprintln!("Embedding error for {}: {}", image_id, e);
             }
         }
 

@@ -100,7 +100,7 @@ impl FileWatcher {
         roots: Vec<String>,
         app_data_dir: PathBuf,
     ) -> Result<(), String> {
-        eprintln!("[watcher] Starting with {} roots", roots.len());
+        crate::safe_eprintln!("[watcher] Starting with {} roots", roots.len());
         let db = Arc::new(db);
         let intent_reg = self.intent_registry.clone();
         let sync_q = self.sync_queue.clone();
@@ -124,7 +124,7 @@ impl FileWatcher {
                     );
                 }
                 Err(e) => {
-                    eprintln!("[watcher] Error: {}", e);
+                    crate::safe_eprintln!("[watcher] Error: {}", e);
                 }
             })
             .map_err(|e| format!("Failed to create watcher: {}", e))?;
@@ -133,11 +133,11 @@ impl FileWatcher {
             let path = PathBuf::from(root);
             if path.exists() {
                 match watcher.watch(&path, RecursiveMode::Recursive) {
-                    Ok(()) => eprintln!("[watcher] Watching: {}", root),
-                    Err(e) => eprintln!("[watcher] Failed to watch {}: {}", root, e),
+                    Ok(()) => crate::safe_eprintln!("[watcher] Watching: {}", root),
+                    Err(e) => crate::safe_eprintln!("[watcher] Failed to watch {}: {}", root, e),
                 }
             } else {
-                eprintln!("[watcher] Root does not exist, skipping: {}", root);
+                crate::safe_eprintln!("[watcher] Root does not exist, skipping: {}", root);
             }
         }
 
@@ -174,7 +174,7 @@ impl FileWatcher {
                         Ok(outcome) => match &outcome {
                             crate::db_core::import::SyncOutcome::Unchanged => {}
                             other => {
-                                eprintln!(
+                                crate::safe_eprintln!(
                                     "[watcher] Synced {:?}: {:?}",
                                     path.file_name().unwrap_or_default(),
                                     other
@@ -182,7 +182,11 @@ impl FileWatcher {
                                 any_changed = true;
                             }
                         },
-                        Err(e) => eprintln!("[watcher] Sync error for {}: {}", path.display(), e),
+                        Err(e) => crate::safe_eprintln!(
+                            "[watcher] Sync error for {}: {}",
+                            path.display(),
+                            e
+                        ),
                     }
                 }
                 if any_changed {
@@ -192,7 +196,7 @@ impl FileWatcher {
         });
 
         self.watcher = Some(watcher);
-        eprintln!("[watcher] Started successfully");
+        crate::safe_eprintln!("[watcher] Started successfully");
         Ok(())
     }
 
@@ -274,7 +278,10 @@ impl FileWatcher {
                         continue;
                     }
                     if Self::is_root_offline(path, db) {
-                        eprintln!("[watcher] Root offline for {}, skipping", path.display());
+                        crate::safe_eprintln!(
+                            "[watcher] Root offline for {}, skipping",
+                            path.display()
+                        );
                         let _ = app_handle
                             .emit("watcher:volume-offline", path.to_string_lossy().to_string());
                         continue;
@@ -288,7 +295,7 @@ impl FileWatcher {
                             let stub_path = path.parent().unwrap().join(&stub_name);
                             if stub_path.exists() || crate::cloud::is_cloud_placeholder(&stub_path)
                             {
-                                eprintln!(
+                                crate::safe_eprintln!(
                                     "[watcher] Cloud eviction ({:?}), skipping: {}",
                                     provider,
                                     path.display()
@@ -304,7 +311,7 @@ impl FileWatcher {
                             }
                             if let Ok(meta) = std::fs::metadata(path) {
                                 if meta.len() == 0 {
-                                    eprintln!(
+                                    crate::safe_eprintln!(
                                         "[watcher] Cloud placeholder ({:?}), skipping: {}",
                                         provider,
                                         path.display()
@@ -319,11 +326,16 @@ impl FileWatcher {
                         if file.missing_at.is_none() {
                             match db.mark_file_missing(&file.path) {
                                 Ok(true) => {
-                                    eprintln!("[watcher] Marked missing: {}", file.path);
+                                    crate::safe_eprintln!(
+                                        "[watcher] Marked missing: {}",
+                                        file.path
+                                    );
                                     changed = true;
                                 }
                                 Ok(false) => {}
-                                Err(e) => eprintln!("[watcher] Error marking missing: {}", e),
+                                Err(e) => {
+                                    crate::safe_eprintln!("[watcher] Error marking missing: {}", e)
+                                }
                             }
                         }
                     }
@@ -356,10 +368,16 @@ impl FileWatcher {
                         match find_file_by_path_flexible(db, old) {
                             Some(file) => match db.update_image_file_path(&file.id, &new_str) {
                                 Ok(()) => {
-                                    eprintln!("[watcher] Renamed: {} -> {}", file.path, new_str);
+                                    crate::safe_eprintln!(
+                                        "[watcher] Renamed: {} -> {}",
+                                        file.path,
+                                        new_str
+                                    );
                                     changed = true;
                                 }
-                                Err(e) => eprintln!("[watcher] Error updating path: {}", e),
+                                Err(e) => {
+                                    crate::safe_eprintln!("[watcher] Error updating path: {}", e)
+                                }
                             },
                             None => {}
                         }

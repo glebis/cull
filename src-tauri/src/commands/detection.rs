@@ -183,7 +183,7 @@ pub async fn detect_objects(
             }
             Err(e) => {
                 drop(engine);
-                eprintln!("Detection error for {}: {}", image_id, e);
+                crate::safe_eprintln!("Detection error for {}: {}", image_id, e);
             }
         }
 
@@ -238,7 +238,7 @@ pub async fn detect_nsfw(
             }
             Err(e) => {
                 drop(engine);
-                eprintln!("NudeNet error for {}: {}", image_id, e);
+                crate::safe_eprintln!("NudeNet error for {}: {}", image_id, e);
             }
         }
 

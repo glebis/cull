@@ -1186,7 +1186,7 @@ impl CullMcp {
                     }
                     Err(e) => {
                         drop(engine);
-                        eprintln!("Embedding error for {}: {}", image_id, e);
+                        crate::safe_eprintln!("Embedding error for {}: {}", image_id, e);
                     }
                 }
                 state
@@ -1297,7 +1297,7 @@ impl CullMcp {
                     }
                     Err(e) => {
                         drop(engine);
-                        eprintln!("Detection error for {}: {}", image_id, e);
+                        crate::safe_eprintln!("Detection error for {}: {}", image_id, e);
                     }
                 }
                 state
@@ -1402,7 +1402,7 @@ impl CullMcp {
                         let _ = state.db.store_vision_metadata(image_id, &model, &fields);
                         analyzed += 1;
                     }
-                    Err(e) => eprintln!("Vision error for {}: {}", image_id, e),
+                    Err(e) => crate::safe_eprintln!("Vision error for {}: {}", image_id, e),
                 }
                 state
                     .jobs
@@ -1784,7 +1784,7 @@ impl ServerHandler for CullMcp {
             .into_iter()
             .filter(|tool| self.tool_enabled_by_module(tool.name.as_ref()))
             .collect();
-        eprintln!("MCP list_tools: returning {} tools", tools.len());
+        crate::safe_eprintln!("MCP list_tools: returning {} tools", tools.len());
         Ok(rmcp::model::ListToolsResult {
             tools,
             next_cursor: None,

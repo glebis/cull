@@ -345,13 +345,13 @@ mod integration_tests {
     fn test_real_gpt_image_2_file() {
         let path = PathBuf::from("/Users/glebkalinin/genome-toolkit/test-images/v5/v5-01.png");
         if !path.exists() {
-            eprintln!("Skipping: test image not found");
+            crate::safe_eprintln!("Skipping: test image not found");
             return;
         }
         let info = read_c2pa_info(&path).expect("Should find C2PA data");
-        eprintln!("Agents: {:?}", info.software_agents);
-        eprintln!("ChatGPT layer: {}", info.has_chatgpt_layer);
-        eprintln!("Source label: {:?}", info.openai_source_label());
+        crate::safe_eprintln!("Agents: {:?}", info.software_agents);
+        crate::safe_eprintln!("ChatGPT layer: {}", info.has_chatgpt_layer);
+        crate::safe_eprintln!("Source label: {:?}", info.openai_source_label());
         assert_eq!(info.openai_source_label(), Some("gpt_image_2"));
     }
 }

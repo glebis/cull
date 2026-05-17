@@ -35,6 +35,6 @@ pub fn print_error(json: bool, message: &str) {
             serde_json::json!({"event": "error", "message": message}).to_string()
         );
     } else {
-        eprintln!("{}", message);
+        crate::safe_eprintln!("{}", message);
     }
 }

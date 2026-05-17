@@ -36,7 +36,7 @@ pub fn decode_raw_preview(path: &Path) -> Result<RawPreview, String> {
         match fuji::FujiRafDecoder.extract_preview(path) {
             Ok(preview) => return Ok(preview),
             Err(e) => {
-                eprintln!("[raw] Fuji RAF parser failed, trying LibRaw: {}", e);
+                crate::safe_eprintln!("[raw] Fuji RAF parser failed, trying LibRaw: {}", e);
             }
         }
     }

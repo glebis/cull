@@ -445,7 +445,7 @@ pub async fn serve_static_publish_package_inner(
                     .serve_connection(io, service)
                     .await
                 {
-                    eprintln!("Static publishing HTTP connection error: {}", err);
+                    crate::safe_eprintln!("Static publishing HTTP connection error: {}", err);
                 }
             });
         }

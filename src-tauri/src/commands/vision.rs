@@ -121,7 +121,7 @@ pub async fn analyze_images(
                     500,
                     ollama_jurisdiction,
                 );
-                eprintln!("Vision error for {}: {}", image_id, e);
+                crate::safe_eprintln!("Vision error for {}: {}", image_id, e);
             }
         }
 

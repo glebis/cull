@@ -38,7 +38,7 @@ pub async fn start_socket_server(
         std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o600))?;
     }
 
-    eprintln!("MCP socket server listening on {:?}", sock_path);
+    crate::safe_eprintln!("MCP socket server listening on {:?}", sock_path);
 
     loop {
         let (stream, _) = listener.accept().await?;
@@ -47,7 +47,7 @@ pub async fn start_socket_server(
         CONNECTION_COUNT.fetch_add(1, Ordering::Relaxed);
 
         tokio::spawn(async move {
-            eprintln!(
+            crate::safe_eprintln!(
                 "MCP client connected (active: {})",
                 CONNECTION_COUNT.load(Ordering::Relaxed)
             );
@@ -58,16 +58,16 @@ pub async fn start_socket_server(
             match mcp.serve((read, write)).await {
                 Ok(server) => {
                     if let Err(e) = server.waiting().await {
-                        eprintln!("MCP session ended with error: {:?}", e);
+                        crate::safe_eprintln!("MCP session ended with error: {:?}", e);
                     }
                 }
                 Err(e) => {
-                    eprintln!("MCP session failed to start: {:?}", e);
+                    crate::safe_eprintln!("MCP session failed to start: {:?}", e);
                 }
             }
 
             CONNECTION_COUNT.fetch_sub(1, Ordering::Relaxed);
-            eprintln!(
+            crate::safe_eprintln!(
                 "MCP client disconnected (active: {})",
                 CONNECTION_COUNT.load(Ordering::Relaxed)
             );

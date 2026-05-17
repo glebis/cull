@@ -269,10 +269,16 @@ pub async fn regenerate_thumbnails(
                                 &img.image.id,
                             ) {
                                 Ok(_) => regenerated += 1,
-                                Err(e) => eprintln!("RAW thumbnail failed for {}: {}", img.path, e),
+                                Err(e) => crate::safe_eprintln!(
+                                    "RAW thumbnail failed for {}: {}",
+                                    img.path,
+                                    e
+                                ),
                             }
                         }
-                        Err(e) => eprintln!("RAW decode failed for {}: {}", img.path, e),
+                        Err(e) => {
+                            crate::safe_eprintln!("RAW decode failed for {}: {}", img.path, e)
+                        }
                     }
                 } else {
                     match crate::db_core::thumbnails::generate_thumbnail(
@@ -281,7 +287,7 @@ pub async fn regenerate_thumbnails(
                         &img.image.id,
                     ) {
                         Ok(_) => regenerated += 1,
-                        Err(e) => eprintln!("Thumbnail failed for {}: {}", img.path, e),
+                        Err(e) => crate::safe_eprintln!("Thumbnail failed for {}: {}", img.path, e),
                     }
                 }
             }
@@ -330,11 +336,17 @@ pub async fn regenerate_thumbnails_by_ids(
                                 ) {
                                     Ok(_) => regenerated += 1,
                                     Err(e) => {
-                                        eprintln!("RAW thumbnail failed for {}: {}", img.path, e)
+                                        crate::safe_eprintln!(
+                                            "RAW thumbnail failed for {}: {}",
+                                            img.path,
+                                            e
+                                        )
                                     }
                                 }
                             }
-                            Err(e) => eprintln!("RAW decode failed for {}: {}", img.path, e),
+                            Err(e) => {
+                                crate::safe_eprintln!("RAW decode failed for {}: {}", img.path, e)
+                            }
                         }
                     } else {
                         match crate::db_core::thumbnails::generate_thumbnail(
@@ -343,7 +355,9 @@ pub async fn regenerate_thumbnails_by_ids(
                             &img.image.id,
                         ) {
                             Ok(_) => regenerated += 1,
-                            Err(e) => eprintln!("Thumbnail failed for {}: {}", img.path, e),
+                            Err(e) => {
+                                crate::safe_eprintln!("Thumbnail failed for {}: {}", img.path, e)
+                            }
                         }
                     }
                 }
