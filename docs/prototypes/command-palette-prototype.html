@@ -458,11 +458,13 @@
       display: grid;
       grid-template-columns: 1fr 230px;
       min-height: 372px;
+      position: relative;
     }
 
     .result-list {
       padding: 8px;
       border-right: 1px solid var(--border);
+      position: relative;
     }
 
     .result-row {
@@ -545,6 +547,164 @@
     .badge.purple { color: var(--purple); }
     .badge.red { color: var(--red); }
 
+    .result-context-menu {
+      position: absolute;
+      top: 64px;
+      right: 18px;
+      width: 232px;
+      padding: 5px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: rgba(12, 12, 18, 0.98);
+      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.56);
+      z-index: 4;
+    }
+
+    .menu-item {
+      min-height: 30px;
+      display: grid;
+      grid-template-columns: 18px 1fr auto;
+      align-items: center;
+      gap: 7px;
+      padding: 0 7px;
+      border-radius: var(--radius);
+      color: var(--text-secondary);
+      font-size: 11px;
+    }
+
+    .menu-item.active {
+      color: var(--text);
+      background: rgba(122, 162, 247, 0.12);
+      outline: 1px solid rgba(122, 162, 247, 0.32);
+    }
+
+    .menu-item .menu-icon {
+      color: var(--blue);
+      font-size: 10px;
+    }
+
+    .menu-item .menu-key {
+      color: var(--text-secondary);
+      font-size: 10px;
+    }
+
+    .menu-item.warning .menu-icon,
+    .menu-item.warning .menu-key {
+      color: var(--orange);
+    }
+
+    .menu-separator {
+      height: 1px;
+      background: var(--border);
+      margin: 5px 4px;
+    }
+
+    .hotkey-popover {
+      position: absolute;
+      left: 50%;
+      top: 62px;
+      width: 448px;
+      transform: translateX(-50%);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: rgba(12, 12, 18, 0.99);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.62);
+      padding: 14px;
+      z-index: 5;
+    }
+
+    .hotkey-title {
+      color: var(--text);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    .hotkey-subtitle {
+      color: var(--text-secondary);
+      font-size: 11px;
+      margin-bottom: 12px;
+    }
+
+    .hotkey-recorder {
+      height: 48px;
+      border: 1px solid rgba(122, 162, 247, 0.48);
+      border-radius: var(--radius);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: rgba(122, 162, 247, 0.08);
+      box-shadow: inset 0 0 0 1px rgba(122, 162, 247, 0.12);
+      margin-bottom: 12px;
+    }
+
+    .scope-row {
+      display: grid;
+      grid-template-columns: 54px 1fr;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      color: var(--text-secondary);
+      font-size: 11px;
+    }
+
+    .segmented {
+      display: flex;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      width: max-content;
+    }
+
+    .segment {
+      padding: 4px 8px;
+      color: var(--text-secondary);
+      background: var(--surface-2);
+      border-right: 1px solid var(--border);
+      font-size: 10px;
+    }
+
+    .segment:last-child {
+      border-right: 0;
+    }
+
+    .segment.active {
+      color: var(--green);
+      background: rgba(158, 206, 106, 0.08);
+    }
+
+    .conflict-box {
+      border: 1px solid rgba(224, 175, 104, 0.36);
+      border-radius: var(--radius);
+      padding: 9px;
+      background: rgba(224, 175, 104, 0.07);
+      color: var(--orange);
+      font-size: 11px;
+      margin-bottom: 12px;
+    }
+
+    .hotkey-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 7px;
+    }
+
+    .hotkey-action {
+      min-height: 28px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface-2);
+      color: var(--text-secondary);
+      padding: 0 9px;
+      font-size: 11px;
+    }
+
+    .hotkey-action.primary {
+      color: var(--text);
+      border-color: rgba(122, 162, 247, 0.48);
+      background: rgba(122, 162, 247, 0.11);
+    }
+
     .detail-pane {
       padding: 12px;
       background: rgba(8, 8, 12, 0.42);
@@ -608,7 +768,8 @@
       font-size: 11px;
     }
 
-    .state-conflicts .warning-bar {
+    .state-conflicts .warning-bar,
+    .state-hotkey .warning-bar {
       display: flex;
     }
 
@@ -616,6 +777,8 @@
     .state-workflow .mode-token { color: var(--orange); }
     .state-pinned .mode-token { color: var(--green); }
     .state-conflicts .mode-token { color: var(--red); }
+    .state-contextmenu .mode-token { color: var(--blue); }
+    .state-hotkey .mode-token { color: var(--orange); }
 
     .mobile-shell {
       display: none;
@@ -670,6 +833,18 @@
 
     body[data-view="mobile"] .detail-pane {
       display: none;
+    }
+
+    body[data-view="mobile"] .result-context-menu {
+      left: 48px;
+      right: auto;
+      top: 84px;
+      width: calc(100% - 72px);
+    }
+
+    body[data-view="mobile"] .hotkey-popover {
+      top: 84px;
+      width: calc(100% - 24px);
     }
 
     body[data-view="mobile"] .result-list {
@@ -957,6 +1132,38 @@
           ["SET", "Show all shortcut conflicts", "Settings", "2 warnings, 0 hard conflicts", "", ""],
           ["HELP", "Open keyboard reference", "Help", "Searchable command list", "?", ""]
         ]
+      },
+      {
+        id: "contextmenu",
+        label: "Result context menu",
+        query: "@ client",
+        token: "@",
+        className: "state-contextmenu",
+        detail: "Result rows expose a compact context menu for run, favorite, hotkey capture, aliasing, recents cleanup, and command ID inspection.",
+        rows: [
+          ["COL", "Open Client final selects", "Collection destination", "Stable ID: collection:client-final | 46 images", "Shift Cmd C", "pinned"],
+          ["COL", "Client proofing rejects", "Collection", "29 images", "", ""],
+          ["SES", "Client workshop session", "Session", "3 canvases | 184 events", "", ""],
+          ["CAN", "Client selects canvas", "Canvas", "32 placed images", "", ""],
+          ["SMART", "Client-ready portraits", "Smart collection", "Rating >= 4, accepted", "", ""],
+          ["TAG", "Detected: person", "Detected class", "318 images", "", ""]
+        ]
+      },
+      {
+        id: "hotkey",
+        label: "Inline hotkey capture",
+        query: "set hotkey",
+        token: "⌘",
+        className: "state-hotkey",
+        detail: "The inline hotkey recorder keeps the user in flow while still checking command conflicts, result stability, context scope, and platform-reserved shortcuts.",
+        rows: [
+          ["COL", "Open Client final selects", "Collection destination", "Stable ID: collection:client-final | 46 images", "Cmd P", "danger"],
+          ["CMD", "Create collection from selection", "Command", "Existing binding", "Shift Cmd C", "context"],
+          ["CMD", "Open universal palette", "Command", "Recommended default", "Cmd K", "pinned"],
+          ["CMD", "Open command-only palette", "Command", "VS Code-style command mode", "Shift Cmd P", ""],
+          ["SET", "Open Keyboard Shortcuts", "Settings", "Full conflict map", "", ""],
+          ["HELP", "Show platform-reserved shortcuts", "Help", "macOS conflicts", "", ""]
+        ]
       }
     ];
 
@@ -1027,6 +1234,7 @@
 
       const frame = document.getElementById("frame");
       frame.className = "prototype-frame " + preset.className;
+      document.querySelectorAll(".result-context-menu, .hotkey-popover").forEach(node => node.remove());
 
       document.getElementById("modeToken").textContent = preset.token;
       document.getElementById("paletteQuery").textContent = preset.query;
@@ -1098,6 +1306,59 @@
           <div class="detail-line"><span>Safety</span><span>${preset.id === "workflow" ? "validates steps" : preset.id === "conflicts" ? "requires confirmation" : "registry command"}</span></div>
         </div>
       `;
+
+      if (preset.id === "contextmenu") {
+        renderResultContextMenu(resultList);
+      } else if (preset.id === "hotkey") {
+        renderHotkeyPopover();
+      }
+    }
+
+    function renderResultContextMenu(resultList) {
+      const menu = document.createElement("div");
+      menu.className = "result-context-menu";
+      menu.innerHTML = `
+        <div class="menu-item active"><span class="menu-icon">↵</span><span>Run</span><span class="menu-key">Enter</span></div>
+        <div class="menu-item"><span class="menu-icon">★</span><span>Unfavorite</span><span class="menu-key">F</span></div>
+        <div class="menu-item"><span class="menu-icon">⌘</span><span>Set Hotkey...</span><span class="menu-key">⌥ H</span></div>
+        <div class="menu-item"><span class="menu-icon">A</span><span>Add Alias...</span><span></span></div>
+        <div class="menu-separator"></div>
+        <div class="menu-item"><span class="menu-icon">×</span><span>Remove from Recents</span><span></span></div>
+        <div class="menu-item"><span class="menu-icon">ID</span><span>Copy Command ID</span><span></span></div>
+        <div class="menu-item"><span class="menu-icon">↗</span><span>Open in Settings</span><span></span></div>
+      `;
+      resultList.appendChild(menu);
+    }
+
+    function renderHotkeyPopover() {
+      const content = document.querySelector(".palette-content");
+      const popover = document.createElement("div");
+      popover.className = "hotkey-popover";
+      popover.innerHTML = `
+        <div class="hotkey-title">Set hotkey for "Open Client final selects"</div>
+        <div class="hotkey-subtitle">Stable destination: collection:client-final</div>
+        <div class="hotkey-recorder">
+          <span class="keycap">Cmd</span>
+          <span class="keycap">P</span>
+        </div>
+        <div class="scope-row">
+          <span>Scope</span>
+          <div class="segmented">
+            <span class="segment active">App-wide</span>
+            <span class="segment">Grid</span>
+            <span class="segment">When collection exists</span>
+          </div>
+        </div>
+        <div class="conflict-box">
+          Cmd P is macOS Print and should not be silently replaced. Recommended: Cmd K for palette, Shift Cmd C for this destination, or confirm an Obsidian-style preset explicitly.
+        </div>
+        <div class="hotkey-actions">
+          <button class="hotkey-action">Choose another</button>
+          <button class="hotkey-action">Cancel</button>
+          <button class="hotkey-action primary">Replace anyway</button>
+        </div>
+      `;
+      content.appendChild(popover);
     }
 
     function updatePrompt() {
@@ -1118,6 +1379,10 @@
         parts.push("Warn that Cmd+P conflicts with macOS Print and recommend Cmd+K as the default launcher shortcut.");
       } else if (preset.id === "navigation") {
         parts.push("Use @ mode for destinations such as folders, collections, sessions, canvases, smart collections, and detected classes.");
+      } else if (preset.id === "contextmenu") {
+        parts.push("Show a compact result context menu with Run, Favorite, Set Hotkey, Add Alias, Remove from Recents, Copy Command ID, and Open in Settings.");
+      } else if (preset.id === "hotkey") {
+        parts.push("Show an inline hotkey recorder with scope controls, stable result ID, conflict detection, and explicit handling for Cmd+P as a platform-reserved shortcut.");
       }
 
       document.getElementById("promptOut").textContent = parts.join(" ");
