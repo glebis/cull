@@ -1,0 +1,26 @@
+- generic [active] [ref=e1] [box=0,0,1200,766]:
+  - complementary "Prototype controls" [ref=e2] [box=0,0,320,766]:
+    - generic [ref=e3] [box=18,18,283,22]:
+      - heading "Cull Palette Prototype" [level=1] [ref=e4] [box=18,18,198,22]
+      - generic [ref=e5] [box=241,24,60,15]: playground
+    - generic [ref=e6] [box=18,58,283,277]:
+      - generic [ref=e7] [box=18,73,283,15]: State presets
+      - generic [ref=e8] [box=18,95,283,239]
+    - generic [ref=e15] [box=18,348,283,72]:
+      - generic [ref=e16] [box=18,363,283,15]: Viewport
+      - combobox "Viewport" [ref=e17] [box=18,386,283,34]
+    - generic [ref=e18] [box=18,434,283,122]:
+      - generic [ref=e19] [box=18,449,283,15]: Options
+      - generic [ref=e20] [box=18,471,283,28]
+      - generic [ref=e22] [box=18,499,283,28]
+      - generic [ref=e24] [box=18,527,283,28]
+    - generic [ref=e26] [box=18,569,283,349]:
+      - generic [ref=e27] [box=18,584,283,15]: Generated direction
+      - generic [ref=e28] [box=18,609,283,267]: Design the Cull command palette state "Universal launcher" for a Tokyo Night, keyboard-first image viewer. Use a compact overlay with mode token ">", visible command rows, category metadata, and current-context ranking. Show palette favorites separately from the pinned import collection. Display shortcut badges and make conflicts visible. Include a right-hand detail pane for the active result.
+      - button "Copy prompt" [ref=e29] [cursor=pointer] [box=18,884,283,35]
+  - main [ref=e30] [box=320,0,880,766]:
+    - generic [ref=e31] [box=350,58,820,650]:
+      - generic [ref=e32] [box=351,59,818,38]
+      - generic [ref=e46] [box=351,97,818,580]
+      - generic [ref=e98] [box=351,677,818,30]
+      - dialog "Command palette prototype" [ref=e102] [box=381,167,758,462]

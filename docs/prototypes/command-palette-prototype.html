@@ -1,0 +1,1163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cull Command Palette Prototype</title>
+  <style>
+    :root {
+      --bg: #08080c;
+      --surface: #0c0c12;
+      --surface-2: #101018;
+      --surface-3: #151522;
+      --border: #1a1a2e;
+      --text: #e0e0e0;
+      --text-secondary: #7a7fa0;
+      --blue: #7aa2f7;
+      --green: #9ece6a;
+      --orange: #e0af68;
+      --purple: #bb9af7;
+      --red: #f7768e;
+      --spacing: 8px;
+      --radius: 4px;
+      --font: "JetBrains Mono", "SF Mono", "Menlo", "Consolas", monospace;
+      --chrome: #050508;
+      --overlay: rgba(5, 5, 8, 0.68);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      line-height: 1.45;
+      letter-spacing: 0;
+    }
+
+    body {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      overflow: hidden;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    .control-rail {
+      height: 100vh;
+      overflow: auto;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 18px;
+    }
+
+    .rail-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .rail-title h1 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .rail-title span {
+      color: var(--green);
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+
+    .control-section {
+      border-top: 1px solid var(--border);
+      padding-top: 14px;
+      margin-top: 14px;
+    }
+
+    .control-label {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--text-secondary);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .preset-list,
+    .toggle-row {
+      display: grid;
+      gap: 6px;
+    }
+
+    .preset-btn,
+    .small-btn,
+    .copy-btn {
+      min-height: 32px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface-2);
+      color: var(--text-secondary);
+      cursor: pointer;
+      text-align: left;
+      padding: 7px 9px;
+    }
+
+    .preset-btn:hover,
+    .small-btn:hover,
+    .copy-btn:hover {
+      border-color: var(--blue);
+      color: var(--text);
+    }
+
+    .preset-btn.active {
+      border-color: var(--green);
+      color: var(--text);
+      background: rgba(158, 206, 106, 0.08);
+    }
+
+    .select,
+    .range {
+      width: 100%;
+    }
+
+    .select {
+      height: 34px;
+      color: var(--text);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0 8px;
+    }
+
+    .checkbox-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 28px;
+      color: var(--text-secondary);
+    }
+
+    .prompt-box {
+      margin-top: 10px;
+      min-height: 118px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px;
+      color: var(--text-secondary);
+      white-space: pre-wrap;
+    }
+
+    .copy-btn {
+      width: 100%;
+      margin-top: 8px;
+      text-align: center;
+      color: var(--green);
+    }
+
+    .stage {
+      height: 100vh;
+      overflow: auto;
+      display: grid;
+      place-items: center;
+      padding: 30px;
+      background:
+        linear-gradient(90deg, rgba(122, 162, 247, 0.035) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(122, 162, 247, 0.028) 1px, transparent 1px),
+        var(--bg);
+      background-size: 24px 24px;
+    }
+
+    .prototype-frame {
+      width: min(1180px, 100%);
+      aspect-ratio: 16 / 10;
+      min-height: 650px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      display: grid;
+      grid-template-rows: 38px 1fr 30px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+    }
+
+    .shot-mode .prototype-frame {
+      width: min(1280px, calc(100vw - 48px));
+      min-height: min(760px, calc(100vh - 48px));
+    }
+
+    .topbar,
+    .statusbar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      color: var(--text-secondary);
+      user-select: none;
+    }
+
+    .statusbar {
+      border-bottom: 0;
+      border-top: 1px solid var(--border);
+      justify-content: space-between;
+      font-size: 11px;
+    }
+
+    .traffic {
+      display: flex;
+      gap: 7px;
+      margin-right: 30px;
+    }
+
+    .dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: var(--border);
+    }
+
+    .dot.red { background: var(--red); }
+    .dot.orange { background: var(--orange); }
+    .dot.green { background: var(--green); }
+
+    .tabs {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      margin: 0 auto;
+      height: 100%;
+      font-size: 12px;
+    }
+
+    .tab {
+      height: 100%;
+      display: grid;
+      place-items: center;
+      border-bottom: 2px solid transparent;
+    }
+
+    .tab.active {
+      color: var(--text);
+      border-bottom-color: var(--green);
+    }
+
+    .window-label {
+      font-size: 11px;
+      color: var(--blue);
+    }
+
+    .app-body {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+    }
+
+    .sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 10px 8px;
+      overflow: hidden;
+    }
+
+    .section {
+      margin-bottom: 13px;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--text-secondary);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin: 0 0 6px;
+    }
+
+    .section-item,
+    .folder-row {
+      height: 27px;
+      border-radius: var(--radius);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 8px;
+      color: var(--text-secondary);
+      overflow: hidden;
+    }
+
+    .section-item.active,
+    .folder-row.active {
+      color: var(--text);
+      background: rgba(158, 206, 106, 0.08);
+    }
+
+    .count {
+      margin-left: auto;
+      color: var(--text-secondary);
+      font-size: 11px;
+    }
+
+    .pin-target {
+      border: 1px solid rgba(158, 206, 106, 0.35);
+      background: rgba(158, 206, 106, 0.08);
+      color: var(--text);
+      height: auto;
+      padding: 8px;
+      margin-bottom: 7px;
+    }
+
+    .main {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 52px 1fr;
+      background: var(--bg);
+    }
+
+    .command-strip {
+      display: flex;
+      align-items: center;
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(12, 12, 18, 0.58);
+    }
+
+    .search-hint {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 32px;
+      color: var(--text-secondary);
+      opacity: 0.58;
+    }
+
+    .grid {
+      min-height: 0;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: repeat(5, minmax(96px, 1fr));
+      auto-rows: minmax(96px, 1fr);
+      gap: 4px;
+      padding: 12px;
+    }
+
+    .thumb {
+      background: var(--surface-2);
+      border: 1px solid transparent;
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+    }
+
+    .thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0.9;
+      filter: saturate(0.86) contrast(0.95);
+    }
+
+    .thumb:nth-child(3),
+    .thumb:nth-child(8) {
+      border-color: var(--green);
+    }
+
+    .thumb::after {
+      content: attr(data-tag);
+      position: absolute;
+      left: 6px;
+      bottom: 5px;
+      padding: 1px 5px;
+      background: rgba(8, 8, 12, 0.82);
+      border: 1px solid rgba(26, 26, 46, 0.9);
+      color: var(--orange);
+      font-size: 10px;
+    }
+
+    .palette-backdrop {
+      position: absolute;
+      inset: 38px 0 30px;
+      display: grid;
+      place-items: start center;
+      padding-top: 70px;
+      background: var(--overlay);
+      z-index: 5;
+    }
+
+    .palette {
+      width: min(760px, calc(100% - 60px));
+      background: rgba(12, 12, 18, 0.98);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 28px 90px rgba(0, 0, 0, 0.62);
+      overflow: hidden;
+      animation: palette-in 160ms ease-out both;
+    }
+
+    @keyframes palette-in {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .palette-input-row {
+      display: grid;
+      grid-template-columns: 34px 1fr auto;
+      align-items: center;
+      min-height: 54px;
+      border-bottom: 1px solid var(--border);
+      padding: 0 12px;
+      gap: 8px;
+    }
+
+    .mode-token {
+      color: var(--green);
+      font-size: 16px;
+      text-align: center;
+    }
+
+    .palette-query {
+      font-size: 15px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .keycap {
+      min-width: 26px;
+      height: 20px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0 6px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface-3);
+      color: var(--text-secondary);
+      font-size: 10px;
+    }
+
+    .palette-content {
+      display: grid;
+      grid-template-columns: 1fr 230px;
+      min-height: 372px;
+    }
+
+    .result-list {
+      padding: 8px;
+      border-right: 1px solid var(--border);
+    }
+
+    .result-row {
+      min-height: 49px;
+      border-radius: var(--radius);
+      display: grid;
+      grid-template-columns: 27px 1fr auto;
+      align-items: center;
+      gap: 9px;
+      padding: 7px 9px;
+      color: var(--text-secondary);
+      position: relative;
+    }
+
+    .result-row.active {
+      background: rgba(122, 162, 247, 0.11);
+      color: var(--text);
+      outline: 1px solid rgba(122, 162, 247, 0.38);
+    }
+
+    .result-row.pinned::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 8px;
+      bottom: 8px;
+      width: 2px;
+      background: var(--green);
+    }
+
+    .result-icon {
+      width: 22px;
+      height: 22px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      display: grid;
+      place-items: center;
+      color: var(--blue);
+      font-size: 10px;
+    }
+
+    .result-main {
+      min-width: 0;
+    }
+
+    .result-title {
+      color: inherit;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .result-meta {
+      margin-top: 2px;
+      display: flex;
+      gap: 8px;
+      color: var(--text-secondary);
+      font-size: 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .result-badges {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+    }
+
+    .badge {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text-secondary);
+      padding: 1px 5px;
+      font-size: 10px;
+    }
+
+    .badge.green { color: var(--green); }
+    .badge.orange { color: var(--orange); }
+    .badge.purple { color: var(--purple); }
+    .badge.red { color: var(--red); }
+
+    .detail-pane {
+      padding: 12px;
+      background: rgba(8, 8, 12, 0.42);
+      color: var(--text-secondary);
+      font-size: 11px;
+    }
+
+    .detail-title {
+      color: var(--text);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .detail-grid {
+      display: grid;
+      gap: 7px;
+      margin-top: 12px;
+    }
+
+    .detail-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid rgba(26, 26, 46, 0.7);
+      padding-bottom: 6px;
+    }
+
+    .palette-footer {
+      min-height: 34px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 0 12px;
+      color: var(--text-secondary);
+      font-size: 10px;
+    }
+
+    .hint-group {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .warning-bar {
+      position: absolute;
+      left: 50%;
+      top: 48px;
+      transform: translateX(-50%);
+      display: none;
+      gap: 10px;
+      align-items: center;
+      padding: 7px 10px;
+      border: 1px solid rgba(224, 175, 104, 0.35);
+      border-radius: var(--radius);
+      background: rgba(224, 175, 104, 0.08);
+      color: var(--orange);
+      z-index: 8;
+      font-size: 11px;
+    }
+
+    .state-conflicts .warning-bar {
+      display: flex;
+    }
+
+    .state-navigation .mode-token { color: var(--purple); }
+    .state-workflow .mode-token { color: var(--orange); }
+    .state-pinned .mode-token { color: var(--green); }
+    .state-conflicts .mode-token { color: var(--red); }
+
+    .mobile-shell {
+      display: none;
+    }
+
+    body[data-view="mobile"] {
+      grid-template-columns: 320px 1fr;
+    }
+
+    body[data-view="mobile"] .prototype-frame {
+      width: 390px;
+      min-height: 760px;
+      aspect-ratio: auto;
+      grid-template-rows: 40px 1fr 34px;
+    }
+
+    body[data-view="mobile"] .app-body {
+      grid-template-columns: 1fr;
+    }
+
+    body[data-view="mobile"] .sidebar,
+    body[data-view="mobile"] .tabs .tab:nth-child(n+5),
+    body[data-view="mobile"] .window-label {
+      display: none;
+    }
+
+    body[data-view="mobile"] .tabs {
+      gap: 14px;
+      margin: 0;
+      font-size: 11px;
+    }
+
+    body[data-view="mobile"] .grid {
+      grid-template-columns: repeat(3, 1fr);
+      auto-rows: 118px;
+      padding: 8px;
+    }
+
+    body[data-view="mobile"] .palette-backdrop {
+      padding-top: 28px;
+      place-items: start center;
+    }
+
+    body[data-view="mobile"] .palette {
+      width: calc(100% - 18px);
+    }
+
+    body[data-view="mobile"] .palette-content {
+      grid-template-columns: 1fr;
+      min-height: 500px;
+    }
+
+    body[data-view="mobile"] .detail-pane {
+      display: none;
+    }
+
+    body[data-view="mobile"] .result-list {
+      border-right: 0;
+    }
+
+    body[data-view="mobile"] .result-row {
+      grid-template-columns: 25px 1fr;
+    }
+
+    body[data-view="mobile"] .result-badges {
+      grid-column: 2;
+      justify-self: start;
+    }
+
+    body[data-view="mobile"] .palette-footer {
+      align-items: flex-start;
+      flex-direction: column;
+      justify-content: center;
+      padding: 7px 10px;
+      min-height: 58px;
+    }
+
+    body.shot-mode {
+      display: block;
+      overflow: hidden;
+    }
+
+    body.shot-mode .control-rail {
+      display: none;
+    }
+
+    body.shot-mode .stage {
+      width: 100vw;
+      height: 100vh;
+      padding: 24px;
+      overflow: hidden;
+    }
+
+    @media (max-width: 980px) {
+      body:not(.shot-mode) {
+        grid-template-columns: 1fr;
+        overflow: auto;
+      }
+
+      body:not(.shot-mode) .control-rail {
+        height: auto;
+      }
+
+      body:not(.shot-mode) .stage {
+        height: auto;
+        min-height: 760px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <aside class="control-rail" aria-label="Prototype controls">
+    <div class="rail-title">
+      <h1>Cull Palette Prototype</h1>
+      <span>playground</span>
+    </div>
+
+    <section class="control-section">
+      <label class="control-label">State presets</label>
+      <div class="preset-list" id="presetList"></div>
+    </section>
+
+    <section class="control-section">
+      <label class="control-label" for="viewSelect">Viewport</label>
+      <select class="select" id="viewSelect">
+        <option value="desktop">Desktop</option>
+        <option value="mobile">Mobile</option>
+      </select>
+    </section>
+
+    <section class="control-section">
+      <label class="control-label">Options</label>
+      <label class="checkbox-line">
+        <input type="checkbox" id="showPins" checked />
+        Show pinned/favorite indicators
+      </label>
+      <label class="checkbox-line">
+        <input type="checkbox" id="showShortcuts" checked />
+        Show shortcut badges
+      </label>
+      <label class="checkbox-line">
+        <input type="checkbox" id="showContext" checked />
+        Show context detail pane
+      </label>
+    </section>
+
+    <section class="control-section">
+      <label class="control-label" for="promptOut">Generated direction</label>
+      <div class="prompt-box" id="promptOut"></div>
+      <button class="copy-btn" id="copyBtn">Copy prompt</button>
+    </section>
+  </aside>
+
+  <main class="stage">
+    <div class="prototype-frame" id="frame">
+      <div class="topbar">
+        <div class="traffic" aria-hidden="true">
+          <span class="dot red"></span>
+          <span class="dot orange"></span>
+          <span class="dot green"></span>
+        </div>
+        <div class="tabs">
+          <div class="tab active">Grid</div>
+          <div class="tab">Loupe</div>
+          <div class="tab">Compare</div>
+          <div class="tab">Canvas</div>
+          <div class="tab">Lineage</div>
+          <div class="tab">Embeddings</div>
+          <div class="tab">Export</div>
+        </div>
+        <div class="window-label">Cull</div>
+      </div>
+
+      <div class="app-body">
+        <aside class="sidebar">
+          <div class="section">
+            <div class="section-header">Library</div>
+            <div class="section-item active">All Images <span class="count">1248</span></div>
+            <div class="section-item">Missing files <span class="count">0</span></div>
+          </div>
+          <div class="section">
+            <div class="section-header">Pinned import target</div>
+            <div class="pin-target">Client final selects<br><span class="count">46 images</span></div>
+          </div>
+          <div class="section">
+            <div class="section-header">Smart</div>
+            <div class="section-item">MJ 4+ portraits <span class="count">112</span></div>
+            <div class="section-item">Recent widescreen <span class="count">83</span></div>
+            <div class="section-item">Rejected variants <span class="count">29</span></div>
+          </div>
+          <div class="section">
+            <div class="section-header">Collections</div>
+            <div class="folder-row active">Client final selects <span class="count">46</span></div>
+            <div class="folder-row">Homepage candidates <span class="count">18</span></div>
+            <div class="folder-row">Texture studies <span class="count">61</span></div>
+          </div>
+        </aside>
+
+        <section class="main">
+          <div class="command-strip">
+            <div class="search-hint">/ to search images <span class="keycap">Cmd F</span></div>
+          </div>
+          <div class="grid" aria-hidden="true" id="thumbGrid"></div>
+        </section>
+      </div>
+
+      <div class="statusbar">
+        <span><span style="color: var(--green)">GRID</span> 1248 images | 46 selected target</span>
+        <span>Cmd K palette | / search | 1-5 rate | A accept | X reject</span>
+      </div>
+
+      <div class="warning-bar">
+        <span>Shortcut conflict:</span>
+        <span>Cmd P is macOS Print. Use Cmd K or confirm Obsidian preset.</span>
+      </div>
+
+      <div class="palette-backdrop">
+        <section class="palette" role="dialog" aria-label="Command palette prototype">
+          <div class="palette-input-row">
+            <div class="mode-token" id="modeToken">&gt;</div>
+            <div class="palette-query" id="paletteQuery"></div>
+            <span class="keycap">Esc</span>
+          </div>
+          <div class="palette-content">
+            <div class="result-list" id="resultList"></div>
+            <aside class="detail-pane" id="detailPane"></aside>
+          </div>
+          <div class="palette-footer">
+            <div class="hint-group"><span class="keycap">Enter</span> run <span class="keycap">Up</span><span class="keycap">Down</span> move</div>
+            <div class="hint-group"><span class="keycap">Tab</span> switch mode <span class="keycap">F</span> favorite</div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const DEFAULTS = {
+      state: "universal",
+      view: "desktop",
+      showPins: true,
+      showShortcuts: true,
+      showContext: true
+    };
+
+    const presets = [
+      {
+        id: "universal",
+        label: "Universal launcher",
+        query: "rate selected",
+        token: ">",
+        className: "state-universal",
+        detail: "The default Cmd+K entry point mixes commands, destinations, and workflows, ranked by context.",
+        rows: [
+          ["CMD", "Rate selected images 5 stars", "Command", "Selection: 12 images", "Cmd 5", "context"],
+          ["CMD", "Accept current image", "Command", "Grid curation", "A", "context"],
+          ["NAV", "Open Client final selects", "Collection", "Pinned import target | 46 images", "", "pinned"],
+          ["AI", "Find visually similar to current image", "AI", "Uses current focus", "", ""],
+          ["FLOW", "Start new render batch review", "Workflow", "Import target + ratings + export prep", "", "pinned"],
+          ["SET", "Open Keyboard Shortcuts", "Settings", "Resolve conflicts and presets", "", ""]
+        ]
+      },
+      {
+        id: "commands",
+        label: "Command-only mode",
+        query: "> open command palette command",
+        token: ">",
+        className: "state-commands",
+        detail: "Shift+Cmd+P narrows to executable commands and hides navigation destinations.",
+        rows: [
+          ["VIEW", "Switch to Compare", "View", "Compare selected pair", "Cmd 3", "context"],
+          ["VIEW", "Switch to Embeddings", "View", "Map current scope", "Cmd 6", ""],
+          ["EDIT", "Undo last action", "Edit", "Action manager", "Cmd Z", ""],
+          ["FILE", "Import Folder", "File", "Choose folder and index images", "Cmd O", ""],
+          ["AI", "Analyze remaining images", "AI", "Ollama available", "", ""],
+          ["EXP", "Export current collection", "Export", "Use last export preset", "", ""]
+        ]
+      },
+      {
+        id: "navigation",
+        label: "Navigation providers",
+        query: "@ client",
+        token: "@",
+        className: "state-navigation",
+        detail: "The @ prefix makes folders, sessions, smart collections, collections, canvases, and detected classes first-class destinations.",
+        rows: [
+          ["COL", "Client final selects", "Collection", "46 images | pinned import target", "", "pinned"],
+          ["COL", "Client proofing rejects", "Collection", "29 images", "", ""],
+          ["SES", "Client workshop session", "Session", "3 canvases | 184 events", "", ""],
+          ["CAN", "Client selects canvas", "Canvas", "32 placed images", "", ""],
+          ["SMART", "Client-ready portraits", "Smart collection", "Rating >= 4, accepted", "", ""],
+          ["TAG", "Detected: person", "Detected class", "318 images", "", ""]
+        ]
+      },
+      {
+        id: "pinned",
+        label: "Pinned and recents",
+        query: "pin",
+        token: ">",
+        className: "state-pinned",
+        detail: "Pinned palette items are favorites for launcher ranking; they are intentionally separate from the pinned import collection in the sidebar.",
+        rows: [
+          ["FAV", "Start new render batch review", "Pinned workflow", "Used 17 times this week", "", "pinned"],
+          ["FAV", "Open Client final selects", "Pinned destination", "46 images", "", "pinned"],
+          ["FAV", "Find similar to current image", "Pinned command", "Context: focused image", "", "pinned"],
+          ["REC", "Run YOLO detection for current scope", "Recent command", "Last run 14:20", "", ""],
+          ["REC", "Export contact sheet", "Recent workflow", "A4 proof layout", "", ""],
+          ["SET", "Manage pinned palette items", "Settings", "Favorite, reorder, remove stale IDs", "", ""]
+        ]
+      },
+      {
+        id: "workflow",
+        label: "Saved automation",
+        query: "workflow delivery",
+        token: "~",
+        className: "state-workflow",
+        detail: "Automations start as saved sequences of registered Cull commands, with context validation before every step.",
+        rows: [
+          ["FLOW", "Prepare client delivery set", "Workflow", "Validate selection -> export -> contact sheet", "", "pinned"],
+          ["FLOW", "Review new import batch", "Workflow", "Open batch -> collect mode -> smart filter", "", ""],
+          ["FLOW", "AI annotate current scope", "Workflow", "Detect objects -> vision tags -> refresh filters", "", ""],
+          ["STEP", "Step 1: validate selected collection", "Workflow step", "Requires active collection", "", ""],
+          ["STEP", "Step 2: export web copies", "Workflow step", "Requires output preset", "", ""],
+          ["STEP", "Step 3: create proof contact sheet", "Workflow step", "Prompts for title", "", ""]
+        ]
+      },
+      {
+        id: "conflicts",
+        label: "Shortcut conflicts",
+        query: "cmd p",
+        token: "!",
+        className: "state-conflicts",
+        detail: "The shortcut editor should call out platform conflicts instead of silently stealing Print.",
+        rows: [
+          ["WARN", "Cmd P conflicts with Print", "Shortcut", "macOS standard shortcut", "Cmd P", "danger"],
+          ["OK", "Use Cmd K for universal palette", "Recommended", "No conflict in current map", "Cmd K", "pinned"],
+          ["OK", "Use Shift+Cmd+P for command-only", "Alternate", "VS Code familiar command mode", "Shift Cmd P", ""],
+          ["PRE", "Apply Obsidian-style preset", "Preset", "Requires explicit confirmation", "Cmd P", ""],
+          ["SET", "Show all shortcut conflicts", "Settings", "2 warnings, 0 hard conflicts", "", ""],
+          ["HELP", "Open keyboard reference", "Help", "Searchable command list", "?", ""]
+        ]
+      }
+    ];
+
+    const state = { ...DEFAULTS };
+
+    const thumbs = [
+      "../slides/01-title.png",
+      "../slides/03-paradigm.png",
+      "../slides/04-agent-native.png",
+      "../slides/05-embeddings.png",
+      "../slides/06-features.png",
+      "../slides/07-keyboard.png",
+      "../slides/08-tech-stack.png",
+      "../slides/09-privacy.png",
+      "../slides/10-speed.png",
+      "../slides/11-cta.png"
+    ];
+
+    function initFromUrl() {
+      const params = new URLSearchParams(location.search);
+      if (params.has("state")) state.state = params.get("state");
+      if (params.has("view")) state.view = params.get("view");
+      if (params.get("shot") === "1") document.body.classList.add("shot-mode");
+    }
+
+    function currentPreset() {
+      return presets.find(p => p.id === state.state) || presets[0];
+    }
+
+    function renderControls() {
+      const list = document.getElementById("presetList");
+      list.innerHTML = "";
+      for (const preset of presets) {
+        const button = document.createElement("button");
+        button.className = "preset-btn" + (preset.id === state.state ? " active" : "");
+        button.textContent = preset.label;
+        button.addEventListener("click", () => {
+          state.state = preset.id;
+          updateAll();
+        });
+        list.appendChild(button);
+      }
+
+      document.getElementById("viewSelect").value = state.view;
+      document.getElementById("showPins").checked = state.showPins;
+      document.getElementById("showShortcuts").checked = state.showShortcuts;
+      document.getElementById("showContext").checked = state.showContext;
+    }
+
+    function renderThumbs() {
+      const grid = document.getElementById("thumbGrid");
+      grid.innerHTML = "";
+      for (let i = 0; i < 20; i += 1) {
+        const item = document.createElement("div");
+        item.className = "thumb";
+        item.dataset.tag = i % 4 === 0 ? "5*" : i % 3 === 0 ? "A" : "";
+        const img = document.createElement("img");
+        img.src = thumbs[i % thumbs.length];
+        img.alt = "";
+        item.appendChild(img);
+        grid.appendChild(item);
+      }
+    }
+
+    function renderPreview() {
+      const preset = currentPreset();
+      document.body.dataset.view = state.view;
+
+      const frame = document.getElementById("frame");
+      frame.className = "prototype-frame " + preset.className;
+
+      document.getElementById("modeToken").textContent = preset.token;
+      document.getElementById("paletteQuery").textContent = preset.query;
+
+      const resultList = document.getElementById("resultList");
+      resultList.innerHTML = "";
+
+      preset.rows.forEach((row, index) => {
+        const [icon, title, category, meta, shortcut, flag] = row;
+        const el = document.createElement("div");
+        const pinned = flag === "pinned" && state.showPins;
+        el.className = "result-row" + (index === 0 ? " active" : "") + (pinned ? " pinned" : "");
+
+        const iconEl = document.createElement("div");
+        iconEl.className = "result-icon";
+        iconEl.textContent = icon;
+
+        const main = document.createElement("div");
+        main.className = "result-main";
+        const titleEl = document.createElement("div");
+        titleEl.className = "result-title";
+        titleEl.textContent = title;
+        const metaEl = document.createElement("div");
+        metaEl.className = "result-meta";
+        metaEl.innerHTML = `<span>${category}</span><span>${meta}</span>`;
+        main.append(titleEl, metaEl);
+
+        const badges = document.createElement("div");
+        badges.className = "result-badges";
+        if (pinned) {
+          const pin = document.createElement("span");
+          pin.className = "badge green";
+          pin.textContent = "fav";
+          badges.appendChild(pin);
+        }
+        if (flag === "context") {
+          const ctx = document.createElement("span");
+          ctx.className = "badge purple";
+          ctx.textContent = "context";
+          badges.appendChild(ctx);
+        }
+        if (flag === "danger") {
+          const warn = document.createElement("span");
+          warn.className = "badge red";
+          warn.textContent = "conflict";
+          badges.appendChild(warn);
+        }
+        if (shortcut && state.showShortcuts) {
+          const key = document.createElement("span");
+          key.className = flag === "danger" ? "badge red" : "badge";
+          key.textContent = shortcut;
+          badges.appendChild(key);
+        }
+
+        el.append(iconEl, main, badges);
+        resultList.appendChild(el);
+      });
+
+      const detail = document.getElementById("detailPane");
+      detail.style.display = state.showContext ? "" : "none";
+      const active = preset.rows[0];
+      detail.innerHTML = `
+        <div class="detail-title">${active[1]}</div>
+        <div>${preset.detail}</div>
+        <div class="detail-grid">
+          <div class="detail-line"><span>Scope</span><span>${active[2]}</span></div>
+          <div class="detail-line"><span>Context</span><span>${active[3]}</span></div>
+          <div class="detail-line"><span>Shortcut</span><span>${active[4] || "none"}</span></div>
+          <div class="detail-line"><span>Safety</span><span>${preset.id === "workflow" ? "validates steps" : preset.id === "conflicts" ? "requires confirmation" : "registry command"}</span></div>
+        </div>
+      `;
+    }
+
+    function updatePrompt() {
+      const preset = currentPreset();
+      const parts = [
+        `Design the Cull command palette state "${preset.label}" for a Tokyo Night, keyboard-first image viewer.`,
+        `Use a compact overlay with mode token "${preset.token}", visible command rows, category metadata, and current-context ranking.`
+      ];
+
+      if (state.showPins) parts.push("Show palette favorites separately from the pinned import collection.");
+      if (state.showShortcuts) parts.push("Display shortcut badges and make conflicts visible.");
+      if (state.showContext) parts.push("Include a right-hand detail pane for the active result.");
+      if (state.view === "mobile") parts.push("Use a single-column mobile layout with the same keyboard semantics.");
+
+      if (preset.id === "workflow") {
+        parts.push("Represent automations as saved sequences of registered Cull commands, with validation before execution.");
+      } else if (preset.id === "conflicts") {
+        parts.push("Warn that Cmd+P conflicts with macOS Print and recommend Cmd+K as the default launcher shortcut.");
+      } else if (preset.id === "navigation") {
+        parts.push("Use @ mode for destinations such as folders, collections, sessions, canvases, smart collections, and detected classes.");
+      }
+
+      document.getElementById("promptOut").textContent = parts.join(" ");
+    }
+
+    function updateAll() {
+      renderControls();
+      renderPreview();
+      updatePrompt();
+    }
+
+    document.getElementById("viewSelect").addEventListener("change", event => {
+      state.view = event.target.value;
+      updateAll();
+    });
+
+    document.getElementById("showPins").addEventListener("change", event => {
+      state.showPins = event.target.checked;
+      updateAll();
+    });
+
+    document.getElementById("showShortcuts").addEventListener("change", event => {
+      state.showShortcuts = event.target.checked;
+      updateAll();
+    });
+
+    document.getElementById("showContext").addEventListener("change", event => {
+      state.showContext = event.target.checked;
+      updateAll();
+    });
+
+    document.getElementById("copyBtn").addEventListener("click", async event => {
+      await navigator.clipboard.writeText(document.getElementById("promptOut").textContent);
+      event.currentTarget.textContent = "Copied";
+      setTimeout(() => { event.currentTarget.textContent = "Copy prompt"; }, 900);
+    });
+
+    initFromUrl();
+    renderThumbs();
+    updateAll();
+  </script>
+</body>
+</html>
