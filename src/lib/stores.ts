@@ -234,6 +234,7 @@ export function showToast(message: string, opts?: { detail?: string; type?: Toas
 // Embedding view state (persists across tab switches)
 export type EmbeddingInteractionMode = 'map' | 'stack' | 'review' | 'text';
 export type EmbeddingZPreset = 'projection' | 'cluster' | 'source' | 'rating' | 'decision' | 'recency' | 'resolution';
+export type EmbeddingProvider = 'clip' | 'dinov2' | 'gemini';
 
 export interface EmbeddingViewState {
     panX: number;
@@ -241,7 +242,7 @@ export interface EmbeddingViewState {
     scale: number;
     selectedPointId: string | null;
     highlightedCluster: number | null;
-    provider: 'clip' | 'gemini';
+    provider: EmbeddingProvider;
     projectionKey: string | null;
     hasUserView: boolean;
     interactionMode: EmbeddingInteractionMode;

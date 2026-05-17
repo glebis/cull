@@ -6,9 +6,11 @@ interface ProjectionImageMeta {
     thumbnailPath: string | null;
 }
 
+type EmbeddingProvider = 'clip' | 'dinov2' | 'gemini';
+
 interface ProjectionRequest {
     requestId: number;
-    provider: 'clip' | 'gemini';
+    provider: EmbeddingProvider;
     ids: string[];
     vectors: Float32Array;
     dims: number;
@@ -49,7 +51,7 @@ function hashString(input: string): number {
     return hash >>> 0;
 }
 
-function projectionKey(provider: 'clip' | 'gemini', ids: string[]): string {
+function projectionKey(provider: EmbeddingProvider, ids: string[]): string {
     const sorted = [...ids].sort();
     let hash = 0x811c9dc5;
     for (const id of sorted) {

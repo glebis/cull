@@ -11,16 +11,17 @@
         embeddingViewState,
         settingsOpen,
         type EmbeddingViewState,
+        type EmbeddingProvider,
         type EmbeddingInteractionMode,
         type EmbeddingZPreset,
     } from '$lib/stores';
     import { get } from 'svelte/store';
     import { computeScatterThumbSize, formatBytes, formatDownloadRateEta } from '$lib/embedding-utils';
     import {
-        isModelAvailable,
-        getClipModelDownloadInfo,
-        downloadClipModel,
-        generateEmbeddings,
+        isEmbeddingModelAvailable,
+        getEmbeddingModelDownloadInfo,
+        downloadEmbeddingModel,
+        generateModelEmbeddings,
         getEmbeddingPage,
         getEmbeddingCount,
         getImageCount,
@@ -34,25 +35,66 @@
         pauseJob,
         resumeJob,
     } from '$lib/api';
-    import type { ClipModelDownloadInfo, EmbeddingPage, GenerationRun, ImageWithFile } from '$lib/api';
+    import type { EmbeddingModelDownloadInfo, EmbeddingPage, GenerationRun, ImageWithFile } from '$lib/api';
 
     // State
-    let modelAvailable = $state(false);
     let downloading = $state(false);
     let generating = $state(false);
     let genProgress = $state({ current: 0, total: 0 });
-    let embeddingCount = $state(0);
     let totalImages = $state(0);
     let regeneratingThumbs = $state(false);
     let staleEmbeddingCount = $state(0);
 
     // Provider config
-    type Provider = 'clip' | 'gemini';
-    let selectedProvider = $state<Provider>('clip');
+    type LocalProvider = Exclude<EmbeddingProvider, 'gemini'>;
+    type ModelOption = {
+        id: EmbeddingProvider;
+        label: string;
+        shortLabel: string;
+        modelName: string;
+        dims: string;
+        scope: string;
+        downloadLabel?: string;
+    };
+    const MODEL_OPTIONS: ModelOption[] = [
+        {
+            id: 'clip',
+            label: 'CLIP ViT-B/32',
+            shortLabel: 'CLIP',
+            modelName: 'clip-vit-b32',
+            dims: '512d',
+            scope: 'local',
+            downloadLabel: 'Download CLIP (~350MB)',
+        },
+        {
+            id: 'dinov2',
+            label: 'DINOv2 ViT-S/14',
+            shortLabel: 'DINOv2',
+            modelName: 'dinov2-vits14',
+            dims: '384d',
+            scope: 'local',
+            downloadLabel: 'Download DINOv2 (~87MB)',
+        },
+        {
+            id: 'gemini',
+            label: 'Gemini Embedding 2',
+            shortLabel: 'Gemini',
+            modelName: 'gemini-embedding-2',
+            dims: 'API',
+            scope: 'cloud',
+        },
+    ];
+    let selectedProvider = $state<EmbeddingProvider>('clip');
     let configOpen = $state(false);
     let hasGoogleKey = $state(false);
+    let localModelAvailable = $state<Record<LocalProvider, boolean>>({ clip: false, dinov2: false });
+    let localEmbeddingCounts = $state<Record<LocalProvider, number>>({ clip: 0, dinov2: 0 });
+    let localModelDownloadInfo = $state<Record<LocalProvider, EmbeddingModelDownloadInfo | null>>({ clip: null, dinov2: null });
     let geminiEmbeddingCount = $state(0);
-    let currentEmbeddingCount = $derived(selectedProvider === 'gemini' ? geminiEmbeddingCount : embeddingCount);
+    let currentEmbeddingCount = $derived(providerEmbeddingCount(selectedProvider));
+    let selectedModel = $derived(MODEL_OPTIONS.find(option => option.id === selectedProvider) ?? MODEL_OPTIONS[0]);
+    let selectedModelAvailable = $derived(providerReady(selectedProvider));
+    let selectedDownloadInfo = $derived(isLocalProvider(selectedProvider) ? localModelDownloadInfo[selectedProvider] : null);
     const PROJECTION_EMBEDDING_LIMIT = 5000;
 
     // Visual embed interaction config
@@ -95,7 +137,6 @@
     let downloadStartTime = $state(0);
     let downloadSpeed = $state('');
     let downloadJobId = $state<string | null>(null);
-    let clipModelDownloadInfo = $state<ClipModelDownloadInfo | null>(null);
 
     // UMAP projection
     type Point = { id: string; x: number; y: number; cluster: number };
@@ -196,6 +237,35 @@
             });
     });
 
+    function isLocalProvider(provider: EmbeddingProvider): provider is LocalProvider {
+        return provider === 'clip' || provider === 'dinov2';
+    }
+
+    function modelNameForProvider(provider: EmbeddingProvider): string {
+        return MODEL_OPTIONS.find(option => option.id === provider)?.modelName ?? 'clip-vit-b32';
+    }
+
+    function providerEmbeddingCount(provider: EmbeddingProvider): number {
+        if (provider === 'gemini') return geminiEmbeddingCount;
+        return localEmbeddingCounts[provider];
+    }
+
+    function providerReady(provider: EmbeddingProvider): boolean {
+        if (provider === 'gemini') return hasGoogleKey;
+        return localModelAvailable[provider];
+    }
+
+    function providerStatusLabel(provider: EmbeddingProvider): string {
+        if (provider === 'gemini') return hasGoogleKey ? 'ready' : 'key';
+        return localModelAvailable[provider] ? 'ready' : 'model';
+    }
+
+    async function selectProvider(provider: EmbeddingProvider) {
+        if (provider === selectedProvider) return;
+        selectedProvider = provider;
+        await handleProviderChange();
+    }
+
     function restoreInteractionState(savedState: Partial<EmbeddingViewState>) {
         selectedProvider = savedState.provider ?? 'clip';
         interactionMode = savedState.interactionMode ?? 'map';
@@ -211,8 +281,8 @@
         void (async () => {
             const savedState = get(embeddingViewState);
             restoreInteractionState(savedState);
-            await loadClipModelDownloadInfo();
-            await checkModel();
+            await loadLocalModelDownloadInfo();
+            await checkLocalModels();
             await loadApiKeyState();
             await loadEmbeddingState();
         })();
@@ -222,30 +292,56 @@
         };
     });
 
-    async function checkModel() {
+    async function checkLocalModels() {
         try {
-            modelAvailable = await isModelAvailable();
+            const [clipAvailable, dinoAvailable] = await Promise.all([
+                isEmbeddingModelAvailable('clip-vit-b32'),
+                isEmbeddingModelAvailable('dinov2-vits14'),
+            ]);
+            localModelAvailable = {
+                clip: clipAvailable,
+                dinov2: dinoAvailable,
+            };
         } catch (e) {
-            console.error('Failed to check model:', e);
+            console.error('Failed to check embedding models:', e);
         }
     }
 
-    async function loadClipModelDownloadInfo() {
+    async function loadLocalModelDownloadInfo() {
         try {
-            clipModelDownloadInfo = await getClipModelDownloadInfo();
+            const [clipInfo, dinoInfo] = await Promise.all([
+                getEmbeddingModelDownloadInfo('clip-vit-b32'),
+                getEmbeddingModelDownloadInfo('dinov2-vits14'),
+            ]);
+            localModelDownloadInfo = {
+                clip: clipInfo,
+                dinov2: dinoInfo,
+            };
         } catch (e) {
-            console.error('Failed to load CLIP model download info:', e);
+            console.error('Failed to load embedding model download info:', e);
         }
     }
 
     async function loadEmbeddingState() {
         try {
-            totalImages = await getImageCount();
-            embeddingCount = await getEmbeddingCount();
-            if (hasGoogleKey) {
-                geminiEmbeddingCount = await getEmbeddingCount('gemini-embedding-2');
-            }
-            if (currentEmbeddingCount > 0) {
+            const [imageTotal, clipCount, dinoCount, geminiCount] = await Promise.all([
+                getImageCount(),
+                getEmbeddingCount('clip-vit-b32'),
+                getEmbeddingCount('dinov2-vits14'),
+                getEmbeddingCount('gemini-embedding-2'),
+            ]);
+            totalImages = imageTotal;
+            localEmbeddingCounts = {
+                clip: clipCount,
+                dinov2: dinoCount,
+            };
+            geminiEmbeddingCount = geminiCount;
+            const selectedCount = selectedProvider === 'gemini'
+                ? geminiCount
+                : selectedProvider === 'dinov2'
+                    ? dinoCount
+                    : clipCount;
+            if (selectedCount > 0) {
                 await loadProjection();
             } else {
                 points = [];
@@ -296,7 +392,7 @@
         const unlisten: UnlistenFn = await listen<{ current: number; total: number; provider: string }>(
             'embedding-progress',
             (event) => {
-                genProgress = event.payload;
+                genProgress = { current: event.payload.current, total: event.payload.total };
             }
         );
 
@@ -317,15 +413,19 @@
     }
 
     async function handleDownload() {
+        if (!isLocalProvider(selectedProvider)) return;
+        const provider = selectedProvider;
+        const modelName = modelNameForProvider(provider);
         downloading = true;
         downloadProgress = { downloaded: 0, total: 0, status: 'downloading', job_id: null, error: null };
         downloadJobId = null;
         downloadStartTime = Date.now();
         downloadSpeed = '';
 
-        const unlisten: UnlistenFn = await listen<{ downloaded: number; total: number; status: string; job_id?: string; error?: string }>(
+        const unlisten: UnlistenFn = await listen<{ downloaded: number; total: number; status: string; job_id?: string; error?: string; model?: string }>(
             'model-download-progress',
             (event) => {
+                if (event.payload.model && event.payload.model !== modelName) return;
                 downloadProgress = { ...event.payload, job_id: event.payload.job_id ?? downloadJobId, error: event.payload.error ?? null };
                 if (event.payload.job_id) downloadJobId = event.payload.job_id;
                 downloadSpeed = formatDownloadRateEta(
@@ -337,8 +437,8 @@
         );
 
         try {
-            await downloadClipModel();
-            modelAvailable = true;
+            await downloadEmbeddingModel(modelName);
+            localModelAvailable = { ...localModelAvailable, [provider]: true };
         } catch (e) {
             console.error('Download failed:', e);
             downloadProgress = { ...downloadProgress, status: downloadProgress.status === 'cancelled' ? 'cancelled' : 'failed', error: String(e) };
@@ -367,22 +467,27 @@
     }
 
     async function handleGenerate() {
+        if (!isLocalProvider(selectedProvider)) return;
+        const provider = selectedProvider;
+        const modelName = modelNameForProvider(provider);
         generating = true;
         genProgress = { current: 0, total: 0 };
 
-        const unlisten: UnlistenFn = await listen<{ current: number; total: number }>(
+        const unlisten: UnlistenFn = await listen<{ current: number; total: number; model?: string }>(
             'embedding-progress',
             (event) => {
-                genProgress = event.payload;
+                if (event.payload.model && event.payload.model !== modelName) return;
+                genProgress = { current: event.payload.current, total: event.payload.total };
             }
         );
 
         try {
             const imageIds = await listImageIds();
             totalImages = imageIds.length;
-            await generateEmbeddings(imageIds);
-            embeddingCount = await getEmbeddingCount();
-            if (embeddingCount > 0) {
+            await generateModelEmbeddings(modelName, imageIds);
+            const count = await getEmbeddingCount(modelName);
+            localEmbeddingCounts = { ...localEmbeddingCounts, [provider]: count };
+            if (count > 0) {
                 await loadProjection();
             }
         } catch (e) {
@@ -955,7 +1060,7 @@
     async function loadProjection() {
         const loadSeq = ++projectionLoadSeq;
         try {
-            const modelName = selectedProvider === 'gemini' ? 'gemini-embedding-2' : undefined;
+            const modelName = modelNameForProvider(selectedProvider);
             const embeddingPage = await getEmbeddingPage(modelName, PROJECTION_EMBEDDING_LIMIT, 0);
             if (loadSeq !== projectionLoadSeq) return;
             if (embeddingPage.ids.length < 2) {
@@ -1367,37 +1472,42 @@
     <div class="left-panel">
         <div class="panel-section">
             <div class="section-header-row">
-                <div class="section-header">PROVIDER</div>
+                <div class="section-header">MODEL</div>
                 <button class="gear-btn" onclick={() => configOpen = !configOpen} title="Settings">
                     &#9881;
                 </button>
             </div>
-            <select class="provider-select" bind:value={selectedProvider} onchange={handleProviderChange}>
-                <option value="clip">CLIP ViT-B/32 (local)</option>
-                <option value="gemini">Gemini Embedding 2 (API)</option>
-            </select>
-            <div class="model-detail">
-                {#if selectedProvider === 'clip'}
-                    {#if !modelAvailable}
-                        Model not downloaded
-                    {:else}
-                        {embeddingCount}/{totalImages} images
-                    {/if}
-                {:else}
-                    {geminiEmbeddingCount}/{totalImages} images
-                {/if}
+            <div class="model-list" role="radiogroup" aria-label="Embedding model">
+                {#each MODEL_OPTIONS as option}
+                    <button
+                        class="model-option"
+                        class:active={selectedProvider === option.id}
+                        onclick={() => selectProvider(option.id)}
+                        role="radio"
+                        aria-checked={selectedProvider === option.id}
+                        title={option.label}
+                    >
+                        <span class="model-option-main">
+                            <span class="model-name">{option.shortLabel}</span>
+                            <span class="model-count">{providerEmbeddingCount(option.id)}/{totalImages}</span>
+                        </span>
+                        <span class="model-option-meta">
+                            <span>{option.scope}</span>
+                            <span>{option.dims}</span>
+                            <span class:ready={providerReady(option.id)}>{providerStatusLabel(option.id)}</span>
+                        </span>
+                    </button>
+                {/each}
             </div>
         </div>
 
-        {#if configOpen}
+        {#if configOpen && selectedProvider === 'gemini' && !hasGoogleKey}
             <div class="panel-section config-section">
-                {#if selectedProvider === 'gemini' && !hasGoogleKey}
-                    <div class="section-header">GEMINI API KEY REQUIRED</div>
-                    <p class="key-missing-text">Set your Google API key in Settings to use Gemini embeddings.</p>
-                    <button class="settings-link-btn" onclick={() => settingsOpen.set(true)}>
-                        Open Settings
-                    </button>
-                {/if}
+                <div class="section-header">GEMINI API KEY REQUIRED</div>
+                <p class="key-missing-text">Set your Google API key in Settings to use Gemini embeddings.</p>
+                <button class="settings-link-btn" onclick={() => settingsOpen.set(true)}>
+                    Open Settings
+                </button>
             </div>
         {/if}
 
@@ -1468,8 +1578,8 @@
             </div>
         </div>
 
-        {#if selectedProvider === 'clip'}
-            {#if !modelAvailable}
+        {#if isLocalProvider(selectedProvider)}
+            {#if !selectedModelAvailable}
                 <div class="panel-section">
                     {#if downloading}
                         <div class="download-progress">
@@ -1506,7 +1616,7 @@
                             {#if downloadProgress.status === 'failed' || downloadProgress.status === 'cancelled'}
                                 Resume Download
                             {:else}
-                                Download Model (~350MB)
+                                {selectedModel.downloadLabel ?? 'Download Model'}
                             {/if}
                         </button>
                         {#if downloadProgress.status === 'failed' && downloadProgress.error}
@@ -1515,11 +1625,11 @@
                     {/if}
                     <div class="manual-download">
                         <div class="section-header" style="margin-top: 10px">MANUAL DOWNLOAD</div>
-                        {#if clipModelDownloadInfo}
-                            <div class="manual-path">{clipModelDownloadInfo.model_path}</div>
-                            <pre class="manual-cmd">{clipModelDownloadInfo.curl_command}</pre>
+                        {#if selectedDownloadInfo}
+                            <div class="manual-path">{selectedDownloadInfo.model_path}</div>
+                            <pre class="manual-cmd">{selectedDownloadInfo.curl_command}</pre>
                         {:else}
-                            <pre class="manual-cmd">https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx</pre>
+                            <pre class="manual-cmd">{modelNameForProvider(selectedProvider)}</pre>
                         {/if}
                     </div>
                 </div>
@@ -1531,13 +1641,17 @@
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Embeddings</span>
-                        <span class="stat-value">{embeddingCount}</span>
+                        <span class="stat-value">{currentEmbeddingCount}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Model</span>
+                        <span class="stat-value">{selectedModel.dims}</span>
                     </div>
                     <button class="action-btn" onclick={handleGenerate} disabled={generating}>
                         {#if generating}
                             Generating {genProgress.current}/{genProgress.total}...
-                        {:else if embeddingCount < totalImages}
-                            Generate Embeddings ({Math.max(0, totalImages - embeddingCount)} remaining)
+                        {:else if currentEmbeddingCount < totalImages}
+                            Generate Embeddings ({Math.max(0, totalImages - currentEmbeddingCount)} remaining)
                         {:else}
                             Regenerate All
                         {/if}
@@ -1649,10 +1763,14 @@
                 {#if projecting}
                     <div class="empty-icon">&#8987;</div>
                     <div class="empty-title">Projecting...</div>
-                {:else if !modelAvailable && selectedProvider === 'clip'}
+                {:else if isLocalProvider(selectedProvider) && !selectedModelAvailable}
                     <div class="empty-icon">&#9881;</div>
                     <div class="empty-title">Model Required</div>
-                    <div class="empty-text">Download the CLIP model to generate embeddings</div>
+                    <div class="empty-text">Download {selectedModel.label} to generate embeddings</div>
+                {:else if selectedProvider === 'gemini' && !hasGoogleKey}
+                    <div class="empty-icon">&#9881;</div>
+                    <div class="empty-title">API Key Required</div>
+                    <div class="empty-text">Set a Google API key before generating Gemini embeddings</div>
                 {:else if currentEmbeddingCount === 0}
                     <div class="empty-icon">&#9673;</div>
                     <div class="empty-title">No Embeddings Yet</div>
@@ -1793,10 +1911,77 @@
         margin-bottom: 8px;
     }
 
-    .model-detail {
+    .model-list {
+        display: grid;
+        gap: 5px;
+    }
+
+    .model-option {
+        display: grid;
+        gap: 3px;
+        width: 100%;
+        min-height: 46px;
+        padding: 7px 8px;
+        background: var(--bg);
+        color: var(--text-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        font-family: var(--font);
+        cursor: pointer;
+        text-align: left;
+        transition: border-color 0.15s, background 0.15s, color 0.15s;
+    }
+
+    .model-option:hover {
+        border-color: var(--blue);
+        color: var(--text);
+    }
+
+    .model-option.active {
+        background: color-mix(in srgb, var(--blue) 12%, var(--bg));
+        border-color: var(--blue);
+        color: var(--text);
+    }
+
+    .model-option-main,
+    .model-option-meta {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+    }
+
+    .model-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--text);
+    }
+
+    .model-count {
+        margin-left: auto;
+        flex-shrink: 0;
         font-size: 10px;
         color: var(--text-secondary);
-        margin-top: 2px;
+    }
+
+    .model-option-meta {
+        gap: 6px;
+        font-size: 9px;
+        color: var(--text-secondary);
+    }
+
+    .model-option-meta span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .model-option-meta span.ready {
+        color: var(--green);
     }
 
     .stat-row {

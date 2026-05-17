@@ -62,7 +62,15 @@
                 upsertJob(e.payload.job_id ?? `evt_nsfw`, 'nsfw', 'running', e.payload.current, e.payload.total, null);
             });
             const u10 = await listen<any>('model-download-progress', (e) => {
-                upsertDownload(e.payload.job_id ?? 'evt_clip_download', 'clip-download', e.payload.downloaded, e.payload.total, e.payload.status, e.payload.error ?? null);
+                const model = e.payload.model ?? 'clip-vit-b32';
+                upsertDownload(
+                    e.payload.job_id ?? `evt_${model}_download`,
+                    `${model}-download`,
+                    e.payload.downloaded,
+                    e.payload.total,
+                    e.payload.status,
+                    e.payload.error ?? null,
+                );
             });
             const u11 = await listen<any>('yolo-download-progress', (e) => {
                 upsertDownload('evt_yolo_download', 'yolo-download', e.payload.downloaded, e.payload.total, e.payload.status, e.payload.variant);
@@ -189,7 +197,7 @@
     }
 
     function isDownloadJob(job: JobInfo): boolean {
-        return ['clip-download', 'yolo-download', 'nudenet-download'].includes(job.kind);
+        return job.kind.endsWith('-download') || ['clip-download', 'yolo-download', 'nudenet-download'].includes(job.kind);
     }
 
     function kindLabel(kind: string): string {
@@ -210,7 +218,16 @@
             'health-check': 'Library health',
             'raw-backfill': 'RAW previews',
         };
-        return labels[kind] ?? kind;
+        if (labels[kind]) return labels[kind];
+        if (kind.endsWith('-download')) {
+            const model = kind.slice(0, -'-download'.length);
+            const modelLabels: Record<string, string> = {
+                'clip-vit-b32': 'CLIP model',
+                'dinov2-vits14': 'DINOv2 model',
+            };
+            return modelLabels[model] ?? `${model} model`;
+        }
+        return kind;
     }
 
     function statusIcon(status: string): string {

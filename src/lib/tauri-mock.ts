@@ -219,6 +219,24 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   ],
   list_images: () => Array.from({ length: 20 }, (_, i) => makeMockImage(i)),
   get_image_count: () => 20,
+  list_image_ids: () => Array.from({ length: 20 }, (_, i) => `img-${i}`),
+  get_images_by_ids: (_: any, args: { imageIds: string[] }) =>
+    args.imageIds.map(id => makeMockImage(Number(id.replace('img-', '')) || 0)),
+  get_embedding_count: (_: any, args?: { model?: string | null }) => {
+    if (args?.model === 'dinov2-vits14') return 8;
+    if (args?.model === 'gemini-embedding-2') return 0;
+    return 12;
+  },
+  get_embedding_page: (_: any, args?: { model?: string | null; limit?: number }) => {
+    const model = args?.model ?? 'clip-vit-b32';
+    const dims = model === 'dinov2-vits14' ? 384 : 512;
+    const total = model === 'dinov2-vits14' ? 8 : 12;
+    const ids = Array.from({ length: Math.min(args?.limit ?? total, total) }, (_, i) => `img-${i}`);
+    const vectors = ids.flatMap((_, imageIndex) =>
+      Array.from({ length: dims }, (_, dimIndex) => Math.sin((imageIndex + 1) * (dimIndex + 1)) * 0.1)
+    );
+    return { ids, vectors, dims, total, offset: 0, limit: args?.limit ?? total, has_more: false };
+  },
   list_jobs: () => [],
   get_job: () => null,
   cancel_job: () => undefined,
