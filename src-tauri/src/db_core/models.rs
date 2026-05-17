@@ -59,6 +59,29 @@ pub struct ImageQualityMetrics {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImagePaletteColor {
+    pub hex: String,
+    pub red: u8,
+    pub green: u8,
+    pub blue: u8,
+    pub percentage: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageColorMetrics {
+    pub image_id: String,
+    pub analyzer_version: String,
+    pub dominant_hex: String,
+    pub palette: Vec<ImagePaletteColor>,
+    pub dominant_hue_bucket: String,
+    pub mean_luma: f64,
+    pub mean_saturation: f64,
+    pub colorfulness: f64,
+    pub contrast: f64,
+    pub analyzed_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimilarityGroupSummary {
     pub id: String,
     pub model_name: String,

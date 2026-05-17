@@ -58,6 +58,27 @@ export interface ImageQualityMetrics {
     analyzed_at: string;
 }
 
+export interface ImagePaletteColor {
+    hex: string;
+    red: number;
+    green: number;
+    blue: number;
+    percentage: number;
+}
+
+export interface ImageColorMetrics {
+    image_id: string;
+    analyzer_version: string;
+    dominant_hex: string;
+    palette: ImagePaletteColor[];
+    dominant_hue_bucket: string;
+    mean_luma: number;
+    mean_saturation: number;
+    colorfulness: number;
+    contrast: number;
+    analyzed_at: string;
+}
+
 export interface SimilarityGroupSummary {
     id: string;
     model_name: string;
@@ -380,6 +401,17 @@ export async function listTags(limit = 100, offset = 0): Promise<TagSummary[]> {
 }
 
 // Embedding commands
+export interface ClipModelDownloadInfo {
+    url: string;
+    model_path: string;
+    part_path: string;
+    curl_command: string;
+}
+
+export async function getClipModelDownloadInfo(): Promise<ClipModelDownloadInfo> {
+    return invoke('get_clip_model_download_info');
+}
+
 export async function downloadClipModel(): Promise<string> {
     return invoke('download_clip_model');
 }
@@ -562,6 +594,26 @@ export async function getImageQuality(imageId: string): Promise<ImageQualityMetr
 
 export async function getQualityCount(): Promise<number> {
     return invoke('get_quality_count');
+}
+
+export async function analyzeImageColors(imageIds: string[]): Promise<number> {
+    return invoke('analyze_image_colors', { imageIds });
+}
+
+export async function getImageColorMetrics(imageId: string): Promise<ImageColorMetrics | null> {
+    return invoke('get_image_color_metrics', { imageId });
+}
+
+export async function getColorMetricsCount(): Promise<number> {
+    return invoke('get_color_metrics_count');
+}
+
+export async function listImagesByColorBucket(
+    bucket: string,
+    limit = 100,
+    offset = 0,
+): Promise<ImageWithFile[]> {
+    return invoke('list_images_by_color_bucket', { bucket, limit, offset });
 }
 
 export async function analyzePerceptualHashes(imageIds: string[]): Promise<number> {

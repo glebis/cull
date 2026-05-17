@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 use uuid::Uuid;
 
+use super::color;
 use super::db::Database;
 use super::models::*;
 use super::perceptual_hash;
@@ -133,6 +134,12 @@ pub fn sync_file(
                 &image_id,
                 raw_preview.as_ref().map(|p| &p.image),
             );
+            run_color_metrics(
+                db,
+                file_path,
+                &image_id,
+                raw_preview.as_ref().map(|p| &p.image),
+            );
         }
         return Ok(SyncOutcome::ContentChanged { image_id });
     }
@@ -188,6 +195,12 @@ pub fn sync_file(
         run_source_detection(db, file_path, &image_id, &ext, raw_dims);
         run_sidecar_detection(db, file_path, &image_id);
         run_perceptual_hash(
+            db,
+            file_path,
+            &image_id,
+            raw_preview.as_ref().map(|p| &p.image),
+        );
+        run_color_metrics(
             db,
             file_path,
             &image_id,
@@ -367,5 +380,21 @@ fn run_perceptual_hash(
 
     if let Ok(hash) = result {
         let _ = db.store_image_perceptual_hash(&hash);
+    }
+}
+
+fn run_color_metrics(
+    db: &Database,
+    file_path: &Path,
+    image_id: &str,
+    preview: Option<&image::DynamicImage>,
+) {
+    let result = match preview {
+        Some(img) => Ok(color::analyze_dynamic_image_color_metrics(image_id, img)),
+        None => color::analyze_image_color_metrics(image_id, file_path),
+    };
+
+    if let Ok(metrics) = result {
+        let _ = db.store_image_color_metrics(&metrics);
     }
 }

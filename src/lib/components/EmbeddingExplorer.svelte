@@ -15,9 +15,10 @@
         type EmbeddingZPreset,
     } from '$lib/stores';
     import { get } from 'svelte/store';
-    import { computeScatterThumbSize } from '$lib/embedding-utils';
+    import { computeScatterThumbSize, formatBytes, formatDownloadRateEta } from '$lib/embedding-utils';
     import {
         isModelAvailable,
+        getClipModelDownloadInfo,
         downloadClipModel,
         generateEmbeddings,
         getEmbeddingPage,
@@ -33,7 +34,7 @@
         pauseJob,
         resumeJob,
     } from '$lib/api';
-    import type { EmbeddingPage, GenerationRun, ImageWithFile } from '$lib/api';
+    import type { ClipModelDownloadInfo, EmbeddingPage, GenerationRun, ImageWithFile } from '$lib/api';
 
     // State
     let modelAvailable = $state(false);
@@ -94,6 +95,7 @@
     let downloadStartTime = $state(0);
     let downloadSpeed = $state('');
     let downloadJobId = $state<string | null>(null);
+    let clipModelDownloadInfo = $state<ClipModelDownloadInfo | null>(null);
 
     // UMAP projection
     type Point = { id: string; x: number; y: number; cluster: number };
@@ -209,6 +211,7 @@
         void (async () => {
             const savedState = get(embeddingViewState);
             restoreInteractionState(savedState);
+            await loadClipModelDownloadInfo();
             await checkModel();
             await loadApiKeyState();
             await loadEmbeddingState();
@@ -224,6 +227,14 @@
             modelAvailable = await isModelAvailable();
         } catch (e) {
             console.error('Failed to check model:', e);
+        }
+    }
+
+    async function loadClipModelDownloadInfo() {
+        try {
+            clipModelDownloadInfo = await getClipModelDownloadInfo();
+        } catch (e) {
+            console.error('Failed to load CLIP model download info:', e);
         }
     }
 
@@ -305,14 +316,6 @@
         }
     }
 
-    function formatBytes(bytes: number): string {
-        if (bytes === 0) return '0 B';
-        const mb = bytes / (1024 * 1024);
-        if (mb >= 1) return `${mb.toFixed(0)} MB`;
-        const kb = bytes / 1024;
-        return `${kb.toFixed(0)} KB`;
-    }
-
     async function handleDownload() {
         downloading = true;
         downloadProgress = { downloaded: 0, total: 0, status: 'downloading', job_id: null, error: null };
@@ -325,12 +328,11 @@
             (event) => {
                 downloadProgress = { ...event.payload, job_id: event.payload.job_id ?? downloadJobId, error: event.payload.error ?? null };
                 if (event.payload.job_id) downloadJobId = event.payload.job_id;
-                // Calculate speed
-                const elapsed = (Date.now() - downloadStartTime) / 1000;
-                if (elapsed > 0 && event.payload.downloaded > 0) {
-                    const bytesPerSec = event.payload.downloaded / elapsed;
-                    downloadSpeed = `${formatBytes(bytesPerSec)}/s`;
-                }
+                downloadSpeed = formatDownloadRateEta(
+                    event.payload.downloaded,
+                    event.payload.total,
+                    downloadStartTime
+                );
             }
         );
 
@@ -1513,8 +1515,12 @@
                     {/if}
                     <div class="manual-download">
                         <div class="section-header" style="margin-top: 10px">MANUAL DOWNLOAD</div>
-                        <pre class="manual-cmd">curl -L -o ~/.../models/clip-vit-b32-vision.onnx \
-  https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx</pre>
+                        {#if clipModelDownloadInfo}
+                            <div class="manual-path">{clipModelDownloadInfo.model_path}</div>
+                            <pre class="manual-cmd">{clipModelDownloadInfo.curl_command}</pre>
+                        {:else}
+                            <pre class="manual-cmd">https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx</pre>
+                        {/if}
                     </div>
                 </div>
             {:else}
@@ -2310,6 +2316,18 @@
 
     .manual-download {
         margin-top: 4px;
+    }
+
+    .manual-path {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 5px 6px;
+        margin-bottom: 6px;
+        word-break: break-all;
+        line-height: 1.4;
     }
 
     .manual-cmd {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
     cosineDistance, findNearestNeighbors, computePointOpacity, kMeans,
-    formatBytes, nameCluster, getClusterPreviewPaths,
+    formatBytes, formatDownloadRateEta, nameCluster, getClusterPreviewPaths,
     computeUmapNeighborCount, computeClusterCount,
     screenToWorld, worldToScreen,
     computeNeighborLineStyle, computePointRadius,
@@ -239,6 +239,29 @@ describe('formatBytes', () => {
 
     it('small values show as KB', () => {
         expect(formatBytes(1024)).toBe('1 KB');
+    });
+});
+
+describe('formatDownloadRateEta', () => {
+    it('shows transfer rate and estimated time remaining when total is known', () => {
+        const startedAt = 1_000;
+        const now = 11_000;
+        const downloaded = 20 * 1024 * 1024;
+        const total = 50 * 1024 * 1024;
+
+        expect(formatDownloadRateEta(downloaded, total, startedAt, now)).toBe('2 MB/s · 15s remaining');
+    });
+
+    it('shows only transfer rate until total bytes are known', () => {
+        const startedAt = 1_000;
+        const now = 6_000;
+        const downloaded = 5 * 1024 * 1024;
+
+        expect(formatDownloadRateEta(downloaded, 0, startedAt, now)).toBe('1 MB/s');
+    });
+
+    it('returns an empty label before progress starts', () => {
+        expect(formatDownloadRateEta(0, 10 * 1024 * 1024, 1_000, 6_000)).toBe('');
     });
 });
 

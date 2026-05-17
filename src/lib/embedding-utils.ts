@@ -80,6 +80,42 @@ export function formatBytes(bytes: number): string {
     return `${kb.toFixed(0)} KB`;
 }
 
+export function formatDownloadRateEta(
+    downloaded: number,
+    total: number,
+    startedAtMs: number,
+    nowMs: number = Date.now()
+): string {
+    if (downloaded <= 0) return '';
+
+    const elapsedSeconds = Math.max(0, (nowMs - startedAtMs) / 1000);
+    if (elapsedSeconds <= 0) return '';
+
+    const bytesPerSecond = downloaded / elapsedSeconds;
+    if (bytesPerSecond <= 0) return '';
+
+    let label = `${formatBytes(bytesPerSecond)}/s`;
+    if (total > downloaded) {
+        const remainingSeconds = Math.ceil((total - downloaded) / bytesPerSecond);
+        label += ` · ${formatDuration(remainingSeconds)} remaining`;
+    }
+    return label;
+}
+
+function formatDuration(totalSeconds: number): string {
+    if (totalSeconds < 60) return `${totalSeconds}s`;
+
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes < 60) {
+        return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+    }
+
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
+}
+
 export function nameCluster(
     clusterPointIds: string[],
     pathLookup: Map<string, string>

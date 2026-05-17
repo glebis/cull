@@ -1,6 +1,52 @@
 use crate::db_core::gemini::GeminiEmbeddingProvider;
 use crate::AppState;
+use serde::Serialize;
+use std::path::Path;
 use tauri::{AppHandle, Emitter, State};
+
+const CLIP_MODEL_URL: &str =
+    "https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClipModelDownloadInfo {
+    pub url: String,
+    pub model_path: String,
+    pub part_path: String,
+    pub curl_command: String,
+}
+
+fn clip_model_download_info_for_path(model_path: &Path) -> ClipModelDownloadInfo {
+    let part_path = crate::services::model_download::part_path_for(model_path);
+    let model_path = model_path.to_string_lossy().to_string();
+    let part_path = part_path.to_string_lossy().to_string();
+    let quoted_part_path = shell_quote(&part_path);
+    let quoted_model_path = shell_quote(&model_path);
+    let quoted_url = shell_quote(CLIP_MODEL_URL);
+
+    ClipModelDownloadInfo {
+        url: CLIP_MODEL_URL.to_string(),
+        model_path: model_path.clone(),
+        part_path: part_path.clone(),
+        curl_command: format!(
+            "mkdir -p {} && curl -L -C - -o {} {} && mv {} {}",
+            shell_quote(
+                Path::new(&model_path)
+                    .parent()
+                    .map(|path| path.to_string_lossy().to_string())
+                    .unwrap_or_else(|| ".".to_string())
+                    .as_str()
+            ),
+            quoted_part_path,
+            quoted_url,
+            shell_quote(&part_path),
+            quoted_model_path
+        ),
+    }
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
 
 #[tauri::command]
 pub async fn generate_embeddings(
@@ -93,6 +139,42 @@ pub async fn list_similarity_group_images(
 }
 
 #[tauri::command]
+pub async fn get_clip_model_download_info(
+    state: State<'_, AppState>,
+) -> Result<ClipModelDownloadInfo, String> {
+    let model_path = {
+        let engine = state.embedding_engine.lock();
+        engine.model_path()
+    };
+    Ok(clip_model_download_info_for_path(&model_path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clip_model_download_info_includes_real_model_path_and_curl_command() {
+        let info = clip_model_download_info_for_path(Path::new(
+            "/tmp/cull-models/clip-vit-b32-vision.onnx",
+        ));
+
+        assert_eq!(info.model_path, "/tmp/cull-models/clip-vit-b32-vision.onnx");
+        assert_eq!(
+            info.part_path,
+            "/tmp/cull-models/clip-vit-b32-vision.onnx.part"
+        );
+        assert_eq!(info.url, CLIP_MODEL_URL);
+        assert!(info
+            .curl_command
+            .contains("'/tmp/cull-models/clip-vit-b32-vision.onnx.part'"));
+        assert!(info
+            .curl_command
+            .contains("'/tmp/cull-models/clip-vit-b32-vision.onnx'"));
+    }
+}
+
+#[tauri::command]
 pub async fn download_clip_model(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -106,8 +188,6 @@ pub async fn download_clip_model(
         return Ok("already_downloaded".to_string());
     }
 
-    let url = "https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx";
-
     let client = reqwest::Client::new();
     let (job_id, _cancel) = state.jobs.create_job("clip-download", 0);
     let control = state
@@ -116,7 +196,7 @@ pub async fn download_clip_model(
         .ok_or_else(|| format!("Download job '{}' not found", job_id))?;
     let outcome = crate::services::model_download::download_model_file_controlled(
         &client,
-        url,
+        CLIP_MODEL_URL,
         &model_path,
         &control,
         |progress| {

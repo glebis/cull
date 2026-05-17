@@ -287,6 +287,24 @@ CREATE INDEX IF NOT EXISTS image_quality_focus_idx ON image_quality_metrics(focu
 CREATE INDEX IF NOT EXISTS image_quality_blur_idx ON image_quality_metrics(blur_score);
 CREATE INDEX IF NOT EXISTS image_quality_exposure_idx ON image_quality_metrics(exposure_score);
 
+-- Deterministic local color palette metrics used for visual grouping.
+CREATE TABLE IF NOT EXISTS image_color_metrics (
+    image_id TEXT PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+    analyzer_version TEXT NOT NULL,
+    dominant_hex TEXT NOT NULL,
+    palette_json TEXT NOT NULL,
+    dominant_hue_bucket TEXT NOT NULL,
+    mean_luma REAL NOT NULL,
+    mean_saturation REAL NOT NULL,
+    colorfulness REAL NOT NULL,
+    contrast REAL NOT NULL,
+    analyzed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS image_color_hue_bucket_idx ON image_color_metrics(dominant_hue_bucket);
+CREATE INDEX IF NOT EXISTS image_color_luma_idx ON image_color_metrics(mean_luma);
+CREATE INDEX IF NOT EXISTS image_color_saturation_idx ON image_color_metrics(mean_saturation);
+CREATE INDEX IF NOT EXISTS image_color_colorfulness_idx ON image_color_metrics(colorfulness);
+
 -- Generated similarity groups from embedding vectors.
 CREATE TABLE IF NOT EXISTS image_similarity_groups (
     id TEXT PRIMARY KEY,

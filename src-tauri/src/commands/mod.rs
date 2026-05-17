@@ -1,4 +1,5 @@
 pub mod collections;
+pub mod color;
 pub mod deeplink;
 pub mod detection;
 pub mod diagnostics;

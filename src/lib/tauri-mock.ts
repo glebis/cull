@@ -238,6 +238,25 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     analyzed_at: '2026-01-01T00:00:00Z',
   }),
   get_quality_count: () => 12,
+  analyze_image_colors: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
+  get_image_color_metrics: (_: any, args: { imageId: string }) => ({
+    image_id: args.imageId,
+    analyzer_version: 'color-v1',
+    dominant_hex: '#7aa2f7',
+    palette: [
+      { hex: '#7aa2f7', red: 122, green: 162, blue: 247, percentage: 0.46 },
+      { hex: '#0c0c12', red: 12, green: 12, blue: 18, percentage: 0.32 },
+      { hex: '#e0af68', red: 224, green: 175, blue: 104, percentage: 0.22 },
+    ],
+    dominant_hue_bucket: 'blue',
+    mean_luma: 0.42,
+    mean_saturation: 0.38,
+    colorfulness: 0.51,
+    contrast: 0.29,
+    analyzed_at: '2026-01-01T00:00:00Z',
+  }),
+  get_color_metrics_count: () => 18,
+  list_images_by_color_bucket: () => [makeMockImage(1), makeMockImage(4), makeMockImage(7)],
   analyze_perceptual_hashes: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   get_image_perceptual_hash: (_: any, args: { imageId: string }) => ({
     image_id: args.imageId,
@@ -258,6 +277,12 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       distance: 3,
     },
   ],
+  get_clip_model_download_info: () => ({
+    url: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx',
+    model_path: '/mock/app-data/models/clip-vit-b32-vision.onnx',
+    part_path: '/mock/app-data/models/clip-vit-b32-vision.onnx.part',
+    curl_command: "mkdir -p '/mock/app-data/models' && curl -L -C - -o '/mock/app-data/models/clip-vit-b32-vision.onnx.part' 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx' && mv '/mock/app-data/models/clip-vit-b32-vision.onnx.part' '/mock/app-data/models/clip-vit-b32-vision.onnx'",
+  }),
   generate_similarity_groups: () => ({
     model_name: 'clip-vit-b32',
     threshold: 0.88,

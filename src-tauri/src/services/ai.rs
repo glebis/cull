@@ -1,7 +1,8 @@
+use crate::db_core::color;
 use crate::db_core::detection::Detection;
 use crate::db_core::models::{
-    EmbeddingPage, ImagePerceptualHash, ImageQualityMetrics, ImageWithFile, NearDuplicateImage,
-    SimilarityGroupSummary, SimilarityGroupingResult,
+    EmbeddingPage, ImageColorMetrics, ImagePerceptualHash, ImageQualityMetrics, ImageWithFile,
+    NearDuplicateImage, SimilarityGroupSummary, SimilarityGroupingResult,
 };
 use crate::db_core::perceptual_hash::{self, PHASH_ALGORITHM};
 use crate::db_core::quality;
@@ -206,6 +207,42 @@ pub fn get_image_quality(
 
 pub fn get_quality_count(ctx: &ServiceContext) -> Result<u32, ServiceError> {
     Ok(ctx.db.quality_metrics_count()?)
+}
+
+pub fn analyze_image_color_metrics(
+    ctx: &ServiceContext,
+    image_id: &str,
+) -> Result<ImageColorMetrics, ServiceError> {
+    let image = crate::services::library::get_image(ctx, image_id)?;
+    let ml_path = crate::commands::resolve_image_path_for_ml(&image, ctx.app_data_dir);
+    let metrics =
+        color::analyze_image_color_metrics(image_id, &ml_path).map_err(ServiceError::Engine)?;
+    ctx.db.store_image_color_metrics(&metrics)?;
+    Ok(metrics)
+}
+
+pub fn get_image_color_metrics(
+    ctx: &ServiceContext,
+    image_id: &str,
+) -> Result<Option<ImageColorMetrics>, ServiceError> {
+    Ok(ctx.db.get_image_color_metrics(image_id)?)
+}
+
+pub fn get_color_metrics_count(ctx: &ServiceContext) -> Result<u32, ServiceError> {
+    Ok(ctx.db.color_metrics_count()?)
+}
+
+pub fn list_images_by_color_bucket(
+    ctx: &ServiceContext,
+    bucket: &str,
+    page: Pagination,
+) -> Result<Vec<ImageWithFile>, ServiceError> {
+    let page = Pagination::clamped(page.offset, page.limit);
+    let mut images = ctx
+        .db
+        .list_images_by_color_bucket(bucket, page.limit, page.offset)?;
+    enrich_thumbnails(&mut images, ctx.app_data_dir);
+    Ok(images)
 }
 
 pub fn analyze_image_perceptual_hash(

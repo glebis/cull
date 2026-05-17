@@ -1,6 +1,7 @@
 pub mod activity;
 pub mod c2pa_reader;
 pub mod canvas_document;
+pub mod color;
 pub mod db;
 pub mod detection;
 pub mod embeddings;

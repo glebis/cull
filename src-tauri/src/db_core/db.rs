@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 18;
+const CURRENT_SCHEMA_VERSION: i64 = 19;
 
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, "core_schema"),
@@ -32,6 +32,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (16, "curation_analysis"),
     (17, "image_tags"),
     (18, "perceptual_hashes"),
+    (19, "image_color_metrics"),
 ];
 
 #[derive(Clone)]
@@ -142,6 +143,8 @@ impl Database {
         self.record_migration(17, "image_tags")?;
         self.migrate_perceptual_hashes()?;
         self.record_migration(18, "perceptual_hashes")?;
+        self.migrate_image_color_metrics()?;
+        self.record_migration(19, "image_color_metrics")?;
         self.set_schema_version(CURRENT_SCHEMA_VERSION)?;
         Ok(())
     }
@@ -319,6 +322,29 @@ impl Database {
             CREATE INDEX IF NOT EXISTS image_phash_band1_idx ON image_perceptual_hashes(algorithm, band1);
             CREATE INDEX IF NOT EXISTS image_phash_band2_idx ON image_perceptual_hashes(algorithm, band2);
             CREATE INDEX IF NOT EXISTS image_phash_band3_idx ON image_perceptual_hashes(algorithm, band3);",
+        )?;
+        Ok(())
+    }
+
+    fn migrate_image_color_metrics(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS image_color_metrics (
+                image_id TEXT PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+                analyzer_version TEXT NOT NULL,
+                dominant_hex TEXT NOT NULL,
+                palette_json TEXT NOT NULL,
+                dominant_hue_bucket TEXT NOT NULL,
+                mean_luma REAL NOT NULL,
+                mean_saturation REAL NOT NULL,
+                colorfulness REAL NOT NULL,
+                contrast REAL NOT NULL,
+                analyzed_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS image_color_hue_bucket_idx ON image_color_metrics(dominant_hue_bucket);
+            CREATE INDEX IF NOT EXISTS image_color_luma_idx ON image_color_metrics(mean_luma);
+            CREATE INDEX IF NOT EXISTS image_color_saturation_idx ON image_color_metrics(mean_saturation);
+            CREATE INDEX IF NOT EXISTS image_color_colorfulness_idx ON image_color_metrics(colorfulness);",
         )?;
         Ok(())
     }
@@ -1583,6 +1609,122 @@ impl Database {
         })
     }
 
+    pub fn store_image_color_metrics(&self, metrics: &ImageColorMetrics) -> Result<()> {
+        let palette_json =
+            serde_json::to_string(&metrics.palette).unwrap_or_else(|_| "[]".to_string());
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT OR REPLACE INTO image_color_metrics (
+                image_id, analyzer_version, dominant_hex, palette_json, dominant_hue_bucket,
+                mean_luma, mean_saturation, colorfulness, contrast, analyzed_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                &metrics.image_id,
+                &metrics.analyzer_version,
+                &metrics.dominant_hex,
+                &palette_json,
+                &metrics.dominant_hue_bucket,
+                metrics.mean_luma,
+                metrics.mean_saturation,
+                metrics.colorfulness,
+                metrics.contrast,
+                &metrics.analyzed_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_image_color_metrics(&self, image_id: &str) -> Result<Option<ImageColorMetrics>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT image_id, analyzer_version, dominant_hex, palette_json, dominant_hue_bucket,
+                    mean_luma, mean_saturation, colorfulness, contrast, analyzed_at
+             FROM image_color_metrics
+             WHERE image_id = ?1",
+            params![image_id],
+            |row| {
+                let palette_json: String = row.get(3)?;
+                let palette = serde_json::from_str::<Vec<ImagePaletteColor>>(&palette_json)
+                    .unwrap_or_default();
+                Ok(ImageColorMetrics {
+                    image_id: row.get(0)?,
+                    analyzer_version: row.get(1)?,
+                    dominant_hex: row.get(2)?,
+                    palette,
+                    dominant_hue_bucket: row.get(4)?,
+                    mean_luma: row.get(5)?,
+                    mean_saturation: row.get(6)?,
+                    colorfulness: row.get(7)?,
+                    contrast: row.get(8)?,
+                    analyzed_at: row.get(9)?,
+                })
+            },
+        )
+        .optional()
+    }
+
+    pub fn color_metrics_count(&self) -> Result<u32> {
+        let conn = self.conn.lock();
+        conn.query_row("SELECT COUNT(*) FROM image_color_metrics", [], |row| {
+            row.get(0)
+        })
+    }
+
+    pub fn list_images_by_color_bucket(
+        &self,
+        bucket: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<ImageWithFile>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
+                    i.created_at, i.imported_at, f.path,
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
+                    i.raw_metadata, f.missing_at
+             FROM image_color_metrics cm
+             JOIN images i ON i.id = cm.image_id
+             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+             LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             WHERE cm.dominant_hue_bucket = ?1
+             GROUP BY i.id
+             ORDER BY cm.colorfulness DESC, i.imported_at DESC
+             LIMIT ?2 OFFSET ?3",
+        )?;
+        let rows = stmt.query_map(params![bucket, limit, offset], |row| {
+            let star: Option<u8> = row.get(9)?;
+            let color: Option<String> = row.get(10)?;
+            let decision: Option<String> = row.get(11)?;
+            let selection = decision.map(|d| Selection {
+                image_id: row.get(0).unwrap(),
+                project_id: None,
+                star_rating: star,
+                color_label: color,
+                decision: d,
+            });
+            Ok(ImageWithFile {
+                image: Image {
+                    id: row.get(0)?,
+                    sha256_hash: row.get(1)?,
+                    width: row.get(2)?,
+                    height: row.get(3)?,
+                    format: row.get(4)?,
+                    file_size: row.get(5)?,
+                    created_at: row.get(6)?,
+                    imported_at: row.get(7)?,
+                    ai_prompt: row.get(13)?,
+                    raw_metadata: row.get(14)?,
+                },
+                path: row.get(8)?,
+                thumbnail_path: None,
+                selection,
+                source_label: row.get(12)?,
+                missing_at: row.get(15)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
     // ---- Tag enrichment methods ----
 
     pub fn add_image_tag(
@@ -2653,6 +2795,7 @@ impl Database {
                              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
                              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
                              LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
+                             LEFT JOIN image_color_metrics cm ON cm.image_id = i.id
                              LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
                              WHERE ({})",
                             where_clause
@@ -2718,6 +2861,7 @@ impl Database {
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
              LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
+             LEFT JOIN image_color_metrics cm ON cm.image_id = i.id
              LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
              WHERE ({})",
             where_clause
@@ -2753,6 +2897,7 @@ impl Database {
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
              LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
+             LEFT JOIN image_color_metrics cm ON cm.image_id = i.id
              LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
              WHERE ({})
              GROUP BY i.id
@@ -3596,6 +3741,84 @@ mod tests {
             near_distance,
             far_distance
         );
+    }
+
+    #[test]
+    fn test_color_metrics_extract_dominant_red_palette() {
+        use crate::db_core::color::{analyze_image_color_metrics, COLOR_ANALYZER_VERSION};
+        use image::{ImageBuffer, Rgb};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("red.png");
+        let img = ImageBuffer::from_pixel(32, 32, Rgb([240u8, 12, 20]));
+        img.save(&path).unwrap();
+
+        let metrics = analyze_image_color_metrics("red", &path).unwrap();
+        assert_eq!(metrics.analyzer_version, COLOR_ANALYZER_VERSION);
+        assert_eq!(metrics.dominant_hue_bucket, "red");
+        assert_eq!(metrics.palette.len(), 1);
+        assert!(metrics.palette[0].percentage > 0.99, "{:?}", metrics);
+        assert!(metrics.mean_saturation > 0.8, "{:?}", metrics);
+    }
+
+    #[test]
+    fn test_color_metrics_are_stored_and_filterable() {
+        let db = test_db();
+        insert_test_image(&db, "red", "hash-red-color");
+        insert_test_image(&db, "blue", "hash-blue-color");
+
+        db.store_image_color_metrics(&ImageColorMetrics {
+            image_id: "red".to_string(),
+            analyzer_version: "color-v1".to_string(),
+            dominant_hex: "#f20c14".to_string(),
+            palette: vec![ImagePaletteColor {
+                hex: "#f20c14".to_string(),
+                red: 242,
+                green: 12,
+                blue: 20,
+                percentage: 1.0,
+            }],
+            dominant_hue_bucket: "red".to_string(),
+            mean_luma: 0.27,
+            mean_saturation: 0.9,
+            colorfulness: 0.6,
+            contrast: 0.02,
+            analyzed_at: "2026-05-17T00:00:00Z".to_string(),
+        })
+        .unwrap();
+        db.store_image_color_metrics(&ImageColorMetrics {
+            image_id: "blue".to_string(),
+            analyzer_version: "color-v1".to_string(),
+            dominant_hex: "#1848f0".to_string(),
+            palette: vec![ImagePaletteColor {
+                hex: "#1848f0".to_string(),
+                red: 24,
+                green: 72,
+                blue: 240,
+                percentage: 1.0,
+            }],
+            dominant_hue_bucket: "blue".to_string(),
+            mean_luma: 0.33,
+            mean_saturation: 0.85,
+            colorfulness: 0.62,
+            contrast: 0.02,
+            analyzed_at: "2026-05-17T00:00:00Z".to_string(),
+        })
+        .unwrap();
+
+        let stored = db.get_image_color_metrics("red").unwrap().unwrap();
+        assert_eq!(stored.dominant_hex, "#f20c14");
+        assert_eq!(stored.palette[0].red, 242);
+        assert_eq!(db.color_metrics_count().unwrap(), 2);
+
+        let images = db.list_images_by_color_bucket("red", 10, 0).unwrap();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].image.id, "red");
+
+        let filter = r#"{"type":"rule","field":"dominant_hue_bucket","op":"eq","value":"red"}"#;
+        assert_eq!(db.count_smart_collection(filter).unwrap(), 1);
+        let results = db.evaluate_smart_collection(filter).unwrap();
+        assert_eq!(results[0].image.id, "red");
     }
 
     #[test]
