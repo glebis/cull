@@ -2,15 +2,16 @@
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
 use super::models::*;
+use super::perceptual_hash::hamming_distance_parts;
 use super::smart_collections::{FilterNode, SmartCollection};
 use super::tags::{normalize_tag_name, split_tag_list};
 use parking_lot::Mutex;
 use rusqlite::{ffi, params, Connection, Error as SqlError, OptionalExtension, Result};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 17;
+const CURRENT_SCHEMA_VERSION: i64 = 18;
 
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, "core_schema"),
@@ -30,6 +31,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (15, "asset_load_events"),
     (16, "curation_analysis"),
     (17, "image_tags"),
+    (18, "perceptual_hashes"),
 ];
 
 #[derive(Clone)]
@@ -138,6 +140,8 @@ impl Database {
         self.record_migration(16, "curation_analysis")?;
         self.migrate_image_tags()?;
         self.record_migration(17, "image_tags")?;
+        self.migrate_perceptual_hashes()?;
+        self.record_migration(18, "perceptual_hashes")?;
         self.set_schema_version(CURRENT_SCHEMA_VERSION)?;
         Ok(())
     }
@@ -291,6 +295,30 @@ impl Database {
             CREATE INDEX IF NOT EXISTS image_tags_image_idx ON image_tags(image_id);
             CREATE INDEX IF NOT EXISTS image_tags_tag_idx ON image_tags(tag_id);
             CREATE INDEX IF NOT EXISTS image_tags_source_idx ON image_tags(source);",
+        )?;
+        Ok(())
+    }
+
+    fn migrate_perceptual_hashes(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS image_perceptual_hashes (
+                image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+                algorithm TEXT NOT NULL,
+                hash_hi INTEGER NOT NULL,
+                hash_lo INTEGER NOT NULL,
+                band0 INTEGER NOT NULL,
+                band1 INTEGER NOT NULL,
+                band2 INTEGER NOT NULL,
+                band3 INTEGER NOT NULL,
+                analyzed_at TEXT NOT NULL,
+                PRIMARY KEY (image_id, algorithm)
+            );
+            CREATE INDEX IF NOT EXISTS image_phash_algorithm_idx ON image_perceptual_hashes(algorithm);
+            CREATE INDEX IF NOT EXISTS image_phash_band0_idx ON image_perceptual_hashes(algorithm, band0);
+            CREATE INDEX IF NOT EXISTS image_phash_band1_idx ON image_perceptual_hashes(algorithm, band1);
+            CREATE INDEX IF NOT EXISTS image_phash_band2_idx ON image_perceptual_hashes(algorithm, band2);
+            CREATE INDEX IF NOT EXISTS image_phash_band3_idx ON image_perceptual_hashes(algorithm, band3);",
         )?;
         Ok(())
     }
@@ -1812,6 +1840,125 @@ impl Database {
             tags_created: after_count.saturating_sub(before_count),
             image_tags_created,
         })
+    }
+
+    pub fn store_image_perceptual_hash(&self, hash: &ImagePerceptualHash) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT OR REPLACE INTO image_perceptual_hashes (
+                image_id, algorithm, hash_hi, hash_lo, band0, band1, band2, band3, analyzed_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                &hash.image_id,
+                &hash.algorithm,
+                hash.hash_hi,
+                hash.hash_lo,
+                hash.band0,
+                hash.band1,
+                hash.band2,
+                hash.band3,
+                &hash.analyzed_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_image_perceptual_hash(
+        &self,
+        image_id: &str,
+        algorithm: &str,
+    ) -> Result<Option<ImagePerceptualHash>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT image_id, algorithm, hash_hi, hash_lo, band0, band1, band2, band3, analyzed_at
+             FROM image_perceptual_hashes
+             WHERE image_id = ?1 AND algorithm = ?2",
+            params![image_id, algorithm],
+            |row| {
+                Ok(ImagePerceptualHash {
+                    image_id: row.get(0)?,
+                    algorithm: row.get(1)?,
+                    hash_hi: row.get(2)?,
+                    hash_lo: row.get(3)?,
+                    band0: row.get(4)?,
+                    band1: row.get(5)?,
+                    band2: row.get(6)?,
+                    band3: row.get(7)?,
+                    analyzed_at: row.get(8)?,
+                })
+            },
+        )
+        .optional()
+    }
+
+    pub fn perceptual_hash_count(&self, algorithm: &str) -> Result<u32> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT COUNT(*) FROM image_perceptual_hashes WHERE algorithm = ?1",
+            params![algorithm],
+            |row| row.get(0),
+        )
+    }
+
+    pub fn find_near_duplicates_by_phash(
+        &self,
+        image_id: &str,
+        algorithm: &str,
+        max_distance: u32,
+        limit: u32,
+    ) -> Result<Vec<NearDuplicateImage>> {
+        let Some(base) = self.get_image_perceptual_hash(image_id, algorithm)? else {
+            return Ok(vec![]);
+        };
+
+        let mut candidate_distances: Vec<(String, u32)> = {
+            let conn = self.conn.lock();
+            let mut stmt = conn.prepare(
+                "SELECT image_id, hash_hi, hash_lo
+                 FROM image_perceptual_hashes
+                 WHERE algorithm = ?1
+                   AND image_id != ?2
+                   AND (band0 = ?3 OR band1 = ?4 OR band2 = ?5 OR band3 = ?6)",
+            )?;
+            let rows = stmt.query_map(
+                params![algorithm, image_id, base.band0, base.band1, base.band2, base.band3],
+                |row| {
+                    let candidate_id: String = row.get(0)?;
+                    let hash_hi: i64 = row.get(1)?;
+                    let hash_lo: i64 = row.get(2)?;
+                    let distance =
+                        hamming_distance_parts(base.hash_hi, base.hash_lo, hash_hi, hash_lo);
+                    Ok((candidate_id, distance))
+                },
+            )?;
+            rows.collect::<Result<Vec<_>>>()?
+        };
+
+        candidate_distances.retain(|(_, distance)| *distance <= max_distance);
+        candidate_distances.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+        candidate_distances.truncate(limit as usize);
+
+        let ids: Vec<String> = candidate_distances
+            .iter()
+            .map(|(id, _)| id.clone())
+            .collect();
+        let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let images = self.get_images_by_ids(&id_refs)?;
+        let mut images_by_id: HashMap<String, ImageWithFile> = images
+            .into_iter()
+            .map(|image| (image.image.id.clone(), image))
+            .collect();
+
+        Ok(candidate_distances
+            .into_iter()
+            .filter_map(|(id, distance)| {
+                images_by_id.remove(&id).map(|image| NearDuplicateImage {
+                    image,
+                    algorithm: algorithm.to_string(),
+                    distance,
+                })
+            })
+            .collect())
     }
 
     pub fn replace_similarity_groups(
@@ -3367,6 +3514,88 @@ mod tests {
         assert!(normalized.contains(&"studio-portrait"));
         assert!(normalized.contains(&"person"));
         assert!(!normalized.contains(&"chair"));
+    }
+
+    #[test]
+    fn test_perceptual_hash_identifies_near_duplicates() {
+        let db = test_db();
+        insert_test_image(&db, "base", "hash-phash-base");
+        insert_test_image(&db, "near", "hash-phash-near");
+        insert_test_image(&db, "far", "hash-phash-far");
+
+        let base_hash =
+            ImagePerceptualHash::from_hash_lo("base", "phash-dct-64-v1", 0xFFFF_0000_FFFF_0000u64);
+        let near_hash =
+            ImagePerceptualHash::from_hash_lo("near", "phash-dct-64-v1", 0xFFFF_0000_FFFF_0001u64);
+        let far_hash =
+            ImagePerceptualHash::from_hash_lo("far", "phash-dct-64-v1", 0x0000_FFFF_0000_FFFFu64);
+
+        db.store_image_perceptual_hash(&base_hash).unwrap();
+        db.store_image_perceptual_hash(&near_hash).unwrap();
+        db.store_image_perceptual_hash(&far_hash).unwrap();
+
+        let stored = db
+            .get_image_perceptual_hash("base", "phash-dct-64-v1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.hash_lo as u64, 0xFFFF_0000_FFFF_0000u64);
+        assert_eq!(db.perceptual_hash_count("phash-dct-64-v1").unwrap(), 3);
+
+        let duplicates = db
+            .find_near_duplicates_by_phash("base", "phash-dct-64-v1", 4, 10)
+            .unwrap();
+        assert_eq!(duplicates.len(), 1);
+        assert_eq!(duplicates[0].image.image.id, "near");
+        assert_eq!(duplicates[0].distance, 1);
+    }
+
+    #[test]
+    fn test_phash_is_stable_under_small_brightness_changes() {
+        use crate::db_core::perceptual_hash::{
+            analyze_image_perceptual_hash, hamming_distance, PHASH_ALGORITHM,
+        };
+        use image::{ImageBuffer, Rgb};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let base_path = tmp.path().join("base.png");
+        let bright_path = tmp.path().join("bright.png");
+        let checker_path = tmp.path().join("checker.png");
+
+        let base = ImageBuffer::from_fn(96, 96, |x, y| {
+            let v = ((x * 3 + y * 2) % 256) as u8;
+            Rgb([v, v.saturating_add(8), v.saturating_sub(8)])
+        });
+        let bright = ImageBuffer::from_fn(96, 96, |x, y| {
+            let v = ((x * 3 + y * 2) % 256) as u8;
+            let b = v.saturating_add(12);
+            Rgb([b, b.saturating_add(8), b.saturating_sub(8)])
+        });
+        let checker = ImageBuffer::from_fn(96, 96, |x, y| {
+            let v = if ((x / 8) + (y / 8)) % 2 == 0 {
+                0u8
+            } else {
+                255u8
+            };
+            Rgb([v, v, v])
+        });
+        base.save(&base_path).unwrap();
+        bright.save(&bright_path).unwrap();
+        checker.save(&checker_path).unwrap();
+
+        let base_hash = analyze_image_perceptual_hash("base", &base_path).unwrap();
+        let bright_hash = analyze_image_perceptual_hash("bright", &bright_path).unwrap();
+        let checker_hash = analyze_image_perceptual_hash("checker", &checker_path).unwrap();
+
+        assert_eq!(base_hash.algorithm, PHASH_ALGORITHM);
+        let near_distance = hamming_distance(&base_hash, &bright_hash);
+        let far_distance = hamming_distance(&base_hash, &checker_hash);
+        assert!(near_distance <= 8, "near distance: {}", near_distance);
+        assert!(
+            far_distance > near_distance + 8,
+            "near: {}, far: {}",
+            near_distance,
+            far_distance
+        );
     }
 
     #[test]

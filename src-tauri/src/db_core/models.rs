@@ -109,6 +109,52 @@ pub struct TagBackfillResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImagePerceptualHash {
+    pub image_id: String,
+    pub algorithm: String,
+    pub hash_hi: i64,
+    pub hash_lo: i64,
+    pub band0: i64,
+    pub band1: i64,
+    pub band2: i64,
+    pub band3: i64,
+    pub analyzed_at: String,
+}
+
+impl ImagePerceptualHash {
+    pub fn from_hash_lo(image_id: &str, algorithm: &str, hash_lo: u64) -> Self {
+        let bands = phash_bands(hash_lo);
+        Self {
+            image_id: image_id.to_string(),
+            algorithm: algorithm.to_string(),
+            hash_hi: 0,
+            hash_lo: hash_lo as i64,
+            band0: bands[0],
+            band1: bands[1],
+            band2: bands[2],
+            band3: bands[3],
+            analyzed_at: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+}
+
+fn phash_bands(hash_lo: u64) -> [i64; 4] {
+    [
+        ((hash_lo >> 48) & 0xffff) as i64,
+        ((hash_lo >> 32) & 0xffff) as i64,
+        ((hash_lo >> 16) & 0xffff) as i64,
+        (hash_lo & 0xffff) as i64,
+    ]
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NearDuplicateImage {
+    pub image: ImageWithFile,
+    pub algorithm: String,
+    pub distance: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingPage {
     pub ids: Vec<String>,
     pub vectors: Vec<f32>,

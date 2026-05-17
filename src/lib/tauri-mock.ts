@@ -233,6 +233,26 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     analyzed_at: '2026-01-01T00:00:00Z',
   }),
   get_quality_count: () => 12,
+  analyze_perceptual_hashes: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
+  get_image_perceptual_hash: (_: any, args: { imageId: string }) => ({
+    image_id: args.imageId,
+    algorithm: 'phash-dct-64-v1',
+    hash_hi: 0,
+    hash_lo: 9223372036854775807,
+    band0: 32767,
+    band1: 65535,
+    band2: 32767,
+    band3: 65535,
+    analyzed_at: '2026-01-01T00:00:00Z',
+  }),
+  get_perceptual_hash_count: () => 18,
+  find_near_duplicates_by_phash: () => [
+    {
+      image: makeMockImage(1),
+      algorithm: 'phash-dct-64-v1',
+      distance: 3,
+    },
+  ],
   generate_similarity_groups: () => ({
     model_name: 'clip-vit-b32',
     threshold: 0.88,

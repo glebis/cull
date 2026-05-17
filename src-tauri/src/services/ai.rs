@@ -1,8 +1,9 @@
 use crate::db_core::detection::Detection;
 use crate::db_core::models::{
-    EmbeddingPage, ImageQualityMetrics, ImageWithFile, SimilarityGroupSummary,
-    SimilarityGroupingResult,
+    EmbeddingPage, ImagePerceptualHash, ImageQualityMetrics, ImageWithFile, NearDuplicateImage,
+    SimilarityGroupSummary, SimilarityGroupingResult,
 };
+use crate::db_core::perceptual_hash::{self, PHASH_ALGORITHM};
 use crate::db_core::quality;
 use crate::services::library::enrich_thumbnails;
 use crate::services::{Pagination, ServiceContext, ServiceError};
@@ -205,6 +206,58 @@ pub fn get_image_quality(
 
 pub fn get_quality_count(ctx: &ServiceContext) -> Result<u32, ServiceError> {
     Ok(ctx.db.quality_metrics_count()?)
+}
+
+pub fn analyze_image_perceptual_hash(
+    ctx: &ServiceContext,
+    image_id: &str,
+) -> Result<ImagePerceptualHash, ServiceError> {
+    let image = crate::services::library::get_image(ctx, image_id)?;
+    let ml_path = crate::commands::resolve_image_path_for_ml(&image, ctx.app_data_dir);
+    let hash = perceptual_hash::analyze_image_perceptual_hash(image_id, &ml_path)
+        .map_err(ServiceError::Engine)?;
+    ctx.db.store_image_perceptual_hash(&hash)?;
+    Ok(hash)
+}
+
+pub fn get_image_perceptual_hash(
+    ctx: &ServiceContext,
+    image_id: &str,
+    algorithm: Option<&str>,
+) -> Result<Option<ImagePerceptualHash>, ServiceError> {
+    Ok(ctx
+        .db
+        .get_image_perceptual_hash(image_id, algorithm.unwrap_or(PHASH_ALGORITHM))?)
+}
+
+pub fn get_perceptual_hash_count(
+    ctx: &ServiceContext,
+    algorithm: Option<&str>,
+) -> Result<u32, ServiceError> {
+    Ok(ctx
+        .db
+        .perceptual_hash_count(algorithm.unwrap_or(PHASH_ALGORITHM))?)
+}
+
+pub fn find_near_duplicates_by_phash(
+    ctx: &ServiceContext,
+    image_id: &str,
+    max_distance: u32,
+    limit: u32,
+    algorithm: Option<&str>,
+) -> Result<Vec<NearDuplicateImage>, ServiceError> {
+    let mut duplicates = ctx.db.find_near_duplicates_by_phash(
+        image_id,
+        algorithm.unwrap_or(PHASH_ALGORITHM),
+        max_distance,
+        limit,
+    )?;
+    let mut images: Vec<ImageWithFile> = duplicates.iter().map(|d| d.image.clone()).collect();
+    enrich_thumbnails(&mut images, ctx.app_data_dir);
+    for (duplicate, image) in duplicates.iter_mut().zip(images) {
+        duplicate.image = image;
+    }
+    Ok(duplicates)
 }
 
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {

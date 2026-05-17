@@ -251,6 +251,25 @@ CREATE INDEX IF NOT EXISTS image_tags_image_idx ON image_tags(image_id);
 CREATE INDEX IF NOT EXISTS image_tags_tag_idx ON image_tags(tag_id);
 CREATE INDEX IF NOT EXISTS image_tags_source_idx ON image_tags(source);
 
+-- DCT perceptual hashes for fast near-duplicate candidate lookup.
+CREATE TABLE IF NOT EXISTS image_perceptual_hashes (
+    image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    algorithm TEXT NOT NULL,
+    hash_hi INTEGER NOT NULL,
+    hash_lo INTEGER NOT NULL,
+    band0 INTEGER NOT NULL,
+    band1 INTEGER NOT NULL,
+    band2 INTEGER NOT NULL,
+    band3 INTEGER NOT NULL,
+    analyzed_at TEXT NOT NULL,
+    PRIMARY KEY (image_id, algorithm)
+);
+CREATE INDEX IF NOT EXISTS image_phash_algorithm_idx ON image_perceptual_hashes(algorithm);
+CREATE INDEX IF NOT EXISTS image_phash_band0_idx ON image_perceptual_hashes(algorithm, band0);
+CREATE INDEX IF NOT EXISTS image_phash_band1_idx ON image_perceptual_hashes(algorithm, band1);
+CREATE INDEX IF NOT EXISTS image_phash_band2_idx ON image_perceptual_hashes(algorithm, band2);
+CREATE INDEX IF NOT EXISTS image_phash_band3_idx ON image_perceptual_hashes(algorithm, band3);
+
 -- Deterministic local quality metrics used for culling and ranking.
 CREATE TABLE IF NOT EXISTS image_quality_metrics (
     image_id TEXT PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,

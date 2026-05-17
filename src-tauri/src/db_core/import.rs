@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use super::db::Database;
 use super::models::*;
+use super::perceptual_hash;
 use super::sidecar;
 use super::source_detection::{detect_source, read_png_text_chunks};
 use super::thumbnails;
@@ -126,6 +127,12 @@ pub fn sync_file(
             }
             run_source_detection(db, file_path, &image_id, &ext, raw_dims);
             run_sidecar_detection(db, file_path, &image_id);
+            run_perceptual_hash(
+                db,
+                file_path,
+                &image_id,
+                raw_preview.as_ref().map(|p| &p.image),
+            );
         }
         return Ok(SyncOutcome::ContentChanged { image_id });
     }
@@ -180,6 +187,12 @@ pub fn sync_file(
         }
         run_source_detection(db, file_path, &image_id, &ext, raw_dims);
         run_sidecar_detection(db, file_path, &image_id);
+        run_perceptual_hash(
+            db,
+            file_path,
+            &image_id,
+            raw_preview.as_ref().map(|p| &p.image),
+        );
         Ok(SyncOutcome::NewImport { image_id })
     } else {
         Ok(SyncOutcome::Registered)
@@ -336,5 +349,23 @@ fn run_sidecar_detection(db: &Database, file_path: &Path, image_id: &str) {
             let _ = db.insert_generation_run(&run);
             let _ = db.link_image_to_run(image_id, &run_id);
         }
+    }
+}
+
+fn run_perceptual_hash(
+    db: &Database,
+    file_path: &Path,
+    image_id: &str,
+    preview: Option<&image::DynamicImage>,
+) {
+    let result = match preview {
+        Some(img) => Ok(perceptual_hash::analyze_dynamic_image_perceptual_hash(
+            image_id, img,
+        )),
+        None => perceptual_hash::analyze_image_perceptual_hash(image_id, file_path),
+    };
+
+    if let Ok(hash) = result {
+        let _ = db.store_image_perceptual_hash(&hash);
     }
 }

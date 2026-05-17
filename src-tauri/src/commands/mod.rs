@@ -12,6 +12,7 @@ pub mod jobs;
 pub mod library;
 pub mod lineage;
 pub mod mcp;
+pub mod perceptual_hash;
 pub mod privacy;
 pub mod quality;
 pub mod raw;

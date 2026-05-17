@@ -103,6 +103,24 @@ export interface TagBackfillResult {
     image_tags_created: number;
 }
 
+export interface ImagePerceptualHash {
+    image_id: string;
+    algorithm: string;
+    hash_hi: number;
+    hash_lo: number;
+    band0: number;
+    band1: number;
+    band2: number;
+    band3: number;
+    analyzed_at: string;
+}
+
+export interface NearDuplicateImage {
+    image: ImageWithFile;
+    algorithm: string;
+    distance: number;
+}
+
 export interface ImportResponse {
     imported: number;
     skipped: number;
@@ -536,6 +554,35 @@ export async function getImageQuality(imageId: string): Promise<ImageQualityMetr
 
 export async function getQualityCount(): Promise<number> {
     return invoke('get_quality_count');
+}
+
+export async function analyzePerceptualHashes(imageIds: string[]): Promise<number> {
+    return invoke('analyze_perceptual_hashes', { imageIds });
+}
+
+export async function getImagePerceptualHash(
+    imageId: string,
+    algorithm?: string,
+): Promise<ImagePerceptualHash | null> {
+    return invoke('get_image_perceptual_hash', { imageId, algorithm: algorithm ?? null });
+}
+
+export async function getPerceptualHashCount(algorithm?: string): Promise<number> {
+    return invoke('get_perceptual_hash_count', { algorithm: algorithm ?? null });
+}
+
+export async function findNearDuplicatesByPhash(
+    imageId: string,
+    maxDistance = 8,
+    limit = 50,
+    algorithm?: string,
+): Promise<NearDuplicateImage[]> {
+    return invoke('find_near_duplicates_by_phash', {
+        imageId,
+        maxDistance,
+        limit,
+        algorithm: algorithm ?? null,
+    });
 }
 
 // Delete commands
