@@ -97,9 +97,6 @@ pub async fn download_clip_model(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    use futures_util::StreamExt;
-    use std::io::Write;
-
     let model_path = {
         let engine = state.embedding_engine.lock();
         engine.model_path()
@@ -112,56 +109,36 @@ pub async fn download_clip_model(
     let url = "https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx";
 
     let client = reqwest::Client::new();
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("Request error: {}", e))?;
-
-    let total_size = response.content_length().unwrap_or(0);
-
-    // Emit initial progress
-    let _ = app.emit(
-        "model-download-progress",
-        serde_json::json!({
-            "downloaded": 0u64,
-            "total": total_size,
-            "status": "downloading"
-        }),
-    );
-
-    let mut file =
-        std::fs::File::create(&model_path).map_err(|e| format!("File create error: {}", e))?;
-    let mut downloaded: u64 = 0;
-    let mut stream = response.bytes_stream();
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("Download error: {}", e))?;
-        file.write_all(&chunk)
-            .map_err(|e| format!("Write error: {}", e))?;
-        downloaded += chunk.len() as u64;
-
-        // Emit progress every ~500KB to avoid flooding
-        if downloaded % (512 * 1024) < chunk.len() as u64 || downloaded == total_size {
+    let outcome = crate::services::model_download::download_model_file(
+        &client,
+        url,
+        &model_path,
+        |progress| {
             let _ = app.emit(
                 "model-download-progress",
                 serde_json::json!({
-                    "downloaded": downloaded,
-                    "total": total_size,
-                    "status": "downloading"
+                    "downloaded": progress.downloaded,
+                    "total": progress.total,
+                    "status": progress.status,
+                    "resumable": progress.resumable,
                 }),
             );
-        }
-    }
-
-    let _ = app.emit(
-        "model-download-progress",
-        serde_json::json!({
-            "downloaded": total_size,
-            "total": total_size,
-            "status": "complete"
-        }),
-    );
+        },
+    )
+    .await
+    .map_err(|err| {
+        let _ = app.emit(
+            "model-download-progress",
+            serde_json::json!({
+                "downloaded": 0u64,
+                "total": 0u64,
+                "status": "failed",
+                "resumable": true,
+                "error": err,
+            }),
+        );
+        err
+    })?;
 
     // Load the model after download
     {
@@ -169,7 +146,11 @@ pub async fn download_clip_model(
         engine.load_model()?;
     }
 
-    Ok("downloaded".to_string())
+    Ok(if outcome.resumed {
+        "resumed".to_string()
+    } else {
+        "downloaded".to_string()
+    })
 }
 
 #[tauri::command]

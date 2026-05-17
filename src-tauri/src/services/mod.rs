@@ -14,6 +14,7 @@ pub mod import;
 pub mod jobs;
 #[allow(dead_code)]
 pub mod library;
+pub mod model_download;
 pub mod model_pipeline;
 pub mod sessions;
 pub mod tokens;
