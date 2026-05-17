@@ -29,6 +29,9 @@
         getImagesByIds,
         getGenerationRun,
         regenerateThumbnails,
+        cancelJob,
+        pauseJob,
+        resumeJob,
     } from '$lib/api';
     import type { EmbeddingPage, GenerationRun, ImageWithFile } from '$lib/api';
 
@@ -87,9 +90,10 @@
     let canvasLabelsOpen = $state(false);
 
     // Download progress
-    let downloadProgress = $state({ downloaded: 0, total: 0, status: '' });
+    let downloadProgress = $state({ downloaded: 0, total: 0, status: '', job_id: null as string | null, error: null as string | null });
     let downloadStartTime = $state(0);
     let downloadSpeed = $state('');
+    let downloadJobId = $state<string | null>(null);
 
     // UMAP projection
     type Point = { id: string; x: number; y: number; cluster: number };
@@ -311,14 +315,16 @@
 
     async function handleDownload() {
         downloading = true;
-        downloadProgress = { downloaded: 0, total: 0, status: 'downloading' };
+        downloadProgress = { downloaded: 0, total: 0, status: 'downloading', job_id: null, error: null };
+        downloadJobId = null;
         downloadStartTime = Date.now();
         downloadSpeed = '';
 
-        const unlisten: UnlistenFn = await listen<{ downloaded: number; total: number; status: string }>(
+        const unlisten: UnlistenFn = await listen<{ downloaded: number; total: number; status: string; job_id?: string; error?: string }>(
             'model-download-progress',
             (event) => {
-                downloadProgress = event.payload;
+                downloadProgress = { ...event.payload, job_id: event.payload.job_id ?? downloadJobId, error: event.payload.error ?? null };
+                if (event.payload.job_id) downloadJobId = event.payload.job_id;
                 // Calculate speed
                 const elapsed = (Date.now() - downloadStartTime) / 1000;
                 if (elapsed > 0 && event.payload.downloaded > 0) {
@@ -333,10 +339,29 @@
             modelAvailable = true;
         } catch (e) {
             console.error('Download failed:', e);
+            downloadProgress = { ...downloadProgress, status: downloadProgress.status === 'cancelled' ? 'cancelled' : 'failed', error: String(e) };
         } finally {
             unlisten();
             downloading = false;
         }
+    }
+
+    async function handlePauseDownload() {
+        if (!downloadJobId) return;
+        await pauseJob(downloadJobId);
+        downloadProgress = { ...downloadProgress, status: 'paused' };
+    }
+
+    async function handleResumeDownload() {
+        if (!downloadJobId) return;
+        await resumeJob(downloadJobId);
+        downloadProgress = { ...downloadProgress, status: 'downloading' };
+    }
+
+    async function handleCancelDownload() {
+        if (!downloadJobId) return;
+        await cancelJob(downloadJobId);
+        downloadProgress = { ...downloadProgress, status: 'cancelled' };
     }
 
     async function handleGenerate() {
@@ -1447,7 +1472,9 @@
                     {#if downloading}
                         <div class="download-progress">
                             <div class="progress-text">
-                                {#if downloadProgress.total > 0}
+                                {#if downloadProgress.status === 'paused'}
+                                    Paused: {formatBytes(downloadProgress.downloaded)} / {formatBytes(downloadProgress.total)}
+                                {:else if downloadProgress.total > 0}
                                     Downloading: {formatBytes(downloadProgress.downloaded)} / {formatBytes(downloadProgress.total)}
                                     ({Math.round((downloadProgress.downloaded / downloadProgress.total) * 100)}%)
                                 {:else}
@@ -1463,11 +1490,26 @@
                             {#if downloadSpeed}
                                 <div class="progress-speed">{downloadSpeed}</div>
                             {/if}
+                            <div class="download-actions">
+                                {#if downloadProgress.status === 'paused'}
+                                    <button class="small-btn" onclick={handleResumeDownload} disabled={!downloadJobId}>Resume</button>
+                                {:else}
+                                    <button class="small-btn" onclick={handlePauseDownload} disabled={!downloadJobId}>Pause</button>
+                                {/if}
+                                <button class="small-btn danger" onclick={handleCancelDownload} disabled={!downloadJobId}>Cancel</button>
+                            </div>
                         </div>
                     {:else}
                         <button class="action-btn" onclick={handleDownload}>
-                            Download Model (~350MB)
+                            {#if downloadProgress.status === 'failed' || downloadProgress.status === 'cancelled'}
+                                Resume Download
+                            {:else}
+                                Download Model (~350MB)
+                            {/if}
                         </button>
+                        {#if downloadProgress.status === 'failed' && downloadProgress.error}
+                            <div class="download-error">{downloadProgress.error}</div>
+                        {/if}
                     {/if}
                     <div class="manual-download">
                         <div class="section-header" style="margin-top: 10px">MANUAL DOWNLOAD</div>
@@ -2224,6 +2266,46 @@
         font-size: 9px;
         color: var(--text-secondary);
         text-align: right;
+    }
+
+    .download-actions {
+        display: flex;
+        gap: 6px;
+        margin-top: 4px;
+    }
+
+    .small-btn {
+        flex: 1;
+        background: color-mix(in srgb, var(--surface) 80%, var(--blue));
+        color: var(--text);
+        border: 1px solid var(--border);
+        font-family: var(--font);
+        font-size: 10px;
+        padding: 4px 6px;
+        border-radius: var(--radius);
+        cursor: pointer;
+    }
+
+    .small-btn:hover:not(:disabled) {
+        border-color: var(--blue);
+    }
+
+    .small-btn.danger:hover:not(:disabled) {
+        border-color: var(--red);
+        color: var(--red);
+    }
+
+    .small-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .download-error {
+        margin-top: 6px;
+        color: var(--red);
+        font-size: 10px;
+        line-height: 1.4;
+        word-break: break-word;
     }
 
     .manual-download {

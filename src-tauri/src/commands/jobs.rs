@@ -20,3 +20,13 @@ pub async fn list_jobs(state: State<'_, AppState>) -> Result<Vec<JobSnapshot>, S
 pub async fn cancel_job(state: State<'_, AppState>, job_id: String) -> Result<(), String> {
     state.jobs.cancel(&job_id)
 }
+
+#[tauri::command]
+pub async fn pause_job(state: State<'_, AppState>, job_id: String) -> Result<(), String> {
+    state.jobs.pause(&job_id).map(|_| ())
+}
+
+#[tauri::command]
+pub async fn resume_job(state: State<'_, AppState>, job_id: String) -> Result<(), String> {
+    state.jobs.resume(&job_id)
+}

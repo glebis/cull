@@ -109,14 +109,26 @@ pub async fn download_clip_model(
     let url = "https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx";
 
     let client = reqwest::Client::new();
-    let outcome = crate::services::model_download::download_model_file(
+    let (job_id, _cancel) = state.jobs.create_job("clip-download", 0);
+    let control = state
+        .jobs
+        .control_for(&job_id)
+        .ok_or_else(|| format!("Download job '{}' not found", job_id))?;
+    let outcome = crate::services::model_download::download_model_file_controlled(
         &client,
         url,
         &model_path,
+        &control,
         |progress| {
+            state.jobs.update_progress(
+                &job_id,
+                progress.downloaded.min(u32::MAX as u64) as u32,
+                Some("Downloading CLIP model"),
+            );
             let _ = app.emit(
                 "model-download-progress",
                 serde_json::json!({
+                    "job_id": job_id,
                     "downloaded": progress.downloaded,
                     "total": progress.total,
                     "status": progress.status,
@@ -127,12 +139,19 @@ pub async fn download_clip_model(
     )
     .await
     .map_err(|err| {
+        if control.cancellation_token().is_cancelled() {
+            state.jobs.mark_cancelled(&job_id);
+        } else {
+            state.jobs.fail(&job_id, &err);
+        }
+        state.jobs.persist_terminal(&job_id, &state.db);
         let _ = app.emit(
             "model-download-progress",
             serde_json::json!({
+                "job_id": job_id,
                 "downloaded": 0u64,
                 "total": 0u64,
-                "status": "failed",
+                "status": if control.cancellation_token().is_cancelled() { "cancelled" } else { "failed" },
                 "resumable": true,
                 "error": err,
             }),
@@ -143,9 +162,15 @@ pub async fn download_clip_model(
     // Load the model after download
     {
         let mut engine = state.embedding_engine.lock();
-        engine.load_model()?;
+        engine.load_model().map_err(|err| {
+            state.jobs.fail(&job_id, &err);
+            state.jobs.persist_terminal(&job_id, &state.db);
+            err
+        })?;
     }
 
+    state.jobs.complete(&job_id);
+    state.jobs.persist_terminal(&job_id, &state.db);
     Ok(if outcome.resumed {
         "resumed".to_string()
     } else {

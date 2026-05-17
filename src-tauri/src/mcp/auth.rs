@@ -114,6 +114,8 @@ mod tests {
         "get_job",
         "list_jobs",
         "cancel_job",
+        "pause_job",
+        "resume_job",
         "rescan_sources",
         "serve_static_publish_package",
     ];

@@ -88,9 +88,12 @@ pub fn tool_capability(tool_name: &str) -> &'static str {
         "create_token" | "list_tokens" | "revoke_token" | "rotate_token" | "get_audit_log"
         | "prune_audit_log" => "tokens:manage",
 
-        "get_job" | "list_jobs" | "cancel_job" | "serve_static_publish_package" => {
-            "settings:manage"
-        }
+        "get_job"
+        | "list_jobs"
+        | "cancel_job"
+        | "pause_job"
+        | "resume_job"
+        | "serve_static_publish_package" => "settings:manage",
 
         _ => "settings:manage",
     }

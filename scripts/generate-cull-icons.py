@@ -18,11 +18,7 @@ TAHOE_LAYERS = TAHOE_DIR / "icon-composer-layers"
 TAHOE_DOCUMENTS = TAHOE_DIR / "icon-composer-documents"
 TAHOE_RENDERS = TAHOE_DIR / "icon-composer-renders"
 TAHOE_ICNS = TAHOE_DIR / "icns"
-VARIANT_DIRS = [
-    TAHOE_MASTERS,
-    TAURI_ICONS / "variants",
-    ROOT / "static" / "icon-variants",
-]
+RUNTIME_VARIANT_DIRS = [TAURI_ICONS / "variants", ROOT / "static" / "icon-variants"]
 
 VARIANTS = {
     "primary": {
@@ -233,6 +229,11 @@ def write_png(path, size, background, mark):
     path.write_bytes(encode_png(size, render_icon(size, background, mark)))
 
 
+def write_masked_png(path, size, background, mark):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(encode_png(size, render_masked_preview(size, background, mark)))
+
+
 def write_png_pixels(path, size, rgba):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(encode_png(size, rgba))
@@ -357,8 +358,14 @@ def write_ico(path, pngs):
 
 def generate_variant_icons():
     for name, variant in VARIANTS.items():
-        for directory in VARIANT_DIRS:
-            write_png(
+        write_png(
+            TAHOE_MASTERS / f"cull-{name}.png",
+            1024,
+            variant["background"],
+            variant["mark"],
+        )
+        for directory in RUNTIME_VARIANT_DIRS:
+            write_masked_png(
                 directory / f"cull-{name}.png",
                 1024,
                 variant["background"],
@@ -385,12 +392,7 @@ def generate_variant_icons():
 def generate_tahoe_icon_documents():
     for name, variant in VARIANTS.items():
         document = write_icon_composer_document(name, variant)
-        render_path = TAHOE_RENDERS / f"cull-{name}.png"
-        if export_icon_composer_image(document, render_path, 1024):
-            for directory in (TAURI_ICONS / "variants", ROOT / "static" / "icon-variants"):
-                directory.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(render_path, directory / f"cull-{name}.png")
-            shutil.copyfile(render_path, TAHOE_MASKED / f"cull-{name}-masked.png")
+        export_icon_composer_image(document, TAHOE_RENDERS / f"cull-{name}.png", 1024)
 
 
 def generate_icns_variant(name, variant):
@@ -399,14 +401,10 @@ def generate_icns_variant(name, variant):
         return
 
     TAHOE_ICNS.mkdir(parents=True, exist_ok=True)
-    write_icns(
-        TAHOE_ICNS / f"cull-{name}.icns",
-        variant,
-        TAHOE_DOCUMENTS / f"cull-{name}.icon",
-    )
+    write_icns(TAHOE_ICNS / f"cull-{name}.icns", variant)
 
 
-def write_icns(path, variant, document=None):
+def write_icns(path, variant):
     iconutil = shutil.which("iconutil")
     if not iconutil:
         return
@@ -426,9 +424,7 @@ def write_icns(path, variant, document=None):
     with tempfile.TemporaryDirectory(suffix=".iconset") as tmp:
         iconset = Path(tmp)
         for filename, size in files.items():
-            output = iconset / filename
-            if not document or not export_icon_composer_image(document, output, size):
-                write_png(output, size, variant["background"], variant["mark"])
+            write_masked_png(iconset / filename, size, variant["background"], variant["mark"])
         subprocess.run(
             [iconutil, "-c", "icns", str(iconset), "-o", str(path)],
             check=True,
@@ -443,22 +439,16 @@ def generate_tahoe_icns():
 def generate_bundle_icons():
     primary = VARIANTS["primary"]
     for filename, size in BUNDLE_SIZES.items():
-        output = TAURI_ICONS / filename
-        if filename != "icon.png" or not export_icon_composer_image(
-            TAHOE_DOCUMENTS / "cull-primary.icon",
-            output,
-            size,
-        ):
-            write_png(output, size, primary["background"], primary["mark"])
+        write_masked_png(TAURI_ICONS / filename, size, primary["background"], primary["mark"])
     for filename, size in WINDOWS_SIZES.items():
         write_png(TAURI_ICONS / filename, size, primary["background"], primary["mark"])
 
     ico_pngs = []
     for size in (16, 24, 32, 48, 64, 128, 256):
-        data = encode_png(size, render_icon(size, primary["background"], primary["mark"]))
+        data = encode_png(size, render_masked_preview(size, primary["background"], primary["mark"]))
         ico_pngs.append((size, data))
     write_ico(TAURI_ICONS / "icon.ico", ico_pngs)
-    write_icns(TAURI_ICONS / "icon.icns", primary, TAHOE_DOCUMENTS / "cull-primary.icon")
+    write_icns(TAURI_ICONS / "icon.icns", primary)
 
 
 def main():

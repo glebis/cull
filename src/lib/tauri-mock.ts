@@ -219,6 +219,11 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   ],
   list_images: () => Array.from({ length: 20 }, (_, i) => makeMockImage(i)),
   get_image_count: () => 20,
+  list_jobs: () => [],
+  get_job: () => null,
+  cancel_job: () => undefined,
+  pause_job: () => undefined,
+  resume_job: () => undefined,
   analyze_image_quality: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   get_image_quality: (_: any, args: { imageId: string }) => ({
     image_id: args.imageId,

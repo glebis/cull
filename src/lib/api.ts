@@ -250,6 +250,14 @@ export async function cancelJob(jobId: string): Promise<void> {
     return invoke<void>('cancel_job', { jobId });
 }
 
+export async function pauseJob(jobId: string): Promise<void> {
+    return invoke<void>('pause_job', { jobId });
+}
+
+export async function resumeJob(jobId: string): Promise<void> {
+    return invoke<void>('resume_job', { jobId });
+}
+
 export async function rescanSources(): Promise<number> {
     return invoke<number>('rescan_sources');
 }

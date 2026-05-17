@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { listen } from '@tauri-apps/api/event';
-    import { cancelJob as cancelJobApi, listJobs, type JobSnapshot } from '$lib/api';
+    import { cancelJob as cancelJobApi, listJobs, pauseJob as pauseJobApi, resumeJob as resumeJobApi, type JobSnapshot } from '$lib/api';
 
     interface JobInfo {
         job_id: string;
@@ -62,7 +62,7 @@
                 upsertJob(e.payload.job_id ?? `evt_nsfw`, 'nsfw', 'running', e.payload.current, e.payload.total, null);
             });
             const u10 = await listen<any>('model-download-progress', (e) => {
-                upsertDownload('evt_clip_download', 'clip-download', e.payload.downloaded, e.payload.total, e.payload.status);
+                upsertDownload(e.payload.job_id ?? 'evt_clip_download', 'clip-download', e.payload.downloaded, e.payload.total, e.payload.status, e.payload.error ?? null);
             });
             const u11 = await listen<any>('yolo-download-progress', (e) => {
                 upsertDownload('evt_yolo_download', 'yolo-download', e.payload.downloaded, e.payload.total, e.payload.status, e.payload.variant);
@@ -166,6 +166,32 @@
         }
     }
 
+    async function pauseJob(jobId: string) {
+        const job = jobs.find(j => j.job_id === jobId);
+        if (!job) return;
+        try {
+            await pauseJobApi(jobId);
+            upsertJob(jobId, job.kind, 'paused', job.current, job.total, 'Paused');
+        } catch {
+            dismissJob(jobId);
+        }
+    }
+
+    async function resumeJob(jobId: string) {
+        const job = jobs.find(j => j.job_id === jobId);
+        if (!job) return;
+        try {
+            await resumeJobApi(jobId);
+            upsertJob(jobId, job.kind, 'running', job.current, job.total, null);
+        } catch {
+            dismissJob(jobId);
+        }
+    }
+
+    function isDownloadJob(job: JobInfo): boolean {
+        return ['clip-download', 'yolo-download', 'nudenet-download'].includes(job.kind);
+    }
+
     function kindLabel(kind: string): string {
         const labels: Record<string, string> = {
             import: 'Import',
@@ -193,6 +219,7 @@
             case 'failed': return '✕';
             case 'cancelled': return '—';
             case 'cancelling': return '…';
+            case 'paused': return '||';
             default: return '●';
         }
     }
@@ -240,6 +267,8 @@
                     <span class="job-progress-text">
                         {#if job.status === 'running' || job.status === 'cancelling'}
                             {progressText(job)}
+                        {:else if job.status === 'paused'}
+                            Paused
                         {:else if job.status === 'completed'}
                             Done
                         {:else if job.status === 'failed'}
@@ -248,13 +277,19 @@
                             Cancelled
                         {/if}
                     </span>
-                    {#if job.status === 'running'}
+                    {#if job.status === 'running' && isDownloadJob(job)}
+                        <button class="cancel-btn" onclick={() => pauseJob(job.job_id)} title="Pause" aria-label="Pause {kindLabel(job.kind)}">||</button>
+                        <button class="cancel-btn" onclick={() => cancelJob(job.job_id)} title="Cancel" aria-label="Cancel {kindLabel(job.kind)}">✕</button>
+                    {:else if job.status === 'paused' && isDownloadJob(job)}
+                        <button class="cancel-btn" onclick={() => resumeJob(job.job_id)} title="Resume" aria-label="Resume {kindLabel(job.kind)}">&gt;</button>
+                        <button class="cancel-btn" onclick={() => cancelJob(job.job_id)} title="Cancel" aria-label="Cancel {kindLabel(job.kind)}">✕</button>
+                    {:else if job.status === 'running'}
                         <button class="cancel-btn" onclick={() => cancelJob(job.job_id)} title="Cancel" aria-label="Cancel {kindLabel(job.kind)}">✕</button>
                     {:else}
                         <button class="cancel-btn" onclick={() => dismissJob(job.job_id)} title="Dismiss" aria-label="Dismiss">✕</button>
                     {/if}
                 </div>
-                {#if job.status === 'running' || job.status === 'cancelling'}
+                {#if job.status === 'running' || job.status === 'cancelling' || job.status === 'paused'}
                     <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax={job.total} aria-valuenow={job.current}>
                         <div class="progress-fill {job.status}" style="width: {progressFraction(job) * 100}%"></div>
                     </div>
@@ -302,6 +337,7 @@
         flex-shrink: 0;
     }
     .job-icon.running { color: var(--blue); }
+    .job-icon.paused { color: var(--orange); }
     .job-icon.cancelling { color: var(--orange); }
     .job-icon.completed { color: var(--green); }
     .job-icon.failed { color: var(--red); }
@@ -362,6 +398,9 @@
         background: var(--blue);
     }
     .progress-fill.cancelling {
+        background: var(--orange);
+    }
+    .progress-fill.paused {
         background: var(--orange);
     }
 </style>

@@ -380,6 +380,8 @@ pub fn run() {
             commands::jobs::get_job,
             commands::jobs::list_jobs,
             commands::jobs::cancel_job,
+            commands::jobs::pause_job,
+            commands::jobs::resume_job,
             commands::library::list_images,
             commands::library::get_image_count,
             commands::library::list_image_ids,

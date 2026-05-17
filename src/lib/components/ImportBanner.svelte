@@ -1,7 +1,8 @@
 <script lang="ts">
     import { importBatchFilter, importBatchImageIds, pinnedCollection, collections, activeCollection, activeFolder, activeSmartCollection, activeDetectedClass, showToast, requestTextInput } from '$lib/stores';
-    import { createCollection, addToCollection, listCollections } from '$lib/api';
+    import { createCollection, addToCollection, listCollections, getBatchImages, getGenerationRun } from '$lib/api';
     import { invalidateImageCache, loadAllImages } from '$lib/image-loading';
+    import { generateImportCollectionName, type ImportCollectionNameItem } from '$lib/collection-name';
     import { get } from 'svelte/store';
 
     let count = $derived($importBatchImageIds.length);
@@ -17,10 +18,11 @@
         const batchId = get(importBatchFilter);
         if (!batchId) return;
 
+        const initialValue = await buildDefaultCollectionName(batchId);
         const name = await requestTextInput({
             title: 'Save Import as Collection',
             label: 'Collection name',
-            initialValue: `Import ${new Date().toLocaleString()}`,
+            initialValue,
             confirmLabel: 'Save',
         });
         if (!name || !name.trim()) return;
@@ -49,6 +51,37 @@
         } catch (e) {
             console.error('Failed to save collection:', e);
             showToast('Failed to create collection', { type: 'error' });
+        }
+    }
+
+    async function buildDefaultCollectionName(batchId: string): Promise<string> {
+        const now = new Date();
+        try {
+            const batchImages = await getBatchImages(batchId);
+            const generationPrompts = new Map<string, string | null>();
+            const promptCandidates = batchImages
+                .filter(img => !img.image.ai_prompt)
+                .slice(0, 12);
+
+            await Promise.all(promptCandidates.map(async (img) => {
+                try {
+                    const run = await getGenerationRun(img.image.id);
+                    generationPrompts.set(img.image.id, run?.prompt ?? null);
+                } catch {
+                    generationPrompts.set(img.image.id, null);
+                }
+            }));
+
+            const items: ImportCollectionNameItem[] = batchImages.map(img => ({
+                path: img.path,
+                aiPrompt: img.image.ai_prompt,
+                generationPrompt: generationPrompts.get(img.image.id) ?? null,
+                importedAt: img.image.imported_at,
+            }));
+            return generateImportCollectionName(items);
+        } catch (e) {
+            console.warn('Failed to build import collection name:', e);
+            return generateImportCollectionName([], { now });
         }
     }
 </script>

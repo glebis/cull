@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::services::model_download::{DownloadControl, PauseController};
+
 #[derive(Debug, Clone, Serialize)]
 pub struct JobSnapshot {
     pub job_id: String,
@@ -20,6 +22,7 @@ pub struct JobSnapshot {
 pub struct JobState {
     pub snapshot: JobSnapshot,
     pub cancel: CancellationToken,
+    pub pause: PauseController,
 }
 
 #[derive(Clone)]
@@ -40,6 +43,7 @@ impl JobRegistry {
         let raw = Uuid::new_v4().to_string().replace('-', "");
         let job_id = format!("job_{}", &raw[..12]);
         let cancel = CancellationToken::new();
+        let pause = PauseController::default();
         let now = chrono::Utc::now().to_rfc3339();
         let snapshot = JobSnapshot {
             job_id: job_id.clone(),
@@ -55,6 +59,7 @@ impl JobRegistry {
         let state = JobState {
             snapshot,
             cancel: cancel.clone(),
+            pause,
         };
         let mut jobs = self.jobs.lock().unwrap();
         self.prune_locked(&mut jobs);
@@ -104,15 +109,50 @@ impl JobRegistry {
         let state = jobs
             .get_mut(job_id)
             .ok_or_else(|| format!("Job '{}' not found", job_id))?;
+        if !matches!(state.snapshot.status.as_str(), "running" | "paused") {
+            return Err(format!(
+                "Job '{}' is not running (status: {})",
+                job_id, state.snapshot.status
+            ));
+        }
+        state.pause.resume();
+        state.snapshot.status = "cancelling".to_string();
+        state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+        state.cancel.cancel();
+        Ok(())
+    }
+
+    pub fn pause(&self, job_id: &str) -> Result<PauseController, String> {
+        let mut jobs = self.jobs.lock().unwrap();
+        let state = jobs
+            .get_mut(job_id)
+            .ok_or_else(|| format!("Job '{}' not found", job_id))?;
         if state.snapshot.status != "running" {
             return Err(format!(
                 "Job '{}' is not running (status: {})",
                 job_id, state.snapshot.status
             ));
         }
-        state.snapshot.status = "cancelling".to_string();
+        state.pause.pause();
+        state.snapshot.status = "paused".to_string();
         state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
-        state.cancel.cancel();
+        Ok(state.pause.clone())
+    }
+
+    pub fn resume(&self, job_id: &str) -> Result<(), String> {
+        let mut jobs = self.jobs.lock().unwrap();
+        let state = jobs
+            .get_mut(job_id)
+            .ok_or_else(|| format!("Job '{}' not found", job_id))?;
+        if state.snapshot.status != "paused" {
+            return Err(format!(
+                "Job '{}' is not paused (status: {})",
+                job_id, state.snapshot.status
+            ));
+        }
+        state.pause.resume();
+        state.snapshot.status = "running".to_string();
+        state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
         Ok(())
     }
 
@@ -142,6 +182,12 @@ impl JobRegistry {
             .unwrap_or(true)
     }
 
+    pub fn control_for(&self, job_id: &str) -> Option<DownloadControl> {
+        let jobs = self.jobs.lock().unwrap();
+        jobs.get(job_id)
+            .map(|s| DownloadControl::new(s.cancel.clone(), s.pause.clone()))
+    }
+
     pub fn persist_terminal(&self, job_id: &str, db: &crate::db_core::db::Database) {
         let jobs = self.jobs.lock().unwrap();
         if let Some(state) = jobs.get(job_id) {
@@ -164,8 +210,11 @@ impl JobRegistry {
             for snapshot in snapshots {
                 let cancel = CancellationToken::new();
                 cancel.cancel();
-                jobs.entry(snapshot.job_id.clone())
-                    .or_insert(JobState { snapshot, cancel });
+                jobs.entry(snapshot.job_id.clone()).or_insert(JobState {
+                    snapshot,
+                    cancel,
+                    pause: PauseController::default(),
+                });
             }
         }
     }
@@ -276,6 +325,22 @@ mod tests {
         let snapshot = registry.get(&job_id).unwrap();
         assert_eq!(snapshot.status, "cancelling");
         assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn test_pause_and_resume_job() {
+        let registry = JobRegistry::default();
+        let (job_id, _token) = registry.create_job("clip-download", 200);
+
+        let pause = registry.pause(&job_id).unwrap();
+        let snapshot = registry.get(&job_id).unwrap();
+        assert_eq!(snapshot.status, "paused");
+        assert!(pause.is_paused());
+
+        registry.resume(&job_id).unwrap();
+        let snapshot = registry.get(&job_id).unwrap();
+        assert_eq!(snapshot.status, "running");
+        assert!(!pause.is_paused());
     }
 
     #[test]
