@@ -95,6 +95,7 @@ mod tests {
         "show_collection",
         "import_folder",
         "import_files",
+        "download_embedding_model",
         "generate_embeddings",
         "detect_objects",
         "analyze_images",
@@ -153,7 +154,12 @@ mod tests {
         "export_static_publish_canvas",
     ];
     const DISPLAY_TOOLS: &[&str] = &["show_image", "navigate_to_folder", "show_collection"];
-    const AI_TOOLS: &[&str] = &["generate_embeddings", "detect_objects", "analyze_images"];
+    const AI_TOOLS: &[&str] = &[
+        "download_embedding_model",
+        "generate_embeddings",
+        "detect_objects",
+        "analyze_images",
+    ];
     const TOKEN_TOOLS: &[&str] = &[
         "create_token",
         "list_tokens",

@@ -278,11 +278,27 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     },
   ],
   get_clip_model_download_info: () => ({
+    model_id: 'clip-vit-b32',
     url: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx',
     model_path: '/mock/app-data/models/clip-vit-b32-vision.onnx',
     part_path: '/mock/app-data/models/clip-vit-b32-vision.onnx.part',
     curl_command: "mkdir -p '/mock/app-data/models' && curl -L -C - -o '/mock/app-data/models/clip-vit-b32-vision.onnx.part' 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx' && mv '/mock/app-data/models/clip-vit-b32-vision.onnx.part' '/mock/app-data/models/clip-vit-b32-vision.onnx'",
   }),
+  get_embedding_model_download_info: (_: any, args: { model: string }) => ({
+    model_id: args.model,
+    url: args.model === 'dinov2-vits14'
+      ? 'https://huggingface.co/sefaburak/dinov2-small-onnx/resolve/main/dinov2_vits14.onnx'
+      : 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx',
+    model_path: `/mock/app-data/models/${args.model}.onnx`,
+    part_path: `/mock/app-data/models/${args.model}.onnx.part`,
+    curl_command: `curl -L -C - -o '/mock/app-data/models/${args.model}.onnx.part'`,
+  }),
+  download_clip_model: () => 'already_downloaded',
+  download_embedding_model: () => 'already_downloaded',
+  is_model_available: () => true,
+  is_embedding_model_available: () => true,
+  generate_embeddings: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
+  generate_model_embeddings: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   generate_similarity_groups: () => ({
     model_name: 'clip-vit-b32',
     threshold: 0.88,

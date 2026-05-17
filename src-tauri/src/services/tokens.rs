@@ -83,7 +83,10 @@ pub fn tool_capability(tool_name: &str) -> &'static str {
 
         "show_image" | "navigate_to_folder" | "show_collection" => "display:navigate",
 
-        "generate_embeddings" | "detect_objects" | "analyze_images" => "ai:run",
+        "download_embedding_model"
+        | "generate_embeddings"
+        | "detect_objects"
+        | "analyze_images" => "ai:run",
 
         "create_token" | "list_tokens" | "revoke_token" | "rotate_token" | "get_audit_log"
         | "prune_audit_log" => "tokens:manage",
@@ -625,6 +628,7 @@ mod tests {
             "settings:manage"
         );
         assert_eq!(tool_capability("show_image"), "display:navigate");
+        assert_eq!(tool_capability("download_embedding_model"), "ai:run");
         assert_eq!(tool_capability("generate_embeddings"), "ai:run");
         assert_eq!(tool_capability("create_token"), "tokens:manage");
         assert_eq!(tool_capability("unknown_tool"), "settings:manage");

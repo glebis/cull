@@ -300,6 +300,8 @@ pub struct FindSimilarParams {
     pub image_id: String,
     #[schemars(description = "Number of results to return (default 10)")]
     pub limit: Option<u32>,
+    #[schemars(description = "Embedding model: 'clip-vit-b32' or 'dinov2-vits14'")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -358,8 +360,16 @@ pub struct CancelJobParams {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct GenerateEmbeddingsParams {
-    #[schemars(description = "List of image IDs to generate CLIP embeddings for")]
+    #[schemars(description = "List of image IDs to generate embeddings for")]
     pub image_ids: Vec<String>,
+    #[schemars(description = "Embedding model: 'clip-vit-b32' or 'dinov2-vits14'")]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DownloadEmbeddingModelParams {
+    #[schemars(description = "Embedding model: 'clip-vit-b32' or 'dinov2-vits14'")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -734,27 +744,28 @@ impl CullMcp {
         }
         let state = self.app_handle.state::<AppState>();
         let top_k = clamp_limit(params.limit.unwrap_or(10)) as usize;
+        let model_id = params.model.as_deref().unwrap_or("clip-vit-b32");
+        if crate::db_core::embeddings::embedding_model_spec(model_id).is_none() {
+            return format!("Error: Unsupported embedding model '{}'", model_id);
+        }
 
-        let query = match state
-            .db
-            .get_embedding_vector(&params.image_id, "clip-vit-b32")
-        {
+        let query = match state.db.get_embedding_vector(&params.image_id, model_id) {
             Ok(Some(vector)) => vector,
             Err(e) => return format!("Error: {}", e),
             Ok(None) => {
                 return format!(
-                    "Error: Image '{}' has no embedding. Run generate_embeddings first.",
-                    params.image_id
+                    "Error: Image '{}' has no '{}' embedding. Run generate_embeddings first.",
+                    params.image_id, model_id
                 )
             }
         };
-        match state.db.find_similar(&query, "clip-vit-b32", top_k * 2) {
+        match state.db.find_similar(&query, model_id, top_k * 2) {
             Ok(results) => {
                 let r: Vec<serde_json::Value> = results
                     .iter()
                     .filter(|(id, _)| self.check_image_id_scope(id).unwrap_or(false))
                     .take(top_k)
-                    .map(|(id, score)| serde_json::json!({"image_id": id, "similarity": score}))
+                    .map(|(id, score)| serde_json::json!({"image_id": id, "similarity": score, "model": model_id}))
                     .collect();
                 serde_json::to_string(&r).unwrap_or_else(|_| "[]".to_string())
             }
@@ -1105,7 +1116,115 @@ impl CullMcp {
     // --- AI / Processing tools ---
 
     #[tool(
-        description = "Generate CLIP visual embeddings for images (required for find_similar). Returns count processed."
+        description = "Download a local embedding model. Supports 'clip-vit-b32' and 'dinov2-vits14'. Returns a background job id."
+    )]
+    fn download_embedding_model(
+        &self,
+        Parameters(params): Parameters<DownloadEmbeddingModelParams>,
+    ) -> String {
+        let model_id = params
+            .model
+            .unwrap_or_else(|| crate::db_core::embeddings::CLIP_MODEL_ID.to_string());
+        let Some(spec) = crate::db_core::embeddings::embedding_model_spec(&model_id) else {
+            return format!("Error: Unsupported embedding model '{}'", model_id);
+        };
+        let state = self.app_handle.state::<AppState>();
+        let model_path = {
+            let engine = state.embedding_engine.lock();
+            match engine.model_path_for(spec.model_id) {
+                Ok(path) => path,
+                Err(e) => return format!("Error: {}", e),
+            }
+        };
+
+        if model_path.exists() {
+            return serde_json::json!({
+                "status": "already_downloaded",
+                "model": spec.model_id,
+                "model_path": model_path,
+            })
+            .to_string();
+        }
+
+        let (job_id, _cancel_token) = state
+            .jobs
+            .create_job(&format!("{}-download", spec.model_id), 0);
+        let Some(control) = state.jobs.control_for(&job_id) else {
+            return format!("Error: Download job '{}' not found", job_id);
+        };
+        let app = self.app_handle.clone();
+        let job_id_ret = job_id.clone();
+        let model_path_for_task = model_path.clone();
+        let url = spec.url.to_string();
+        let model_id_for_task = spec.model_id.to_string();
+        let display_name = spec.display_name.to_string();
+
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<AppState>();
+            let client = reqwest::Client::new();
+            let result = crate::services::model_download::download_model_file_controlled(
+                &client,
+                &url,
+                &model_path_for_task,
+                &control,
+                |progress| {
+                    state.jobs.update_progress(
+                        &job_id,
+                        progress.downloaded.min(u32::MAX as u64) as u32,
+                        Some(&format!("Downloading {}", display_name)),
+                    );
+                    let _ = app.emit(
+                        "model-download-progress",
+                        serde_json::json!({
+                            "job_id": &job_id,
+                            "model": &model_id_for_task,
+                            "downloaded": progress.downloaded,
+                            "total": progress.total,
+                            "status": progress.status,
+                            "resumable": progress.resumable,
+                        }),
+                    );
+                },
+            )
+            .await;
+
+            match result {
+                Ok(_) => {
+                    let load_result = {
+                        let mut engine = state.embedding_engine.lock();
+                        engine.load_model_for(&model_id_for_task)
+                    };
+                    match load_result {
+                        Ok(()) => state.jobs.complete(&job_id),
+                        Err(e) => state.jobs.fail(&job_id, &e),
+                    }
+                }
+                Err(e) => {
+                    if control.cancellation_token().is_cancelled() {
+                        state.jobs.mark_cancelled(&job_id);
+                    } else {
+                        state.jobs.fail(&job_id, &e);
+                    }
+                }
+            }
+            state.jobs.persist_terminal(&job_id, &state.db);
+            let _ = app.emit(
+                "job-status-changed",
+                serde_json::json!({"job_id": &job_id, "status": state.jobs.get(&job_id).map(|j| j.status)}),
+            );
+        });
+
+        serde_json::json!({
+            "status": "started",
+            "job_id": job_id_ret,
+            "model": spec.model_id,
+            "model_path": model_path,
+        })
+        .to_string()
+    }
+
+    #[tool(
+        description = "Generate visual embeddings for images (required for find_similar). Supports CLIP and DINOv2. Returns a background job id."
     )]
     fn generate_embeddings(
         &self,
@@ -1124,17 +1243,17 @@ impl CullMcp {
             }
         }
         let state = self.app_handle.state::<AppState>();
+        let model_id = params
+            .model
+            .unwrap_or_else(|| crate::db_core::embeddings::CLIP_MODEL_ID.to_string());
+        if crate::db_core::embeddings::embedding_model_spec(&model_id).is_none() {
+            return format!("Error: Unsupported embedding model '{}'", model_id);
+        }
 
         {
             let mut engine = state.embedding_engine.lock();
-            if engine.session.is_none() {
-                if !engine.is_model_available() {
-                    return "Error: Model not downloaded. Run download_clip_model first."
-                        .to_string();
-                }
-                if let Err(e) = engine.load_model() {
-                    return format!("Error loading model: {}", e);
-                }
+            if let Err(e) = engine.load_model_for(&model_id) {
+                return format!("Error loading model: {}", e);
             }
         }
 
@@ -1143,67 +1262,37 @@ impl CullMcp {
         let job_id_ret = job_id.clone();
         let app = self.app_handle.clone();
         let image_ids = params.image_ids.clone();
+        let model_id_for_task = model_id.clone();
 
         tauri::async_runtime::spawn(async move {
             let state = app.state::<AppState>();
-            let mut generated = 0u32;
-
-            for (i, image_id) in image_ids.iter().enumerate() {
-                if cancel_token.is_cancelled() {
-                    state.jobs.mark_cancelled(&job_id);
-                    state.jobs.persist_terminal(&job_id, &state.db);
-                    let _ = app.emit(
-                        "job-status-changed",
-                        serde_json::json!({"job_id": &job_id, "status": "cancelled"}),
-                    );
-                    return;
-                }
-
-                let id_refs: Vec<&str> = vec![image_id.as_str()];
-                let images = match state.db.get_images_by_ids(&id_refs) {
-                    Ok(imgs) => imgs,
-                    Err(_) => {
-                        state.jobs.update_progress(&job_id, (i + 1) as u32, None);
-                        continue;
-                    }
-                };
-                let img = match images.first() {
-                    Some(img) => img,
-                    None => {
-                        state.jobs.update_progress(&job_id, (i + 1) as u32, None);
-                        continue;
-                    }
-                };
-
-                let engine = state.embedding_engine.lock();
-                match engine.generate_embedding(std::path::Path::new(&img.path)) {
-                    Ok(embedding) => {
-                        drop(engine);
-                        let _ = state
-                            .db
-                            .store_embedding(image_id, "clip-vit-b32", &embedding);
-                        generated += 1;
-                    }
-                    Err(e) => {
-                        drop(engine);
-                        crate::safe_eprintln!("Embedding error for {}: {}", image_id, e);
-                    }
-                }
-                state
-                    .jobs
-                    .update_progress(&job_id, (i + 1) as u32, Some(image_id));
-                let _ = app.emit(
-                    "embedding-progress",
-                    serde_json::json!({"current": i + 1, "total": total}),
-                );
+            let result = crate::services::model_pipeline::run_embedding_model(
+                crate::services::model_pipeline::EmbeddingRunRequest {
+                    db: &state.db,
+                    app_data_dir: &state.app_data_dir,
+                    embedding_engine: &state.embedding_engine,
+                    jobs: Some(&state.jobs),
+                    job_id: Some(&job_id),
+                    cancel: Some(&cancel_token),
+                    app: Some(&app),
+                    model_id: &model_id_for_task,
+                    image_ids: &image_ids,
+                },
+            );
+            match result {
+                Ok(result) if result.status == "cancelled" => state.jobs.mark_cancelled(&job_id),
+                Ok(_) => state.jobs.complete(&job_id),
+                Err(e) => state.jobs.fail(&job_id, &e),
             }
-
-            state.jobs.complete(&job_id);
             state.jobs.persist_terminal(&job_id, &state.db);
-            let _ = app.emit("job-status-changed", serde_json::json!({"job_id": &job_id, "status": "completed", "processed": generated}));
+            let _ = app.emit(
+                "job-status-changed",
+                serde_json::json!({"job_id": &job_id, "status": state.jobs.get(&job_id).map(|j| j.status)}),
+            );
         });
 
-        serde_json::json!({"job_id": job_id_ret, "total_images": total}).to_string()
+        serde_json::json!({"job_id": job_id_ret, "total_images": total, "model": model_id})
+            .to_string()
     }
 
     #[tool(description = "Run YOLO object detection on images. Returns count processed.")]
@@ -2341,7 +2430,12 @@ mod tests {
 
     #[test]
     fn test_ai_tools_map_to_ai_run() {
-        let ai_tools = ["generate_embeddings", "detect_objects", "analyze_images"];
+        let ai_tools = [
+            "download_embedding_model",
+            "generate_embeddings",
+            "detect_objects",
+            "analyze_images",
+        ];
         for tool in &ai_tools {
             assert_eq!(
                 tokens::tool_capability(tool),

@@ -402,26 +402,45 @@ export async function listTags(limit = 100, offset = 0): Promise<TagSummary[]> {
 
 // Embedding commands
 export interface ClipModelDownloadInfo {
+    model_id: string;
     url: string;
     model_path: string;
     part_path: string;
     curl_command: string;
 }
 
+export type EmbeddingModelDownloadInfo = ClipModelDownloadInfo;
+
 export async function getClipModelDownloadInfo(): Promise<ClipModelDownloadInfo> {
     return invoke('get_clip_model_download_info');
+}
+
+export async function getEmbeddingModelDownloadInfo(model = 'clip-vit-b32'): Promise<EmbeddingModelDownloadInfo> {
+    return invoke('get_embedding_model_download_info', { model });
 }
 
 export async function downloadClipModel(): Promise<string> {
     return invoke('download_clip_model');
 }
 
+export async function downloadEmbeddingModel(model = 'clip-vit-b32'): Promise<string> {
+    return invoke('download_embedding_model', { model });
+}
+
 export async function isModelAvailable(): Promise<boolean> {
     return invoke('is_model_available');
 }
 
+export async function isEmbeddingModelAvailable(model = 'clip-vit-b32'): Promise<boolean> {
+    return invoke('is_embedding_model_available', { model });
+}
+
 export async function generateEmbeddings(imageIds: string[]): Promise<number> {
     return invoke('generate_embeddings', { imageIds });
+}
+
+export async function generateModelEmbeddings(model: string, imageIds: string[]): Promise<number> {
+    return invoke('generate_model_embeddings', { model, imageIds });
 }
 
 export interface EmbeddingPage {

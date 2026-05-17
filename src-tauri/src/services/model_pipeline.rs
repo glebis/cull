@@ -1,5 +1,5 @@
 use crate::db_core::db::Database;
-use crate::db_core::embeddings::EmbeddingEngine;
+use crate::db_core::embeddings::{embedding_model_spec, EmbeddingEngine, CLIP_MODEL_ID};
 use crate::db_core::models::{ImageWithFile, NewModelRun, NewModelRunItem};
 use crate::services::jobs::JobRegistry;
 use parking_lot::Mutex;
@@ -7,8 +7,6 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter};
 use tokio_util::sync::CancellationToken;
-
-const CLIP_MODEL_ID: &str = "clip-vit-b32";
 
 pub struct ClipEmbeddingRunRequest<'a> {
     pub db: &'a Database,
@@ -21,8 +19,20 @@ pub struct ClipEmbeddingRunRequest<'a> {
     pub image_ids: &'a [String],
 }
 
+pub struct EmbeddingRunRequest<'a> {
+    pub db: &'a Database,
+    pub app_data_dir: &'a PathBuf,
+    pub embedding_engine: &'a Mutex<EmbeddingEngine>,
+    pub jobs: Option<&'a JobRegistry>,
+    pub job_id: Option<&'a str>,
+    pub cancel: Option<&'a CancellationToken>,
+    pub app: Option<&'a AppHandle>,
+    pub model_id: &'a str,
+    pub image_ids: &'a [String],
+}
+
 #[derive(Debug, Clone, Serialize)]
-pub struct ClipEmbeddingRunResult {
+pub struct EmbeddingRunResult {
     pub model_run_id: String,
     pub generated: u32,
     pub failed: u32,
@@ -30,13 +40,27 @@ pub struct ClipEmbeddingRunResult {
     pub status: String,
 }
 
+pub type ClipEmbeddingRunResult = EmbeddingRunResult;
+
 pub fn ensure_clip_model_loaded(embedding_engine: &Mutex<EmbeddingEngine>) -> Result<(), String> {
+    ensure_embedding_model_loaded(embedding_engine, CLIP_MODEL_ID)
+}
+
+pub fn ensure_embedding_model_loaded(
+    embedding_engine: &Mutex<EmbeddingEngine>,
+    model_id: &str,
+) -> Result<(), String> {
     let mut engine = embedding_engine.lock();
     if engine.session.is_none() {
-        if !engine.is_model_available() {
-            return Err("Model not downloaded. Run download_clip_model first.".to_string());
+        if !engine.is_model_available_for(model_id)? {
+            return Err(format!(
+                "Model '{}' not downloaded. Run download_embedding_model first.",
+                model_id
+            ));
         }
-        engine.load_model()?;
+        engine.load_model_for(model_id)?;
+    } else {
+        engine.load_model_for(model_id)?;
     }
     Ok(())
 }
@@ -44,6 +68,22 @@ pub fn ensure_clip_model_loaded(embedding_engine: &Mutex<EmbeddingEngine>) -> Re
 pub fn run_clip_embeddings(
     request: ClipEmbeddingRunRequest<'_>,
 ) -> Result<ClipEmbeddingRunResult, String> {
+    run_embedding_model(EmbeddingRunRequest {
+        db: request.db,
+        app_data_dir: request.app_data_dir,
+        embedding_engine: request.embedding_engine,
+        jobs: request.jobs,
+        job_id: request.job_id,
+        cancel: request.cancel,
+        app: request.app,
+        model_id: CLIP_MODEL_ID,
+        image_ids: request.image_ids,
+    })
+}
+
+pub fn run_embedding_model(request: EmbeddingRunRequest<'_>) -> Result<EmbeddingRunResult, String> {
+    let spec = embedding_model_spec(request.model_id)
+        .ok_or_else(|| format!("Unsupported embedding model '{}'", request.model_id))?;
     let total = request.image_ids.len() as u32;
     let model_run_id = format!("mr_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
     let now = chrono::Utc::now().to_rfc3339();
@@ -57,6 +97,9 @@ pub fn run_clip_embeddings(
         "source": "hf_hub",
         "projection": "embeddings",
         "normalized": true,
+        "input_size": spec.input_size,
+        "output_dims": spec.output_dims,
+        "model_file": spec.file_name,
     })
     .to_string();
 
@@ -69,7 +112,7 @@ pub fn run_clip_embeddings(
             profile_id: None,
             task: "embedding".to_string(),
             provider: "local".to_string(),
-            model_id: CLIP_MODEL_ID.to_string(),
+            model_id: spec.model_id.to_string(),
             model_revision: None,
             status: "running".to_string(),
             input_scope_json,
@@ -117,7 +160,7 @@ pub fn run_clip_embeddings(
                 i as u32,
                 total,
             );
-            return Ok(ClipEmbeddingRunResult {
+            return Ok(EmbeddingRunResult {
                 model_run_id,
                 generated,
                 failed,
@@ -166,7 +209,7 @@ pub fn run_clip_embeddings(
         let ml_path = resolve_image_path_for_ml(&image, request.app_data_dir);
         let embedding = {
             let engine = request.embedding_engine.lock();
-            engine.generate_embedding(&ml_path)
+            engine.generate_embedding_for(spec.model_id, &ml_path)
         };
 
         match embedding {
@@ -175,7 +218,7 @@ pub fn run_clip_embeddings(
                     .db
                     .store_embedding_with_model_run(
                         image_id,
-                        CLIP_MODEL_ID,
+                        spec.model_id,
                         &vector,
                         Some(&model_run_id),
                     )
@@ -233,7 +276,7 @@ pub fn run_clip_embeddings(
         total,
     );
 
-    Ok(ClipEmbeddingRunResult {
+    Ok(EmbeddingRunResult {
         model_run_id,
         generated,
         failed,
@@ -279,7 +322,7 @@ fn insert_embedding_item(
 }
 
 fn update_progress(
-    request: &ClipEmbeddingRunRequest<'_>,
+    request: &EmbeddingRunRequest<'_>,
     model_run_id: &str,
     current: u32,
     total: u32,
@@ -294,7 +337,7 @@ fn update_progress(
             serde_json::json!({
                 "current": current,
                 "total": total,
-                "model": CLIP_MODEL_ID,
+                "model": request.model_id,
                 "model_run_id": model_run_id,
             }),
         );
@@ -384,5 +427,36 @@ mod tests {
             )
             .unwrap();
         assert_eq!(failed_items, 1);
+    }
+
+    #[test]
+    fn test_dinov2_pipeline_records_model_id_for_missing_image() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let app_data_dir = tmp.path().to_path_buf();
+        let model_dir = tmp.path().join("models");
+        let embedding_engine = Mutex::new(EmbeddingEngine::new(&model_dir));
+        let image_ids = vec!["missing-image".to_string()];
+
+        let result = run_embedding_model(EmbeddingRunRequest {
+            db: &db,
+            app_data_dir: &app_data_dir,
+            embedding_engine: &embedding_engine,
+            jobs: None,
+            job_id: None,
+            cancel: None,
+            app: None,
+            model_id: "dinov2-vits14",
+            image_ids: &image_ids,
+        })
+        .unwrap();
+
+        assert_eq!(result.generated, 0);
+        assert_eq!(result.failed, 1);
+        assert_eq!(result.status, "completed");
+
+        let run = db.get_model_run(&result.model_run_id).unwrap().unwrap();
+        assert_eq!(run.model_id, "dinov2-vits14");
+        assert!(run.params_json.contains("\"output_dims\":384"));
     }
 }

@@ -108,6 +108,26 @@ pub enum CliCommand {
         #[arg(long)]
         naming: Option<String>,
     },
+
+    #[command(name = "get_embedding_model_download_info")]
+    GetEmbeddingModelDownloadInfo {
+        #[arg(long, default_value = "clip-vit-b32")]
+        model: String,
+    },
+
+    #[command(name = "download_embedding_model")]
+    DownloadEmbeddingModel {
+        #[arg(long, default_value = "clip-vit-b32")]
+        model: String,
+    },
+
+    #[command(name = "generate_embeddings")]
+    GenerateEmbeddings {
+        #[arg(long, default_value = "clip-vit-b32")]
+        model: String,
+        #[arg(long = "image_ids", visible_alias = "image-id", value_delimiter = ',')]
+        image_ids: Vec<String>,
+    },
 }
 
 pub fn run_headless_if_requested(args: &CliArgs) -> Option<i32> {
@@ -183,6 +203,21 @@ fn execute_headless(args: &CliArgs) -> Result<Value, String> {
                 "flatten": flatten,
                 "naming": naming,
             }),
+        ),
+        CliCommand::GetEmbeddingModelDownloadInfo { model } => tools::execute_named_tool(
+            &ctx,
+            "get_embedding_model_download_info",
+            serde_json::json!({ "model": model }),
+        ),
+        CliCommand::DownloadEmbeddingModel { model } => tools::execute_named_tool(
+            &ctx,
+            "download_embedding_model",
+            serde_json::json!({ "model": model }),
+        ),
+        CliCommand::GenerateEmbeddings { model, image_ids } => tools::execute_named_tool(
+            &ctx,
+            "generate_embeddings",
+            serde_json::json!({ "model": model, "image_ids": image_ids }),
         ),
     }
 }
@@ -296,6 +331,44 @@ mod tests {
                 );
             }
             other => panic!("expected call_tool command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_download_embedding_model_subcommand() {
+        let args = CliArgs::try_parse_from([
+            "cull",
+            "--json",
+            "download_embedding_model",
+            "--model",
+            "dinov2-vits14",
+        ])
+        .unwrap();
+        match args.command {
+            Some(CliCommand::DownloadEmbeddingModel { model }) => {
+                assert_eq!(model, "dinov2-vits14")
+            }
+            other => panic!("expected download_embedding_model command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_generate_embeddings_subcommand_accepts_model() {
+        let args = CliArgs::try_parse_from([
+            "cull",
+            "generate_embeddings",
+            "--model",
+            "dinov2-vits14",
+            "--image_ids",
+            "img1,img2",
+        ])
+        .unwrap();
+        match args.command {
+            Some(CliCommand::GenerateEmbeddings { model, image_ids }) => {
+                assert_eq!(model, "dinov2-vits14");
+                assert_eq!(image_ids, vec!["img1".to_string(), "img2".to_string()]);
+            }
+            other => panic!("expected generate_embeddings command, got {:?}", other),
         }
     }
 }

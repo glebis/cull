@@ -4,27 +4,41 @@ use serde::Serialize;
 use std::path::Path;
 use tauri::{AppHandle, Emitter, State};
 
-const CLIP_MODEL_URL: &str =
-    "https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx";
+use crate::db_core::embeddings::{embedding_model_spec, CLIP_MODEL_ID};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ClipModelDownloadInfo {
+pub struct EmbeddingModelDownloadInfo {
+    pub model_id: String,
     pub url: String,
     pub model_path: String,
     pub part_path: String,
     pub curl_command: String,
 }
 
+pub type ClipModelDownloadInfo = EmbeddingModelDownloadInfo;
+
+#[cfg(test)]
 fn clip_model_download_info_for_path(model_path: &Path) -> ClipModelDownloadInfo {
+    embedding_model_download_info_for_path(CLIP_MODEL_ID, model_path)
+        .expect("CLIP model spec should exist")
+}
+
+fn embedding_model_download_info_for_path(
+    model_id: &str,
+    model_path: &Path,
+) -> Result<EmbeddingModelDownloadInfo, String> {
+    let spec = embedding_model_spec(model_id)
+        .ok_or_else(|| format!("Unsupported embedding model '{}'", model_id))?;
     let part_path = crate::services::model_download::part_path_for(model_path);
     let model_path = model_path.to_string_lossy().to_string();
     let part_path = part_path.to_string_lossy().to_string();
     let quoted_part_path = shell_quote(&part_path);
     let quoted_model_path = shell_quote(&model_path);
-    let quoted_url = shell_quote(CLIP_MODEL_URL);
+    let quoted_url = shell_quote(spec.url);
 
-    ClipModelDownloadInfo {
-        url: CLIP_MODEL_URL.to_string(),
+    Ok(EmbeddingModelDownloadInfo {
+        model_id: spec.model_id.to_string(),
+        url: spec.url.to_string(),
         model_path: model_path.clone(),
         part_path: part_path.clone(),
         curl_command: format!(
@@ -41,7 +55,7 @@ fn clip_model_download_info_for_path(model_path: &Path) -> ClipModelDownloadInfo
             shell_quote(&part_path),
             quoted_model_path
         ),
-    }
+    })
 }
 
 fn shell_quote(value: &str) -> String {
@@ -65,6 +79,42 @@ pub async fn generate_embeddings(
             cancel: None,
             app: Some(&app),
             image_ids: &image_ids,
+        },
+    )?;
+    Ok(result.generated)
+}
+
+#[tauri::command]
+pub async fn generate_model_embeddings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    model: String,
+    image_ids: Vec<String>,
+) -> Result<u32, String> {
+    generate_embeddings_for_model(&app, &state, &model, &image_ids)
+}
+
+fn generate_embeddings_for_model(
+    app: &AppHandle,
+    state: &AppState,
+    model_id: &str,
+    image_ids: &[String],
+) -> Result<u32, String> {
+    crate::services::model_pipeline::ensure_embedding_model_loaded(
+        &state.embedding_engine,
+        model_id,
+    )?;
+    let result = crate::services::model_pipeline::run_embedding_model(
+        crate::services::model_pipeline::EmbeddingRunRequest {
+            db: &state.db,
+            app_data_dir: &state.app_data_dir,
+            embedding_engine: &state.embedding_engine,
+            jobs: None,
+            job_id: None,
+            cancel: None,
+            app: Some(app),
+            model_id,
+            image_ids,
         },
     )?;
     Ok(result.generated)
@@ -142,11 +192,19 @@ pub async fn list_similarity_group_images(
 pub async fn get_clip_model_download_info(
     state: State<'_, AppState>,
 ) -> Result<ClipModelDownloadInfo, String> {
+    get_embedding_model_download_info(state, CLIP_MODEL_ID.to_string()).await
+}
+
+#[tauri::command]
+pub async fn get_embedding_model_download_info(
+    state: State<'_, AppState>,
+    model: String,
+) -> Result<EmbeddingModelDownloadInfo, String> {
     let model_path = {
         let engine = state.embedding_engine.lock();
-        engine.model_path()
+        engine.model_path_for(&model)?
     };
-    Ok(clip_model_download_info_for_path(&model_path))
+    embedding_model_download_info_for_path(&model, &model_path)
 }
 
 #[cfg(test)]
@@ -164,13 +222,34 @@ mod tests {
             info.part_path,
             "/tmp/cull-models/clip-vit-b32-vision.onnx.part"
         );
-        assert_eq!(info.url, CLIP_MODEL_URL);
+        assert_eq!(info.url, crate::db_core::embeddings::CLIP_MODEL_SPEC.url);
         assert!(info
             .curl_command
             .contains("'/tmp/cull-models/clip-vit-b32-vision.onnx.part'"));
         assert!(info
             .curl_command
             .contains("'/tmp/cull-models/clip-vit-b32-vision.onnx'"));
+    }
+
+    #[test]
+    fn dinov2_model_download_info_uses_model_specific_url_and_path() {
+        let info = embedding_model_download_info_for_path(
+            "dinov2-vits14",
+            Path::new("/tmp/cull-models/dinov2-vits14.onnx"),
+        )
+        .unwrap();
+
+        assert_eq!(info.model_id, "dinov2-vits14");
+        assert_eq!(
+            info.url,
+            "https://huggingface.co/sefaburak/dinov2-small-onnx/resolve/main/dinov2_vits14.onnx"
+        );
+        assert_eq!(info.model_path, "/tmp/cull-models/dinov2-vits14.onnx");
+        assert_eq!(info.part_path, "/tmp/cull-models/dinov2-vits14.onnx.part");
+        assert!(info
+            .curl_command
+            .contains("'/tmp/cull-models/dinov2-vits14.onnx.part'"));
+        assert!(info.curl_command.contains("'https://huggingface.co/"));
     }
 }
 
@@ -179,9 +258,28 @@ pub async fn download_clip_model(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    download_embedding_model_for(&app, &state, CLIP_MODEL_ID).await
+}
+
+#[tauri::command]
+pub async fn download_embedding_model(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    model: String,
+) -> Result<String, String> {
+    download_embedding_model_for(&app, &state, &model).await
+}
+
+async fn download_embedding_model_for(
+    app: &AppHandle,
+    state: &AppState,
+    model_id: &str,
+) -> Result<String, String> {
+    let spec = embedding_model_spec(model_id)
+        .ok_or_else(|| format!("Unsupported embedding model '{}'", model_id))?;
     let model_path = {
         let engine = state.embedding_engine.lock();
-        engine.model_path()
+        engine.model_path_for(spec.model_id)?
     };
 
     if model_path.exists() {
@@ -189,26 +287,29 @@ pub async fn download_clip_model(
     }
 
     let client = reqwest::Client::new();
-    let (job_id, _cancel) = state.jobs.create_job("clip-download", 0);
+    let (job_id, _cancel) = state
+        .jobs
+        .create_job(&format!("{}-download", spec.model_id), 0);
     let control = state
         .jobs
         .control_for(&job_id)
         .ok_or_else(|| format!("Download job '{}' not found", job_id))?;
     let outcome = crate::services::model_download::download_model_file_controlled(
         &client,
-        CLIP_MODEL_URL,
+        spec.url,
         &model_path,
         &control,
         |progress| {
             state.jobs.update_progress(
                 &job_id,
                 progress.downloaded.min(u32::MAX as u64) as u32,
-                Some("Downloading CLIP model"),
+                Some(&format!("Downloading {}", spec.display_name)),
             );
             let _ = app.emit(
                 "model-download-progress",
                 serde_json::json!({
                     "job_id": job_id,
+                    "model": spec.model_id,
                     "downloaded": progress.downloaded,
                     "total": progress.total,
                     "status": progress.status,
@@ -229,6 +330,7 @@ pub async fn download_clip_model(
             "model-download-progress",
             serde_json::json!({
                 "job_id": job_id,
+                "model": spec.model_id,
                 "downloaded": 0u64,
                 "total": 0u64,
                 "status": if control.cancellation_token().is_cancelled() { "cancelled" } else { "failed" },
@@ -242,7 +344,7 @@ pub async fn download_clip_model(
     // Load the model after download
     {
         let mut engine = state.embedding_engine.lock();
-        engine.load_model().map_err(|err| {
+        engine.load_model_for(spec.model_id).map_err(|err| {
             state.jobs.fail(&job_id, &err);
             state.jobs.persist_terminal(&job_id, &state.db);
             err
@@ -262,6 +364,15 @@ pub async fn download_clip_model(
 pub async fn is_model_available(state: State<'_, AppState>) -> Result<bool, String> {
     let ctx = crate::services::ServiceContext::from_app_state(&state, None);
     crate::services::ai::is_clip_available(&ctx).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn is_embedding_model_available(
+    state: State<'_, AppState>,
+    model: String,
+) -> Result<bool, String> {
+    let engine = state.embedding_engine.lock();
+    engine.is_model_available_for(&model)
 }
 
 #[tauri::command]
