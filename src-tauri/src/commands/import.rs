@@ -1,3 +1,4 @@
+use crate::db_core::db::Database;
 use crate::db_core::models::NewSessionEvent;
 use crate::AppState;
 use std::path::Path;
@@ -125,6 +126,7 @@ pub async fn import_folder(
     let image_ids_out = new_image_ids.clone();
 
     if !new_image_ids.is_empty() {
+        run_post_import_quality_analysis(app.clone(), new_image_ids.clone());
         run_post_import_detection(app.clone(), new_image_ids);
     }
 
@@ -220,6 +222,7 @@ pub async fn import_files(
     let image_ids_out = new_image_ids.clone();
 
     if !new_image_ids.is_empty() {
+        run_post_import_quality_analysis(app.clone(), new_image_ids.clone());
         run_post_import_detection(app, new_image_ids);
     }
 
@@ -486,6 +489,133 @@ pub async fn rescan_sources(app: AppHandle, state: State<'_, AppState>) -> Resul
     Ok(updated)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ImportQualitySummary {
+    analyzed: u32,
+    failed: u32,
+    cancelled: bool,
+}
+
+fn run_post_import_quality_analysis(app: AppHandle, image_ids: Vec<String>) {
+    if image_ids.is_empty() {
+        return;
+    }
+
+    let app_clone = app.clone();
+    crate::spawn_guarded(app_clone, "post-import-quality", move || async move {
+        let state: State<'_, AppState> = app.state();
+        let total = image_ids.len() as u32;
+        let (job_id, cancel_token) = state.jobs.create_job("quality", total);
+        let progress_job_id = job_id.clone();
+        let progress_app = app.clone();
+        let cancel_for_loop = cancel_token.clone();
+
+        let _ = app.emit(
+            "job-status-changed",
+            serde_json::json!({
+                "job_id": &job_id,
+                "kind": "quality",
+                "status": "running",
+                "current": 0,
+                "total": total,
+            }),
+        );
+
+        let summary = analyze_quality_for_imported_images(
+            &state.db,
+            &state.app_data_dir,
+            &image_ids,
+            |current, total| {
+                state.jobs.update_progress(&progress_job_id, current, None);
+                let _ = progress_app.emit(
+                    "quality-progress",
+                    serde_json::json!({
+                        "job_id": &progress_job_id,
+                        "current": current,
+                        "total": total,
+                        "analyzer": crate::db_core::quality::QUALITY_ANALYZER_VERSION,
+                    }),
+                );
+            },
+            move || cancel_for_loop.is_cancelled(),
+        );
+
+        let status = if summary.cancelled {
+            state.jobs.mark_cancelled(&job_id);
+            "cancelled"
+        } else {
+            state.jobs.complete(&job_id);
+            "completed"
+        };
+        state.jobs.persist_terminal(&job_id, &state.db);
+        let _ = app.emit(
+            "job-status-changed",
+            serde_json::json!({
+                "job_id": &job_id,
+                "kind": "quality",
+                "status": status,
+                "current": if summary.cancelled { summary.analyzed + summary.failed } else { total },
+                "total": total,
+                "message": format!("{} analyzed, {} skipped", summary.analyzed, summary.failed),
+            }),
+        );
+    });
+}
+
+fn analyze_quality_for_imported_images<F, C>(
+    db: &Database,
+    app_data_dir: &Path,
+    image_ids: &[String],
+    mut on_progress: F,
+    mut should_cancel: C,
+) -> ImportQualitySummary
+where
+    F: FnMut(u32, u32),
+    C: FnMut() -> bool,
+{
+    let total = image_ids.len() as u32;
+    let mut summary = ImportQualitySummary {
+        analyzed: 0,
+        failed: 0,
+        cancelled: false,
+    };
+
+    for (index, image_id) in image_ids.iter().enumerate() {
+        if should_cancel() {
+            summary.cancelled = true;
+            break;
+        }
+
+        match analyze_quality_for_imported_image(db, app_data_dir, image_id) {
+            Ok(()) => summary.analyzed += 1,
+            Err(e) => {
+                summary.failed += 1;
+                crate::safe_eprintln!("Quality analysis error for {}: {}", image_id, e);
+            }
+        }
+        on_progress((index + 1) as u32, total);
+    }
+
+    summary
+}
+
+fn analyze_quality_for_imported_image(
+    db: &Database,
+    app_data_dir: &Path,
+    image_id: &str,
+) -> Result<(), String> {
+    let images = db
+        .get_images_by_ids(&[image_id])
+        .map_err(|e| e.to_string())?;
+    let image = images
+        .first()
+        .ok_or_else(|| format!("Image '{}' not found", image_id))?;
+    let ml_path = crate::commands::resolve_image_path_for_ml(image, app_data_dir);
+    let metrics = crate::db_core::quality::analyze_image_quality(image_id, &ml_path)?;
+    db.store_image_quality_metrics(&metrics)
+        .map_err(|e| e.to_string())
+}
+
 fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
     let app_clone = app.clone();
     crate::spawn_guarded(app_clone, "post-import-detection", move || async move {
@@ -608,4 +738,43 @@ fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
             }),
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db_core::db::Database;
+
+    #[test]
+    fn post_import_quality_analysis_stores_metrics_without_inline_import_work() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app_data_dir = tmp.path().join("app-data");
+        std::fs::create_dir(&app_data_dir).unwrap();
+        let image_path = tmp.path().join("checker.png");
+        let image = image::ImageBuffer::from_fn(32, 32, |x, y| {
+            let value: u8 = if (x + y) % 2 == 0 { 255 } else { 0 };
+            image::Rgba([value, value, value, 255])
+        });
+        image.save(&image_path).unwrap();
+
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let image_id = crate::db_core::import::import_file(&db, &image_path, &app_data_dir)
+            .unwrap()
+            .unwrap();
+
+        assert!(db.get_image_quality_metrics(&image_id).unwrap().is_none());
+
+        let summary = analyze_quality_for_imported_images(
+            &db,
+            &app_data_dir,
+            &[image_id.clone()],
+            |_current, _total| {},
+            || false,
+        );
+
+        assert_eq!(summary.analyzed, 1);
+        assert_eq!(summary.failed, 0);
+        assert!(!summary.cancelled);
+        assert!(db.get_image_quality_metrics(&image_id).unwrap().is_some());
+    }
 }
