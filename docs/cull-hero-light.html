@@ -1,0 +1,753 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cull Hero Light Concept</title>
+  <style>
+    :root {
+      --ink: #10100f;
+      --muted: #5f625d;
+      --faint: #8d9188;
+      --paper: #f7f7f2;
+      --paper-2: #ffffff;
+      --line: #d9ddd2;
+      --blue: #0b63f6;
+      --green: #2f8f52;
+      --yellow: #f0c441;
+      --red: #d74c35;
+      --shadow: 0 24px 80px rgba(17, 22, 14, 0.18);
+      --radius: 8px;
+      font-family:
+        "Avenir Next",
+        "Helvetica Neue",
+        -apple-system,
+        BlinkMacSystemFont,
+        sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(16, 16, 15, 0.045) 1px, transparent 1px) 0 0 / 48px 48px,
+        linear-gradient(rgba(16, 16, 15, 0.035) 1px, transparent 1px) 0 0 / 48px 48px,
+        var(--paper);
+    }
+
+    .page {
+      min-height: 100vh;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .page::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 82% 26%, rgba(11, 99, 246, 0.10), transparent 24%),
+        radial-gradient(circle at 18% 84%, rgba(240, 196, 65, 0.16), transparent 19%);
+      opacity: 0.7;
+    }
+
+    header,
+    main,
+    .next-strip {
+      position: relative;
+      z-index: 1;
+    }
+
+    header {
+      height: 88px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 56px;
+      border-bottom: 1px solid rgba(16, 16, 15, 0.10);
+      background: rgba(247, 247, 242, 0.78);
+      backdrop-filter: blur(18px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .brand img {
+      width: 42px;
+      height: 42px;
+      border-radius: 6px;
+      box-shadow: 0 1px 0 rgba(16, 16, 15, 0.08);
+    }
+
+    .brand span {
+      font-size: 21px;
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      gap: 30px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    nav a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .nav-cta {
+      padding: 10px 15px;
+      border: 1px solid var(--ink);
+      border-radius: 999px;
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.5);
+    }
+
+    main {
+      min-height: calc(100vh - 88px);
+      display: grid;
+      grid-template-columns: minmax(420px, 0.92fr) minmax(620px, 1.24fr);
+      gap: 42px;
+      align-items: center;
+      padding: 34px 56px 92px;
+    }
+
+    .copy {
+      max-width: 620px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 28px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border: 2px solid var(--blue);
+      border-radius: 50%;
+      background: var(--paper-2);
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 12ch;
+      font-family:
+        Charter,
+        "Iowan Old Style",
+        Georgia,
+        serif;
+      font-size: clamp(68px, 7.2vw, 124px);
+      line-height: 0.88;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .subhead {
+      max-width: 590px;
+      margin: 30px 0 0;
+      color: #343731;
+      font-size: 21px;
+      line-height: 1.48;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 38px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 50px;
+      padding: 0 20px;
+      border-radius: 6px;
+      font-size: 15px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .button.primary {
+      color: #fff;
+      background: var(--ink);
+      box-shadow: 0 10px 24px rgba(16, 16, 15, 0.18);
+    }
+
+    .button.secondary {
+      color: var(--ink);
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.64);
+    }
+
+    .trust {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 28px;
+    }
+
+    .trust span {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid rgba(16, 16, 15, 0.12);
+      border-radius: 999px;
+      color: #353a32;
+      background: rgba(255, 255, 255, 0.58);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .hero-visual {
+      position: relative;
+      min-height: 680px;
+      padding-top: 52px;
+    }
+
+    .desk {
+      position: absolute;
+      inset: 72px 0 auto auto;
+      width: min(820px, 100%);
+      height: 600px;
+      border: 1px solid rgba(16, 16, 15, 0.13);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #111116;
+      box-shadow: var(--shadow);
+      transform: rotate(-1.2deg);
+    }
+
+    .desk-top {
+      height: 42px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+      color: rgba(255, 255, 255, 0.52);
+      font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #f66a5c;
+    }
+
+    .dot:nth-child(2) {
+      background: #f6c65b;
+    }
+
+    .dot:nth-child(3) {
+      background: #60c972;
+      margin-right: 12px;
+    }
+
+    .desk-grid {
+      display: grid;
+      grid-template-columns: 188px 1fr;
+      height: calc(100% - 42px);
+    }
+
+    .rail {
+      padding: 18px 14px;
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+      background: #0b0b0f;
+      color: #b8bac3;
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .rail-title {
+      margin-bottom: 16px;
+      color: #f0f2ea;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+
+    .rail-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .rail-row strong {
+      color: #f0c441;
+      font-weight: 700;
+    }
+
+    .rail-pill {
+      margin-top: 18px;
+      padding: 11px;
+      border: 1px solid rgba(47, 143, 82, 0.45);
+      border-radius: 6px;
+      color: #a6e8b9;
+      background: rgba(47, 143, 82, 0.11);
+    }
+
+    .work {
+      padding: 18px;
+      display: grid;
+      grid-template-columns: 1fr 238px;
+      gap: 16px;
+    }
+
+    .thumbs {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      align-content: start;
+    }
+
+    .thumb {
+      position: relative;
+      aspect-ratio: 1;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 5px;
+      background:
+        linear-gradient(135deg, rgba(11, 99, 246, 0.28), transparent),
+        #1a1d24;
+    }
+
+    .thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      filter: saturate(0.94) contrast(1.02);
+    }
+
+    .thumb.keep {
+      outline: 2px solid #9ece6a;
+      outline-offset: -2px;
+    }
+
+    .thumb.reject::after {
+      content: "reject";
+      position: absolute;
+      right: 5px;
+      bottom: 5px;
+      padding: 3px 5px;
+      border-radius: 3px;
+      color: #ffd3ce;
+      background: rgba(215, 76, 53, 0.78);
+      font: 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      text-transform: uppercase;
+    }
+
+    .thumb.keep::after {
+      content: "keeper";
+      position: absolute;
+      right: 5px;
+      bottom: 5px;
+      padding: 3px 5px;
+      border-radius: 3px;
+      color: #0b2012;
+      background: #9ece6a;
+      font: 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      text-transform: uppercase;
+    }
+
+    .review {
+      display: grid;
+      grid-template-rows: 168px auto 1fr;
+      gap: 12px;
+    }
+
+    .preview {
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 6px;
+      background: #050507;
+    }
+
+    .preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .meta {
+      padding: 11px;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 6px;
+      color: #dfe2d9;
+      background: rgba(255, 255, 255, 0.04);
+      font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .meta-label {
+      color: #8f98a8;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 9px;
+    }
+
+    .chips span {
+      padding: 4px 6px;
+      border-radius: 4px;
+      background: rgba(122, 162, 247, 0.14);
+      color: #a9c4ff;
+    }
+
+    .export {
+      align-self: end;
+      padding: 12px;
+      border: 1px solid rgba(240, 196, 65, 0.45);
+      border-radius: 6px;
+      background: rgba(240, 196, 65, 0.10);
+      color: #f1df9a;
+      font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .keeper-strip {
+      position: absolute;
+      left: 18px;
+      right: 60px;
+      bottom: 0;
+      height: 104px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid rgba(16, 16, 15, 0.14);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: 0 16px 48px rgba(16, 16, 15, 0.13);
+      backdrop-filter: blur(20px);
+      transform: rotate(1.2deg);
+    }
+
+    .keeper-strip strong {
+      width: 116px;
+      font-size: 12px;
+      line-height: 1.2;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .mini {
+      width: 72px;
+      height: 72px;
+      overflow: hidden;
+      border-radius: 5px;
+      border: 1px solid rgba(16, 16, 15, 0.16);
+      background: #dde0d6;
+    }
+
+    .mini img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .callout {
+      position: absolute;
+      top: 0;
+      right: 26px;
+      width: 264px;
+      padding: 15px;
+      border: 1px solid rgba(16, 16, 15, 0.13);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.90);
+      box-shadow: 0 14px 42px rgba(16, 16, 15, 0.12);
+      backdrop-filter: blur(22px);
+      z-index: 3;
+    }
+
+    .callout h2 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .callout-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .callout-row b {
+      color: var(--ink);
+    }
+
+    .next-strip {
+      position: absolute;
+      left: 56px;
+      right: 56px;
+      bottom: 18px;
+      height: 42px;
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      border-top: 1px solid rgba(16, 16, 15, 0.13);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .next-strip b {
+      color: var(--ink);
+    }
+
+    @media (max-width: 1080px) {
+      header {
+        padding: 0 28px;
+      }
+
+      nav {
+        display: none;
+      }
+
+      main {
+        grid-template-columns: 1fr;
+        padding: 36px 28px 110px;
+      }
+
+      h1 {
+        max-width: 11ch;
+      }
+
+      .hero-visual {
+        min-height: 520px;
+        padding-top: 0;
+      }
+
+      .desk {
+        inset: 0 0 auto auto;
+        height: 470px;
+      }
+    }
+
+    @media (max-width: 720px) {
+      header {
+        height: 72px;
+      }
+
+      .brand img {
+        width: 34px;
+        height: 34px;
+      }
+
+      main {
+        min-height: calc(100vh - 72px);
+        padding-top: 30px;
+      }
+
+      h1 {
+        font-size: 50px;
+      }
+
+      .subhead {
+        margin-top: 24px;
+        font-size: 17px;
+      }
+
+      .actions {
+        gap: 10px;
+        margin-top: 26px;
+      }
+
+      .button {
+        min-height: 46px;
+        padding: 0 16px;
+        font-size: 14px;
+      }
+
+      .trust {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        justify-items: start;
+        margin-top: 20px;
+      }
+
+      .trust span {
+        min-height: 31px;
+        max-width: 100%;
+      }
+
+      .hero-visual {
+        min-height: 420px;
+        margin-top: -4px;
+      }
+
+      .desk {
+        width: 720px;
+        right: -300px;
+        transform: rotate(-1.2deg) scale(0.82);
+        transform-origin: right top;
+      }
+
+      .keeper-strip,
+      .callout {
+        display: none;
+      }
+
+      .next-strip {
+        left: 28px;
+        right: 28px;
+        gap: 16px;
+        overflow: hidden;
+        white-space: nowrap;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="brand" aria-label="Cull">
+        <img src="../static/icon-variants/cull-primary.png" alt="" />
+        <span>Cull</span>
+      </div>
+      <nav aria-label="Primary">
+        <a href="#">Workflow</a>
+        <a href="#">Privacy</a>
+        <a href="#">Agents</a>
+        <a href="#">GitHub</a>
+        <a class="nav-cta" href="#">Download Alpha</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="copy" aria-labelledby="hero-title">
+        <div class="eyebrow">Local-first AI image review</div>
+        <h1 id="hero-title">Review AI image batches locally.</h1>
+        <p class="subhead">
+          Import a folder of generations, compare variants, keep prompt context close,
+          mark the winners, and export clean sets without uploading your library.
+        </p>
+        <div class="actions">
+          <a class="button primary" href="#">Download Alpha</a>
+          <a class="button secondary" href="#">Watch batch review</a>
+        </div>
+        <div class="trust" aria-label="Trust notes">
+          <span>Local-first core workflow</span>
+          <span>BYOK cloud optional</span>
+          <span>Scoped agent access</span>
+        </div>
+      </section>
+
+      <section class="hero-visual" aria-label="Cull product workflow visualization">
+        <div class="callout">
+          <h2>Data Flow</h2>
+          <div class="callout-row"><span>Review desk</span><b>Local</b></div>
+          <div class="callout-row"><span>Prompt metadata</span><b>Local</b></div>
+          <div class="callout-row"><span>Cloud models</span><b>BYOK only</b></div>
+        </div>
+
+        <div class="desk">
+          <div class="desk-top">
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span>batch: /generations/campaign-v7</span>
+          </div>
+          <div class="desk-grid">
+            <aside class="rail">
+              <div class="rail-title">Cull Batch</div>
+              <div class="rail-row"><span>Imported</span><strong>742</strong></div>
+              <div class="rail-row"><span>Reviewed</span><strong>518</strong></div>
+              <div class="rail-row"><span>Keepers</span><strong>34</strong></div>
+              <div class="rail-row"><span>Rejected</span><strong>301</strong></div>
+              <div class="rail-pill">
+                Core workflow: local<br />
+                Agent role: curator
+              </div>
+            </aside>
+
+            <div class="work">
+              <div class="thumbs" aria-hidden="true">
+                <div class="thumb keep"><img src="slides/05-embeddings.png" alt="" /></div>
+                <div class="thumb"><img src="../site/public/images/imageview-final-lineage.png" alt="" /></div>
+                <div class="thumb reject"><img src="../site/public/images/imageview-target-loupe.png" alt="" /></div>
+                <div class="thumb"><img src="../site/public/images/imageview-final-canvas.png" alt="" /></div>
+                <div class="thumb"><img src="../site/public/images/imageview-final-loupe.png" alt="" /></div>
+                <div class="thumb keep"><img src="../site/public/images/imageview-final-collections.png" alt="" /></div>
+                <div class="thumb"><img src="slides/03-paradigm.png" alt="" /></div>
+                <div class="thumb"><img src="slides/06-features.png" alt="" /></div>
+                <div class="thumb reject"><img src="slides/02-problem.png" alt="" /></div>
+                <div class="thumb"><img src="slides/09-privacy.png" alt="" /></div>
+                <div class="thumb keep"><img src="../site/public/images/imageview-final-lineage.png" alt="" /></div>
+                <div class="thumb"><img src="../site/public/images/imageview-final-canvas.png" alt="" /></div>
+              </div>
+
+              <div class="review">
+                <div class="preview">
+                  <img src="../site/public/images/imageview-final-loupe.png" alt="" />
+                </div>
+                <div class="meta">
+                  <div class="meta-label">Prompt context</div>
+                  cinematic portrait, low-key studio light, 85mm, dark fabric, v7
+                  <div class="chips">
+                    <span>openai</span>
+                    <span>gpt-image-1</span>
+                    <span>seed 4281</span>
+                  </div>
+                </div>
+                <div class="export">
+                  Export queue<br />
+                  34 keepers · originals · sidecar metadata<br />
+                  destination: client-final/
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="keeper-strip" aria-hidden="true">
+          <strong>From batch to final set</strong>
+          <div class="mini"><img src="../site/public/images/imageview-final-loupe.png" alt="" /></div>
+          <div class="mini"><img src="../site/public/images/imageview-final-collections.png" alt="" /></div>
+          <div class="mini"><img src="../site/public/images/imageview-final-lineage.png" alt="" /></div>
+          <div class="mini"><img src="../site/public/images/imageview-final-canvas.png" alt="" /></div>
+        </div>
+      </section>
+    </main>
+
+    <div class="next-strip" aria-hidden="true">
+      <b>Next:</b>
+      <span>Cull batch</span>
+      <span>Compare variants</span>
+      <span>Keep prompt context</span>
+      <span>Export winners</span>
+    </div>
+  </div>
+</body>
+</html>
