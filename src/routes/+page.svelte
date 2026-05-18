@@ -12,6 +12,7 @@
     import EmbeddingExplorer from '$lib/components/EmbeddingExplorer.svelte';
     import UpdateBanner from '$lib/components/UpdateBanner.svelte';
     import CommandBar from '$lib/components/CommandBar.svelte';
+    import CommandPalette from '$lib/components/CommandPalette.svelte';
     import Export from '$lib/components/Export.svelte';
     import Toast from '$lib/components/Toast.svelte';
     import ImportBanner from '$lib/components/ImportBanner.svelte';
@@ -271,6 +272,7 @@
 </div>
 
 <JobProgressPanel />
+<CommandPalette />
 
 {#if $settingsOpen}
     <McpSettings onclose={() => settingsOpen.set(false)} />

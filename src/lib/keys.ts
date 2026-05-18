@@ -14,6 +14,7 @@ import type { ViewMode } from './stores';
 import { setRating, setDecision, createCollection, addToCollection, listCollections, rotateImage, undo, redo } from './api';
 import { showToast } from './stores';
 import { invalidateImageCache, loadImagesForCurrentScope } from './image-loading';
+import { commandForKeyboardEvent, openCommandPalette, recordCommandUse, runCommandPaletteItem } from './command-palette';
 
 let waitingForStar = false;
 
@@ -217,6 +218,18 @@ function moveLoupeFocus(delta: number) {
 // ---- Main handler ----
 
 export function handleKeydown(e: KeyboardEvent) {
+    if (e.key.toLowerCase() === 'k' && e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        openCommandPalette('all');
+        return;
+    }
+
+    if (e.key.toLowerCase() === 'p' && e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        openCommandPalette('commands');
+        return;
+    }
+
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
     const tag = (e.target as HTMLElement)?.tagName;
@@ -231,6 +244,15 @@ export function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'f' && e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         searchOpen.set(true);
+        return;
+    }
+
+    const commandItem = commandForKeyboardEvent(e);
+    if (commandItem) {
+        e.preventDefault();
+        runCommandPaletteItem(commandItem)
+            .then(() => recordCommandUse(commandItem.id))
+            .catch(err => console.error('Failed to run command hotkey:', err));
         return;
     }
 
