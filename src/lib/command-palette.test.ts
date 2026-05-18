@@ -64,7 +64,7 @@ describe('command palette helpers', () => {
     });
 
     it('formats and matches keyboard shortcuts', () => {
-        const event = keyEvent('p', { metaKey: true, shiftKey: true });
+        const event = keyEvent('P', { metaKey: true, shiftKey: true });
 
         expect(shortcutFromKeyboardEvent(event)).toBe('Cmd+Shift+P');
         expect(eventMatchesShortcut(event, 'Cmd+Shift+P')).toBe(true);

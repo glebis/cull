@@ -608,7 +608,7 @@ export function getShortcutConflict(
     hotkeys: Record<string, string>,
 ): string | null {
     const current = items.find(item => item.id === currentItemId);
-    if (current?.defaultShortcut === shortcut && !hotkeys[currentItemId]) return null;
+    if (current?.defaultShortcut === shortcut) return null;
     const existing = items.find(item =>
         item.id !== currentItemId &&
         shortcutForItem(item, hotkeys) === shortcut

@@ -198,7 +198,8 @@
 
     function saveHotkey() {
         if (!hotkeyTarget) return;
-        hotkeys = setCommandHotkey(hotkeyTarget.id, capturedShortcut || null);
+        const customShortcut = capturedShortcut === hotkeyTarget.defaultShortcut ? null : capturedShortcut || null;
+        hotkeys = setCommandHotkey(hotkeyTarget.id, customShortcut);
         hotkeyTargetId = null;
         capturedShortcut = '';
     }
