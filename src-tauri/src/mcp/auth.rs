@@ -90,6 +90,8 @@ mod tests {
         "search_by_object",
         "get_detections",
         "get_vision_metadata",
+        "get_image_quality",
+        "get_quality_count",
         "show_image",
         "navigate_to_folder",
         "show_collection",
@@ -97,6 +99,7 @@ mod tests {
         "import_files",
         "download_embedding_model",
         "generate_embeddings",
+        "analyze_image_quality",
         "detect_objects",
         "analyze_images",
         "create_token",
@@ -132,6 +135,8 @@ mod tests {
         "get_canvas_layout",
         "get_detections",
         "get_vision_metadata",
+        "get_image_quality",
+        "get_quality_count",
     ];
 
     const SEARCH_TOOLS: &[&str] = &["find_similar", "search_by_object"];
@@ -157,6 +162,7 @@ mod tests {
     const AI_TOOLS: &[&str] = &[
         "download_embedding_model",
         "generate_embeddings",
+        "analyze_image_quality",
         "detect_objects",
         "analyze_images",
     ];

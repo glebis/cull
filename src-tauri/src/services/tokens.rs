@@ -61,7 +61,9 @@ pub fn tool_capability(tool_name: &str) -> &'static str {
         | "get_canvas_layout"
         | "get_library_stats"
         | "get_detections"
-        | "get_vision_metadata" => "library:read",
+        | "get_vision_metadata"
+        | "get_image_quality"
+        | "get_quality_count" => "library:read",
 
         "search_images" | "find_similar" | "search_by_object" => "library:search",
 
@@ -85,6 +87,7 @@ pub fn tool_capability(tool_name: &str) -> &'static str {
 
         "download_embedding_model"
         | "generate_embeddings"
+        | "analyze_image_quality"
         | "detect_objects"
         | "analyze_images" => "ai:run",
 
@@ -630,6 +633,9 @@ mod tests {
         assert_eq!(tool_capability("show_image"), "display:navigate");
         assert_eq!(tool_capability("download_embedding_model"), "ai:run");
         assert_eq!(tool_capability("generate_embeddings"), "ai:run");
+        assert_eq!(tool_capability("analyze_image_quality"), "ai:run");
+        assert_eq!(tool_capability("get_image_quality"), "library:read");
+        assert_eq!(tool_capability("get_quality_count"), "library:read");
         assert_eq!(tool_capability("create_token"), "tokens:manage");
         assert_eq!(tool_capability("unknown_tool"), "settings:manage");
     }

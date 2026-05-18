@@ -99,7 +99,10 @@
             const u17 = await listen<any>('backfill-progress', (e) => {
                 upsertJob(e.payload.job_id ?? `evt_raw_backfill`, 'raw-backfill', 'running', e.payload.current, e.payload.total, null);
             });
-            unlisteners = [u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11, u12, u13, u14, u15, u16, u17];
+            const u18 = await listen<any>('quality-progress', (e) => {
+                upsertJob(e.payload.job_id ?? `evt_quality`, 'quality', 'running', e.payload.current, e.payload.total, e.payload.analyzer ?? null);
+            });
+            unlisteners = [u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11, u12, u13, u14, u15, u16, u17, u18];
         } catch {
             // Not in Tauri environment
         }
@@ -217,6 +220,7 @@
             'auto-detection': 'Auto detection',
             'health-check': 'Library health',
             'raw-backfill': 'RAW previews',
+            quality: 'Quality metrics',
         };
         if (labels[kind]) return labels[kind];
         if (kind.endsWith('-download')) {

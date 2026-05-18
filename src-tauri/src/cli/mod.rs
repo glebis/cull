@@ -128,6 +128,23 @@ pub enum CliCommand {
         #[arg(long = "image_ids", visible_alias = "image-id", value_delimiter = ',')]
         image_ids: Vec<String>,
     },
+
+    #[command(name = "analyze_image_quality")]
+    AnalyzeImageQuality {
+        #[arg(long = "image_ids", visible_alias = "image-id", value_delimiter = ',')]
+        image_ids: Vec<String>,
+        #[arg(long)]
+        all: bool,
+    },
+
+    #[command(name = "get_image_quality")]
+    GetImageQuality {
+        #[arg(long = "image_id", visible_alias = "image-id")]
+        image_id: String,
+    },
+
+    #[command(name = "get_quality_count")]
+    GetQualityCount,
 }
 
 pub fn run_headless_if_requested(args: &CliArgs) -> Option<i32> {
@@ -219,6 +236,22 @@ fn execute_headless(args: &CliArgs) -> Result<Value, String> {
             "generate_embeddings",
             serde_json::json!({ "model": model, "image_ids": image_ids }),
         ),
+        CliCommand::AnalyzeImageQuality { image_ids, all } => tools::execute_named_tool(
+            &ctx,
+            "analyze_image_quality",
+            serde_json::json!({
+                "image_ids": if image_ids.is_empty() { None::<Vec<String>> } else { Some(image_ids.clone()) },
+                "all": all,
+            }),
+        ),
+        CliCommand::GetImageQuality { image_id } => tools::execute_named_tool(
+            &ctx,
+            "get_image_quality",
+            serde_json::json!({ "image_id": image_id }),
+        ),
+        CliCommand::GetQualityCount => {
+            tools::execute_named_tool(&ctx, "get_quality_count", serde_json::json!({}))
+        }
     }
 }
 
@@ -369,6 +402,32 @@ mod tests {
                 assert_eq!(image_ids, vec!["img1".to_string(), "img2".to_string()]);
             }
             other => panic!("expected generate_embeddings command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_analyze_image_quality_subcommand_accepts_all() {
+        let args = CliArgs::try_parse_from(["cull", "analyze_image_quality", "--all"]).unwrap();
+        match args.command {
+            Some(CliCommand::AnalyzeImageQuality { image_ids, all }) => {
+                assert!(all);
+                assert!(image_ids.is_empty());
+            }
+            other => panic!("expected analyze_image_quality command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_analyze_image_quality_subcommand_accepts_ids() {
+        let args =
+            CliArgs::try_parse_from(["cull", "analyze_image_quality", "--image_ids", "img1,img2"])
+                .unwrap();
+        match args.command {
+            Some(CliCommand::AnalyzeImageQuality { image_ids, all }) => {
+                assert!(!all);
+                assert_eq!(image_ids, vec!["img1".to_string(), "img2".to_string()]);
+            }
+            other => panic!("expected analyze_image_quality command, got {:?}", other),
         }
     }
 }

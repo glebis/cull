@@ -386,6 +386,12 @@ pub struct AnalyzeImagesParams {
     pub image_ids: Vec<String>,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AnalyzeImageQualityParams {
+    #[schemars(description = "List of image IDs to analyze for blur, focus, and exposure")]
+    pub image_ids: Vec<String>,
+}
+
 // --- Token management param structs ---
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -828,6 +834,29 @@ impl CullMcp {
                 }).collect();
                 serde_json::to_string(&r).unwrap_or_else(|_| "[]".to_string())
             }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Get blur, focus, and exposure metrics for an image")]
+    fn get_image_quality(&self, Parameters(params): Parameters<ImageIdParams>) -> String {
+        match self.check_image_id_scope(&params.image_id) {
+            Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
+            Err(e) => return format!("Error: {}", e),
+            _ => {}
+        }
+        let state = self.app_handle.state::<AppState>();
+        match state.db.get_image_quality_metrics(&params.image_id) {
+            Ok(metrics) => serde_json::to_string(&metrics).unwrap_or_else(|_| "null".to_string()),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Get count of images with stored blur, focus, and exposure metrics")]
+    fn get_quality_count(&self) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state.db.quality_metrics_count() {
+            Ok(count) => serde_json::json!({ "count": count }).to_string(),
             Err(e) => format!("Error: {}", e),
         }
     }
@@ -1293,6 +1322,84 @@ impl CullMcp {
 
         serde_json::json!({"job_id": job_id_ret, "total_images": total, "model": model_id})
             .to_string()
+    }
+
+    #[tool(
+        description = "Analyze blur, focus, and exposure for images. Returns a background job id."
+    )]
+    fn analyze_image_quality(
+        &self,
+        Parameters(params): Parameters<AnalyzeImageQualityParams>,
+    ) -> String {
+        if params.image_ids.is_empty() {
+            return "Error: analyze_image_quality requires at least one image_id".to_string();
+        }
+        for image_id in &params.image_ids {
+            match self.check_image_id_scope(image_id) {
+                Ok(false) => {
+                    return format!(
+                        "Error: Access denied — image '{}' outside token scope",
+                        image_id
+                    )
+                }
+                Err(e) => return format!("Error: {}", e),
+                _ => {}
+            }
+        }
+
+        let state = self.app_handle.state::<AppState>();
+        let total = params.image_ids.len() as u32;
+        let (job_id, cancel_token) = state.jobs.create_job("quality", total);
+        let job_id_ret = job_id.clone();
+        let app = self.app_handle.clone();
+        let image_ids = params.image_ids.clone();
+
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<AppState>();
+            let mut analyzed = 0u32;
+
+            for (i, image_id) in image_ids.iter().enumerate() {
+                if cancel_token.is_cancelled() {
+                    state.jobs.mark_cancelled(&job_id);
+                    state.jobs.persist_terminal(&job_id, &state.db);
+                    let _ = app.emit(
+                        "job-status-changed",
+                        serde_json::json!({"job_id": &job_id, "status": "cancelled"}),
+                    );
+                    return;
+                }
+
+                let ctx =
+                    crate::services::ServiceContext::from_app_state(&state, Some(app.clone()));
+                match crate::services::ai::analyze_image_quality(&ctx, image_id) {
+                    Ok(_) => analyzed += 1,
+                    Err(e) => {
+                        crate::safe_eprintln!("Quality analysis error for {}: {}", image_id, e)
+                    }
+                }
+                state
+                    .jobs
+                    .update_progress(&job_id, (i + 1) as u32, Some(image_id));
+                let _ = app.emit(
+                    "quality-progress",
+                    serde_json::json!({
+                        "job_id": &job_id,
+                        "current": i + 1,
+                        "total": total,
+                        "analyzer": crate::db_core::quality::QUALITY_ANALYZER_VERSION,
+                    }),
+                );
+            }
+
+            state.jobs.complete(&job_id);
+            state.jobs.persist_terminal(&job_id, &state.db);
+            let _ = app.emit(
+                "job-status-changed",
+                serde_json::json!({"job_id": &job_id, "status": "completed", "processed": analyzed}),
+            );
+        });
+
+        serde_json::json!({"job_id": job_id_ret, "total_images": total}).to_string()
     }
 
     #[tool(description = "Run YOLO object detection on images. Returns count processed.")]
@@ -2333,6 +2440,8 @@ mod tests {
             "get_library_stats",
             "get_detections",
             "get_vision_metadata",
+            "get_image_quality",
+            "get_quality_count",
         ];
         for tool in &read_tools {
             assert_eq!(
@@ -2433,6 +2542,7 @@ mod tests {
         let ai_tools = [
             "download_embedding_model",
             "generate_embeddings",
+            "analyze_image_quality",
             "detect_objects",
             "analyze_images",
         ];

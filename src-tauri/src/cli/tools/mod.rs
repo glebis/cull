@@ -6,6 +6,7 @@ mod embeddings;
 mod export;
 mod import;
 mod library;
+mod quality;
 
 pub const SUPPORTED_TOOLS: &[&str] = &[
     "get_library_stats",
@@ -17,6 +18,9 @@ pub const SUPPORTED_TOOLS: &[&str] = &[
     "get_embedding_model_download_info",
     "download_embedding_model",
     "generate_embeddings",
+    "analyze_image_quality",
+    "get_image_quality",
+    "get_quality_count",
     "list_export_presets",
     "export_images",
 ];
@@ -38,6 +42,9 @@ pub fn execute_named_tool(
         }
         "download_embedding_model" => embeddings::download_embedding_model(ctx, params),
         "generate_embeddings" => embeddings::generate_embeddings(ctx, params),
+        "analyze_image_quality" => quality::analyze_image_quality(ctx, params),
+        "get_image_quality" => quality::get_image_quality(ctx, params),
+        "get_quality_count" => quality::get_quality_count(ctx),
         "list_export_presets" => export::list_export_presets(),
         "export_images" => export::export_images(ctx, params),
         other => Err(format!(
