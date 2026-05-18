@@ -16,6 +16,7 @@
         type CommandPaletteMode,
     } from '$lib/stores';
     import {
+        canAssignCommandHotkey,
         getCommandPaletteItems,
         getShortcutConflict,
         readCommandHotkeys,
@@ -57,6 +58,10 @@
         capturedShortcut && hotkeyTarget
             ? getShortcutConflict(capturedShortcut, hotkeyTarget.id, items, hotkeys)
             : null
+    );
+    let canSaveHotkey = $derived(
+        Boolean(hotkeyTarget) &&
+        canAssignCommandHotkey(capturedShortcut, hotkeyTarget?.id ?? '', items, hotkeys)
     );
 
     function refreshPreferences() {
@@ -198,6 +203,7 @@
 
     function saveHotkey() {
         if (!hotkeyTarget) return;
+        if (!canAssignCommandHotkey(capturedShortcut, hotkeyTarget.id, items, hotkeys)) return;
         const customShortcut = capturedShortcut === hotkeyTarget.defaultShortcut ? null : capturedShortcut || null;
         hotkeys = setCommandHotkey(hotkeyTarget.id, customShortcut);
         hotkeyTargetId = null;
@@ -377,7 +383,7 @@
                             {capturedShortcut || 'Press shortcut'}
                         </button>
                         {#if shortcutConflict}
-                            <div class="hotkey-warning">Reassigns: {shortcutConflict}</div>
+                            <div class="hotkey-warning">Already in use: {shortcutConflict}</div>
                         {/if}
                         <div class="hotkey-actions">
                             <button type="button" onclick={() => {
@@ -386,7 +392,7 @@
                             }}>
                                 Cancel
                             </button>
-                            <button type="button" class="primary" onclick={saveHotkey}>
+                            <button type="button" class="primary" onclick={saveHotkey} disabled={!canSaveHotkey}>
                                 Save
                             </button>
                         </div>
@@ -722,6 +728,13 @@
     .hotkey-actions button.primary {
         border-color: var(--blue);
         color: var(--blue);
+    }
+
+    .hotkey-actions button:disabled {
+        border-color: var(--border-subtle);
+        color: var(--text-secondary);
+        cursor: not-allowed;
+        opacity: 0.55;
     }
 
     @media (max-width: 640px) {

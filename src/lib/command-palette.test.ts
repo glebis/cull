@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+    canAssignCommandHotkey,
     eventMatchesShortcut,
     getShortcutConflict,
     scoreCommandPaletteItem,
@@ -80,7 +81,20 @@ describe('command palette helpers', () => {
 
         expect(getShortcutConflict('Cmd+F', 'view.grid', items, {})).toBe('Search Images');
         expect(getShortcutConflict('Cmd+F', 'app.search', items, {})).toBeNull();
+        expect(getShortcutConflict('Cmd+P', 'view.grid', items, {})).toBe('Print');
         expect(getShortcutConflict('Cmd+L', 'view.grid', items, { 'view.loupe': 'Cmd+L' })).toBe('Loupe View');
         expect(getShortcutConflict('Cmd+L', 'view.grid', items, {})).toBeNull();
+    });
+
+    it('blocks assigning shortcuts already owned by another command or reserved action', () => {
+        const items = [
+            item('view.grid', 'Grid View', 'View', { defaultShortcut: 'Cmd+1' }),
+            item('view.loupe', 'Loupe View'),
+        ];
+
+        expect(canAssignCommandHotkey('Cmd+1', 'view.grid', items, {})).toBe(true);
+        expect(canAssignCommandHotkey('Cmd+1', 'view.loupe', items, {})).toBe(false);
+        expect(canAssignCommandHotkey('Cmd+P', 'view.loupe', items, {})).toBe(false);
+        expect(canAssignCommandHotkey('Cmd+L', 'view.loupe', items, {})).toBe(true);
     });
 });

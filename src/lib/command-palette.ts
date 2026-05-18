@@ -66,6 +66,7 @@ export const COMMAND_HOTKEYS_STORAGE_KEY = 'cull.commandPalette.hotkeys';
 const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
     'Cmd+K': 'Open command palette',
     'Cmd+Shift+P': 'Open command-only palette',
+    'Cmd+P': 'Print',
     'Cmd+F': 'Image search',
     '/': 'Image search',
     'Cmd+B': 'Toggle sidebar',
@@ -616,6 +617,15 @@ export function getShortcutConflict(
     if (existing) return existing.title;
     const builtin = BUILT_IN_SHORTCUT_LABELS[shortcut];
     return builtin ?? null;
+}
+
+export function canAssignCommandHotkey(
+    shortcut: string,
+    currentItemId: string,
+    items: CommandPaletteItem[],
+    hotkeys: Record<string, string>,
+): boolean {
+    return !shortcut || getShortcutConflict(shortcut, currentItemId, items, hotkeys) === null;
 }
 
 export async function runCommandPaletteItem(item: CommandPaletteItem) {
