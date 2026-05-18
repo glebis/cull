@@ -1,6 +1,7 @@
 <script lang="ts">
-    import { viewMode, thumbnailSize, windowName, navigateTo } from '$lib/stores';
+    import { viewMode, thumbnailSize, windowName, navigateTo, showToast } from '$lib/stores';
     import type { ViewMode } from '$lib/stores';
+    import { maybeShowShortcutReminder, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from '$lib/shortcut-reminders';
 
     const tabs: { id: ViewMode; label: string; key: string; icon: string }[] = [
         { id: 'grid', label: 'Grid', key: '⌘1', icon: '⊞' },
@@ -20,6 +21,19 @@
         size = val;
         thumbnailSize.set(val);
     }
+
+    function selectTab(mode: ViewMode) {
+        const changed = $viewMode !== mode;
+        navigateTo(mode);
+        if (!changed) return;
+        maybeShowShortcutReminder(VIEW_CYCLE_SHORTCUT_REMINDER_ID, () => {
+            showToast('Shortcut available', {
+                detail: 'Tab cycles views. Shift+Tab goes back.',
+                type: 'info',
+                duration: 5000,
+            });
+        });
+    }
 </script>
 
 <div class="tabbar">
@@ -31,7 +45,7 @@
             <button
                 class="tab"
                 class:active={$viewMode === tab.id}
-                onclick={() => navigateTo(tab.id)}
+                onclick={() => selectTab(tab.id)}
             >
                 <span class="tab-icon">{tab.icon}</span>{tab.label}<span class="tab-key">{tab.key}</span>
             </button>

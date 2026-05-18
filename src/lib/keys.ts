@@ -15,8 +15,11 @@ import { setRating, setDecision, createCollection, addToCollection, listCollecti
 import { showToast } from './stores';
 import { invalidateImageCache, loadImagesForCurrentScope } from './image-loading';
 import { commandForKeyboardEvent, openCommandPalette, recordCommandUse, runCommandPaletteItem } from './command-palette';
+import { recordShortcutUse, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from './shortcut-reminders';
 
 let waitingForStar = false;
+
+const VIEW_MODE_CYCLE: ViewMode[] = ['grid', 'loupe', 'compare', 'canvas', 'lineage', 'embeddings', 'export'];
 
 const VIEW_MODE_KEYS: Record<string, ViewMode> = {
     '1': 'grid',
@@ -47,6 +50,24 @@ function moveFocus(delta: number) {
         return next;
     });
     scrollFocusedIntoView();
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    return target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target.isContentEditable;
+}
+
+function cycleViewMode(direction: 1 | -1) {
+    const currentMode = get(viewMode);
+    const currentIndex = VIEW_MODE_CYCLE.indexOf(currentMode);
+    const nextIndex = currentIndex >= 0
+        ? (currentIndex + direction + VIEW_MODE_CYCLE.length) % VIEW_MODE_CYCLE.length
+        : direction === 1 ? 0 : VIEW_MODE_CYCLE.length - 1;
+    navigateTo(VIEW_MODE_CYCLE[nextIndex]);
+    recordShortcutUse(VIEW_CYCLE_SHORTCUT_REMINDER_ID);
 }
 
 function scrollFocusedIntoView() {
@@ -230,10 +251,16 @@ export function handleKeydown(e: KeyboardEvent) {
         return;
     }
 
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (isEditableTarget(e.target)) return;
 
     const tag = (e.target as HTMLElement)?.tagName;
     if (['BUTTON', 'A', 'SELECT'].includes(tag) && (e.key === ' ' || e.key === 'Enter')) return;
+
+    if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        cycleViewMode(e.shiftKey ? -1 : 1);
+        return;
+    }
 
     // Search bar: / or Cmd+F opens search
     if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey) {
@@ -738,10 +765,6 @@ function handleCompareKeys(e: KeyboardEvent) {
         case 'ArrowUp':
             e.preventDefault();
             compareSwapFocusedImage(-1);
-            break;
-        case 'Tab':
-            e.preventDefault();
-            compareActiveSide.update(s => (s === 0 ? 1 : 0) as 0 | 1);
             break;
         case '1':
             // Accept left, reject right

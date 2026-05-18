@@ -80,6 +80,8 @@ const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
     'Cmd+6': 'Embeddings view',
     'Cmd+7': 'Export view',
     'Cmd+8': 'Tinder view',
+    'Tab': 'Cycle to next view',
+    'Shift+Tab': 'Cycle to previous view',
     'Backspace': 'Move focused image to Trash',
     'Cmd+Backspace': 'Delete focused image permanently',
 };

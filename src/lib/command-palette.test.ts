@@ -82,6 +82,8 @@ describe('command palette helpers', () => {
         expect(getShortcutConflict('Cmd+F', 'view.grid', items, {})).toBe('Search Images');
         expect(getShortcutConflict('Cmd+F', 'app.search', items, {})).toBeNull();
         expect(getShortcutConflict('Cmd+P', 'view.grid', items, {})).toBe('Print');
+        expect(getShortcutConflict('Tab', 'view.grid', items, {})).toBe('Cycle to next view');
+        expect(getShortcutConflict('Shift+Tab', 'view.grid', items, {})).toBe('Cycle to previous view');
         expect(getShortcutConflict('Cmd+L', 'view.grid', items, { 'view.loupe': 'Cmd+L' })).toBe('Loupe View');
         expect(getShortcutConflict('Cmd+L', 'view.grid', items, {})).toBeNull();
     });
