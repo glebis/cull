@@ -2,12 +2,22 @@ import { describe, expect, it } from 'vitest';
 import {
     canAssignCommandHotkey,
     eventMatchesShortcut,
+    findDuplicateCommandHotkeys,
+    getCommandPaletteItems,
     getShortcutConflict,
     scoreCommandPaletteItem,
     shortcutFromKeyboardEvent,
     sortCommandPaletteItems,
     type CommandPaletteItem,
 } from './command-palette';
+import {
+    collectMode,
+    collectModeTarget,
+    collections,
+    focusedIndex,
+    images,
+    selectedIds,
+} from './stores';
 
 function keyEvent(key: string, modifiers: Partial<KeyboardEvent> = {}): KeyboardEvent {
     return {
@@ -32,6 +42,15 @@ function item(id: string, title: string, category = 'Command', extra: Partial<Co
 }
 
 describe('command palette helpers', () => {
+    function resetCommandContext() {
+        images.set([]);
+        focusedIndex.set(0);
+        selectedIds.set(new Set());
+        collections.set([]);
+        collectMode.set(false);
+        collectModeTarget.set(null);
+    }
+
     it('scores title, category, keyword, and acronym matches', () => {
         const grid = item('view.grid', 'Grid View', 'View', { keywords: ['gallery'] });
         const smart = item('scope.smart.best', 'Best Midjourney Picks', 'Smart Collection');
@@ -62,6 +81,15 @@ describe('command palette helpers', () => {
         ];
 
         expect(sortCommandPaletteItems(items, '', { mode: 'commands' }).map(i => i.id)).toEqual(['app.search']);
+    });
+
+    it('filters items hidden by context predicates', () => {
+        const items = [
+            item('app.visible', 'Visible Command', 'App', { when: () => true }),
+            item('app.hidden', 'Hidden Command', 'App', { when: () => false }),
+        ];
+
+        expect(sortCommandPaletteItems(items, '').map(i => i.id)).toEqual(['app.visible']);
     });
 
     it('formats and matches keyboard shortcuts', () => {
@@ -98,5 +126,65 @@ describe('command palette helpers', () => {
         expect(canAssignCommandHotkey('Cmd+1', 'view.loupe', items, {})).toBe(false);
         expect(canAssignCommandHotkey('Cmd+P', 'view.loupe', items, {})).toBe(false);
         expect(canAssignCommandHotkey('Cmd+L', 'view.loupe', items, {})).toBe(true);
+    });
+
+    it('reports duplicate command hotkeys', () => {
+        const items = [
+            item('view.grid', 'Grid View', 'View', { defaultShortcut: 'Cmd+1' }),
+            item('view.loupe', 'Loupe View', 'View', { defaultShortcut: 'Cmd+2' }),
+            item('view.compare', 'Compare View', 'View'),
+        ];
+
+        expect(findDuplicateCommandHotkeys(items, {
+            'view.compare': 'Cmd+1',
+        })).toEqual([
+            {
+                shortcut: 'Cmd+1',
+                commandIds: ['view.grid', 'view.compare'],
+                titles: ['Grid View', 'Compare View'],
+            },
+        ]);
+    });
+
+    it('includes collection workflow commands', () => {
+        resetCommandContext();
+        const ids = getCommandPaletteItems('commands').map(i => i.id);
+
+        expect(ids).toContain('collection.create-from-selection');
+        expect(ids).toContain('collection.create-from-unselected');
+        expect(ids).toContain('collection.toggle-collect-mode');
+        expect(ids).toContain('collection.add-focused-to-collect-target');
+    });
+
+    it('disables collect-focused outside collect mode', () => {
+        resetCommandContext();
+        images.set([{
+            image: { id: 'img-1' },
+            path: '/tmp/img-1.png',
+            thumbnail_path: null,
+            selection: null,
+        } as never]);
+
+        const command = getCommandPaletteItems('commands')
+            .find(i => i.id === 'collection.add-focused-to-collect-target');
+
+        expect(command?.disabled).toBe(true);
+    });
+
+    it('enables collect-focused with a target and focused image', () => {
+        resetCommandContext();
+        collectMode.set(true);
+        collectModeTarget.set('col-1');
+        images.set([{
+            image: { id: 'img-1' },
+            path: '/tmp/img-1.png',
+            thumbnail_path: null,
+            selection: null,
+        } as never]);
+
+        const command = getCommandPaletteItems('commands')
+            .find(i => i.id === 'collection.add-focused-to-collect-target');
+
+        expect(command?.disabled).toBe(false);
     });
 });

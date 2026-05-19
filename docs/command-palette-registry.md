@@ -20,6 +20,7 @@ interface CommandPaletteItem {
   keywords?: string[];
   defaultShortcut?: string;
   disabled?: boolean;
+  when?: () => boolean;
   run: () => void | Promise<void>;
 }
 ```
@@ -29,6 +30,7 @@ Rules:
 - `id` is stable and dot-namespaced, for example `app.search`, `view.grid`, `image.rating.5`, `scope.collection.<id>`.
 - `title`, `subtitle`, `category`, and `keywords` are searchable.
 - `kind: 'destination'` is used for navigation targets such as folders, collections, smart collections, and all images.
+- `when` hides a command entirely when the current context does not apply.
 - `disabled` keeps unavailable commands visible when useful, but prevents execution.
 - `run` is the only execution entry point; native menu handlers, keyboard handlers, context menus, and future UI rows should delegate to the same command implementation once migrated.
 
@@ -114,3 +116,21 @@ Shortcut handling rules:
 ## First Implementation Boundary
 
 `imageview-zu0.2` should build the shared registry UI and wire palette open/close behavior. It should not rewrite every command surface in one pass. The safer order is: open palette shortcuts, registry search/pins/recents/hotkey capture, then gradual migration of menu, context menu, sidebar, and AI/batch actions.
+
+## Current Coverage For `imageview-zu0.2`
+
+Represented in the registry:
+
+- view switching: `view.*`
+- sidebar and zen toggles: `app.toggle-sidebar`, `app.toggle-zen`
+- undo/redo: `edit.undo`, `edit.redo`
+- trash/delete: `image.trash`, `image.delete-permanently`
+- rating/decision: `image.rating.*`, `image.decision.*`
+- settings/search: `app.settings`, `app.search`
+- collection workflows: `collection.create-from-selection`, `collection.create-from-unselected`, `collection.toggle-collect-mode`, `collection.add-focused-to-collect-target`
+
+Deferred with reasons:
+
+- import files/folder: still owned by `src/lib/menu.ts` and `Sidebar.svelte`; moving it into the registry should first extract one shared import-dialog service so native menu, sidebar, and palette do not fork file-dialog/import/focus behavior.
+- full context menu migration: should happen after command contexts can carry explicit image/selection targets instead of relying only on the globally focused image.
+- AI/batch commands: should be exposed through job-aware command wrappers so long-running work has progress, cancellation, and disabled states.

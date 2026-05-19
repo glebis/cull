@@ -6,11 +6,15 @@ import {
     activeFolder,
     activeSession,
     activeSmartCollection,
+    collectMode,
+    collectModeTarget,
     collections,
     commandPaletteMode,
     commandPaletteOpen,
     focusedIndex,
     images,
+    requestCollectionTarget,
+    requestTextInput,
     searchOpen,
     selectedIds,
     sessionCanvases,
@@ -21,6 +25,7 @@ import {
     sidebarVisible,
     smartCollections,
     folders,
+    statusHint,
     viewMode,
     zenMode,
     navigateBack,
@@ -29,7 +34,7 @@ import {
     type ViewMode,
 } from './stores';
 import { invalidateImageCache, loadAllImages, loadImagesForCurrentScope } from './image-loading';
-import { redo, setDecision, setRating, undo } from './api';
+import { addToCollection, createCollection, listCollections, redo, setDecision, setRating, undo } from './api';
 
 export type CommandPaletteItemKind = 'command' | 'destination';
 
@@ -42,6 +47,7 @@ export interface CommandPaletteItem {
     keywords?: string[];
     defaultShortcut?: string;
     disabled?: boolean;
+    when?: () => boolean;
     run: () => void | Promise<void>;
 }
 
@@ -50,6 +56,12 @@ export interface CommandPaletteSortOptions {
     pinnedIds?: string[];
     recentIds?: string[];
     hotkeys?: Record<string, string>;
+}
+
+export interface CommandHotkeyDuplicate {
+    shortcut: string;
+    commandIds: string[];
+    titles: string[];
 }
 
 export const COMMAND_PALETTE_SHORTCUT_POLICY = {
@@ -254,9 +266,90 @@ function focusedImageTitle(): string {
     return image?.path.split('/').pop() ?? 'focused image';
 }
 
+function selectedImageIds(inverse = false): string[] {
+    const selected = get(selectedIds);
+    return get(images)
+        .filter(item => inverse ? !selected.has(item.image.id) : selected.has(item.image.id))
+        .map(item => item.image.id);
+}
+
+async function createCollectionFromImageSet(inverse = false) {
+    const imageIds = selectedImageIds(inverse);
+    if (imageIds.length === 0) {
+        statusHint.set(inverse ? 'No unselected images' : 'Select images first');
+        setTimeout(() => statusHint.set(null), 2000);
+        return;
+    }
+
+    const name = await requestTextInput({
+        title: inverse ? 'Create Collection from Unselected' : 'Create Collection from Selection',
+        label: 'Collection name',
+        description: `${imageIds.length} images will be added.`,
+        placeholder: 'Collection name',
+        confirmLabel: 'Create',
+    });
+    if (!name?.trim()) return;
+
+    const collectionId = await createCollection(name.trim());
+    await addToCollection(collectionId, imageIds);
+    collections.set(await listCollections());
+    statusHint.set(`Created "${name.trim()}" with ${imageIds.length} images`);
+    setTimeout(() => statusHint.set(null), 2000);
+}
+
+async function toggleCollectMode() {
+    if (get(collectMode)) {
+        collectMode.set(false);
+        collectModeTarget.set(null);
+        statusHint.set(null);
+        return;
+    }
+
+    const availableCollections = get(collections);
+    const target = await requestCollectionTarget({
+        title: 'Collect Mode',
+        description: availableCollections.length > 0
+            ? 'Choose the collection that Space will add images to, or create a new one.'
+            : 'Create a collection that Space will add images to.',
+        collections: availableCollections,
+        confirmLabel: 'Start',
+    });
+    if (!target) return;
+
+    let targetId: string;
+    if (target.type === 'existing') {
+        targetId = target.collectionId;
+    } else {
+        targetId = await createCollection(target.name);
+        collections.set(await listCollections());
+    }
+
+    collectMode.set(true);
+    collectModeTarget.set(targetId);
+    const collectionName = get(collections).find(item => item[0] === targetId)?.[1] ?? '';
+    statusHint.set(`Collect mode: Space to add, B to exit [${collectionName}]`);
+}
+
+async function addFocusedImageToCollectTarget() {
+    const target = get(collectModeTarget);
+    const image = get(images)[get(focusedIndex)];
+    if (!target || !image) return;
+
+    await addToCollection(target, [image.image.id]);
+    invalidateImageCache();
+    collections.set(await listCollections());
+    if (get(activeCollection) === target) {
+        await loadImagesForCurrentScope({ resetFocus: false, force: true });
+    }
+    statusHint.set('Added to collection. Space for next, B to exit');
+}
+
 function commandItems(): CommandPaletteItem[] {
     const hasImage = Boolean(get(images)[get(focusedIndex)]);
     const selectedCount = get(selectedIds).size;
+    const unselectedCount = Math.max(0, get(images).length - selectedCount);
+    const collectTarget = get(collectModeTarget);
+    const collectTargetName = get(collections).find(item => item[0] === collectTarget)?.[1] ?? 'collection';
 
     return [
         {
@@ -370,6 +463,45 @@ function commandItems(): CommandPaletteItem[] {
             keywords: ['deselect'],
             disabled: selectedCount === 0,
             run: () => selectedIds.set(new Set()),
+        },
+        {
+            id: 'collection.create-from-selection',
+            title: 'Create Collection from Selection',
+            subtitle: selectedCount === 0 ? 'Select images first' : `${selectedCount} selected`,
+            category: 'Collections',
+            kind: 'command',
+            keywords: ['collection', 'selected', 'save'],
+            disabled: selectedCount === 0,
+            run: () => createCollectionFromImageSet(false),
+        },
+        {
+            id: 'collection.create-from-unselected',
+            title: 'Create Collection from Unselected',
+            subtitle: unselectedCount === 0 ? 'No unselected images' : `${unselectedCount} unselected`,
+            category: 'Collections',
+            kind: 'command',
+            keywords: ['collection', 'inverse', 'unselected'],
+            disabled: unselectedCount === 0,
+            run: () => createCollectionFromImageSet(true),
+        },
+        {
+            id: 'collection.toggle-collect-mode',
+            title: get(collectMode) ? 'Exit Collect Mode' : 'Start Collect Mode',
+            subtitle: get(collectMode) ? `Collecting into ${collectTargetName}` : 'Choose a collection target for Space',
+            category: 'Collections',
+            kind: 'command',
+            keywords: ['collect', 'collection', 'space'],
+            run: toggleCollectMode,
+        },
+        {
+            id: 'collection.add-focused-to-collect-target',
+            title: 'Add Focused Image to Collect Target',
+            subtitle: collectTarget ? collectTargetName : 'Start collect mode first',
+            category: 'Collections',
+            kind: 'command',
+            keywords: ['collect', 'append', 'collection'],
+            disabled: !hasImage || !collectTarget,
+            run: addFocusedImageToCollectTarget,
         },
         {
             id: 'image.trash',
@@ -491,6 +623,10 @@ export function getCommandPaletteItems(mode: CommandPaletteMode = get(commandPal
     return [...commands, ...destinationItems()];
 }
 
+export function isCommandPaletteItemVisible(item: CommandPaletteItem): boolean {
+    return item.when ? item.when() : true;
+}
+
 function normalize(value: string): string {
     return value.toLowerCase().replace(/[^a-z0-9/]+/g, ' ').trim();
 }
@@ -550,6 +686,7 @@ export function sortCommandPaletteItems(
     const mode = options.mode ?? 'all';
 
     return items
+        .filter(item => isCommandPaletteItemVisible(item))
         .filter(item => mode === 'all' || item.kind === 'command')
         .map(item => ({
             item,
@@ -630,8 +767,30 @@ export function canAssignCommandHotkey(
     return !shortcut || getShortcutConflict(shortcut, currentItemId, items, hotkeys) === null;
 }
 
+export function findDuplicateCommandHotkeys(
+    items: CommandPaletteItem[],
+    hotkeys: Record<string, string>,
+): CommandHotkeyDuplicate[] {
+    const byShortcut = new Map<string, CommandPaletteItem[]>();
+    for (const item of items) {
+        const shortcut = shortcutForItem(item, hotkeys);
+        if (!shortcut) continue;
+        const group = byShortcut.get(shortcut) ?? [];
+        group.push(item);
+        byShortcut.set(shortcut, group);
+    }
+
+    return [...byShortcut.entries()]
+        .filter(([, group]) => group.length > 1)
+        .map(([shortcut, group]) => ({
+            shortcut,
+            commandIds: group.map(item => item.id),
+            titles: group.map(item => item.title),
+        }));
+}
+
 export async function runCommandPaletteItem(item: CommandPaletteItem) {
-    if (item.disabled) return;
+    if (item.disabled || !isCommandPaletteItemVisible(item)) return;
     await item.run();
 }
 
@@ -639,6 +798,7 @@ export function commandForKeyboardEvent(event: KeyboardEvent): CommandPaletteIte
     const hotkeys = readCommandHotkeys();
     const items = getCommandPaletteItems('all');
     const item = items.find(candidate => {
+        if (!isCommandPaletteItemVisible(candidate)) return false;
         const shortcut = hotkeys[candidate.id];
         return shortcut ? eventMatchesShortcut(event, shortcut) : false;
     });
