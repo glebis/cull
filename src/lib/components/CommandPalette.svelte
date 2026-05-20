@@ -45,6 +45,8 @@
     let hotkeyTargetId = $state<string | null>(null);
     let capturedShortcut = $state('');
 
+    const COMMAND_PALETTE_RESULTS_ID = 'command-palette-results';
+
     let visibleItems = $derived(sortCommandPaletteItems(items, query, {
         mode: $commandPaletteMode,
         pinnedIds,
@@ -219,6 +221,15 @@
         return shortcutForItem(item, hotkeys);
     }
 
+    function commandOptionId(id: string): string {
+        let hash = 0;
+        for (const char of id) {
+            hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+        }
+        const slug = id.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'item';
+        return `command-palette-option-${slug.slice(0, 48)}-${Math.abs(hash).toString(36)}`;
+    }
+
     $effect(() => {
         if ($commandPaletteOpen) {
             query = '';
@@ -291,16 +302,28 @@
                 class="palette-input"
                 bind:value={query}
                 placeholder={$commandPaletteMode === 'commands' ? 'Run a command' : 'Run a command or jump to a scope'}
+                role="combobox"
                 aria-label="Command palette query"
+                aria-autocomplete="list"
+                aria-expanded={visibleItems.length > 0}
+                aria-haspopup="listbox"
+                aria-controls={COMMAND_PALETTE_RESULTS_ID}
+                aria-activedescendant={selectedItem ? commandOptionId(selectedItem.id) : undefined}
                 onkeydown={handleInputKeydown}
             />
 
-            <div class="palette-results" role="listbox" aria-label="Command palette results">
+            <div
+                id={COMMAND_PALETTE_RESULTS_ID}
+                class="palette-results"
+                role="listbox"
+                aria-label="Command palette results"
+            >
                 {#if visibleItems.length === 0}
                     <div class="empty-result">No matches</div>
                 {:else}
                     {#each visibleItems as item, index (item.id)}
                         <button
+                            id={commandOptionId(item.id)}
                             type="button"
                             class="palette-row"
                             class:selected={index === selectedIndex}
