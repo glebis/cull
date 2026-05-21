@@ -11,7 +11,7 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 | App menu | Pass | About, Settings, Services, Hide, Hide Others, Show All, Quit are present. Settings opens the in-app settings panel. |
 | File menu | Pass | Open File and Open Folder are wired to import flows. Close Window uses the native predefined item. |
 | Edit menu | Pass | Undo and Redo are wired to Cull's undo stack. Cut, Copy, Paste, Select All use native predefined items. Deselect All clears image selection. |
-| View menu | Pass | View labels and `Cmd+1` through `Cmd+7` match the tab bar and keyboard handler. |
+| View menu | Pass | View labels and shortcuts match the tab bar and keyboard handler. |
 | Window menu | Pass | Minimize, Zoom, and Bring All to Front use native predefined items. |
 | Help menu | Pass | Cull Help opens the repository README. |
 | Tray menu | Partial | Show Window and Quit are wired. Stats and MCP status are display-only placeholders until dynamic tray status refresh is implemented. |
@@ -58,11 +58,11 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 | Canvas | `Cmd+4` | `view_canvas` | Navigates to Canvas | Pass |
 | Lineage | `Cmd+5` | `view_lineage` | Navigates to Lineage | Pass |
 | Embedding Explorer | `Cmd+6` | `view_embeddings` | Navigates to Embedding Explorer | Pass |
-| Export | `Cmd+7` | `view_export` | Navigates to Export | Pass |
+| Export | `Cmd+0` | `view_export` | Navigates to Export | Pass |
 | Toggle Sidebar | `Cmd+B` | `toggle_sidebar` | Toggles sidebar visibility | Pass |
 | Zoom In | `Cmd++` | `zoom_in` | Increases grid thumbnail size and Loupe scale | Pass |
 | Zoom Out | `Cmd+-` | `zoom_out` | Decreases grid thumbnail size and Loupe scale | Pass |
-| Actual Size | `Cmd+0` | `actual_size` | Resets Loupe scale to 1x | Pass |
+| Actual Size | none | `actual_size` | Resets Loupe scale to 1x | Pass |
 | Enter Full Screen | native | predefined fullscreen | Tauri native | Pass |
 
 ## Window Menu

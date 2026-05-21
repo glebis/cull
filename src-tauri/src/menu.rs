@@ -133,7 +133,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         "view_export",
         "Export",
         true,
-        Some::<&str>("CmdOrCtrl+7"),
+        Some::<&str>("CmdOrCtrl+0"),
     )?)?;
     view_menu.append(&PredefinedMenuItem::separator(app)?)?;
     view_menu.append(&MenuItem::with_id(
@@ -163,7 +163,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         "actual_size",
         "Actual Size",
         true,
-        Some::<&str>("CmdOrCtrl+0"),
+        None::<&str>,
     )?)?;
     view_menu.append(&PredefinedMenuItem::separator(app)?)?;
     view_menu.append(&PredefinedMenuItem::fullscreen(app, None)?)?;

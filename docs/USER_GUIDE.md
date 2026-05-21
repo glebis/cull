@@ -43,9 +43,9 @@ Cull has seven primary views:
 | `Cmd+4` | Canvas | Arrange selected images spatially |
 | `Cmd+5` | Lineage | Inspect generation runs and image relationships |
 | `Cmd+6` | Embedding Explorer | Explore visual clusters and similarity |
-| `Cmd+7` | Export | Build exports from selected or collected images |
+| `Cmd+0` | Export | Build exports from selected or collected images |
 
-The same view order is used by the tab bar, keyboard handler, and native View menu.
+The same view shortcuts are used by the tab bar, keyboard handler, and native View menu.
 
 ## Review And Curate
 

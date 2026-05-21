@@ -10,7 +10,7 @@
         { id: 'canvas', label: 'Canvas', key: '⌘4', icon: '▦' },
         { id: 'lineage', label: 'Lineage', key: '⌘5', icon: '⎇' },
         { id: 'embeddings', label: 'Embeddings', key: '⌘6', icon: '⁘' },
-        { id: 'export', label: 'Export', key: '⌘7', icon: '⤓' },
+        { id: 'export', label: 'Export', key: '⌘0', icon: '⤓' },
     ];
 
     let size = $state(160);

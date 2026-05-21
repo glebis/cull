@@ -146,6 +146,17 @@ describe('command palette helpers', () => {
         ]);
     });
 
+    it('assigns Export View to Cmd+0 without reserving Cmd+7', () => {
+        resetCommandContext();
+        const items = getCommandPaletteItems('commands');
+        const exportView = items.find(i => i.id === 'view.export');
+
+        expect(exportView?.defaultShortcut).toBe('Cmd+0');
+        expect(getShortcutConflict('Cmd+0', 'view.grid', items, {})).toBe('Export View');
+        expect(getShortcutConflict('Cmd+7', 'view.grid', items, {})).toBeNull();
+        expect(findDuplicateCommandHotkeys(items, {})).toEqual([]);
+    });
+
     it('includes collection workflow commands', () => {
         resetCommandContext();
         const ids = getCommandPaletteItems('commands').map(i => i.id);

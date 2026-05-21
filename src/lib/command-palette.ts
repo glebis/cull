@@ -90,7 +90,7 @@ const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
     'Cmd+4': 'Canvas view',
     'Cmd+5': 'Lineage view',
     'Cmd+6': 'Embeddings view',
-    'Cmd+7': 'Export view',
+    'Cmd+0': 'Export view',
     'Cmd+8': 'Tinder view',
     'Tab': 'Cycle to next view',
     'Shift+Tab': 'Cycle to previous view',
@@ -105,7 +105,7 @@ const VIEW_COMMANDS: Array<{ mode: ViewMode; title: string; subtitle: string; sh
     { mode: 'canvas', title: 'Canvas View', subtitle: 'Arrange selected images spatially', shortcut: 'Cmd+4' },
     { mode: 'lineage', title: 'Lineage View', subtitle: 'Review related generations', shortcut: 'Cmd+5' },
     { mode: 'embeddings', title: 'Embeddings View', subtitle: 'Explore visual clusters', shortcut: 'Cmd+6' },
-    { mode: 'export', title: 'Export View', subtitle: 'Prepare images for publishing', shortcut: 'Cmd+7' },
+    { mode: 'export', title: 'Export View', subtitle: 'Prepare images for publishing', shortcut: 'Cmd+0' },
     { mode: 'tinder', title: 'Tinder View', subtitle: 'Fast accept or reject triage', shortcut: 'Cmd+8' },
 ];
 

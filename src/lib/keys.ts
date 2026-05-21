@@ -28,7 +28,7 @@ const VIEW_MODE_KEYS: Record<string, ViewMode> = {
     '4': 'canvas',
     '5': 'lineage',
     '6': 'embeddings',
-    '7': 'export',
+    '0': 'export',
     '8': 'tinder',
 };
 
@@ -349,14 +349,7 @@ export function handleKeydown(e: KeyboardEvent) {
         return;
     }
 
-    // Cmd+0: actual size (reset loupe zoom)
-    if (e.key === '0' && e.metaKey && !e.ctrlKey && !e.altKey) {
-        e.preventDefault();
-        resetLoupeZoom();
-        return;
-    }
-
-    // View mode switching with Cmd+number (⌘1-7)
+    // View mode switching with Cmd+number
     if (VIEW_MODE_KEYS[e.key] && e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         navigateTo(VIEW_MODE_KEYS[e.key]);

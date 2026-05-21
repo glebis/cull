@@ -187,13 +187,13 @@ cull://contact-sheet?folder=./photos&columns=4&output=/tmp/sheet.png
 
 | Key | View |
 |-----|------|
-| `1` | Grid |
-| `2` | Loupe |
-| `3` | Compare |
-| `4` | Canvas |
-| `5` | Lineage |
-| `6` | Embedding Explorer |
-| `7` | Export |
+| `Cmd+1` | Grid |
+| `Cmd+2` | Loupe |
+| `Cmd+3` | Compare |
+| `Cmd+4` | Canvas |
+| `Cmd+5` | Lineage |
+| `Cmd+6` | Embedding Explorer |
+| `Cmd+0` | Export |
 
 ### Curation
 
