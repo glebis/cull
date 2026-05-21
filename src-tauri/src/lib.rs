@@ -17,7 +17,8 @@ mod tray;
 mod watcher;
 
 use crate::commands::deeplink::{
-    emit_open_params, file_path_from_url, open_params_for_file_paths, parse_deep_link,
+    emit_open_params, file_path_from_url, open_params_for_drag_drop_paths,
+    open_params_for_file_paths, parse_deep_link,
 };
 use crate::db_core::db::Database;
 use crate::db_core::detection::DetectionEngine;
@@ -595,11 +596,7 @@ pub fn run() {
             {
                 match drag_event {
                     tauri::DragDropEvent::Enter { paths, .. } => {
-                        let has_images = paths
-                            .iter()
-                            .any(|p| crate::extensions::is_image_path(p, false));
-                        let has_dirs = paths.iter().any(|p| p.is_dir());
-                        if has_images || has_dirs {
+                        if !open_params_for_drag_drop_paths(paths).is_empty() {
                             let _ = app.emit("drag-hover", true);
                         }
                     }
@@ -609,69 +606,8 @@ pub fn run() {
                     tauri::DragDropEvent::Drop { paths, .. } => {
                         let _ = app.emit("drag-hover", false);
 
-                        let dirs: Vec<&PathBuf> = paths.iter().filter(|p| p.is_dir()).collect();
-                        let files: Vec<String> = paths
-                            .iter()
-                            .filter(|p| !p.is_dir() && crate::extensions::is_image_path(p, false))
-                            .map(|p| p.to_string_lossy().into_owned())
-                            .collect();
-
-                        if dirs.len() == 1 && files.is_empty() {
-                            let params = crate::commands::deeplink::OpenParams {
-                                path: None,
-                                paths: None,
-                                folder: Some(dirs[0].to_string_lossy().into_owned()),
-                                view: Some("grid".to_string()),
-                                size: None,
-                                zoom: None,
-                                fullscreen: None,
-                                focus: None,
-                                image_id: None,
-                                gap: None,
-                            };
+                        for params in open_params_for_drag_drop_paths(paths) {
                             let _ = emit_open_params(app, params);
-                        } else if !files.is_empty() {
-                            let params = crate::commands::deeplink::OpenParams {
-                                path: if files.len() == 1 {
-                                    Some(files[0].clone())
-                                } else {
-                                    None
-                                },
-                                paths: if files.len() > 1 {
-                                    Some(files.clone())
-                                } else {
-                                    None
-                                },
-                                folder: None,
-                                view: Some(
-                                    if files.len() == 1 { "loupe" } else { "grid" }.to_string(),
-                                ),
-                                size: None,
-                                zoom: None,
-                                fullscreen: None,
-                                focus: None,
-                                image_id: None,
-                                gap: None,
-                            };
-                            let _ = emit_open_params(app, params);
-                        }
-
-                        for dir in &dirs {
-                            if !files.is_empty() || dirs.len() > 1 {
-                                let params = crate::commands::deeplink::OpenParams {
-                                    path: None,
-                                    paths: None,
-                                    folder: Some(dir.to_string_lossy().into_owned()),
-                                    view: None,
-                                    size: None,
-                                    zoom: None,
-                                    fullscreen: None,
-                                    focus: None,
-                                    image_id: None,
-                                    gap: None,
-                                };
-                                let _ = emit_open_params(app, params);
-                            }
                         }
                     }
                     _ => {}

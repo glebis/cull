@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex, OnceLock,
@@ -60,6 +61,51 @@ pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams>
         image_id: None,
         gap: None,
     })
+}
+
+pub fn open_params_for_drag_drop_paths(paths: &[PathBuf]) -> Vec<OpenParams> {
+    let dirs: Vec<String> = paths
+        .iter()
+        .filter(|p| p.is_dir())
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    let files: Vec<String> = paths
+        .iter()
+        .filter(|p| !p.is_dir() && crate::extensions::is_image_path(p, false))
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+
+    if dirs.len() == 1 && files.is_empty() {
+        return vec![OpenParams {
+            folder: Some(dirs[0].clone()),
+            view: Some("grid".to_string()),
+            ..OpenParams::default()
+        }];
+    }
+
+    let mut params = Vec::new();
+    if !files.is_empty() {
+        let file_count = files.len();
+        params.push(OpenParams {
+            path: if file_count == 1 {
+                Some(files[0].clone())
+            } else {
+                None
+            },
+            paths: if file_count > 1 { Some(files) } else { None },
+            view: Some(if file_count == 1 { "loupe" } else { "grid" }.to_string()),
+            ..OpenParams::default()
+        });
+    }
+
+    if !params.is_empty() || dirs.len() > 1 {
+        params.extend(dirs.into_iter().map(|folder| OpenParams {
+            folder: Some(folder),
+            ..OpenParams::default()
+        }));
+    }
+
+    params
 }
 
 pub fn file_path_from_url(url: &str) -> Option<String> {
@@ -209,5 +255,83 @@ mod tests {
         assert_eq!(params.path.as_deref(), Some("/tmp/image.png"));
         assert_eq!(params.view.as_deref(), Some("loupe"));
         assert!(params.paths.is_none());
+    }
+
+    #[test]
+    fn drag_drop_single_image_opens_loupe() {
+        let dir = tempfile::tempdir().unwrap();
+        let image = dir.path().join("image.jpg");
+        std::fs::write(&image, b"not a real jpeg").unwrap();
+
+        let params = open_params_for_drag_drop_paths(&[image.clone()]);
+
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].path, Some(image.to_string_lossy().into_owned()));
+        assert_eq!(params[0].paths, None);
+        assert_eq!(params[0].folder, None);
+        assert_eq!(params[0].view.as_deref(), Some("loupe"));
+    }
+
+    #[test]
+    fn drag_drop_multiple_images_opens_grid_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first.jpg");
+        let second = dir.path().join("second.png");
+        std::fs::write(&first, b"image").unwrap();
+        std::fs::write(&second, b"image").unwrap();
+
+        let params = open_params_for_drag_drop_paths(&[first.clone(), second.clone()]);
+
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].path, None);
+        assert_eq!(
+            params[0].paths,
+            Some(vec![
+                first.to_string_lossy().into_owned(),
+                second.to_string_lossy().into_owned(),
+            ])
+        );
+        assert_eq!(params[0].folder, None);
+        assert_eq!(params[0].view.as_deref(), Some("grid"));
+    }
+
+    #[test]
+    fn drag_drop_single_folder_opens_folder_grid() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("Library");
+        std::fs::create_dir(&folder).unwrap();
+
+        let params = open_params_for_drag_drop_paths(&[folder.clone()]);
+
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].path, None);
+        assert_eq!(params[0].paths, None);
+        assert_eq!(
+            params[0].folder,
+            Some(folder.to_string_lossy().into_owned())
+        );
+        assert_eq!(params[0].view.as_deref(), Some("grid"));
+    }
+
+    #[test]
+    fn drag_drop_mixed_files_and_folders_keeps_both_import_actions() {
+        let dir = tempfile::tempdir().unwrap();
+        let image = dir.path().join("image.webp");
+        let folder = dir.path().join("Folder");
+        let ignored = dir.path().join("notes.txt");
+        std::fs::write(&image, b"image").unwrap();
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(&ignored, b"text").unwrap();
+
+        let params = open_params_for_drag_drop_paths(&[image.clone(), folder.clone(), ignored]);
+
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].path, Some(image.to_string_lossy().into_owned()));
+        assert_eq!(params[0].view.as_deref(), Some("loupe"));
+        assert_eq!(
+            params[1].folder,
+            Some(folder.to_string_lossy().into_owned())
+        );
+        assert_eq!(params[1].view, None);
     }
 }

@@ -9,7 +9,7 @@ Terminal-inspired, keyboard-first image viewer for AI-generated image workflows.
 - **Keyboard-first** — vim-style navigation, every action reachable without mouse
 - **AI-native** — CLIP embeddings, UMAP visualization, semantic search, YOLO detection
 - **Agent-friendly** — every GUI operation has a CLI equivalent; composable pipelines via stdin/stdout
-- **macOS-integrated** — Open With, drag-and-drop, Quick Look, Share sheet, Services menu
+- **macOS-integrated** — Open With, drag-and-drop, native menus, Share sheet, Reveal in Finder
 - **Non-destructive** — SQLite library with SHA-256 dedup; originals are never modified
 
 ## Tech Stack
@@ -51,6 +51,8 @@ Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 | Native macOS menu bar (File/Edit/View/Window/Help) | Done |
 | Drag-and-drop from Finder | Done |
 | File type associations (Open With in Finder) | Done |
+| Share sheet integration | Done |
+| Reveal in Finder | Done |
 | Single-instance with deep link forwarding | Done |
 | Multi-window support | Done |
 | Dark terminal aesthetic | Done |
@@ -91,8 +93,6 @@ CLI module and output standards live in [docs/agent-cli-standards.md](docs/agent
 
 **OS Integration:**
 - [ ] Quick Look extension (Spacebar preview in Finder)
-- [ ] Share sheet (outbound sharing to other apps)
-- [ ] Reveal in Finder
 - [ ] URL scheme expansion (action verbs: import, export, search, contact-sheet)
 
 **Viewing & Metadata:**
@@ -142,7 +142,7 @@ CLI module and output standards live in [docs/agent-cli-standards.md](docs/agent
 - [ ] Perceptual hashing for near-duplicate detection
 - [ ] Basic image stats on import (aspect ratio, transparency, bit depth)
 
-## CLI (Planned)
+## CLI (Planned Full Parity)
 
 Every GUI operation will have a CLI equivalent:
 

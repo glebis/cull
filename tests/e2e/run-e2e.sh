@@ -51,83 +51,67 @@ ab tab new "$URL" > /dev/null
 sleep 3
 get_page
 
-has "SMART\|5 Stars" && pass "Smart collections visible" || fail "No smart collections"
-has "textbox.*landscape" && pass "Command bar present" || fail "No command bar"
-has "All Images" && pass "All Images button present" || fail "No All Images"
+has "Grid" && pass "Grid tab visible" || fail "No Grid tab"
+has "All Images" && pass "All Images scope visible" || fail "No All Images"
+has "/ to search" && pass "Search trigger visible" || fail "No search trigger"
+has "Import Folder" && pass "Import Folder action visible" || fail "No Import Folder action"
+has "AI MODELS" && pass "AI model controls visible" || fail "No AI model controls"
 ab screenshot "$SHOTS/01-loaded.png" > /dev/null
 echo ""
 
-# ── 2: NL parsing ──
-log "Command bar parsing"
-INPUT=$(echo "$PAGE" | grep 'textbox.*landscape' | grep -oE 'e[0-9]+' | head -1)
-if [ -n "$INPUT" ]; then
-    ab click "@$INPUT" > /dev/null
+# ── 2: Search expands ──
+log "Search expands"
+SEARCH=$(echo "$PAGE" | grep '"/ to search"' | grep -oE 'e[0-9]+' | head -1)
+if [ -n "$SEARCH" ]; then
+    ab click "@$SEARCH" > /dev/null
     sleep 1
-    # Use native input setter + events to work with Svelte's bind:value
-    ab eval "const el = document.querySelector('.command-input'); const nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; nativeSet.call(el, 'portrait midjourney 4 stars'); el.dispatchEvent(new Event('input', {bubbles:true})); el.dispatchEvent(new Event('change', {bubbles:true}));" > /dev/null
-    sleep 1
-    # Dispatch keydown Enter
-    ab eval "document.querySelector('.command-input').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', code:'Enter', bubbles:true}));" > /dev/null
-    sleep 2
     get_page
-    has "Parsed\|parsed\|Orientation\|orientation\|rule" && pass "Rules shown" || fail "No rules after Enter"
-    has "Apply" && pass "Apply button shown" || fail "No Apply button"
-    ab screenshot "$SHOTS/02-parsed.png" > /dev/null
+    has "searchbox.*Search images" && pass "Search box appeared" || fail "No search box"
+    has "Switch dictation language" && pass "Dictation language control present" || fail "No dictation language control"
+    ab screenshot "$SHOTS/02-search.png" > /dev/null
 else
-    fail "Could not find command input"
+    fail "Could not find search trigger"
 fi
 echo ""
 
-# ── 3: Apply ──
-log "Apply filter"
-APPLY=$(echo "$PAGE" | grep -i 'Apply' | grep -oE 'e[0-9]+' | head -1)
-if [ -n "$APPLY" ]; then
-    ab click "@$APPLY" > /dev/null
-    sleep 3
+# ── 3: Embedding Explorer ──
+log "Embedding Explorer provider UI"
+EMBED=$(echo "$PAGE" | grep 'Embeddings' | grep -oE 'e[0-9]+' | head -1)
+if [ -n "$EMBED" ]; then
+    ab click "@$EMBED" > /dev/null
+    sleep 2
     get_page
-    has "images" && pass "Match count shown" || fail "No match count"
-    has "Save Collection\|save-btn\|Save" && pass "Save button visible" || fail "No Save button"
-    ab screenshot "$SHOTS/03-applied.png" > /dev/null
+    has "Visual embeddings" && pass "Embedding canvas landmark present" || fail "No embedding canvas landmark"
+    has "CLIP" && pass "CLIP provider visible" || fail "No CLIP provider"
+    has "DINOv2" && pass "DINOv2 provider visible" || fail "No DINOv2 provider"
+    has "Gemini" && pass "Gemini provider visible" || fail "No Gemini provider"
+    ab screenshot "$SHOTS/03-embeddings.png" > /dev/null
 else
-    fail "Could not find Apply button"
+    fail "Could not find Embeddings tab"
 fi
 echo ""
 
-# ── 4: Save collection ──
-log "Save collection"
-SAVE=$(echo "$PAGE" | grep -i "Save Collection" | grep -oE 'e[0-9]+' | head -1)
-if [ -n "$SAVE" ]; then
-    # Use CSS selector — refs go stale between snapshot and click
-    ab eval "document.querySelector('.save-btn').click();" > /dev/null
-    sleep 2
-    get_page
-    has "NAME\|Name\|name-input\|Portrait\|Cancel" && pass "Name bar appeared" || fail "No name bar"
-    ab screenshot "$SHOTS/04-naming.png" > /dev/null
-
-    # Click Save confirm via CSS selector (refs go stale between snapshot and click)
-    ab eval "document.querySelector('.save-confirm-btn').click();" > /dev/null
-    sleep 3
-    get_page
-    has "Saved as\|saved\|saved-toast\|Portrait" && pass "Save confirmation shown" || fail "No save confirmation"
-    ab screenshot "$SHOTS/05-saved.png" > /dev/null
-else
-    fail "Could not find Save button"
-fi
+# ── 4: Embedding controls ──
+log "Embedding controls"
+has "Map" && pass "Map interaction mode visible" || fail "No Map mode"
+has "Stack" && pass "Stack interaction mode visible" || fail "No Stack mode"
+has "Review" && pass "Review interaction mode visible" || fail "No Review mode"
+has "Z PRESET" && pass "Z preset selector visible" || fail "No Z preset selector"
+has "Download CLIP" && pass "Download action visible for missing local model" || fail "No Download CLIP action"
+ab screenshot "$SHOTS/04-embedding-controls.png" > /dev/null
 echo ""
 
-# ── 5: Click preset ──
-log "Click preset collection"
-sleep 3
-get_page
-PRESET=$(echo "$PAGE" | grep -i "5 Stars\|Picks\|Landscape" | grep -oE 'e[0-9]+' | head -1)
-if [ -n "$PRESET" ]; then
-    ab click "@$PRESET" > /dev/null
+# ── 5: Return to grid ──
+log "Return to grid"
+GRID=$(echo "$PAGE" | grep 'Grid' | grep -oE 'e[0-9]+' | head -1)
+if [ -n "$GRID" ]; then
+    ab click "@$GRID" > /dev/null
     sleep 2
     get_page
-    pass "Clicked preset"
-    ab screenshot "$SHOTS/06-preset.png" > /dev/null
+    has "No images loaded\|All Images" && pass "Grid view restored" || fail "Grid view did not restore"
+    ab screenshot "$SHOTS/05-grid.png" > /dev/null
 else
-    fail "No preset found to click"
+    fail "Could not find Grid tab"
 fi
 echo ""
 

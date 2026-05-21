@@ -335,8 +335,8 @@
     .drop-overlay {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.7);
-        border: 3px solid var(--accent, #4a9eff);
+        background: color-mix(in srgb, var(--bg) 72%, transparent);
+        border: 3px solid var(--blue);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -346,9 +346,9 @@
     .drop-label {
         font-size: 18px;
         font-weight: 700;
-        color: var(--accent, #4a9eff);
+        color: var(--blue);
         text-transform: uppercase;
-        letter-spacing: 2px;
+        letter-spacing: 0;
     }
     .main-with-commandbar {
         grid-area: main;
