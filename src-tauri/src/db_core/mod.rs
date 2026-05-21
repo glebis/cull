@@ -6,6 +6,7 @@ pub mod db;
 pub mod detection;
 pub mod embeddings;
 pub mod gemini;
+pub mod image_decode;
 pub mod import;
 pub mod lineage;
 pub mod models;

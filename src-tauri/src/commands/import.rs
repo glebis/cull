@@ -646,19 +646,8 @@ fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
                 let id_refs: Vec<&str> = vec![image_id.as_str()];
                 if let Ok(images) = state.db.get_images_by_ids(&id_refs) {
                     if let Some(img) = images.first() {
-                        let detect_path = if crate::extensions::is_raw_extension(
-                            std::path::Path::new(&img.path)
-                                .extension()
-                                .and_then(|e| e.to_str())
-                                .unwrap_or(""),
-                        ) {
-                            crate::db_core::thumbnails::thumbnail_path(
-                                &app.state::<AppState>().app_data_dir,
-                                image_id,
-                            )
-                        } else {
-                            std::path::PathBuf::from(&img.path)
-                        };
+                        let detect_path =
+                            crate::commands::resolve_image_path_for_ml(img, &state.app_data_dir);
                         let engine = state.detection_engine.lock();
                         if let Ok(detections) = engine.detect(&detect_path) {
                             drop(engine);
@@ -701,19 +690,8 @@ fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
                 let id_refs: Vec<&str> = vec![image_id.as_str()];
                 if let Ok(images) = state.db.get_images_by_ids(&id_refs) {
                     if let Some(img) = images.first() {
-                        let detect_path = if crate::extensions::is_raw_extension(
-                            std::path::Path::new(&img.path)
-                                .extension()
-                                .and_then(|e| e.to_str())
-                                .unwrap_or(""),
-                        ) {
-                            crate::db_core::thumbnails::thumbnail_path(
-                                &app.state::<AppState>().app_data_dir,
-                                image_id,
-                            )
-                        } else {
-                            std::path::PathBuf::from(&img.path)
-                        };
+                        let detect_path =
+                            crate::commands::resolve_image_path_for_ml(img, &state.app_data_dir);
                         let engine = state.safety_engine.lock();
                         if let Ok(detections) = engine.detect(&detect_path) {
                             drop(engine);
@@ -775,6 +753,68 @@ mod tests {
         assert_eq!(summary.analyzed, 1);
         assert_eq!(summary.failed, 0);
         assert!(!summary.cancelled);
+        assert!(db.get_image_quality_metrics(&image_id).unwrap().is_some());
+    }
+
+    #[test]
+    fn imports_bmp_with_dimensions_and_thumbnail() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app_data_dir = tmp.path().join("app-data");
+        std::fs::create_dir(&app_data_dir).unwrap();
+        let image_path = tmp.path().join("sample.bmp");
+        let image = image::ImageBuffer::from_fn(24, 16, |x, y| {
+            let red = (x * 10) as u8;
+            let green = (y * 12) as u8;
+            image::Rgb([red, green, 128])
+        });
+        image.save(&image_path).unwrap();
+
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let image_id = crate::db_core::import::import_file(&db, &image_path, &app_data_dir)
+            .unwrap()
+            .unwrap();
+        let images = db.get_images_by_ids(&[&image_id]).unwrap();
+        let imported = images.first().unwrap();
+
+        assert_eq!(imported.image.width, 24);
+        assert_eq!(imported.image.height, 16);
+        assert!(crate::db_core::thumbnails::thumbnail_path(&app_data_dir, &image_id).exists());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn imports_svg_with_platform_decoder_thumbnail_and_quality() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app_data_dir = tmp.path().join("app-data");
+        std::fs::create_dir(&app_data_dir).unwrap();
+        let image_path = tmp.path().join("poster.svg");
+        std::fs::write(
+            &image_path,
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="48"><rect width="64" height="48" fill="#1a1a2e"/><circle cx="32" cy="24" r="16" fill="#bb9af7"/></svg>"##,
+        )
+        .unwrap();
+
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let image_id = crate::db_core::import::import_file(&db, &image_path, &app_data_dir)
+            .unwrap()
+            .unwrap();
+        let images = db.get_images_by_ids(&[&image_id]).unwrap();
+        let imported = images.first().unwrap();
+
+        assert_eq!(imported.image.width, 64);
+        assert_eq!(imported.image.height, 48);
+        assert!(crate::db_core::thumbnails::thumbnail_path(&app_data_dir, &image_id).exists());
+
+        let summary = analyze_quality_for_imported_images(
+            &db,
+            &app_data_dir,
+            &[image_id.clone()],
+            |_current, _total| {},
+            || false,
+        );
+
+        assert_eq!(summary.analyzed, 1);
+        assert_eq!(summary.failed, 0);
         assert!(db.get_image_quality_metrics(&image_id).unwrap().is_some());
     }
 }

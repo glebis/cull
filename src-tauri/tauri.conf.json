@@ -107,6 +107,11 @@
         "description": "AVIF Image"
       },
       {
+        "ext": ["jxl"],
+        "mimeType": "image/jxl",
+        "description": "JPEG XL Image"
+      },
+      {
         "ext": ["svg"],
         "mimeType": "image/svg+xml",
         "description": "SVG Image"

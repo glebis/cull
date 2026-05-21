@@ -173,7 +173,7 @@ impl DetectionEngine {
         let session_mutex = self.session.as_ref().ok_or("Model not loaded")?;
         let mut session = session_mutex.lock().unwrap();
 
-        let img = image::open(image_path).map_err(|e| format!("Image open error: {}", e))?;
+        let img = crate::db_core::image_decode::decode_image(image_path, false)?.image;
         let (orig_w, orig_h) = (img.width(), img.height());
 
         // Letterbox resize preserving aspect ratio

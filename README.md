@@ -57,9 +57,9 @@ Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 
 ### Supported Formats
 
-Currently: **JPEG, PNG, WebP, GIF**
+Currently: **JPEG, PNG, WebP, GIF, BMP, TIFF, ICO**, plus **HEIC/HEIF, SVG, AVIF, JPEG XL, and PSD on macOS via ImageIO**. RAW preview import is available for CR2, CR3, NEF, ARW, DNG, ORF, RAF, and RW2 when the RAW module is enabled.
 
-Planned: HEIC/HEIF, TIFF, BMP, SVG, AVIF, JPEG XL, RAW (CR2, CR3, NEF, ARW, DNG, ORF, RAF, RW2)
+Still planned: full metadata extraction and non-preview RAW decode for camera formats.
 
 ### Agent CLI
 
@@ -84,7 +84,7 @@ CLI module and output standards live in [docs/agent-cli-standards.md](docs/agent
 - [x] **File type associations** — CFBundleDocumentTypes so app appears in Finder "Open With"
 - [x] **Drag and drop from Finder** — drop files/folders onto the window to import
 - [x] **Native macOS menu bar** — File > Open, Open Folder, Edit, View, Window, Help
-- [ ] **Broad format support** — HEIC, TIFF, BMP, SVG, AVIF, JPEG XL, RAW formats
+- [x] **Broad format support** — HEIC, TIFF, BMP, SVG, AVIF, JPEG XL, RAW preview formats
 - [ ] **Model download UX** — progress bar, pause/resume, manual download option
 
 ### P1 — Power user features

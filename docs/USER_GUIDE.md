@@ -29,7 +29,7 @@ Use **File > Open File...** to import one or more images. A single imported imag
 
 Use **File > Open Folder...** to import a folder. Cull scans recursively and switches the active scope to that folder.
 
-Supported viewing formats in the current app are JPEG, PNG, WebP, and GIF. Additional file associations are registered for future format support, but some formats are still under development.
+Supported import formats are JPEG, PNG, WebP, GIF, BMP, TIFF, and ICO. On macOS, Cull also decodes HEIC/HEIF, SVG, AVIF, JPEG XL, and PSD through ImageIO for thumbnails and analysis. RAW preview import supports CR2, CR3, NEF, ARW, DNG, ORF, RAF, and RW2 when the RAW module is enabled.
 
 ## Navigate Views
 

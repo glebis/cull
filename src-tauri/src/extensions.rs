@@ -2,12 +2,20 @@ use std::path::Path;
 
 pub const BASE_IMAGE_EXTENSIONS: &[&str] = &[
     "jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif", "heic", "heif", "avif", "svg",
-    "ico", "psd",
+    "jxl", "ico", "psd",
 ];
 
 pub const RAW_EXTENSIONS: &[&str] = &["cr2", "cr3", "nef", "arw", "dng", "orf", "raf", "rw2"];
 
-pub const BASE_DECODABLE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif"];
+pub const IMAGE_CRATE_DECODABLE_EXTENSIONS: &[&str] = &[
+    "jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif", "ico",
+];
+
+#[cfg(target_os = "macos")]
+pub const PLATFORM_DECODABLE_EXTENSIONS: &[&str] = &["heic", "heif", "avif", "svg", "jxl", "psd"];
+
+#[cfg(not(target_os = "macos"))]
+pub const PLATFORM_DECODABLE_EXTENSIONS: &[&str] = &[];
 
 pub fn supported_extensions(module_raw: bool) -> Vec<&'static str> {
     let mut exts = BASE_IMAGE_EXTENSIONS.to_vec();
@@ -34,8 +42,23 @@ pub fn is_image_path(path: &Path, module_raw: bool) -> bool {
 
 pub fn is_decodable(ext: &str, module_raw: bool) -> bool {
     let lower = ext.to_lowercase();
-    BASE_DECODABLE_EXTENSIONS.contains(&lower.as_str())
+    IMAGE_CRATE_DECODABLE_EXTENSIONS.contains(&lower.as_str())
+        || is_platform_decodable(&lower)
         || (module_raw && RAW_EXTENSIONS.contains(&lower.as_str()))
+}
+
+pub fn is_platform_decodable(ext: &str) -> bool {
+    let lower = ext.to_lowercase();
+    PLATFORM_DECODABLE_EXTENSIONS.contains(&lower.as_str())
+}
+
+pub fn is_platform_only_decodable(ext: &str) -> bool {
+    let lower = ext.to_lowercase();
+    is_platform_decodable(&lower) && !IMAGE_CRATE_DECODABLE_EXTENSIONS.contains(&lower.as_str())
+}
+
+pub fn should_use_thumbnail_for_ml(ext: &str) -> bool {
+    is_raw_extension(ext) || is_platform_only_decodable(ext)
 }
 
 #[cfg(test)]
@@ -49,6 +72,7 @@ mod tests {
         assert!(exts.contains(&"jpg"));
         assert!(exts.contains(&"png"));
         assert!(exts.contains(&"psd"));
+        assert!(exts.contains(&"jxl"));
         assert!(!exts.contains(&"raf"));
         assert!(!exts.contains(&"cr2"));
     }
@@ -89,6 +113,19 @@ mod tests {
         assert!(!is_decodable("raf", false));
         assert!(is_decodable("raf", true));
         assert!(is_decodable("cr2", true));
-        assert!(!is_decodable("bmp", false));
+        assert!(is_decodable("bmp", false));
+        assert!(is_decodable("tif", false));
+        assert!(is_decodable("ico", false));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_imageio_formats_are_platform_decodable() {
+        assert!(is_decodable("heic", false));
+        assert!(is_decodable("svg", false));
+        assert!(is_decodable("jxl", false));
+        assert!(should_use_thumbnail_for_ml("heif"));
+        assert!(should_use_thumbnail_for_ml("svg"));
+        assert!(!should_use_thumbnail_for_ml("jpg"));
     }
 }

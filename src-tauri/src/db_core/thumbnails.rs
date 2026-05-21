@@ -27,7 +27,7 @@ pub fn generate_thumbnail(
     app_data_dir: &Path,
     image_id: &str,
 ) -> Result<PathBuf, String> {
-    let img = image::open(source_path).map_err(|e| format!("Failed to open image: {}", e))?;
+    let img = crate::db_core::image_decode::decode_image(source_path, false)?.image;
     let thumb_dir = thumbnail_dir(app_data_dir);
 
     let mut current = img;

@@ -35,8 +35,13 @@ pub fn resolve_image_path_for_ml(
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("");
-    if crate::extensions::is_raw_extension(ext) {
-        crate::db_core::thumbnails::thumbnail_path(app_data_dir, &img.image.id)
+    if crate::extensions::should_use_thumbnail_for_ml(ext) {
+        let thumbnail = crate::db_core::thumbnails::thumbnail_path(app_data_dir, &img.image.id);
+        if thumbnail.exists() {
+            thumbnail
+        } else {
+            std::path::PathBuf::from(&img.path)
+        }
     } else {
         std::path::PathBuf::from(&img.path)
     }

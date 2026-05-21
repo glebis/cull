@@ -8,7 +8,7 @@ pub fn analyze_image_quality(
     image_id: &str,
     image_path: &Path,
 ) -> Result<ImageQualityMetrics, String> {
-    let img = image::open(image_path).map_err(|e| format!("Image open error: {}", e))?;
+    let img = crate::db_core::image_decode::decode_image(image_path, false)?.image;
     let img = downsample_for_analysis(&img);
     let gray = img.to_luma8();
     let (width, height) = gray.dimensions();

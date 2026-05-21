@@ -11,7 +11,7 @@ pub fn analyze_image_perceptual_hash(
     image_id: &str,
     image_path: &Path,
 ) -> Result<ImagePerceptualHash, String> {
-    let img = image::open(image_path).map_err(|e| format!("Image open error: {}", e))?;
+    let img = crate::db_core::image_decode::decode_image(image_path, false)?.image;
     Ok(analyze_dynamic_image_perceptual_hash(image_id, &img))
 }
 
