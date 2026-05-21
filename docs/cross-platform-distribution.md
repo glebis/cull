@@ -15,12 +15,13 @@ ImageView is a Tauri 2 desktop app. The practical release path is macOS first, t
 | Linux arm64 | Later | High | Possible, but AppImage/ONNX/runtime testing will take extra CI work. |
 | Android/iOS | Deferred | High | Requires mobile UX and filesystem model redesign. |
 
-The current Tauri config uses `"bundle.targets": "all"` and an updater endpoint under GitHub Releases:
+The current Tauri config uses `"bundle.targets": "all"`, creates updater artifacts, and points the updater at GitHub Releases:
 
 ```json
 {
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all"
   },
   "plugins": {
@@ -33,7 +34,32 @@ The current Tauri config uses `"bundle.targets": "all"` and an updater endpoint 
 }
 ```
 
-The current GitHub release workflow only builds macOS. Add Linux and Windows runners only after the portability checklist below passes locally or in dedicated CI branches.
+The current GitHub release workflow builds macOS Intel and Apple Silicon artifacts. Add Linux and Windows runners only after the portability checklist below passes locally or in dedicated CI branches.
+
+## Current Publish Audit
+
+Status: macOS-first direct-download release path, updated 2026-05-22.
+
+Agent-complete items:
+
+- Tauri updater artifacts are enabled with `bundle.createUpdaterArtifacts = true`, matching the configured `latest.json` endpoint and updater public key.
+- The GitHub release workflow runs the frontend and Rust quality gates before packaging.
+- The release workflow imports a macOS signing certificate and passes Apple notarization credentials plus Tauri updater signing credentials to `tauri-action`.
+- Frontend dependencies were refreshed inside the existing semver ranges, and the remaining `cookie` advisory is pinned to `0.7.2` via npm overrides.
+
+Human-owned release blockers:
+
+- Apple Developer Program membership with authority to create a Developer ID Application certificate.
+- GitHub Actions secrets: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, `KEYCHAIN_PASSWORD`, `TAURI_SIGNING_PRIVATE_KEY`, and optionally `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+- Private backup of the Tauri updater signing key. Losing it means installed users cannot receive trusted updates from this update channel.
+- Clean-machine smoke testing on Apple Silicon and Intel macOS before publishing the draft release.
+- Final publishing decision for license and positioning: the repo is source-available under BUSL-1.1, not OSI open source.
+
+Remaining agent-track work before expanding beyond macOS:
+
+- Add Linux release matrix only after Linux dependency/install smoke tests pass on the oldest supported distro.
+- Add Windows release matrix only after MCP local transport is abstracted away from Unix sockets and trash behavior is implemented or explicitly unsupported on Windows.
+- Add artifact smoke-test automation once signed macOS artifacts exist.
 
 ## Platform Support Notes
 

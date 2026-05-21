@@ -30,6 +30,9 @@
     let moduleRaw = $state(false);
     let moduleStaticPublishing = $state(false);
     let appIconVariant = $state<AppIconVariantId>('primary');
+    let openaiEmbeddingModel = $state('text-embedding-3-large');
+    let ollamaEmbeddingUrl = $state('http://localhost:11434/api/embed');
+    let ollamaEmbeddingModel = $state('embeddinggemma');
 
     interface ApiKeyState {
         exists: boolean;
@@ -54,7 +57,7 @@
 
     onMount(async () => {
         try {
-            const [toks, ctSetting, trashSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting, iconSetting] = await Promise.all([
+            const [toks, ctSetting, trashSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting, iconSetting, openaiEmbeddingSetting, ollamaEmbeddingUrlSetting, ollamaEmbeddingModelSetting] = await Promise.all([
                 listMcpTokens(),
                 getAppSetting('close_to_tray'),
                 getAppSetting('skip_trash_confirm'),
@@ -64,6 +67,9 @@
                 getAppSetting('module_raw'),
                 getAppSetting('module_static_publishing'),
                 getAppSetting('app_icon_variant'),
+                getAppSetting('openai_embedding_model'),
+                getAppSetting('ollama_embedding_url'),
+                getAppSetting('ollama_embedding_model'),
             ]);
             tokens = toks;
             closeToTray = ctSetting !== 'false';
@@ -74,6 +80,9 @@
             moduleRaw = rawSetting === 'true';
             moduleStaticPublishing = staticPublishingSetting === 'true';
             appIconVariant = normalizeAppIconVariant(iconSetting);
+            if (openaiEmbeddingSetting) openaiEmbeddingModel = openaiEmbeddingSetting;
+            if (ollamaEmbeddingUrlSetting) ollamaEmbeddingUrl = ollamaEmbeddingUrlSetting;
+            if (ollamaEmbeddingModelSetting) ollamaEmbeddingModel = ollamaEmbeddingModelSetting;
 
             const [hasOpenai, hasGoogle, hasOpenrouter] = await Promise.all([
                 hasApiKey('openai'),
@@ -181,6 +190,23 @@
         apiKeys[provider].exists = false;
         apiKeys[provider].status = 'none';
         apiKeys[provider].inputValue = '';
+    }
+
+    async function saveOpenAiEmbeddingModel() {
+        const model = openaiEmbeddingModel.trim() || 'text-embedding-3-large';
+        openaiEmbeddingModel = model;
+        await setAppSetting('openai_embedding_model', model);
+    }
+
+    async function saveOllamaEmbeddingConfig() {
+        const url = ollamaEmbeddingUrl.trim() || 'http://localhost:11434/api/embed';
+        const model = ollamaEmbeddingModel.trim() || 'embeddinggemma';
+        ollamaEmbeddingUrl = url;
+        ollamaEmbeddingModel = model;
+        await Promise.all([
+            setAppSetting('ollama_embedding_url', url),
+            setAppSetting('ollama_embedding_model', model),
+        ]);
     }
 
     async function handleCreate() {
@@ -396,6 +422,46 @@
                     </div>
                 {/each}
                 <div class="keychain-hint">&#128274; Stored securely in system keychain</div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">Embedding Models</div>
+                <div class="setting-row api-key-row">
+                    <span class="provider-label">OpenAI</span>
+                    <div class="api-key-controls">
+                        <input
+                            type="text"
+                            class="api-input"
+                            bind:value={openaiEmbeddingModel}
+                            onblur={saveOpenAiEmbeddingModel}
+                            placeholder="text-embedding-3-large"
+                        />
+                    </div>
+                </div>
+                <div class="setting-row api-key-row">
+                    <span class="provider-label">Ollama URL</span>
+                    <div class="api-key-controls">
+                        <input
+                            type="text"
+                            class="api-input"
+                            bind:value={ollamaEmbeddingUrl}
+                            onblur={saveOllamaEmbeddingConfig}
+                            placeholder="http://localhost:11434/api/embed"
+                        />
+                    </div>
+                </div>
+                <div class="setting-row api-key-row">
+                    <span class="provider-label">Ollama model</span>
+                    <div class="api-key-controls">
+                        <input
+                            type="text"
+                            class="api-input"
+                            bind:value={ollamaEmbeddingModel}
+                            onblur={saveOllamaEmbeddingConfig}
+                            placeholder="embeddinggemma"
+                        />
+                    </div>
+                </div>
             </div>
 
             {#if revealedSecret}

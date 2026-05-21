@@ -424,12 +424,32 @@ export interface ClipModelDownloadInfo {
 
 export type EmbeddingModelDownloadInfo = ClipModelDownloadInfo;
 
+export interface EmbeddingProviderInfo {
+    id: string;
+    label: string;
+    shortLabel: string;
+    modelName: string;
+    dimensions: number;
+    dimensionsLabel: string;
+    scope: string;
+    runtime: string;
+    status: string;
+    available: boolean;
+    downloadable: boolean;
+    downloadLabel: string | null;
+    apiKeyProvider: string | null;
+}
+
 export async function getClipModelDownloadInfo(): Promise<ClipModelDownloadInfo> {
     return invoke('get_clip_model_download_info');
 }
 
 export async function getEmbeddingModelDownloadInfo(model = 'clip-vit-b32'): Promise<EmbeddingModelDownloadInfo> {
     return invoke('get_embedding_model_download_info', { model });
+}
+
+export async function listEmbeddingProviders(): Promise<EmbeddingProviderInfo[]> {
+    return invoke('list_embedding_providers');
 }
 
 export async function downloadClipModel(): Promise<string> {
@@ -516,6 +536,18 @@ export async function hasApiKey(provider: string): Promise<boolean> {
 
 export async function generateGeminiEmbeddings(imageIds: string[]): Promise<number> {
     return invoke('generate_gemini_embeddings', { imageIds });
+}
+
+export async function checkOllamaEmbedding(): Promise<string[]> {
+    return invoke('check_ollama_embedding');
+}
+
+export async function getOllamaEmbeddingConfig(): Promise<[string, string]> {
+    return invoke('get_ollama_embedding_config');
+}
+
+export async function setOllamaEmbeddingConfig(url?: string, model?: string): Promise<void> {
+    return invoke('set_ollama_embedding_config', { url: url ?? null, model: model ?? null });
 }
 
 // Detection commands (YOLO + NudeNet)

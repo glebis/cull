@@ -225,12 +225,14 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   get_embedding_count: (_: any, args?: { model?: string | null }) => {
     if (args?.model === 'dinov2-vits14') return 8;
     if (args?.model === 'gemini-embedding-2') return 0;
+    if (args?.model?.startsWith('openai:')) return 6;
+    if (args?.model?.startsWith('ollama:')) return 5;
     return 12;
   },
   get_embedding_page: (_: any, args?: { model?: string | null; limit?: number }) => {
     const model = args?.model ?? 'clip-vit-b32';
-    const dims = model === 'dinov2-vits14' ? 384 : 512;
-    const total = model === 'dinov2-vits14' ? 8 : 12;
+    const dims = model === 'dinov2-vits14' ? 384 : model.startsWith('openai:') || model === 'gemini-embedding-2' ? 3072 : model.startsWith('ollama:') ? 768 : 512;
+    const total = model === 'dinov2-vits14' ? 8 : model.startsWith('openai:') ? 6 : model.startsWith('ollama:') ? 5 : model === 'gemini-embedding-2' ? 0 : 12;
     const ids = Array.from({ length: Math.min(args?.limit ?? total, total) }, (_, i) => `img-${i}`);
     const vectors = ids.flatMap((_, imageIndex) =>
       Array.from({ length: dims }, (_, dimIndex) => Math.sin((imageIndex + 1) * (dimIndex + 1)) * 0.1)
@@ -311,6 +313,86 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     part_path: `/mock/app-data/models/${args.model}.onnx.part`,
     curl_command: `curl -L -C - -o '/mock/app-data/models/${args.model}.onnx.part'`,
   }),
+  list_embedding_providers: () => [
+    {
+      id: 'clip',
+      label: 'CLIP ViT-B/32',
+      shortLabel: 'CLIP',
+      modelName: 'clip-vit-b32',
+      dimensions: 512,
+      dimensionsLabel: '512d',
+      scope: 'local',
+      runtime: 'local-onnx',
+      status: 'ready',
+      available: true,
+      downloadable: true,
+      downloadLabel: 'Download CLIP (~350MB)',
+      apiKeyProvider: null,
+    },
+    {
+      id: 'dinov2',
+      label: 'DINOv2 ViT-S/14',
+      shortLabel: 'DINOv2',
+      modelName: 'dinov2-vits14',
+      dimensions: 384,
+      dimensionsLabel: '384d',
+      scope: 'local',
+      runtime: 'local-onnx',
+      status: 'ready',
+      available: true,
+      downloadable: true,
+      downloadLabel: 'Download DINOv2 (~87MB)',
+      apiKeyProvider: null,
+    },
+    {
+      id: 'gemini',
+      label: 'Gemini Embedding 2',
+      shortLabel: 'Gemini',
+      modelName: 'gemini-embedding-2',
+      dimensions: 3072,
+      dimensionsLabel: '3072d',
+      scope: 'cloud',
+      runtime: 'cloud-api',
+      status: 'key',
+      available: false,
+      downloadable: false,
+      downloadLabel: null,
+      apiKeyProvider: 'google',
+    },
+    {
+      id: 'openai',
+      label: 'OpenAI Text Embedding 3 Large',
+      shortLabel: 'OpenAI',
+      modelName: 'openai:text-embedding-3-large',
+      dimensions: 3072,
+      dimensionsLabel: '3072d',
+      scope: 'cloud',
+      runtime: 'cloud-api',
+      status: 'key',
+      available: false,
+      downloadable: false,
+      downloadLabel: null,
+      apiKeyProvider: 'openai',
+    },
+    {
+      id: 'ollama',
+      label: 'Ollama Text Embeddings',
+      shortLabel: 'Ollama',
+      modelName: 'ollama:embeddinggemma',
+      dimensions: 0,
+      dimensionsLabel: 'model',
+      scope: 'local',
+      runtime: 'local-api',
+      status: 'ready',
+      available: true,
+      downloadable: false,
+      downloadLabel: null,
+      apiKeyProvider: null,
+    },
+  ],
+  check_ollama_embedding: () => ['embeddinggemma:latest', 'nomic-embed-text:latest'],
+  get_ollama_embedding_config: () => ['http://localhost:11434/api/embed', 'embeddinggemma'],
+  set_ollama_embedding_config: () => undefined,
   download_clip_model: () => 'already_downloaded',
   download_embedding_model: () => 'already_downloaded',
   is_model_available: () => true,

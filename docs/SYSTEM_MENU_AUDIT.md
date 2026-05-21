@@ -8,7 +8,7 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 
 | Area | Status | Notes |
 |---|---|---|
-| App menu | Pass | About, Settings, Services, Hide, Hide Others, Show All, Quit are present. Settings opens the in-app settings panel. |
+| App menu | Pass | About, Settings, Services, Hide, Hide Others, Show All, Quit are present. About and Settings open in-app panels. |
 | File menu | Pass | Open File and Open Folder are wired to import flows. Close Window uses the native predefined item. |
 | Edit menu | Pass | Undo and Redo are wired to Cull's undo stack. Cut, Copy, Paste, Select All use native predefined items. Deselect All clears image selection and is disabled when nothing is selected. |
 | Image menu | Pass | Current image/selection actions mirror the context menu and are disabled when no image is focused. |
@@ -21,7 +21,7 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 
 | Label | Shortcut | Native ID / Event | Handler | Status |
 |---|---|---|---|---|
-| About Cull | native | predefined about | Tauri native | Pass |
+| About Cull | native | `about` | Opens custom About dialog with linked credits | Pass |
 | Settings... | `Cmd+,` | `settings` | Opens settings panel | Pass |
 | Services | native | predefined services | macOS native | Pass |
 | Hide Cull | `Cmd+H` | predefined hide | macOS native | Pass |
@@ -108,4 +108,5 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 - Undo and redo were previously keyboard-only and are now exposed through the native Edit menu.
 - Image-specific context actions are now also exposed through the native Image menu.
 - Native menu state is now synchronized from Svelte: image actions disable with no focused image, Deselect All disables with no selection, View items are checked, and Toggle Sidebar reflects the sidebar state.
+- About Cull now opens Cull's custom in-app About dialog so the release can show the app image and linked credits instead of the default native panel.
 - The tray status placeholders should become dynamic before a polished binary release, but they do not block a source release.

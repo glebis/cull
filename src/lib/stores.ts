@@ -234,7 +234,8 @@ export function showToast(message: string, opts?: { detail?: string; type?: Toas
 // Embedding view state (persists across tab switches)
 export type EmbeddingInteractionMode = 'map' | 'stack' | 'review' | 'text';
 export type EmbeddingZPreset = 'projection' | 'cluster' | 'source' | 'rating' | 'decision' | 'recency' | 'resolution';
-export type EmbeddingProvider = 'clip' | 'dinov2' | 'gemini';
+export type EmbeddingSpacePreset = 'balanced' | 'compact' | 'gallery' | 'deep' | 'custom';
+export type EmbeddingProvider = 'clip' | 'dinov2' | 'gemini' | 'openai' | 'ollama';
 
 export interface EmbeddingViewState {
     panX: number;
@@ -252,6 +253,11 @@ export interface EmbeddingViewState {
     largePreviewOpen: boolean;
     textOutputOpen: boolean;
     canvasLabelsOpen: boolean;
+    spacePreset: EmbeddingSpacePreset;
+    spaceSpacing: number;
+    spaceDepth: number;
+    spaceScale: number;
+    spacePerspective: number;
 }
 
 export const embeddingViewState = writable<EmbeddingViewState>({
@@ -270,6 +276,11 @@ export const embeddingViewState = writable<EmbeddingViewState>({
     largePreviewOpen: true,
     textOutputOpen: false,
     canvasLabelsOpen: false,
+    spacePreset: 'balanced',
+    spaceSpacing: 1,
+    spaceDepth: 0.35,
+    spaceScale: 1,
+    spacePerspective: 0.3,
 });
 
 // Sessions
@@ -280,6 +291,7 @@ export const activeCanvas = writable<Canvas | null>(null);
 
 // Settings panel
 export const settingsOpen = writable<boolean>(false);
+export const aboutOpen = writable<boolean>(false);
 export const searchOpen = writable<boolean>(false);
 export type CommandPaletteMode = 'all' | 'commands';
 export const commandPaletteOpen = writable<boolean>(false);

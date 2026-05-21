@@ -13,6 +13,7 @@ pub mod models;
 pub mod nl_parser;
 pub mod perceptual_hash;
 pub mod quality;
+pub mod remote_embeddings;
 pub mod secrets;
 pub mod sessions;
 pub mod sidecar;

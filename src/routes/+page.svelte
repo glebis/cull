@@ -19,12 +19,13 @@
     import LineageView from '$lib/components/LineageView.svelte';
     import Tinder from '$lib/components/Tinder.svelte';
     import McpSettings from '$lib/components/McpSettings.svelte';
+    import AboutDialog from '$lib/components/AboutDialog.svelte';
     import JobProgressPanel from '$lib/components/JobProgressPanel.svelte';
     import TrashConfirmDialog from '$lib/components/TrashConfirmDialog.svelte';
     import TextInputDialog from '$lib/components/TextInputDialog.svelte';
     import CollectionTargetDialog from '$lib/components/CollectionTargetDialog.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass } from '$lib/stores';
+    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass } from '$lib/stores';
     import { trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
@@ -276,6 +277,10 @@
 
 {#if $settingsOpen}
     <McpSettings onclose={() => settingsOpen.set(false)} />
+{/if}
+
+{#if $aboutOpen}
+    <AboutDialog onclose={() => aboutOpen.set(false)} />
 {/if}
 
 <TrashConfirmDialog

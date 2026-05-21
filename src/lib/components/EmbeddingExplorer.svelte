@@ -14,12 +14,20 @@
         type EmbeddingProvider,
         type EmbeddingInteractionMode,
         type EmbeddingZPreset,
+        type EmbeddingSpacePreset,
     } from '$lib/stores';
     import { get } from 'svelte/store';
     import { computeScatterThumbSize, formatBytes, formatDownloadRateEta } from '$lib/embedding-utils';
     import {
+        DEFAULT_MODEL_OPTIONS,
+        modelOptionsFromProviderInfo,
+        type LocalEmbeddingProvider,
+        type ModelOption,
+    } from '$lib/embedding-providers';
+    import {
         isEmbeddingModelAvailable,
         getEmbeddingModelDownloadInfo,
+        listEmbeddingProviders,
         downloadEmbeddingModel,
         generateModelEmbeddings,
         getEmbeddingPage,
@@ -27,7 +35,6 @@
         getImageCount,
         listImageIds,
         hasApiKey,
-        generateGeminiEmbeddings,
         getImagesByIds,
         getGenerationRun,
         regenerateThumbnails,
@@ -46,53 +53,20 @@
     let staleEmbeddingCount = $state(0);
 
     // Provider config
-    type LocalProvider = Exclude<EmbeddingProvider, 'gemini'>;
-    type ModelOption = {
-        id: EmbeddingProvider;
-        label: string;
-        shortLabel: string;
-        modelName: string;
-        dims: string;
-        scope: string;
-        downloadLabel?: string;
-    };
-    const MODEL_OPTIONS: ModelOption[] = [
-        {
-            id: 'clip',
-            label: 'CLIP ViT-B/32',
-            shortLabel: 'CLIP',
-            modelName: 'clip-vit-b32',
-            dims: '512d',
-            scope: 'local',
-            downloadLabel: 'Download CLIP (~350MB)',
-        },
-        {
-            id: 'dinov2',
-            label: 'DINOv2 ViT-S/14',
-            shortLabel: 'DINOv2',
-            modelName: 'dinov2-vits14',
-            dims: '384d',
-            scope: 'local',
-            downloadLabel: 'Download DINOv2 (~87MB)',
-        },
-        {
-            id: 'gemini',
-            label: 'Gemini Embedding 2',
-            shortLabel: 'Gemini',
-            modelName: 'gemini-embedding-2',
-            dims: 'API',
-            scope: 'cloud',
-        },
-    ];
+    type LocalProvider = LocalEmbeddingProvider;
+    type RemoteProvider = Exclude<EmbeddingProvider, LocalProvider>;
+    let modelOptions = $state<ModelOption[]>(DEFAULT_MODEL_OPTIONS);
     let selectedProvider = $state<EmbeddingProvider>('clip');
     let configOpen = $state(false);
     let hasGoogleKey = $state(false);
+    let hasOpenAiKey = $state(false);
+    let ollamaEmbeddingReady = $state(false);
     let localModelAvailable = $state<Record<LocalProvider, boolean>>({ clip: false, dinov2: false });
     let localEmbeddingCounts = $state<Record<LocalProvider, number>>({ clip: 0, dinov2: 0 });
     let localModelDownloadInfo = $state<Record<LocalProvider, EmbeddingModelDownloadInfo | null>>({ clip: null, dinov2: null });
-    let geminiEmbeddingCount = $state(0);
+    let remoteEmbeddingCounts = $state<Record<RemoteProvider, number>>({ gemini: 0, openai: 0, ollama: 0 });
     let currentEmbeddingCount = $derived(providerEmbeddingCount(selectedProvider));
-    let selectedModel = $derived(MODEL_OPTIONS.find(option => option.id === selectedProvider) ?? MODEL_OPTIONS[0]);
+    let selectedModel = $derived(modelOptions.find(option => option.id === selectedProvider) ?? modelOptions[0] ?? DEFAULT_MODEL_OPTIONS[0]);
     let selectedModelAvailable = $derived(providerReady(selectedProvider));
     let selectedDownloadInfo = $derived(isLocalProvider(selectedProvider) ? localModelDownloadInfo[selectedProvider] : null);
     const PROJECTION_EMBEDDING_LIMIT = 5000;
@@ -114,6 +88,38 @@
         { id: 'recency', label: 'Recency', title: 'Layer images by import month' },
         { id: 'resolution', label: 'Resolution', title: 'Layer images by megapixel bucket' },
     ];
+    type SpacePresetValues = {
+        spacing: number;
+        depth: number;
+        scale: number;
+        perspective: number;
+    };
+    const SPACE_PRESETS: { id: Exclude<EmbeddingSpacePreset, 'custom'>; label: string; title: string; values: SpacePresetValues }[] = [
+        {
+            id: 'balanced',
+            label: 'Balanced',
+            title: 'Neutral spacing with shallow z separation',
+            values: { spacing: 1, depth: 0.35, scale: 1, perspective: 0.3 },
+        },
+        {
+            id: 'compact',
+            label: 'Compact',
+            title: 'Dense contact-sheet view for large sets',
+            values: { spacing: 0.72, depth: 0.18, scale: 0.82, perspective: 0.12 },
+        },
+        {
+            id: 'gallery',
+            label: 'Gallery',
+            title: 'More air between images with larger thumbnails',
+            values: { spacing: 1.35, depth: 0.32, scale: 1.28, perspective: 0.18 },
+        },
+        {
+            id: 'deep',
+            label: 'Deep',
+            title: 'Layered z-space with stronger perspective',
+            values: { spacing: 1.08, depth: 0.88, scale: 1.08, perspective: 0.72 },
+        },
+    ];
     const SOURCE_DISPLAY: Record<string, string> = {
         gpt_image_2: 'GPT-image-2',
         dalle_3: 'DALL-E 3',
@@ -131,6 +137,11 @@
     let largePreviewOpen = $state(true);
     let textOutputOpen = $state(false);
     let canvasLabelsOpen = $state(false);
+    let spacePreset = $state<EmbeddingSpacePreset>('balanced');
+    let spaceSpacing = $state(1);
+    let spaceDepth = $state(0.35);
+    let spaceScale = $state(1);
+    let spacePerspective = $state(0.3);
 
     // Download progress
     let downloadProgress = $state({ downloaded: 0, total: 0, status: '', job_id: null as string | null, error: null as string | null });
@@ -189,6 +200,8 @@
     ];
 
     let zLayers = $derived(buildZLayersForPreset(zPreset));
+    let projectionCenter = $derived(computeProjectionCenter(points));
+    let zLayerRankRange = $derived(computeZLayerRankRange(zLayers));
     let activeZLayer = $derived(activeZLayerKey ? zLayers.find(layer => layer.key === activeZLayerKey) ?? null : null);
     let activeLayerPoints = $derived(activeZLayerKey ? getPointsForLayer(activeZLayerKey) : points);
     let selectedImage = $derived(selectedPoint ? imageMap.get(selectedPoint.id) ?? null : null);
@@ -220,6 +233,10 @@
         activeZLayerKey;
         focusActiveLayer;
         canvasLabelsOpen;
+        spaceSpacing;
+        spaceDepth;
+        spaceScale;
+        spacePerspective;
         requestDraw();
     });
 
@@ -241,23 +258,42 @@
         return provider === 'clip' || provider === 'dinov2';
     }
 
+    function isRemoteProvider(provider: EmbeddingProvider): provider is RemoteProvider {
+        return !isLocalProvider(provider);
+    }
+
+    function knownProviderId(id: string): EmbeddingProvider | null {
+        if (id === 'clip' || id === 'dinov2' || id === 'gemini' || id === 'openai' || id === 'ollama') return id;
+        return null;
+    }
+
+    function localProviderOptions(): Array<ModelOption & { id: LocalProvider }> {
+        return modelOptions.filter((option): option is ModelOption & { id: LocalProvider } => isLocalProvider(option.id));
+    }
+
     function modelNameForProvider(provider: EmbeddingProvider): string {
-        return MODEL_OPTIONS.find(option => option.id === provider)?.modelName ?? 'clip-vit-b32';
+        return modelOptions.find(option => option.id === provider)?.modelName ?? 'clip-vit-b32';
     }
 
     function providerEmbeddingCount(provider: EmbeddingProvider): number {
-        if (provider === 'gemini') return geminiEmbeddingCount;
-        return localEmbeddingCounts[provider];
+        if (isLocalProvider(provider)) return localEmbeddingCounts[provider];
+        return remoteEmbeddingCounts[provider];
     }
 
     function providerReady(provider: EmbeddingProvider): boolean {
         if (provider === 'gemini') return hasGoogleKey;
-        return localModelAvailable[provider];
+        if (provider === 'openai') return hasOpenAiKey;
+        if (provider === 'ollama') return ollamaEmbeddingReady;
+        if (isLocalProvider(provider)) return localModelAvailable[provider];
+        return false;
     }
 
     function providerStatusLabel(provider: EmbeddingProvider): string {
         if (provider === 'gemini') return hasGoogleKey ? 'ready' : 'key';
-        return localModelAvailable[provider] ? 'ready' : 'model';
+        if (provider === 'openai') return hasOpenAiKey ? 'ready' : 'key';
+        if (provider === 'ollama') return ollamaEmbeddingReady ? 'ready' : 'offline';
+        if (isLocalProvider(provider)) return localModelAvailable[provider] ? 'ready' : 'model';
+        return 'config';
     }
 
     async function selectProvider(provider: EmbeddingProvider) {
@@ -275,12 +311,20 @@
         largePreviewOpen = savedState.largePreviewOpen ?? true;
         textOutputOpen = savedState.textOutputOpen ?? false;
         canvasLabelsOpen = savedState.canvasLabelsOpen ?? false;
+        const defaultPreset = SPACE_PRESETS[0];
+        spacePreset = savedState.spacePreset ?? defaultPreset.id;
+        const presetValues = SPACE_PRESETS.find(preset => preset.id === spacePreset)?.values ?? defaultPreset.values;
+        spaceSpacing = savedState.spaceSpacing ?? presetValues.spacing;
+        spaceDepth = savedState.spaceDepth ?? presetValues.depth;
+        spaceScale = savedState.spaceScale ?? presetValues.scale;
+        spacePerspective = savedState.spacePerspective ?? presetValues.perspective;
     }
 
     onMount(() => {
         void (async () => {
             const savedState = get(embeddingViewState);
             restoreInteractionState(savedState);
+            await loadProviderOptions();
             await loadLocalModelDownloadInfo();
             await checkLocalModels();
             await loadApiKeyState();
@@ -292,16 +336,47 @@
         };
     });
 
+    async function loadProviderOptions() {
+        try {
+            const providers = await listEmbeddingProviders();
+            const nextOptions = modelOptionsFromProviderInfo(providers);
+            if (nextOptions.length > 0) {
+                modelOptions = nextOptions;
+            }
+
+            const nextAvailable = { ...localModelAvailable };
+            for (const providerInfo of providers) {
+                const provider = knownProviderId(providerInfo.id);
+                if (!provider) continue;
+                if (isLocalProvider(provider)) {
+                    nextAvailable[provider] = providerInfo.available;
+                } else if (provider === 'gemini') {
+                    hasGoogleKey = providerInfo.available;
+                } else if (provider === 'openai') {
+                    hasOpenAiKey = providerInfo.available;
+                } else if (provider === 'ollama') {
+                    ollamaEmbeddingReady = providerInfo.available;
+                }
+            }
+            localModelAvailable = nextAvailable;
+        } catch (e) {
+            console.error('Failed to load embedding providers:', e);
+        }
+    }
+
     async function checkLocalModels() {
         try {
-            const [clipAvailable, dinoAvailable] = await Promise.all([
-                isEmbeddingModelAvailable('clip-vit-b32'),
-                isEmbeddingModelAvailable('dinov2-vits14'),
-            ]);
-            localModelAvailable = {
-                clip: clipAvailable,
-                dinov2: dinoAvailable,
-            };
+            const checks = await Promise.all(
+                localProviderOptions().map(async option => [
+                    option.id,
+                    await isEmbeddingModelAvailable(option.modelName),
+                ] as const)
+            );
+            const nextAvailable = { ...localModelAvailable };
+            for (const [provider, available] of checks) {
+                nextAvailable[provider] = available;
+            }
+            localModelAvailable = nextAvailable;
         } catch (e) {
             console.error('Failed to check embedding models:', e);
         }
@@ -309,14 +384,17 @@
 
     async function loadLocalModelDownloadInfo() {
         try {
-            const [clipInfo, dinoInfo] = await Promise.all([
-                getEmbeddingModelDownloadInfo('clip-vit-b32'),
-                getEmbeddingModelDownloadInfo('dinov2-vits14'),
-            ]);
-            localModelDownloadInfo = {
-                clip: clipInfo,
-                dinov2: dinoInfo,
-            };
+            const infos = await Promise.all(
+                localProviderOptions().map(async option => [
+                    option.id,
+                    await getEmbeddingModelDownloadInfo(option.modelName),
+                ] as const)
+            );
+            const nextInfo = { ...localModelDownloadInfo };
+            for (const [provider, info] of infos) {
+                nextInfo[provider] = info;
+            }
+            localModelDownloadInfo = nextInfo;
         } catch (e) {
             console.error('Failed to load embedding model download info:', e);
         }
@@ -324,23 +402,27 @@
 
     async function loadEmbeddingState() {
         try {
-            const [imageTotal, clipCount, dinoCount, geminiCount] = await Promise.all([
-                getImageCount(),
-                getEmbeddingCount('clip-vit-b32'),
-                getEmbeddingCount('dinov2-vits14'),
-                getEmbeddingCount('gemini-embedding-2'),
-            ]);
+            const imageTotal = await getImageCount();
+            const countEntries = await Promise.all(
+                modelOptions.map(async option => [
+                    option.id,
+                    await getEmbeddingCount(option.modelName),
+                ] as const)
+            );
             totalImages = imageTotal;
-            localEmbeddingCounts = {
-                clip: clipCount,
-                dinov2: dinoCount,
-            };
-            geminiEmbeddingCount = geminiCount;
-            const selectedCount = selectedProvider === 'gemini'
-                ? geminiCount
-                : selectedProvider === 'dinov2'
-                    ? dinoCount
-                    : clipCount;
+            const nextLocalCounts = { ...localEmbeddingCounts };
+            const nextRemoteCounts = { ...remoteEmbeddingCounts };
+            let selectedCount = 0;
+            for (const [provider, count] of countEntries) {
+                if (isLocalProvider(provider)) {
+                    nextLocalCounts[provider] = count;
+                } else {
+                    nextRemoteCounts[provider] = count;
+                }
+                if (provider === selectedProvider) selectedCount = count;
+            }
+            localEmbeddingCounts = nextLocalCounts;
+            remoteEmbeddingCounts = nextRemoteCounts;
             if (selectedCount > 0) {
                 await loadProjection();
             } else {
@@ -355,10 +437,12 @@
 
     async function loadApiKeyState() {
         try {
-            hasGoogleKey = await hasApiKey('google');
-            if (hasGoogleKey) {
-                geminiEmbeddingCount = await getEmbeddingCount('gemini-embedding-2');
-            }
+            const [googleKey, openAiKey] = await Promise.all([
+                hasApiKey('google'),
+                hasApiKey('openai'),
+            ]);
+            hasGoogleKey = googleKey;
+            hasOpenAiKey = openAiKey;
         } catch (e) {
             console.error('Failed to load API key state:', e);
         }
@@ -368,7 +452,11 @@
     $effect(() => {
         const isOpen = $settingsOpen;
         if (prevSettingsOpen && !isOpen) {
-            loadApiKeyState();
+            void (async () => {
+                await loadApiKeyState();
+                await loadProviderOptions();
+                await loadEmbeddingState();
+            })();
         }
         prevSettingsOpen = isOpen;
     });
@@ -385,13 +473,17 @@
         saveViewState();
     }
 
-    async function handleGenerateGemini() {
+    async function handleGenerateRemote() {
+        if (!isRemoteProvider(selectedProvider)) return;
+        const provider = selectedProvider;
+        const modelName = modelNameForProvider(provider);
         generating = true;
         genProgress = { current: 0, total: 0 };
 
-        const unlisten: UnlistenFn = await listen<{ current: number; total: number; provider: string }>(
+        const unlisten: UnlistenFn = await listen<{ current: number; total: number; provider: string; model?: string }>(
             'embedding-progress',
             (event) => {
+                if (event.payload.model && event.payload.model !== modelName) return;
                 genProgress = { current: event.payload.current, total: event.payload.total };
             }
         );
@@ -399,13 +491,14 @@
         try {
             const imageIds = await listImageIds();
             totalImages = imageIds.length;
-            await generateGeminiEmbeddings(imageIds);
-            geminiEmbeddingCount = await getEmbeddingCount('gemini-embedding-2');
-            if (geminiEmbeddingCount > 0) {
+            await generateModelEmbeddings(modelName, imageIds);
+            const count = await getEmbeddingCount(modelName);
+            remoteEmbeddingCounts = { ...remoteEmbeddingCounts, [provider]: count };
+            if (count > 0) {
                 await loadProjection();
             }
         } catch (e) {
-            console.error('Gemini generate failed:', e);
+            console.error(`${provider} generate failed:`, e);
         } finally {
             unlisten();
             generating = false;
@@ -615,6 +708,85 @@
         return { key: 'resolution:unknown', label: 'Unknown size', rank: 0 };
     }
 
+    function clamp(value: number, min: number, max: number): number {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    function computeProjectionCenter(sourcePoints: Point[]): { x: number; y: number } {
+        if (sourcePoints.length === 0) return { x: 0, y: 0 };
+        const xs = sourcePoints.map(point => point.x);
+        const ys = sourcePoints.map(point => point.y);
+        return {
+            x: (Math.min(...xs) + Math.max(...xs)) / 2,
+            y: (Math.min(...ys) + Math.max(...ys)) / 2,
+        };
+    }
+
+    function computeZLayerRankRange(layers: ZLayer[]): { min: number; max: number } {
+        if (layers.length === 0) return { min: 0, max: 0 };
+        let min = Infinity;
+        let max = -Infinity;
+        for (const layer of layers) {
+            if (!Number.isFinite(layer.rank)) continue;
+            min = Math.min(min, layer.rank);
+            max = Math.max(max, layer.rank);
+        }
+        if (!Number.isFinite(min) || !Number.isFinite(max)) return { min: 0, max: 0 };
+        return { min, max };
+    }
+
+    function formatMultiplier(value: number): string {
+        return `${value.toFixed(2)}x`;
+    }
+
+    function formatPercent(value: number): string {
+        return `${Math.round(value * 100)}%`;
+    }
+
+    function matchingSpacePreset(values: SpacePresetValues): EmbeddingSpacePreset {
+        const match = SPACE_PRESETS.find(preset =>
+            Math.abs(preset.values.spacing - values.spacing) < 0.001
+            && Math.abs(preset.values.depth - values.depth) < 0.001
+            && Math.abs(preset.values.scale - values.scale) < 0.001
+            && Math.abs(preset.values.perspective - values.perspective) < 0.001
+        );
+        return match?.id ?? 'custom';
+    }
+
+    function applySpacePreset(presetId: EmbeddingSpacePreset, persist: boolean = true) {
+        const preset = SPACE_PRESETS.find(item => item.id === presetId);
+        if (!preset) return;
+        spacePreset = preset.id;
+        spaceSpacing = preset.values.spacing;
+        spaceDepth = preset.values.depth;
+        spaceScale = preset.values.scale;
+        spacePerspective = preset.values.perspective;
+        requestDraw();
+        if (persist) saveViewState();
+    }
+
+    function handleSpacePresetChange(e: Event) {
+        const presetId = (e.currentTarget as HTMLSelectElement).value as EmbeddingSpacePreset;
+        applySpacePreset(presetId);
+    }
+
+    function updateSpaceControl(key: keyof SpacePresetValues, value: number) {
+        const next = {
+            spacing: spaceSpacing,
+            depth: spaceDepth,
+            scale: spaceScale,
+            perspective: spacePerspective,
+            [key]: value,
+        };
+        spaceSpacing = next.spacing;
+        spaceDepth = next.depth;
+        spaceScale = next.scale;
+        spacePerspective = next.perspective;
+        spacePreset = matchingSpacePreset(next);
+        requestDraw();
+        saveViewState();
+    }
+
     function layerForPoint(point: Point, preset: EmbeddingZPreset): ZLayer {
         const img = imageMap.get(point.id) ?? null;
         switch (preset) {
@@ -719,19 +891,7 @@
 
     function getRenderPoints(): Point[] {
         return [...points].sort((a, b) => {
-            const aLayer = layerForPoint(a, zPreset);
-            const bLayer = layerForPoint(b, zPreset);
-            let aRank = aLayer.rank;
-            let bRank = bLayer.rank;
-            if (activeZLayerKey && aLayer.key === activeZLayerKey) aRank += 10_000;
-            if (activeZLayerKey && bLayer.key === activeZLayerKey) bRank += 10_000;
-            if (highlightedCluster !== null && a.cluster === highlightedCluster) aRank += 5_000;
-            if (highlightedCluster !== null && b.cluster === highlightedCluster) bRank += 5_000;
-            if (selectedPoint?.id === a.id) aRank += 20_000;
-            if (selectedPoint?.id === b.id) bRank += 20_000;
-            if (hoveredPoint?.id === a.id) aRank += 30_000;
-            if (hoveredPoint?.id === b.id) bRank += 30_000;
-            return aRank - bRank;
+            return visualDepthForPoint(a) - visualDepthForPoint(b);
         });
     }
 
@@ -879,6 +1039,7 @@
             const layerLabel = activeZLayer?.label ?? 'All Images';
             return [
                 `preset: ${Z_PRESETS.find(preset => preset.id === zPreset)?.label ?? zPreset}`,
+                `space: ${SPACE_PRESETS.find(preset => preset.id === spacePreset)?.label ?? 'Custom'}`,
                 `layer: ${layerLabel}`,
                 `images: ${activeLayerPoints.length}`,
             ].join('\n');
@@ -897,6 +1058,7 @@
             `decision: ${formatDecision(decision)}`,
             `z-preset: ${Z_PRESETS.find(preset => preset.id === zPreset)?.label ?? zPreset}`,
             `z-layer: ${activeZLayer?.label ?? 'All Images'}`,
+            `space: ${SPACE_PRESETS.find(preset => preset.id === spacePreset)?.label ?? 'Custom'}`,
         ];
         if (selectedGenerationRun?.provider || selectedGenerationRun?.model || selectedGenerationRun?.seed) {
             lines.push(`generation: ${[
@@ -1151,6 +1313,37 @@
         return [wx * scale + panX, wy * scale + panY];
     }
 
+    function baseLayerDepth(point: Point): number {
+        if (zLayers.length <= 1 || zLayerRankRange.max === zLayerRankRange.min) return 0;
+        const layer = layerForPoint(point, zPreset);
+        return ((layer.rank - zLayerRankRange.min) / (zLayerRankRange.max - zLayerRankRange.min)) * 2 - 1;
+    }
+
+    function visualDepthForPoint(point: Point): number {
+        let depth = baseLayerDepth(point);
+        if (highlightedCluster !== null && point.cluster === highlightedCluster) depth += 0.45;
+        if (activeZLayerKey && pointLayerKey(point) === activeZLayerKey) depth += 0.75;
+        if (selectedPoint?.id === point.id) depth += 1.05;
+        if (hoveredPoint?.id === point.id) depth += 1.2;
+        return clamp(depth, -1.2, 2.2);
+    }
+
+    function projectPointForCanvas(point: Point): { sx: number; sy: number; depth: number; perspectiveScale: number } {
+        const spacedX = projectionCenter.x + (point.x - projectionCenter.x) * spaceSpacing;
+        const spacedY = projectionCenter.y + (point.y - projectionCenter.y) * spaceSpacing;
+        const [flatX, flatY] = worldToScreen(spacedX, spacedY);
+        const depth = visualDepthForPoint(point) * spaceDepth;
+        const perspectiveScale = clamp(1 + depth * spacePerspective * 0.22, 0.55, 1.7);
+        const vanishingX = canvasWidth * 0.5;
+        const vanishingY = canvasHeight * 0.42;
+        return {
+            sx: vanishingX + (flatX - vanishingX) * perspectiveScale + depth * 12,
+            sy: vanishingY + (flatY - vanishingY) * perspectiveScale - depth * 42,
+            depth,
+            perspectiveScale,
+        };
+    }
+
     function requestDraw() {
         if (drawQueued) return;
         if (typeof requestAnimationFrame !== 'undefined') {
@@ -1175,9 +1368,10 @@
         const renderPoints = getRenderPoints();
 
         // Draw background layers first so active z-layers and selected items stay inspectable.
-        const margin = baseThumbSize + 10;
+        const margin = baseThumbSize * Math.max(1, spaceScale * (1 + spaceDepth * spacePerspective)) + 64;
         for (const p of renderPoints) {
-            const [sx, sy] = worldToScreen(p.x, p.y);
+            const { sx, sy, depth, perspectiveScale } = projectPointForCanvas(p);
+            const thumbSize = baseThumbSize * spaceScale * perspectiveScale;
             if (sx < -margin || sx > canvasWidth + margin || sy < -margin || sy > canvasHeight + margin) continue;
 
             const color = CLUSTER_COLORS[p.cluster % CLUSTER_COLORS.length];
@@ -1185,18 +1379,19 @@
             const isHovered = hoveredPoint && hoveredPoint.id === p.id;
             const dimmed = pointIsDimmed(p);
 
-            const thumbEl = useThumb ? pickThumbnail(p.id, baseThumbSize) : undefined;
-            ctx.globalAlpha = dimmed ? 0.22 : 1;
+            const thumbEl = useThumb ? pickThumbnail(p.id, thumbSize) : undefined;
+            const depthAlpha = clamp(0.62 + depth * 0.18, 0.38, 1);
+            ctx.globalAlpha = dimmed ? 0.22 : depthAlpha;
 
             if (thumbEl && thumbEl.complete && thumbEl.naturalWidth > 0) {
                 const aspect = thumbEl.naturalWidth / thumbEl.naturalHeight;
                 let dw: number, dh: number;
                 if (aspect >= 1) {
-                    dw = baseThumbSize;
-                    dh = baseThumbSize / aspect;
+                    dw = thumbSize;
+                    dh = thumbSize / aspect;
                 } else {
-                    dh = baseThumbSize;
-                    dw = baseThumbSize * aspect;
+                    dh = thumbSize;
+                    dw = thumbSize * aspect;
                 }
 
                 const dpr = window.devicePixelRatio || 1;
@@ -1213,7 +1408,7 @@
                 }
             } else {
                 // Colored dot fallback
-                const radius = Math.max(2, Math.min(5, 4 / Math.sqrt(scale)));
+                const radius = Math.max(2, Math.min(6, (4 / Math.sqrt(scale)) * spaceScale * perspectiveScale));
                 ctx.fillStyle = color;
                 ctx.beginPath();
                 ctx.arc(sx, sy, radius, 0, Math.PI * 2);
@@ -1227,7 +1422,7 @@
             }
 
             if (shouldDrawCanvasLabel(p, !!isSelected, !!isHovered)) {
-                drawCanvasPointLabel(ctx, p, sx, sy, baseThumbSize);
+                drawCanvasPointLabel(ctx, p, sx, sy, thumbSize);
             }
             ctx.globalAlpha = 1;
         }
@@ -1238,7 +1433,9 @@
             ctx.font = 'bold 11px JetBrains Mono, monospace';
             ctx.textAlign = 'center';
             for (const cluster of clusters) {
-                const [sx, sy] = worldToScreen(cluster.x, cluster.y);
+                const clusterX = projectionCenter.x + (cluster.x - projectionCenter.x) * spaceSpacing;
+                const clusterY = projectionCenter.y + (cluster.y - projectionCenter.y) * spaceSpacing;
+                const [sx, sy] = worldToScreen(clusterX, clusterY);
                 // Background pill
                 const text = cluster.label;
                 const tw = ctx.measureText(text).width;
@@ -1267,7 +1464,7 @@
 
         // Draw hover tooltip
         if (hoveredPoint) {
-            const [sx, sy] = worldToScreen(hoveredPoint.x, hoveredPoint.y);
+            const { sx, sy } = projectPointForCanvas(hoveredPoint);
             const img = imageMap.get(hoveredPoint.id);
             if (img) {
                 const name = img.path.split('/').pop() || img.image.id;
@@ -1298,6 +1495,11 @@
             largePreviewOpen,
             textOutputOpen,
             canvasLabelsOpen,
+            spacePreset,
+            spaceSpacing,
+            spaceDepth,
+            spaceScale,
+            spacePerspective,
         });
     }
 
@@ -1340,12 +1542,14 @@
         const rect = canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
-        const { size: thumbSize } = computeScatterThumbSize(scale, points.length);
-        const hitHalf = Math.max(6, thumbSize / 2);
+        const { size: baseThumbSize } = computeScatterThumbSize(scale, points.length);
 
         let found: Point | null = null;
-        for (const p of points) {
-            const [sx, sy] = worldToScreen(p.x, p.y);
+        const renderPoints = getRenderPoints();
+        for (let i = renderPoints.length - 1; i >= 0; i--) {
+            const p = renderPoints[i];
+            const { sx, sy, perspectiveScale } = projectPointForCanvas(p);
+            const hitHalf = Math.max(6, (baseThumbSize * spaceScale * perspectiveScale) / 2);
             if (Math.abs(mx - sx) < hitHalf && Math.abs(my - sy) < hitHalf) {
                 found = p;
                 break;
@@ -1478,7 +1682,7 @@
                 </button>
             </div>
             <div class="model-list" role="radiogroup" aria-label="Embedding model">
-                {#each MODEL_OPTIONS as option}
+                {#each modelOptions as option}
                     <button
                         class="model-option"
                         class:active={selectedProvider === option.id}
@@ -1501,13 +1705,18 @@
             </div>
         </div>
 
-        {#if configOpen && selectedProvider === 'gemini' && !hasGoogleKey}
+        {#if configOpen && ((selectedProvider === 'gemini' && !hasGoogleKey) || (selectedProvider === 'openai' && !hasOpenAiKey) || (selectedProvider === 'ollama' && !ollamaEmbeddingReady))}
             <div class="panel-section config-section">
-                <div class="section-header">GEMINI API KEY REQUIRED</div>
-                <p class="key-missing-text">Set your Google API key in Settings to use Gemini embeddings.</p>
-                <button class="settings-link-btn" onclick={() => settingsOpen.set(true)}>
-                    Open Settings
-                </button>
+                {#if selectedProvider === 'ollama'}
+                    <div class="section-header">OLLAMA EMBEDDINGS OFFLINE</div>
+                    <p class="key-missing-text">Start Ollama and pull an embedding model such as embeddinggemma.</p>
+                {:else}
+                    <div class="section-header">{selectedProvider === 'openai' ? 'OPENAI' : 'GEMINI'} API KEY REQUIRED</div>
+                    <p class="key-missing-text">Set your {selectedProvider === 'openai' ? 'OpenAI' : 'Google'} API key in Settings.</p>
+                    <button class="settings-link-btn" onclick={() => settingsOpen.set(true)}>
+                        Open Settings
+                    </button>
+                {/if}
             </div>
         {/if}
 
@@ -1532,6 +1741,81 @@
                     <option value={preset.id}>{preset.label}</option>
                 {/each}
             </select>
+
+            <label class="control-label" for="embedding-space-preset">SPACE PRESET</label>
+            <select
+                id="embedding-space-preset"
+                class="provider-select"
+                value={spacePreset}
+                onchange={handleSpacePresetChange}
+                title={SPACE_PRESETS.find(preset => preset.id === spacePreset)?.title ?? 'Custom visual spacing'}
+            >
+                {#each SPACE_PRESETS as preset}
+                    <option value={preset.id}>{preset.label}</option>
+                {/each}
+                {#if spacePreset === 'custom'}
+                    <option value="custom">Custom</option>
+                {/if}
+            </select>
+
+            <div class="space-control-panel">
+                <label class="range-control">
+                    <span class="range-header">
+                        <span>Spacing</span>
+                        <span class="range-value">{formatMultiplier(spaceSpacing)}</span>
+                    </span>
+                    <input
+                        type="range"
+                        min="0.6"
+                        max="1.8"
+                        step="0.05"
+                        value={spaceSpacing}
+                        oninput={(e) => updateSpaceControl('spacing', (e.currentTarget as HTMLInputElement).valueAsNumber)}
+                    />
+                </label>
+                <label class="range-control">
+                    <span class="range-header">
+                        <span>Z depth</span>
+                        <span class="range-value">{formatPercent(spaceDepth)}</span>
+                    </span>
+                    <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={spaceDepth}
+                        oninput={(e) => updateSpaceControl('depth', (e.currentTarget as HTMLInputElement).valueAsNumber)}
+                    />
+                </label>
+                <label class="range-control">
+                    <span class="range-header">
+                        <span>Scale</span>
+                        <span class="range-value">{formatMultiplier(spaceScale)}</span>
+                    </span>
+                    <input
+                        type="range"
+                        min="0.55"
+                        max="1.75"
+                        step="0.05"
+                        value={spaceScale}
+                        oninput={(e) => updateSpaceControl('scale', (e.currentTarget as HTMLInputElement).valueAsNumber)}
+                    />
+                </label>
+                <label class="range-control">
+                    <span class="range-header">
+                        <span>Perspective</span>
+                        <span class="range-value">{formatPercent(spacePerspective)}</span>
+                    </span>
+                    <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={spacePerspective}
+                        oninput={(e) => updateSpaceControl('perspective', (e.currentTarget as HTMLInputElement).valueAsNumber)}
+                    />
+                </label>
+            </div>
 
             <div class="layer-row">
                 <button class="layer-step-btn" onclick={() => navigateZLayer(-1)} disabled={zLayers.length === 0} title="Previous z-layer">↑</button>
@@ -1658,26 +1942,26 @@
                     </button>
                 </div>
             {/if}
-        {:else}
-            <div class="panel-section">
-                <div class="stat-row">
-                    <span class="stat-label">Images</span>
-                    <span class="stat-value">{totalImages}</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Embeddings</span>
-                    <span class="stat-value">{geminiEmbeddingCount}</span>
-                </div>
-                <button class="action-btn" onclick={handleGenerateGemini} disabled={generating || !hasGoogleKey} title={hasGoogleKey ? '' : 'Set Google API key in Settings'}>
-                    {#if generating}
-                        Generating {genProgress.current}/{genProgress.total}...
-                    {:else if !hasGoogleKey}
-                        Set API Key First
-                    {:else if geminiEmbeddingCount < totalImages}
-                        Generate Embeddings ({Math.max(0, totalImages - geminiEmbeddingCount)} remaining)
-                    {:else}
-                        Regenerate All
-                    {/if}
+	        {:else}
+	            <div class="panel-section">
+	                <div class="stat-row">
+	                    <span class="stat-label">Images</span>
+	                    <span class="stat-value">{totalImages}</span>
+	                </div>
+	                <div class="stat-row">
+	                    <span class="stat-label">Embeddings</span>
+	                    <span class="stat-value">{currentEmbeddingCount}</span>
+	                </div>
+	                <button class="action-btn" onclick={handleGenerateRemote} disabled={generating || !selectedModelAvailable} title={selectedModelAvailable ? '' : providerStatusLabel(selectedProvider)}>
+	                    {#if generating}
+	                        Generating {genProgress.current}/{genProgress.total}...
+	                    {:else if !selectedModelAvailable}
+	                        {selectedProvider === 'ollama' ? 'Start Ollama First' : 'Set API Key First'}
+	                    {:else if currentEmbeddingCount < totalImages}
+	                        Generate Embeddings ({Math.max(0, totalImages - currentEmbeddingCount)} remaining)
+	                    {:else}
+	                        Regenerate All
+	                    {/if}
                 </button>
             </div>
         {/if}
@@ -1767,10 +2051,10 @@
                     <div class="empty-icon">&#9881;</div>
                     <div class="empty-title">Model Required</div>
                     <div class="empty-text">Download {selectedModel.label} to generate embeddings</div>
-                {:else if selectedProvider === 'gemini' && !hasGoogleKey}
+                {:else if isRemoteProvider(selectedProvider) && !selectedModelAvailable}
                     <div class="empty-icon">&#9881;</div>
-                    <div class="empty-title">API Key Required</div>
-                    <div class="empty-text">Set a Google API key before generating Gemini embeddings</div>
+                    <div class="empty-title">{selectedProvider === 'ollama' ? 'Ollama Offline' : 'API Key Required'}</div>
+                    <div class="empty-text">{selectedProvider === 'ollama' ? 'Start Ollama before generating embeddings' : `Set an API key before generating ${selectedModel.shortLabel} embeddings`}</div>
                 {:else if currentEmbeddingCount === 0}
                     <div class="empty-icon">&#9673;</div>
                     <div class="empty-title">No Embeddings Yet</div>
@@ -2083,6 +2367,45 @@
         font-weight: 700;
         letter-spacing: 0.08em;
         color: var(--text-secondary);
+    }
+
+    .space-control-panel {
+        display: grid;
+        gap: 7px;
+        margin-top: 6px;
+        padding: 8px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+    }
+
+    .range-control {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+        color: var(--text-secondary);
+        font-size: 9px;
+    }
+
+    .range-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-width: 0;
+    }
+
+    .range-value {
+        flex-shrink: 0;
+        color: var(--text);
+    }
+
+    .range-control input[type="range"] {
+        width: 100%;
+        height: 16px;
+        margin: 0;
+        accent-color: var(--blue);
+        cursor: pointer;
     }
 
     .layer-row {

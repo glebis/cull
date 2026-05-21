@@ -32,6 +32,7 @@ import {
     selectedIds,
     loupeScale,
     settingsOpen,
+    aboutOpen,
     navigateTo,
     showToast,
     requestTextInput,
@@ -317,6 +318,9 @@ async function handleImageTrash() {
 
 function handleMenuAction(action: string) {
     switch (action) {
+        case 'about':
+            aboutOpen.set(true);
+            break;
         case 'open_file':
             handleOpenFile();
             break;

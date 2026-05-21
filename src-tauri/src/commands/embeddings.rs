@@ -4,7 +4,34 @@ use serde::Serialize;
 use std::path::Path;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::db_core::embeddings::{embedding_model_spec, CLIP_MODEL_ID};
+use crate::db_core::embeddings::{
+    embedding_model_spec, embedding_provider_for_model, embedding_provider_specs, EmbeddingEngine,
+    CLIP_MODEL_ID, GEMINI_EMBEDDING_MODEL_ID,
+};
+use crate::db_core::remote_embeddings::{
+    build_text_embedding_input, check_ollama_embedding_available, normalize_embedding,
+    ollama_storage_model_id, openai_storage_model_id, OllamaTextEmbeddingProvider,
+    OpenAiTextEmbeddingProvider, OLLAMA_EMBEDDING_MODEL, OLLAMA_EMBEDDING_URL,
+    OPENAI_EMBEDDING_ENDPOINT, OPENAI_EMBEDDING_MODEL,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddingProviderInfo {
+    pub id: String,
+    pub label: String,
+    pub short_label: String,
+    pub model_name: String,
+    pub dimensions: usize,
+    pub dimensions_label: String,
+    pub scope: String,
+    pub runtime: String,
+    pub status: String,
+    pub available: bool,
+    pub downloadable: bool,
+    pub download_label: Option<String>,
+    pub api_key_provider: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EmbeddingModelDownloadInfo {
@@ -16,6 +43,127 @@ pub struct EmbeddingModelDownloadInfo {
 }
 
 pub type ClipModelDownloadInfo = EmbeddingModelDownloadInfo;
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ProviderAvailability {
+    google_key_exists: bool,
+    openai_key_exists: bool,
+    ollama_available: bool,
+}
+
+fn embedding_provider_infos(
+    engine: &EmbeddingEngine,
+    availability: ProviderAvailability,
+) -> Vec<EmbeddingProviderInfo> {
+    embedding_provider_specs()
+        .iter()
+        .map(|spec| {
+            let (scope, available, status) = match spec.runtime {
+                "local-onnx" => {
+                    let available = engine
+                        .is_model_available_for(spec.model_id)
+                        .unwrap_or(false);
+                    (
+                        "local",
+                        available,
+                        if available { "ready" } else { "model" },
+                    )
+                }
+                "cloud-api" => {
+                    let available = match spec.api_key_provider {
+                        Some("google") => availability.google_key_exists,
+                        Some("openai") => availability.openai_key_exists,
+                        _ => false,
+                    };
+                    ("cloud", available, if available { "ready" } else { "key" })
+                }
+                "local-api" => (
+                    "local",
+                    availability.ollama_available,
+                    if availability.ollama_available {
+                        "ready"
+                    } else {
+                        "offline"
+                    },
+                ),
+                _ => ("unknown", false, "unsupported"),
+            };
+
+            EmbeddingProviderInfo {
+                id: spec.id.to_string(),
+                label: spec.label.to_string(),
+                short_label: spec.short_label.to_string(),
+                model_name: spec.model_id.to_string(),
+                dimensions: spec.dimensions,
+                dimensions_label: if spec.dimensions == 0 {
+                    "model".to_string()
+                } else {
+                    format!("{}d", spec.dimensions)
+                },
+                scope: scope.to_string(),
+                runtime: spec.runtime.to_string(),
+                status: status.to_string(),
+                available,
+                downloadable: spec.downloadable,
+                download_label: spec.download_label.map(str::to_string),
+                api_key_provider: spec.api_key_provider.map(str::to_string),
+            }
+        })
+        .collect()
+}
+
+fn api_key_exists(state: &AppState, provider: &str) -> Result<bool, String> {
+    let flag_key = format!("api_key_exists_{}", provider);
+    match state.db.get_setting(&flag_key) {
+        Ok(Some(value)) => Ok(value == "true"),
+        Ok(None) => Ok(false),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+fn openai_embedding_model(state: &AppState) -> Result<String, String> {
+    Ok(state
+        .db
+        .get_setting("openai_embedding_model")
+        .map_err(|e| e.to_string())?
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| OPENAI_EMBEDDING_MODEL.to_string()))
+}
+
+fn ollama_embedding_config(state: &AppState) -> Result<(String, String), String> {
+    let url = state
+        .db
+        .get_setting("ollama_embedding_url")
+        .map_err(|e| e.to_string())?
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| OLLAMA_EMBEDDING_URL.to_string());
+    let model = state
+        .db
+        .get_setting("ollama_embedding_model")
+        .map_err(|e| e.to_string())?
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| OLLAMA_EMBEDDING_MODEL.to_string());
+    Ok((url, model))
+}
+
+fn ollama_model_available(models: &[String], configured_model: &str) -> bool {
+    let configured = configured_model.trim();
+    if configured.is_empty() {
+        return false;
+    }
+    models.iter().any(|model| {
+        model == configured
+            || model
+                .strip_suffix(":latest")
+                .map(|base| base == configured)
+                .unwrap_or(false)
+            || (!configured.contains(':')
+                && model
+                    .split_once(':')
+                    .map(|(base, _)| base == configured)
+                    .unwrap_or(false))
+    })
+}
 
 #[cfg(test)]
 fn clip_model_download_info_for_path(model_path: &Path) -> ClipModelDownloadInfo {
@@ -91,15 +239,39 @@ pub async fn generate_model_embeddings(
     model: String,
     image_ids: Vec<String>,
 ) -> Result<u32, String> {
-    generate_embeddings_for_model(&app, &state, &model, &image_ids)
+    generate_embeddings_for_model(&app, &state, &model, &image_ids).await
 }
 
-fn generate_embeddings_for_model(
+async fn generate_embeddings_for_model(
     app: &AppHandle,
     state: &AppState,
     model_id: &str,
     image_ids: &[String],
 ) -> Result<u32, String> {
+    if model_id == GEMINI_EMBEDDING_MODEL_ID {
+        return generate_gemini_embeddings_for(app, state, image_ids).await;
+    }
+    if let Some(model) = model_id.strip_prefix("openai:") {
+        let model = if model.trim().is_empty() {
+            openai_embedding_model(state)?
+        } else {
+            model.to_string()
+        };
+        return generate_openai_text_embeddings(app, state, &model, image_ids).await;
+    }
+    if let Some(model) = model_id.strip_prefix("ollama:") {
+        let (_, configured_model) = ollama_embedding_config(state)?;
+        let model = if model.trim().is_empty() {
+            configured_model
+        } else {
+            model.to_string()
+        };
+        return generate_ollama_text_embeddings(app, state, &model, image_ids).await;
+    }
+    if embedding_provider_for_model(model_id).is_none() {
+        return Err(format!("Unsupported embedding model '{}'", model_id));
+    }
+
     crate::services::model_pipeline::ensure_embedding_model_loaded(
         &state.embedding_engine,
         model_id,
@@ -207,6 +379,66 @@ pub async fn get_embedding_model_download_info(
     embedding_model_download_info_for_path(&model, &model_path)
 }
 
+#[tauri::command]
+pub async fn list_embedding_providers(
+    state: State<'_, AppState>,
+) -> Result<Vec<EmbeddingProviderInfo>, String> {
+    let openai_model = openai_embedding_model(&state)?;
+    let (ollama_url, ollama_model) = ollama_embedding_config(&state)?;
+    let ollama_models = check_ollama_embedding_available(&ollama_url)
+        .await
+        .unwrap_or_default();
+    let availability = ProviderAvailability {
+        google_key_exists: api_key_exists(&state, "google")?,
+        openai_key_exists: api_key_exists(&state, "openai")?,
+        ollama_available: ollama_model_available(&ollama_models, &ollama_model),
+    };
+    let engine = state.embedding_engine.lock();
+    let mut providers = embedding_provider_infos(&engine, availability);
+    for provider in &mut providers {
+        if provider.id == "openai" {
+            provider.model_name = openai_storage_model_id(&openai_model);
+        } else if provider.id == "ollama" {
+            provider.model_name = ollama_storage_model_id(&ollama_model);
+        }
+    }
+    Ok(providers)
+}
+
+#[tauri::command]
+pub async fn check_ollama_embedding(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let (url, _) = ollama_embedding_config(&state)?;
+    check_ollama_embedding_available(&url).await
+}
+
+#[tauri::command]
+pub async fn get_ollama_embedding_config(
+    state: State<'_, AppState>,
+) -> Result<(String, String), String> {
+    ollama_embedding_config(&state)
+}
+
+#[tauri::command]
+pub async fn set_ollama_embedding_config(
+    state: State<'_, AppState>,
+    url: Option<String>,
+    model: Option<String>,
+) -> Result<(), String> {
+    if let Some(url) = url {
+        state
+            .db
+            .set_setting("ollama_embedding_url", &url)
+            .map_err(|e| e.to_string())?;
+    }
+    if let Some(model) = model {
+        state
+            .db
+            .set_setting("ollama_embedding_model", &model)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,6 +482,65 @@ mod tests {
             .curl_command
             .contains("'/tmp/cull-models/dinov2-vits14.onnx.part'"));
         assert!(info.curl_command.contains("'https://huggingface.co/"));
+    }
+
+    #[test]
+    fn provider_infos_report_local_model_and_cloud_key_availability() {
+        let tmp = tempfile::tempdir().unwrap();
+        let engine = crate::db_core::embeddings::EmbeddingEngine::new(tmp.path());
+
+        let missing = embedding_provider_infos(&engine, ProviderAvailability::default());
+        assert_eq!(missing.len(), 5);
+        assert_eq!(missing[0].id, "clip");
+        assert_eq!(missing[0].scope, "local");
+        assert_eq!(missing[0].status, "model");
+        assert!(!missing[0].available);
+        assert_eq!(missing[1].id, "dinov2");
+        assert_eq!(missing[1].status, "model");
+        assert_eq!(missing[2].id, "gemini");
+        assert_eq!(missing[2].scope, "cloud");
+        assert_eq!(missing[2].status, "key");
+        assert_eq!(missing[2].api_key_provider.as_deref(), Some("google"));
+        assert_eq!(missing[3].id, "openai");
+        assert_eq!(missing[3].status, "key");
+        assert_eq!(missing[3].api_key_provider.as_deref(), Some("openai"));
+        assert_eq!(missing[4].id, "ollama");
+        assert_eq!(missing[4].scope, "local");
+        assert_eq!(missing[4].status, "offline");
+        assert_eq!(missing[4].dimensions_label, "model");
+
+        std::fs::write(tmp.path().join("clip-vit-b32-vision.onnx"), b"model").unwrap();
+
+        let with_ready_providers = embedding_provider_infos(
+            &engine,
+            ProviderAvailability {
+                google_key_exists: true,
+                openai_key_exists: true,
+                ollama_available: true,
+            },
+        );
+        assert_eq!(with_ready_providers[0].status, "ready");
+        assert!(with_ready_providers[0].available);
+        assert_eq!(with_ready_providers[1].status, "model");
+        assert_eq!(with_ready_providers[2].status, "ready");
+        assert!(with_ready_providers[2].available);
+        assert_eq!(with_ready_providers[3].status, "ready");
+        assert!(with_ready_providers[3].available);
+        assert_eq!(with_ready_providers[4].status, "ready");
+        assert!(with_ready_providers[4].available);
+    }
+
+    #[test]
+    fn ollama_model_available_accepts_latest_tag_alias() {
+        let models = vec![
+            "embeddinggemma:latest".to_string(),
+            "nomic-embed-text:v1.5".to_string(),
+        ];
+
+        assert!(ollama_model_available(&models, "embeddinggemma"));
+        assert!(ollama_model_available(&models, "embeddinggemma:latest"));
+        assert!(ollama_model_available(&models, "nomic-embed-text"));
+        assert!(!ollama_model_available(&models, "mxbai-embed-large"));
     }
 }
 
@@ -460,11 +751,190 @@ pub async fn has_api_key(state: State<'_, AppState>, provider: String) -> Result
     }
 }
 
+enum TextEmbeddingProvider {
+    OpenAi(OpenAiTextEmbeddingProvider),
+    Ollama(OllamaTextEmbeddingProvider),
+}
+
+impl TextEmbeddingProvider {
+    async fn generate_embedding(&self, input: &str) -> Result<Vec<f32>, String> {
+        match self {
+            TextEmbeddingProvider::OpenAi(provider) => provider.generate_embedding(input).await,
+            TextEmbeddingProvider::Ollama(provider) => provider.generate_embedding(input).await,
+        }
+    }
+}
+
+async fn generate_openai_text_embeddings(
+    app: &AppHandle,
+    state: &AppState,
+    model: &str,
+    image_ids: &[String],
+) -> Result<u32, String> {
+    let api_key = state
+        .secrets
+        .get("api_key_openai")?
+        .ok_or("OpenAI API key not set")?;
+    let _ = state.db.set_setting("api_key_exists_openai", "true");
+    generate_text_embeddings_for(
+        app,
+        state,
+        image_ids,
+        TextEmbeddingRun {
+            provider: TextEmbeddingProvider::OpenAi(OpenAiTextEmbeddingProvider::new(
+                &api_key, model,
+            )),
+            provider_name: "openai",
+            endpoint: OPENAI_EMBEDDING_ENDPOINT.to_string(),
+            model,
+            storage_model_id: openai_storage_model_id(model),
+            jurisdiction: "US - OpenAI Inc",
+        },
+    )
+    .await
+}
+
+async fn generate_ollama_text_embeddings(
+    app: &AppHandle,
+    state: &AppState,
+    model: &str,
+    image_ids: &[String],
+) -> Result<u32, String> {
+    let (url, _) = ollama_embedding_config(state)?;
+    let endpoint = crate::db_core::remote_embeddings::normalize_ollama_embed_url(&url);
+    let jurisdiction = if endpoint.contains("localhost") || endpoint.contains("127.0.0.1") {
+        "Local"
+    } else {
+        "Remote"
+    };
+    generate_text_embeddings_for(
+        app,
+        state,
+        image_ids,
+        TextEmbeddingRun {
+            provider: TextEmbeddingProvider::Ollama(OllamaTextEmbeddingProvider::new(
+                &endpoint, model,
+            )),
+            provider_name: "ollama",
+            endpoint,
+            model,
+            storage_model_id: ollama_storage_model_id(model),
+            jurisdiction,
+        },
+    )
+    .await
+}
+
+struct TextEmbeddingRun<'a> {
+    provider: TextEmbeddingProvider,
+    provider_name: &'static str,
+    endpoint: String,
+    model: &'a str,
+    storage_model_id: String,
+    jurisdiction: &'static str,
+}
+
+async fn generate_text_embeddings_for(
+    app: &AppHandle,
+    state: &AppState,
+    image_ids: &[String],
+    run: TextEmbeddingRun<'_>,
+) -> Result<u32, String> {
+    let total = image_ids.len() as u32;
+    let mut generated = 0u32;
+
+    for (i, image_id) in image_ids.iter().enumerate() {
+        let id_refs: Vec<&str> = vec![image_id.as_str()];
+        let images = state
+            .db
+            .get_images_by_ids(&id_refs)
+            .map_err(|e| e.to_string())?;
+        let img = images.first().ok_or("Image not found")?;
+        let generation_run = state
+            .db
+            .get_generation_run_for_image(image_id)
+            .map_err(|e| e.to_string())?;
+        let vision_metadata = state
+            .db
+            .get_vision_metadata(image_id)
+            .map_err(|e| e.to_string())?;
+        let input = build_text_embedding_input(img, generation_run.as_ref(), &vision_metadata);
+        let dims = format!("{}x{}", img.image.width, img.image.height);
+
+        match run.provider.generate_embedding(&input).await {
+            Ok(embedding) => {
+                let embedding = normalize_embedding(embedding);
+                let _ = crate::services::audit::log_api_call(
+                    &state.db,
+                    run.provider_name,
+                    &run.endpoint,
+                    "text",
+                    input.len() as i64,
+                    Some(&input),
+                    Some(&dims),
+                    Some(run.model),
+                    200,
+                    run.jurisdiction,
+                );
+                state
+                    .db
+                    .store_embedding(image_id, &run.storage_model_id, &embedding)
+                    .map_err(|e| e.to_string())?;
+                generated += 1;
+            }
+            Err(e) => {
+                let _ = crate::services::audit::log_api_call(
+                    &state.db,
+                    run.provider_name,
+                    &run.endpoint,
+                    "text",
+                    input.len() as i64,
+                    Some(&input),
+                    Some(&dims),
+                    Some(run.model),
+                    500,
+                    run.jurisdiction,
+                );
+                crate::safe_eprintln!(
+                    "{} embedding error for {}: {}",
+                    run.provider_name,
+                    image_id,
+                    e
+                );
+            }
+        }
+
+        let _ = app.emit(
+            "embedding-progress",
+            serde_json::json!({
+                "current": i + 1,
+                "total": total,
+                "provider": run.provider_name,
+                "model": run.storage_model_id,
+            }),
+        );
+
+        if run.provider_name == "openai" {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+    }
+
+    Ok(generated)
+}
+
 #[tauri::command]
 pub async fn generate_gemini_embeddings(
     app: AppHandle,
     state: State<'_, AppState>,
     image_ids: Vec<String>,
+) -> Result<u32, String> {
+    generate_gemini_embeddings_for(&app, &state, &image_ids).await
+}
+
+async fn generate_gemini_embeddings_for(
+    app: &AppHandle,
+    state: &AppState,
+    image_ids: &[String],
 ) -> Result<u32, String> {
     let api_key = state
         .secrets
@@ -501,7 +971,7 @@ pub async fn generate_gemini_embeddings(
                 );
                 state
                     .db
-                    .store_embedding(image_id, "gemini-embedding-2", &embedding)
+                    .store_embedding(image_id, GEMINI_EMBEDDING_MODEL_ID, &embedding)
                     .map_err(|e| e.to_string())?;
                 generated += 1;
             }
@@ -521,7 +991,8 @@ pub async fn generate_gemini_embeddings(
             serde_json::json!({
                 "current": i + 1,
                 "total": total,
-                "provider": "gemini"
+                "provider": "gemini",
+                "model": GEMINI_EMBEDDING_MODEL_ID,
             }),
         );
 

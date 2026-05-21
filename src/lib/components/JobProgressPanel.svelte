@@ -33,7 +33,13 @@
                 upsertJob(e.payload.job_id ?? `evt_import`, 'import', 'running', e.payload.current, e.payload.total, e.payload.filename);
             });
             const u2 = await listen<any>('embedding-progress', (e) => {
-                const provider = e.payload.provider === 'gemini' ? 'gemini-embeddings' : 'embeddings';
+                const provider = e.payload.provider === 'gemini'
+                    ? 'gemini-embeddings'
+                    : e.payload.provider === 'openai'
+                        ? 'openai-embeddings'
+                        : e.payload.provider === 'ollama'
+                            ? 'ollama-embeddings'
+                            : 'embeddings';
                 upsertJob(e.payload.job_id ?? `evt_${provider}`, provider, 'running', e.payload.current, e.payload.total, null);
             });
             const u3 = await listen<any>('detection-progress', (e) => {
@@ -208,6 +214,8 @@
             import: 'Import',
             embeddings: 'Embeddings',
             'gemini-embeddings': 'Gemini embeddings',
+            'openai-embeddings': 'OpenAI embeddings',
+            'ollama-embeddings': 'Ollama embeddings',
             detection: 'Detection',
             nsfw: 'NSFW detection',
             vision: 'Vision',

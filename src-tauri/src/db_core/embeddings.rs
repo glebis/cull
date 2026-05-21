@@ -1,11 +1,15 @@
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::Tensor;
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use crate::db_core::remote_embeddings::{OLLAMA_EMBEDDING_MODEL_ID, OPENAI_EMBEDDING_MODEL_ID};
+
 pub const CLIP_MODEL_ID: &str = "clip-vit-b32";
 pub const DINO_V2_SMALL_MODEL_ID: &str = "dinov2-vits14";
+pub const GEMINI_EMBEDDING_MODEL_ID: &str = "gemini-embedding-2";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EmbeddingModelSpec {
@@ -19,6 +23,19 @@ pub struct EmbeddingModelSpec {
     pub output_dims: usize,
     pub mean: [f32; 3],
     pub std: [f32; 3],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct EmbeddingProviderSpec {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub short_label: &'static str,
+    pub model_id: &'static str,
+    pub runtime: &'static str,
+    pub dimensions: usize,
+    pub api_key_provider: Option<&'static str>,
+    pub downloadable: bool,
+    pub download_label: Option<&'static str>,
 }
 
 pub const CLIP_MODEL_SPEC: EmbeddingModelSpec = EmbeddingModelSpec {
@@ -47,12 +64,93 @@ pub const DINO_V2_SMALL_MODEL_SPEC: EmbeddingModelSpec = EmbeddingModelSpec {
     std: [0.229, 0.224, 0.225],
 };
 
+pub const EMBEDDING_PROVIDER_SPECS: [EmbeddingProviderSpec; 5] = [
+    EmbeddingProviderSpec {
+        id: "clip",
+        label: "CLIP ViT-B/32",
+        short_label: "CLIP",
+        model_id: CLIP_MODEL_ID,
+        runtime: "local-onnx",
+        dimensions: 512,
+        api_key_provider: None,
+        downloadable: true,
+        download_label: Some("Download CLIP (~350MB)"),
+    },
+    EmbeddingProviderSpec {
+        id: "dinov2",
+        label: "DINOv2 ViT-S/14",
+        short_label: "DINOv2",
+        model_id: DINO_V2_SMALL_MODEL_ID,
+        runtime: "local-onnx",
+        dimensions: 384,
+        api_key_provider: None,
+        downloadable: true,
+        download_label: Some("Download DINOv2 (~87MB)"),
+    },
+    EmbeddingProviderSpec {
+        id: "gemini",
+        label: "Gemini Embedding 2",
+        short_label: "Gemini",
+        model_id: GEMINI_EMBEDDING_MODEL_ID,
+        runtime: "cloud-api",
+        dimensions: 3072,
+        api_key_provider: Some("google"),
+        downloadable: false,
+        download_label: None,
+    },
+    EmbeddingProviderSpec {
+        id: "openai",
+        label: "OpenAI Text Embedding 3 Large",
+        short_label: "OpenAI",
+        model_id: OPENAI_EMBEDDING_MODEL_ID,
+        runtime: "cloud-api",
+        dimensions: 3072,
+        api_key_provider: Some("openai"),
+        downloadable: false,
+        download_label: None,
+    },
+    EmbeddingProviderSpec {
+        id: "ollama",
+        label: "Ollama Text Embeddings",
+        short_label: "Ollama",
+        model_id: OLLAMA_EMBEDDING_MODEL_ID,
+        runtime: "local-api",
+        dimensions: 0,
+        api_key_provider: None,
+        downloadable: false,
+        download_label: None,
+    },
+];
+
 pub fn embedding_model_spec(model_id: &str) -> Option<EmbeddingModelSpec> {
     match model_id {
         CLIP_MODEL_ID => Some(CLIP_MODEL_SPEC),
         DINO_V2_SMALL_MODEL_ID => Some(DINO_V2_SMALL_MODEL_SPEC),
         _ => None,
     }
+}
+
+pub fn embedding_provider_specs() -> &'static [EmbeddingProviderSpec] {
+    &EMBEDDING_PROVIDER_SPECS
+}
+
+pub fn embedding_provider_for_model(model_id: &str) -> Option<EmbeddingProviderSpec> {
+    if model_id.starts_with("openai:") {
+        return EMBEDDING_PROVIDER_SPECS
+            .iter()
+            .find(|provider| provider.id == "openai")
+            .copied();
+    }
+    if model_id.starts_with("ollama:") {
+        return EMBEDDING_PROVIDER_SPECS
+            .iter()
+            .find(|provider| provider.id == "ollama")
+            .copied();
+    }
+    EMBEDDING_PROVIDER_SPECS
+        .iter()
+        .find(|provider| provider.model_id == model_id)
+        .copied()
 }
 
 pub struct EmbeddingEngine {
@@ -227,5 +325,74 @@ mod tests {
             tmp.path().join("dinov2-vits14.onnx")
         );
         assert!(!engine.is_model_available_for("dinov2-vits14").unwrap());
+    }
+
+    #[test]
+    fn embedding_provider_catalog_lists_supported_runtime_providers() {
+        let providers = embedding_provider_specs();
+        let ids: Vec<&str> = providers.iter().map(|provider| provider.id).collect();
+
+        assert_eq!(ids, vec!["clip", "dinov2", "gemini", "openai", "ollama"]);
+        assert_eq!(providers[0].model_id, CLIP_MODEL_ID);
+        assert_eq!(providers[0].runtime, "local-onnx");
+        assert_eq!(providers[0].dimensions, 512);
+        assert!(providers[0].downloadable);
+
+        assert_eq!(providers[1].model_id, DINO_V2_SMALL_MODEL_ID);
+        assert_eq!(providers[1].runtime, "local-onnx");
+        assert_eq!(providers[1].dimensions, 384);
+        assert!(providers[1].downloadable);
+
+        assert_eq!(providers[2].id, "gemini");
+        assert_eq!(providers[2].model_id, "gemini-embedding-2");
+        assert_eq!(providers[2].runtime, "cloud-api");
+        assert_eq!(providers[2].api_key_provider, Some("google"));
+        assert!(!providers[2].downloadable);
+
+        assert_eq!(providers[3].id, "openai");
+        assert_eq!(providers[3].model_id, "openai:text-embedding-3-large");
+        assert_eq!(providers[3].runtime, "cloud-api");
+        assert_eq!(providers[3].api_key_provider, Some("openai"));
+        assert_eq!(providers[3].dimensions, 3072);
+        assert!(!providers[3].downloadable);
+
+        assert_eq!(providers[4].id, "ollama");
+        assert_eq!(providers[4].model_id, "ollama:embeddinggemma");
+        assert_eq!(providers[4].runtime, "local-api");
+        assert_eq!(providers[4].dimensions, 0);
+        assert!(!providers[4].downloadable);
+    }
+
+    #[test]
+    fn provider_for_model_maps_stored_model_names() {
+        assert_eq!(
+            embedding_provider_for_model(CLIP_MODEL_ID).unwrap().id,
+            "clip"
+        );
+        assert_eq!(
+            embedding_provider_for_model(DINO_V2_SMALL_MODEL_ID)
+                .unwrap()
+                .id,
+            "dinov2"
+        );
+        assert_eq!(
+            embedding_provider_for_model("gemini-embedding-2")
+                .unwrap()
+                .id,
+            "gemini"
+        );
+        assert_eq!(
+            embedding_provider_for_model("openai:text-embedding-3-large")
+                .unwrap()
+                .id,
+            "openai"
+        );
+        assert_eq!(
+            embedding_provider_for_model("ollama:embeddinggemma")
+                .unwrap()
+                .id,
+            "ollama"
+        );
+        assert!(embedding_provider_for_model("unknown-model").is_none());
     }
 }

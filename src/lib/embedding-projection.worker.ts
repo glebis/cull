@@ -6,7 +6,7 @@ interface ProjectionImageMeta {
     thumbnailPath: string | null;
 }
 
-type EmbeddingProvider = 'clip' | 'dinov2' | 'gemini';
+type EmbeddingProvider = 'clip' | 'dinov2' | 'gemini' | 'openai' | 'ollama';
 
 interface ProjectionRequest {
     requestId: number;

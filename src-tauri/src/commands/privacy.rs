@@ -78,6 +78,30 @@ pub async fn get_data_flow_status(
         },
     });
 
+    let ollama_embedding_url = state
+        .db
+        .get_setting("ollama_embedding_url")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "http://localhost:11434/api/embed".to_string());
+    let ollama_embedding_is_local =
+        ollama_embedding_url.contains("localhost") || ollama_embedding_url.contains("127.0.0.1");
+    entries.push(DataFlowEntry {
+        feature: "Ollama embeddings".into(),
+        status: if ollama_embedding_is_local {
+            "local"
+        } else {
+            "active"
+        }
+        .into(),
+        server: if ollama_embedding_is_local {
+            "localhost".into()
+        } else {
+            "remote".into()
+        },
+        data_sent: "Metadata text".into(),
+    });
+
     let openai_key = state
         .db
         .get_setting("api_key_exists_openai")
@@ -95,6 +119,20 @@ pub async fn get_data_flow_status(
         },
         data_sent: if openai_key {
             "Prompts + images".into()
+        } else {
+            "Nothing".into()
+        },
+    });
+    entries.push(DataFlowEntry {
+        feature: "OpenAI embeddings".into(),
+        status: if openai_key { "configured" } else { "off" }.into(),
+        server: if openai_key {
+            "US 🇺🇸".into()
+        } else {
+            "—".into()
+        },
+        data_sent: if openai_key {
+            "Metadata text + API key".into()
         } else {
             "Nothing".into()
         },

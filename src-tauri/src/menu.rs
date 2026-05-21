@@ -1,7 +1,5 @@
 use serde::Deserialize;
-use tauri::menu::{
-    AboutMetadata, CheckMenuItem, Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu,
-};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Wry};
 
 pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
@@ -9,14 +7,12 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 
     // App menu
     let app_menu = Submenu::new(app, "Cull", true)?;
-    app_menu.append(&PredefinedMenuItem::about(
+    app_menu.append(&MenuItem::with_id(
         app,
-        Some("About Cull"),
-        Some(AboutMetadata {
-            name: Some("Cull".to_string()),
-            version: Some("0.1.0".to_string()),
-            ..Default::default()
-        }),
+        "about",
+        "About Cull",
+        true,
+        None::<&str>,
     )?)?;
     app_menu.append(&PredefinedMenuItem::separator(app)?)?;
     app_menu.append(&MenuItem::with_id(
@@ -351,7 +347,7 @@ fn find_menu_item_in_items(
 pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
     let id = event.id().0.as_str();
     match id {
-        "open_file" | "open_folder" | "settings" | "undo" | "redo" | "deselect_all"
+        "about" | "open_file" | "open_folder" | "settings" | "undo" | "redo" | "deselect_all"
         | "image_share" | "image_open_default" | "image_open_with" | "image_reveal"
         | "image_rename" | "image_move_to" | "image_trash" | "view_grid" | "view_compare"
         | "view_loupe" | "view_canvas" | "view_lineage" | "view_embeddings" | "view_export"
