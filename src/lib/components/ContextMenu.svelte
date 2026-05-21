@@ -1,8 +1,8 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
-    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, moveImage, renameImage, listFolders, getImagesByIds, shareImages, openImagesWithApplication } from '$lib/api';
-    import type { ImageWithFile } from '$lib/api';
+    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, moveImage, renameImage, listFolders, getImagesByIds, shareImages, openImagesWithApplication, listOpenWithApplications } from '$lib/api';
+    import type { ImageWithFile, OpenWithApplication } from '$lib/api';
     import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast, requestTextInput } from '$lib/stores';
     import { clearImageScope, invalidateImageCache, loadImagesForCurrentScope, resetImagePaging } from '$lib/image-loading';
     import { clampFloatingPosition } from '$lib/floating-position';
@@ -21,6 +21,9 @@
     let openSubmenu = $state<string | null>(null);
     let collectionList = $state<[string, string, number][]>([]);
     let folderList = $state<[string, number][]>([]);
+    let openWithApps = $state<OpenWithApplication[]>([]);
+    let openWithLoading = $state(false);
+    let openWithLoadedFor = $state<string | null>(null);
     let folderSearch = $state('');
     let menuX = $state(0);
     let menuY = $state(0);
@@ -132,6 +135,7 @@
                     if (key === 'rate') openSubmenu = 'rate';
                     else if (key === 'collections') { loadCollections(); }
                     else if (key === 'copy') openSubmenu = 'copy';
+                    else if (key === 'openwith') { loadOpenWithApps(); }
                     else if (key === 'moveto') { loadFolders(); }
                 }
             }
@@ -280,8 +284,29 @@
         });
         if (!selected || Array.isArray(selected)) return;
 
+        await handleOpenWithApp(selected);
+    }
+
+    async function loadOpenWithApps() {
+        openSubmenu = 'openwith';
+        if (openWithLoadedFor === image.image.id) return;
+
+        openWithLoading = true;
         try {
-            await openImagesWithApplication([image.image.id], selected);
+            openWithApps = await listOpenWithApplications(image.image.id);
+            openWithLoadedFor = image.image.id;
+        } catch (e) {
+            openWithApps = [];
+            showToast('Open With app list unavailable', { detail: String(e), type: 'warning', duration: 8000 });
+        } finally {
+            openWithLoading = false;
+        }
+    }
+
+    async function handleOpenWithApp(appPath: string) {
+        onclose();
+        try {
+            await openImagesWithApplication([image.image.id], appPath);
         } catch (e) {
             showToast('Open With failed', { detail: String(e), type: 'error', duration: 8000 });
         }
@@ -572,13 +597,41 @@
             data-menu-index="10"
             tabindex={activeIndex === 10 ? 0 : -1}
         >Open in Default App</button>
-        <button
-            class="context-menu-item"
-            onclick={handleOpenWith}
-            role="menuitem"
-            data-menu-index="11"
-            tabindex={activeIndex === 11 ? 0 : -1}
-        >Open With...</button>
+        <div class="submenu-parent"
+            onmouseenter={loadOpenWithApps}
+            onmouseleave={() => { if (openSubmenu === 'openwith') openSubmenu = null; }}
+        >
+            <button
+                class="context-menu-item has-submenu"
+                role="menuitem"
+                data-menu-index="11"
+                data-submenu-key="openwith"
+                tabindex={activeIndex === 11 ? 0 : -1}
+            >
+                <span>Open With</span>
+                <span class="arrow">►</span>
+            </button>
+            {#if openSubmenu === 'openwith'}
+                <div class="submenu open-with-submenu" role="menu">
+                    {#if openWithLoading}
+                        <div class="context-menu-item empty-menu-item">Loading...</div>
+                    {:else}
+                        {#each openWithApps as app}
+                            <button class="context-menu-item" onclick={() => handleOpenWithApp(app.path)} role="menuitem" tabindex="-1" title={app.path}>
+                                <span>{app.name}</span>
+                                {#if app.is_default}<span class="count">Default</span>{/if}
+                            </button>
+                        {/each}
+                        {#if openWithApps.length > 0}
+                            <div class="separator"></div>
+                        {/if}
+                        <button class="context-menu-item" onclick={handleOpenWith} role="menuitem" tabindex="-1">
+                            Choose Application...
+                        </button>
+                    {/if}
+                </div>
+            {/if}
+        </div>
     {/if}
 
     <button
@@ -731,6 +784,10 @@
         max-width: min(460px, calc(100vw - 32px));
         max-height: min(420px, calc(100vh - 24px));
         overflow: hidden;
+    }
+    .open-with-submenu {
+        min-width: 240px;
+        max-width: min(360px, calc(100vw - 32px));
     }
     .folder-search-row {
         padding: 4px 8px 6px;

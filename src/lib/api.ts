@@ -166,6 +166,19 @@ export interface GenerationRun {
     imported_at: string;
 }
 
+export interface OpenWithApplication {
+    name: string;
+    path: string;
+    is_default: boolean;
+}
+
+export interface MenuStatePayload {
+    viewMode: string;
+    sidebarVisible: boolean;
+    hasFocusedImage: boolean;
+    selectedCount: number;
+}
+
 // Smart Collections types
 
 export interface FilterGroup {
@@ -982,6 +995,14 @@ export async function shareImages(imageIds: string[]): Promise<void> {
 
 export async function openImagesWithApplication(imageIds: string[], appPath: string): Promise<void> {
     return invoke<void>('open_images_with_application', { imageIds, appPath });
+}
+
+export async function listOpenWithApplications(imageId: string): Promise<OpenWithApplication[]> {
+    return invoke<OpenWithApplication[]>('list_open_with_applications', { imageId });
+}
+
+export async function updateMenuState(state: MenuStatePayload): Promise<void> {
+    return invoke<void>('update_menu_state', { state });
 }
 
 export async function backfillRawPreviews(): Promise<number> {

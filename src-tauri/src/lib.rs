@@ -521,6 +521,8 @@ pub fn run() {
             commands::files::create_subfolder,
             commands::files::share_images,
             commands::files::open_images_with_application,
+            commands::files::list_open_with_applications,
+            menu::update_menu_state,
             commands::raw::backfill_raw_previews,
             commands::privacy::get_data_flow_status,
             commands::privacy::get_api_audit_log,

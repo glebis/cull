@@ -1,6 +1,6 @@
 # System Menu Audit
 
-Status: audited against `src-tauri/src/menu.rs`, `src/lib/menu.ts`, `src/lib/keys.ts`, and `src/lib/components/TabBar.svelte` on 2026-05-21.
+Status: audited against `src-tauri/src/menu.rs`, `src/lib/menu.ts`, `src/lib/keys.ts`, and `src/lib/components/TabBar.svelte` on 2026-05-22.
 
 This document is the release checklist for native menu behavior. Menu labels, shortcuts, frontend handlers, and keyboard shortcuts must stay aligned.
 
@@ -10,9 +10,9 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 |---|---|---|
 | App menu | Pass | About, Settings, Services, Hide, Hide Others, Show All, Quit are present. Settings opens the in-app settings panel. |
 | File menu | Pass | Open File and Open Folder are wired to import flows. Close Window uses the native predefined item. |
-| Edit menu | Pass | Undo and Redo are wired to Cull's undo stack. Cut, Copy, Paste, Select All use native predefined items. Deselect All clears image selection. |
-| Image menu | Pass | Current image/selection actions mirror the context menu and are no-op-safe when no image is focused. |
-| View menu | Pass | View labels and shortcuts match the tab bar and keyboard handler. |
+| Edit menu | Pass | Undo and Redo are wired to Cull's undo stack. Cut, Copy, Paste, Select All use native predefined items. Deselect All clears image selection and is disabled when nothing is selected. |
+| Image menu | Pass | Current image/selection actions mirror the context menu and are disabled when no image is focused. |
+| View menu | Pass | View labels and shortcuts match the tab bar and keyboard handler. Current view and sidebar state are reflected with checkmarks. |
 | Window menu | Pass | Minimize, Zoom, and Bring All to Front use native predefined items. |
 | Help menu | Pass | Cull Help opens the repository README. |
 | Tray menu | Partial | Show Window and Quit are wired. Stats and MCP status are display-only placeholders until dynamic tray status refresh is implemented. |
@@ -47,7 +47,7 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 | Copy | `Cmd+C` | predefined copy | Native text editing | Pass |
 | Paste | `Cmd+V` | predefined paste | Native text editing | Pass |
 | Select All | `Cmd+A` | predefined select all | Native text editing | Pass |
-| Deselect All | `Cmd+Shift+A` | `deselect_all` | Clears image selection | Pass |
+| Deselect All | `Cmd+Shift+A` | `deselect_all` | Clears image selection; disabled when selection is empty | Pass |
 
 ## Image Menu
 
@@ -55,7 +55,7 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 |---|---|---|---|---|
 | Share... | none | `image_share` | Opens the native macOS Share sheet for the focused image or active selection | Pass |
 | Open in Default App | none | `image_open_default` | Opens the focused image through the system default handler | Pass |
-| Open With... | none | `image_open_with` | Prompts for a `.app` bundle and opens the focused image with that app | Pass |
+| Open With... | none | `image_open_with` | Shows compatible apps from macOS Launch Services, with Choose Application fallback | Pass |
 | Reveal in Finder | none | `image_reveal` | Reveals the focused image or selected images in Finder | Pass |
 | Rename... | none | `image_rename` | Opens Cull's rename dialog for the focused image | Pass |
 | Move to Folder... | none | `image_move_to` | Opens a folder picker and moves the focused image or active selection | Pass |
@@ -65,14 +65,14 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 
 | Label | Shortcut | Native ID / Event | Handler | Status |
 |---|---|---|---|---|
-| Grid | `Cmd+1` | `view_grid` | Navigates to Grid | Pass |
-| Loupe | `Cmd+2` | `view_loupe` | Navigates to Loupe | Pass |
-| Compare | `Cmd+3` | `view_compare` | Navigates to Compare | Pass |
-| Canvas | `Cmd+4` | `view_canvas` | Navigates to Canvas | Pass |
-| Lineage | `Cmd+5` | `view_lineage` | Navigates to Lineage | Pass |
-| Embedding Explorer | `Cmd+6` | `view_embeddings` | Navigates to Embedding Explorer | Pass |
-| Export | `Cmd+0` | `view_export` | Navigates to Export | Pass |
-| Toggle Sidebar | `Cmd+B` | `toggle_sidebar` | Toggles sidebar visibility | Pass |
+| Grid | `Cmd+1` | `view_grid` | Navigates to Grid; checked when active | Pass |
+| Loupe | `Cmd+2` | `view_loupe` | Navigates to Loupe; checked when active | Pass |
+| Compare | `Cmd+3` | `view_compare` | Navigates to Compare; checked when active | Pass |
+| Canvas | `Cmd+4` | `view_canvas` | Navigates to Canvas; checked when active | Pass |
+| Lineage | `Cmd+5` | `view_lineage` | Navigates to Lineage; checked when active | Pass |
+| Embedding Explorer | `Cmd+6` | `view_embeddings` | Navigates to Embedding Explorer; checked when active | Pass |
+| Export | `Cmd+0` | `view_export` | Navigates to Export; checked when active | Pass |
+| Toggle Sidebar | `Cmd+B` | `toggle_sidebar` | Toggles sidebar visibility; checked when sidebar is visible | Pass |
 | Zoom In | `Cmd++` | `zoom_in` | Increases grid thumbnail size and Loupe scale | Pass |
 | Zoom Out | `Cmd+-` | `zoom_out` | Decreases grid thumbnail size and Loupe scale | Pass |
 | Actual Size | none | `actual_size` | Resets Loupe scale to 1x | Pass |
@@ -107,4 +107,5 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 - Help was previously a no-op and is now wired.
 - Undo and redo were previously keyboard-only and are now exposed through the native Edit menu.
 - Image-specific context actions are now also exposed through the native Image menu.
+- Native menu state is now synchronized from Svelte: image actions disable with no focused image, Deselect All disables with no selection, View items are checked, and Toggle Sidebar reflects the sidebar state.
 - The tray status placeholders should become dynamic before a polished binary release, but they do not block a source release.

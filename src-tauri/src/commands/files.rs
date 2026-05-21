@@ -1,6 +1,15 @@
 use crate::AppState;
+use serde::Serialize;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, State, Window};
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OpenWithApplication {
+    name: String,
+    path: String,
+    is_default: bool,
+}
 
 #[derive(Debug, PartialEq, Eq)]
 enum DiskMove {
@@ -284,6 +293,30 @@ pub async fn open_images_with_application(
     open_paths_with_application(&app_bundle, vec![path])
 }
 
+#[tauri::command]
+pub async fn list_open_with_applications(
+    state: State<'_, AppState>,
+    image_id: String,
+) -> Result<Vec<OpenWithApplication>, String> {
+    let images = state
+        .db
+        .get_images_by_ids(&[&image_id])
+        .map_err(|e| e.to_string())?;
+    let img = images
+        .first()
+        .ok_or_else(|| format!("Image '{}' not found", image_id))?;
+
+    let path = PathBuf::from(&img.path);
+    if !path.exists() {
+        return Err(format!(
+            "Cannot list applications for missing file: {}",
+            img.path
+        ));
+    }
+
+    list_applications_for_path(&path)
+}
+
 fn validate_app_bundle(app_path: &Path) -> Result<(), String> {
     if !app_path.exists() {
         return Err(format!("Application not found: {}", app_path.display()));
@@ -301,6 +334,14 @@ fn validate_app_bundle(app_path: &Path) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn app_display_name(path: &Path) -> String {
+    path.file_stem()
+        .or_else(|| path.file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or("Application")
+        .to_string()
 }
 
 #[cfg(target_os = "macos")]
@@ -324,9 +365,59 @@ fn open_paths_with_application(app_path: &Path, paths: Vec<PathBuf>) -> Result<(
     }
 }
 
+#[cfg(target_os = "macos")]
+fn list_applications_for_path(path: &Path) -> Result<Vec<OpenWithApplication>, String> {
+    use objc2_app_kit::NSWorkspace;
+    use objc2_foundation::NSURL;
+
+    let file_url = NSURL::from_file_path(path)
+        .ok_or_else(|| format!("Invalid file path: {}", path.display()))?;
+    let workspace = NSWorkspace::sharedWorkspace();
+    let default_path = workspace
+        .URLForApplicationToOpenURL(&file_url)
+        .and_then(|url| url.to_file_path());
+    let app_urls = workspace.URLsForApplicationsToOpenURL(&file_url);
+
+    let mut seen = HashSet::new();
+    let mut default_apps = Vec::new();
+    let mut other_apps = Vec::new();
+    for app_url in app_urls.to_vec() {
+        let Some(path) = app_url.to_file_path() else {
+            continue;
+        };
+        if !path.is_dir() {
+            continue;
+        }
+        let path_str = path.to_string_lossy().to_string();
+        if !seen.insert(path_str.clone()) {
+            continue;
+        }
+        let app = OpenWithApplication {
+            name: app_display_name(&path),
+            is_default: default_path
+                .as_ref()
+                .is_some_and(|default| default == &path),
+            path: path_str,
+        };
+        if app.is_default {
+            default_apps.push(app);
+        } else {
+            other_apps.push(app);
+        }
+    }
+
+    default_apps.extend(other_apps);
+    Ok(default_apps)
+}
+
 #[cfg(not(target_os = "macos"))]
 fn open_paths_with_application(_app_path: &Path, _paths: Vec<PathBuf>) -> Result<(), String> {
     Err("Open With is currently available on macOS only".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn list_applications_for_path(_path: &Path) -> Result<Vec<OpenWithApplication>, String> {
+    Err("Open With application discovery is currently available on macOS only".to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -447,6 +538,14 @@ mod tests {
         assert_eq!(
             validate_app_bundle(&app).unwrap_err(),
             "Choose a macOS .app bundle"
+        );
+    }
+
+    #[test]
+    fn app_display_name_uses_bundle_stem() {
+        assert_eq!(
+            app_display_name(Path::new("/Applications/Preview.app")),
+            "Preview"
         );
     }
 }

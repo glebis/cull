@@ -1,6 +1,6 @@
 # Image Context Menu Audit
 
-Status: researched and implemented macOS share/menu follow-up slice on 2026-05-21.
+Status: researched and implemented macOS share/menu follow-up slice on 2026-05-22.
 
 ## Sources Checked
 
@@ -10,6 +10,7 @@ Status: researched and implemented macOS share/menu follow-up slice on 2026-05-2
 - Apple App Extension Programming Guide, Share: Share extensions are separate extension targets with their own `Info.plist`, `NSExtensionPointIdentifier`, and activation rules. Source: https://developer.apple.com/library/archive/documentation/General/Conceptual/ExtensibilityPG/Share.html
 - Apple App Extension Programming Guide, creating extensions: macOS extension templates include sandbox and user-selected file entitlements by default, and Developer ID signing affects extension availability. Source: https://developer.apple.com/library/archive/documentation/General/Conceptual/ExtensibilityPG/ExtensionCreation.html
 - Apple `NSServices` Info.plist key: Services are advertised through an app's `NSServices` property and appear in the macOS Services menu. Source: https://developer.apple.com/documentation/bundleresources/information-property-list/nsservices
+- Apple AppKit `NSWorkspace`: provides compatible applications for a file URL via `URLsForApplicationsToOpenURL`. Source: https://developer.apple.com/documentation/appkit/nsworkspace
 - Capture One external editor flow: `Image > Open With`, also available by right-clicking an image in the browser. Source: https://support.captureone.com/hc/en-us/articles/360002627737-Opening-images-in-an-external-editor
 - Capture One deletion flow: right-clicking browser images exposes move-to-trash and delete-from-disk variants. Source: https://support.captureone.com/hc/en-us/articles/360002546757-Deleting-images-and-variants-in-general
 - Capture One rating/tag flow: rating and color tag changes are available from thumbnail/viewer right-click menus. Source: https://support.captureone.com/hc/en-us/article_attachments/360007177777
@@ -55,8 +56,9 @@ This means Cull is not missing the core culling context menu. The gap was macOS 
 - Added `Share...` to image context menus. It shares the clicked image, or all selected images when the clicked image is part of the selection.
 - Added a Rust `share_images` command that resolves image IDs to source file paths and presents AppKit's native `NSSharingServicePicker` on macOS.
 - Added `Open in Default App` for single-image context menus.
-- Added `Open With...` for single-image context menus. The first version uses a native folder picker pointed at `/Applications` and validates the selected `.app` bundle before launching the image with `open -a`.
+- Added `Open With...` for single-image context menus. It now asks macOS for compatible apps, puts the default app first, and keeps a Choose Application fallback that validates the selected `.app` bundle before launching the image with `open -a`.
 - Added a native macOS `Image` menu with Share, Open in Default App, Open With, Reveal in Finder, Rename, Move to Folder, and Move to Trash.
+- Added state-aware native menu behavior: image actions disable when no image is focused, Deselect All disables when selection is empty, View entries show the current view, and Toggle Sidebar reflects sidebar visibility.
 - Expanded Copy to support paths, filenames, and file URLs, with multi-select newline output.
 - Fixed context-menu keyboard traversal to follow actual visible menu items instead of sparse hard-coded indexes.
 
@@ -76,6 +78,6 @@ Follow-up implementation task to keep: prototype a Share Extension only after we
 
 ## Next Decisions
 
-- Replace the folder-based `Open With...` picker with a recent-app submenu or a Launch Services app list if users need faster repeated handoff to editors.
+- Add Open With recents or favorites only if the compatible-app submenu still feels too slow for repeated handoff to editors.
 - Add color labels only if we commit to using them in filters/smart collections; otherwise they are UI clutter.
 - Add Export Selected to the context menu only if it deep-links into the existing Export view without creating a second export path.

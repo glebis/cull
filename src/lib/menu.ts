@@ -8,12 +8,15 @@ import {
     redo,
     undo,
     moveImage,
+    listOpenWithApplications,
     openImagesWithApplication,
     renameImage,
     shareImages,
     trashImages,
     listFolders,
+    updateMenuState,
     type ImageWithFile,
+    type OpenWithApplication,
 } from './api';
 import {
     images,
@@ -151,13 +154,7 @@ async function handleImageOpenDefault() {
     }
 }
 
-async function handleImageOpenWith() {
-    const [img] = currentMenuTarget({ single: true });
-    if (!img) {
-        showToast('No image selected', { type: 'warning' });
-        return;
-    }
-
+async function chooseOpenWithApplication(img: ImageWithFile) {
     const selected = await dialogOpen({
         title: 'Open With',
         directory: true,
@@ -166,11 +163,52 @@ async function handleImageOpenWith() {
         fileAccessMode: 'scoped',
     });
     if (!selected || Array.isArray(selected)) return;
+    await openImageWithApplication(img, selected);
+}
 
+async function openImageWithApplication(img: ImageWithFile, appPath: string) {
     try {
-        await openImagesWithApplication([img.image.id], selected);
+        await openImagesWithApplication([img.image.id], appPath);
     } catch (e) {
         showToast('Open With failed', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
+function showOpenWithToast(img: ImageWithFile, apps: OpenWithApplication[]) {
+    const filename = img.path.split('/').pop() ?? img.path;
+    showToast('Open With', {
+        detail: filename,
+        duration: 12000,
+        actions: [
+            ...apps.slice(0, 3).map((app) => ({
+                label: app.is_default ? `${app.name} (Default)` : app.name,
+                onclick: () => openImageWithApplication(img, app.path),
+            })),
+            {
+                label: 'Choose...',
+                onclick: () => chooseOpenWithApplication(img),
+            },
+        ],
+    });
+}
+
+async function handleImageOpenWith() {
+    const [img] = currentMenuTarget({ single: true });
+    if (!img) {
+        showToast('No image selected', { type: 'warning' });
+        return;
+    }
+
+    try {
+        const apps = await listOpenWithApplications(img.image.id);
+        if (apps.length > 0) {
+            showOpenWithToast(img, apps);
+        } else {
+            await chooseOpenWithApplication(img);
+        }
+    } catch (e) {
+        showToast('Open With app list unavailable', { detail: String(e), type: 'warning', duration: 8000 });
+        await chooseOpenWithApplication(img);
     }
 }
 
@@ -367,8 +405,32 @@ function handleMenuAction(action: string) {
     }
 }
 
+let menuStateQueued = false;
+
+function queueMenuStateUpdate() {
+    if (menuStateQueued) return;
+    menuStateQueued = true;
+    queueMicrotask(() => {
+        menuStateQueued = false;
+        updateMenuState({
+            viewMode: get(viewMode),
+            sidebarVisible: get(sidebarVisible),
+            hasFocusedImage: get(focusedImage) !== null,
+            selectedCount: get(selectedIds).size,
+        }).catch((e) => {
+            console.debug('Failed to update native menu state:', e);
+        });
+    });
+}
+
 export async function initMenu() {
     await listen<string>('menu-action', (event) => {
         handleMenuAction(event.payload);
     });
+
+    viewMode.subscribe(queueMenuStateUpdate);
+    sidebarVisible.subscribe(queueMenuStateUpdate);
+    focusedImage.subscribe(queueMenuStateUpdate);
+    selectedIds.subscribe(queueMenuStateUpdate);
+    queueMenuStateUpdate();
 }

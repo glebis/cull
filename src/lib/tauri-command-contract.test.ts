@@ -37,7 +37,7 @@ function frontendInvokeNames(): string[] {
 function registeredCommandNames(): string[] {
     const source = readFileSync(join(root, 'src-tauri/src/lib.rs'), 'utf8');
     const names = new Set<string>();
-    const commandRe = /commands::[a-zA-Z0-9_]+::([a-zA-Z0-9_]+)/g;
+    const commandRe = /(?:commands::[a-zA-Z0-9_]+|menu)::([a-zA-Z0-9_]+)/g;
 
     for (const match of source.matchAll(commandRe)) {
         names.add(match[1]);
