@@ -519,6 +519,7 @@ pub fn run() {
             commands::files::move_image,
             commands::files::rename_image,
             commands::files::create_subfolder,
+            commands::files::share_images,
             commands::raw::backfill_raw_previews,
             commands::privacy::get_data_flow_status,
             commands::privacy::get_api_audit_log,

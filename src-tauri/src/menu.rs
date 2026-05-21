@@ -55,8 +55,20 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 
     // Edit menu
     let edit_menu = Submenu::new(app, "Edit", true)?;
-    edit_menu.append(&PredefinedMenuItem::undo(app, None)?)?;
-    edit_menu.append(&PredefinedMenuItem::redo(app, None)?)?;
+    edit_menu.append(&MenuItem::with_id(
+        app,
+        "undo",
+        "Undo",
+        true,
+        Some::<&str>("CmdOrCtrl+Z"),
+    )?)?;
+    edit_menu.append(&MenuItem::with_id(
+        app,
+        "redo",
+        "Redo",
+        true,
+        Some::<&str>("CmdOrCtrl+Shift+Z"),
+    )?)?;
     edit_menu.append(&PredefinedMenuItem::separator(app)?)?;
     edit_menu.append(&PredefinedMenuItem::cut(app, None)?)?;
     edit_menu.append(&PredefinedMenuItem::copy(app, None)?)?;
@@ -182,9 +194,10 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
     let id = event.id().0.as_str();
     match id {
-        "open_file" | "open_folder" | "settings" | "deselect_all" | "view_grid"
-        | "view_compare" | "view_loupe" | "view_canvas" | "view_lineage" | "view_embeddings"
-        | "view_export" | "toggle_sidebar" | "zoom_in" | "zoom_out" | "actual_size" | "help" => {
+        "open_file" | "open_folder" | "settings" | "undo" | "redo" | "deselect_all"
+        | "view_grid" | "view_compare" | "view_loupe" | "view_canvas" | "view_lineage"
+        | "view_embeddings" | "view_export" | "toggle_sidebar" | "zoom_in" | "zoom_out"
+        | "actual_size" | "help" => {
             let _ = app.emit("menu-action", id);
         }
         _ => {}

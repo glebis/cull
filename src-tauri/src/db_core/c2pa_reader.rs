@@ -343,7 +343,7 @@ mod integration_tests {
 
     #[test]
     fn test_real_gpt_image_2_file() {
-        let path = PathBuf::from("/Users/glebkalinin/genome-toolkit/test-images/v5/v5-01.png");
+        let path = PathBuf::from("/Users/example/cull-test-images/gpt-image-c2pa.png");
         if !path.exists() {
             crate::safe_eprintln!("Skipping: test image not found");
             return;

@@ -43,7 +43,7 @@ Before shipping a site or app bundle, confirm:
 - attribution requirements are met
 - the license is stored or linked in this repo
 
-Prefer OFL or similarly permissive fonts for open-source distribution.
+Prefer OFL or similarly permissive fonts for public source distribution.
 
 ## Screenshots And Mockups
 
@@ -66,7 +66,7 @@ Allowed now:
 
 - local-first
 - privacy-first as a product principle
-- open-source
+- source-available
 - no hidden data collection as an intended standard
 - made in Europe
 - designed to respect European expectations

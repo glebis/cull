@@ -1,6 +1,6 @@
 {
   "timestamp": "2026-05-07T16:35:16.114494",
-  "prompt": "A favicon icon, 1024x1024. A terminal cursor (thin vertical bar/line) in bright green (#9ece6a) combined with a small image/photo frame icon, both on a pure black background (#08080c). The cursor is on the left side, the small rectangular frame shape is to its right. Monospace terminal aesthetic \u2014 think of a code editor blinking cursor next to a picture icon. Clean, minimal, no gradients, no shading. Must be recognizable at 16x16 pixels. No text, no labels.",
+  "prompt": "A favicon icon, 1024x1024. A terminal cursor (thin vertical bar/line) in bright green (#9ece6a) combined with a small image/photo frame icon, both on a pure black background (#08080c). The cursor is on the left side, the small rectangular frame shape is to its right. Monospace terminal aesthetic — think of a code editor blinking cursor next to a picture icon. Clean, minimal, no gradients, no shading. Must be recognizable at 16x16 pixels. No text, no labels.",
   "preset": null,
   "platform": null,
   "thinking": "off",
@@ -8,7 +8,7 @@
   "provider": "openai",
   "n": 1,
   "seed": null,
-  "output": "/Users/glebkalinin/ai_projects/claude-code-lab/20260502-obsidian/imageview/site/public/images/favicon-v2-cursor.png",
+  "output": "site/public/images/favicon-v2-cursor.png",
   "project": null,
   "estimated_cost": 0.006
 }

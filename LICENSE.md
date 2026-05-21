@@ -3,13 +3,15 @@
 Parameters
 
 Licensor:             Gleb Kalinin
-Licensed Work:        ImageView 0.1.0
+Licensed Work:        Cull 0.1.0
 Additional Use Grant: You may use the Licensed Work for non-commercial purposes.
                       Commercial use requires a separate license from the Licensor.
 Change Date:          2030-05-07
 Change License:       Apache License, Version 2.0
 
 For the full BSL 1.1 license text, see https://mariadb.com/bsl11/
+
+SPDX-License-Identifier: BUSL-1.1
 
 Notice
 

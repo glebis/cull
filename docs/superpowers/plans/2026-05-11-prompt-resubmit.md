@@ -675,7 +675,7 @@ export async function estimateGenerationCost(model: string, size: string, qualit
 
 - [ ] **Step 2: Verify TypeScript compiles**
 
-Run: `cd /Users/glebkalinin/ai_projects/claude-code-lab/20260502-obsidian/imageview && npx tsc --noEmit 2>&1 | tail -5`
+Run: `cd <repo> && npx tsc --noEmit 2>&1 | tail -5`
 Expected: no errors (or only pre-existing ones)
 
 - [ ] **Step 3: Commit**
@@ -710,7 +710,7 @@ Update the `unlisteners` array on line ~44 to include `u7`:
 
 - [ ] **Step 2: Verify it builds**
 
-Run: `cd /Users/glebkalinin/ai_projects/claude-code-lab/20260502-obsidian/imageview && npx vite build 2>&1 | tail -5`
+Run: `cd <repo> && npx vite build 2>&1 | tail -5`
 Expected: build succeeds
 
 - [ ] **Step 3: Commit**

@@ -13,7 +13,7 @@ Use these for compact product contexts:
 - Agent-native archive for AI-generated creative work.
 - A local-first reference engine for images, videos, prompts, and visual memory.
 - Creative memory for agents and the people who work with them.
-- Open-source software for turning unsorted AI work into collections, posts, books, and exhibitions.
+- Source-available software for turning unsorted AI work into collections, posts, books, and exhibitions.
 - A private, local archive that agents can search, curate, and compose through MCP.
 
 ## Hero Lines
@@ -36,9 +36,9 @@ Cull is designed for agent control from the ground up. Its MCP tools let agents 
 
 Cull is local-first and privacy-first. Your archive stays on your machine by default, without hidden data collection or forced dependency on a cloud subscription.
 
-## Open Source Message
+## Source Availability Message
 
-Cull is open source so the creative community can inspect, extend, and adapt the tool instead of trusting a black-box archive for their visual memory.
+Cull is source-available so the creative community can inspect, extend, and adapt the tool instead of trusting a black-box archive for their visual memory.
 
 ## European Trust Message
 

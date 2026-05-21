@@ -1,6 +1,7 @@
 import { listen } from '@tauri-apps/api/event';
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
-import { importFolder, importFiles } from './api';
+import { openUrl } from '@tauri-apps/plugin-opener';
+import { importFolder, importFiles, redo, undo } from './api';
 import {
     viewMode,
     focusedIndex,
@@ -13,6 +14,8 @@ import {
     selectedIds,
     loupeScale,
     settingsOpen,
+    navigateTo,
+    showToast,
     type ViewMode,
 } from './stores';
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
@@ -64,29 +67,43 @@ function handleMenuAction(action: string) {
         case 'open_folder':
             handleOpenFolder();
             break;
+        case 'undo':
+            undo().then(label => {
+                if (!label) return;
+                showToast(`Undone: ${label}`, { type: 'info', duration: 4000 });
+                window.dispatchEvent(new CustomEvent('reload-images'));
+            });
+            break;
+        case 'redo':
+            redo().then(label => {
+                if (!label) return;
+                showToast(`Redone: ${label}`, { type: 'info', duration: 4000 });
+                window.dispatchEvent(new CustomEvent('reload-images'));
+            });
+            break;
         case 'deselect_all':
             selectedIds.set(new Set());
             break;
         case 'view_grid':
-            viewMode.set('grid');
+            navigateTo('grid');
             break;
         case 'view_compare':
-            viewMode.set('compare');
+            navigateTo('compare');
             break;
         case 'view_loupe':
-            viewMode.set('loupe');
+            navigateTo('loupe');
             break;
         case 'view_canvas':
-            viewMode.set('canvas' as ViewMode);
+            navigateTo('canvas' as ViewMode);
             break;
         case 'view_lineage':
-            viewMode.set('lineage' as ViewMode);
+            navigateTo('lineage' as ViewMode);
             break;
         case 'view_embeddings':
-            viewMode.set('embeddings');
+            navigateTo('embeddings');
             break;
         case 'view_export':
-            viewMode.set('export' as ViewMode);
+            navigateTo('export' as ViewMode);
             break;
         case 'toggle_sidebar':
             sidebarVisible.update((v) => !v);
@@ -103,10 +120,10 @@ function handleMenuAction(action: string) {
             loupeScale.set(1);
             break;
         case 'settings':
-            settingsOpen.update(v => !v);
+            settingsOpen.set(true);
             break;
         case 'help':
-            // Help not yet implemented
+            openUrl('https://github.com/glebis/imageview#readme');
             break;
     }
 }

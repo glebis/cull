@@ -7,6 +7,7 @@ node_modules/
 # SvelteKit
 /build
 /.svelte-kit
+/src-tauri/.svelte-kit
 /package
 
 # Vite
@@ -23,8 +24,15 @@ dist/
 !.env.example
 .venv/
 
+# Local databases and bd/Dolt runtime files
+*.db
+*.db-shm
+*.db-wal
+.dolt/
+
 # App data
 thumbnails/
+outputs/
 
 # Tooling (Enzyme, Beads, Superpowers)
 **/.enzyme/

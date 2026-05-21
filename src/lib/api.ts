@@ -976,6 +976,10 @@ export async function createSubfolder(parentPath: string, name: string): Promise
     return invoke<string>('create_subfolder', { parentPath, name });
 }
 
+export async function shareImages(imageIds: string[]): Promise<void> {
+    return invoke<void>('share_images', { imageIds });
+}
+
 export async function backfillRawPreviews(): Promise<number> {
     return invoke<number>('backfill_raw_previews');
 }

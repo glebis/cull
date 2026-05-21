@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
-    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, moveImage, renameImage, listFolders, getImagesByIds } from '$lib/api';
+    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, moveImage, renameImage, listFolders, getImagesByIds, shareImages } from '$lib/api';
     import type { ImageWithFile } from '$lib/api';
     import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast, requestTextInput } from '$lib/stores';
     import { clearImageScope, invalidateImageCache, loadImagesForCurrentScope, resetImagePaging } from '$lib/image-loading';
@@ -105,15 +105,12 @@
 
     $effect(() => {
         if (menuEl) {
-            const btn = menuEl.querySelector<HTMLButtonElement>(`button[data-menu-index="${activeIndex}"]`);
-            btn?.focus();
+            flatItems[activeIndex]?.focus();
         }
     });
 
     function handleMenuKeydown(e: KeyboardEvent) {
-        const items = menuEl
-            ? Array.from(menuEl.querySelectorAll<HTMLButtonElement>('button[data-menu-index]'))
-            : [];
+        const items = flatItems;
         const count = items.length;
         if (count === 0) return;
 
@@ -236,7 +233,40 @@
 
     async function handleCopyPath() {
         onclose();
-        await navigator.clipboard.writeText(image.path);
+        await navigator.clipboard.writeText(targetImages().map(img => img.path).join('\n'));
+    }
+
+    async function handleCopyFilename() {
+        onclose();
+        await navigator.clipboard.writeText(targetImages().map(img => img.path.split('/').pop() ?? img.path).join('\n'));
+    }
+
+    function toFileUrl(path: string) {
+        return `file://${path.split('/').map((part, index) => index === 0 ? '' : encodeURIComponent(part)).join('/')}`;
+    }
+
+    async function handleCopyFileUrl() {
+        onclose();
+        await navigator.clipboard.writeText(targetImages().map(img => toFileUrl(img.path)).join('\n'));
+    }
+
+    function targetImages() {
+        const byId = new Map($images.map(img => [img.image.id, img]));
+        return targetIds.map(id => byId.get(id) ?? (id === image.image.id ? image : null)).filter((img): img is ImageWithFile => img !== null);
+    }
+
+    async function handleShare() {
+        onclose();
+        try {
+            await shareImages([...new Set(targetIds)]);
+        } catch (e) {
+            showToast('Share failed', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    async function openInDefaultApp(path: string) {
+        const { openPath } = await import('@tauri-apps/plugin-opener');
+        await openPath(path);
     }
 
     async function handleTrash() {
@@ -492,26 +522,46 @@
         </button>
         {#if openSubmenu === 'copy'}
             <div class="submenu" role="menu">
-                <button class="context-menu-item" onclick={handleCopyPath} role="menuitem" tabindex="-1">Copy Path</button>
+                <button class="context-menu-item" onclick={handleCopyPath} role="menuitem" tabindex="-1">Copy Path{multiCount > 1 ? 's' : ''}</button>
+                <button class="context-menu-item" onclick={handleCopyFilename} role="menuitem" tabindex="-1">Copy Filename{multiCount > 1 ? 's' : ''}</button>
+                <button class="context-menu-item" onclick={handleCopyFileUrl} role="menuitem" tabindex="-1">Copy File URL{multiCount > 1 ? 's' : ''}</button>
             </div>
         {/if}
     </div>
+
+    <button
+        class="context-menu-item"
+        onclick={handleShare}
+        role="menuitem"
+        data-menu-index="8"
+        tabindex={activeIndex === 8 ? 0 : -1}
+    >Share{multiCount > 1 ? ` (${multiCount})` : ''}...</button>
 
     <!-- File actions -->
     <button
         class="context-menu-item"
         onclick={act(() => revealInFinder(image.path))}
         role="menuitem"
-        data-menu-index="8"
-        tabindex={activeIndex === 8 ? 0 : -1}
+        data-menu-index="9"
+        tabindex={activeIndex === 9 ? 0 : -1}
     >Reveal in Finder</button>
+
+    {#if multiCount === 1}
+        <button
+            class="context-menu-item"
+            onclick={act(() => openInDefaultApp(image.path))}
+            role="menuitem"
+            data-menu-index="10"
+            tabindex={activeIndex === 10 ? 0 : -1}
+        >Open in Default App</button>
+    {/if}
 
     <button
         class="context-menu-item"
         onclick={handleRename}
         role="menuitem"
-        data-menu-index="9"
-        tabindex={activeIndex === 9 ? 0 : -1}
+        data-menu-index="11"
+        tabindex={activeIndex === 11 ? 0 : -1}
     >Rename...</button>
 
     <!-- Move to -->
@@ -522,9 +572,9 @@
         <button
             class="context-menu-item has-submenu"
             role="menuitem"
-            data-menu-index="10"
+            data-menu-index="12"
             data-submenu-key="moveto"
-            tabindex={activeIndex === 10 ? 0 : -1}
+            tabindex={activeIndex === 12 ? 0 : -1}
         >
             <span>Move to...</span>
             <span class="arrow">►</span>
@@ -572,8 +622,8 @@
         class="context-menu-item danger"
         onclick={handleTrash}
         role="menuitem"
-        data-menu-index="11"
-        tabindex={activeIndex === 11 ? 0 : -1}
+        data-menu-index="13"
+        tabindex={activeIndex === 13 ? 0 : -1}
     >Trash{multiCount > 1 ? ` (${multiCount})` : ''}</button>
 </div>
 

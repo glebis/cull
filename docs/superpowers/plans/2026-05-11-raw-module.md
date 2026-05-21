@@ -1046,7 +1046,7 @@ In `Loupe.svelte`, find the crop and rotate UI elements and add a condition to d
 
 - [ ] **Step 6: Build frontend**
 
-Run: `cd /Users/glebkalinin/ai_projects/claude-code-lab/20260502-obsidian/cull && npx vite build 2>&1 | tail -10`
+Run: `cd <repo> && npx vite build 2>&1 | tail -10`
 Expected: Builds successfully.
 
 - [ ] **Step 7: Commit**
@@ -1111,7 +1111,7 @@ In the template, add a new section (following the existing `.section` / `.sectio
 
 - [ ] **Step 3: Build and test**
 
-Run: `cd /Users/glebkalinin/ai_projects/claude-code-lab/20260502-obsidian/cull && npx vite build 2>&1 | tail -10`
+Run: `cd <repo> && npx vite build 2>&1 | tail -10`
 
 - [ ] **Step 4: Commit**
 
@@ -1512,8 +1512,8 @@ async function toggleModuleRaw() {
 
 - [ ] **Step 3: Build everything**
 
-Run: `cd /Users/glebkalinin/ai_projects/claude-code-lab/20260502-obsidian/cull && cd src-tauri && cargo build 2>&1 | tail -10`
-Run: `cd /Users/glebkalinin/ai_projects/claude-code-lab/20260502-obsidian/cull && npx vite build 2>&1 | tail -10`
+Run: `cd <repo> && cd src-tauri && cargo build 2>&1 | tail -10`
+Run: `cd <repo> && npx vite build 2>&1 | tail -10`
 
 - [ ] **Step 4: Final commit**
 

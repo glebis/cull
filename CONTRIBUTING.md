@@ -9,17 +9,17 @@
 ## Development Setup
 
 ```bash
-git clone https://github.com/gastownhall/cull.git
-cd cull
+git clone https://github.com/glebis/imageview.git
+cd imageview
 npm install
 npm run tauri dev
 ```
 
 ## Code Style
 
-**Rust:** `cargo fmt` and `cargo clippy` before committing.
+**Rust:** `cd src-tauri && cargo fmt --all`, `cargo clippy --all-targets`, and `cargo test --all-targets` before committing.
 
-**Svelte/TypeScript:** `npm run check` for type checking.
+**Svelte/TypeScript:** `npm run check` for type checking and `npm test` for unit tests.
 
 ## Issue Tracking
 
@@ -36,6 +36,6 @@ bd q "title"         # quick-create an issue
 1. Fork the repository
 2. Create a feature branch from `main`
 3. Make your changes
-4. Run `cargo fmt && cargo clippy` and `npm run check`
+4. Run `npm run check`, `npm test`, `cd src-tauri && cargo fmt --all`, `cargo clippy --all-targets`, and `cargo test --all-targets`
 5. Commit with a descriptive message
 6. Open a PR against `main`

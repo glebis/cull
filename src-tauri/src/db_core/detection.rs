@@ -229,8 +229,8 @@ impl DetectionEngine {
 
         for i in 0..num_boxes {
             // Extract bbox (cx, cy, w, h) — flat layout: [batch][field][box]
-            let cx = data[0 * stride_1 + i];
-            let cy = data[1 * stride_1 + i];
+            let cx = data[i];
+            let cy = data[stride_1 + i];
             let w = data[2 * stride_1 + i];
             let h = data[3 * stride_1 + i];
 

@@ -8,7 +8,7 @@
   "provider": "openai",
   "n": 1,
   "seed": 200,
-  "output": "/Users/glebkalinin/ai_projects/claude-code-lab/20260502-obsidian/imageview/site/public/images/icon-v5b-funnel.png",
+  "output": "site/public/images/icon-v5b-funnel.png",
   "project": null,
   "estimated_cost": 0.006
 }

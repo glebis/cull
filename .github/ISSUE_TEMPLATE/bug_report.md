@@ -18,4 +18,4 @@ labels: bug
 
 **Environment**
 - OS:
-- ImageView version:
+- Cull version:

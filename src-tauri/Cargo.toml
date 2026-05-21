@@ -1,8 +1,12 @@
 [package]
 name = "cull"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Local-first desktop image viewer for AI-generated art workflows."
+authors = ["Gleb Kalinin <glebis@gmail.com>"]
+license = "BUSL-1.1"
+repository = "https://github.com/glebis/imageview"
+homepage = "https://github.com/glebis/imageview"
+readme = "../README.md"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -70,8 +74,8 @@ tempfile = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage"] }
-objc2-foundation = { version = "0.3", features = ["NSString", "NSLocale", "NSError", "NSThread", "block2"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage", "NSResponder", "NSSharingService", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSError", "NSGeometry", "NSLocale", "NSObject", "NSString", "NSThread", "NSURL", "block2"] }
 objc2-speech = "0.3"
 objc2-avf-audio = "0.3"
 block2 = "0.6"

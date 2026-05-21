@@ -8,7 +8,7 @@
   "provider": "openai",
   "n": 1,
   "seed": null,
-  "output": "/Users/glebkalinin/ai_projects/claude-code-lab/20260502-obsidian/imageview/site/public/images/favicon-v3-grid.png",
+  "output": "site/public/images/favicon-v3-grid.png",
   "project": null,
   "estimated_cost": 0.006
 }

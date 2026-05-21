@@ -186,9 +186,7 @@ mod tests {
     #[test]
     #[ignore] // requires real RAF file on disk
     fn test_real_gfx_raf() {
-        let path = std::path::Path::new(
-            "/Users/glebkalinin/Documents/Pictures/20210317 a53/Capture/20210317 a53 0028.RAF",
-        );
+        let path = std::path::Path::new("/Users/example/Pictures/RAF Samples/GFX 50R sample.RAF");
         if !path.exists() {
             crate::safe_eprintln!("Skipping: test RAF file not found");
             return;
@@ -213,9 +211,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_real_gfx_raf_via_libraw() {
-        let path = std::path::Path::new(
-            "/Users/glebkalinin/Documents/Pictures/20210317 a53/Capture/20210317 a53 0028.RAF",
-        );
+        let path = std::path::Path::new("/Users/example/Pictures/RAF Samples/GFX 50R sample.RAF");
         if !path.exists() {
             return;
         }

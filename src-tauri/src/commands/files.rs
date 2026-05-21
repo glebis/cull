@@ -1,6 +1,6 @@
 use crate::AppState;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, State, Window};
 
 #[derive(Debug, PartialEq, Eq)]
 enum DiskMove {
@@ -217,6 +217,103 @@ pub async fn create_subfolder(
     let _ = app.emit("folders:changed", ());
 
     Ok(new_folder.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn share_images(
+    app: AppHandle,
+    window: Window,
+    state: State<'_, AppState>,
+    image_ids: Vec<String>,
+) -> Result<(), String> {
+    if image_ids.is_empty() {
+        return Err("No images selected to share".to_string());
+    }
+
+    let id_refs: Vec<&str> = image_ids.iter().map(|id| id.as_str()).collect();
+    let found = state
+        .db
+        .get_images_by_ids(&id_refs)
+        .map_err(|e| e.to_string())?;
+    if found.is_empty() {
+        return Err("No matching images found to share".to_string());
+    }
+
+    let mut paths = Vec::with_capacity(found.len());
+    for img in found {
+        let path = PathBuf::from(&img.path);
+        if !path.exists() {
+            return Err(format!("Cannot share missing file: {}", img.path));
+        }
+        paths.push(path);
+    }
+
+    share_paths(app, window.label().to_string(), paths)
+}
+
+#[cfg(target_os = "macos")]
+fn share_paths(app: AppHandle, window_label: String, paths: Vec<PathBuf>) -> Result<(), String> {
+    if objc2::MainThreadMarker::new().is_some() {
+        return show_share_picker_on_main(&app, &window_label, &paths);
+    }
+
+    let handle = app.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let result = show_share_picker_on_main(&handle, &window_label, &paths);
+        let _ = tx.send(result);
+    })
+    .map_err(|e| format!("Failed to schedule share sheet: {}", e))?;
+
+    rx.recv()
+        .map_err(|_| "Failed to receive share sheet result".to_string())?
+}
+
+#[cfg(target_os = "macos")]
+fn show_share_picker_on_main(
+    app: &AppHandle,
+    window_label: &str,
+    paths: &[PathBuf],
+) -> Result<(), String> {
+    use objc2::AllocAnyThread;
+    use objc2_app_kit::{NSSharingServicePicker, NSView};
+    use objc2_foundation::{NSArray, NSRectEdge, NSURL};
+    use tauri::Manager;
+
+    let _mtm = objc2::MainThreadMarker::new()
+        .ok_or_else(|| "macOS share sheet must run on the main thread".to_string())?;
+    let window = app
+        .get_webview_window(window_label)
+        .ok_or_else(|| format!("Window '{}' not found", window_label))?;
+    let ns_view = window
+        .ns_view()
+        .map_err(|e| format!("Failed to access native view: {}", e))?;
+    let view = unsafe { (ns_view as *mut NSView).as_ref() }
+        .ok_or_else(|| "Native view is unavailable".to_string())?;
+
+    let urls = paths
+        .iter()
+        .map(|path| {
+            NSURL::from_file_path(path)
+                .ok_or_else(|| format!("Could not create file URL for {}", path.display()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let url_refs = urls.iter().map(|url| url.as_ref()).collect::<Vec<&NSURL>>();
+    let items = NSArray::from_slice(&url_refs);
+    let picker = unsafe {
+        NSSharingServicePicker::initWithItems(
+            NSSharingServicePicker::alloc(),
+            items.cast_unchecked(),
+        )
+    };
+
+    picker.showRelativeToRect_ofView_preferredEdge(view.bounds(), view, NSRectEdge::NSMinYEdge);
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn share_paths(_app: AppHandle, _window_label: String, _paths: Vec<PathBuf>) -> Result<(), String> {
+    Err("System sharing is currently available on macOS only".to_string())
 }
 
 #[cfg(test)]

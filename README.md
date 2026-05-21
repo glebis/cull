@@ -1,6 +1,6 @@
 # Cull
 
-Agent-friendly AI image viewer for macOS. Built to replace Preview.app for power users.
+Local-first, agent-friendly AI image viewer for macOS. Built to replace Preview.app for power users.
 
 Terminal-inspired, keyboard-first image viewer for AI-generated image workflows. Handles batch review, comparison, curation, iteration, and export of hundreds to tens of thousands of images. Full bidirectional agent integration via MCP, CLI, and URL scheme.
 
@@ -15,6 +15,14 @@ Terminal-inspired, keyboard-first image viewer for AI-generated image workflows.
 ## Tech Stack
 
 Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
+
+## Documentation
+
+- [User Guide](docs/USER_GUIDE.md) — installation, import, viewing, curation, collections, embeddings, export, CLI, and privacy basics
+- [System Menu Audit](docs/SYSTEM_MENU_AUDIT.md) — complete native menu inventory and implementation status
+- [Privacy & Data Flow](docs/PRIVACY.md) — local-first behavior, opt-in cloud features, and data destinations
+- [Contributing](CONTRIBUTING.md) — setup, checks, and pull request process
+- [Distribution](docs/cross-platform-distribution.md) — release builds and platform planning
 
 ## Current Status (v0.1.0)
 
@@ -180,8 +188,8 @@ cull://contact-sheet?folder=./photos&columns=4&output=/tmp/sheet.png
 | Key | View |
 |-----|------|
 | `1` | Grid |
-| `2` | Compare |
-| `3` | Loupe |
+| `2` | Loupe |
+| `3` | Compare |
 | `4` | Canvas |
 | `5` | Lineage |
 | `6` | Embedding Explorer |
@@ -199,8 +207,8 @@ cull://contact-sheet?folder=./photos&columns=4&output=/tmp/sheet.png
 ## Quick Start
 
 ```bash
-git clone https://github.com/gastownhall/cull.git
-cd cull
+git clone https://github.com/glebis/imageview.git
+cd imageview
 npm install
 npm run tauri dev
 ```
@@ -217,6 +225,8 @@ Dark terminal aesthetic. Monospace typography. 8px spacing grid. No decorative e
 
 See `docs/design-system.md` for the full design spec.
 
-## License
+## Source License
 
 Business Source License 1.1. Non-commercial use is permitted. Commercial use requires a separate license. Converts to Apache 2.0 on 2030-05-07. See [LICENSE.md](LICENSE.md).
+
+This is a source-available license, not an OSI-approved open-source license. If the release goal is strict open source, choose an OSI-approved license before publishing.

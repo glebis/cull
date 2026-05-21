@@ -8,7 +8,7 @@
   "provider": "openai",
   "n": 1,
   "seed": null,
-  "output": "/Users/glebkalinin/ai_projects/claude-code-lab/20260502-obsidian/imageview/docs/privacy-dashboard-mockup.png",
+  "output": "docs/privacy-dashboard-mockup.png",
   "project": null,
   "estimated_cost": 0.32
 }

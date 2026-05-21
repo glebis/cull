@@ -127,4 +127,4 @@ Promising directions:
 - terminal/MCP proof sections
 - image-only art/editorial sections
 - output variety sections showing social posts, publications, exhibitions, and books
-- privacy/open-source sections expressed visually, not as dense policy text
+- privacy/source-availability sections expressed visually, not as dense policy text

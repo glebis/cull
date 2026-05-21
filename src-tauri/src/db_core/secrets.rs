@@ -89,10 +89,10 @@ mod tests {
         let store = MemoryStore::new();
         assert_eq!(store.get("api_key_google").unwrap(), None);
 
-        store.set("api_key_google", "AIza_test_key_123").unwrap();
+        store.set("api_key_google", "test_google_key_123").unwrap();
         assert_eq!(
             store.get("api_key_google").unwrap(),
-            Some("AIza_test_key_123".to_string())
+            Some("test_google_key_123".to_string())
         );
     }
 
