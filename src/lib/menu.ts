@@ -1,10 +1,25 @@
 import { listen } from '@tauri-apps/api/event';
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
-import { openUrl } from '@tauri-apps/plugin-opener';
-import { importFolder, importFiles, redo, undo } from './api';
+import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
+import { get } from 'svelte/store';
 import {
+    importFolder,
+    importFiles,
+    redo,
+    undo,
+    moveImage,
+    openImagesWithApplication,
+    renameImage,
+    shareImages,
+    trashImages,
+    listFolders,
+    type ImageWithFile,
+} from './api';
+import {
+    images,
     viewMode,
     focusedIndex,
+    focusedImage,
     sidebarVisible,
     thumbnailSize,
     activeFolder,
@@ -16,12 +31,22 @@ import {
     settingsOpen,
     navigateTo,
     showToast,
+    requestTextInput,
+    folders,
     type ViewMode,
 } from './stores';
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
+import { folderDisplayName } from './move-menu-utils';
 
 const IMAGE_FILTERS = [
-    { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'tif', 'heic', 'heif', 'avif', 'svg'] },
+    {
+        name: 'Images',
+        extensions: [
+            'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'tif', 'heic', 'heif',
+            'avif', 'svg', 'jxl', 'ico', 'psd', 'cr2', 'cr3', 'nef', 'arw', 'dng',
+            'orf', 'raf', 'rw2',
+        ],
+    },
 ];
 
 async function handleOpenFile() {
@@ -59,6 +84,199 @@ async function handleOpenFolder() {
     viewMode.set('grid');
 }
 
+function currentMenuTarget(options: { single?: boolean } = {}): ImageWithFile[] {
+    const focused = get(focusedImage);
+    if (!focused) return [];
+    if (options.single) return [focused];
+
+    const selected = get(selectedIds);
+    if (selected.size > 0 && selected.has(focused.image.id)) {
+        const byId = new Map(get(images).map((img) => [img.image.id, img]));
+        const selectedImages = [...selected]
+            .map((id) => byId.get(id))
+            .filter((img): img is ImageWithFile => img !== undefined);
+        if (selectedImages.length > 0) return selectedImages;
+    }
+
+    return [focused];
+}
+
+function currentMenuTargetIds(options: { single?: boolean } = {}): string[] {
+    return [...new Set(currentMenuTarget(options).map((img) => img.image.id))];
+}
+
+function currentFolderPath(img: ImageWithFile): string | undefined {
+    const parts = img.path.split('/');
+    parts.pop();
+    return parts.join('/') || undefined;
+}
+
+async function reloadAfterImageRemoval(ids: string[]) {
+    const removed = new Set(ids);
+    const remainingLoadedCount = get(images).filter((img) => !removed.has(img.image.id)).length;
+    await loadImagesForCurrentScope({
+        resetFocus: false,
+        force: true,
+        invalidateCache: true,
+        minItems: remainingLoadedCount,
+    });
+    if (get(focusedIndex) >= get(images).length) {
+        focusedIndex.set(Math.max(0, get(images).length - 1));
+    }
+}
+
+async function handleImageShare() {
+    const ids = currentMenuTargetIds();
+    if (ids.length === 0) {
+        showToast('No image selected', { type: 'warning' });
+        return;
+    }
+    try {
+        await shareImages(ids);
+    } catch (e) {
+        showToast('Share failed', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
+async function handleImageOpenDefault() {
+    const [img] = currentMenuTarget({ single: true });
+    if (!img) {
+        showToast('No image selected', { type: 'warning' });
+        return;
+    }
+    try {
+        await openPath(img.path);
+    } catch (e) {
+        showToast('Open failed', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
+async function handleImageOpenWith() {
+    const [img] = currentMenuTarget({ single: true });
+    if (!img) {
+        showToast('No image selected', { type: 'warning' });
+        return;
+    }
+
+    const selected = await dialogOpen({
+        title: 'Open With',
+        directory: true,
+        multiple: false,
+        defaultPath: '/Applications',
+        fileAccessMode: 'scoped',
+    });
+    if (!selected || Array.isArray(selected)) return;
+
+    try {
+        await openImagesWithApplication([img.image.id], selected);
+    } catch (e) {
+        showToast('Open With failed', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
+async function handleImageReveal() {
+    const targets = currentMenuTarget();
+    if (targets.length === 0) {
+        showToast('No image selected', { type: 'warning' });
+        return;
+    }
+    try {
+        await revealItemInDir(targets.map((img) => img.path));
+    } catch (e) {
+        showToast('Reveal failed', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
+async function handleImageRename() {
+    const [img] = currentMenuTarget({ single: true });
+    if (!img) {
+        showToast('No image selected', { type: 'warning' });
+        return;
+    }
+
+    const currentName = img.path.split('/').pop() ?? '';
+    const newName = await requestTextInput({
+        title: 'Rename File',
+        label: 'File name',
+        initialValue: currentName,
+        confirmLabel: 'Rename',
+    });
+    if (!newName?.trim() || newName.trim() === currentName) return;
+
+    try {
+        await renameImage(img.image.id, newName.trim());
+        await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
+        showToast(`Renamed to ${newName.trim()}`, { type: 'success' });
+    } catch (e) {
+        showToast('Rename failed', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
+async function moveMenuImagesToFolder(ids: string[], folder: string) {
+    let moved = 0;
+    try {
+        for (const id of ids) {
+            await moveImage(id, folder);
+            moved += 1;
+        }
+    } catch (e) {
+        if (moved > 0) {
+            await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
+        }
+        showToast('Move incomplete', {
+            detail: `${moved}/${ids.length} moved. ${String(e)}`,
+            type: 'error',
+            duration: 10000,
+        });
+        return;
+    }
+
+    await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
+    try {
+        folders.set(await listFolders());
+    } catch (e) {
+        console.error('Failed to refresh folders after move:', e);
+    }
+    const movedLabel = moved === 1 ? '1 image' : `${moved} images`;
+    showToast(`Moved ${movedLabel} to ${folderDisplayName(folder)}`, { type: 'success' });
+}
+
+async function handleImageMoveTo() {
+    const targets = currentMenuTarget();
+    const ids = [...new Set(targets.map((img) => img.image.id))];
+    if (ids.length === 0) {
+        showToast('No image selected', { type: 'warning' });
+        return;
+    }
+
+    const selected = await dialogOpen({
+        title: ids.length === 1 ? 'Move Image to Folder' : `Move ${ids.length} Images to Folder`,
+        directory: true,
+        multiple: false,
+        defaultPath: currentFolderPath(targets[0]),
+        canCreateDirectories: true,
+        fileAccessMode: 'scoped',
+    });
+    if (!selected || Array.isArray(selected)) return;
+
+    await moveMenuImagesToFolder(ids, selected);
+}
+
+async function handleImageTrash() {
+    const ids = currentMenuTargetIds();
+    if (ids.length === 0) {
+        showToast('No image selected', { type: 'warning' });
+        return;
+    }
+
+    try {
+        await trashImages(ids);
+        await reloadAfterImageRemoval(ids);
+    } catch (e) {
+        showToast('Trash failed', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
 function handleMenuAction(action: string) {
     switch (action) {
         case 'open_file':
@@ -83,6 +301,27 @@ function handleMenuAction(action: string) {
             break;
         case 'deselect_all':
             selectedIds.set(new Set());
+            break;
+        case 'image_share':
+            handleImageShare();
+            break;
+        case 'image_open_default':
+            handleImageOpenDefault();
+            break;
+        case 'image_open_with':
+            handleImageOpenWith();
+            break;
+        case 'image_reveal':
+            handleImageReveal();
+            break;
+        case 'image_rename':
+            handleImageRename();
+            break;
+        case 'image_move_to':
+            handleImageMoveTo();
+            break;
+        case 'image_trash':
+            handleImageTrash();
             break;
         case 'view_grid':
             navigateTo('grid');

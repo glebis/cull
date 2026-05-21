@@ -251,6 +251,84 @@ pub async fn share_images(
     share_paths(app, window.label().to_string(), paths)
 }
 
+#[tauri::command]
+pub async fn open_images_with_application(
+    state: State<'_, AppState>,
+    app_path: String,
+    image_ids: Vec<String>,
+) -> Result<(), String> {
+    if image_ids.is_empty() {
+        return Err("No image selected to open".to_string());
+    }
+    if image_ids.len() > 1 {
+        return Err("Open With currently supports one image at a time".to_string());
+    }
+
+    let app_bundle = PathBuf::from(&app_path);
+    validate_app_bundle(&app_bundle)?;
+
+    let id_refs: Vec<&str> = image_ids.iter().map(|id| id.as_str()).collect();
+    let found = state
+        .db
+        .get_images_by_ids(&id_refs)
+        .map_err(|e| e.to_string())?;
+    let img = found
+        .first()
+        .ok_or_else(|| format!("Image '{}' not found", image_ids[0]))?;
+
+    let path = PathBuf::from(&img.path);
+    if !path.exists() {
+        return Err(format!("Cannot open missing file: {}", img.path));
+    }
+
+    open_paths_with_application(&app_bundle, vec![path])
+}
+
+fn validate_app_bundle(app_path: &Path) -> Result<(), String> {
+    if !app_path.exists() {
+        return Err(format!("Application not found: {}", app_path.display()));
+    }
+    if !app_path.is_dir() {
+        return Err("Choose a macOS .app bundle".to_string());
+    }
+    let is_app_bundle = app_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("app"))
+        .unwrap_or(false);
+    if !is_app_bundle {
+        return Err("Choose a macOS .app bundle".to_string());
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn open_paths_with_application(app_path: &Path, paths: Vec<PathBuf>) -> Result<(), String> {
+    let status = std::process::Command::new("open")
+        .arg("-a")
+        .arg(app_path)
+        .arg("--")
+        .args(paths.iter())
+        .status()
+        .map_err(|e| format!("Failed to launch application: {}", e))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Open With failed for {} with status {}",
+            app_path.display(),
+            status
+        ))
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn open_paths_with_application(_app_path: &Path, _paths: Vec<PathBuf>) -> Result<(), String> {
+    Err("Open With is currently available on macOS only".to_string())
+}
+
 #[cfg(target_os = "macos")]
 fn share_paths(app: AppHandle, window_label: String, paths: Vec<PathBuf>) -> Result<(), String> {
     if objc2::MainThreadMarker::new().is_some() {
@@ -349,5 +427,26 @@ mod tests {
 
         assert_eq!(std::fs::read(&source).unwrap(), b"image");
         assert!(!dest.exists());
+    }
+
+    #[test]
+    fn validate_app_bundle_accepts_app_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Preview.app");
+        std::fs::create_dir(&app).unwrap();
+
+        assert!(validate_app_bundle(&app).is_ok());
+    }
+
+    #[test]
+    fn validate_app_bundle_rejects_non_app_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Preview");
+        std::fs::create_dir(&app).unwrap();
+
+        assert_eq!(
+            validate_app_bundle(&app).unwrap_err(),
+            "Choose a macOS .app bundle"
+        );
     }
 }

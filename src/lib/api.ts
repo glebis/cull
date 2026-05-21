@@ -980,6 +980,10 @@ export async function shareImages(imageIds: string[]): Promise<void> {
     return invoke<void>('share_images', { imageIds });
 }
 
+export async function openImagesWithApplication(imageIds: string[], appPath: string): Promise<void> {
+    return invoke<void>('open_images_with_application', { imageIds, appPath });
+}
+
 export async function backfillRawPreviews(): Promise<number> {
     return invoke<number>('backfill_raw_previews');
 }

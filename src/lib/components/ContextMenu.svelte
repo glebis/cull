@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
-    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, moveImage, renameImage, listFolders, getImagesByIds, shareImages } from '$lib/api';
+    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, moveImage, renameImage, listFolders, getImagesByIds, shareImages, openImagesWithApplication } from '$lib/api';
     import type { ImageWithFile } from '$lib/api';
     import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast, requestTextInput } from '$lib/stores';
     import { clearImageScope, invalidateImageCache, loadImagesForCurrentScope, resetImagePaging } from '$lib/image-loading';
@@ -267,6 +267,24 @@
     async function openInDefaultApp(path: string) {
         const { openPath } = await import('@tauri-apps/plugin-opener');
         await openPath(path);
+    }
+
+    async function handleOpenWith() {
+        onclose();
+        const selected = await openDialog({
+            title: 'Open With',
+            directory: true,
+            multiple: false,
+            defaultPath: '/Applications',
+            fileAccessMode: 'scoped',
+        });
+        if (!selected || Array.isArray(selected)) return;
+
+        try {
+            await openImagesWithApplication([image.image.id], selected);
+        } catch (e) {
+            showToast('Open With failed', { detail: String(e), type: 'error', duration: 8000 });
+        }
     }
 
     async function handleTrash() {
@@ -554,14 +572,21 @@
             data-menu-index="10"
             tabindex={activeIndex === 10 ? 0 : -1}
         >Open in Default App</button>
+        <button
+            class="context-menu-item"
+            onclick={handleOpenWith}
+            role="menuitem"
+            data-menu-index="11"
+            tabindex={activeIndex === 11 ? 0 : -1}
+        >Open With...</button>
     {/if}
 
     <button
         class="context-menu-item"
         onclick={handleRename}
         role="menuitem"
-        data-menu-index="11"
-        tabindex={activeIndex === 11 ? 0 : -1}
+        data-menu-index="12"
+        tabindex={activeIndex === 12 ? 0 : -1}
     >Rename...</button>
 
     <!-- Move to -->
@@ -572,9 +597,9 @@
         <button
             class="context-menu-item has-submenu"
             role="menuitem"
-            data-menu-index="12"
+            data-menu-index="13"
             data-submenu-key="moveto"
-            tabindex={activeIndex === 12 ? 0 : -1}
+            tabindex={activeIndex === 13 ? 0 : -1}
         >
             <span>Move to...</span>
             <span class="arrow">►</span>
@@ -622,8 +647,8 @@
         class="context-menu-item danger"
         onclick={handleTrash}
         role="menuitem"
-        data-menu-index="13"
-        tabindex={activeIndex === 13 ? 0 : -1}
+        data-menu-index="14"
+        tabindex={activeIndex === 14 ? 0 : -1}
     >Trash{multiCount > 1 ? ` (${multiCount})` : ''}</button>
 </div>
 

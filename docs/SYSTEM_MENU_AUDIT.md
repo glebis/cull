@@ -11,6 +11,7 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 | App menu | Pass | About, Settings, Services, Hide, Hide Others, Show All, Quit are present. Settings opens the in-app settings panel. |
 | File menu | Pass | Open File and Open Folder are wired to import flows. Close Window uses the native predefined item. |
 | Edit menu | Pass | Undo and Redo are wired to Cull's undo stack. Cut, Copy, Paste, Select All use native predefined items. Deselect All clears image selection. |
+| Image menu | Pass | Current image/selection actions mirror the context menu and are no-op-safe when no image is focused. |
 | View menu | Pass | View labels and shortcuts match the tab bar and keyboard handler. |
 | Window menu | Pass | Minimize, Zoom, and Bring All to Front use native predefined items. |
 | Help menu | Pass | Cull Help opens the repository README. |
@@ -47,6 +48,18 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 | Paste | `Cmd+V` | predefined paste | Native text editing | Pass |
 | Select All | `Cmd+A` | predefined select all | Native text editing | Pass |
 | Deselect All | `Cmd+Shift+A` | `deselect_all` | Clears image selection | Pass |
+
+## Image Menu
+
+| Label | Shortcut | Native ID / Event | Handler | Status |
+|---|---|---|---|---|
+| Share... | none | `image_share` | Opens the native macOS Share sheet for the focused image or active selection | Pass |
+| Open in Default App | none | `image_open_default` | Opens the focused image through the system default handler | Pass |
+| Open With... | none | `image_open_with` | Prompts for a `.app` bundle and opens the focused image with that app | Pass |
+| Reveal in Finder | none | `image_reveal` | Reveals the focused image or selected images in Finder | Pass |
+| Rename... | none | `image_rename` | Opens Cull's rename dialog for the focused image | Pass |
+| Move to Folder... | none | `image_move_to` | Opens a folder picker and moves the focused image or active selection | Pass |
+| Move to Trash | none | `image_trash` | Moves the focused image or active selection to Trash and reloads the current scope | Pass |
 
 ## View Menu
 
@@ -93,4 +106,5 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 - README, tab bar, keyboard handler, and native menu now agree that `Cmd+2` is Loupe and `Cmd+3` is Compare.
 - Help was previously a no-op and is now wired.
 - Undo and redo were previously keyboard-only and are now exposed through the native Edit menu.
+- Image-specific context actions are now also exposed through the native Image menu.
 - The tray status placeholders should become dynamic before a polished binary release, but they do not block a source release.

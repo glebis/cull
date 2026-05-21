@@ -84,6 +84,61 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     )?)?;
     menu.append(&edit_menu)?;
 
+    // Image menu
+    let image_menu = Submenu::new(app, "Image", true)?;
+    image_menu.append(&MenuItem::with_id(
+        app,
+        "image_share",
+        "Share...",
+        true,
+        None::<&str>,
+    )?)?;
+    image_menu.append(&MenuItem::with_id(
+        app,
+        "image_open_default",
+        "Open in Default App",
+        true,
+        None::<&str>,
+    )?)?;
+    image_menu.append(&MenuItem::with_id(
+        app,
+        "image_open_with",
+        "Open With...",
+        true,
+        None::<&str>,
+    )?)?;
+    image_menu.append(&PredefinedMenuItem::separator(app)?)?;
+    image_menu.append(&MenuItem::with_id(
+        app,
+        "image_reveal",
+        "Reveal in Finder",
+        true,
+        None::<&str>,
+    )?)?;
+    image_menu.append(&MenuItem::with_id(
+        app,
+        "image_rename",
+        "Rename...",
+        true,
+        None::<&str>,
+    )?)?;
+    image_menu.append(&MenuItem::with_id(
+        app,
+        "image_move_to",
+        "Move to Folder...",
+        true,
+        None::<&str>,
+    )?)?;
+    image_menu.append(&PredefinedMenuItem::separator(app)?)?;
+    image_menu.append(&MenuItem::with_id(
+        app,
+        "image_trash",
+        "Move to Trash",
+        true,
+        None::<&str>,
+    )?)?;
+    menu.append(&image_menu)?;
+
     // View menu
     let view_menu = Submenu::new(app, "View", true)?;
     view_menu.append(&MenuItem::with_id(
@@ -195,9 +250,10 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
     let id = event.id().0.as_str();
     match id {
         "open_file" | "open_folder" | "settings" | "undo" | "redo" | "deselect_all"
-        | "view_grid" | "view_compare" | "view_loupe" | "view_canvas" | "view_lineage"
-        | "view_embeddings" | "view_export" | "toggle_sidebar" | "zoom_in" | "zoom_out"
-        | "actual_size" | "help" => {
+        | "image_share" | "image_open_default" | "image_open_with" | "image_reveal"
+        | "image_rename" | "image_move_to" | "image_trash" | "view_grid" | "view_compare"
+        | "view_loupe" | "view_canvas" | "view_lineage" | "view_embeddings" | "view_export"
+        | "toggle_sidebar" | "zoom_in" | "zoom_out" | "actual_size" | "help" => {
             let _ = app.emit("menu-action", id);
         }
         _ => {}

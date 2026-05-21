@@ -520,6 +520,7 @@ pub fn run() {
             commands::files::rename_image,
             commands::files::create_subfolder,
             commands::files::share_images,
+            commands::files::open_images_with_application,
             commands::raw::backfill_raw_previews,
             commands::privacy::get_data_flow_status,
             commands::privacy::get_api_audit_log,
