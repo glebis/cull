@@ -5,8 +5,25 @@ export type ViewMode = 'grid' | 'compare' | 'loupe' | 'canvas' | 'lineage' | 'em
 
 export const images = writable<ImageWithFile[]>([]);
 export const selectedIds = writable<Set<string>>(new Set());
-export const focusedIndex = writable<number>(0);
 export const focusedImageOverride = writable<ImageWithFile | null>(null);
+
+function createFocusedIndexStore() {
+    const store = writable<number>(0);
+
+    return {
+        subscribe: store.subscribe,
+        set(index: number) {
+            focusedImageOverride.set(null);
+            store.set(index);
+        },
+        update(updater: (index: number) => number) {
+            focusedImageOverride.set(null);
+            store.update(updater);
+        },
+    };
+}
+
+export const focusedIndex = createFocusedIndexStore();
 export const totalCount = writable<number>(0);
 export const viewMode = writable<ViewMode>('grid');
 export const gridScrollTop = writable<number>(0);
