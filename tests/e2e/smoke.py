@@ -159,7 +159,10 @@ def test_view_switching(page: Page) -> None:
         ("Meta+7", "export", ".export-view", "Export"),
     ]
     for shortcut, mode, selector, label in cases:
-        press(page, shortcut)
+        if shortcut == "Meta+7":
+            dispatch_key(page, "7", meta=True)
+        else:
+            press(page, shortcut)
         wait_mode(page, mode)
         expect(page.locator(selector)).to_be_visible(timeout=5_000)
         expect(page.locator(".tab.active")).to_contain_text(label)
@@ -345,7 +348,7 @@ def test_view_mode_cmd_numbers(page: Page) -> None:
     expect(page.locator(".tab.active")).to_contain_text("Embeddings")
 
     # Cmd+7 -> export
-    press(page, "Meta+7")
+    dispatch_key(page, "7", meta=True)
     wait_mode(page, "export")
     expect(page.locator(".tab.active")).to_contain_text("Export")
 
