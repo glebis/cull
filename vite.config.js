@@ -2,10 +2,22 @@ import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
 
 const host = process.env.TAURI_DEV_HOST;
+const e2eMock = process.env.CULL_E2E_MOCK === "1";
+const tauriMock = decodeURIComponent(new URL("./src/lib/tauri-mock.ts", import.meta.url).pathname);
+const tauriMockAliases = [
+  "@tauri-apps/api/core",
+  "@tauri-apps/api/event",
+  "@tauri-apps/plugin-deep-link",
+  "@tauri-apps/plugin-dialog",
+  "@tauri-apps/plugin-opener",
+  "@tauri-apps/plugin-process",
+  "@tauri-apps/plugin-updater",
+].map((find) => ({ find, replacement: tauriMock }));
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [sveltekit()],
+  resolve: e2eMock ? { alias: tauriMockAliases } : undefined,
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

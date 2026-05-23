@@ -1,3 +1,20 @@
+type MockListener<T = any> = (event: { event: string; payload: T }) => void;
+export type UnlistenFn = () => void;
+
+const mockListeners = new Map<string, Map<number, MockListener>>();
+let nextListenerId = 1;
+
+if (typeof window !== 'undefined') {
+  (window as any).__CULL_E2E_MOCK__ = true;
+  (window as any).__CULL_E2E_EMIT__ = (event: string, payload: any) => {
+    const listeners = mockListeners.get(event);
+    if (!listeners) return;
+    for (const handler of listeners.values()) {
+      handler({ event, payload });
+    }
+  };
+}
+
 const MOCK_SMART_COLLECTIONS = [
   { id: 'preset-1', name: '5 Stars', description: null, collection_type: 'smart', filter_json: '{"type":"rule","field":"rating","op":"eq","value":5.0}', nl_query: null, is_preset: true, sort_order: 1, created_at: '2026-01-01', image_count: 124 },
   { id: 'preset-2', name: '4 Stars+', description: null, collection_type: 'smart', filter_json: '{"type":"rule","field":"rating","op":"gte","value":4.0}', nl_query: null, is_preset: true, sort_order: 2, created_at: '2026-01-01', image_count: 389 },
@@ -35,13 +52,60 @@ function makeMockImage(i: number) {
   };
 }
 
+function mockImageDataUri(filePath: string): string {
+  const filename = filePath.split('/').pop() || 'mock image';
+  const hue = Array.from(filename).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360"><rect width="640" height="360" fill="hsl(${hue},45%,18%)"/><rect x="24" y="24" width="592" height="312" fill="none" stroke="hsl(${hue},65%,58%)" stroke-width="4"/><text x="320" y="182" text-anchor="middle" font-family="monospace" font-size="28" fill="white">${filename}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+const mockCollections: [string, string, number][] = [
+  ['col-picks', 'Picks', 6],
+];
+
+const mockSessions = [
+  {
+    id: 'session-1',
+    name: 'Smoke Session',
+    source_folder: '/mock/session',
+    session_folder: '/mock/session',
+    image_count: 4,
+    created_at: '2026-05-01T12:00:00Z',
+    updated_at: '2026-05-01T12:00:00Z',
+  },
+];
+
+const mockCanvases = [
+  {
+    id: 'canvas-1',
+    session_id: 'session-1',
+    name: 'Smoke Canvas',
+    canvas_type: 'manual',
+    layout_json: null,
+    created_at: '2026-05-01T12:00:00Z',
+    updated_at: '2026-05-01T12:00:00Z',
+  },
+];
+
 const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
+  'plugin:event|listen': () => nextListenerId++,
+  'plugin:event|unlisten': () => undefined,
+  'plugin:deep-link|get_current': () => [],
+  'plugin:updater|check': () => null,
+  'plugin:process|restart': () => undefined,
+  'plugin:dialog|open': () => null,
+  'plugin:opener|open_url': () => undefined,
+  'plugin:opener|open_path': () => undefined,
+  'plugin:opener|reveal_item_in_dir': () => undefined,
+
   list_smart_collections: () => [...MOCK_SMART_COLLECTIONS, ...userCollections],
 
   evaluate_smart_collection: () => {
     const count = 5 + Math.floor(Math.random() * 20);
     return Array.from({ length: count }, (_, i) => makeMockImage(i));
   },
+
+  count_smart_collection: () => 7,
 
   create_smart_collection: (_: any, args: { name: string; filterJson: string; nlQuery?: string }) => {
     const id = `user-${nextId++}`;
@@ -173,6 +237,10 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     delete mockApiKeys[`api_key_${args.provider}`];
   },
   validate_api_key: () => true,
+  get_app_setting: () => null,
+  set_app_setting: () => undefined,
+  apply_app_icon_variant: () => undefined,
+  update_menu_state: () => undefined,
   backfill_image_metadata: () => 0,
   backfill_image_tags: () => ({
     images_processed: 20,
@@ -225,14 +293,15 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   get_embedding_count: (_: any, args?: { model?: string | null }) => {
     if (args?.model === 'dinov2-vits14') return 8;
     if (args?.model === 'gemini-embedding-2') return 0;
+    if (args?.model?.startsWith('cohere:')) return 7;
     if (args?.model?.startsWith('openai:')) return 6;
     if (args?.model?.startsWith('ollama:')) return 5;
     return 12;
   },
   get_embedding_page: (_: any, args?: { model?: string | null; limit?: number }) => {
     const model = args?.model ?? 'clip-vit-b32';
-    const dims = model === 'dinov2-vits14' ? 384 : model.startsWith('openai:') || model === 'gemini-embedding-2' ? 3072 : model.startsWith('ollama:') ? 768 : 512;
-    const total = model === 'dinov2-vits14' ? 8 : model.startsWith('openai:') ? 6 : model.startsWith('ollama:') ? 5 : model === 'gemini-embedding-2' ? 0 : 12;
+    const dims = model === 'dinov2-vits14' ? 384 : model.startsWith('cohere:') ? 1024 : model.startsWith('openai:') || model === 'gemini-embedding-2' ? 3072 : model.startsWith('ollama:') ? 768 : 512;
+    const total = model === 'dinov2-vits14' ? 8 : model.startsWith('cohere:') ? 7 : model.startsWith('openai:') ? 6 : model.startsWith('ollama:') ? 5 : model === 'gemini-embedding-2' ? 0 : 12;
     const ids = Array.from({ length: Math.min(args?.limit ?? total, total) }, (_, i) => `img-${i}`);
     const vectors = ids.flatMap((_, imageIndex) =>
       Array.from({ length: dims }, (_, dimIndex) => Math.sin((imageIndex + 1) * (dimIndex + 1)) * 0.1)
@@ -244,6 +313,21 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   cancel_job: () => undefined,
   pause_job: () => undefined,
   resume_job: () => undefined,
+  set_rating: () => undefined,
+  set_decision: () => undefined,
+  undo: () => 'rating',
+  redo: () => 'rating',
+  trash_images: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
+  delete_images_permanently: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
+  rotate_image: () => undefined,
+  crop_image: (_: any, args: { imageId: string }) => args.imageId,
+  get_generation_run: () => null,
+  record_asset_load_event: (_: any, args: { event: any }) => ({
+    id: 'asset-event-1',
+    ...args.event,
+    created_at: '2026-05-01T12:00:00Z',
+  }),
+  get_asset_load_events: () => [],
   analyze_image_quality: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   get_image_quality: (_: any, args: { imageId: string }) => ({
     image_id: args.imageId,
@@ -360,6 +444,21 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       apiKeyProvider: 'google',
     },
     {
+      id: 'cohere',
+      label: 'Cohere Embed v4 Multimodal',
+      shortLabel: 'Cohere',
+      modelName: 'cohere:embed-v4.0',
+      dimensions: 1024,
+      dimensionsLabel: '1024d',
+      scope: 'cloud',
+      runtime: 'cloud-api',
+      status: 'key',
+      available: false,
+      downloadable: false,
+      downloadLabel: null,
+      apiKeyProvider: 'cohere',
+    },
+    {
       id: 'openai',
       label: 'OpenAI Text Embedding 3 Large',
       shortLabel: 'OpenAI',
@@ -421,10 +520,76 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   ],
   list_similarity_group_images: () => Array.from({ length: 4 }, (_, i) => makeMockImage(i)),
   list_folders: () => [],
-  list_collections: () => [],
+  delete_folder: () => 0,
+  list_collections: () => mockCollections,
+  create_collection: (_: any, args: { name: string }) => {
+    const id = `col-${nextId++}`;
+    mockCollections.push([id, args.name, 0]);
+    return id;
+  },
+  add_to_collection: () => undefined,
+  remove_from_collection: () => undefined,
+  delete_collection: (_: any, args: { collectionId: string }) => {
+    const index = mockCollections.findIndex(([id]) => id === args.collectionId);
+    if (index >= 0) mockCollections.splice(index, 1);
+  },
   list_images_by_folder: () => [],
   list_images_filtered: () => [],
   list_collection_images: () => [],
+  is_yolo_available: () => true,
+  is_nudenet_available: () => true,
+  download_yolo_model: () => 'already_downloaded',
+  download_nudenet_model: () => 'already_downloaded',
+  detect_objects: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
+  detect_nsfw: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
+  get_detection_count: (_: any, args: { model: string }) => args.model === 'yolo11m' ? 5 : 1,
+  count_by_detected_class: (_: any, args: { className: string }) => args.className === 'person' ? 5 : 0,
+  search_by_detected_class: () => [['img-0', 0.95], ['img-1', 0.9]],
+  list_images_by_detected_class: () => [makeMockImage(0), makeMockImage(1)],
+  get_detections: () => [
+    { class_name: 'person', confidence: 0.93, x: 0.16, y: 0.18, width: 0.32, height: 0.56 },
+    { class_name: 'EXPOSED_BREAST_F', confidence: 0.88, x: 0.52, y: 0.22, width: 0.2, height: 0.28 },
+  ],
+  check_ollama: () => [],
+  get_ollama_config: () => ['http://localhost:11434/api/generate', 'llava'],
+  set_ollama_config: () => undefined,
+  analyze_images: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
+  get_vision_metadata: () => [],
+  get_vision_count: () => 0,
+  rescan_sources: () => 20,
+  list_lineage_groups: () => [],
+  get_lineage_group_images: () => [],
+  rename_lineage_group: () => undefined,
+  dissolve_lineage_group: () => undefined,
+  list_sessions: () => mockSessions,
+  create_session: (_: any, args: { name: string }) => ({
+    ...mockSessions[0],
+    id: `session-${nextId++}`,
+    name: args.name,
+    image_count: 0,
+  }),
+  validate_session_folder: () => true,
+  list_canvases: () => mockCanvases,
+  create_canvas: (_: any, args: { sessionId: string; name: string; canvasType: string }) => ({
+    ...mockCanvases[0],
+    id: `canvas-${nextId++}`,
+    session_id: args.sessionId,
+    name: args.name,
+    canvas_type: args.canvasType,
+  }),
+  update_canvas_layout: () => undefined,
+  delete_canvas: () => undefined,
+  list_mcp_tokens: () => [],
+  create_mcp_token: () => [
+    { id: 'token-1', name: 'Smoke', role: 'viewer', scope_json: null, created_at: '2026-05-01T12:00:00Z', last_used_at: null, revoked_at: null },
+    'cull_test_secret',
+  ],
+  revoke_mcp_token: () => undefined,
+  rotate_mcp_token: () => 'cull_test_secret_rotated',
+  get_data_flow_status: () => [],
+  get_api_audit_log: () => [],
+  export_audit_log: () => '/mock/audit.json',
+  backfill_raw_previews: () => 0,
 };
 
 export async function invoke<T>(cmd: string, args?: any): Promise<T> {
@@ -436,4 +601,51 @@ export async function invoke<T>(cmd: string, args?: any): Promise<T> {
 
   console.warn(`[mock] No handler for command: ${cmd}`);
   return undefined as T;
+}
+
+export function convertFileSrc(filePath: string): string {
+  return mockImageDataUri(filePath);
+}
+
+export async function listen<T>(event: string, handler: MockListener<T>, _options?: any): Promise<UnlistenFn> {
+  const id = nextListenerId++;
+  const listeners = mockListeners.get(event) ?? new Map<number, MockListener>();
+  listeners.set(id, handler as MockListener);
+  mockListeners.set(event, listeners);
+  return () => {
+    listeners.delete(id);
+    if (listeners.size === 0) mockListeners.delete(event);
+  };
+}
+
+export async function getCurrent(): Promise<string[]> {
+  return [];
+}
+
+export async function onOpenUrl(handler: (urls: string[]) => void): Promise<UnlistenFn> {
+  return listen<string[]>('deep-link-open-url', (event) => handler(event.payload));
+}
+
+export async function check(): Promise<null> {
+  return null;
+}
+
+export async function relaunch(..._args: any[]): Promise<void> {
+  return undefined;
+}
+
+export async function open(..._args: any[]): Promise<string | string[] | null> {
+  return null;
+}
+
+export async function openPath(..._args: any[]): Promise<void> {
+  return undefined;
+}
+
+export async function openUrl(..._args: any[]): Promise<void> {
+  return undefined;
+}
+
+export async function revealItemInDir(..._args: any[]): Promise<void> {
+  return undefined;
 }
