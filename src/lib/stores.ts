@@ -125,6 +125,7 @@ export function navigateTo(mode: ViewMode) {
     const currentMode = get(viewMode);
     if (currentMode === mode) return;
     viewHistory.update(h => [...h, { mode: currentMode, focusedIndex: get(focusedIndex) }]);
+    if (mode === 'loupe') resetLoupeTransform();
     viewMode.set(mode);
 }
 
@@ -167,6 +168,12 @@ export const compareActiveSide = writable<0 | 1>(0);
 export const loupeScale = writable<number>(1);
 export const loupePanX = writable<number>(0);
 export const loupePanY = writable<number>(0);
+
+export function resetLoupeTransform() {
+    loupeScale.set(1);
+    loupePanX.set(0);
+    loupePanY.set(0);
+}
 
 export const folders = writable<[string, number][]>([]);
 export const activeFolder = writable<string | null>(null);

@@ -5,6 +5,7 @@ import {
     activeSmartCollection, activeDetectedClass, minSizeFilter, loupeScale, loupePanX, loupePanY,
     lineageLayout, showDetectionBoxes, nsfwMode, embeddingViewState,
     focusedIndex, images,
+    resetLoupeTransform,
     type ViewMode, type LineageLayout, type NsfwMode, type EmbeddingViewState,
 } from './stores';
 
@@ -101,6 +102,7 @@ export function restoreAppStateBeforeImages(): PersistedState | null {
 
 export function applyRestoredViewState(state: PersistedState | null): void {
     if (!state) return;
+    if (state.viewMode === 'loupe') resetLoupeTransform();
     viewMode.set(state.viewMode);
     focusedIndex.set(state.focusedIndex ?? 0);
     gridScrollTop.set(state.gridScrollTop ?? 0);

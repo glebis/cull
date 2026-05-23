@@ -1,7 +1,19 @@
 import { get } from 'svelte/store';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ImageWithFile } from './api';
-import { focusedImage, focusedImageOverride, focusedIndex, images, selectedIds } from './stores';
+import {
+    focusedImage,
+    focusedImageOverride,
+    focusedIndex,
+    images,
+    loupePanX,
+    loupePanY,
+    loupeScale,
+    navigateTo,
+    selectedIds,
+    viewHistory,
+    viewMode,
+} from './stores';
 
 function makeImage(id: string): ImageWithFile {
     return {
@@ -49,6 +61,30 @@ describe('focusedImage', () => {
         focusedIndex.update((index) => index + 1);
 
         expect(get(focusedImage)?.image.id).toBe('grid-2');
+    });
+});
+
+describe('navigation', () => {
+    afterEach(() => {
+        viewMode.set('grid');
+        viewHistory.set([]);
+        loupeScale.set(1);
+        loupePanX.set(0);
+        loupePanY.set(0);
+    });
+
+    it('opens loupe in fit-in mode with centered pan', () => {
+        viewMode.set('grid');
+        loupeScale.set(2.5);
+        loupePanX.set(120);
+        loupePanY.set(-80);
+
+        navigateTo('loupe');
+
+        expect(get(viewMode)).toBe('loupe');
+        expect(get(loupeScale)).toBe(1);
+        expect(get(loupePanX)).toBe(0);
+        expect(get(loupePanY)).toBe(0);
     });
 });
 

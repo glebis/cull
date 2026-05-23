@@ -6,7 +6,7 @@ import {
     collections, collectMode, collectModeTarget, activeCollection,
     showDetectionBoxes, showDetectionInspector, nsfwMode,
     navigateTo, navigateBack, searchOpen, focusedImage, activeSession,
-    requestTextInput, requestCollectionTarget, selectionAnchorIndex,
+    requestTextInput, requestCollectionTarget, selectionAnchorIndex, resetLoupeTransform,
 } from './stores';
 import { computeCompareSwap } from './compare-utils';
 import type { NsfwMode } from './stores';
@@ -28,7 +28,7 @@ const VIEW_MODE_KEYS: Record<string, ViewMode> = {
     '4': 'canvas',
     '5': 'lineage',
     '6': 'embeddings',
-    '0': 'export',
+    '7': 'export',
     '8': 'tinder',
 };
 
@@ -228,9 +228,7 @@ function comparePrevPair() {
 // ---- Loupe helpers ----
 
 function resetLoupeZoom() {
-    loupeScale.set(1);
-    loupePanX.set(0);
-    loupePanY.set(0);
+    resetLoupeTransform();
 }
 
 function moveLoupeFocus(delta: number) {
@@ -337,6 +335,12 @@ export function handleKeydown(e: KeyboardEvent) {
     if (e.metaKey && e.key === 'b') {
         e.preventDefault();
         sidebarVisible.update(v => !v);
+        return;
+    }
+
+    if (e.metaKey && e.key === '0' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        resetLoupeZoom();
         return;
     }
 
