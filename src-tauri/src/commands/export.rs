@@ -8,6 +8,31 @@ use base64::Engine;
 use std::collections::BTreeSet;
 use tauri::State;
 
+/// Validates that a string is safe to use as a single path component.
+/// Rejects path traversal attempts (`..`), separators (`/`, `\`), null bytes,
+/// and empty strings.
+fn sanitize_path_component(s: &str) -> Result<String, String> {
+    if s.is_empty() {
+        return Err("Path component must not be empty".to_string());
+    }
+    if s.contains("..") {
+        return Err(format!("Path component must not contain '..': '{}'", s));
+    }
+    if s.contains('/') || s.contains('\\') {
+        return Err(format!(
+            "Path component must not contain path separators: '{}'",
+            s
+        ));
+    }
+    if s.contains('\0') {
+        return Err(format!(
+            "Path component must not contain null bytes: '{}'",
+            s
+        ));
+    }
+    Ok(s.to_string())
+}
+
 #[derive(serde::Serialize)]
 pub struct PresetInfo {
     pub id: String,
@@ -288,6 +313,10 @@ pub async fn save_export_image(
     target_id: String,
     manifest_id: String,
 ) -> Result<String, String> {
+    let manifest_id = sanitize_path_component(&manifest_id)?;
+    let target_id = sanitize_path_component(&target_id)?;
+    let slide_id = sanitize_path_component(&slide_id)?;
+
     let export_dir = state
         .app_data_dir
         .join("exports")
@@ -317,6 +346,9 @@ pub async fn assemble_export_pdf(
     manifest_id: String,
     target_id: String,
 ) -> Result<String, String> {
+    let manifest_id = sanitize_path_component(&manifest_id)?;
+    let target_id = sanitize_path_component(&target_id)?;
+
     let export_dir = state
         .app_data_dir
         .join("exports")

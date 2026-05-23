@@ -188,8 +188,10 @@ pub fn run() {
             for arg in &args {
                 if arg.starts_with("cull://") {
                     crate::safe_eprintln!("[single-instance] Forwarding deep link: {}", arg);
-                    let params = parse_deep_link(arg);
-                    let _ = emit_open_params(app, params);
+                    match parse_deep_link(arg) {
+                        Ok(params) => { let _ = emit_open_params(app, params); }
+                        Err(e) => crate::safe_eprintln!("[single-instance] Deep link rejected: {}", e),
+                    }
                 } else {
                     let path = PathBuf::from(arg);
                     if path.is_file() && crate::extensions::is_image_path(&path, false) {
@@ -360,8 +362,10 @@ pub fn run() {
                         for url in urls {
                             crate::safe_eprintln!("[deep-link] Processing URL: {}", url);
                             if url.starts_with("cull://") {
-                                let params = parse_deep_link(&url);
-                                let _ = emit_open_params(&handle, params);
+                                match parse_deep_link(&url) {
+                                    Ok(params) => { let _ = emit_open_params(&handle, params); }
+                                    Err(e) => crate::safe_eprintln!("[deep-link] Deep link rejected: {}", e),
+                                }
                             }
                         }
                     }
@@ -586,8 +590,10 @@ pub fn run() {
 
                 for url in urls {
                     if url.scheme() == "cull" {
-                        let params = parse_deep_link(url.as_str());
-                        let _ = emit_open_params(app, params);
+                        match parse_deep_link(url.as_str()) {
+                            Ok(params) => { let _ = emit_open_params(app, params); }
+                            Err(e) => crate::safe_eprintln!("[deep-link] Deep link rejected: {}", e),
+                        }
                     }
                 }
             }

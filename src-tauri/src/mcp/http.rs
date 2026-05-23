@@ -113,6 +113,27 @@ async fn run_http_server(
                         }
                     }
 
+                    // Reject cross-origin requests
+                    if let Some(origin) = req
+                        .headers()
+                        .get(http::header::ORIGIN)
+                        .and_then(|v| v.to_str().ok())
+                    {
+                        // Browser-originated cross-origin requests include Origin header.
+                        // MCP clients (curl, SDKs) typically don't send Origin.
+                        // Reject any request with an Origin header as it's likely from a browser.
+                        crate::safe_eprintln!(
+                            "MCP HTTP: rejecting cross-origin request from origin '{}'",
+                            origin
+                        );
+                        return Ok(hyper::Response::builder()
+                            .status(403)
+                            .body(Full::new(Bytes::from(
+                                "Forbidden: Cross-origin requests are not allowed",
+                            )))
+                            .unwrap());
+                    }
+
                     // Extract and validate bearer token
                     let auth_header = req
                         .headers()

@@ -503,10 +503,6 @@ pub fn folder_in_scope(scope: &Option<TokenScope>, folder_path: &str) -> bool {
         }
     }
 
-    if s.collections.is_some() {
-        return true;
-    }
-
     false
 }
 

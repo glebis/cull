@@ -642,6 +642,17 @@ impl CullMcp {
 
     #[tool(description = "Add images to an existing collection")]
     fn add_to_collection(&self, Parameters(params): Parameters<AddToCollectionParams>) -> String {
+        // Check target collection is in scope
+        if let Some(ref scope) = self.token_scope() {
+            if let Some(ref allowed) = scope.collections {
+                if !allowed.contains(&params.collection_id) {
+                    return "Error: Access denied — collection outside token scope".to_string();
+                }
+            } else {
+                // Token has no collection scope — deny collection mutations
+                return "Error: Access denied — collection outside token scope".to_string();
+            }
+        }
         for image_id in &params.image_ids {
             match self.check_image_id_scope(image_id) {
                 Ok(false) => {
@@ -667,10 +678,13 @@ impl CullMcp {
     #[tool(description = "Delete a collection (does not delete the images)")]
     fn delete_collection(&self, Parameters(params): Parameters<CollectionIdParams>) -> String {
         if let Some(ref scope) = self.token_scope() {
-            if let Some(ref allowed) = scope.collections {
-                if !allowed.contains(&params.collection_id) {
-                    return "Error: Access denied — collection outside token scope".to_string();
-                }
+            let allowed = scope
+                .collections
+                .as_ref()
+                .map(|c| c.contains(&params.collection_id))
+                .unwrap_or(false);
+            if !allowed {
+                return "Error: Access denied — collection outside token scope".to_string();
             }
         }
         let state = self.app_handle.state::<AppState>();
@@ -1792,9 +1806,49 @@ impl CullMcp {
     )]
     fn get_canvas_layout(&self, Parameters(params): Parameters<GetCanvasLayoutParams>) -> String {
         let state = self.app_handle.state::<AppState>();
+        let scope = self.token_scope();
         match state.db.get_canvas(&params.canvas_id) {
             Ok(Some(canvas)) => match canvas_layout_for_mcp(&canvas) {
-                Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()),
+                Ok(mut result) => {
+                    // Filter canvas items by token scope
+                    if scope.is_some() {
+                        if let Some(layout) = result.get_mut("layout") {
+                            if let Some(items) = layout.get_mut("items") {
+                                if let Some(arr) = items.as_array() {
+                                    let image_ids: Vec<&str> = arr
+                                        .iter()
+                                        .filter_map(|item| item.get("imageId")?.as_str())
+                                        .collect();
+                                    // Batch-resolve image paths for scope checking
+                                    let id_refs: Vec<&str> = image_ids.clone();
+                                    let images_by_id = state
+                                        .db
+                                        .get_images_by_ids(&id_refs)
+                                        .unwrap_or_default();
+                                    let allowed_ids: std::collections::HashSet<&str> = images_by_id
+                                        .iter()
+                                        .filter(|img| {
+                                            tokens::image_in_scope(&scope, &img.path, &[])
+                                        })
+                                        .map(|img| img.image.id.as_str())
+                                        .collect();
+                                    let filtered: Vec<serde_json::Value> = arr
+                                        .iter()
+                                        .filter(|item| {
+                                            item.get("imageId")
+                                                .and_then(|v| v.as_str())
+                                                .map(|id| allowed_ids.contains(id))
+                                                .unwrap_or(false)
+                                        })
+                                        .cloned()
+                                        .collect();
+                                    *items = serde_json::Value::Array(filtered);
+                                }
+                            }
+                        }
+                    }
+                    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+                }
                 Err(e) => format!("Error: {}", e),
             },
             Ok(None) => format!("Error: Canvas '{}' was not found", params.canvas_id),

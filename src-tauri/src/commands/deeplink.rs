@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex, OnceLock,
@@ -18,6 +18,100 @@ pub struct OpenParams {
     pub focus: Option<u32>,
     pub image_id: Option<String>,
     pub gap: Option<u32>,
+}
+
+/// Sensitive directories that must never be accessed via deep links.
+const SENSITIVE_DIRS: &[&str] = &[
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".config/gcloud",
+    "Library/Keychains",
+];
+
+/// Validate that a single path is safe for deep-link access.
+/// Returns the canonicalized path string on success, or an error message.
+fn validate_path(raw: &str) -> Result<String, String> {
+    let path = Path::new(raw);
+
+    // Canonicalize resolves symlinks and normalizes ".."
+    let canonical =
+        std::fs::canonicalize(path).map_err(|e| format!("Cannot resolve path '{}': {}", raw, e))?;
+
+    let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
+
+    // Must be under $HOME
+    if !canonical.starts_with(&home) {
+        return Err(format!(
+            "Deep link path '{}' is outside the home directory",
+            canonical.display()
+        ));
+    }
+
+    // Get the portion relative to $HOME for checking sensitive dirs and hidden components
+    let relative = canonical
+        .strip_prefix(&home)
+        .map_err(|_| "Internal error stripping home prefix")?;
+
+    // Check sensitive directories
+    for sensitive in SENSITIVE_DIRS {
+        let sensitive_path = Path::new(sensitive);
+        if relative.starts_with(sensitive_path) {
+            return Err(format!(
+                "Deep link access to '{}' is blocked (sensitive directory)",
+                canonical.display()
+            ));
+        }
+    }
+
+    // Reject hidden files/directories (components starting with '.')
+    for component in relative.components() {
+        if let std::path::Component::Normal(name) = component {
+            if let Some(s) = name.to_str() {
+                if s.starts_with('.') {
+                    return Err(format!(
+                        "Deep link access to '{}' is blocked (hidden path component '{}')",
+                        canonical.display(),
+                        s
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(canonical.to_string_lossy().into_owned())
+}
+
+/// Validate all file-system paths in OpenParams received from a deep link.
+/// Non-path fields (view, size, zoom, etc.) are passed through unchanged.
+pub fn validate_open_params(params: OpenParams) -> Result<OpenParams, String> {
+    let path = match params.path {
+        Some(ref p) => Some(validate_path(p)?),
+        None => None,
+    };
+
+    let paths = match params.paths {
+        Some(ref ps) => {
+            let mut validated = Vec::with_capacity(ps.len());
+            for p in ps {
+                validated.push(validate_path(p)?);
+            }
+            Some(validated)
+        }
+        None => None,
+    };
+
+    let folder = match params.folder {
+        Some(ref f) => Some(validate_path(f)?),
+        None => None,
+    };
+
+    Ok(OpenParams {
+        path,
+        paths,
+        folder,
+        ..params
+    })
 }
 
 static FRONTEND_OPEN_LISTENER_READY: AtomicBool = AtomicBool::new(false);
@@ -150,11 +244,13 @@ pub async fn open_with_params(
         image_id,
         gap,
     };
-    emit_open_params(&app, params).map_err(|e| e.to_string())
+    let validated = validate_open_params(params)?;
+    emit_open_params(&app, validated).map_err(|e| e.to_string())
 }
 
 /// Parse a deep link URL into OpenParams.
-pub fn parse_deep_link(url: &str) -> OpenParams {
+/// Returns an error if any file-system path fails validation.
+pub fn parse_deep_link(url: &str) -> Result<OpenParams, String> {
     let mut params = OpenParams {
         path: None,
         paths: None,
@@ -211,7 +307,7 @@ pub fn parse_deep_link(url: &str) -> OpenParams {
         }
     }
 
-    params
+    validate_open_params(params)
 }
 
 fn percent_decode(s: &str) -> String {
@@ -247,6 +343,106 @@ mod tests {
     #[test]
     fn ignores_non_file_url_for_file_path() {
         assert!(file_path_from_url("cull://loupe?image_id=img-1").is_none());
+    }
+
+    // --- Deep link path validation tests ---
+
+    #[test]
+    fn valid_home_path_passes_validation() {
+        let home = dirs::home_dir().unwrap();
+        // Create a non-hidden temp directory under $HOME
+        let test_dir = home.join("cull_deeplink_test_tmp");
+        std::fs::create_dir_all(&test_dir).unwrap();
+        let image = test_dir.join("photo.jpg");
+        std::fs::write(&image, b"fake image").unwrap();
+
+        let result = validate_path(image.to_str().unwrap());
+        // Clean up before asserting so we don't leave files on failure
+        let _ = std::fs::remove_file(&image);
+        let _ = std::fs::remove_dir(&test_dir);
+        assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    }
+
+    #[test]
+    fn etc_passwd_is_rejected() {
+        let result = validate_path("/etc/passwd");
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("outside the home directory"),
+            "Should mention outside home directory"
+        );
+    }
+
+    #[test]
+    fn ssh_dir_is_rejected() {
+        let home = dirs::home_dir().unwrap();
+        let ssh_path = home.join(".ssh");
+        // Only test if the directory actually exists (it does on most dev machines)
+        if ssh_path.exists() {
+            let result = validate_path(ssh_path.to_str().unwrap());
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(
+                err.contains("sensitive directory") || err.contains("hidden path component"),
+                "Should block .ssh: {}",
+                err
+            );
+        }
+    }
+
+    #[test]
+    fn dotdot_traversal_rejected() {
+        // Build a path that tries to traverse out of home via ..
+        let result = validate_path("/tmp/../etc/passwd");
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("outside the home directory"),
+            "Traversal to /etc should be rejected"
+        );
+    }
+
+    #[test]
+    fn hidden_directory_rejected() {
+        let home = dirs::home_dir().unwrap();
+        let hidden = home.join(".hidden_test_dir_deeplink");
+        let _ = std::fs::create_dir(&hidden);
+        if hidden.exists() {
+            let result = validate_path(hidden.to_str().unwrap());
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("hidden path component"));
+            let _ = std::fs::remove_dir(&hidden);
+        }
+    }
+
+    #[test]
+    fn validate_open_params_passes_no_paths() {
+        // OpenParams with no file-system paths should pass through fine
+        let params = OpenParams {
+            view: Some("grid".to_string()),
+            size: Some(280),
+            ..OpenParams::default()
+        };
+        let result = validate_open_params(params);
+        assert!(result.is_ok());
+        let p = result.unwrap();
+        assert_eq!(p.view.as_deref(), Some("grid"));
+        assert_eq!(p.size, Some(280));
+    }
+
+    #[test]
+    fn drag_drop_paths_not_affected_by_validation() {
+        // Drag-drop functions return OpenParams directly, never going through
+        // validate_open_params. Verify they still work with arbitrary paths.
+        let dir = tempfile::tempdir().unwrap();
+        let image = dir.path().join("image.jpg");
+        std::fs::write(&image, b"not a real jpeg").unwrap();
+
+        let params = open_params_for_drag_drop_paths(&[image.clone()]);
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].path, Some(image.to_string_lossy().into_owned()));
+
+        let file_params = open_params_for_file_paths(vec![image.to_string_lossy().into_owned()]);
+        assert!(file_params.is_some());
     }
 
     #[test]

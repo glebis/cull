@@ -416,7 +416,14 @@ pub async fn serve_static_publish_package_inner(
         ));
     }
 
-    let host = host.unwrap_or_else(|| "127.0.0.1".to_string());
+    let requested_host = host.unwrap_or_else(|| "127.0.0.1".to_string());
+    if requested_host != "127.0.0.1" && requested_host != "localhost" && requested_host != "::1" {
+        crate::safe_eprintln!(
+            "Static publishing: rejecting non-localhost host '{}', binding to 127.0.0.1",
+            requested_host
+        );
+    }
+    let host = "127.0.0.1".to_string();
     let port = port.unwrap_or(8000);
     let addr: SocketAddr = format!("{}:{}", host, port)
         .parse()
@@ -546,21 +553,56 @@ fn mime_for_path(path: &Path) -> &'static str {
 }
 
 fn resolve_export_root(state: &AppState, requested: Option<&str>) -> Result<PathBuf, String> {
-    if let Some(path) = requested.map(str::trim).filter(|path| !path.is_empty()) {
-        return Ok(PathBuf::from(path));
-    }
-
-    if let Some(saved) = state
+    let path = if let Some(path) = requested.map(str::trim).filter(|path| !path.is_empty()) {
+        PathBuf::from(path)
+    } else if let Some(saved) = state
         .db
         .get_setting("static_publishing_output_dir")
         .map_err(|e| e.to_string())?
         .map(|path| path.trim().to_string())
         .filter(|path| !path.is_empty())
     {
-        return Ok(PathBuf::from(saved));
+        PathBuf::from(saved)
+    } else {
+        return Ok(state.app_data_dir.join("static-publishing").join("canvas"));
+    };
+
+    // Reject path traversal
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err("Export path must not contain '..' components".to_string());
     }
 
-    Ok(state.app_data_dir.join("static-publishing").join("canvas"))
+    // Ensure path is under home directory or system temp directory
+    if let Some(home) = dirs::home_dir() {
+        let canonical = if path.exists() {
+            path.canonicalize()
+                .map_err(|e| format!("Invalid export path: {}", e))?
+        } else if let Some(parent) = path.parent().filter(|p| p.exists()) {
+            let canonical_parent = parent
+                .canonicalize()
+                .map_err(|e| format!("Invalid export path parent: {}", e))?;
+            canonical_parent.join(path.file_name().unwrap_or_default())
+        } else {
+            path.clone()
+        };
+        let home_canonical = home.canonicalize().unwrap_or_else(|_| home.clone());
+        let temp_dir = std::env::temp_dir();
+        let temp_canonical = temp_dir.canonicalize().unwrap_or(temp_dir);
+        if !canonical.starts_with(&home)
+            && !canonical.starts_with(&home_canonical)
+            && !canonical.starts_with(&temp_canonical)
+        {
+            return Err(format!(
+                "Export path must be under the home directory ({})",
+                home.display()
+            ));
+        }
+    }
+
+    Ok(path)
 }
 
 fn export_image_variants(

@@ -318,19 +318,48 @@ pub async fn list_open_with_applications(
 }
 
 fn validate_app_bundle(app_path: &Path) -> Result<(), String> {
+    if !app_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("app"))
+        .unwrap_or(false)
+    {
+        return Err("Choose a macOS .app bundle".to_string());
+    }
     if !app_path.exists() {
         return Err(format!("Application not found: {}", app_path.display()));
     }
     if !app_path.is_dir() {
         return Err("Choose a macOS .app bundle".to_string());
     }
-    let is_app_bundle = app_path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.eq_ignore_ascii_case("app"))
-        .unwrap_or(false);
-    if !is_app_bundle {
-        return Err("Choose a macOS .app bundle".to_string());
+
+    // Canonicalize to resolve symlinks and ../ traversal before checking the allowlist
+    let canonical = app_path
+        .canonicalize()
+        .map_err(|e| format!("Cannot resolve application path: {}", e))?;
+
+    let home_apps = dirs::home_dir()
+        .map(|h| h.join("Applications"))
+        .unwrap_or_else(|| PathBuf::from("/Users/Shared/Applications"));
+
+    let allowed_prefixes: Vec<PathBuf> = vec![
+        PathBuf::from("/Applications"),
+        PathBuf::from("/System/Applications"),
+        PathBuf::from("/System/Library"),
+        home_apps,
+    ];
+
+    let in_allowed_dir = allowed_prefixes
+        .iter()
+        .any(|prefix| canonical.starts_with(prefix));
+
+    if !in_allowed_dir {
+        return Err(format!(
+            "Application '{}' is outside allowed directories. \
+             Only apps in /Applications, /System/Applications, \
+             ~/Applications, or /System/Library are permitted.",
+            app_path.display()
+        ));
     }
 
     Ok(())
@@ -521,12 +550,12 @@ mod tests {
     }
 
     #[test]
-    fn validate_app_bundle_accepts_app_directory() {
-        let dir = tempfile::tempdir().unwrap();
-        let app = dir.path().join("Preview.app");
-        std::fs::create_dir(&app).unwrap();
-
-        assert!(validate_app_bundle(&app).is_ok());
+    fn validate_app_bundle_accepts_system_app() {
+        // /Applications/Preview.app should exist on any macOS system
+        let app = Path::new("/Applications/Preview.app");
+        if app.exists() {
+            assert!(validate_app_bundle(app).is_ok());
+        }
     }
 
     #[test]
@@ -539,6 +568,26 @@ mod tests {
             validate_app_bundle(&app).unwrap_err(),
             "Choose a macOS .app bundle"
         );
+    }
+
+    #[test]
+    fn validate_app_bundle_rejects_app_outside_allowed_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Evil.app");
+        std::fs::create_dir(&app).unwrap();
+
+        let err = validate_app_bundle(&app).unwrap_err();
+        assert!(
+            err.contains("outside allowed directories"),
+            "Expected allowlist error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_app_bundle_rejects_missing_app_extension() {
+        let err = validate_app_bundle(Path::new("/Applications/SomeApp")).unwrap_err();
+        assert_eq!(err, "Choose a macOS .app bundle");
     }
 
     #[test]
