@@ -39,4 +39,5 @@ outputs/
 **/.enzyme-embeddings/
 .beads/
 .superpowers/
+.worktrees/
 .tdd-state.json
