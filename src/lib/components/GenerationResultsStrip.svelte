@@ -3,18 +3,19 @@
     import { listen } from '@tauri-apps/api/event';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { getImagesByIds, type ImageWithFile } from '$lib/api';
+    import { focusedImage, openImageInLoupe } from '$lib/stores';
+    import ContextMenu from './ContextMenu.svelte';
 
-    interface Props {
-        oncompare: (imageIds: string[]) => void;
-        onselect: (imageId: string) => void;
-    }
-
-    let { oncompare, onselect }: Props = $props();
-
-    let images = $state<ImageWithFile[]>([]);
+    let resultImages = $state<ImageWithFile[]>([]);
     let visible = $state(false);
     let jobId = $state<string | null>(null);
     let unlistener: (() => void) | null = null;
+    let ctxMenu = $state<{ visible: boolean; x: number; y: number; image: ImageWithFile | null }>({
+        visible: false,
+        x: 0,
+        y: 0,
+        image: null,
+    });
 
     onMount(async () => {
         try {
@@ -22,8 +23,11 @@
                 const ids: string[] = e.payload.image_ids ?? [];
                 jobId = e.payload.job_id ?? null;
                 if (ids.length > 0) {
-                    images = await getImagesByIds(ids);
-                    visible = true;
+                    resultImages = await getImagesByIds(ids);
+                    if (resultImages.length > 0) {
+                        visible = true;
+                        openImageInLoupe(resultImages[0]);
+                    }
                 }
             });
         } catch {
@@ -37,38 +41,57 @@
 
     function dismiss() {
         visible = false;
-        images = [];
-    }
-
-    function openCompare() {
-        oncompare(images.map(i => i.image.id));
-        dismiss();
+        resultImages = [];
+        ctxMenu = { visible: false, x: 0, y: 0, image: null };
     }
 
     function thumbnailUrl(img: ImageWithFile): string {
         return convertFileSrc(img.thumbnail_path ?? img.path);
     }
+
+    function openResult(img: ImageWithFile) {
+        openImageInLoupe(img);
+    }
+
+    function handleContextMenu(e: MouseEvent, img: ImageWithFile) {
+        e.preventDefault();
+        e.stopPropagation();
+        openImageInLoupe(img);
+        ctxMenu = { visible: true, x: e.clientX, y: e.clientY, image: img };
+    }
 </script>
 
-{#if visible && images.length > 0}
+{#if visible && resultImages.length > 0}
     <div class="results-strip">
         <div class="strip-header">
-            <span class="strip-title">Generated {images.length} image{images.length > 1 ? 's' : ''}</span>
+            <span class="strip-title">Generated {resultImages.length} image{resultImages.length > 1 ? 's' : ''}</span>
             <div class="strip-actions">
-                {#if images.length > 1}
-                    <button class="strip-btn" onclick={openCompare}>Compare</button>
-                {/if}
                 <button class="strip-btn dismiss" onclick={dismiss}>&times;</button>
             </div>
         </div>
         <div class="strip-images">
-            {#each images as img}
-                <button class="strip-thumb" onclick={() => onselect(img.image.id)}>
+            {#each resultImages as img}
+                <button
+                    class="strip-thumb"
+                    class:active={$focusedImage?.image.id === img.image.id}
+                    onclick={() => openResult(img)}
+                    oncontextmenu={(e) => handleContextMenu(e, img)}
+                    title={img.path.split('/').pop() ?? 'Generated image'}
+                >
                     <img src={thumbnailUrl(img)} alt="" />
                 </button>
             {/each}
         </div>
     </div>
+
+    {#if ctxMenu.visible && ctxMenu.image}
+        <ContextMenu
+            image={ctxMenu.image}
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            onclose={() => ctxMenu.visible = false}
+        />
+    {/if}
 {/if}
 
 <style>
@@ -84,6 +107,7 @@
         z-index: 900;
         min-width: 200px;
         max-width: 90vw;
+        box-shadow: 0 0 0 1px var(--bg);
     }
     .strip-header {
         display: flex;
@@ -135,6 +159,14 @@
     }
     .strip-thumb:hover {
         border-color: var(--blue);
+    }
+    .strip-thumb.active {
+        border-color: var(--blue);
+        box-shadow: 0 0 0 1px var(--blue);
+    }
+    .strip-thumb:focus-visible {
+        outline: 1px solid var(--blue);
+        outline-offset: 2px;
     }
     .strip-thumb img {
         width: 100%;

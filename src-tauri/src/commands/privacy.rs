@@ -78,6 +78,28 @@ pub async fn get_data_flow_status(
         },
     });
 
+    let cohere_key = state
+        .db
+        .get_setting("api_key_exists_cohere")
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false);
+    entries.push(DataFlowEntry {
+        feature: "Cohere multimodal embeddings".into(),
+        status: if cohere_key { "active" } else { "off" }.into(),
+        server: if cohere_key {
+            "CA/US".into()
+        } else {
+            "—".into()
+        },
+        data_sent: if cohere_key {
+            "Images + API key".into()
+        } else {
+            "Nothing".into()
+        },
+    });
+
     let ollama_embedding_url = state
         .db
         .get_setting("ollama_embedding_url")

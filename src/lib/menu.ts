@@ -31,6 +31,9 @@ import {
     activeDetectedClass,
     selectedIds,
     loupeScale,
+    loupePanX,
+    loupePanY,
+    resetLoupeTransform,
     settingsOpen,
     aboutOpen,
     navigateTo,
@@ -71,7 +74,7 @@ async function handleOpenFile() {
         focusedIndex.set(0);
     }
     if (paths.length === 1) {
-        viewMode.set('loupe');
+        navigateTo('loupe');
     }
 }
 
@@ -395,10 +398,17 @@ function handleMenuAction(action: string) {
             break;
         case 'zoom_out':
             thumbnailSize.update((s) => Math.max(s - 40, 40));
-            loupeScale.update((s) => Math.max(s / 1.25, 0.1));
+            loupeScale.update((s) => {
+                const next = Math.max(s / 1.25, 0.1);
+                if (next <= 1) {
+                    loupePanX.set(0);
+                    loupePanY.set(0);
+                }
+                return next;
+            });
             break;
         case 'actual_size':
-            loupeScale.set(1);
+            resetLoupeTransform();
             break;
         case 'settings':
             settingsOpen.set(true);

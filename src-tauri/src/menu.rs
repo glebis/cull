@@ -194,7 +194,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         "Export",
         true,
         false,
-        Some::<&str>("CmdOrCtrl+0"),
+        Some::<&str>("CmdOrCtrl+7"),
     )?)?;
     view_menu.append(&PredefinedMenuItem::separator(app)?)?;
     view_menu.append(&CheckMenuItem::with_id(
@@ -211,7 +211,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         "zoom_in",
         "Zoom In",
         true,
-        Some::<&str>("CmdOrCtrl+Plus"),
+        Some::<&str>("CmdOrCtrl+="),
     )?)?;
     view_menu.append(&MenuItem::with_id(
         app,
@@ -225,7 +225,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         "actual_size",
         "Actual Size",
         true,
-        None::<&str>,
+        Some::<&str>("CmdOrCtrl+0"),
     )?)?;
     view_menu.append(&PredefinedMenuItem::separator(app)?)?;
     view_menu.append(&PredefinedMenuItem::fullscreen(app, None)?)?;

@@ -1,12 +1,107 @@
-import { writable, derived, get } from 'svelte/store';
+import { writable, derived, get, type Writable } from 'svelte/store';
 import type { ImageWithFile, SmartCollection, Session, Canvas } from './api';
 
 export type ViewMode = 'grid' | 'compare' | 'loupe' | 'canvas' | 'lineage' | 'embeddings' | 'export' | 'tinder';
 
 export const images = writable<ImageWithFile[]>([]);
-export const selectedIds = writable<Set<string>>(new Set());
-export const focusedIndex = writable<number>(0);
+
+export interface SelectionStore extends Writable<Set<string>> {
+    undo(): boolean;
+    redo(): boolean;
+    reset(ids?: Set<string>): void;
+    clearHistory(): void;
+}
+
+function cloneSelection(ids: Set<string>): Set<string> {
+    return new Set(ids);
+}
+
+function selectionsEqual(a: Set<string>, b: Set<string>): boolean {
+    if (a.size !== b.size) return false;
+    for (const id of a) {
+        if (!b.has(id)) return false;
+    }
+    return true;
+}
+
+function createSelectionStore(historyLimit = 100): SelectionStore {
+    const store = writable<Set<string>>(new Set());
+    let current = new Set<string>();
+    let undoStack: Set<string>[] = [];
+    let redoStack: Set<string>[] = [];
+
+    function publish(nextIds: Set<string>, recordHistory: boolean) {
+        const next = cloneSelection(nextIds);
+        if (selectionsEqual(current, next)) return;
+
+        if (recordHistory) {
+            undoStack.push(cloneSelection(current));
+            if (undoStack.length > historyLimit) undoStack = undoStack.slice(-historyLimit);
+            redoStack = [];
+        }
+
+        current = next;
+        store.set(current);
+    }
+
+    return {
+        subscribe: store.subscribe,
+        set(ids: Set<string>) {
+            publish(ids, true);
+        },
+        update(updater: (ids: Set<string>) => Set<string>) {
+            publish(updater(cloneSelection(current)), true);
+        },
+        undo() {
+            const previous = undoStack.pop();
+            if (!previous) return false;
+            redoStack.push(cloneSelection(current));
+            current = cloneSelection(previous);
+            store.set(current);
+            return true;
+        },
+        redo() {
+            const next = redoStack.pop();
+            if (!next) return false;
+            undoStack.push(cloneSelection(current));
+            current = cloneSelection(next);
+            store.set(current);
+            return true;
+        },
+        reset(ids: Set<string> = new Set()) {
+            undoStack = [];
+            redoStack = [];
+            current = cloneSelection(ids);
+            store.set(current);
+        },
+        clearHistory() {
+            undoStack = [];
+            redoStack = [];
+        },
+    };
+}
+
+export const selectedIds = createSelectionStore();
+export const selectionAnchorIndex = writable<number | null>(null);
 export const focusedImageOverride = writable<ImageWithFile | null>(null);
+
+function createFocusedIndexStore() {
+    const store = writable<number>(0);
+
+    return {
+        subscribe: store.subscribe,
+        set(index: number) {
+            focusedImageOverride.set(null);
+            store.set(index);
+        },
+        update(updater: (index: number) => number) {
+            focusedImageOverride.set(null);
+            store.update(updater);
+        },
+    };
+}
+
+export const focusedIndex = createFocusedIndexStore();
 export const totalCount = writable<number>(0);
 export const viewMode = writable<ViewMode>('grid');
 export const gridScrollTop = writable<number>(0);
@@ -30,7 +125,23 @@ export function navigateTo(mode: ViewMode) {
     const currentMode = get(viewMode);
     if (currentMode === mode) return;
     viewHistory.update(h => [...h, { mode: currentMode, focusedIndex: get(focusedIndex) }]);
+    if (mode === 'loupe') resetLoupeTransform();
     viewMode.set(mode);
+}
+
+export function openImageInLoupe(image: ImageWithFile) {
+    const index = get(images).findIndex(item => item.image.id === image.image.id);
+    if (index >= 0) {
+        focusedIndex.set(index);
+    } else {
+        focusedImageOverride.set(image);
+    }
+
+    if (get(viewMode) === 'loupe') {
+        resetLoupeTransform();
+    } else {
+        navigateTo('loupe');
+    }
 }
 
 export function navigateBack(): boolean {
@@ -72,6 +183,12 @@ export const compareActiveSide = writable<0 | 1>(0);
 export const loupeScale = writable<number>(1);
 export const loupePanX = writable<number>(0);
 export const loupePanY = writable<number>(0);
+
+export function resetLoupeTransform() {
+    loupeScale.set(1);
+    loupePanX.set(0);
+    loupePanY.set(0);
+}
 
 export const folders = writable<[string, number][]>([]);
 export const activeFolder = writable<string | null>(null);
@@ -235,7 +352,7 @@ export function showToast(message: string, opts?: { detail?: string; type?: Toas
 export type EmbeddingInteractionMode = 'map' | 'stack' | 'review' | 'text';
 export type EmbeddingZPreset = 'projection' | 'cluster' | 'source' | 'rating' | 'decision' | 'recency' | 'resolution';
 export type EmbeddingSpacePreset = 'balanced' | 'compact' | 'gallery' | 'deep' | 'custom';
-export type EmbeddingProvider = 'clip' | 'dinov2' | 'gemini' | 'openai' | 'ollama';
+export type EmbeddingProvider = 'clip' | 'dinov2' | 'gemini' | 'cohere' | 'openai' | 'ollama';
 
 export interface EmbeddingViewState {
     panX: number;

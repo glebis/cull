@@ -35,6 +35,21 @@ describe('embedding provider metadata', () => {
                 apiKeyProvider: 'google',
             },
             {
+                id: 'cohere',
+                label: 'Cohere Embed v4 Multimodal',
+                shortLabel: 'Cohere',
+                modelName: 'cohere:embed-v4.0',
+                dimensions: 1024,
+                dimensionsLabel: '1024d',
+                scope: 'cloud',
+                runtime: 'cloud-api',
+                status: 'key',
+                available: false,
+                downloadable: false,
+                downloadLabel: null,
+                apiKeyProvider: 'cohere',
+            },
+            {
                 id: 'openai',
                 label: 'OpenAI Text Embedding 3 Large',
                 shortLabel: 'OpenAI',
@@ -100,6 +115,14 @@ describe('embedding provider metadata', () => {
                 scope: 'cloud',
             },
             {
+                id: 'cohere',
+                label: 'Cohere Embed v4 Multimodal',
+                shortLabel: 'Cohere',
+                modelName: 'cohere:embed-v4.0',
+                dims: '1024d',
+                scope: 'cloud',
+            },
+            {
                 id: 'openai',
                 label: 'OpenAI Text Embedding 3 Large',
                 shortLabel: 'OpenAI',
@@ -119,6 +142,6 @@ describe('embedding provider metadata', () => {
     });
 
     it('keeps a complete static default for initial render', () => {
-        expect(DEFAULT_MODEL_OPTIONS.map(option => option.id)).toEqual(['clip', 'dinov2', 'gemini', 'openai', 'ollama']);
+        expect(DEFAULT_MODEL_OPTIONS.map(option => option.id)).toEqual(['clip', 'dinov2', 'gemini', 'cohere', 'openai', 'ollama']);
     });
 });

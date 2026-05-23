@@ -59,12 +59,13 @@
     let selectedProvider = $state<EmbeddingProvider>('clip');
     let configOpen = $state(false);
     let hasGoogleKey = $state(false);
+    let hasCohereKey = $state(false);
     let hasOpenAiKey = $state(false);
     let ollamaEmbeddingReady = $state(false);
     let localModelAvailable = $state<Record<LocalProvider, boolean>>({ clip: false, dinov2: false });
     let localEmbeddingCounts = $state<Record<LocalProvider, number>>({ clip: 0, dinov2: 0 });
     let localModelDownloadInfo = $state<Record<LocalProvider, EmbeddingModelDownloadInfo | null>>({ clip: null, dinov2: null });
-    let remoteEmbeddingCounts = $state<Record<RemoteProvider, number>>({ gemini: 0, openai: 0, ollama: 0 });
+    let remoteEmbeddingCounts = $state<Record<RemoteProvider, number>>({ gemini: 0, cohere: 0, openai: 0, ollama: 0 });
     let currentEmbeddingCount = $derived(providerEmbeddingCount(selectedProvider));
     let selectedModel = $derived(modelOptions.find(option => option.id === selectedProvider) ?? modelOptions[0] ?? DEFAULT_MODEL_OPTIONS[0]);
     let selectedModelAvailable = $derived(providerReady(selectedProvider));
@@ -263,7 +264,7 @@
     }
 
     function knownProviderId(id: string): EmbeddingProvider | null {
-        if (id === 'clip' || id === 'dinov2' || id === 'gemini' || id === 'openai' || id === 'ollama') return id;
+        if (id === 'clip' || id === 'dinov2' || id === 'gemini' || id === 'cohere' || id === 'openai' || id === 'ollama') return id;
         return null;
     }
 
@@ -282,6 +283,7 @@
 
     function providerReady(provider: EmbeddingProvider): boolean {
         if (provider === 'gemini') return hasGoogleKey;
+        if (provider === 'cohere') return hasCohereKey;
         if (provider === 'openai') return hasOpenAiKey;
         if (provider === 'ollama') return ollamaEmbeddingReady;
         if (isLocalProvider(provider)) return localModelAvailable[provider];
@@ -290,6 +292,7 @@
 
     function providerStatusLabel(provider: EmbeddingProvider): string {
         if (provider === 'gemini') return hasGoogleKey ? 'ready' : 'key';
+        if (provider === 'cohere') return hasCohereKey ? 'ready' : 'key';
         if (provider === 'openai') return hasOpenAiKey ? 'ready' : 'key';
         if (provider === 'ollama') return ollamaEmbeddingReady ? 'ready' : 'offline';
         if (isLocalProvider(provider)) return localModelAvailable[provider] ? 'ready' : 'model';
@@ -352,6 +355,8 @@
                     nextAvailable[provider] = providerInfo.available;
                 } else if (provider === 'gemini') {
                     hasGoogleKey = providerInfo.available;
+                } else if (provider === 'cohere') {
+                    hasCohereKey = providerInfo.available;
                 } else if (provider === 'openai') {
                     hasOpenAiKey = providerInfo.available;
                 } else if (provider === 'ollama') {
@@ -437,11 +442,13 @@
 
     async function loadApiKeyState() {
         try {
-            const [googleKey, openAiKey] = await Promise.all([
+            const [googleKey, cohereKey, openAiKey] = await Promise.all([
                 hasApiKey('google'),
+                hasApiKey('cohere'),
                 hasApiKey('openai'),
             ]);
             hasGoogleKey = googleKey;
+            hasCohereKey = cohereKey;
             hasOpenAiKey = openAiKey;
         } catch (e) {
             console.error('Failed to load API key state:', e);
@@ -1705,14 +1712,14 @@
             </div>
         </div>
 
-        {#if configOpen && ((selectedProvider === 'gemini' && !hasGoogleKey) || (selectedProvider === 'openai' && !hasOpenAiKey) || (selectedProvider === 'ollama' && !ollamaEmbeddingReady))}
+        {#if configOpen && ((selectedProvider === 'gemini' && !hasGoogleKey) || (selectedProvider === 'cohere' && !hasCohereKey) || (selectedProvider === 'openai' && !hasOpenAiKey) || (selectedProvider === 'ollama' && !ollamaEmbeddingReady))}
             <div class="panel-section config-section">
                 {#if selectedProvider === 'ollama'}
                     <div class="section-header">OLLAMA EMBEDDINGS OFFLINE</div>
                     <p class="key-missing-text">Start Ollama and pull an embedding model such as embeddinggemma.</p>
                 {:else}
-                    <div class="section-header">{selectedProvider === 'openai' ? 'OPENAI' : 'GEMINI'} API KEY REQUIRED</div>
-                    <p class="key-missing-text">Set your {selectedProvider === 'openai' ? 'OpenAI' : 'Google'} API key in Settings.</p>
+                    <div class="section-header">{selectedModel.shortLabel.toUpperCase()} API KEY REQUIRED</div>
+                    <p class="key-missing-text">Set your {selectedModel.shortLabel} API key in Settings.</p>
                     <button class="settings-link-btn" onclick={() => settingsOpen.set(true)}>
                         Open Settings
                     </button>

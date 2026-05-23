@@ -1,7 +1,7 @@
 <script lang="ts">
-    import { images, selectedIds, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState } from '$lib/stores';
+    import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState } from '$lib/stores';
     import { IMAGE_PAGE_SIZE, loadMoreImagesForCurrentScope } from '$lib/image-loading';
-    import { buildRangeSelectionIds, computeGridLayout, computeVisibleItems } from '$lib/view-utils';
+    import { computeGridClickSelection, computeGridLayout, computeVisibleItems } from '$lib/view-utils';
     import Thumbnail from './Thumbnail.svelte';
 
     let containerEl: HTMLDivElement | undefined = $state(undefined);
@@ -47,9 +47,19 @@
     }
 
     function handleClick(index: number, event: MouseEvent | KeyboardEvent) {
-        if (event.shiftKey) {
-            selectedIds.set(buildRangeSelectionIds($images, $focusedIndex, index, item => item.image.id));
-        }
+        const result = computeGridClickSelection({
+            items: $images,
+            selectedIds: $selectedIds,
+            focusedIndex: $focusedIndex,
+            anchorIndex: $selectionAnchorIndex,
+            targetIndex: index,
+            shiftKey: event.shiftKey,
+            toggleKey: event.altKey || event.metaKey,
+            getId: item => item.image.id,
+        });
+
+        if (result.selectedIds) selectedIds.set(result.selectedIds);
+        selectionAnchorIndex.set(result.anchorIndex);
         focusedIndex.set(index);
     }
 

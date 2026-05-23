@@ -3,6 +3,7 @@ import {
     getFilename,
     getThumbnailBorderClass,
     buildRangeSelectionIds,
+    computeGridClickSelection,
     computeGridLayout,
     computeVisibleItems,
     formatLoupeInfo,
@@ -73,6 +74,90 @@ describe('buildRangeSelectionIds', () => {
 
     it('returns an empty selection when there are no items', () => {
         expect(buildRangeSelectionIds([], 0, 2, item => item)).toEqual(new Set());
+    });
+});
+
+describe('computeGridClickSelection', () => {
+    const items = ['a', 'b', 'c', 'd', 'e', 'f'].map(id => ({ id }));
+
+    it('plain click only moves the range anchor and leaves selection intact', () => {
+        const result = computeGridClickSelection({
+            items,
+            selectedIds: new Set(['b']),
+            focusedIndex: 1,
+            anchorIndex: null,
+            targetIndex: 4,
+            shiftKey: false,
+            toggleKey: false,
+            getId: item => item.id,
+        });
+
+        expect(result.selectedIds).toBeNull();
+        expect(result.anchorIndex).toBe(4);
+    });
+
+    it('shift click adds the anchor range without dropping existing selection', () => {
+        const result = computeGridClickSelection({
+            items,
+            selectedIds: new Set(['a']),
+            focusedIndex: 1,
+            anchorIndex: null,
+            targetIndex: 4,
+            shiftKey: true,
+            toggleKey: false,
+            getId: item => item.id,
+        });
+
+        expect(result.selectedIds).toEqual(new Set(['a', 'b', 'c', 'd', 'e']));
+        expect(result.anchorIndex).toBe(1);
+    });
+
+    it('shift click keeps using the existing anchor instead of the current focus', () => {
+        const result = computeGridClickSelection({
+            items,
+            selectedIds: new Set(['f']),
+            focusedIndex: 4,
+            anchorIndex: 1,
+            targetIndex: 3,
+            shiftKey: true,
+            toggleKey: false,
+            getId: item => item.id,
+        });
+
+        expect(result.selectedIds).toEqual(new Set(['f', 'b', 'c', 'd']));
+        expect(result.anchorIndex).toBe(1);
+    });
+
+    it('option click toggles the clicked image without affecting the rest of the selection', () => {
+        const result = computeGridClickSelection({
+            items,
+            selectedIds: new Set(['b', 'd']),
+            focusedIndex: 1,
+            anchorIndex: 1,
+            targetIndex: 3,
+            shiftKey: false,
+            toggleKey: true,
+            getId: item => item.id,
+        });
+
+        expect(result.selectedIds).toEqual(new Set(['b']));
+        expect(result.anchorIndex).toBe(3);
+    });
+
+    it('shift option click toggles the anchor range', () => {
+        const result = computeGridClickSelection({
+            items,
+            selectedIds: new Set(['a', 'b', 'e']),
+            focusedIndex: 0,
+            anchorIndex: 1,
+            targetIndex: 3,
+            shiftKey: true,
+            toggleKey: true,
+            getId: item => item.id,
+        });
+
+        expect(result.selectedIds).toEqual(new Set(['a', 'e', 'c', 'd']));
+        expect(result.anchorIndex).toBe(1);
     });
 });
 

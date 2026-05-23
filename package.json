@@ -11,6 +11,7 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "tauri",
     "test": "vitest run",
+    "test:e2e": "bash tests/e2e/run-e2e.sh",
     "test:perf": "vitest run src/lib/view-utils.test.ts -t \"grid rendering performance budget\"",
     "test:watch": "vitest"
   },

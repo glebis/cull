@@ -24,6 +24,7 @@
     import TrashConfirmDialog from '$lib/components/TrashConfirmDialog.svelte';
     import TextInputDialog from '$lib/components/TextInputDialog.svelte';
     import CollectionTargetDialog from '$lib/components/CollectionTargetDialog.svelte';
+    import GenerationResultsStrip from '$lib/components/GenerationResultsStrip.svelte';
     import { handleKeydown } from '$lib/keys';
     import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass } from '$lib/stores';
     import { trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections } from '$lib/api';
@@ -273,6 +274,7 @@
 </div>
 
 <JobProgressPanel />
+<GenerationResultsStrip />
 <CommandPalette />
 
 {#if $settingsOpen}

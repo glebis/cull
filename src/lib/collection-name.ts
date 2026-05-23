@@ -84,6 +84,7 @@ const SMALL_TITLE_WORDS = new Set(['a', 'an', 'and', 'as', 'at', 'by', 'for', 'f
 const BRAND_WORDS: Record<string, string> = {
     'ai': 'AI',
     'api': 'API',
+    'cohere': 'Cohere',
     'dall e': 'DALL-E',
     'dalle': 'DALL-E',
     'gemini': 'Gemini',

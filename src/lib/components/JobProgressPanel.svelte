@@ -35,6 +35,8 @@
             const u2 = await listen<any>('embedding-progress', (e) => {
                 const provider = e.payload.provider === 'gemini'
                     ? 'gemini-embeddings'
+                    : e.payload.provider === 'cohere'
+                        ? 'cohere-embeddings'
                     : e.payload.provider === 'openai'
                         ? 'openai-embeddings'
                         : e.payload.provider === 'ollama'
@@ -214,6 +216,7 @@
             import: 'Import',
             embeddings: 'Embeddings',
             'gemini-embeddings': 'Gemini embeddings',
+            'cohere-embeddings': 'Cohere embeddings',
             'openai-embeddings': 'OpenAI embeddings',
             'ollama-embeddings': 'Ollama embeddings',
             detection: 'Detection',

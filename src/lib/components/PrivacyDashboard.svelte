@@ -43,6 +43,14 @@
             tos: 'https://openai.com/policies/terms-of-use/',
             retention: '30 days. Zero Data Retention available.',
         },
+        cohere: {
+            company: 'Cohere, Toronto CA / San Francisco CA',
+            certifications: ['SOC 2 Type II'],
+            gdpr: 'DPA available for business plans',
+            training: 'No training on API data by default',
+            tos: 'https://cohere.com/terms-of-use',
+            retention: 'See Cohere data usage policy',
+        },
         openrouter: {
             company: 'OpenRouter (US)',
             certifications: ['SOC 2 (Enterprise only)'],

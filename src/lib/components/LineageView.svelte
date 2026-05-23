@@ -1,14 +1,17 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { onMount } from 'svelte';
-    import { lineageLayout, images, focusedIndex, navigateTo, activeCollection, activeFolder, collections, showToast, requestTextInput } from '$lib/stores';
+    import { lineageLayout, images, focusedIndex, focusedImageOverride, navigateTo, activeCollection, activeFolder, collections, showToast, requestTextInput } from '$lib/stores';
     import { listLineageGroups, getLineageGroupImages, renameLineageGroup, dissolveLineageGroup, type LineageGroup, type ImageWithFile } from '$lib/api';
+    import { resolveLineageImageFocus } from '$lib/lineage-utils';
     import type { LineageLayout } from '$lib/stores';
+    import ContextMenu from './ContextMenu.svelte';
 
     let groups = $state<LineageGroup[]>([]);
     let groupImages = $state<Map<string, ImageWithFile[]>>(new Map());
     let selectedGroupId = $state<string | null>(null);
     let loading = $state(true);
+    let contextMenu = $state<{ image: ImageWithFile; x: number; y: number } | null>(null);
 
     // Current images from the active context (collection/folder/all)
     let contextImageIds = $derived(new Set($images.map(img => img.image.id)));
@@ -68,19 +71,30 @@
         lineageLayout.update(l => l === 'timeline' ? 'comparison' : 'timeline');
     }
 
-    function openInLoupe(index: number) {
-        focusedIndex.set(index);
+    function focusLineageImage(img: ImageWithFile) {
+        const target = resolveLineageImageFocus($images, img);
+        if (target.focusedIndex !== null) {
+            focusedIndex.set(target.focusedIndex);
+        }
+        focusedImageOverride.set(target.focusedImageOverride);
+    }
+
+    function openInLoupe(img: ImageWithFile) {
+        focusLineageImage(img);
         navigateTo('loupe');
     }
 
-    function openInLoupeByKey(e: KeyboardEvent, index: number) {
+    function openInLoupeByKey(e: KeyboardEvent, img: ImageWithFile) {
         if (e.key !== 'Enter' && e.key !== ' ') return;
         e.preventDefault();
-        openInLoupe(index);
+        openInLoupe(img);
     }
 
-    function findGlobalIndex(imageId: string): number {
-        return $images.findIndex(img => img.image.id === imageId);
+    function handleImageContextMenu(e: MouseEvent, img: ImageWithFile) {
+        e.preventDefault();
+        e.stopPropagation();
+        focusLineageImage(img);
+        contextMenu = { image: img, x: e.clientX, y: e.clientY };
     }
 
     function thumbnailUrl(img: ImageWithFile): string {
@@ -152,8 +166,9 @@
                         {#each imgs as img, i (img.image.id)}
                             <div
                                 class="strip-thumb"
-                                onclick={() => openInLoupe(findGlobalIndex(img.image.id))}
-                                onkeydown={(e) => openInLoupeByKey(e, findGlobalIndex(img.image.id))}
+                                onclick={() => openInLoupe(img)}
+                                onkeydown={(e) => openInLoupeByKey(e, img)}
+                                oncontextmenu={(e) => handleImageContextMenu(e, img)}
                                 role="button"
                                 tabindex="0"
                             >
@@ -201,8 +216,9 @@
                     {#each imgs as img (img.image.id)}
                         <div
                             class="comparison-cell"
-                            onclick={() => openInLoupe(findGlobalIndex(img.image.id))}
-                            onkeydown={(e) => openInLoupeByKey(e, findGlobalIndex(img.image.id))}
+                            onclick={() => openInLoupe(img)}
+                            onkeydown={(e) => openInLoupeByKey(e, img)}
+                            oncontextmenu={(e) => handleImageContextMenu(e, img)}
                             role="button"
                             tabindex="0"
                         >
@@ -229,6 +245,15 @@
         </div>
     {/if}
 </div>
+
+{#if contextMenu}
+    <ContextMenu
+        image={contextMenu.image}
+        x={contextMenu.x}
+        y={contextMenu.y}
+        onclose={() => contextMenu = null}
+    />
+{/if}
 
 <style>
     .lineage-view {

@@ -6,7 +6,7 @@ import {
     collections, collectMode, collectModeTarget, activeCollection,
     showDetectionBoxes, showDetectionInspector, nsfwMode,
     navigateTo, navigateBack, searchOpen, focusedImage, activeSession,
-    requestTextInput, requestCollectionTarget,
+    requestTextInput, requestCollectionTarget, selectionAnchorIndex, resetLoupeTransform,
 } from './stores';
 import { computeCompareSwap } from './compare-utils';
 import type { NsfwMode } from './stores';
@@ -28,7 +28,7 @@ const VIEW_MODE_KEYS: Record<string, ViewMode> = {
     '4': 'canvas',
     '5': 'lineage',
     '6': 'embeddings',
-    '0': 'export',
+    '7': 'export',
     '8': 'tinder',
 };
 
@@ -105,6 +105,15 @@ function toggleSelect() {
         }
         return next;
     });
+    selectionAnchorIndex.set(idx);
+}
+
+function showSelectionHistoryStatus(label: string) {
+    const count = get(selectedIds).size;
+    statusHint.set(`${label}: ${count} selected`);
+    setTimeout(() => {
+        if (get(statusHint) === `${label}: ${count} selected`) statusHint.set(null);
+    }, 2000);
 }
 
 export async function handleStarRating(n: number, imageIndex?: number) {
@@ -219,9 +228,7 @@ function comparePrevPair() {
 // ---- Loupe helpers ----
 
 function resetLoupeZoom() {
-    loupeScale.set(1);
-    loupePanX.set(0);
-    loupePanY.set(0);
+    resetLoupeTransform();
 }
 
 function moveLoupeFocus(delta: number) {
@@ -274,6 +281,8 @@ export function handleKeydown(e: KeyboardEvent) {
         return;
     }
 
+    const mode = get(viewMode);
+
     const commandItem = commandForKeyboardEvent(e);
     if (commandItem) {
         e.preventDefault();
@@ -282,8 +291,6 @@ export function handleKeydown(e: KeyboardEvent) {
             .catch(err => console.error('Failed to run command hotkey:', err));
         return;
     }
-
-    const mode = get(viewMode);
 
     // Star rating chord (works in all modes)
     if (waitingForStar) {
@@ -331,6 +338,12 @@ export function handleKeydown(e: KeyboardEvent) {
         return;
     }
 
+    if (e.metaKey && e.key === '0' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        resetLoupeZoom();
+        return;
+    }
+
     // Detection shortcuts (D, I, B)
     if (e.key === 'd' && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
@@ -359,6 +372,10 @@ export function handleKeydown(e: KeyboardEvent) {
     // Undo: Cmd+Z
     if (e.key.toLowerCase() === 'z' && e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
+        if (mode === 'grid' && selectedIds.undo()) {
+            showSelectionHistoryStatus('Selection restored');
+            return;
+        }
         undo().then(label => {
             if (label) {
                 showToast(`Undone: ${label}`, { type: 'info', duration: 4000 });
@@ -371,6 +388,10 @@ export function handleKeydown(e: KeyboardEvent) {
     // Redo: Cmd+Shift+Z
     if (e.key.toLowerCase() === 'z' && e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
+        if (mode === 'grid' && selectedIds.redo()) {
+            showSelectionHistoryStatus('Selection redone');
+            return;
+        }
         redo().then(label => {
             if (label) {
                 showToast(`Redone: ${label}`, { type: 'info', duration: 4000 });
