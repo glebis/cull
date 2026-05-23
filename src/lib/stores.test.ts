@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ImageWithFile } from './api';
-import { focusedImage, focusedImageOverride, focusedIndex, images } from './stores';
+import { focusedImage, focusedImageOverride, focusedIndex, images, selectedIds } from './stores';
 
 function makeImage(id: string): ImageWithFile {
     return {
@@ -30,6 +30,7 @@ describe('focusedImage', () => {
         focusedImageOverride.set(null);
         focusedIndex.set(0);
         images.set([]);
+        selectedIds.reset(new Set());
     });
 
     it('uses the focused index after an override when focus is set directly', () => {
@@ -48,5 +49,37 @@ describe('focusedImage', () => {
         focusedIndex.update((index) => index + 1);
 
         expect(get(focusedImage)?.image.id).toBe('grid-2');
+    });
+});
+
+describe('selectedIds history', () => {
+    afterEach(() => {
+        selectedIds.reset(new Set());
+    });
+
+    it('undo restores the previous selection state', () => {
+        selectedIds.set(new Set(['a']));
+        selectedIds.set(new Set(['a', 'b']));
+
+        expect(selectedIds.undo()).toBe(true);
+        expect(get(selectedIds)).toEqual(new Set(['a']));
+    });
+
+    it('redo reapplies an undone selection state', () => {
+        selectedIds.set(new Set(['a']));
+        selectedIds.set(new Set(['a', 'b']));
+        selectedIds.undo();
+
+        expect(selectedIds.redo()).toBe(true);
+        expect(get(selectedIds)).toEqual(new Set(['a', 'b']));
+    });
+
+    it('does not create a history entry for equivalent selections', () => {
+        selectedIds.set(new Set(['a']));
+        selectedIds.set(new Set(['a']));
+
+        expect(selectedIds.undo()).toBe(true);
+        expect(get(selectedIds)).toEqual(new Set());
+        expect(selectedIds.undo()).toBe(false);
     });
 });

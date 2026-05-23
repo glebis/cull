@@ -1,10 +1,88 @@
-import { writable, derived, get } from 'svelte/store';
+import { writable, derived, get, type Writable } from 'svelte/store';
 import type { ImageWithFile, SmartCollection, Session, Canvas } from './api';
 
 export type ViewMode = 'grid' | 'compare' | 'loupe' | 'canvas' | 'lineage' | 'embeddings' | 'export' | 'tinder';
 
 export const images = writable<ImageWithFile[]>([]);
-export const selectedIds = writable<Set<string>>(new Set());
+
+export interface SelectionStore extends Writable<Set<string>> {
+    undo(): boolean;
+    redo(): boolean;
+    reset(ids?: Set<string>): void;
+    clearHistory(): void;
+}
+
+function cloneSelection(ids: Set<string>): Set<string> {
+    return new Set(ids);
+}
+
+function selectionsEqual(a: Set<string>, b: Set<string>): boolean {
+    if (a.size !== b.size) return false;
+    for (const id of a) {
+        if (!b.has(id)) return false;
+    }
+    return true;
+}
+
+function createSelectionStore(historyLimit = 100): SelectionStore {
+    const store = writable<Set<string>>(new Set());
+    let current = new Set<string>();
+    let undoStack: Set<string>[] = [];
+    let redoStack: Set<string>[] = [];
+
+    function publish(nextIds: Set<string>, recordHistory: boolean) {
+        const next = cloneSelection(nextIds);
+        if (selectionsEqual(current, next)) return;
+
+        if (recordHistory) {
+            undoStack.push(cloneSelection(current));
+            if (undoStack.length > historyLimit) undoStack = undoStack.slice(-historyLimit);
+            redoStack = [];
+        }
+
+        current = next;
+        store.set(current);
+    }
+
+    return {
+        subscribe: store.subscribe,
+        set(ids: Set<string>) {
+            publish(ids, true);
+        },
+        update(updater: (ids: Set<string>) => Set<string>) {
+            publish(updater(cloneSelection(current)), true);
+        },
+        undo() {
+            const previous = undoStack.pop();
+            if (!previous) return false;
+            redoStack.push(cloneSelection(current));
+            current = cloneSelection(previous);
+            store.set(current);
+            return true;
+        },
+        redo() {
+            const next = redoStack.pop();
+            if (!next) return false;
+            undoStack.push(cloneSelection(current));
+            current = cloneSelection(next);
+            store.set(current);
+            return true;
+        },
+        reset(ids: Set<string> = new Set()) {
+            undoStack = [];
+            redoStack = [];
+            current = cloneSelection(ids);
+            store.set(current);
+        },
+        clearHistory() {
+            undoStack = [];
+            redoStack = [];
+        },
+    };
+}
+
+export const selectedIds = createSelectionStore();
+export const selectionAnchorIndex = writable<number | null>(null);
 export const focusedImageOverride = writable<ImageWithFile | null>(null);
 
 function createFocusedIndexStore() {

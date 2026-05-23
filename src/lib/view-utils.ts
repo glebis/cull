@@ -25,6 +25,79 @@ export function buildRangeSelectionIds<T>(
     return new Set(items.slice(start, end + 1).map(getId));
 }
 
+export interface GridClickSelectionInput<T> {
+    items: T[];
+    selectedIds: Set<string>;
+    focusedIndex: number;
+    anchorIndex: number | null;
+    targetIndex: number;
+    shiftKey: boolean;
+    toggleKey: boolean;
+    getId: (item: T) => string;
+}
+
+export interface GridClickSelectionResult {
+    selectedIds: Set<string> | null;
+    anchorIndex: number;
+}
+
+function normalizeGridIndex(index: number | null, fallback: number, maxIndex: number): number {
+    const value = index === null || !Number.isFinite(index) ? fallback : index;
+    return clamp(Math.trunc(value), 0, maxIndex);
+}
+
+export function computeGridClickSelection<T>({
+    items,
+    selectedIds,
+    focusedIndex,
+    anchorIndex,
+    targetIndex,
+    shiftKey,
+    toggleKey,
+    getId,
+}: GridClickSelectionInput<T>): GridClickSelectionResult {
+    if (items.length === 0) {
+        return { selectedIds: null, anchorIndex: 0 };
+    }
+
+    const maxIndex = items.length - 1;
+    const target = normalizeGridIndex(targetIndex, 0, maxIndex);
+    const anchor = normalizeGridIndex(anchorIndex, focusedIndex, maxIndex);
+
+    if (shiftKey) {
+        const rangeIds = buildRangeSelectionIds(items, anchor, target, getId);
+        const next = new Set(selectedIds);
+
+        if (toggleKey) {
+            for (const id of rangeIds) {
+                if (next.has(id)) {
+                    next.delete(id);
+                } else {
+                    next.add(id);
+                }
+            }
+        } else {
+            for (const id of rangeIds) next.add(id);
+        }
+
+        return { selectedIds: next, anchorIndex: anchor };
+    }
+
+    if (toggleKey) {
+        const item = items[target];
+        const next = new Set(selectedIds);
+        const id = getId(item);
+        if (next.has(id)) {
+            next.delete(id);
+        } else {
+            next.add(id);
+        }
+        return { selectedIds: next, anchorIndex: target };
+    }
+
+    return { selectedIds: null, anchorIndex: target };
+}
+
 export interface LoupeImagePathCandidate {
     path: string;
     thumbnail_path?: string | null;
