@@ -231,15 +231,14 @@ def test_rating_decision_and_selection(page: Page) -> None:
     press(page, "0")
     expect(page.locator(".thumb.focused .rating .star")).to_have_count(0)
 
-    press(page, "s")
     press(page, "5")
     expect(page.locator(".thumb.focused .rating .star")).to_have_count(5)
 
-    press(page, "a")
+    dispatch_key(page, "a")
     expect(page.locator(".thumb.focused .badge.accept")).to_be_visible()
-    press(page, "x")
+    dispatch_key(page, "x")
     expect(page.locator(".thumb.focused .badge.reject")).to_be_visible()
-    press(page, "u")
+    dispatch_key(page, "u")
     expect(page.locator(".thumb.focused .badge")).to_have_count(0)
 
     press(page, "Space")
@@ -465,17 +464,20 @@ def test_accept_reject_undecided(page: Page) -> None:
     wait_mode(page, "grid")
     press(page, "Home")
 
+    dispatch_key(page, "u")
+    expect(page.locator(".thumb.focused .badge")).to_have_count(0)
+
     # a -> accept (green check badge)
-    press(page, "a")
+    dispatch_key(page, "a")
     expect(page.locator(".thumb.focused .badge.accept")).to_be_visible()
 
     # x -> reject (red x badge)
-    press(page, "x")
+    dispatch_key(page, "x")
     expect(page.locator(".thumb.focused .badge.reject")).to_be_visible()
     expect(page.locator(".thumb.focused .badge.accept")).to_have_count(0)
 
     # u -> undecided (no badge)
-    press(page, "u")
+    dispatch_key(page, "u")
     expect(page.locator(".thumb.focused .badge")).to_have_count(0)
 
 
