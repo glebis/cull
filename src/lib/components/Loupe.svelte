@@ -3,7 +3,6 @@
     import { onMount } from 'svelte';
     import ContextMenu from './ContextMenu.svelte';
     import PromptResubmitDialog from './PromptResubmitDialog.svelte';
-    import GenerationResultsStrip from './GenerationResultsStrip.svelte';
     import { images, focusedIndex, focusedImage, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
     import { getDetections, getVisionMetadata, cropImage, getImagesByIds, getGenerationRun, isRawFormat } from '$lib/api';
     import type { Detection, GenerationRun } from '$lib/api';
@@ -648,11 +647,6 @@
         sourceImageId={image?.image.id ?? null}
         onclose={() => resubmitVisible = false}
         ongenerated={(ids, jobId) => {}}
-    />
-
-    <GenerationResultsStrip
-        oncompare={(ids) => {}}
-        onselect={(id) => {}}
     />
 
 {#if $showDetectionInspector}

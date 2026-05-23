@@ -10,6 +10,7 @@ import {
     loupePanY,
     loupeScale,
     navigateTo,
+    openImageInLoupe,
     selectedIds,
     viewHistory,
     viewMode,
@@ -66,6 +67,9 @@ describe('focusedImage', () => {
 
 describe('navigation', () => {
     afterEach(() => {
+        focusedImageOverride.set(null);
+        focusedIndex.set(0);
+        images.set([]);
         viewMode.set('grid');
         viewHistory.set([]);
         loupeScale.set(1);
@@ -82,6 +86,50 @@ describe('navigation', () => {
         navigateTo('loupe');
 
         expect(get(viewMode)).toBe('loupe');
+        expect(get(loupeScale)).toBe(1);
+        expect(get(loupePanX)).toBe(0);
+        expect(get(loupePanY)).toBe(0);
+    });
+
+    it('opens an image in loupe with an override when it is outside the current grid scope', () => {
+        const source = makeImage('source');
+        const generated = makeImage('generated');
+        images.set([source]);
+        viewMode.set('grid');
+
+        openImageInLoupe(generated);
+
+        expect(get(viewMode)).toBe('loupe');
+        expect(get(focusedImage)?.image.id).toBe('generated');
+        expect(get(focusedImageOverride)?.image.id).toBe('generated');
+    });
+
+    it('opens an image in loupe by focused index when it is already loaded', () => {
+        const source = makeImage('source');
+        const generated = makeImage('generated');
+        images.set([source, generated]);
+        focusedImageOverride.set(makeImage('old-override'));
+        viewMode.set('grid');
+
+        openImageInLoupe(generated);
+
+        expect(get(viewMode)).toBe('loupe');
+        expect(get(focusedIndex)).toBe(1);
+        expect(get(focusedImageOverride)).toBeNull();
+        expect(get(focusedImage)?.image.id).toBe('generated');
+    });
+
+    it('re-centres loupe when opening a generated image while already in loupe', () => {
+        const generated = makeImage('generated');
+        viewMode.set('loupe');
+        loupeScale.set(3);
+        loupePanX.set(40);
+        loupePanY.set(-20);
+
+        openImageInLoupe(generated);
+
+        expect(get(viewMode)).toBe('loupe');
+        expect(get(focusedImage)?.image.id).toBe('generated');
         expect(get(loupeScale)).toBe(1);
         expect(get(loupePanX)).toBe(0);
         expect(get(loupePanY)).toBe(0);

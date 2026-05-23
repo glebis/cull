@@ -129,6 +129,21 @@ export function navigateTo(mode: ViewMode) {
     viewMode.set(mode);
 }
 
+export function openImageInLoupe(image: ImageWithFile) {
+    const index = get(images).findIndex(item => item.image.id === image.image.id);
+    if (index >= 0) {
+        focusedIndex.set(index);
+    } else {
+        focusedImageOverride.set(image);
+    }
+
+    if (get(viewMode) === 'loupe') {
+        resetLoupeTransform();
+    } else {
+        navigateTo('loupe');
+    }
+}
+
 export function navigateBack(): boolean {
     const history = get(viewHistory);
     if (history.length === 0) return false;
