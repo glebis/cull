@@ -5,7 +5,10 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::db_core::remote_embeddings::{OLLAMA_EMBEDDING_MODEL_ID, OPENAI_EMBEDDING_MODEL_ID};
+use crate::db_core::remote_embeddings::{
+    COHERE_EMBEDDING_DIMENSIONS, COHERE_EMBEDDING_MODEL_ID, OLLAMA_EMBEDDING_MODEL_ID,
+    OPENAI_EMBEDDING_MODEL_ID,
+};
 
 pub const CLIP_MODEL_ID: &str = "clip-vit-b32";
 pub const DINO_V2_SMALL_MODEL_ID: &str = "dinov2-vits14";
@@ -64,7 +67,7 @@ pub const DINO_V2_SMALL_MODEL_SPEC: EmbeddingModelSpec = EmbeddingModelSpec {
     std: [0.229, 0.224, 0.225],
 };
 
-pub const EMBEDDING_PROVIDER_SPECS: [EmbeddingProviderSpec; 5] = [
+pub const EMBEDDING_PROVIDER_SPECS: [EmbeddingProviderSpec; 6] = [
     EmbeddingProviderSpec {
         id: "clip",
         label: "CLIP ViT-B/32",
@@ -95,6 +98,17 @@ pub const EMBEDDING_PROVIDER_SPECS: [EmbeddingProviderSpec; 5] = [
         runtime: "cloud-api",
         dimensions: 3072,
         api_key_provider: Some("google"),
+        downloadable: false,
+        download_label: None,
+    },
+    EmbeddingProviderSpec {
+        id: "cohere",
+        label: "Cohere Embed v4 Multimodal",
+        short_label: "Cohere",
+        model_id: COHERE_EMBEDDING_MODEL_ID,
+        runtime: "cloud-api",
+        dimensions: COHERE_EMBEDDING_DIMENSIONS,
+        api_key_provider: Some("cohere"),
         downloadable: false,
         download_label: None,
     },
@@ -139,6 +153,12 @@ pub fn embedding_provider_for_model(model_id: &str) -> Option<EmbeddingProviderS
         return EMBEDDING_PROVIDER_SPECS
             .iter()
             .find(|provider| provider.id == "openai")
+            .copied();
+    }
+    if model_id.starts_with("cohere:") {
+        return EMBEDDING_PROVIDER_SPECS
+            .iter()
+            .find(|provider| provider.id == "cohere")
             .copied();
     }
     if model_id.starts_with("ollama:") {
@@ -332,7 +352,10 @@ mod tests {
         let providers = embedding_provider_specs();
         let ids: Vec<&str> = providers.iter().map(|provider| provider.id).collect();
 
-        assert_eq!(ids, vec!["clip", "dinov2", "gemini", "openai", "ollama"]);
+        assert_eq!(
+            ids,
+            vec!["clip", "dinov2", "gemini", "cohere", "openai", "ollama"]
+        );
         assert_eq!(providers[0].model_id, CLIP_MODEL_ID);
         assert_eq!(providers[0].runtime, "local-onnx");
         assert_eq!(providers[0].dimensions, 512);
@@ -349,18 +372,25 @@ mod tests {
         assert_eq!(providers[2].api_key_provider, Some("google"));
         assert!(!providers[2].downloadable);
 
-        assert_eq!(providers[3].id, "openai");
-        assert_eq!(providers[3].model_id, "openai:text-embedding-3-large");
+        assert_eq!(providers[3].id, "cohere");
+        assert_eq!(providers[3].model_id, "cohere:embed-v4.0");
         assert_eq!(providers[3].runtime, "cloud-api");
-        assert_eq!(providers[3].api_key_provider, Some("openai"));
-        assert_eq!(providers[3].dimensions, 3072);
+        assert_eq!(providers[3].api_key_provider, Some("cohere"));
+        assert_eq!(providers[3].dimensions, 1024);
         assert!(!providers[3].downloadable);
 
-        assert_eq!(providers[4].id, "ollama");
-        assert_eq!(providers[4].model_id, "ollama:embeddinggemma");
-        assert_eq!(providers[4].runtime, "local-api");
-        assert_eq!(providers[4].dimensions, 0);
+        assert_eq!(providers[4].id, "openai");
+        assert_eq!(providers[4].model_id, "openai:text-embedding-3-large");
+        assert_eq!(providers[4].runtime, "cloud-api");
+        assert_eq!(providers[4].api_key_provider, Some("openai"));
+        assert_eq!(providers[4].dimensions, 3072);
         assert!(!providers[4].downloadable);
+
+        assert_eq!(providers[5].id, "ollama");
+        assert_eq!(providers[5].model_id, "ollama:embeddinggemma");
+        assert_eq!(providers[5].runtime, "local-api");
+        assert_eq!(providers[5].dimensions, 0);
+        assert!(!providers[5].downloadable);
     }
 
     #[test]
@@ -386,6 +416,12 @@ mod tests {
                 .unwrap()
                 .id,
             "openai"
+        );
+        assert_eq!(
+            embedding_provider_for_model("cohere:embed-v4.0")
+                .unwrap()
+                .id,
+            "cohere"
         );
         assert_eq!(
             embedding_provider_for_model("ollama:embeddinggemma")

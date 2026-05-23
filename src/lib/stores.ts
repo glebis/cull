@@ -330,7 +330,7 @@ export function showToast(message: string, opts?: { detail?: string; type?: Toas
 export type EmbeddingInteractionMode = 'map' | 'stack' | 'review' | 'text';
 export type EmbeddingZPreset = 'projection' | 'cluster' | 'source' | 'rating' | 'decision' | 'recency' | 'resolution';
 export type EmbeddingSpacePreset = 'balanced' | 'compact' | 'gallery' | 'deep' | 'custom';
-export type EmbeddingProvider = 'clip' | 'dinov2' | 'gemini' | 'openai' | 'ollama';
+export type EmbeddingProvider = 'clip' | 'dinov2' | 'gemini' | 'cohere' | 'openai' | 'ollama';
 
 export interface EmbeddingViewState {
     panX: number;

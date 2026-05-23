@@ -30,6 +30,7 @@
     let moduleRaw = $state(false);
     let moduleStaticPublishing = $state(false);
     let appIconVariant = $state<AppIconVariantId>('primary');
+    let cohereEmbeddingModel = $state('embed-v4.0');
     let openaiEmbeddingModel = $state('text-embedding-3-large');
     let ollamaEmbeddingUrl = $state('http://localhost:11434/api/embed');
     let ollamaEmbeddingModel = $state('embeddinggemma');
@@ -39,12 +40,13 @@
         inputValue: string;
         status: 'none' | 'connected' | 'invalid' | 'validating' | 'error';
     }
-    const PROVIDERS = ['openai', 'google', 'openrouter'] as const;
-    const PROVIDER_LABELS: Record<string, string> = { openai: 'OpenAI', google: 'Google', openrouter: 'OpenRouter' };
-    const PROVIDER_PLACEHOLDERS: Record<string, string> = { openai: 'sk-...', google: 'AIza...', openrouter: 'sk-or-...' };
+    const PROVIDERS = ['openai', 'google', 'cohere', 'openrouter'] as const;
+    const PROVIDER_LABELS: Record<string, string> = { openai: 'OpenAI', google: 'Google', cohere: 'Cohere', openrouter: 'OpenRouter' };
+    const PROVIDER_PLACEHOLDERS: Record<string, string> = { openai: 'sk-...', google: 'AIza...', cohere: 'co-...', openrouter: 'sk-or-...' };
     let apiKeys = $state<Record<string, ApiKeyState>>({
         openai: { exists: false, inputValue: '', status: 'none' },
         google: { exists: false, inputValue: '', status: 'none' },
+        cohere: { exists: false, inputValue: '', status: 'none' },
         openrouter: { exists: false, inputValue: '', status: 'none' },
     });
 
@@ -57,7 +59,7 @@
 
     onMount(async () => {
         try {
-            const [toks, ctSetting, trashSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting, iconSetting, openaiEmbeddingSetting, ollamaEmbeddingUrlSetting, ollamaEmbeddingModelSetting] = await Promise.all([
+            const [toks, ctSetting, trashSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting, iconSetting, cohereEmbeddingSetting, openaiEmbeddingSetting, ollamaEmbeddingUrlSetting, ollamaEmbeddingModelSetting] = await Promise.all([
                 listMcpTokens(),
                 getAppSetting('close_to_tray'),
                 getAppSetting('skip_trash_confirm'),
@@ -67,6 +69,7 @@
                 getAppSetting('module_raw'),
                 getAppSetting('module_static_publishing'),
                 getAppSetting('app_icon_variant'),
+                getAppSetting('cohere_embedding_model'),
                 getAppSetting('openai_embedding_model'),
                 getAppSetting('ollama_embedding_url'),
                 getAppSetting('ollama_embedding_model'),
@@ -80,19 +83,23 @@
             moduleRaw = rawSetting === 'true';
             moduleStaticPublishing = staticPublishingSetting === 'true';
             appIconVariant = normalizeAppIconVariant(iconSetting);
+            if (cohereEmbeddingSetting) cohereEmbeddingModel = cohereEmbeddingSetting;
             if (openaiEmbeddingSetting) openaiEmbeddingModel = openaiEmbeddingSetting;
             if (ollamaEmbeddingUrlSetting) ollamaEmbeddingUrl = ollamaEmbeddingUrlSetting;
             if (ollamaEmbeddingModelSetting) ollamaEmbeddingModel = ollamaEmbeddingModelSetting;
 
-            const [hasOpenai, hasGoogle, hasOpenrouter] = await Promise.all([
+            const [hasOpenai, hasGoogle, hasCohere, hasOpenrouter] = await Promise.all([
                 hasApiKey('openai'),
                 hasApiKey('google'),
+                hasApiKey('cohere'),
                 hasApiKey('openrouter'),
             ]);
             apiKeys.openai.exists = hasOpenai;
             apiKeys.openai.status = hasOpenai ? 'connected' : 'none';
             apiKeys.google.exists = hasGoogle;
             apiKeys.google.status = hasGoogle ? 'connected' : 'none';
+            apiKeys.cohere.exists = hasCohere;
+            apiKeys.cohere.status = hasCohere ? 'connected' : 'none';
             apiKeys.openrouter.exists = hasOpenrouter;
             apiKeys.openrouter.status = hasOpenrouter ? 'connected' : 'none';
         } catch (e) {
@@ -190,6 +197,12 @@
         apiKeys[provider].exists = false;
         apiKeys[provider].status = 'none';
         apiKeys[provider].inputValue = '';
+    }
+
+    async function saveCohereEmbeddingModel() {
+        const model = cohereEmbeddingModel.trim() || 'embed-v4.0';
+        cohereEmbeddingModel = model;
+        await setAppSetting('cohere_embedding_model', model);
     }
 
     async function saveOpenAiEmbeddingModel() {
@@ -426,6 +439,18 @@
 
             <div class="section">
                 <div class="section-header">Embedding Models</div>
+                <div class="setting-row api-key-row">
+                    <span class="provider-label">Cohere</span>
+                    <div class="api-key-controls">
+                        <input
+                            type="text"
+                            class="api-input"
+                            bind:value={cohereEmbeddingModel}
+                            onblur={saveCohereEmbeddingModel}
+                            placeholder="embed-v4.0"
+                        />
+                    </div>
+                </div>
                 <div class="setting-row api-key-row">
                     <span class="provider-label">OpenAI</span>
                     <div class="api-key-controls">

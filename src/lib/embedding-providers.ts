@@ -41,6 +41,14 @@ export const DEFAULT_MODEL_OPTIONS: ModelOption[] = [
         scope: 'cloud',
     },
     {
+        id: 'cohere',
+        label: 'Cohere Embed v4 Multimodal',
+        shortLabel: 'Cohere',
+        modelName: 'cohere:embed-v4.0',
+        dims: '1024d',
+        scope: 'cloud',
+    },
+    {
         id: 'openai',
         label: 'OpenAI Text Embedding 3 Large',
         shortLabel: 'OpenAI',
@@ -58,7 +66,7 @@ export const DEFAULT_MODEL_OPTIONS: ModelOption[] = [
     },
 ];
 
-const KNOWN_PROVIDER_IDS = new Set<EmbeddingProvider>(['clip', 'dinov2', 'gemini', 'openai', 'ollama']);
+const KNOWN_PROVIDER_IDS = new Set<EmbeddingProvider>(['clip', 'dinov2', 'gemini', 'cohere', 'openai', 'ollama']);
 
 function isEmbeddingProvider(id: string): id is EmbeddingProvider {
     return KNOWN_PROVIDER_IDS.has(id as EmbeddingProvider);

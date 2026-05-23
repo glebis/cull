@@ -9,10 +9,11 @@ use crate::db_core::embeddings::{
     CLIP_MODEL_ID, GEMINI_EMBEDDING_MODEL_ID,
 };
 use crate::db_core::remote_embeddings::{
-    build_text_embedding_input, check_ollama_embedding_available, normalize_embedding,
-    ollama_storage_model_id, openai_storage_model_id, OllamaTextEmbeddingProvider,
-    OpenAiTextEmbeddingProvider, OLLAMA_EMBEDDING_MODEL, OLLAMA_EMBEDDING_URL,
-    OPENAI_EMBEDDING_ENDPOINT, OPENAI_EMBEDDING_MODEL,
+    build_text_embedding_input, check_ollama_embedding_available, cohere_storage_model_id,
+    normalize_embedding, ollama_storage_model_id, openai_storage_model_id,
+    CohereImageEmbeddingProvider, OllamaTextEmbeddingProvider, OpenAiTextEmbeddingProvider,
+    COHERE_EMBEDDING_ENDPOINT, COHERE_EMBEDDING_MODEL, OLLAMA_EMBEDDING_MODEL,
+    OLLAMA_EMBEDDING_URL, OPENAI_EMBEDDING_ENDPOINT, OPENAI_EMBEDDING_MODEL,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -47,6 +48,7 @@ pub type ClipModelDownloadInfo = EmbeddingModelDownloadInfo;
 #[derive(Debug, Clone, Copy, Default)]
 struct ProviderAvailability {
     google_key_exists: bool,
+    cohere_key_exists: bool,
     openai_key_exists: bool,
     ollama_available: bool,
 }
@@ -72,6 +74,7 @@ fn embedding_provider_infos(
                 "cloud-api" => {
                     let available = match spec.api_key_provider {
                         Some("google") => availability.google_key_exists,
+                        Some("cohere") => availability.cohere_key_exists,
                         Some("openai") => availability.openai_key_exists,
                         _ => false,
                     };
@@ -128,6 +131,15 @@ fn openai_embedding_model(state: &AppState) -> Result<String, String> {
         .map_err(|e| e.to_string())?
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| OPENAI_EMBEDDING_MODEL.to_string()))
+}
+
+fn cohere_embedding_model(state: &AppState) -> Result<String, String> {
+    Ok(state
+        .db
+        .get_setting("cohere_embedding_model")
+        .map_err(|e| e.to_string())?
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| COHERE_EMBEDDING_MODEL.to_string()))
 }
 
 fn ollama_embedding_config(state: &AppState) -> Result<(String, String), String> {
@@ -259,6 +271,14 @@ async fn generate_embeddings_for_model(
         };
         return generate_openai_text_embeddings(app, state, &model, image_ids).await;
     }
+    if let Some(model) = model_id.strip_prefix("cohere:") {
+        let model = if model.trim().is_empty() {
+            cohere_embedding_model(state)?
+        } else {
+            model.to_string()
+        };
+        return generate_cohere_image_embeddings(app, state, &model, image_ids).await;
+    }
     if let Some(model) = model_id.strip_prefix("ollama:") {
         let (_, configured_model) = ollama_embedding_config(state)?;
         let model = if model.trim().is_empty() {
@@ -384,12 +404,14 @@ pub async fn list_embedding_providers(
     state: State<'_, AppState>,
 ) -> Result<Vec<EmbeddingProviderInfo>, String> {
     let openai_model = openai_embedding_model(&state)?;
+    let cohere_model = cohere_embedding_model(&state)?;
     let (ollama_url, ollama_model) = ollama_embedding_config(&state)?;
     let ollama_models = check_ollama_embedding_available(&ollama_url)
         .await
         .unwrap_or_default();
     let availability = ProviderAvailability {
         google_key_exists: api_key_exists(&state, "google")?,
+        cohere_key_exists: api_key_exists(&state, "cohere")?,
         openai_key_exists: api_key_exists(&state, "openai")?,
         ollama_available: ollama_model_available(&ollama_models, &ollama_model),
     };
@@ -398,6 +420,8 @@ pub async fn list_embedding_providers(
     for provider in &mut providers {
         if provider.id == "openai" {
             provider.model_name = openai_storage_model_id(&openai_model);
+        } else if provider.id == "cohere" {
+            provider.model_name = cohere_storage_model_id(&cohere_model);
         } else if provider.id == "ollama" {
             provider.model_name = ollama_storage_model_id(&ollama_model);
         }
@@ -490,7 +514,7 @@ mod tests {
         let engine = crate::db_core::embeddings::EmbeddingEngine::new(tmp.path());
 
         let missing = embedding_provider_infos(&engine, ProviderAvailability::default());
-        assert_eq!(missing.len(), 5);
+        assert_eq!(missing.len(), 6);
         assert_eq!(missing[0].id, "clip");
         assert_eq!(missing[0].scope, "local");
         assert_eq!(missing[0].status, "model");
@@ -501,13 +525,16 @@ mod tests {
         assert_eq!(missing[2].scope, "cloud");
         assert_eq!(missing[2].status, "key");
         assert_eq!(missing[2].api_key_provider.as_deref(), Some("google"));
-        assert_eq!(missing[3].id, "openai");
+        assert_eq!(missing[3].id, "cohere");
         assert_eq!(missing[3].status, "key");
-        assert_eq!(missing[3].api_key_provider.as_deref(), Some("openai"));
-        assert_eq!(missing[4].id, "ollama");
-        assert_eq!(missing[4].scope, "local");
-        assert_eq!(missing[4].status, "offline");
-        assert_eq!(missing[4].dimensions_label, "model");
+        assert_eq!(missing[3].api_key_provider.as_deref(), Some("cohere"));
+        assert_eq!(missing[4].id, "openai");
+        assert_eq!(missing[4].status, "key");
+        assert_eq!(missing[4].api_key_provider.as_deref(), Some("openai"));
+        assert_eq!(missing[5].id, "ollama");
+        assert_eq!(missing[5].scope, "local");
+        assert_eq!(missing[5].status, "offline");
+        assert_eq!(missing[5].dimensions_label, "model");
 
         std::fs::write(tmp.path().join("clip-vit-b32-vision.onnx"), b"model").unwrap();
 
@@ -515,6 +542,7 @@ mod tests {
             &engine,
             ProviderAvailability {
                 google_key_exists: true,
+                cohere_key_exists: true,
                 openai_key_exists: true,
                 ollama_available: true,
             },
@@ -528,6 +556,8 @@ mod tests {
         assert!(with_ready_providers[3].available);
         assert_eq!(with_ready_providers[4].status, "ready");
         assert!(with_ready_providers[4].available);
+        assert_eq!(with_ready_providers[5].status, "ready");
+        assert!(with_ready_providers[5].available);
     }
 
     #[test]
@@ -716,6 +746,15 @@ pub async fn validate_api_key(provider: String, key: String) -> Result<bool, Str
                 .map_err(|e| format!("{}", e))?;
             Ok(resp.status().is_success())
         }
+        "cohere" => {
+            let resp = client
+                .get("https://api.cohere.com/v1/models")
+                .bearer_auth(key)
+                .send()
+                .await
+                .map_err(|e| format!("{}", e))?;
+            Ok(resp.status().is_success())
+        }
         "openrouter" => {
             let resp = client
                 .get("https://openrouter.ai/api/v1/models")
@@ -792,6 +831,89 @@ async fn generate_openai_text_embeddings(
         },
     )
     .await
+}
+
+async fn generate_cohere_image_embeddings(
+    app: &AppHandle,
+    state: &AppState,
+    model: &str,
+    image_ids: &[String],
+) -> Result<u32, String> {
+    let api_key = state
+        .secrets
+        .get("api_key_cohere")?
+        .ok_or("Cohere API key not set")?;
+    let _ = state.db.set_setting("api_key_exists_cohere", "true");
+    let provider = CohereImageEmbeddingProvider::new(&api_key, model);
+    let storage_model_id = cohere_storage_model_id(model);
+    let total = image_ids.len() as u32;
+    let mut generated = 0u32;
+
+    for (i, image_id) in image_ids.iter().enumerate() {
+        let id_refs: Vec<&str> = vec![image_id.as_str()];
+        let images = state
+            .db
+            .get_images_by_ids(&id_refs)
+            .map_err(|e| e.to_string())?;
+        let img = images.first().ok_or("Image not found")?;
+        let ml_path = crate::commands::resolve_image_path_for_ml(img, &state.app_data_dir);
+        let file_size = std::fs::metadata(&ml_path)
+            .map(|metadata| metadata.len() as i64)
+            .unwrap_or(0);
+        let dims = format!("{}x{}", img.image.width, img.image.height);
+
+        match provider.generate_embedding(&ml_path).await {
+            Ok(embedding) => {
+                let embedding = normalize_embedding(embedding);
+                let _ = crate::services::audit::log_api_call(
+                    &state.db,
+                    "cohere",
+                    COHERE_EMBEDDING_ENDPOINT,
+                    "image",
+                    file_size,
+                    None,
+                    Some(&dims),
+                    Some(model),
+                    200,
+                    "CA/US - Cohere",
+                );
+                state
+                    .db
+                    .store_embedding(image_id, &storage_model_id, &embedding)
+                    .map_err(|e| e.to_string())?;
+                generated += 1;
+            }
+            Err(e) => {
+                let _ = crate::services::audit::log_api_call(
+                    &state.db,
+                    "cohere",
+                    COHERE_EMBEDDING_ENDPOINT,
+                    "image",
+                    file_size,
+                    None,
+                    Some(&dims),
+                    Some(model),
+                    500,
+                    "CA/US - Cohere",
+                );
+                crate::safe_eprintln!("Cohere embedding error for {}: {}", image_id, e);
+            }
+        }
+
+        let _ = app.emit(
+            "embedding-progress",
+            serde_json::json!({
+                "current": i + 1,
+                "total": total,
+                "provider": "cohere",
+                "model": storage_model_id,
+            }),
+        );
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    }
+
+    Ok(generated)
 }
 
 async fn generate_ollama_text_embeddings(

@@ -1,7 +1,13 @@
 use crate::db_core::models::{GenerationRun, ImageWithFile};
+use base64::Engine;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
+pub const COHERE_EMBEDDING_MODEL: &str = "embed-v4.0";
+pub const COHERE_EMBEDDING_MODEL_ID: &str = "cohere:embed-v4.0";
+pub const COHERE_EMBEDDING_ENDPOINT: &str = "https://api.cohere.com/v2/embed";
+pub const COHERE_EMBEDDING_DIMENSIONS: usize = 1024;
 pub const OPENAI_EMBEDDING_MODEL: &str = "text-embedding-3-large";
 pub const OPENAI_EMBEDDING_MODEL_ID: &str = "openai:text-embedding-3-large";
 pub const OPENAI_EMBEDDING_ENDPOINT: &str = "https://api.openai.com/v1/embeddings";
@@ -18,6 +24,12 @@ pub struct OpenAiTextEmbeddingProvider {
 pub struct OllamaTextEmbeddingProvider {
     client: Client,
     url: String,
+    model: String,
+}
+
+pub struct CohereImageEmbeddingProvider {
+    client: Client,
+    api_key: String,
     model: String,
 }
 
@@ -49,6 +61,19 @@ struct OllamaEmbedRequest<'a> {
 struct OllamaEmbedResponse {
     embeddings: Option<Vec<Vec<f32>>>,
     embedding: Option<Vec<f32>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CohereEmbedResponse {
+    embeddings: CohereEmbeddings,
+}
+
+#[derive(Debug, Deserialize)]
+struct CohereEmbeddings {
+    #[serde(rename = "float_")]
+    float_compat: Option<Vec<Vec<f32>>>,
+    #[serde(rename = "float")]
+    float_values: Option<Vec<Vec<f32>>>,
 }
 
 impl OpenAiTextEmbeddingProvider {
@@ -86,6 +111,54 @@ impl OpenAiTextEmbeddingProvider {
             .await
             .map_err(|e| format!("OpenAI body: {}", e))?;
         parse_openai_embedding_response(&body)
+    }
+}
+
+impl CohereImageEmbeddingProvider {
+    pub fn new(api_key: &str, model: &str) -> Self {
+        CohereImageEmbeddingProvider {
+            client: Client::new(),
+            api_key: api_key.to_string(),
+            model: model.to_string(),
+        }
+    }
+
+    pub async fn generate_embedding(&self, image_path: &Path) -> Result<Vec<f32>, String> {
+        let image_bytes = std::fs::read(image_path).map_err(|e| format!("Read: {}", e))?;
+        let data_url = image_data_url(image_path, &image_bytes);
+        let request = serde_json::json!({
+            "model": self.model,
+            "input_type": "search_document",
+            "embedding_types": ["float"],
+            "output_dimension": COHERE_EMBEDDING_DIMENSIONS,
+            "inputs": [{
+                "content": [{
+                    "type": "image_url",
+                    "image_url": { "url": data_url }
+                }]
+            }]
+        });
+
+        let resp = self
+            .client
+            .post(COHERE_EMBEDDING_ENDPOINT)
+            .bearer_auth(&self.api_key)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| format!("Cohere request failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("Cohere returned {}: {}", status, text));
+        }
+
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| format!("Cohere body: {}", e))?;
+        parse_cohere_embedding_response(&body)
     }
 }
 
@@ -162,6 +235,10 @@ pub async fn check_ollama_embedding_available(url: &str) -> Result<Vec<String>, 
 
 pub fn openai_storage_model_id(model: &str) -> String {
     storage_model_id("openai", model)
+}
+
+pub fn cohere_storage_model_id(model: &str) -> String {
+    storage_model_id("cohere", model)
 }
 
 pub fn ollama_storage_model_id(model: &str) -> String {
@@ -287,6 +364,35 @@ pub fn parse_ollama_embedding_response(body: &str) -> Result<Vec<f32>, String> {
         .ok_or_else(|| "Ollama response did not include an embedding".to_string())
 }
 
+pub fn parse_cohere_embedding_response(body: &str) -> Result<Vec<f32>, String> {
+    let response: CohereEmbedResponse =
+        serde_json::from_str(body).map_err(|e| format!("Cohere parse error: {}", e))?;
+    response
+        .embeddings
+        .float_compat
+        .or(response.embeddings.float_values)
+        .and_then(|mut embeddings| embeddings.drain(..).next())
+        .filter(|embedding| !embedding.is_empty())
+        .ok_or_else(|| "Cohere response did not include a float embedding".to_string())
+}
+
+fn image_data_url(image_path: &Path, image_bytes: &[u8]) -> String {
+    let mime = match image_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        Some("avif") => "image/avif",
+        _ => "image/png",
+    };
+    let b64 = base64::engine::general_purpose::STANDARD.encode(image_bytes);
+    format!("data:{};base64,{}", mime, b64)
+}
+
 fn storage_model_id(provider: &str, model: &str) -> String {
     let trimmed = model.trim();
     if trimmed.starts_with(&format!("{}:", provider)) {
@@ -346,6 +452,7 @@ mod tests {
             openai_storage_model_id("openai:text-embedding-3-large"),
             "openai:text-embedding-3-large"
         );
+        assert_eq!(cohere_storage_model_id("embed-v4.0"), "cohere:embed-v4.0");
         assert_eq!(
             ollama_storage_model_id("nomic-embed-text"),
             "ollama:nomic-embed-text"
@@ -415,6 +522,17 @@ mod tests {
         assert_eq!(
             parse_ollama_embedding_response(legacy).unwrap(),
             vec![0.4, 0.5]
+        );
+    }
+
+    #[test]
+    fn parses_cohere_multimodal_embedding_response() {
+        let body =
+            r#"{"embeddings":{"float_":[[0.1,0.2,0.3]]},"response_type":"embeddings_by_type"}"#;
+
+        assert_eq!(
+            parse_cohere_embedding_response(body).unwrap(),
+            vec![0.1, 0.2, 0.3]
         );
     }
 
