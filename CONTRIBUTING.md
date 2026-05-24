@@ -17,9 +17,11 @@ npm run tauri dev
 
 ## Code Style
 
-**Rust:** `cd src-tauri && cargo fmt --all`, `cargo clippy --all-targets`, and `cargo test --all-targets` before committing.
+Run `npm run ci` before pushing to run the same checks as GitHub Actions.
 
-**Svelte/TypeScript:** `npm run check` for type checking and `npm test` for unit tests.
+**Rust:** `npm run ci:rust` runs `cargo fmt --all -- --check`, `cargo clippy --all-targets`, and `cargo test --all-targets`.
+
+**Svelte/TypeScript:** `npm run ci:frontend` runs `npm ci`, `npm run check`, and `npm test`.
 
 ## Issue Tracking
 
@@ -36,6 +38,6 @@ bd q "title"         # quick-create an issue
 1. Fork the repository
 2. Create a feature branch from `main`
 3. Make your changes
-4. Run `npm run check`, `npm test`, `cd src-tauri && cargo fmt --all`, `cargo clippy --all-targets`, and `cargo test --all-targets`
+4. Run `npm run ci`
 5. Commit with a descriptive message
 6. Open a PR against `main`

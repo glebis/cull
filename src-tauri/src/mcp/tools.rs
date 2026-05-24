@@ -1821,10 +1821,8 @@ impl CullMcp {
                                         .collect();
                                     // Batch-resolve image paths for scope checking
                                     let id_refs: Vec<&str> = image_ids.clone();
-                                    let images_by_id = state
-                                        .db
-                                        .get_images_by_ids(&id_refs)
-                                        .unwrap_or_default();
+                                    let images_by_id =
+                                        state.db.get_images_by_ids(&id_refs).unwrap_or_default();
                                     let allowed_ids: std::collections::HashSet<&str> = images_by_id
                                         .iter()
                                         .filter(|img| {

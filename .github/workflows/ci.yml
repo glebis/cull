@@ -18,14 +18,8 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Typecheck
-        run: npm run check
-
-      - name: Unit tests
-        run: npm test
+      - name: Frontend checks
+        run: bash scripts/check-ci.sh frontend
 
   rust:
     name: Rust checks
@@ -38,14 +32,5 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Check formatting
-        working-directory: src-tauri
-        run: cargo fmt --all -- --check
-
-      - name: Clippy
-        working-directory: src-tauri
-        run: cargo clippy --all-targets
-
-      - name: Tests
-        working-directory: src-tauri
-        run: cargo test --all-targets
+      - name: Rust checks
+        run: bash scripts/check-ci.sh rust
