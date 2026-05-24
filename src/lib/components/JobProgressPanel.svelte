@@ -2,6 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { listen } from '@tauri-apps/api/event';
     import { cancelJob as cancelJobApi, listJobs, pauseJob as pauseJobApi, resumeJob as resumeJobApi, type JobSnapshot } from '$lib/api';
+    import { getProgressPresentation } from '$lib/job-progress';
 
     interface JobInfo {
         job_id: string;
@@ -61,7 +62,14 @@
                 upsertJob(e.payload.job_id ?? `evt_rescan`, 'rescan', 'running', e.payload.current, e.payload.total, null);
             });
             const u7 = await listen<any>('generation-progress', (e) => {
-                upsertJob(e.payload.job_id ?? `evt_generation`, 'generation', 'running', e.payload.current, e.payload.total, `Generating image ${e.payload.current}/${e.payload.total}`);
+                upsertJob(
+                    e.payload.job_id ?? `evt_generation`,
+                    'generation',
+                    'running',
+                    e.payload.current,
+                    e.payload.total,
+                    e.payload.message ?? `Generating image ${e.payload.current}/${e.payload.total}`,
+                );
             });
             const u8 = await listen<any>('thumbnail-progress', (e) => {
                 upsertJob(e.payload.job_id ?? `evt_thumbnails`, 'thumbnails', 'running', e.payload.current, e.payload.total, null);
@@ -256,39 +264,12 @@
         }
     }
 
-    function percent(j: JobInfo): string {
-        if (j.total === 0) return '';
-        return `${Math.round((j.current / j.total) * 100)}%`;
-    }
-
-    function formatBytes(bytes: number): string {
-        if (bytes === 0) return '0 B';
-        const mb = bytes / (1024 * 1024);
-        if (mb >= 1) return `${mb.toFixed(0)} MB`;
-        const kb = bytes / 1024;
-        return `${kb.toFixed(0)} KB`;
-    }
-
-    function progressText(job: JobInfo): string {
-        if (job.downloaded !== undefined && job.totalBytes !== undefined) {
-            if (job.totalBytes > 0) {
-                return `${formatBytes(job.downloaded)} / ${formatBytes(job.totalBytes)} ${percent(job)}`;
-            }
-            return formatBytes(job.downloaded);
-        }
-        if (job.total > 0) return `${job.current}/${job.total} ${percent(job)}`;
-        return 'Working';
-    }
-
-    function progressFraction(j: JobInfo): number {
-        if (j.total === 0) return 0;
-        return Math.min(1, j.current / j.total);
-    }
 </script>
 
 {#if visible}
     <div class="job-panel" role="status" aria-label="Background jobs">
         {#each jobs as job (job.job_id)}
+            {@const progress = getProgressPresentation(job)}
             <div class="job-row {job.status}" class:fade-out={job.fadeOut}>
                 <div class="job-header">
                     <span class="job-icon {job.status}">{statusIcon(job.status)}</span>
@@ -298,7 +279,7 @@
                     {/if}
                     <span class="job-progress-text">
                         {#if job.status === 'running' || job.status === 'cancelling'}
-                            {progressText(job)}
+                            {progress.text}
                         {:else if job.status === 'paused'}
                             Paused
                         {:else if job.status === 'completed'}
@@ -322,8 +303,19 @@
                     {/if}
                 </div>
                 {#if job.status === 'running' || job.status === 'cancelling' || job.status === 'paused'}
-                    <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax={job.total} aria-valuenow={job.current}>
-                        <div class="progress-fill {job.status}" style="width: {progressFraction(job) * 100}%"></div>
+                    <div
+                        class="progress-track"
+                        role="progressbar"
+                        aria-valuemin="0"
+                        aria-valuemax={job.total}
+                        aria-valuenow={progress.indeterminate ? undefined : job.current}
+                        aria-valuetext={progress.ariaValueText}
+                    >
+                        <div
+                            class="progress-fill {job.status}"
+                            class:indeterminate={progress.indeterminate}
+                            style={progress.indeterminate ? '' : `width: ${progress.fraction * 100}%`}
+                        ></div>
                     </div>
                 {/if}
             </div>
@@ -434,5 +426,18 @@
     }
     .progress-fill.paused {
         background: var(--orange);
+    }
+    .progress-fill.indeterminate {
+        width: 34%;
+        animation: generation-wait 1.2s ease-in-out infinite;
+    }
+
+    @keyframes generation-wait {
+        0% {
+            transform: translateX(-100%);
+        }
+        100% {
+            transform: translateX(300%);
+        }
     }
 </style>

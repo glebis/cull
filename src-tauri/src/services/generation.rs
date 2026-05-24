@@ -4,7 +4,9 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::future::Future;
 use std::path::Path;
+use std::time::{Duration, Instant};
 use tauri::Emitter;
 use uuid::Uuid;
 
@@ -138,6 +140,87 @@ pub fn estimate_cost(provider: &str, model: &str, size: &str, quality: &str, n: 
     base * multiplier * n as f64
 }
 
+fn generation_provider_label(provider: &str) -> &'static str {
+    match provider {
+        "openai" => "OpenAI",
+        "openrouter" => "OpenRouter",
+        "google" => "Google",
+        _ => "provider",
+    }
+}
+
+fn generation_wait_message(provider: &str, elapsed_secs: u64) -> String {
+    let label = generation_provider_label(provider);
+    if elapsed_secs == 0 {
+        format!("Waiting for {}", label)
+    } else {
+        format!("Waiting for {} ({}s)", label, elapsed_secs)
+    }
+}
+
+fn generation_progress_payload(
+    job_id: &str,
+    current: u32,
+    total: u8,
+    message: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "job_id": job_id,
+        "current": current,
+        "total": total,
+        "message": message,
+    })
+}
+
+fn set_generation_progress(
+    jobs: &JobRegistry,
+    app_handle: &tauri::AppHandle,
+    job_id: &str,
+    current: u32,
+    total: u8,
+    message: &str,
+) {
+    jobs.update_progress(job_id, current, Some(message));
+    let _ = app_handle.emit(
+        "generation-progress",
+        generation_progress_payload(job_id, current, total, message),
+    );
+}
+
+async fn with_generation_heartbeat<F, T>(
+    future: F,
+    jobs: &JobRegistry,
+    app_handle: &tauri::AppHandle,
+    job_id: &str,
+    request: &GenerationRequest,
+    current: u32,
+) -> T
+where
+    F: Future<Output = T>,
+{
+    let mut future = std::pin::pin!(future);
+    let mut interval = tokio::time::interval(Duration::from_secs(5));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    interval.tick().await;
+    let started_at = Instant::now();
+
+    loop {
+        tokio::select! {
+            result = &mut future => return result,
+            _ = interval.tick() => {
+                set_generation_progress(
+                    jobs,
+                    app_handle,
+                    job_id,
+                    current,
+                    request.n,
+                    &generation_wait_message(&request.provider, started_at.elapsed().as_secs()),
+                );
+            }
+        }
+    }
+}
+
 fn extract_images_openai(resp_body: &str) -> Result<Vec<Vec<u8>>, String> {
     let api_resp: OpenAiImageResponse =
         serde_json::from_str(resp_body).map_err(|e| format!("Parse error: {}", e))?;
@@ -181,6 +264,11 @@ pub async fn generate_images(
     cancel: &tokio_util::sync::CancellationToken,
     app_handle: &tauri::AppHandle,
 ) -> Result<GenerationResult, String> {
+    let initial_message = format!(
+        "Preparing {} request",
+        generation_provider_label(&request.provider)
+    );
+    jobs.update_progress(job_id, 0, Some(&initial_message));
     let _ = app_handle.emit(
         "job-status-changed",
         serde_json::json!({
@@ -189,6 +277,7 @@ pub async fn generate_images(
             "status": "running",
             "current": 0,
             "total": request.n,
+            "message": initial_message,
         }),
     );
 
@@ -215,28 +304,43 @@ pub async fn generate_images(
 
     match api_style {
         ApiStyle::OpenAi => {
-            let resp = client
-                .post(&format!("{}/images/generations", base_url))
-                .header("Authorization", format!("Bearer {}", api_key))
-                .json(&serde_json::json!({
-                    "model": &request.model,
-                    "prompt": &request.prompt,
-                    "n": request.n,
-                    "size": &request.size,
-                    "quality": &request.quality,
-                }))
-                .send()
-                .await
-                .map_err(|e| {
-                    jobs.fail(job_id, &e.to_string());
-                    let _ = app_handle.emit(
-                        "job-status-changed",
-                        serde_json::json!({
-                            "job_id": job_id, "kind": "generation", "status": "failed",
-                        }),
-                    );
-                    format!("API request failed: {}", e)
-                })?;
+            set_generation_progress(
+                jobs,
+                app_handle,
+                job_id,
+                0,
+                request.n,
+                &generation_wait_message(&request.provider, 0),
+            );
+            let resp = with_generation_heartbeat(
+                client
+                    .post(&format!("{}/images/generations", base_url))
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .json(&serde_json::json!({
+                        "model": &request.model,
+                        "prompt": &request.prompt,
+                        "n": request.n,
+                        "size": &request.size,
+                        "quality": &request.quality,
+                    }))
+                    .send(),
+                jobs,
+                app_handle,
+                job_id,
+                request,
+                0,
+            )
+            .await
+            .map_err(|e| {
+                jobs.fail(job_id, &e.to_string());
+                let _ = app_handle.emit(
+                    "job-status-changed",
+                    serde_json::json!({
+                        "job_id": job_id, "kind": "generation", "status": "failed",
+                    }),
+                );
+                format!("API request failed: {}", e)
+            })?;
 
             let resp_status = resp.status();
             let jurisdiction = match request.provider.as_str() {
@@ -274,6 +378,14 @@ pub async fn generate_images(
                 return Err(msg);
             }
 
+            set_generation_progress(
+                jobs,
+                app_handle,
+                job_id,
+                0,
+                request.n,
+                "Receiving generation response",
+            );
             let _ = crate::services::audit::log_api_call(
                 db,
                 &request.provider,
@@ -291,18 +403,29 @@ pub async fn generate_images(
                 jurisdiction,
             );
 
-            let resp_body = resp.text().await.map_err(|e| {
-                let msg = format!("Read error: {}", e);
-                jobs.fail(job_id, &msg);
-                let _ = app_handle.emit(
-                    "job-status-changed",
-                    serde_json::json!({
-                        "job_id": job_id, "kind": "generation", "status": "failed",
-                    }),
-                );
-                msg
-            })?;
+            let resp_body =
+                with_generation_heartbeat(resp.text(), jobs, app_handle, job_id, request, 0)
+                    .await
+                    .map_err(|e| {
+                        let msg = format!("Read error: {}", e);
+                        jobs.fail(job_id, &msg);
+                        let _ = app_handle.emit(
+                            "job-status-changed",
+                            serde_json::json!({
+                                "job_id": job_id, "kind": "generation", "status": "failed",
+                            }),
+                        );
+                        msg
+                    })?;
 
+            set_generation_progress(
+                jobs,
+                app_handle,
+                job_id,
+                0,
+                request.n,
+                "Decoding generated images",
+            );
             let decoded_images = extract_images_openai(&resp_body).map_err(|e| {
                 jobs.fail(job_id, &e);
                 let _ = app_handle.emit(
@@ -326,6 +449,14 @@ pub async fn generate_images(
                     break;
                 }
 
+                set_generation_progress(
+                    jobs,
+                    app_handle,
+                    job_id,
+                    i as u32,
+                    request.n,
+                    &format!("Saving image {}/{}", i + 1, request.n),
+                );
                 match save_image_bytes(
                     bytes,
                     i,
@@ -342,16 +473,13 @@ pub async fn generate_images(
                     Err(e) => errors.push(format!("Image {}: {}", i, e)),
                 }
 
-                jobs.update_progress(
+                set_generation_progress(
+                    jobs,
+                    app_handle,
                     job_id,
                     (i + 1) as u32,
-                    Some(&format!("Saved image {}/{}", i + 1, request.n)),
-                );
-                let _ = app_handle.emit(
-                    "generation-progress",
-                    serde_json::json!({
-                        "job_id": job_id, "current": i + 1, "total": request.n,
-                    }),
+                    request.n,
+                    &format!("Saved image {}/{}", i + 1, request.n),
                 );
             }
         }
@@ -368,6 +496,19 @@ pub async fn generate_images(
                     break;
                 }
 
+                set_generation_progress(
+                    jobs,
+                    app_handle,
+                    job_id,
+                    i as u32,
+                    request.n,
+                    &format!(
+                        "Waiting for {} image {}/{}",
+                        generation_provider_label(&request.provider),
+                        i + 1,
+                        request.n
+                    ),
+                );
                 let url = format!("{}/models/{}:generateContent", base_url, request.model);
                 let mut parts = vec![serde_json::json!({"text": &request.prompt})];
                 if let Some(ref src_id) = request.source_image_id {
@@ -395,13 +536,20 @@ pub async fn generate_images(
                     "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
                 });
 
-                let resp = client
-                    .post(&url)
-                    .header("Content-Type", "application/json")
-                    .header("x-goog-api-key", api_key)
-                    .json(&payload)
-                    .send()
-                    .await;
+                let resp = with_generation_heartbeat(
+                    client
+                        .post(&url)
+                        .header("Content-Type", "application/json")
+                        .header("x-goog-api-key", api_key)
+                        .json(&payload)
+                        .send(),
+                    jobs,
+                    app_handle,
+                    job_id,
+                    request,
+                    i as u32,
+                )
+                .await;
 
                 match resp {
                     Ok(r) => {
@@ -430,6 +578,14 @@ pub async fn generate_images(
                             ));
                             continue;
                         }
+                        set_generation_progress(
+                            jobs,
+                            app_handle,
+                            job_id,
+                            i as u32,
+                            request.n,
+                            &format!("Receiving image {}/{}", i + 1, request.n),
+                        );
                         let _ = crate::services::audit::log_api_call(
                             db,
                             "google",
@@ -446,9 +602,26 @@ pub async fn generate_images(
                             200,
                             "US - Google LLC",
                         );
-                        match r.text().await {
+                        match with_generation_heartbeat(
+                            r.text(),
+                            jobs,
+                            app_handle,
+                            job_id,
+                            request,
+                            i as u32,
+                        )
+                        .await
+                        {
                             Ok(resp_body) => match extract_image_gemini(&resp_body) {
                                 Ok(bytes) => {
+                                    set_generation_progress(
+                                        jobs,
+                                        app_handle,
+                                        job_id,
+                                        i as u32,
+                                        request.n,
+                                        &format!("Saving image {}/{}", i + 1, request.n),
+                                    );
                                     match save_image_bytes(
                                         &bytes,
                                         i,
@@ -473,16 +646,13 @@ pub async fn generate_images(
                     Err(e) => errors.push(format!("Image {}: Request failed: {}", i, e)),
                 }
 
-                jobs.update_progress(
+                set_generation_progress(
+                    jobs,
+                    app_handle,
                     job_id,
                     (i + 1) as u32,
-                    Some(&format!("Saved image {}/{}", i + 1, request.n)),
-                );
-                let _ = app_handle.emit(
-                    "generation-progress",
-                    serde_json::json!({
-                        "job_id": job_id, "current": i + 1, "total": request.n,
-                    }),
+                    request.n,
+                    &format!("Saved image {}/{}", i + 1, request.n),
                 );
             }
         }
@@ -686,4 +856,32 @@ fn create_generation_lineage(
     }
 
     Ok(group_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generation_wait_message_uses_provider_name_and_elapsed_time() {
+        assert_eq!(generation_wait_message("openai", 0), "Waiting for OpenAI");
+        assert_eq!(
+            generation_wait_message("openrouter", 12),
+            "Waiting for OpenRouter (12s)"
+        );
+        assert_eq!(
+            generation_wait_message("google", 65),
+            "Waiting for Google (65s)"
+        );
+    }
+
+    #[test]
+    fn generation_progress_payload_includes_stage_message() {
+        let payload = generation_progress_payload("job_test", 0, 2, "Waiting for OpenAI");
+
+        assert_eq!(payload["job_id"], "job_test");
+        assert_eq!(payload["current"], 0);
+        assert_eq!(payload["total"], 2);
+        assert_eq!(payload["message"], "Waiting for OpenAI");
+    }
 }
