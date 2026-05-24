@@ -111,22 +111,13 @@ pub async fn trash_images(
             .get_images_by_ids(&id_refs)
             .map_err(|e| e.to_string())?;
         if let Some(img) = found.first() {
-            #[cfg(target_os = "macos")]
-            {
-                let status = std::process::Command::new("osascript")
-                    .args([
-                        "-e",
-                        &format!(
-                            "tell application \"Finder\" to delete POSIX file \"{}\"",
-                            img.path.replace('"', "\\\"")
-                        ),
-                    ])
-                    .output();
-                if let Ok(output) = status {
-                    if output.status.success() {
+            let path = std::path::Path::new(&img.path);
+            if path.exists() {
+                match trash::delete(path) {
+                    Ok(()) => {
                         trashed += 1;
                         let _ = state.db.mark_file_missing(&img.path);
-                        let filename = std::path::Path::new(&img.path)
+                        let filename = path
                             .file_name()
                             .and_then(|n| n.to_str())
                             .unwrap_or("file")
@@ -140,6 +131,9 @@ pub async fn trash_images(
                             image_id.clone(),
                             true,
                         );
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to trash {}: {}", img.path, e);
                     }
                 }
             }
@@ -318,4 +312,26 @@ pub async fn check_library_health(
         missing_sources,
         to_regenerate,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify that the trash crate can handle filenames with special characters
+    /// that would have caused AppleScript injection with the old implementation.
+    #[test]
+    fn trash_special_char_filename() {
+        let dir = tempfile::tempdir().unwrap();
+        let evil_name = "test \"file' with $(special) chars.png";
+        let file_path = dir.path().join(evil_name);
+        std::fs::write(&file_path, b"fake image data").unwrap();
+        assert!(file_path.exists());
+
+        trash::delete(&file_path).expect("trash::delete should handle special characters");
+        assert!(
+            !file_path.exists(),
+            "file should no longer exist at original path"
+        );
+    }
 }

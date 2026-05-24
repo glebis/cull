@@ -5,6 +5,43 @@ use crate::services::audit;
 use crate::AppState;
 use serde::Serialize;
 use tauri::State;
+/// Check whether a URL points to a local address by extracting the hostname.
+/// Returns true only for exact matches: `localhost`, `127.0.0.1`, `::1`.
+fn is_local_url(raw: &str) -> bool {
+    // Find the authority portion: skip past "://"
+    let after_scheme = match raw.find("://") {
+        Some(i) => &raw[i + 3..],
+        None => return false,
+    };
+
+    // The authority ends at the next '/' or at end-of-string
+    let authority = match after_scheme.find('/') {
+        Some(i) => &after_scheme[..i],
+        None => after_scheme,
+    };
+
+    // Strip optional userinfo (anything before '@')
+    let host_port = match authority.rfind('@') {
+        Some(i) => &authority[i + 1..],
+        None => authority,
+    };
+
+    // Handle bracketed IPv6 addresses like [::1]:port
+    let host = if host_port.starts_with('[') {
+        match host_port.find(']') {
+            Some(i) => &host_port[1..i],
+            None => return false,
+        }
+    } else {
+        // Strip port suffix for plain hosts
+        match host_port.rfind(':') {
+            Some(i) => &host_port[..i],
+            None => host_port,
+        }
+    };
+
+    host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
 
 #[derive(Debug, Serialize)]
 pub struct DataFlowEntry {
@@ -44,7 +81,7 @@ pub async fn get_data_flow_status(
         .ok()
         .flatten()
         .unwrap_or_else(|| "http://localhost:11434/api/generate".to_string());
-    let ollama_is_local = ollama_url.contains("localhost") || ollama_url.contains("127.0.0.1");
+    let ollama_is_local = is_local_url(&ollama_url);
     entries.push(DataFlowEntry {
         feature: "Ollama vision".into(),
         status: if ollama_is_local { "local" } else { "active" }.into(),
@@ -106,8 +143,7 @@ pub async fn get_data_flow_status(
         .ok()
         .flatten()
         .unwrap_or_else(|| "http://localhost:11434/api/embed".to_string());
-    let ollama_embedding_is_local =
-        ollama_embedding_url.contains("localhost") || ollama_embedding_url.contains("127.0.0.1");
+    let ollama_embedding_is_local = is_local_url(&ollama_embedding_url);
     entries.push(DataFlowEntry {
         feature: "Ollama embeddings".into(),
         status: if ollama_embedding_is_local {
@@ -221,4 +257,44 @@ pub async fn get_api_audit_log(
 #[tauri::command]
 pub async fn export_audit_log(state: State<'_, AppState>) -> Result<String, String> {
     audit::export_audit_log_json(&state.db).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn localhost_is_local() {
+        assert!(is_local_url("http://localhost:11434/api/generate"));
+    }
+
+    #[test]
+    fn localhost_with_port_is_local() {
+        assert!(is_local_url("http://localhost:9847/mcp"));
+    }
+
+    #[test]
+    fn loopback_ipv4_is_local() {
+        assert!(is_local_url("http://127.0.0.1:11434/api/embed"));
+    }
+
+    #[test]
+    fn loopback_ipv6_is_local() {
+        assert!(is_local_url("http://[::1]:11434/api/generate"));
+    }
+
+    #[test]
+    fn localhost_evil_subdomain_is_not_local() {
+        assert!(!is_local_url("https://localhost.evil.com"));
+    }
+
+    #[test]
+    fn remote_host_is_not_local() {
+        assert!(!is_local_url("https://api.example.com/v1/embed"));
+    }
+
+    #[test]
+    fn garbage_input_is_not_local() {
+        assert!(!is_local_url("not-a-url"));
+    }
 }

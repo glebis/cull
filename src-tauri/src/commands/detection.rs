@@ -4,6 +4,54 @@ use crate::services::Pagination;
 use crate::AppState;
 use tauri::{AppHandle, Emitter, State};
 
+/// Expected SHA-256 hashes for ONNX model files.
+/// These guard against corrupted downloads and MITM attacks.
+fn expected_sha256(variant: &YoloVariant) -> &'static str {
+    match variant {
+        // TODO: populate on first verified download of nano and small models
+        YoloVariant::Nano => "PLACEHOLDER_HASH_YOLO11N",
+        YoloVariant::Small => "PLACEHOLDER_HASH_YOLO11S",
+        YoloVariant::Medium => "8a37b5c53ff642831aa454156b548ec2cf2537827445385c3e1c1b276cb666a3",
+    }
+}
+
+const NUDENET_EXPECTED_SHA256: &str =
+    "9832f15515bdb06bcb5a77beb60bc8ea54439bd7ecbaac46dac3b760b3dd13cc";
+
+/// Verify that a downloaded file matches the expected SHA-256 hash.
+/// On mismatch the file is deleted and an error is returned.
+fn verify_sha256(path: &std::path::Path, expected: &str) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let mut file =
+        std::fs::File::open(path).map_err(|e| format!("Cannot open for hash check: {}", e))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| format!("Read error during hash check: {}", e))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let hash = format!("{:x}", hasher.finalize());
+
+    if hash != expected {
+        // Delete the compromised/corrupt file before returning the error.
+        let _ = std::fs::remove_file(path);
+        return Err(format!(
+            "SHA-256 mismatch for {}: expected {}, got {}",
+            path.display(),
+            expected,
+            hash
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn download_yolo_model(
     app: AppHandle,
@@ -54,6 +102,12 @@ pub async fn download_yolo_model(
             }));
         }
     }
+
+    let _ = app.emit("yolo-download-progress", serde_json::json!({
+        "downloaded": total_size, "total": total_size, "variant": variant.model_name(), "status": "verifying"
+    }));
+
+    verify_sha256(&model_path, expected_sha256(&variant))?;
 
     let _ = app.emit("yolo-download-progress", serde_json::json!({
         "downloaded": total_size, "total": total_size, "variant": variant.model_name(), "status": "complete"
@@ -119,6 +173,15 @@ pub async fn download_nudenet_model(
             );
         }
     }
+
+    let _ = app.emit(
+        "nudenet-download-progress",
+        serde_json::json!({
+            "downloaded": total_size, "total": total_size, "status": "verifying"
+        }),
+    );
+
+    verify_sha256(&model_path, NUDENET_EXPECTED_SHA256)?;
 
     let _ = app.emit(
         "nudenet-download-progress",

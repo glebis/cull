@@ -263,8 +263,15 @@ fn export_static_publish_package_with_canvas_inner(
         }
     }
 
-    let share_url = clean_share_url(request.share_url.as_deref())
-        .unwrap_or_else(|| "http://localhost:8000/".to_string());
+    let share_url = match request
+        .share_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(raw) => validate_share_url(raw)?,
+        None => "http://localhost:8000/".to_string(),
+    };
     let access_phrase = generate_access_phrase();
     let qr_svg_path = site_dir.join("qr.svg");
     write_qr_svg(&qr_svg_path, &share_url)?;
@@ -941,17 +948,24 @@ fn write_qr_svg(path: &Path, target: &str) -> Result<(), String> {
     fs::write(path, image).map_err(|e| format!("Failed to write QR code: {}", e))
 }
 
-fn clean_share_url(value: Option<&str>) -> Option<String> {
-    value
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| {
-            if value.ends_with('/') {
-                value.to_string()
-            } else {
-                format!("{}/", value)
-            }
-        })
+fn validate_share_url(url: &str) -> Result<String, String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err("Share URL must not be empty".to_string());
+    }
+    let lower = trimmed.to_lowercase();
+    if !lower.starts_with("http://") && !lower.starts_with("https://") {
+        return Err(format!(
+            "Share URL must use http:// or https:// scheme, got: {}",
+            trimmed
+        ));
+    }
+    let with_slash = if trimmed.ends_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("{}/", trimmed)
+    };
+    Ok(with_slash)
 }
 
 fn generate_access_phrase() -> String {
@@ -1583,6 +1597,55 @@ mod tests {
 
         assert_eq!(rotated.width(), 3);
         assert_eq!(rotated.height(), 2);
+    }
+
+    #[test]
+    fn validate_share_url_accepts_https() {
+        let result = validate_share_url("https://example.com/gallery");
+        assert_eq!(result.unwrap(), "https://example.com/gallery/");
+    }
+
+    #[test]
+    fn validate_share_url_accepts_http() {
+        let result = validate_share_url("http://localhost:8000");
+        assert_eq!(result.unwrap(), "http://localhost:8000/");
+    }
+
+    #[test]
+    fn validate_share_url_preserves_trailing_slash() {
+        let result = validate_share_url("https://example.com/");
+        assert_eq!(result.unwrap(), "https://example.com/");
+    }
+
+    #[test]
+    fn validate_share_url_rejects_javascript() {
+        let result = validate_share_url("javascript:alert(1)");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("http://"));
+    }
+
+    #[test]
+    fn validate_share_url_rejects_data() {
+        let result = validate_share_url("data:text/html,<script>alert(1)</script>");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_share_url_rejects_vbscript() {
+        let result = validate_share_url("vbscript:MsgBox(1)");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_share_url_rejects_case_insensitive() {
+        let result = validate_share_url("JAVASCRIPT:alert(1)");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_share_url_rejects_empty() {
+        let result = validate_share_url("  ");
+        assert!(result.is_err());
     }
 
     #[test]

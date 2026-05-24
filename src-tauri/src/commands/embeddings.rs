@@ -4,6 +4,15 @@ use serde::Serialize;
 use std::path::Path;
 use tauri::{AppHandle, Emitter, State};
 
+/// Redact API keys from error messages to prevent leaking secrets in UI toasts and logs.
+/// Replaces the value of any `key=...` query parameter with `REDACTED`.
+fn redact_api_key(error_msg: &str) -> String {
+    use regex::Regex;
+    // Match `key=<value>` where value runs until whitespace, `&`, `"`, `'`, or end of string
+    let re = Regex::new(r#"(?i)\bkey=[^\s&"']+"#).expect("redact regex must compile");
+    re.replace_all(error_msg, "key=REDACTED").into_owned()
+}
+
 use crate::db_core::embeddings::{
     embedding_model_spec, embedding_provider_for_model, embedding_provider_specs, EmbeddingEngine,
     CLIP_MODEL_ID, GEMINI_EMBEDDING_MODEL_ID,
@@ -561,6 +570,31 @@ mod tests {
     }
 
     #[test]
+    fn redact_api_key_replaces_key_value_in_url() {
+        let msg =
+            "error: https://generativelanguage.googleapis.com/v1beta/models?key=AIzaSySecretKey123";
+        assert_eq!(
+            redact_api_key(msg),
+            "error: https://generativelanguage.googleapis.com/v1beta/models?key=REDACTED"
+        );
+    }
+
+    #[test]
+    fn redact_api_key_handles_key_in_middle_of_query() {
+        let msg = "Request failed: https://example.com/api?foo=bar&key=SECRET_VALUE&baz=qux";
+        let redacted = redact_api_key(msg);
+        assert!(redacted.contains("key=REDACTED"));
+        assert!(!redacted.contains("SECRET_VALUE"));
+        assert!(redacted.contains("baz=qux"));
+    }
+
+    #[test]
+    fn redact_api_key_leaves_message_without_keys_unchanged() {
+        let msg = "Connection refused: could not connect to host";
+        assert_eq!(redact_api_key(msg), msg);
+    }
+
+    #[test]
     fn ollama_model_available_accepts_latest_tag_alias() {
         let models = vec![
             "embeddinggemma:latest".to_string(),
@@ -734,7 +768,7 @@ pub async fn validate_api_key(provider: String, key: String) -> Result<bool, Str
                 .get(&url)
                 .send()
                 .await
-                .map_err(|e| format!("{}", e))?;
+                .map_err(|e| redact_api_key(&format!("{}", e)))?;
             Ok(resp.status().is_success())
         }
         "openai" => {
@@ -1104,7 +1138,11 @@ async fn generate_gemini_embeddings_for(
                     "image", file_size, None, Some(&dims),
                     Some("gemini-embedding-exp-03-07"), 500, "US - Google LLC",
                 );
-                crate::safe_eprintln!("Gemini embedding error for {}: {}", image_id, e);
+                crate::safe_eprintln!(
+                    "Gemini embedding error for {}: {}",
+                    image_id,
+                    redact_api_key(&e)
+                );
             }
         }
 
