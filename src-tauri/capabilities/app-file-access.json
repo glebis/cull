@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "app-file-access",
+  "description": "File-system changing IPC for imports, thumbnails, deletes, moves, shares, transforms, and raw previews.",
+  "windows": ["main", "window-*"],
+  "permissions": ["app-file-access"]
+}

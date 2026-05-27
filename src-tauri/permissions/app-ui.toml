@@ -1,0 +1,15 @@
+[[permission]]
+identifier = "app-ui"
+description = "Allows UI shell commands for window management, menu state, deep-link routing, and dictation controls."
+commands.allow = [
+  "apply_app_icon_variant",
+  "create_window",
+  "drain_pending_open_params",
+  "list_windows",
+  "open_with_params",
+  "rename_window",
+  "send_to_window",
+  "start_dictation",
+  "stop_dictation",
+  "update_menu_state",
+]

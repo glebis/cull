@@ -1,0 +1,22 @@
+[[permission]]
+identifier = "app-file-access"
+description = "Allows file-system changing commands for imports, thumbnails, deletes, moves, shares, transforms, and raw previews."
+commands.allow = [
+  "backfill_raw_previews",
+  "create_subfolder",
+  "crop_image",
+  "delete_folder",
+  "delete_images_permanently",
+  "import_files",
+  "import_folder",
+  "move_image",
+  "open_images_with_application",
+  "regenerate_single_thumbnail",
+  "regenerate_thumbnails",
+  "regenerate_thumbnails_by_ids",
+  "rename_image",
+  "rescan_sources",
+  "rotate_image",
+  "share_images",
+  "trash_images",
+]

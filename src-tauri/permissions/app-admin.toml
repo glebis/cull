@@ -1,0 +1,20 @@
+[[permission]]
+identifier = "app-admin"
+description = "Allows administrative app commands for settings, MCP tokens, jobs, privacy exports, and diagnostics."
+commands.allow = [
+  "cancel_job",
+  "create_mcp_token",
+  "export_audit_log",
+  "get_api_audit_log",
+  "get_app_setting",
+  "get_asset_load_events",
+  "get_job",
+  "list_jobs",
+  "list_mcp_tokens",
+  "pause_job",
+  "record_asset_load_event",
+  "resume_job",
+  "revoke_mcp_token",
+  "rotate_mcp_token",
+  "set_app_setting",
+]

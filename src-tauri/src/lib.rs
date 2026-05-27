@@ -309,9 +309,29 @@ pub fn run() {
                         .unwrap_or(false)
                 };
                 if http_enabled {
-                    let port = args.mcp_http.flatten().unwrap_or(9847);
-                    let host = args.mcp_http_host.clone();
-                    mcp::http::start_http_server(app.handle().clone(), host, port);
+                    let state: tauri::State<'_, AppState> = app.state();
+                    let saved_port = state
+                        .db
+                        .get_setting("mcp_http_port")
+                        .ok()
+                        .flatten()
+                        .and_then(|v| v.parse::<u16>().ok());
+                    let saved_host = state.db.get_setting("mcp_http_host").ok().flatten();
+                    let allow_remote = args.mcp_http_allow_remote
+                        || state
+                            .db
+                            .get_setting("mcp_http_allow_remote")
+                            .ok()
+                            .flatten()
+                            .map(|v| v == "true")
+                            .unwrap_or(false);
+                    let port = args.mcp_http.flatten().or(saved_port).unwrap_or(9847);
+                    let host = if args.mcp_http_host != "127.0.0.1" {
+                        args.mcp_http_host.clone()
+                    } else {
+                        saved_host.unwrap_or_else(|| args.mcp_http_host.clone())
+                    };
+                    mcp::http::start_http_server(app.handle().clone(), host, port, allow_remote);
                 }
             }
 

@@ -7,7 +7,9 @@
 set -euo pipefail
 
 PORT="${CULL_E2E_PORT:-1420}"
-URL="${CULL_E2E_URL:-http://127.0.0.1:${PORT}}"
+EXPLICIT_URL="${CULL_E2E_URL:-}"
+REUSE_SERVER="${CULL_E2E_REUSE_SERVER:-0}"
+URL="${EXPLICIT_URL:-http://127.0.0.1:${PORT}}"
 SHOTS="${CULL_E2E_SHOTS:-/tmp/cull-e2e}"
 LOG="${CULL_E2E_LOG:-/tmp/cull-e2e-vite.log}"
 SERVER_PID=""
@@ -33,7 +35,35 @@ wait_for_server() {
     done
 }
 
+is_port_open() {
+    local port="$1"
+    (echo >"/dev/tcp/127.0.0.1/${port}") >/dev/null 2>&1
+}
+
+select_port() {
+    local port="$1"
+    local limit=$((port + 50))
+    while is_port_open "$port"; do
+        if [ "$REUSE_SERVER" = "1" ]; then
+            echo "$port"
+            return
+        fi
+        echo "[e2e] Port $port is already in use; trying $((port + 1))" >&2
+        port=$((port + 1))
+        if [ "$port" -gt "$limit" ]; then
+            echo "No free E2E port found between $1 and $limit" >&2
+            exit 1
+        fi
+    done
+    echo "$port"
+}
+
 mkdir -p "$SHOTS"
+
+if [ -z "$EXPLICIT_URL" ]; then
+    PORT="$(select_port "$PORT")"
+    URL="http://127.0.0.1:${PORT}"
+fi
 
 if curl -fsS "$URL" >/dev/null 2>&1; then
     echo "[e2e] Reusing server at $URL"

@@ -8,6 +8,8 @@ describe('Tauri asset protocol config', () => {
         expect(csp).not.toBeNull();
         expect(csp['default-src']).toBe("'self'");
         expect(csp['img-src']).toContain('asset:');
+        expect(csp['connect-src']).not.toContain('http://localhost:*');
+        expect(csp['connect-src']).not.toContain('http://127.0.0.1:*');
         expect(Object.prototype.hasOwnProperty.call(csp, 'script-src')).toBe(false);
     });
 

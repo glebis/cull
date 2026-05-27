@@ -28,11 +28,15 @@ Via CLI:
 ```bash
 cull --mcp-http          # default port 9847
 cull --mcp-http 8080     # custom port
+cull --mcp-http --mcp-http-host 0.0.0.0 --mcp-http-allow-remote
 ```
 
 Or toggle in **Settings > MCP Server > HTTP Server**.
 
-Default bind: `127.0.0.1:9847` (localhost only). Change the listen address in settings to bind to LAN.
+Default bind: `127.0.0.1:9847` (localhost only). Non-loopback binds require
+the explicit `--mcp-http-allow-remote` flag or `mcp_http_allow_remote=true`
+setting. When exposing HTTP beyond loopback, create scoped tokens with the
+smallest practical role and content scope before starting the listener.
 
 ### Create a Token
 
@@ -102,7 +106,7 @@ Union semantics: an image is accessible if it matches any filter. Null scope mea
 
 ## Security
 
-- HTTP binds to `127.0.0.1` by default. Explicit setting required for LAN/public binding.
+- HTTP binds to `127.0.0.1` by default. Explicit remote opt-in is required for LAN/public binding.
 - Every HTTP request requires a valid `Authorization: Bearer <token>` header.
 - Filesystem paths are redacted for remote clients — they see filenames only, not full paths.
 - Create scoped tokens with minimal roles for remote access. Never share admin tokens over tunnels.

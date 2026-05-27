@@ -376,6 +376,11 @@
                         {/if}
                     </div>
                 </div>
+                {#if httpEnabled}
+                    <div class="setting-note">
+                        HTTP uses loopback by default. Non-loopback MCP requires explicit remote opt-in and scoped tokens with least privilege.
+                    </div>
+                {/if}
                 <div class="setting-row">
                     <span>Auto-purge missing files</span>
                     <button class="toggle" class:on={autoPurge} onclick={toggleAutoPurge}>
@@ -654,6 +659,48 @@
         padding: 6px 0;
         font-size: 13px;
         color: var(--text);
+    }
+    .setting-note {
+        margin: 2px 0 8px;
+        color: var(--text-secondary);
+        font-size: 11px;
+        line-height: 1.4;
+    }
+    .setting-column {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px 0 4px;
+        font-size: 13px;
+        color: var(--text);
+    }
+    .setting-column-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+    .pattern-textarea {
+        width: 100%;
+        min-height: 132px;
+        resize: vertical;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text);
+        font-family: var(--font);
+        font-size: 11px;
+        line-height: 1.5;
+        padding: 8px 10px;
+        box-sizing: border-box;
+    }
+    .pattern-textarea:focus {
+        outline: none;
+        border-color: var(--blue);
+    }
+    .setting-saved {
+        font-size: 11px;
+        color: var(--green);
     }
     .icon-grid {
         display: grid;

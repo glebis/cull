@@ -17,6 +17,12 @@ use super::tools::CullMcp;
 use crate::services::{tokens, ServiceContext};
 use crate::AppState;
 
+#[derive(Debug)]
+struct BindPolicy {
+    addr: SocketAddr,
+    remote_warning: Option<String>,
+}
+
 struct RateLimiter {
     failures: HashMap<IpAddr, (u32, Instant)>,
     max_failures: u32,
@@ -61,9 +67,26 @@ impl RateLimiter {
     }
 }
 
-pub fn start_http_server(app_handle: tauri::AppHandle, host: String, port: u16) {
+pub fn start_http_server(
+    app_handle: tauri::AppHandle,
+    host: String,
+    port: u16,
+    allow_remote: bool,
+) {
+    let policy = match resolve_bind_policy(&host, port, allow_remote) {
+        Ok(policy) => policy,
+        Err(e) => {
+            crate::safe_eprintln!("MCP HTTP server not started: {}", e);
+            return;
+        }
+    };
+
+    if let Some(warning) = policy.remote_warning.as_ref() {
+        crate::safe_eprintln!("{}", warning);
+    }
+
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = run_http_server(app_handle, host, port).await {
+        if let Err(e) = run_http_server(app_handle, policy.addr).await {
             crate::safe_eprintln!("MCP HTTP server error: {}", e);
         }
     });
@@ -71,11 +94,8 @@ pub fn start_http_server(app_handle: tauri::AppHandle, host: String, port: u16) 
 
 async fn run_http_server(
     app_handle: tauri::AppHandle,
-    host: String,
-    port: u16,
+    addr: SocketAddr,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
-
     let rate_limiter = Arc::new(Mutex::new(RateLimiter::new(
         10,
         Duration::from_secs(15 * 60),
@@ -231,6 +251,33 @@ async fn run_http_server(
     }
 }
 
+fn resolve_bind_policy(host: &str, port: u16, allow_remote: bool) -> Result<BindPolicy, String> {
+    let ip: IpAddr = host
+        .parse()
+        .map_err(|_| format!("invalid MCP HTTP bind host '{}'; use an IP address", host))?;
+    let addr = SocketAddr::new(ip, port);
+    if !addr.ip().is_loopback() && !allow_remote {
+        return Err(format!(
+            "non-loopback bind {} requires mcp_http_allow_remote=true or --mcp-http-allow-remote",
+            addr
+        ));
+    }
+
+    let remote_warning = if addr.ip().is_loopback() {
+        None
+    } else {
+        Some(format!(
+            "WARNING: MCP HTTP is listening on {}. Use scoped tokens with least privilege before exposing this address.",
+            addr
+        ))
+    };
+
+    Ok(BindPolicy {
+        addr,
+        remote_warning,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,6 +295,28 @@ mod tests {
     fn test_missing_bearer_prefix() {
         let header = "Basic dXNlcjpwYXNz";
         assert!(!header.starts_with("Bearer "));
+    }
+
+    #[test]
+    fn test_bind_policy_allows_loopback_without_remote_opt_in() {
+        let policy = resolve_bind_policy("127.0.0.1", 9847, false).unwrap();
+        assert!(policy.addr.ip().is_loopback());
+        assert!(policy.remote_warning.is_none());
+    }
+
+    #[test]
+    fn test_bind_policy_rejects_non_loopback_without_remote_opt_in() {
+        let err = resolve_bind_policy("0.0.0.0", 9847, false).unwrap_err();
+        assert!(err.contains("non-loopback"));
+        assert!(err.contains("mcp_http_allow_remote"));
+    }
+
+    #[test]
+    fn test_bind_policy_warns_about_scoped_tokens_for_remote_bind() {
+        let policy = resolve_bind_policy("0.0.0.0", 9847, true).unwrap();
+        let warning = policy.remote_warning.unwrap();
+        assert!(warning.contains("scoped tokens"));
+        assert!(warning.contains("least privilege"));
     }
 
     #[test]

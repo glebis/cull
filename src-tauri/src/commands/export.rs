@@ -6,6 +6,7 @@ use crate::export::validate;
 use crate::AppState;
 use base64::Engine;
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use tauri::State;
 
 /// Validates that a string is safe to use as a single path component.
@@ -31,6 +32,38 @@ fn sanitize_path_component(s: &str) -> Result<String, String> {
         ));
     }
     Ok(s.to_string())
+}
+
+fn export_target_dir(
+    app_data_dir: &Path,
+    manifest_id: &str,
+    target_id: &str,
+) -> Result<PathBuf, String> {
+    let manifest_id = sanitize_path_component(manifest_id)?;
+    let target_id = sanitize_path_component(target_id)?;
+    Ok(app_data_dir
+        .join("exports")
+        .join(manifest_id)
+        .join(target_id))
+}
+
+fn resolve_pdf_slide_paths(
+    app_data_dir: &Path,
+    manifest_id: &str,
+    target_id: &str,
+    slide_ids: &[String],
+) -> Result<Vec<String>, String> {
+    let export_dir = export_target_dir(app_data_dir, manifest_id, target_id)?;
+    slide_ids
+        .iter()
+        .map(|slide_id| {
+            let slide_id = sanitize_path_component(slide_id)?;
+            Ok(export_dir
+                .join(format!("{}.png", slide_id))
+                .to_string_lossy()
+                .to_string())
+        })
+        .collect()
 }
 
 #[derive(serde::Serialize)]
@@ -317,11 +350,7 @@ pub async fn save_export_image(
     let target_id = sanitize_path_component(&target_id)?;
     let slide_id = sanitize_path_component(&slide_id)?;
 
-    let export_dir = state
-        .app_data_dir
-        .join("exports")
-        .join(&manifest_id)
-        .join(&target_id);
+    let export_dir = export_target_dir(&state.app_data_dir, &manifest_id, &target_id)?;
     std::fs::create_dir_all(&export_dir)
         .map_err(|e| format!("Failed to create export dir: {}", e))?;
 
@@ -340,25 +369,71 @@ pub async fn save_export_image(
 #[tauri::command]
 pub async fn assemble_export_pdf(
     state: State<'_, AppState>,
-    image_paths: Vec<String>,
+    slide_ids: Vec<String>,
     width_px: u32,
     height_px: u32,
     manifest_id: String,
     target_id: String,
 ) -> Result<String, String> {
-    let manifest_id = sanitize_path_component(&manifest_id)?;
-    let target_id = sanitize_path_component(&target_id)?;
-
-    let export_dir = state
-        .app_data_dir
-        .join("exports")
-        .join(&manifest_id)
-        .join(&target_id);
+    let export_dir = export_target_dir(&state.app_data_dir, &manifest_id, &target_id)?;
     std::fs::create_dir_all(&export_dir)
         .map_err(|e| format!("Failed to create export dir: {}", e))?;
 
     let output_path = export_dir.join("carousel.pdf");
     let output_str = output_path.to_string_lossy().to_string();
+    let image_paths =
+        resolve_pdf_slide_paths(&state.app_data_dir, &manifest_id, &target_id, &slide_ids)?;
 
     pdf::assemble_pdf(&image_paths, width_px, height_px, &output_str)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pdf_slide_paths_are_derived_from_export_ids() {
+        let app_data = tempfile::tempdir().unwrap();
+        let paths = resolve_pdf_slide_paths(
+            app_data.path(),
+            "manifest_1",
+            "target_1",
+            &["slide-a".to_string(), "slide-b".to_string()],
+        )
+        .unwrap();
+
+        assert_eq!(paths.len(), 2);
+        assert_eq!(
+            paths[0],
+            app_data
+                .path()
+                .join("exports")
+                .join("manifest_1")
+                .join("target_1")
+                .join("slide-a.png")
+                .to_string_lossy()
+                .to_string()
+        );
+    }
+
+    #[test]
+    fn pdf_slide_paths_reject_arbitrary_renderer_paths() {
+        let app_data = tempfile::tempdir().unwrap();
+
+        let traversal = resolve_pdf_slide_paths(
+            app_data.path(),
+            "manifest_1",
+            "target_1",
+            &["../escape".to_string()],
+        );
+        assert!(traversal.is_err());
+
+        let absolute = resolve_pdf_slide_paths(
+            app_data.path(),
+            "manifest_1",
+            "target_1",
+            &["/tmp/renderer.png".to_string()],
+        );
+        assert!(absolute.is_err());
+    }
 }

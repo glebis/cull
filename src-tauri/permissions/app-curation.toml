@@ -1,0 +1,30 @@
+[[permission]]
+identifier = "app-curation"
+description = "Allows curation commands for ratings, collections, lineage, sessions, canvases, and undo."
+commands.allow = [
+  "add_to_collection",
+  "add_to_lineage_group",
+  "backfill_image_metadata",
+  "convert_session_to_collection",
+  "create_canvas",
+  "create_collection",
+  "create_lineage_group_manual",
+  "create_session",
+  "create_smart_collection",
+  "delete_canvas",
+  "delete_collection",
+  "delete_session",
+  "delete_smart_collection",
+  "dissolve_lineage_group",
+  "merge_lineage_groups",
+  "redo",
+  "remove_from_collection",
+  "remove_from_lineage_group",
+  "rename_lineage_group",
+  "scan_lineage",
+  "set_decision",
+  "set_rating",
+  "undo",
+  "update_canvas_layout",
+  "update_smart_collection",
+]

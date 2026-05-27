@@ -6,7 +6,7 @@ use std::sync::{
 };
 use tauri::{AppHandle, Emitter};
 
-#[derive(Serialize, Clone, Default)]
+#[derive(Serialize, Clone, Default, Debug)]
 pub struct OpenParams {
     pub path: Option<String>,
     pub paths: Option<Vec<String>>,
@@ -135,7 +135,7 @@ pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams>
         return None;
     }
 
-    Some(OpenParams {
+    let params = OpenParams {
         path: if file_paths.len() == 1 {
             Some(file_paths[0].clone())
         } else {
@@ -154,19 +154,21 @@ pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams>
         focus: None,
         image_id: None,
         gap: None,
-    })
+    };
+
+    validate_open_params(params).ok()
 }
 
 pub fn open_params_for_drag_drop_paths(paths: &[PathBuf]) -> Vec<OpenParams> {
     let dirs: Vec<String> = paths
         .iter()
         .filter(|p| p.is_dir())
-        .map(|p| p.to_string_lossy().into_owned())
+        .filter_map(|p| validate_path(&p.to_string_lossy()).ok())
         .collect();
     let files: Vec<String> = paths
         .iter()
         .filter(|p| !p.is_dir() && crate::extensions::is_image_path(p, false))
-        .map(|p| p.to_string_lossy().into_owned())
+        .filter_map(|p| validate_path(&p.to_string_lossy()).ok())
         .collect();
 
     if dirs.len() == 1 && files.is_empty() {
@@ -205,7 +207,7 @@ pub fn open_params_for_drag_drop_paths(paths: &[PathBuf]) -> Vec<OpenParams> {
 pub fn file_path_from_url(url: &str) -> Option<String> {
     let raw_path = url.strip_prefix("file://")?;
     let without_host = raw_path.strip_prefix("localhost").unwrap_or(raw_path);
-    Some(percent_decode(without_host))
+    percent_decode(without_host).ok()
 }
 
 #[tauri::command]
@@ -288,7 +290,7 @@ pub fn parse_deep_link(url: &str) -> Result<OpenParams, String> {
             let mut parts = pair.splitn(2, '=');
             let key = parts.next().unwrap_or("");
             let value = parts.next().unwrap_or("");
-            let decoded = percent_decode(value);
+            let decoded = percent_decode(value)?;
             match key {
                 "path" => params.path = Some(decoded),
                 "paths" => {
@@ -310,27 +312,57 @@ pub fn parse_deep_link(url: &str) -> Result<OpenParams, String> {
     validate_open_params(params)
 }
 
-fn percent_decode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            let hex: String = chars.by_ref().take(2).collect();
-            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                result.push(byte as char);
+fn percent_decode(s: &str) -> Result<String, String> {
+    let input = s.as_bytes();
+    let mut output = Vec::with_capacity(input.len());
+    let mut i = 0;
+    while i < input.len() {
+        match input[i] {
+            b'%' => {
+                if i + 2 >= input.len() {
+                    return Err(format!("Malformed percent encoding in '{}'", s));
+                }
+                let hi = hex_value(input[i + 1])
+                    .ok_or_else(|| format!("Malformed percent encoding in '{}'", s))?;
+                let lo = hex_value(input[i + 2])
+                    .ok_or_else(|| format!("Malformed percent encoding in '{}'", s))?;
+                output.push((hi << 4) | lo);
+                i += 3;
             }
-        } else if c == '+' {
-            result.push(' ');
-        } else {
-            result.push(c);
+            b'+' => {
+                output.push(b' ');
+                i += 1;
+            }
+            byte => {
+                output.push(byte);
+                i += 1;
+            }
         }
     }
-    result
+
+    String::from_utf8(output).map_err(|_| format!("Invalid UTF-8 percent encoding in '{}'", s))
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn home_tempdir(prefix: &str) -> tempfile::TempDir {
+        let home = dirs::home_dir().unwrap();
+        tempfile::Builder::new()
+            .prefix(prefix)
+            .tempdir_in(home)
+            .unwrap()
+    }
 
     #[test]
     fn parses_file_url_into_path() {
@@ -343,6 +375,11 @@ mod tests {
     #[test]
     fn ignores_non_file_url_for_file_path() {
         assert!(file_path_from_url("cull://loupe?image_id=img-1").is_none());
+    }
+
+    #[test]
+    fn file_url_rejects_malformed_percent_encoding() {
+        assert!(file_path_from_url("file:///tmp/Cull%ZZTest/image.png").is_none());
     }
 
     // --- Deep link path validation tests ---
@@ -402,6 +439,20 @@ mod tests {
     }
 
     #[test]
+    fn malformed_percent_encoding_is_rejected() {
+        let result = parse_deep_link("cull://open?path=/Users/test/Cull%ZZ.png");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("percent encoding"));
+    }
+
+    #[test]
+    fn invalid_utf8_percent_encoding_is_rejected() {
+        let result = parse_deep_link("cull://open?path=/Users/test/%E0%A4%A.png");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("percent encoding"));
+    }
+
+    #[test]
     fn hidden_directory_rejected() {
         let home = dirs::home_dir().unwrap();
         let hidden = home.join(".hidden_test_dir_deeplink");
@@ -430,39 +481,43 @@ mod tests {
     }
 
     #[test]
-    fn drag_drop_paths_not_affected_by_validation() {
-        // Drag-drop functions return OpenParams directly, never going through
-        // validate_open_params. Verify they still work with arbitrary paths.
+    fn drag_drop_paths_use_deep_link_validation() {
         let dir = tempfile::tempdir().unwrap();
         let image = dir.path().join("image.jpg");
         std::fs::write(&image, b"not a real jpeg").unwrap();
 
         let params = open_params_for_drag_drop_paths(&[image.clone()]);
-        assert_eq!(params.len(), 1);
-        assert_eq!(params[0].path, Some(image.to_string_lossy().into_owned()));
+        assert!(params.is_empty());
 
         let file_params = open_params_for_file_paths(vec![image.to_string_lossy().into_owned()]);
-        assert!(file_params.is_some());
+        assert!(file_params.is_none());
     }
 
     #[test]
     fn builds_loupe_params_for_opened_file() {
-        let params = open_params_for_file_paths(vec!["/tmp/image.png".to_string()]).unwrap();
-        assert_eq!(params.path.as_deref(), Some("/tmp/image.png"));
+        let dir = home_tempdir("cull_open_file_");
+        let image = dir.path().join("image.png");
+        std::fs::write(&image, b"not a real png").unwrap();
+
+        let params =
+            open_params_for_file_paths(vec![image.to_string_lossy().into_owned()]).unwrap();
+        let canonical = image.canonicalize().unwrap().to_string_lossy().into_owned();
+        assert_eq!(params.path.as_deref(), Some(canonical.as_str()));
         assert_eq!(params.view.as_deref(), Some("loupe"));
         assert!(params.paths.is_none());
     }
 
     #[test]
     fn drag_drop_single_image_opens_loupe() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = home_tempdir("cull_drag_single_");
         let image = dir.path().join("image.jpg");
         std::fs::write(&image, b"not a real jpeg").unwrap();
 
         let params = open_params_for_drag_drop_paths(&[image.clone()]);
 
+        let canonical = image.canonicalize().unwrap().to_string_lossy().into_owned();
         assert_eq!(params.len(), 1);
-        assert_eq!(params[0].path, Some(image.to_string_lossy().into_owned()));
+        assert_eq!(params[0].path.as_deref(), Some(canonical.as_str()));
         assert_eq!(params[0].paths, None);
         assert_eq!(params[0].folder, None);
         assert_eq!(params[0].view.as_deref(), Some("loupe"));
@@ -470,7 +525,7 @@ mod tests {
 
     #[test]
     fn drag_drop_multiple_images_opens_grid_batch() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = home_tempdir("cull_drag_multi_");
         let first = dir.path().join("first.jpg");
         let second = dir.path().join("second.png");
         std::fs::write(&first, b"image").unwrap();
@@ -493,7 +548,7 @@ mod tests {
 
     #[test]
     fn drag_drop_single_folder_opens_folder_grid() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = home_tempdir("cull_drag_folder_");
         let folder = dir.path().join("Library");
         std::fs::create_dir(&folder).unwrap();
 
@@ -511,7 +566,7 @@ mod tests {
 
     #[test]
     fn drag_drop_mixed_files_and_folders_keeps_both_import_actions() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = home_tempdir("cull_drag_mixed_");
         let image = dir.path().join("image.webp");
         let folder = dir.path().join("Folder");
         let ignored = dir.path().join("notes.txt");

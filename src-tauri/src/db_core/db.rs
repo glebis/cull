@@ -104,48 +104,149 @@ impl Database {
             MIGRATIONS.last().map(|(version, _)| *version)
         );
 
-        let conn = self.conn.lock();
+        self.ensure_migration_state_tables()?;
         let schema = include_str!("schema.sql");
-        conn.execute_batch(schema)?;
-        drop(conn);
-        self.record_migration(1, "core_schema")?;
-        self.migrate_smart_collections()?;
-        self.record_migration(2, "smart_collections")?;
-        self.seed_preset_collections()?;
-        self.record_migration(3, "preset_collections")?;
-        self.migrate_lineage_tables()?;
-        self.record_migration(4, "lineage_tables")?;
-        self.migrate_mcp_tables()?;
-        self.record_migration(5, "mcp_tables")?;
-        self.migrate_model_processing()?;
-        self.record_migration(6, "model_processing")?;
-        self.migrate_generation_runs()?;
-        self.record_migration(7, "generation_runs")?;
-        self.migrate_undo_tables()?;
-        self.record_migration(8, "undo_tables")?;
-        self.migrate_sessions()?;
-        self.record_migration(9, "sessions")?;
-        self.migrate_session_events()?;
-        self.record_migration(10, "session_events")?;
-        self.migrate_library_roots()?;
-        self.record_migration(11, "library_roots")?;
-        self.migrate_image_file_stat_columns()?;
-        self.record_migration(12, "image_file_stat_columns")?;
-        self.migrate_raw_metadata()?;
-        self.record_migration(13, "raw_metadata")?;
-        self.migrate_audit_log()?;
-        self.record_migration(14, "api_audit_log")?;
-        self.migrate_asset_load_events()?;
-        self.record_migration(15, "asset_load_events")?;
-        self.migrate_curation_analysis()?;
-        self.record_migration(16, "curation_analysis")?;
-        self.migrate_image_tags()?;
-        self.record_migration(17, "image_tags")?;
-        self.migrate_perceptual_hashes()?;
-        self.record_migration(18, "perceptual_hashes")?;
-        self.migrate_image_color_metrics()?;
-        self.record_migration(19, "image_color_metrics")?;
-        self.set_schema_version(CURRENT_SCHEMA_VERSION)?;
+        self.run_migration_step(1, "core_schema", || {
+            let conn = self.conn.lock();
+            conn.execute_batch(schema)
+        })?;
+        self.run_migration_step(2, "smart_collections", || self.migrate_smart_collections())?;
+        self.run_migration_step(3, "preset_collections", || self.seed_preset_collections())?;
+        self.run_migration_step(4, "lineage_tables", || self.migrate_lineage_tables())?;
+        self.run_migration_step(5, "mcp_tables", || self.migrate_mcp_tables())?;
+        self.run_migration_step(6, "model_processing", || self.migrate_model_processing())?;
+        self.run_migration_step(7, "generation_runs", || self.migrate_generation_runs())?;
+        self.run_migration_step(8, "undo_tables", || self.migrate_undo_tables())?;
+        self.run_migration_step(9, "sessions", || self.migrate_sessions())?;
+        self.run_migration_step(10, "session_events", || self.migrate_session_events())?;
+        self.run_migration_step(11, "library_roots", || self.migrate_library_roots())?;
+        self.run_migration_step(12, "image_file_stat_columns", || {
+            self.migrate_image_file_stat_columns()
+        })?;
+        self.run_migration_step(13, "raw_metadata", || self.migrate_raw_metadata())?;
+        self.run_migration_step(14, "api_audit_log", || self.migrate_audit_log())?;
+        self.run_migration_step(15, "asset_load_events", || self.migrate_asset_load_events())?;
+        self.run_migration_step(16, "curation_analysis", || self.migrate_curation_analysis())?;
+        self.run_migration_step(17, "image_tags", || self.migrate_image_tags())?;
+        self.run_migration_step(18, "perceptual_hashes", || self.migrate_perceptual_hashes())?;
+        self.run_migration_step(19, "image_color_metrics", || {
+            self.migrate_image_color_metrics()
+        })?;
+        Ok(())
+    }
+
+    fn run_migration_step<F>(&self, version: i64, name: &str, apply: F) -> Result<()>
+    where
+        F: FnOnce() -> Result<()>,
+    {
+        self.ensure_migration_state_tables()?;
+        if self.migration_already_applied(version)? {
+            self.record_migration_step_succeeded(version, name)?;
+            return Ok(());
+        }
+
+        self.record_migration_step_started(version, name)?;
+        {
+            let conn = self.conn.lock();
+            conn.execute_batch("BEGIN IMMEDIATE")?;
+        }
+
+        let result = apply()
+            .and_then(|_| self.record_migration(version, name))
+            .and_then(|_| self.set_schema_version(version));
+
+        match result {
+            Ok(()) => {
+                {
+                    let conn = self.conn.lock();
+                    conn.execute_batch("COMMIT")?;
+                }
+                self.record_migration_step_succeeded(version, name)?;
+                Ok(())
+            }
+            Err(err) => {
+                {
+                    let conn = self.conn.lock();
+                    let _ = conn.execute_batch("ROLLBACK");
+                }
+                self.record_migration_step_failed(version, name, &err.to_string())?;
+                Err(err)
+            }
+        }
+    }
+
+    fn migration_already_applied(&self, version: i64) -> Result<bool> {
+        let conn = self.conn.lock();
+        Ok(user_version(&conn)? >= version)
+    }
+
+    fn ensure_migration_state_tables(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL,
+                checksum TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS schema_migration_steps (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed')),
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                error TEXT
+            );",
+        )?;
+        Ok(())
+    }
+
+    fn record_migration_step_started(&self, version: i64, name: &str) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO schema_migration_steps (version, name, status, started_at, finished_at, error)
+             VALUES (?1, ?2, 'started', ?3, NULL, NULL)
+             ON CONFLICT(version) DO UPDATE SET
+                name = excluded.name,
+                status = 'started',
+                started_at = excluded.started_at,
+                finished_at = NULL,
+                error = NULL",
+            params![version, name, now],
+        )?;
+        Ok(())
+    }
+
+    fn record_migration_step_succeeded(&self, version: i64, name: &str) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO schema_migration_steps (version, name, status, started_at, finished_at, error)
+             VALUES (?1, ?2, 'succeeded', ?3, ?3, NULL)
+             ON CONFLICT(version) DO UPDATE SET
+                name = excluded.name,
+                status = 'succeeded',
+                finished_at = excluded.finished_at,
+                error = NULL",
+            params![version, name, now],
+        )?;
+        Ok(())
+    }
+
+    fn record_migration_step_failed(&self, version: i64, name: &str, error: &str) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO schema_migration_steps (version, name, status, started_at, finished_at, error)
+             VALUES (?1, ?2, 'failed', ?3, ?3, ?4)
+             ON CONFLICT(version) DO UPDATE SET
+                name = excluded.name,
+                status = 'failed',
+                finished_at = excluded.finished_at,
+                error = excluded.error",
+            params![version, name, now, error],
+        )?;
         Ok(())
     }
 
@@ -3386,6 +3487,69 @@ mod migration_safety_tests {
             })
             .unwrap();
         assert_eq!(latest_migration, user_version);
+    }
+
+    #[test]
+    fn test_open_records_successful_migration_step_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("cull.db");
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock();
+        let successful_steps: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration_steps WHERE status = 'succeeded'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let failed_steps: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration_steps WHERE status = 'failed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(successful_steps, CURRENT_SCHEMA_VERSION);
+        assert_eq!(failed_steps, 0);
+    }
+
+    #[test]
+    fn test_failed_migration_step_rolls_back_and_records_recovery_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("cull.db");
+        let db = Database::open(&db_path).unwrap();
+
+        let err = db
+            .run_migration_step(20, "failing_test_step", || {
+                let conn = db.conn.lock();
+                conn.execute_batch("CREATE TABLE migration_failure_probe (id INTEGER);")?;
+                Err(migration_error("synthetic migration failure".to_string()))
+            })
+            .unwrap_err();
+        assert!(err.to_string().contains("synthetic migration failure"));
+
+        let conn = db.conn.lock();
+        assert!(!table_exists(&conn, "migration_failure_probe").unwrap());
+
+        let current_user_version = user_version(&conn).unwrap();
+        let latest_migration: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(latest_migration, current_user_version);
+
+        let (status, error): (String, String) = conn
+            .query_row(
+                "SELECT status, error FROM schema_migration_steps WHERE version = 20",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "failed");
+        assert!(error.contains("synthetic migration failure"));
     }
 
     #[test]

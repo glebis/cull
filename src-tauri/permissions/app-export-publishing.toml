@@ -1,0 +1,14 @@
+[[permission]]
+identifier = "app-export-publishing"
+description = "Allows export and static publishing commands."
+commands.allow = [
+  "apply_export_patches",
+  "assemble_export_pdf",
+  "create_export_manifest",
+  "export_static_publish_package",
+  "get_export_asset",
+  "list_export_presets",
+  "save_export_image",
+  "serve_static_publish_package",
+  "validate_export_manifest",
+]

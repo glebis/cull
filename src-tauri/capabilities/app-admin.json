@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "app-admin",
+  "description": "Administrative IPC for settings, MCP tokens, jobs, privacy exports, and diagnostics.",
+  "windows": ["main", "window-*"],
+  "permissions": ["app-admin"]
+}

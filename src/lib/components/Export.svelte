@@ -67,6 +67,7 @@
 
         try {
             const pngPaths: string[] = [];
+            const pdfSlideIds: string[] = [];
 
             for (const [index, slide] of manifest.slides.entries()) {
                 const el = renderRefs[slide.id];
@@ -88,6 +89,7 @@
                     manifestId: manifest.id,
                 });
                 pngPaths.push(path);
+                pdfSlideIds.push(slide.id);
                 exportProgress = { ...exportProgress, current: index + 1, label: `Saved slide ${index + 1}` };
             }
 
@@ -96,7 +98,7 @@
             if (activeTarget.mime === 'application/pdf' && pngPaths.length > 0) {
                 exportProgress = { ...exportProgress, current: manifest.slides.length, label: 'Assembling PDF' };
                 const pdfPath = await invoke<string>('assemble_export_pdf', {
-                    imagePaths: pngPaths,
+                    slideIds: pdfSlideIds,
                     widthPx: activeTarget.width,
                     heightPx: activeTarget.height,
                     manifestId: manifest.id,

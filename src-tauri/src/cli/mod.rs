@@ -39,6 +39,10 @@ pub struct CliArgs {
     #[arg(long, default_value = "127.0.0.1")]
     pub mcp_http_host: String,
 
+    /// Permit MCP HTTP to bind to a non-loopback host. Use only with scoped tokens.
+    #[arg(long)]
+    pub mcp_http_allow_remote: bool,
+
     #[command(subcommand)]
     pub command: Option<CliCommand>,
 }
@@ -267,6 +271,7 @@ mod tests {
         assert!(!args.mcp_stdio);
         assert!(args.mcp_http.is_none());
         assert_eq!(args.mcp_http_host, "127.0.0.1");
+        assert!(!args.mcp_http_allow_remote);
     }
 
     #[test]
@@ -300,6 +305,21 @@ mod tests {
     fn test_mcp_http_host_custom() {
         let args = CliArgs::try_parse_from(["cull", "--mcp-http-host", "0.0.0.0"]).unwrap();
         assert_eq!(args.mcp_http_host, "0.0.0.0");
+        assert!(!args.mcp_http_allow_remote);
+    }
+
+    #[test]
+    fn test_mcp_http_allow_remote_flag_is_explicit() {
+        let args = CliArgs::try_parse_from([
+            "cull",
+            "--mcp-http",
+            "--mcp-http-host",
+            "0.0.0.0",
+            "--mcp-http-allow-remote",
+        ])
+        .unwrap();
+        assert_eq!(args.mcp_http_host, "0.0.0.0");
+        assert!(args.mcp_http_allow_remote);
     }
 
     #[test]
@@ -311,11 +331,13 @@ mod tests {
             "9847",
             "--mcp-http-host",
             "0.0.0.0",
+            "--mcp-http-allow-remote",
         ])
         .unwrap();
         assert!(args.tray);
         assert_eq!(args.mcp_http, Some(Some(9847)));
         assert_eq!(args.mcp_http_host, "0.0.0.0");
+        assert!(args.mcp_http_allow_remote);
     }
 
     #[test]

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "app-read",
+  "description": "Read-only app IPC for browsing library state and metadata.",
+  "windows": ["main", "window-*"],
+  "permissions": ["app-read"]
+}

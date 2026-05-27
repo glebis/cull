@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "app-ui",
+  "description": "UI shell IPC for window management, menu state, deep-link routing, and dictation controls.",
+  "windows": ["main", "window-*"],
+  "permissions": ["app-ui"]
+}
