@@ -38,4 +38,8 @@ describe('view tabs', () => {
         expect(viewTabIconSource).toContain('<svg');
         expect(viewTabIconSource).toContain('viewBox="0 0 24 24"');
     });
+
+    it('marks the app header as a native Tauri drag region', () => {
+        expect(tabBarSource).toContain('<div class="tabbar" data-tauri-drag-region="deep">');
+    });
 });

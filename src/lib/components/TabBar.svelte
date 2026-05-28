@@ -30,7 +30,7 @@
     }
 </script>
 
-<div class="tabbar">
+<div class="tabbar" data-tauri-drag-region="deep">
     {#if $windowName && $windowName !== 'Cull'}
         <span class="window-name">{$windowName}</span>
     {/if}
@@ -75,7 +75,6 @@
         padding: 0 var(--spacing);
         padding-left: 78px;
         grid-area: tabbar;
-        -webkit-app-region: drag;
     }
     .window-name {
         font-size: 11px;
@@ -84,12 +83,10 @@
         padding-right: 8px;
         border-right: 1px solid var(--border);
         white-space: nowrap;
-        -webkit-app-region: no-drag;
     }
     .tabs {
         display: flex;
         gap: 2px;
-        -webkit-app-region: no-drag;
     }
     .tab {
         background: none;
@@ -130,7 +127,6 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        -webkit-app-region: no-drag;
     }
     .slider-icon {
         color: var(--text-secondary);
