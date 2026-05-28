@@ -269,7 +269,9 @@ pub struct SetRatingParams {
 pub struct SetDecisionParams {
     #[schemars(description = "The image ID")]
     pub image_id: String,
-    #[schemars(description = "Decision: 'accept', 'reject', or 'undecided'. Legacy aliases 'selected', 'rejected', and 'none' are accepted.")]
+    #[schemars(
+        description = "Decision: 'accept', 'reject', or 'undecided'. Legacy aliases 'selected', 'rejected', and 'none' are accepted."
+    )]
     pub decision: String,
 }
 
@@ -623,7 +625,9 @@ impl CullMcp {
         }
     }
 
-    #[tool(description = "Set selection decision on an image: 'accept', 'reject', or 'undecided'. Legacy aliases 'selected', 'rejected', and 'none' are accepted.")]
+    #[tool(
+        description = "Set selection decision on an image: 'accept', 'reject', or 'undecided'. Legacy aliases 'selected', 'rejected', and 'none' are accepted."
+    )]
     fn set_decision(&self, Parameters(params): Parameters<SetDecisionParams>) -> String {
         let Some(decision) = normalize_decision(&params.decision) else {
             return "Error: Decision must be 'accept', 'reject', or 'undecided'".to_string();
@@ -2295,7 +2299,14 @@ mod tests {
 
     #[test]
     fn test_decision_valid_values() {
-        for value in ["accept", "reject", "undecided", "selected", "rejected", "none"] {
+        for value in [
+            "accept",
+            "reject",
+            "undecided",
+            "selected",
+            "rejected",
+            "none",
+        ] {
             assert!(
                 super::is_valid_decision(value),
                 "Decision '{}' should be valid",

@@ -1122,7 +1122,8 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
+            let selection =
+                Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -1218,7 +1219,8 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
+            let selection =
+                Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -1273,7 +1275,8 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
+            let selection =
+                Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -1359,7 +1362,8 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
+            let selection =
+                Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -1408,7 +1412,8 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
+            let selection =
+                Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -1766,7 +1771,8 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
+            let selection =
+                Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -2278,7 +2284,8 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
+            let selection =
+                Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -2566,7 +2573,8 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
+            let selection =
+                Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -2609,7 +2617,8 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
+            let selection =
+                Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -2750,7 +2759,8 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
+            let selection =
+                Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -2962,7 +2972,8 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
+            let selection =
+                Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
