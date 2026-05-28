@@ -28,6 +28,23 @@ let nextId = 100;
 
 const mockApiKeys: Record<string, string> = {};
 
+const LONG_COMPARE_FILENAMES = [
+  'ig_0b99ac4db97448df0169ee70444b788191bda40ea3858ee372.png',
+  'ig_0b99ac4db97448df0169ee6fbd671081918388e8c8989ab0b4.png',
+];
+
+function useLongCompareNames(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('longCompareNames') === '1';
+}
+
+function mockImagePath(i: number): string {
+  if (useLongCompareNames() && i < LONG_COMPARE_FILENAMES.length) {
+    return `/mock/${LONG_COMPARE_FILENAMES[i]}`;
+  }
+  return `/mock/image-${i}.png`;
+}
+
 function makeMockImage(i: number) {
   return {
     image: {
@@ -40,7 +57,7 @@ function makeMockImage(i: number) {
       created_at: '2026-01-01',
       imported_at: '2026-05-01',
     },
-    path: `/mock/image-${i}.png`,
+    path: mockImagePath(i),
     thumbnail_path: null,
     selection: i % 3 === 0 ? {
       image_id: `img-${i}`,

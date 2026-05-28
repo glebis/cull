@@ -1,6 +1,6 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
-    import { images, selectedIds, focusedIndex, statusHint, compareActiveSide } from '$lib/stores';
+    import { images, selectedIds, focusedIndex, compareActiveSide } from '$lib/stores';
     import type { ImageWithFile } from '$lib/api';
     import { isRawFormat } from '$lib/api';
     import ContextMenu from './ContextMenu.svelte';
@@ -34,11 +34,6 @@
 
     let leftName = $derived(leftImage?.path.split('/').pop() ?? '');
     let rightName = $derived(rightImage?.path.split('/').pop() ?? '');
-
-    $effect(() => {
-        statusHint.set(`${leftName} vs ${rightName}`);
-        return () => statusHint.set(null);
-    });
 
     function ratingStars(img: ImageWithFile | null): number {
         return img?.selection?.star_rating ?? 0;

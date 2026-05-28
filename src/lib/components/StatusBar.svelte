@@ -91,12 +91,15 @@
         font-size: 11px;
         grid-area: statusbar;
         gap: 12px;
+        min-width: 0;
+        overflow: hidden;
+        box-sizing: border-box;
     }
     .left {
         display: flex;
         align-items: center;
         gap: 8px;
-        flex-shrink: 0;
+        flex: 1 1 auto;
         min-width: 0;
         overflow: hidden;
     }
@@ -115,7 +118,7 @@
         display: flex;
         gap: 12px;
         overflow: hidden;
-        flex-shrink: 1;
+        flex: 0 1 auto;
         min-width: 0;
     }
     .hint {
@@ -133,9 +136,17 @@
     .status-hint {
         color: var(--orange);
         font-weight: 700;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .collection-name {
         color: var(--blue);
         font-weight: 600;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 </style>

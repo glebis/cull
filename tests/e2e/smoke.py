@@ -51,8 +51,8 @@ def slug(value: str) -> str:
     return "".join(ch.lower() if ch.isalnum() else "-" for ch in value).strip("-")
 
 
-def wait_for_app(page: Page) -> None:
-    page.goto(URL)
+def wait_for_app(page: Page, url: str = URL) -> None:
+    page.goto(url)
     try:
         page.wait_for_load_state("networkidle", timeout=5_000)
     except Exception:
@@ -176,6 +176,36 @@ def test_view_switching(page: Page) -> None:
     wait_mode(page, "loupe")
     press(page, "Shift+Tab")
     wait_mode(page, "grid")
+
+
+def test_compare_statusbar_does_not_resize_layout(page: Page) -> None:
+    wait_for_app(page, f"{URL}?longCompareNames=1")
+    press(page, "Meta+3")
+    wait_mode(page, "compare")
+
+    expect(page.locator(".statusbar")).not_to_contain_text(" vs ")
+
+    metrics = page.evaluate(
+        """() => {
+            const shell = document.querySelector('.app-shell').getBoundingClientRect();
+            const compare = document.querySelector('.compare-container').getBoundingClientRect();
+            const panels = [...document.querySelectorAll('.compare-container .panel')]
+                .map((el) => el.getBoundingClientRect());
+            return {
+                windowWidth: window.innerWidth,
+                bodyScrollWidth: document.documentElement.scrollWidth,
+                shellWidth: shell.width,
+                compareWidth: compare.width,
+                leftPanelWidth: panels[0].width,
+                rightPanelWidth: panels[1].width,
+            };
+        }"""
+    )
+
+    assert metrics["bodyScrollWidth"] <= metrics["windowWidth"] + 1, metrics
+    assert abs(metrics["shellWidth"] - metrics["windowWidth"]) <= 1, metrics
+    assert abs(metrics["compareWidth"] - metrics["windowWidth"]) <= 1, metrics
+    assert abs(metrics["leftPanelWidth"] - metrics["rightPanelWidth"]) <= 2, metrics
 
 
 def test_grid_navigation(page: Page) -> None:
@@ -875,6 +905,7 @@ def main() -> int:
         smoke = Smoke(page)
         wait_for_app(page)
         smoke.step("S01 view switching", lambda: test_view_switching(page))
+        smoke.step("S01c compare layout bounded by status bar", lambda: test_compare_statusbar_does_not_resize_layout(page))
         smoke.step("S02 grid navigation", lambda: test_grid_navigation(page))
         smoke.step("S03 loupe navigation", lambda: test_loupe_navigation(page))
         smoke.step("S09/S10/S11 curation and selection", lambda: test_rating_decision_and_selection(page))
