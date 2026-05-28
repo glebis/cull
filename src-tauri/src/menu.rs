@@ -347,13 +347,42 @@ fn find_menu_item_in_items(
 pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
     let id = event.id().0.as_str();
     match id {
+        "help" => show_cull_help(app),
         "about" | "open_file" | "open_folder" | "settings" | "undo" | "redo" | "deselect_all"
         | "image_share" | "image_open_default" | "image_open_with" | "image_reveal"
         | "image_rename" | "image_move_to" | "image_trash" | "view_grid" | "view_compare"
         | "view_loupe" | "view_canvas" | "view_lineage" | "view_embeddings" | "view_export"
-        | "toggle_sidebar" | "zoom_in" | "zoom_out" | "actual_size" | "help" => {
+        | "toggle_sidebar" | "zoom_in" | "zoom_out" | "actual_size" => {
             let _ = app.emit("menu-action", id);
         }
         _ => {}
     }
+}
+
+#[cfg(target_os = "macos")]
+fn show_cull_help(app: &AppHandle) {
+    if objc2::MainThreadMarker::new().is_some() {
+        show_cull_help_on_main();
+        return;
+    }
+
+    let _ = app.run_on_main_thread(show_cull_help_on_main);
+}
+
+#[cfg(target_os = "macos")]
+fn show_cull_help_on_main() {
+    use objc2_app_kit::NSApplication;
+
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return;
+    };
+    let application = NSApplication::sharedApplication(mtm);
+    unsafe {
+        application.showHelp(None);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn show_cull_help(app: &AppHandle) {
+    let _ = app.emit("menu-action", "help");
 }

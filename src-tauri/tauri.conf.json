@@ -67,6 +67,9 @@
       "icons/icon.ico"
     ],
     "macOS": {
+      "files": {
+        "Resources/Cull.help": "help/Cull.help"
+      },
       "dmg": {
         "background": "dmg/cull-dmg-background.png",
         "windowSize": {

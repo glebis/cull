@@ -1,12 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = process.cwd();
-const userGuideUrl = 'https://github.com/glebis/cull/blob/main/docs/USER_GUIDE.md';
+const helpBookFolder = 'Cull.help';
+const helpBookName = 'com.glebkalinin.cull.help';
+const helpBookRoot = 'src-tauri/help/Cull.help/Contents';
 
 function readProjectFile(path: string): string {
     return readFileSync(join(root, path), 'utf8');
+}
+
+function projectFileExists(path: string): boolean {
+    return existsSync(join(root, path));
+}
+
+function projectFileSize(path: string): number {
+    return readProjectFile(path).length;
 }
 
 describe('Help menu contract', () => {
@@ -18,11 +28,51 @@ describe('Help menu contract', () => {
         expect(menuSource).not.toContain('"Cull Help"');
     });
 
-    it('opens the user guide instead of a repository README', () => {
-        const menuSource = readProjectFile('src/lib/menu.ts');
+    it('registers a native macOS Help Book in the app plist', () => {
+        const plist = readProjectFile('src-tauri/Info.plist');
 
-        expect(menuSource).toContain(userGuideUrl);
-        expect(menuSource).not.toMatch(/imageview#readme|cull#readme/i);
+        expect(plist).toContain('<key>CFBundleHelpBookFolder</key>');
+        expect(plist).toContain(`<string>${helpBookFolder}</string>`);
+        expect(plist).toContain('<key>CFBundleHelpBookName</key>');
+        expect(plist).toContain(`<string>${helpBookName}</string>`);
+        expect(plist).toContain('<key>CFAppleHelpAnchor</key>');
+        expect(plist).toContain('<string>index</string>');
+    });
+
+    it('bundles the native macOS Help Book into app resources', () => {
+        const config = JSON.parse(readProjectFile('src-tauri/tauri.conf.json'));
+
+        expect(config.bundle.macOS.files['Resources/Cull.help']).toBe('help/Cull.help');
+    });
+
+    it('ships the user guide as an indexed Apple Help Book', () => {
+        const helpInfo = readProjectFile(`${helpBookRoot}/Info.plist`);
+        const index = readProjectFile(`${helpBookRoot}/Resources/English.lproj/index.html`);
+
+        expect(helpInfo).toContain('<key>CFBundleIdentifier</key>');
+        expect(helpInfo).toContain(`<string>${helpBookName}</string>`);
+        expect(helpInfo).toContain('<key>HPDBookAccessPath</key>');
+        expect(helpInfo).toContain('<string>index.html</string>');
+        expect(helpInfo).toContain('<key>HPDBookIndexPath</key>');
+        expect(helpInfo).toContain('<string>Cull.helpindex</string>');
+        expect(helpInfo).toContain('<key>HPDBookCSIndexPath</key>');
+        expect(helpInfo).toContain('<string>Cull.cshelpindex</string>');
+
+        expect(index).toContain(`name="AppleTitle" content="${helpBookName}"`);
+        expect(projectFileExists(`${helpBookRoot}/Resources/English.lproj/Cull.helpindex`)).toBe(true);
+        expect(projectFileExists(`${helpBookRoot}/Resources/English.lproj/Cull.cshelpindex`)).toBe(true);
+        expect(projectFileSize(`${helpBookRoot}/Resources/English.lproj/Cull.helpindex`)).toBeGreaterThan(0);
+        expect(projectFileSize(`${helpBookRoot}/Resources/English.lproj/Cull.cshelpindex`)).toBeGreaterThan(0);
+    });
+
+    it('opens native Mac help instead of a repository README', () => {
+        const menuSource = readProjectFile('src-tauri/src/menu.rs');
+        const frontendMenuSource = readProjectFile('src/lib/menu.ts');
+
+        expect(menuSource).toContain('show_cull_help');
+        expect(menuSource).toContain('showHelp(None)');
+        expect(frontendMenuSource).not.toMatch(/github\.com\/glebis\/(imageview|cull).*readme/i);
+        expect(frontendMenuSource).not.toContain('docs/USER_GUIDE.md');
     });
 
     it('keeps the user guide covering the core user workflows', () => {

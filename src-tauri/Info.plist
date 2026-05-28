@@ -2,6 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>CFAppleHelpAnchor</key>
+    <string>index</string>
+    <key>CFBundleHelpBookFolder</key>
+    <string>Cull.help</string>
+    <key>CFBundleHelpBookName</key>
+    <string>com.glebkalinin.cull.help</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Cull uses the microphone for voice search dictation.</string>
     <key>NSSpeechRecognitionUsageDescription</key>

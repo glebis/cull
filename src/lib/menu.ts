@@ -1,6 +1,6 @@
 import { listen } from '@tauri-apps/api/event';
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
-import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
+import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { get } from 'svelte/store';
 import {
     importFolder,
@@ -44,8 +44,6 @@ import {
 } from './stores';
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { folderDisplayName } from './move-menu-utils';
-
-const USER_GUIDE_URL = 'https://github.com/glebis/cull/blob/main/docs/USER_GUIDE.md';
 
 const IMAGE_FILTERS = [
     {
@@ -414,9 +412,6 @@ function handleMenuAction(action: string) {
             break;
         case 'settings':
             settingsOpen.set(true);
-            break;
-        case 'help':
-            openUrl(USER_GUIDE_URL);
             break;
     }
 }

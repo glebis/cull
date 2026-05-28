@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="AppleTitle" content="com.glebkalinin.cull.help" />
+  <meta name="description" content="Task-oriented user guide for Cull, a local-first desktop image viewer for AI-generated image sets." />
+  <meta name="KEYWORDS" content="Cull, user guide, import images, curation, collections, embeddings, export, CLI, privacy" />
+  <title>Cull User Guide</title>
+  <link rel="stylesheet" href="sty/help.css" />
+</head>
+<body>
+  <main>
+    <h1>Cull User Guide</h1>
+    <p>Cull is a local-first desktop image viewer for reviewing, comparing, curating, searching, and exporting AI-generated image sets. The app stores library metadata in SQLite and does not rewrite original image files during normal viewing or curation.</p>
+
+    <nav aria-label="Contents">
+      <h2>Contents</h2>
+      <ul>
+        <li><a href="#install">Install and run from source</a></li>
+        <li><a href="#import">Import images</a></li>
+        <li><a href="#navigate">Navigate views</a></li>
+        <li><a href="#curate">Review and curate</a></li>
+        <li><a href="#collections">Use collections</a></li>
+        <li><a href="#export">Export images</a></li>
+        <li><a href="#embeddings">Use embeddings and search</a></li>
+        <li><a href="#cli">Use the CLI</a></li>
+        <li><a href="#privacy">Understand privacy defaults</a></li>
+      </ul>
+    </nav>
+
+    <section id="install">
+      <a name="install"></a>
+      <h2>Install and run from source</h2>
+      <p>Requirements: macOS, Node.js 20 or newer, and stable Rust.</p>
+      <pre><code>git clone https://github.com/glebis/cull.git
+cd cull
+npm install
+npm run tauri dev</code></pre>
+      <p>For a production build, run:</p>
+      <pre><code>npm run tauri build</code></pre>
+    </section>
+
+    <section id="import">
+      <a name="import"></a>
+      <h2>Import images</h2>
+      <p>Choose <strong>File &gt; Open File...</strong> to import one or more images. A single imported image opens in Loupe; multiple imported images remain in the library grid.</p>
+      <p>Choose <strong>File &gt; Open Folder...</strong> to import a folder recursively and scope the grid to that folder.</p>
+      <p>Cull supports JPEG, PNG, WebP, GIF, BMP, TIFF, ICO, and macOS ImageIO formats including HEIC/HEIF, SVG, AVIF, JPEG XL, and PSD. RAW preview import supports CR2, CR3, NEF, ARW, DNG, ORF, RAF, and RW2 when the RAW module is enabled.</p>
+    </section>
+
+    <section id="navigate">
+      <a name="navigate"></a>
+      <h2>Navigate views</h2>
+      <table>
+        <thead>
+          <tr><th>Shortcut</th><th>View</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Cmd+1</td><td>Grid</td><td>Browse many images quickly.</td></tr>
+          <tr><td>Cmd+2</td><td>Loupe</td><td>Inspect one image with zoom and pan.</td></tr>
+          <tr><td>Cmd+3</td><td>Compare</td><td>Review two images side by side.</td></tr>
+          <tr><td>Cmd+4</td><td>Canvas</td><td>Arrange selected images spatially.</td></tr>
+          <tr><td>Cmd+5</td><td>Lineage</td><td>Inspect generation runs and image relationships.</td></tr>
+          <tr><td>Cmd+6</td><td>Embedding Explorer</td><td>Explore visual clusters and similarity.</td></tr>
+          <tr><td>Cmd+0</td><td>Export</td><td>Build exports from selected or collected images.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="curate">
+      <a name="curate"></a>
+      <h2>Review and curate</h2>
+      <p>Use Grid or Loupe to move through images and apply lightweight curation metadata.</p>
+      <table>
+        <thead>
+          <tr><th>Shortcut</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>h, j, k, l or arrow keys</td><td>Move focus.</td></tr>
+          <tr><td>Space</td><td>Toggle selection.</td></tr>
+          <tr><td>s then 1-5</td><td>Set star rating.</td></tr>
+          <tr><td>0</td><td>Clear rating.</td></tr>
+          <tr><td>a / x / u</td><td>Accept, reject, or mark undecided.</td></tr>
+          <tr><td>Backspace</td><td>Move the focused image to Trash.</td></tr>
+          <tr><td>Cmd+Z / Cmd+Shift+Z</td><td>Undo or redo supported library actions.</td></tr>
+        </tbody>
+      </table>
+      <p>Selections, ratings, and decisions are stored in Cull's local database. Originals are not rewritten.</p>
+    </section>
+
+    <section id="collections">
+      <a name="collections"></a>
+      <h2>Use collections</h2>
+      <p>Collections group images without copying the source files.</p>
+      <ul>
+        <li>Press <strong>b</strong> to use Collect mode and add focused images to a target collection.</li>
+        <li>Use the sidebar to browse collections.</li>
+        <li>Use Export view to prepare a collection for output.</li>
+      </ul>
+    </section>
+
+    <section id="export">
+      <a name="export"></a>
+      <h2>Export images</h2>
+      <p>Use Export view (<strong>Cmd+0</strong>) to prepare selected images or a collection for output. The CLI can also export a collection to a folder while preserving originals.</p>
+      <pre><code>cull --json export_images --collection_id &lt;id&gt; --output_dir ~/Desktop/export --format original</code></pre>
+      <p>Export writes new files to the chosen destination and does not rewrite your source images.</p>
+    </section>
+
+    <section id="embeddings">
+      <a name="embeddings"></a>
+      <h2>Use embeddings and search</h2>
+      <p>Cull supports local CLIP embeddings through ONNX Runtime. Local embeddings run on your machine and do not send images to an external service.</p>
+      <p>Optional cloud embedding and generation providers require your own API key. Keys are stored in the OS keychain where supported.</p>
+    </section>
+
+    <section id="cli">
+      <a name="cli"></a>
+      <h2>Use the CLI</h2>
+      <p>Cull includes an MCP-aligned headless CLI slice for agent workflows.</p>
+      <pre><code>cull --json get_library_stats
+cull --json list_images --limit 20 --offset 0
+cull --json import_folder --folder_path ~/renders
+cull --json import_files --file_paths ~/renders/a.png,~/renders/b.png
+cull --json export_images --collection_id &lt;id&gt; --output_dir ~/Desktop/export --format original</code></pre>
+      <p>CLI command names and JSON fields intentionally match MCP tool naming where possible.</p>
+    </section>
+
+    <section id="privacy">
+      <a name="privacy"></a>
+      <h2>Understand privacy defaults</h2>
+      <ul>
+        <li>Image viewing, thumbnails, ratings, collections, and SQLite metadata are local.</li>
+        <li>Local CLIP embeddings use ONNX Runtime on your machine.</li>
+        <li>Cloud providers are opt-in and require your own API key.</li>
+        <li>The MCP HTTP server is disabled unless explicitly enabled.</li>
+      </ul>
+      <p>See the repository privacy document for provider-specific data-flow details.</p>
+    </section>
+  </main>
+</body>
+</html>
