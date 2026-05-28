@@ -65,12 +65,21 @@ describe('Help menu contract', () => {
         expect(projectFileSize(`${helpBookRoot}/Resources/English.lproj/Cull.cshelpindex`)).toBeGreaterThan(0);
     });
 
-    it('opens native Mac help instead of a repository README', () => {
+    it('opens the registered Apple Help Book in Tips instead of a repository README', () => {
         const menuSource = readProjectFile('src-tauri/src/menu.rs');
         const frontendMenuSource = readProjectFile('src/lib/menu.ts');
 
-        expect(menuSource).toContain('show_cull_help');
-        expect(menuSource).toContain('showHelp(None)');
+        expect(menuSource).toContain('open_cull_help_book');
+        expect(menuSource).toContain('AHRegisterHelpBookWithURL');
+        expect(menuSource).toContain('AHGotoPage');
+        expect(menuSource).toContain('CULL_HELP_BOOK_ID');
+        expect(menuSource).toContain(helpBookName);
+        expect(menuSource).toContain('index.html');
+        expect(menuSource).not.toContain('tauri_plugin_opener::open_path');
+        expect(menuSource).not.toContain('Some("Safari")');
+        expect(menuSource).not.toContain('showHelp(None)');
+        expect(menuSource).not.toContain('openHelpAnchor_inBook');
+        expect(menuSource).not.toContain('help:openbook');
         expect(frontendMenuSource).not.toMatch(/github\.com\/glebis\/(imageview|cull).*readme/i);
         expect(frontendMenuSource).not.toContain('docs/USER_GUIDE.md');
     });

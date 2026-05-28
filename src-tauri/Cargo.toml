@@ -74,8 +74,9 @@ trash = "5"
 [dev-dependencies]
 
 [target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSHelpManager", "NSImage", "NSResponder", "NSSharingService", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage", "NSResponder", "NSSharingService", "NSView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSError", "NSGeometry", "NSLocale", "NSObject", "NSString", "NSThread", "NSURL", "block2"] }
 objc2-speech = "0.3"
 objc2-avf-audio = "0.3"

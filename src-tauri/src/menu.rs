@@ -1,6 +1,10 @@
 use serde::Deserialize;
+use std::path::PathBuf;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Emitter, Wry};
+use tauri::{AppHandle, Emitter, Manager, Wry};
+
+const CULL_HELP_BOOK_ID: &str = "com.glebkalinin.cull.help";
+const CULL_HELP_PAGE: &str = "index.html";
 
 pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let menu = Menu::new(app)?;
@@ -361,24 +365,121 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
 
 #[cfg(target_os = "macos")]
 fn show_cull_help(app: &AppHandle) {
-    if objc2::MainThreadMarker::new().is_some() {
-        show_cull_help_on_main();
-        return;
+    if let Err(err) = open_cull_help_book(app) {
+        crate::safe_eprintln!("[menu] Failed to open Cull User Guide: {}", err);
+        let _ = app.emit("menu-action", "help");
     }
-
-    let _ = app.run_on_main_thread(show_cull_help_on_main);
 }
 
 #[cfg(target_os = "macos")]
-fn show_cull_help_on_main() {
-    use objc2_app_kit::NSApplication;
+fn open_cull_help_book(app: &AppHandle) -> Result<(), String> {
+    if objc2::MainThreadMarker::new().is_some() {
+        return open_cull_help_book_on_main(app);
+    }
 
-    let Some(mtm) = objc2::MainThreadMarker::new() else {
-        return;
-    };
-    let application = NSApplication::sharedApplication(mtm);
-    unsafe {
-        application.showHelp(None);
+    let handle = app.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(open_cull_help_book_on_main(&handle));
+    })
+    .map_err(|err| format!("Failed to schedule Cull User Guide open: {}", err))?;
+
+    rx.recv()
+        .map_err(|_| "Failed to receive Cull User Guide open result".to_string())?
+}
+
+#[cfg(target_os = "macos")]
+fn open_cull_help_book_on_main(app: &AppHandle) -> Result<(), String> {
+    let bundle_path = cull_app_bundle_path(app)?;
+    apple_help::register_help_book(&bundle_path)?;
+    apple_help::goto_page(CULL_HELP_BOOK_ID, CULL_HELP_PAGE)
+}
+
+#[cfg(target_os = "macos")]
+fn cull_app_bundle_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|err| format!("Failed to resolve app resources: {}", err))?;
+    if let Some(bundle_path) = resource_dir
+        .parent()
+        .and_then(|contents_dir| contents_dir.parent())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".app"))
+        })
+    {
+        return Ok(bundle_path.to_path_buf());
+    }
+
+    Err(format!(
+        "Expected app resources to be inside a .app bundle, got '{}'",
+        resource_dir.display()
+    ))
+}
+
+#[cfg(target_os = "macos")]
+mod apple_help {
+    use core::ffi::c_void;
+    use core_foundation::base::{OSStatus, TCFType};
+    use core_foundation::string::CFString;
+    use core_foundation::url::CFURL;
+    use std::path::Path;
+    use std::ptr;
+
+    const NO_ERR: OSStatus = 0;
+
+    #[link(name = "Carbon", kind = "framework")]
+    extern "C" {
+        fn AHRegisterHelpBookWithURL(application_url: *const c_void) -> OSStatus;
+        fn AHGotoPage(
+            bookname: *const c_void,
+            path: *const c_void,
+            anchor: *const c_void,
+        ) -> OSStatus;
+    }
+
+    pub fn register_help_book(app_bundle_path: &Path) -> Result<(), String> {
+        let app_bundle_url = CFURL::from_path(app_bundle_path, true).ok_or_else(|| {
+            format!(
+                "Failed to create file URL for app bundle '{}'",
+                app_bundle_path.display()
+            )
+        })?;
+        let status =
+            unsafe { AHRegisterHelpBookWithURL(app_bundle_url.as_concrete_TypeRef().cast()) };
+        status_to_result(
+            status,
+            format!(
+                "Failed to register Help Book from '{}'",
+                app_bundle_path.display()
+            ),
+        )
+    }
+
+    pub fn goto_page(book_id: &str, page: &str) -> Result<(), String> {
+        let book = CFString::new(book_id);
+        let page = CFString::new(page);
+        let status = unsafe {
+            AHGotoPage(
+                book.as_concrete_TypeRef().cast(),
+                page.as_concrete_TypeRef().cast(),
+                ptr::null(),
+            )
+        };
+        status_to_result(
+            status,
+            format!("Failed to open Help Book '{}' page '{}'", book_id, page),
+        )
+    }
+
+    fn status_to_result(status: OSStatus, context: String) -> Result<(), String> {
+        if status == NO_ERR {
+            Ok(())
+        } else {
+            Err(format!("{}: OSStatus {}", context, status))
+        }
     }
 }
 

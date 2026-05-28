@@ -861,6 +861,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
+ "core-foundation 0.10.1",
  "dashmap",
  "dirs 5.0.1",
  "futures-util",
