@@ -8,6 +8,6 @@ The illustration layer was generated with GPT Image on 2026-05-28, then resized 
 Drag Cull into Applications
 ```
 
-Keep this asset light and do not add label-background bands under the icons. Finder draws icon labels in dark text inside the DMG window, so the base artwork itself needs readable light space around the app and Applications positions.
+Keep this asset light and do not draw placeholder cards, rounded-square zones, or label-background bands under the icons. Finder draws the real app and Applications icons plus dark icon labels inside the DMG window, so the base artwork itself needs readable light space around those positions.
 
 The DMG layout in `src-tauri/tauri.conf.json` places the Cull app icon and Applications alias over the two empty rounded-square zones.
