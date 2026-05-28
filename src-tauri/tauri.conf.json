@@ -66,6 +66,23 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "macOS": {
+      "dmg": {
+        "background": "dmg/cull-dmg-background.png",
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 134,
+          "y": 232
+        },
+        "applicationFolderPosition": {
+          "x": 520,
+          "y": 232
+        }
+      }
+    },
     "fileAssociations": [
       {
         "ext": ["jpg", "jpeg"],
