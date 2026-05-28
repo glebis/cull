@@ -45,6 +45,8 @@ import {
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { folderDisplayName } from './move-menu-utils';
 
+const USER_GUIDE_URL = 'https://github.com/glebis/cull/blob/main/docs/USER_GUIDE.md';
+
 const IMAGE_FILTERS = [
     {
         name: 'Images',
@@ -414,7 +416,7 @@ function handleMenuAction(action: string) {
             settingsOpen.set(true);
             break;
         case 'help':
-            openUrl('https://github.com/glebis/imageview#readme');
+            openUrl(USER_GUIDE_URL);
             break;
     }
 }

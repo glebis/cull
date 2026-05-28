@@ -14,7 +14,7 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 | Image menu | Pass | Current image/selection actions mirror the context menu and are disabled when no image is focused. |
 | View menu | Pass | View labels and shortcuts match the tab bar and keyboard handler. Current view and sidebar state are reflected with checkmarks. |
 | Window menu | Pass | Minimize, Zoom, and Bring All to Front use native predefined items. |
-| Help menu | Pass | Cull Help opens the repository README. |
+| Help menu | Pass | Cull User Guide opens the user guide. |
 | Tray menu | Partial | Show Window and Quit are wired. Stats and MCP status are display-only placeholders until dynamic tray status refresh is implemented. |
 
 ## App Menu
@@ -90,7 +90,7 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 
 | Label | Shortcut | Native ID / Event | Handler | Status |
 |---|---|---|---|---|
-| Cull Help | none | `help` | Opens `https://github.com/glebis/cull#readme` | Pass |
+| Cull User Guide | none | `help` | Opens `https://github.com/glebis/cull/blob/main/docs/USER_GUIDE.md` | Pass |
 
 ## Tray Menu
 
@@ -104,7 +104,7 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 ## Release Notes
 
 - README, tab bar, keyboard handler, and native menu now agree that `Cmd+2` is Loupe and `Cmd+3` is Compare.
-- Help was previously a no-op and is now wired.
+- Help opens the task-oriented Cull User Guide instead of the repository README.
 - Undo and redo were previously keyboard-only and are now exposed through the native Edit menu.
 - Image-specific context actions are now also exposed through the native Image menu.
 - Native menu state is now synchronized from Svelte: image actions disable with no focused image, Deselect All disables with no selection, View items are checked, and Toggle Sidebar reflects the sidebar state.

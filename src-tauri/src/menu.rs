@@ -244,7 +244,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     help_menu.append(&MenuItem::with_id(
         app,
         "help",
-        "Cull Help",
+        "Cull User Guide",
         true,
         None::<&str>,
     )?)?;

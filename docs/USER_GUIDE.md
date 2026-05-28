@@ -12,7 +12,7 @@ Prerequisites:
 
 ```bash
 git clone https://github.com/glebis/cull.git
-cd imageview
+cd cull
 npm install
 npm run tauri dev
 ```
@@ -74,6 +74,16 @@ Collections let you group images without copying source files.
 - Use the sidebar to browse collections.
 - Use Export view to prepare a collection for output.
 
+## Export Images
+
+Use the Export view (`Cmd+0`) to prepare selected images or a collection for output. The current CLI slice also supports exporting a collection to a folder while preserving originals:
+
+```bash
+cull --json export_images --collection_id <id> --output_dir ~/Desktop/export --format original
+```
+
+Export operations write new files to the chosen destination and do not rewrite your source images.
+
 ## Embeddings And Search
 
 Cull supports local CLIP embeddings through ONNX Runtime. Local embeddings run on your machine and do not send images to an external service.
@@ -96,7 +106,7 @@ The CLI command names and JSON fields intentionally match MCP tool naming where 
 
 ## Native Menus
 
-The complete menu inventory is maintained in [System Menu Audit](SYSTEM_MENU_AUDIT.md). If a shortcut and menu item disagree, treat that as a bug.
+The complete menu inventory is maintained in [System Menu Audit](SYSTEM_MENU_AUDIT.md). If a shortcut and menu item disagree, treat that as a bug. Use **Help > Cull User Guide** to reopen this guide from the app.
 
 ## Privacy Defaults
 
