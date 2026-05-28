@@ -1,15 +1,15 @@
 # Cull
 
-Local-first, agent-friendly AI image viewer for macOS. Built to replace Preview.app for power users.
+Local-first, keyboard-first review and curation for AI-generated image workflows on macOS.
 
-Terminal-inspired, keyboard-first image viewer for AI-generated image workflows. Handles batch review, comparison, curation, iteration, and export of hundreds to tens of thousands of images. Full bidirectional agent integration via MCP, CLI, and URL scheme.
+Terminal-inspired image viewer for batch review, comparison, curation, iteration, and export of hundreds to tens of thousands of images. Agent integration is built in through MCP, an MCP-aligned headless CLI slice, and the `cull://` URL scheme.
 
 ## What's Different
 
 - **Keyboard-first** — vim-style navigation, every action reachable without mouse
-- **AI-native** — CLIP embeddings, UMAP visualization, semantic search, YOLO detection
-- **Agent-friendly** — every GUI operation has a CLI equivalent; composable pipelines via stdin/stdout
-- **macOS-integrated** — Open With, drag-and-drop, native menus, Share sheet, Reveal in Finder
+- **AI-native** — CLIP/DINOv2 embeddings, UMAP visualization, visual similarity, YOLO detection
+- **Agent-friendly** — local MCP server, headless CLI tools, and deep links share the same command model
+- **macOS-integrated** — Open With, drag-and-drop, native menus, outbound Share sheet, Reveal in Finder
 - **Non-destructive** — SQLite library with SHA-256 dedup; originals are never modified
 
 ## Tech Stack
@@ -33,6 +33,8 @@ Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 | Grid view with 4 thumbnail presets (80-400px) | Done |
 | Loupe view with zoom/pan (up to 20x) | Done |
 | Compare view (side-by-side pairs) | Done |
+| Canvas view with freeform placement, resize, crop, rotate, and notes | Done |
+| Lineage view with timeline and comparison layouts | Done |
 | Embedding Explorer (UMAP 2D scatter + k-means clustering) | Done |
 | Zen mode (fullscreen, hides all chrome) | Done |
 | Vim-style keyboard navigation (hjkl, arrows, Home/End, PgUp/PgDn) | Done |
@@ -43,11 +45,16 @@ Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 | Thumbnail generation (Lanczos3) | Done |
 | Folder and size filtering | Done |
 | Collections (create, add, list, delete, collect-mode) | Done |
-| CLIP ViT-B/32 embeddings via ONNX Runtime | Done |
-| Gemini Embedding 2 via API | Done |
+| Local embedding models (CLIP ViT-B/32, DINOv2 ViT-S/14) | Done |
+| Cloud/local text and multimodal embeddings (Gemini, Cohere, OpenAI, Ollama) | Done |
+| Model download UX with progress, pause/resume, cancel, and manual commands | Done |
 | Cosine similarity search | Done |
 | UMAP visualization with auto-clustering | Done |
+| YOLO object detection and NudeNet NSFW detection controls | Done |
+| Image quality metrics, color metrics, and perceptual hashing | Done |
 | Deep link URL scheme (`cull://`) | Done |
+| MCP server over local stdio/socket plus optional token-authenticated HTTP | Done |
+| MCP-aligned headless CLI slice | Done |
 | Native macOS menu bar (File/Edit/View/Window/Help) | Done |
 | Drag-and-drop from Finder | Done |
 | File type associations (Open With in Finder) | Done |
@@ -55,13 +62,14 @@ Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 | Reveal in Finder | Done |
 | Single-instance with deep link forwarding | Done |
 | Multi-window support | Done |
+| Static Canvas publishing package and local static server | Done |
 | Dark terminal aesthetic | Done |
 
 ### Supported Formats
 
 Currently: **JPEG, PNG, WebP, GIF, BMP, TIFF, ICO**, plus **HEIC/HEIF, SVG, AVIF, JPEG XL, and PSD on macOS via ImageIO**. RAW preview import is available for CR2, CR3, NEF, ARW, DNG, ORF, RAF, and RW2 when the RAW module is enabled.
 
-Still planned: full metadata extraction and non-preview RAW decode for camera formats.
+Remaining RAW work: full metadata extraction and non-preview decode for camera formats.
 
 ### Agent CLI
 
@@ -75,74 +83,59 @@ cull --json export_images --collection_id <id> --output_dir ~/Desktop/export --f
 cull --json call_tool import_folder --params_json '{"folder_path":"/Users/me/renders"}'
 ```
 
-Implemented headless tools: `get_library_stats`, `list_images`, `list_folders`, `list_collections`, `import_folder`, `import_files`, `list_export_presets`, `export_images`.
+Implemented headless tools: `get_library_stats`, `list_images`, `list_folders`, `list_collections`, `import_folder`, `import_files`, `get_embedding_model_download_info`, `download_embedding_model`, `generate_embeddings`, `analyze_image_quality`, `get_image_quality`, `get_quality_count`, `list_export_presets`, `export_images`.
 
 CLI module and output standards live in [docs/agent-cli-standards.md](docs/agent-cli-standards.md).
 
 ## Roadmap
 
-### P0 — Must-have for daily driver
-
-- [x] **File type associations** — CFBundleDocumentTypes so app appears in Finder "Open With"
-- [x] **Drag and drop from Finder** — drop files/folders onto the window to import
-- [x] **Native macOS menu bar** — File > Open, Open Folder, Edit, View, Window, Help
-- [x] **Broad format support** — HEIC, TIFF, BMP, SVG, AVIF, JPEG XL, RAW preview formats
-- [ ] **Model download UX** — progress bar, pause/resume, manual download option
+`bd` is the tracker of record. This README lists only the major remaining product gaps.
 
 ### P1 — Power user features
 
 **OS Integration:**
-- [ ] Quick Look extension (Spacebar preview in Finder)
-- [ ] URL scheme expansion (action verbs: import, export, search, contact-sheet)
+- Quick Look extension (Spacebar preview in Finder)
+- URL scheme expansion beyond current open/import/view parameters: export, search, contact-sheet, resize
 
 **Viewing & Metadata:**
-- [ ] EXIF/IPTC/XMP metadata display panel
-- [ ] Histogram with per-channel RGB and clipping warnings
-- [ ] CLIP text-to-image search
-- [ ] Semantic similarity search (find visually similar images)
-- [ ] AI generation metadata parsing (prompt, seed, model from PNG/EXIF)
+- EXIF/IPTC/XMP metadata display panel
+- Histogram with per-channel RGB and clipping warnings
+- CLIP text-to-image search
+- Semantic similarity search UI for visually similar images
+- Expanded EXIF/XMP generation metadata coverage beyond current C2PA, PNG text, sidecar, and source-detection coverage
 
 **Automation & CLI:**
-- [ ] CLI tool — headless access to import, search, export, detect, rate, convert. Initial MCP-aligned import/export/listing slice is implemented.
-- [ ] MCP server (stdio) — expose all functionality to agents
-- [ ] Batch operations pipeline — composable resize, convert, rename, watermark, export
-- [ ] Contact sheet export — configurable grid with labels, ratings, metadata
+- Full CLI parity for search, detection, rating, conversion, and batch operations
+- Batch operations pipeline: resize, convert, rename, watermark, export
+- Contact sheet export with labels, ratings, and metadata
 
 **AI & Detection:**
-- [ ] YOLO object detection via ONNX Runtime — auto-tagging on import
-- [ ] Florence-2 integration — zero-shot detection + captioning
-- [ ] Multi-model embedding support (Google, Ollama, OpenAI, local ONNX)
+- Automatic YOLO tagging on import
+- Florence-2 integration for zero-shot detection and captioning
 
 **Embedding Explorer:**
-- [ ] Scope to current filter/folder/collection
-- [ ] UMAP in web worker (avoid UI freeze at 10K+ images)
-- [ ] Nearest-neighbor panel with similarity scores
-- [ ] Lasso/rectangle selection to create collections
-- [ ] Clickable clusters with representative thumbnails
-- [ ] Cluster auto-naming
+- Scope projection to current filter/folder/collection
+- Nearest-neighbor panel with similarity scores
+- Lasso/rectangle selection to create collections
+- Clickable clusters with representative thumbnails
+- Cluster auto-naming
 
 **Export:**
-- [ ] Collection export with format conversion and naming templates
-- [ ] WYSIWYG export — capture any view state as PNG/PDF
+- Collection export with format conversion and naming templates
+- WYSIWYG export for arbitrary view state as PNG/PDF
 
 ### P2 — Full platform
 
-- [ ] Services menu integration ("Open in Cull" system-wide)
-- [ ] AppleScript / Apple Events support
-- [ ] Color management (ICC profiles, monitor matching)
-- [ ] Print support with layout options
-- [ ] Global keyboard shortcuts (system-wide hotkeys)
-- [ ] Canvas view — infinite spatial canvas with freeform placement
-- [ ] Lineage view — iteration tree with prompt diffs
-- [ ] InsightFace — face detection and grouping by person
-- [ ] PaddleOCR — text extraction for search
-- [ ] DINOv2 embeddings (alternative to CLIP)
-- [ ] Color palette extraction (k-means dominant colors)
-- [ ] In-app inpainting (select region, type prompt, call API)
-- [ ] Perceptual hashing for near-duplicate detection
-- [ ] Basic image stats on import (aspect ratio, transparency, bit depth)
+- Services menu integration ("Open in Cull" system-wide)
+- AppleScript / Apple Events support
+- Color management (ICC profiles, monitor matching)
+- Print support with layout options
+- Global keyboard shortcuts (system-wide hotkeys)
+- InsightFace face detection and grouping by person
+- PaddleOCR text extraction for search
+- In-app inpainting (select region, type prompt, call API)
 
-## CLI (Planned Full Parity)
+## CLI Full-Parity Target
 
 Every GUI operation will have a CLI equivalent:
 
@@ -158,14 +151,16 @@ find . -name "*.png" | cull pipe --resize 800x0 --format webp
 
 See [docs/cli-and-url-scheme.md](docs/cli-and-url-scheme.md) for the full specification.
 
-## URL Scheme
+## Current URL Scheme
 
 ```
 cull://open?path=/path/to/image.jpg&view=loupe
-cull://import?folder=/path/to/photos&recursive=true
-cull://search?q=sunset+landscape&view=grid
-cull://contact-sheet?folder=./photos&columns=4&output=/tmp/sheet.png
+cull://import?folder=/path/to/photos
+cull://grid?folder=/path/to/photos&size=240
+cull://loupe?image_id=<image-id>&zoom=200
 ```
+
+Search, contact-sheet, and export deep-link verbs are roadmap items.
 
 ## Keyboard Shortcuts
 
@@ -207,8 +202,8 @@ cull://contact-sheet?folder=./photos&columns=4&output=/tmp/sheet.png
 ## Quick Start
 
 ```bash
-git clone https://github.com/glebis/imageview.git
-cd imageview
+git clone https://github.com/glebis/cull.git
+cd cull
 npm install
 npm run tauri dev
 ```

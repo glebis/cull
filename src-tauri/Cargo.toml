@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Local-first desktop image viewer for AI-generated art workflows."
 authors = ["Gleb Kalinin <glebis@gmail.com>"]
 license = "BUSL-1.1"
-repository = "https://github.com/glebis/imageview"
-homepage = "https://github.com/glebis/imageview"
+repository = "https://github.com/glebis/cull"
+homepage = "https://github.com/glebis/cull"
 readme = "../README.md"
 edition = "2021"
 

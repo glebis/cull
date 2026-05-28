@@ -27,7 +27,7 @@ The current Tauri config uses `"bundle.targets": "all"`, creates updater artifac
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/glebis/imageview/releases/latest/download/latest.json"
+        "https://github.com/glebis/cull/releases/latest/download/latest.json"
       ]
     }
   }

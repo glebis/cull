@@ -90,7 +90,7 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 
 | Label | Shortcut | Native ID / Event | Handler | Status |
 |---|---|---|---|---|
-| Cull Help | none | `help` | Opens `https://github.com/glebis/imageview#readme` | Pass |
+| Cull Help | none | `help` | Opens `https://github.com/glebis/cull#readme` | Pass |
 
 ## Tray Menu
 

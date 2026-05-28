@@ -50,7 +50,7 @@
     },
     "updater": {
       "endpoints": [
-        "https://github.com/glebis/imageview/releases/latest/download/latest.json"
+        "https://github.com/glebis/cull/releases/latest/download/latest.json"
       ],
       "pubkey": "RWSQjPypOQXnl9ECxWf3qC91rf0juJzhM++tqHL1SqSxYg9DBfh0U4b7"
     }

@@ -11,7 +11,7 @@ Prerequisites:
 - Rust stable
 
 ```bash
-git clone https://github.com/glebis/imageview.git
+git clone https://github.com/glebis/cull.git
 cd imageview
 npm install
 npm run tauri dev
