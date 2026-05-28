@@ -21,7 +21,7 @@
     const FIELDS: Record<string, FieldMeta> = {
         rating:          { label: 'Rating',       type: 'number',  ops: ['eq','gte','lte','gt','lt'] },
         color_label:     { label: 'Color Label',   type: 'enum',    ops: ['eq','neq'],        enumValues: ['red','yellow','green','blue','purple'] },
-        decision:        { label: 'Decision',      type: 'enum',    ops: ['eq','neq'],        enumValues: ['accepted','rejected','pending'] },
+        decision:        { label: 'Decision',      type: 'enum',    ops: ['eq','neq'],        enumValues: ['accept','reject','undecided'] },
         format:          { label: 'Format',        type: 'string',  ops: ['eq','neq','contains'] },
         width:           { label: 'Width',         type: 'number',  ops: ['eq','gt','gte','lt','lte'] },
         height:          { label: 'Height',        type: 'number',  ops: ['eq','gt','gte','lt','lte'] },

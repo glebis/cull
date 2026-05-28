@@ -37,6 +37,7 @@ import {
 } from './stores';
 import { invalidateImageCache, loadAllImages, loadImagesForCurrentScope } from './image-loading';
 import { addToCollection, createCollection, listCollections, redo, setDecision, setRating, undo } from './api';
+import { withDecision, withRating, type ImageDecision } from './selection-updates';
 
 export type CommandPaletteItemKind = 'command' | 'destination';
 
@@ -231,20 +232,12 @@ async function setFocusedRating(rating: number) {
     invalidateImageCache();
     images.update(all => {
         const next = [...all];
-        const item = { ...next[idx] };
-        item.selection = {
-            image_id: image.image.id,
-            project_id: item.selection?.project_id ?? null,
-            star_rating: rating,
-            color_label: item.selection?.color_label ?? null,
-            decision: item.selection?.decision ?? 'undecided',
-        };
-        next[idx] = item;
+        next[idx] = withRating(next[idx], rating);
         return next;
     });
 }
 
-async function setFocusedDecision(decision: 'accept' | 'reject' | 'undecided') {
+async function setFocusedDecision(decision: ImageDecision) {
     const idx = get(focusedIndex);
     const image = get(images)[idx];
     if (!image) return;
@@ -252,15 +245,7 @@ async function setFocusedDecision(decision: 'accept' | 'reject' | 'undecided') {
     invalidateImageCache();
     images.update(all => {
         const next = [...all];
-        const item = { ...next[idx] };
-        item.selection = {
-            image_id: image.image.id,
-            project_id: item.selection?.project_id ?? null,
-            star_rating: item.selection?.star_rating ?? null,
-            color_label: item.selection?.color_label ?? null,
-            decision,
-        };
-        next[idx] = item;
+        next[idx] = withDecision(next[idx], decision);
         return next;
     });
 }

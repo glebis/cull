@@ -99,7 +99,7 @@ impl ActionManager {
                     "INSERT INTO selections (image_id, project_id, star_rating, decision)
                      VALUES (?1, '__global__', ?2, 'undecided')
                      ON CONFLICT(image_id, project_id)
-                     DO UPDATE SET star_rating = ?2",
+                     DO UPDATE SET star_rating = ?2, decision = COALESCE(decision, 'undecided')",
                     rusqlite::params![image_id, rating],
                 )
                 .map_err(|e| e.to_string())?;

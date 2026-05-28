@@ -31,8 +31,17 @@ fn is_valid_rating(rating: u8) -> bool {
     rating <= 5
 }
 
+fn normalize_decision(decision: &str) -> Option<&'static str> {
+    match decision {
+        "accept" | "selected" => Some("accept"),
+        "reject" | "rejected" => Some("reject"),
+        "undecided" | "none" => Some("undecided"),
+        _ => None,
+    }
+}
+
 fn is_valid_decision(decision: &str) -> bool {
-    matches!(decision, "selected" | "rejected" | "none")
+    normalize_decision(decision).is_some()
 }
 
 fn required_module_for_tool(tool_name: &str) -> Option<&'static str> {
@@ -260,7 +269,7 @@ pub struct SetRatingParams {
 pub struct SetDecisionParams {
     #[schemars(description = "The image ID")]
     pub image_id: String,
-    #[schemars(description = "Decision: 'selected', 'rejected', or 'none'")]
+    #[schemars(description = "Decision: 'accept', 'reject', or 'undecided'. Legacy aliases 'selected', 'rejected', and 'none' are accepted.")]
     pub decision: String,
 }
 
@@ -614,19 +623,19 @@ impl CullMcp {
         }
     }
 
-    #[tool(description = "Set selection decision on an image: 'selected', 'rejected', or 'none'")]
+    #[tool(description = "Set selection decision on an image: 'accept', 'reject', or 'undecided'. Legacy aliases 'selected', 'rejected', and 'none' are accepted.")]
     fn set_decision(&self, Parameters(params): Parameters<SetDecisionParams>) -> String {
-        if !is_valid_decision(&params.decision) {
-            return "Error: Decision must be 'selected', 'rejected', or 'none'".to_string();
-        }
+        let Some(decision) = normalize_decision(&params.decision) else {
+            return "Error: Decision must be 'accept', 'reject', or 'undecided'".to_string();
+        };
         match self.check_image_id_scope(&params.image_id) {
             Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
             Err(e) => return format!("Error: {}", e),
             _ => {}
         }
         let state = self.app_handle.state::<AppState>();
-        match state.db.set_decision(&params.image_id, &params.decision) {
-            Ok(()) => serde_json::json!({"status": "ok", "image_id": params.image_id, "decision": params.decision}).to_string(),
+        match state.db.set_decision(&params.image_id, decision) {
+            Ok(()) => serde_json::json!({"status": "ok", "image_id": params.image_id, "decision": decision}).to_string(),
             Err(e) => format!("Error: {}", e),
         }
     }
@@ -2286,9 +2295,13 @@ mod tests {
 
     #[test]
     fn test_decision_valid_values() {
-        assert!(super::is_valid_decision("selected"));
-        assert!(super::is_valid_decision("rejected"));
-        assert!(super::is_valid_decision("none"));
+        for value in ["accept", "reject", "undecided", "selected", "rejected", "none"] {
+            assert!(
+                super::is_valid_decision(value),
+                "Decision '{}' should be valid",
+                value
+            );
+        }
     }
 
     #[test]
@@ -2296,6 +2309,17 @@ mod tests {
         assert!(!super::is_valid_decision("maybe"));
         assert!(!super::is_valid_decision(""));
         assert!(!super::is_valid_decision("SELECTED"));
+    }
+
+    #[test]
+    fn test_decision_values_normalize_to_database_values() {
+        assert_eq!(super::normalize_decision("accept"), Some("accept"));
+        assert_eq!(super::normalize_decision("selected"), Some("accept"));
+        assert_eq!(super::normalize_decision("reject"), Some("reject"));
+        assert_eq!(super::normalize_decision("rejected"), Some("reject"));
+        assert_eq!(super::normalize_decision("undecided"), Some("undecided"));
+        assert_eq!(super::normalize_decision("none"), Some("undecided"));
+        assert_eq!(super::normalize_decision("maybe"), None);
     }
 
     // --- Pagination clamping (tests production `clamp_limit`) ---

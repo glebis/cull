@@ -34,6 +34,28 @@ pub struct Selection {
     pub decision: String,
 }
 
+impl Selection {
+    pub fn from_nullable_parts(
+        image_id: String,
+        project_id: Option<String>,
+        star_rating: Option<u8>,
+        color_label: Option<String>,
+        decision: Option<String>,
+    ) -> Option<Self> {
+        if star_rating.is_none() && color_label.is_none() && decision.is_none() {
+            return None;
+        }
+
+        Some(Self {
+            image_id,
+            project_id,
+            star_rating,
+            color_label,
+            decision: decision.unwrap_or_else(|| "undecided".to_string()),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageWithFile {
     pub image: Image,

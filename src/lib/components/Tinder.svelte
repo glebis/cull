@@ -7,6 +7,7 @@
     import type { ImageWithFile } from '$lib/api';
     import { parseVoiceCommand, filterByDecision } from '$lib/tinder-utils';
     import { invalidateImageCache } from '$lib/image-loading';
+    import { withDecision, type ImageDecision } from '$lib/selection-updates';
 
     let pairIndex = $state(0);
     let swipeDirection = $state<'left' | 'right' | 'skip' | null>(null);
@@ -39,6 +40,10 @@
         return () => statusHint.set(null);
     });
 
+    function updateImageDecision(imageId: string, decision: ImageDecision) {
+        images.update(all => all.map(img => img.image.id === imageId ? withDecision(img, decision) : img));
+    }
+
     function choose(side: 'left' | 'right' | 'skip') {
         if (animating || done || !leftImage || !rightImage) return;
         swipeDirection = side;
@@ -51,11 +56,15 @@
         if (side === 'left') {
             setDecision(leftId, 'accept', sessionId).catch(console.error);
             setDecision(rightId, 'reject', sessionId).catch(console.error);
+            updateImageDecision(leftId, 'accept');
+            updateImageDecision(rightId, 'reject');
             stats.accepted++;
             stats.rejected++;
         } else if (side === 'right') {
             setDecision(rightId, 'accept', sessionId).catch(console.error);
             setDecision(leftId, 'reject', sessionId).catch(console.error);
+            updateImageDecision(rightId, 'accept');
+            updateImageDecision(leftId, 'reject');
             stats.accepted++;
             stats.rejected++;
         } else {
@@ -118,6 +127,8 @@
         const sessionId = $activeSession?.id ?? null;
         setDecision(last.leftId, 'undecided', sessionId).catch(console.error);
         setDecision(last.rightId, 'undecided', sessionId).catch(console.error);
+        updateImageDecision(last.leftId, 'undecided');
+        updateImageDecision(last.rightId, 'undecided');
         invalidateImageCache();
     }
 

@@ -1122,13 +1122,7 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = decision.map(|d| Selection {
-                image_id: row.get(0).unwrap(),
-                project_id: None,
-                star_rating: star,
-                color_label: color,
-                decision: d,
-            });
+            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -1158,7 +1152,7 @@ impl Database {
             "INSERT INTO selections (image_id, project_id, star_rating, decision)
              VALUES (?1, '__global__', ?2, 'undecided')
              ON CONFLICT(image_id, project_id)
-             DO UPDATE SET star_rating = ?2",
+             DO UPDATE SET star_rating = ?2, decision = COALESCE(decision, 'undecided')",
             params![image_id, rating],
         )?;
         Ok(())
@@ -1224,13 +1218,7 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = decision.map(|d| Selection {
-                image_id: row.get(0).unwrap(),
-                project_id: None,
-                star_rating: star,
-                color_label: color,
-                decision: d,
-            });
+            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -1285,13 +1273,7 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = decision.map(|d| Selection {
-                image_id: row.get(0).unwrap(),
-                project_id: None,
-                star_rating: star,
-                color_label: color,
-                decision: d,
-            });
+            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -1377,13 +1359,7 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = decision.map(|d| Selection {
-                image_id: row.get(0).unwrap(),
-                project_id: None,
-                star_rating: star,
-                color_label: color,
-                decision: d,
-            });
+            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -1432,13 +1408,7 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = decision.map(|d| Selection {
-                image_id: row.get(0).unwrap(),
-                project_id: None,
-                star_rating: star,
-                color_label: color,
-                decision: d,
-            });
+            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -1796,13 +1766,7 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = decision.map(|d| Selection {
-                image_id: row.get(0).unwrap(),
-                project_id: None,
-                star_rating: star,
-                color_label: color,
-                decision: d,
-            });
+            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -2314,13 +2278,7 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = decision.map(|d| Selection {
-                image_id: row.get(0).unwrap(),
-                project_id: None,
-                star_rating: star,
-                color_label: color,
-                decision: d,
-            });
+            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -2608,13 +2566,7 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = decision.map(|d| Selection {
-                image_id: row.get(0).unwrap(),
-                project_id: None,
-                star_rating: star,
-                color_label: color,
-                decision: d,
-            });
+            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -2657,13 +2609,7 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = decision.map(|d| Selection {
-                image_id: row.get(0).unwrap(),
-                project_id: None,
-                star_rating: star,
-                color_label: color,
-                decision: d,
-            });
+            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -2804,13 +2750,7 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = decision.map(|d| Selection {
-                image_id: row.get(0).unwrap(),
-                project_id: None,
-                star_rating: star,
-                color_label: color,
-                decision: d,
-            });
+            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -3022,13 +2962,7 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = decision.map(|d| Selection {
-                image_id: row.get(0).unwrap(),
-                project_id: None,
-                star_rating: star,
-                color_label: color,
-                decision: d,
-            });
+            let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
             Ok(ImageWithFile {
                 image: Image {
                     id: row.get(0)?,
@@ -3674,6 +3608,27 @@ mod tests {
         let results = db.get_images_by_ids(&["img-1"]).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].selection.as_ref().unwrap().star_rating, Some(4));
+    }
+
+    #[test]
+    fn test_get_images_by_ids_includes_rating_when_decision_is_null() {
+        let db = test_db();
+        insert_test_image(&db, "img-1", "hash-1");
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "INSERT INTO selections (image_id, project_id, star_rating, decision)
+                 VALUES (?1, '__global__', 5, NULL)",
+                params!["img-1"],
+            )
+            .unwrap();
+        }
+
+        let results = db.get_images_by_ids(&["img-1"]).unwrap();
+        assert_eq!(results.len(), 1);
+        let selection = results[0].selection.as_ref().unwrap();
+        assert_eq!(selection.star_rating, Some(5));
+        assert_eq!(selection.decision, "undecided");
     }
 
     #[test]

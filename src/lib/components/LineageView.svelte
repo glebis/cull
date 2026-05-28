@@ -177,8 +177,8 @@
                                     alt=""
                                     loading="lazy"
                                 />
-                                {#if img.selection?.decision === 'pick'}
-                                    <div class="badge pick">Pick</div>
+                                {#if img.selection?.decision === 'accept'}
+                                    <div class="badge accept">Accept</div>
                                 {:else if img.selection?.decision === 'reject'}
                                     <div class="badge reject">Reject</div>
                                 {/if}
@@ -227,8 +227,8 @@
                                 alt=""
                                 loading="lazy"
                             />
-                            {#if img.selection?.decision === 'pick'}
-                                <div class="badge pick">Pick</div>
+                            {#if img.selection?.decision === 'accept'}
+                                <div class="badge accept">Accept</div>
                             {:else if img.selection?.decision === 'reject'}
                                 <div class="badge reject">Reject</div>
                             {/if}
@@ -380,8 +380,8 @@
         font-size: 9px;
         font-weight: 600;
     }
-    .badge.pick { background: var(--accent, #8cc63f); color: #1a1a2e; }
-    .badge.reject { background: #e04040; color: #fff; }
+    .badge.accept { background: var(--green); color: var(--bg); }
+    .badge.reject { background: var(--red); color: var(--bg); }
     .stars {
         position: absolute;
         bottom: 4px;

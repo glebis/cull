@@ -219,13 +219,13 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = decision.map(|d| super::models::Selection {
-                image_id: row.get(0).unwrap(),
-                project_id: None,
-                star_rating: star,
-                color_label: color,
-                decision: d,
-            });
+            let selection = super::models::Selection::from_nullable_parts(
+                row.get(0)?,
+                None,
+                star,
+                color,
+                decision,
+            );
             Ok(ImageWithFile {
                 image: super::models::Image {
                     id: row.get(0)?,
@@ -331,13 +331,13 @@ impl Database {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;
-            let selection = decision.map(|d| super::models::Selection {
-                image_id: row.get(0).unwrap(),
-                project_id: None,
-                star_rating: star,
-                color_label: color,
-                decision: d,
-            });
+            let selection = super::models::Selection::from_nullable_parts(
+                row.get(0)?,
+                None,
+                star,
+                color,
+                decision,
+            );
             Ok(ImageWithFile {
                 image: super::models::Image {
                     id: row.get(0)?,

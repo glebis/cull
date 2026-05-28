@@ -7,6 +7,7 @@
     import { clearImageScope, invalidateImageCache, loadImagesForCurrentScope, resetImagePaging } from '$lib/image-loading';
     import { clampFloatingPosition } from '$lib/floating-position';
     import { filterMoveFolders, folderDisplayName, folderParentPath } from '$lib/move-menu-utils';
+    import { withDecision, withRating, type ImageDecision } from '$lib/selection-updates';
 
     interface Props {
         image: ImageWithFile;
@@ -164,14 +165,16 @@
         onclose();
         await setRating(image.image.id, n, $activeSession?.id ?? null);
         invalidateImageCache();
-        if (image.selection) image.selection.star_rating = n;
+        image.selection = withRating(image, n).selection;
+        images.update(all => all.map(item => item.image.id === image.image.id ? withRating(item, n) : item));
     }
 
-    async function handleDecision(d: string) {
+    async function handleDecision(d: ImageDecision) {
         onclose();
         await setDecision(image.image.id, d, $activeSession?.id ?? null);
         invalidateImageCache();
-        if (image.selection) image.selection.decision = d;
+        image.selection = withDecision(image, d).selection;
+        images.update(all => all.map(item => item.image.id === image.image.id ? withDecision(item, d) : item));
     }
 
     async function loadCollections() {

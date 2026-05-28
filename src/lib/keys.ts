@@ -17,6 +17,7 @@ import { showToast } from './stores';
 import { invalidateImageCache, loadImagesForCurrentScope } from './image-loading';
 import { commandForKeyboardEvent, openCommandPalette, recordCommandUse, runCommandPaletteItem } from './command-palette';
 import { recordShortcutUse, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from './shortcut-reminders';
+import { withDecision, withRating, type ImageDecision } from './selection-updates';
 
 let waitingForStar = false;
 
@@ -139,15 +140,7 @@ export async function handleStarRating(n: number, imageIndex?: number) {
         invalidateImageCache();
         images.update(all => {
             const copy = [...all];
-            const item = { ...copy[idx] };
-            item.selection = {
-                image_id: img.image.id,
-                project_id: item.selection?.project_id ?? null,
-                star_rating: n,
-                color_label: item.selection?.color_label ?? null,
-                decision: item.selection?.decision ?? 'undecided',
-            };
-            copy[idx] = item;
+            copy[idx] = withRating(copy[idx], n);
             return copy;
         });
     } catch (e) {
@@ -155,7 +148,7 @@ export async function handleStarRating(n: number, imageIndex?: number) {
     }
 }
 
-export async function handleDecision(decision: string, imageIndex?: number) {
+export async function handleDecision(decision: ImageDecision, imageIndex?: number) {
     const imgs = get(images);
     const idx = imageIndex ?? get(focusedIndex);
     const img = imgs[idx];
@@ -165,15 +158,7 @@ export async function handleDecision(decision: string, imageIndex?: number) {
         invalidateImageCache();
         images.update(all => {
             const copy = [...all];
-            const item = { ...copy[idx] };
-            item.selection = {
-                image_id: img.image.id,
-                project_id: item.selection?.project_id ?? null,
-                star_rating: item.selection?.star_rating ?? null,
-                color_label: item.selection?.color_label ?? null,
-                decision,
-            };
-            copy[idx] = item;
+            copy[idx] = withDecision(copy[idx], decision);
             return copy;
         });
     } catch (e) {
