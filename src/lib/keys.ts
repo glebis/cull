@@ -7,6 +7,7 @@ import {
     showDetectionBoxes, showDetectionInspector, nsfwMode,
     navigateTo, navigateBack, searchOpen, focusedImage, activeSession,
     requestTextInput, requestCollectionTarget, selectionAnchorIndex, resetLoupeTransform,
+    staticPublishingEnabled,
 } from './stores';
 import { computeCompareSwap } from './compare-utils';
 import type { NsfwMode } from './stores';
@@ -19,7 +20,18 @@ import { recordShortcutUse, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from './shortcut-r
 
 let waitingForStar = false;
 
-const VIEW_MODE_CYCLE: ViewMode[] = ['grid', 'loupe', 'compare', 'canvas', 'lineage', 'embeddings', 'export'];
+function viewModeCycle(): ViewMode[] {
+    return [
+        'grid',
+        'loupe',
+        'compare',
+        'canvas',
+        'lineage',
+        'embeddings',
+        ...(get(staticPublishingEnabled) ? ['publish' as ViewMode] : []),
+        'export',
+    ];
+}
 
 const VIEW_MODE_KEYS: Record<string, ViewMode> = {
     '1': 'grid',
@@ -62,11 +74,12 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 function cycleViewMode(direction: 1 | -1) {
     const currentMode = get(viewMode);
-    const currentIndex = VIEW_MODE_CYCLE.indexOf(currentMode);
+    const cycle = viewModeCycle();
+    const currentIndex = cycle.indexOf(currentMode);
     const nextIndex = currentIndex >= 0
-        ? (currentIndex + direction + VIEW_MODE_CYCLE.length) % VIEW_MODE_CYCLE.length
-        : direction === 1 ? 0 : VIEW_MODE_CYCLE.length - 1;
-    navigateTo(VIEW_MODE_CYCLE[nextIndex]);
+        ? (currentIndex + direction + cycle.length) % cycle.length
+        : direction === 1 ? 0 : cycle.length - 1;
+    navigateTo(cycle[nextIndex]);
     recordShortcutUse(VIEW_CYCLE_SHORTCUT_REMINDER_ID);
 }
 

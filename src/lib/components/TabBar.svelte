@@ -1,17 +1,10 @@
 <script lang="ts">
-    import { viewMode, thumbnailSize, windowName, navigateTo, showToast } from '$lib/stores';
+    import { viewMode, thumbnailSize, windowName, navigateTo, showToast, staticPublishingEnabled } from '$lib/stores';
     import type { ViewMode } from '$lib/stores';
     import { maybeShowShortcutReminder, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from '$lib/shortcut-reminders';
+    import { visibleViewTabs } from '$lib/view-tabs';
 
-    const tabs: { id: ViewMode; label: string; key: string; icon: string }[] = [
-        { id: 'grid', label: 'Grid', key: '⌘1', icon: '⊞' },
-        { id: 'loupe', label: 'Loupe', key: '⌘2', icon: '◎' },
-        { id: 'compare', label: 'Compare', key: '⌘3', icon: '◨' },
-        { id: 'canvas', label: 'Canvas', key: '⌘4', icon: '▦' },
-        { id: 'lineage', label: 'Lineage', key: '⌘5', icon: '⎇' },
-        { id: 'embeddings', label: 'Embeddings', key: '⌘6', icon: '⁘' },
-        { id: 'export', label: 'Export', key: '⌘7', icon: '⤓' },
-    ];
+    let tabs = $derived(visibleViewTabs($staticPublishingEnabled));
 
     let size = $state(160);
     thumbnailSize.subscribe(v => size = v);
@@ -47,7 +40,7 @@
                 class:active={$viewMode === tab.id}
                 onclick={() => selectTab(tab.id)}
             >
-                <span class="tab-icon">{tab.icon}</span>{tab.label}<span class="tab-key">{tab.key}</span>
+                <span class="tab-icon">{tab.icon}</span>{tab.label}{#if tab.key}<span class="tab-key">{tab.key}</span>{/if}
             </button>
         {/each}
     </div>

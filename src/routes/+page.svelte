@@ -14,6 +14,7 @@
     import CommandBar from '$lib/components/CommandBar.svelte';
     import CommandPalette from '$lib/components/CommandPalette.svelte';
     import Export from '$lib/components/Export.svelte';
+    import StaticPublishingSettings from '$lib/components/StaticPublishingSettings.svelte';
     import Toast from '$lib/components/Toast.svelte';
     import ImportBanner from '$lib/components/ImportBanner.svelte';
     import LineageView from '$lib/components/LineageView.svelte';
@@ -26,7 +27,7 @@
     import CollectionTargetDialog from '$lib/components/CollectionTargetDialog.svelte';
     import GenerationResultsStrip from '$lib/components/GenerationResultsStrip.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass } from '$lib/stores';
+    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled } from '$lib/stores';
     import { trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
@@ -128,6 +129,7 @@
             });
             applyRestoredViewState(restored);
             await initDeepLink();
+            staticPublishingEnabled.set((await getAppSetting('module_static_publishing')) === 'true');
 
             try {
                 const health = await checkLibraryHealth();
@@ -246,6 +248,10 @@
         <Loupe />
     {:else if $viewMode === 'embeddings'}
         <EmbeddingExplorer />
+    {:else if $viewMode === 'publish' && $staticPublishingEnabled}
+        <div class="publish-view">
+            <StaticPublishingSettings />
+        </div>
     {:else if $viewMode === 'export'}
         <Export />
     {:else if $viewMode === 'lineage'}
@@ -338,6 +344,11 @@
     .placeholder-text {
         font-size: 12px;
         opacity: 0.5;
+    }
+    .publish-view {
+        grid-area: main;
+        overflow-y: auto;
+        background: var(--bg);
     }
     .drop-overlay {
         position: fixed;

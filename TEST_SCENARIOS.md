@@ -293,10 +293,12 @@
 4. Output PNGs / PDF saved to chosen location
 
 ### S42 — Static publishing
-1. Settings → Static Publishing tab
-2. Configure output options (thumbnails, web, full)
-3. Export → generates portable web gallery
-4. Optional: start local HTTP server to preview
+1. Settings → Modules → enable Static Publishing
+2. Publish appears before Export in the top tab bar, command palette, and native View menu
+3. Publish → choose scenario: local preview, client review link, agent handoff, or static host package
+4. Configure site title, description, QR/share URL, related links, search-engine indexing, and image variants
+5. Build Static Site → writes a portable `site/` folder with `index.html`, `robots.txt`, QR, manifest, images, and handoff notes
+6. Optional: start local HTTP server to preview the generated site
 
 ---
 

@@ -17,6 +17,7 @@ import {
     focusedIndex,
     images,
     selectedIds,
+    staticPublishingEnabled,
 } from './stores';
 
 function keyEvent(key: string, modifiers: Partial<KeyboardEvent> = {}): KeyboardEvent {
@@ -49,6 +50,7 @@ describe('command palette helpers', () => {
         collections.set([]);
         collectMode.set(false);
         collectModeTarget.set(null);
+        staticPublishingEnabled.set(false);
     }
 
     it('scores title, category, keyword, and acronym matches', () => {
@@ -157,6 +159,17 @@ describe('command palette helpers', () => {
         expect(getShortcutConflict('Cmd+0', 'view.grid', items, {})).toBe('Actual Size');
         expect(getShortcutConflict('Cmd+7', 'view.grid', items, {})).toBe('Export View');
         expect(findDuplicateCommandHotkeys(items, {})).toEqual([]);
+    });
+
+    it('shows Publish View before Export View only when Static Publishing is enabled', () => {
+        resetCommandContext();
+        expect(getCommandPaletteItems('commands').map(i => i.id)).not.toContain('view.publish');
+
+        staticPublishingEnabled.set(true);
+        const ids = getCommandPaletteItems('commands').map(i => i.id);
+
+        expect(ids).toContain('view.publish');
+        expect(ids.indexOf('view.publish')).toBe(ids.indexOf('view.export') - 1);
     });
 
     it('includes collection workflow commands', () => {

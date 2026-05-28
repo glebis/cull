@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Canvas } from './api';
-import { buildStaticPublishRequestFromSavedCanvas, countSavedCanvasItems } from './static-publishing';
+import { buildStaticPublishRequestFromSavedCanvas, countSavedCanvasItems, parseStaticPublishLinks } from './static-publishing';
 
 function canvas(layoutJson: string): Canvas {
     return {
@@ -47,6 +47,10 @@ describe('static publishing canvas helpers', () => {
             canvasName: ' Shared Gallery ',
             outputDir: ' /tmp/export ',
             shareUrl: ' https://example.test/canvas ',
+            siteTitle: ' Shared Gallery ',
+            siteDescription: ' A compact client review page. ',
+            indexable: false,
+            links: [{ label: 'Project brief', url: 'https://example.test/brief' }],
             includeThumbnails: true,
             includeWeb: false,
             includeFull: true,
@@ -63,6 +67,10 @@ describe('static publishing canvas helpers', () => {
         }]);
         expect(request.output_dir).toBe('/tmp/export');
         expect(request.share_url).toBe('https://example.test/canvas');
+        expect(request.site_title).toBe('Shared Gallery');
+        expect(request.site_description).toBe('A compact client review page.');
+        expect(request.indexable).toBe(false);
+        expect(request.links).toEqual([{ label: 'Project brief', url: 'https://example.test/brief' }]);
         expect(request.include_thumbnails).toBe(true);
         expect(request.include_web).toBe(false);
         expect(request.include_full).toBe(true);
@@ -89,5 +97,17 @@ describe('static publishing canvas helpers', () => {
 
         expect(countSavedCanvasItems(canvas(layoutJson))).toBe(2);
         expect(countSavedCanvasItems(null)).toBe(0);
+    });
+
+    it('parses one custom static site link per line', () => {
+        expect(parseStaticPublishLinks([
+            'Project brief | https://example.test/brief',
+            'Moodboard: https://example.test/moodboard',
+            'broken line',
+            ' | https://example.test/no-label',
+        ].join('\n'))).toEqual([
+            { label: 'Project brief', url: 'https://example.test/brief' },
+            { label: 'Moodboard', url: 'https://example.test/moodboard' },
+        ]);
     });
 });

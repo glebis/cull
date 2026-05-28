@@ -5,6 +5,8 @@ use tauri::{AppHandle, Emitter, Manager, Wry};
 
 const CULL_HELP_BOOK_ID: &str = "com.glebkalinin.cull.help";
 const CULL_HELP_PAGE: &str = "index.html";
+const VIEW_PUBLISH_ID: &str = "view_publish";
+const VIEW_EXPORT_ID: &str = "view_export";
 
 pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let menu = Menu::new(app)?;
@@ -264,10 +266,14 @@ pub struct MenuStatePayload {
     sidebar_visible: bool,
     has_focused_image: bool,
     selected_count: usize,
+    #[serde(default)]
+    static_publishing_enabled: bool,
 }
 
 #[tauri::command]
 pub async fn update_menu_state(app: AppHandle, state: MenuStatePayload) -> Result<(), String> {
+    sync_static_publishing_menu_item(&app, state.static_publishing_enabled)?;
+
     for (id, mode) in [
         ("view_grid", "grid"),
         ("view_loupe", "loupe"),
@@ -275,7 +281,8 @@ pub async fn update_menu_state(app: AppHandle, state: MenuStatePayload) -> Resul
         ("view_canvas", "canvas"),
         ("view_lineage", "lineage"),
         ("view_embeddings", "embeddings"),
-        ("view_export", "export"),
+        (VIEW_PUBLISH_ID, "publish"),
+        (VIEW_EXPORT_ID, "export"),
     ] {
         set_menu_item_checked(&app, id, state.view_mode == mode)?;
     }
@@ -295,6 +302,19 @@ pub async fn update_menu_state(app: AppHandle, state: MenuStatePayload) -> Resul
         set_menu_item_enabled(&app, id, state.has_focused_image)?;
     }
 
+    Ok(())
+}
+
+fn sync_static_publishing_menu_item(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    let exists = find_menu_item(app, VIEW_PUBLISH_ID)?.is_some();
+    if enabled && !exists {
+        let item =
+            CheckMenuItem::with_id(app, VIEW_PUBLISH_ID, "Publish", true, false, None::<&str>)
+                .map_err(|e| format!("Failed to create Publish menu item: {}", e))?;
+        insert_menu_item_before(app, VIEW_EXPORT_ID, &item)?;
+    } else if !enabled && exists {
+        remove_menu_item(app, VIEW_PUBLISH_ID)?;
+    }
     Ok(())
 }
 
@@ -348,6 +368,81 @@ fn find_menu_item_in_items(
     Ok(None)
 }
 
+fn insert_menu_item_before(
+    app: &AppHandle,
+    target_id: &str,
+    item: &dyn tauri::menu::IsMenuItem<Wry>,
+) -> Result<(), String> {
+    let Some(menu) = app.menu() else {
+        return Ok(());
+    };
+    if insert_menu_item_before_in_items(menu.items().map_err(|e| e.to_string())?, target_id, item)?
+    {
+        Ok(())
+    } else {
+        Err(format!(
+            "Could not find menu item '{}' to insert before",
+            target_id
+        ))
+    }
+}
+
+fn insert_menu_item_before_in_items(
+    items: Vec<MenuItemKind<Wry>>,
+    target_id: &str,
+    item: &dyn tauri::menu::IsMenuItem<Wry>,
+) -> Result<bool, String> {
+    for menu_item in items {
+        if let MenuItemKind::Submenu(submenu) = &menu_item {
+            let children = submenu.items().map_err(|e| e.to_string())?;
+            for (idx, child) in children.iter().enumerate() {
+                if child.id().0.as_str() == target_id {
+                    submenu
+                        .insert(item, idx)
+                        .map_err(|e| format!("Failed to insert menu item: {}", e))?;
+                    return Ok(true);
+                }
+            }
+            if insert_menu_item_before_in_items(children, target_id, item)? {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn remove_menu_item(app: &AppHandle, id: &str) -> Result<(), String> {
+    let Some(menu) = app.menu() else {
+        return Ok(());
+    };
+    remove_menu_item_from_items(menu.items().map_err(|e| e.to_string())?, id).map(|_| ())
+}
+
+fn remove_menu_item_from_items(items: Vec<MenuItemKind<Wry>>, id: &str) -> Result<bool, String> {
+    for menu_item in items {
+        if let MenuItemKind::Submenu(submenu) = &menu_item {
+            let children = submenu.items().map_err(|e| e.to_string())?;
+            for child in &children {
+                if child.id().0.as_str() == id {
+                    match child {
+                        MenuItemKind::MenuItem(item) => submenu.remove(item),
+                        MenuItemKind::Check(item) => submenu.remove(item),
+                        MenuItemKind::Icon(item) => submenu.remove(item),
+                        MenuItemKind::Submenu(item) => submenu.remove(item),
+                        MenuItemKind::Predefined(item) => submenu.remove(item),
+                    }
+                    .map_err(|e| format!("Failed to remove menu item '{}': {}", id, e))?;
+                    return Ok(true);
+                }
+            }
+            if remove_menu_item_from_items(children, id)? {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
     let id = event.id().0.as_str();
     match id {
@@ -355,8 +450,8 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
         "about" | "open_file" | "open_folder" | "settings" | "undo" | "redo" | "deselect_all"
         | "image_share" | "image_open_default" | "image_open_with" | "image_reveal"
         | "image_rename" | "image_move_to" | "image_trash" | "view_grid" | "view_compare"
-        | "view_loupe" | "view_canvas" | "view_lineage" | "view_embeddings" | "view_export"
-        | "toggle_sidebar" | "zoom_in" | "zoom_out" | "actual_size" => {
+        | "view_loupe" | "view_canvas" | "view_lineage" | "view_embeddings" | "view_publish"
+        | "view_export" | "toggle_sidebar" | "zoom_in" | "zoom_out" | "actual_size" => {
             let _ = app.emit("menu-action", id);
         }
         _ => {}

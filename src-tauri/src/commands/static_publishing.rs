@@ -38,6 +38,12 @@ pub struct StaticPublishCanvasItem {
     pub hidden: Option<bool>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct StaticPublishLink {
+    pub label: String,
+    pub url: String,
+}
+
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct StaticPublishRequest {
     pub canvas_name: String,
@@ -45,6 +51,14 @@ pub struct StaticPublishRequest {
     pub layout_json: Option<String>,
     pub output_dir: Option<String>,
     pub share_url: Option<String>,
+    #[serde(default)]
+    pub site_title: Option<String>,
+    #[serde(default)]
+    pub site_description: Option<String>,
+    #[serde(default)]
+    pub indexable: bool,
+    #[serde(default)]
+    pub links: Vec<StaticPublishLink>,
     pub include_thumbnails: bool,
     pub include_web: bool,
     pub include_full: bool,
@@ -55,6 +69,14 @@ pub struct StaticPublishCanvasRequest {
     pub canvas_id: String,
     pub output_dir: Option<String>,
     pub share_url: Option<String>,
+    #[serde(default)]
+    pub site_title: Option<String>,
+    #[serde(default)]
+    pub site_description: Option<String>,
+    #[serde(default)]
+    pub indexable: bool,
+    #[serde(default)]
+    pub links: Vec<StaticPublishLink>,
     pub include_thumbnails: bool,
     pub include_web: bool,
     pub include_full: bool,
@@ -157,6 +179,10 @@ pub fn export_static_publish_canvas_inner(
             layout_json: Some(layout_json),
             output_dir: request.output_dir,
             share_url: request.share_url,
+            site_title: request.site_title.or_else(|| Some(canvas.name.clone())),
+            site_description: request.site_description,
+            indexable: request.indexable,
+            links: request.links,
             include_thumbnails: request.include_thumbnails,
             include_web: request.include_web,
             include_full: request.include_full,
@@ -275,6 +301,11 @@ fn export_static_publish_package_with_canvas_inner(
     let access_phrase = generate_access_phrase();
     let qr_svg_path = site_dir.join("qr.svg");
     write_qr_svg(&qr_svg_path, &share_url)?;
+    let site_title = normalize_optional_text(request.site_title.as_deref())
+        .or_else(|| normalize_optional_text(Some(&request.canvas_name)))
+        .unwrap_or_else(|| "Cull Canvas".to_string());
+    let site_description = normalize_optional_text(request.site_description.as_deref());
+    let site_links = validate_site_links(&request.links)?;
 
     let layout: Value = request
         .layout_json
@@ -312,6 +343,12 @@ fn export_static_publish_package_with_canvas_inner(
             "access_phrase": access_phrase,
             "access_note": "Use this phrase for tunnel, reverse proxy, or host-level access control. The static package itself is read-only and does not enforce server-side auth."
         },
+        "site": {
+            "title": site_title,
+            "description": site_description,
+            "indexable": request.indexable,
+            "links": site_links,
+        },
         "variants": {
             "thumb": request.include_thumbnails,
             "web": request.include_web,
@@ -326,8 +363,9 @@ fn export_static_publish_package_with_canvas_inner(
 
     let manifest_path = data_dir.join("canvas.json");
     write_json(&manifest_path, &manifest)?;
-    fs::write(site_dir.join("index.html"), render_index_html())
+    fs::write(site_dir.join("index.html"), render_index_html(&manifest))
         .map_err(|e| format!("Failed to write index.html: {}", e))?;
+    write_robots_txt(&site_dir, request.indexable)?;
     let instructions_path = instructions_dir.join("CLAUDE.md");
     fs::write(
         &instructions_path,
@@ -948,6 +986,35 @@ fn write_qr_svg(path: &Path, target: &str) -> Result<(), String> {
     fs::write(path, image).map_err(|e| format!("Failed to write QR code: {}", e))
 }
 
+fn write_robots_txt(site_dir: &Path, indexable: bool) -> Result<(), String> {
+    let body = if indexable {
+        "User-agent: *\nAllow: /\n"
+    } else {
+        "User-agent: *\nDisallow: /\n"
+    };
+    fs::write(site_dir.join("robots.txt"), body)
+        .map_err(|e| format!("Failed to write robots.txt: {}", e))
+}
+
+fn normalize_optional_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(|text| text.chars().take(300).collect())
+}
+
+fn validate_site_links(links: &[StaticPublishLink]) -> Result<Vec<StaticPublishLink>, String> {
+    let mut normalized = Vec::new();
+    for link in links.iter().take(12) {
+        let Some(label) = normalize_optional_text(Some(&link.label)) else {
+            continue;
+        };
+        let url = validate_share_url(&link.url)?;
+        normalized.push(StaticPublishLink { label, url });
+    }
+    Ok(normalized)
+}
+
 fn validate_share_url(url: &str) -> Result<String, String> {
     let trimmed = url.trim();
     if trimmed.is_empty() {
@@ -999,6 +1066,15 @@ fn sanitize_ext(ext: &str) -> String {
     }
 }
 
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
 fn slugify(value: &str) -> String {
     let mut slug = String::new();
     let mut last_dash = false;
@@ -1019,20 +1095,51 @@ fn slugify(value: &str) -> String {
     }
 }
 
-fn render_index_html() -> &'static str {
-    r##"<!doctype html>
+fn render_index_html(manifest: &Value) -> String {
+    let title = manifest["site"]["title"]
+        .as_str()
+        .or_else(|| manifest["canvas_name"].as_str())
+        .unwrap_or("Cull Canvas");
+    let description = manifest["site"]["description"].as_str().unwrap_or("");
+    let indexable = manifest["site"]["indexable"].as_bool().unwrap_or(false);
+    let robots = if indexable {
+        "index,follow"
+    } else {
+        "noindex,nofollow"
+    };
+    let description_meta = if description.trim().is_empty() {
+        String::new()
+    } else {
+        format!(
+            r#"  <meta name="description" content="{}" />
+"#,
+            html_escape(description)
+        )
+    };
+
+    let html = r##"<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Cull Canvas</title>
+  <title>__TITLE__</title>
+__DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
   <style>
     :root { color-scheme: dark; --bg: #08080c; --surface: #0c0c12; --border: #1a1a2e; --text: #e0e0e0; --muted: #7a7fa0; --blue: #7aa2f7; --green: #9ece6a; }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    a { color: var(--blue); }
+    .skip-link { position: absolute; left: 12px; top: -48px; z-index: 10; padding: 8px 10px; background: var(--green); color: var(--bg); border-radius: 4px; }
+    .skip-link:focus { top: 12px; }
     header { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 14px 18px; background: color-mix(in srgb, var(--bg) 92%, transparent); border-bottom: 1px solid var(--border); backdrop-filter: blur(18px); }
     h1 { margin: 0; font-size: 15px; font-weight: 700; }
+    h2 { margin: 0; font-size: 13px; }
     .meta { color: var(--muted); font-size: 12px; }
+    .description { margin: 4px 0 0; max-width: 70ch; color: var(--muted); font-size: 12px; }
+    .site-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .site-links:empty { display: none; }
+    .site-links a { border: 1px solid var(--border); border-radius: 4px; padding: 3px 7px; text-decoration: none; }
+    .site-links a:focus-visible, .card:focus-visible, .snapshot-links a:focus-visible, .share a:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
     .share { display: flex; gap: 10px; align-items: center; min-width: 0; }
     .share img { width: 56px; height: 56px; border-radius: 4px; background: white; }
     .share a { color: var(--blue); overflow-wrap: anywhere; }
@@ -1041,25 +1148,32 @@ fn render_index_html() -> &'static str {
     .snapshot-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border); }
     .snapshot-links { display: flex; gap: 10px; }
     .snapshot img { display: block; width: 100%; height: auto; background: #ffffff; }
+    .gallery-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 10px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
-    figure { margin: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); overflow: hidden; }
+    .card { display: block; color: inherit; text-decoration: none; border-radius: 4px; }
+    figure { margin: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); overflow: hidden; height: 100%; }
     figure img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: #050508; }
     figcaption { display: grid; gap: 3px; padding: 8px; min-height: 56px; color: var(--muted); font-size: 11px; }
     figcaption strong { color: var(--text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .prompt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .empty { color: var(--muted); padding: 32px 0; }
     @media (max-width: 640px) {
       header { align-items: flex-start; flex-direction: column; }
       .share img { width: 48px; height: 48px; }
       main { padding: 12px; }
-      .grid { grid-template-columns: repeat(auto-fill, minmax(138px, 1fr)); gap: 8px; }
+      .gallery-head { flex-direction: column; gap: 4px; }
+      .grid { grid-template-columns: 1fr; gap: 8px; }
     }
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#gallery">Skip to gallery</a>
   <header>
     <div>
       <h1 id="title">Cull Canvas</h1>
+      <p class="description" id="description" hidden></p>
       <div class="meta" id="summary"></div>
+      <nav class="site-links" id="site-links" aria-label="Related links"></nav>
     </div>
     <div class="share">
       <img id="qr" alt="QR code" src="qr.svg" />
@@ -1077,14 +1191,23 @@ fn render_index_html() -> &'static str {
       </div>
       <img id="snapshot-image" alt="Canvas snapshot" />
     </section>
-    <div id="grid" class="grid"></div>
+    <section id="gallery" aria-labelledby="gallery-title">
+      <div class="gallery-head">
+        <h2 id="gallery-title">Images</h2>
+        <div class="meta" id="gallery-summary" role="status"></div>
+      </div>
+      <div id="grid" class="grid"></div>
+    </section>
     <p id="empty" class="empty" hidden>No images in this package.</p>
   </main>
   <script>
     const grid = document.getElementById('grid');
     const empty = document.getElementById('empty');
     const title = document.getElementById('title');
+    const description = document.getElementById('description');
     const summary = document.getElementById('summary');
+    const gallerySummary = document.getElementById('gallery-summary');
+    const siteLinks = document.getElementById('site-links');
     const shareUrl = document.getElementById('share-url');
     const snapshot = document.getElementById('snapshot');
     const snapshotImage = document.getElementById('snapshot-image');
@@ -1095,21 +1218,43 @@ fn render_index_html() -> &'static str {
       .then(response => response.json())
       .then(data => {
         const images = data.images || [];
-        title.textContent = data.canvas_name || 'Cull Canvas';
-        summary.textContent = `${images.length} images · ${new Date(data.generated_at).toLocaleString()}`;
+        const site = data.site || {};
+        const pageTitle = site.title || data.canvas_name || 'Cull Canvas';
+        title.textContent = pageTitle;
+        document.title = pageTitle;
+        if (site.description) {
+          description.hidden = false;
+          description.textContent = site.description;
+        }
+        const generated = new Date(data.generated_at).toLocaleString();
+        summary.textContent = `${images.length} images · Published ${generated}`;
+        gallerySummary.textContent = `${images.length} image${images.length === 1 ? '' : 's'}`;
         shareUrl.textContent = data.share?.url || window.location.href;
         shareUrl.href = data.share?.url || window.location.href;
+        for (const link of site.links || []) {
+          if (!link.label || !link.url) continue;
+          const a = document.createElement('a');
+          a.href = link.url;
+          a.textContent = link.label;
+          a.rel = 'noopener noreferrer';
+          siteLinks.append(a);
+        }
         empty.hidden = images.length !== 0;
         if (data.snapshots?.png) {
           snapshot.hidden = false;
           snapshotImage.src = data.snapshots.png;
+          snapshotImage.alt = `${pageTitle} canvas snapshot`;
           snapshotPng.href = data.snapshots.png;
           snapshotPdf.href = data.snapshots.pdf || data.snapshots.png;
         }
 
         for (const item of images) {
+          const href = item.files?.full || item.files?.web || item.files?.thumb;
           const src = item.files?.web || item.files?.thumb || item.files?.full;
           if (!src) continue;
+          const card = document.createElement('a');
+          card.className = 'card';
+          card.href = href || src;
           const fig = document.createElement('figure');
           const img = document.createElement('img');
           img.loading = 'lazy';
@@ -1119,11 +1264,21 @@ fn render_index_html() -> &'static str {
           const name = document.createElement('strong');
           name.textContent = item.filename || item.id;
           const details = document.createElement('span');
-          const rating = item.rating ? `${item.rating} stars` : 'unrated';
-          details.textContent = `${item.width}x${item.height} · ${rating}`;
+          const meta = [];
+          if (Number.isFinite(item.width) && Number.isFinite(item.height)) meta.push(`${item.width}x${item.height}`);
+          if (Number.isFinite(item.rating)) meta.push(`${item.rating} stars`);
+          if (item.source_label) meta.push(item.source_label);
+          details.textContent = meta.join(' · ') || 'Image';
           cap.append(name, details);
+          if (item.ai_prompt) {
+            const prompt = document.createElement('span');
+            prompt.className = 'prompt';
+            prompt.textContent = item.ai_prompt;
+            cap.append(prompt);
+          }
           fig.append(img, cap);
-          grid.append(fig);
+          card.append(fig);
+          grid.append(card);
         }
       })
       .catch(error => {
@@ -1133,7 +1288,10 @@ fn render_index_html() -> &'static str {
   </script>
 </body>
 </html>
-"##
+"##;
+    html.replace("__TITLE__", &html_escape(title))
+        .replace("__DESCRIPTION_META__", &description_meta)
+        .replace("__ROBOTS__", robots)
 }
 
 fn render_claude_handoff(
@@ -1237,6 +1395,10 @@ mod tests {
             layout_json: None,
             output_dir: None,
             share_url: None,
+            site_title: None,
+            site_description: None,
+            indexable: false,
+            links: Vec::new(),
             include_thumbnails: true,
             include_web: false,
             include_full: false,
@@ -1274,6 +1436,10 @@ mod tests {
                 layout_json: Some(r#"{"type":"test_canvas"}"#.to_string()),
                 output_dir: Some(output_dir.to_string_lossy().to_string()),
                 share_url: Some("https://example.test/canvas".to_string()),
+                site_title: None,
+                site_description: None,
+                indexable: false,
+                links: Vec::new(),
                 include_thumbnails: true,
                 include_web: true,
                 include_full: false,
@@ -1375,6 +1541,10 @@ mod tests {
                 canvas_id: canvas_id.clone(),
                 output_dir: Some(tmp.path().join("exports").to_string_lossy().to_string()),
                 share_url: None,
+                site_title: None,
+                site_description: None,
+                indexable: false,
+                links: Vec::new(),
                 include_thumbnails: true,
                 include_web: false,
                 include_full: false,
@@ -1473,6 +1643,10 @@ mod tests {
                 canvas_id,
                 output_dir: Some(tmp.path().join("exports").to_string_lossy().to_string()),
                 share_url: None,
+                site_title: None,
+                site_description: None,
+                indexable: false,
+                links: Vec::new(),
                 include_thumbnails: true,
                 include_web: false,
                 include_full: false,
@@ -1567,6 +1741,10 @@ mod tests {
                 canvas_id,
                 output_dir: Some(tmp.path().join("exports").to_string_lossy().to_string()),
                 share_url: None,
+                site_title: None,
+                site_description: None,
+                indexable: false,
+                links: Vec::new(),
                 include_thumbnails: true,
                 include_web: false,
                 include_full: false,
@@ -1646,6 +1824,74 @@ mod tests {
     fn validate_share_url_rejects_empty() {
         let result = validate_share_url("  ");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn export_writes_site_customization_and_robots_policy() {
+        let (state, tmp) = test_state();
+        state.db.set_setting(MODULE_KEY, "true").unwrap();
+
+        let source_path = tmp.path().join("source.png");
+        write_test_image(&source_path);
+        let image_id =
+            crate::db_core::import::import_file(&state.db, &source_path, &state.app_data_dir)
+                .unwrap()
+                .unwrap();
+
+        let result = export_static_publish_package_inner(
+            &state,
+            StaticPublishRequest {
+                canvas_name: "Private Sketches".to_string(),
+                items: vec![StaticPublishCanvasItem {
+                    image_id,
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    hidden: None,
+                }],
+                layout_json: None,
+                output_dir: Some(tmp.path().join("exports").to_string_lossy().to_string()),
+                share_url: Some("https://example.test/private".to_string()),
+                site_title: Some("Client Review".to_string()),
+                site_description: Some("Shortlisted image directions.".to_string()),
+                indexable: false,
+                links: vec![StaticPublishLink {
+                    label: "Project brief".to_string(),
+                    url: "https://example.test/brief".to_string(),
+                }],
+                include_thumbnails: true,
+                include_web: false,
+                include_full: false,
+            },
+        )
+        .unwrap();
+
+        let site_dir = PathBuf::from(&result.site_dir);
+        let manifest: Value = serde_json::from_str(
+            &fs::read_to_string(&result.manifest_path).expect("manifest should be readable"),
+        )
+        .unwrap();
+        assert_eq!(manifest["site"]["title"], "Client Review");
+        assert_eq!(
+            manifest["site"]["description"],
+            "Shortlisted image directions."
+        );
+        assert_eq!(manifest["site"]["indexable"], false);
+        assert_eq!(manifest["site"]["links"][0]["label"], "Project brief");
+        assert_eq!(
+            manifest["site"]["links"][0]["url"],
+            "https://example.test/brief/"
+        );
+
+        let index_html = fs::read_to_string(site_dir.join("index.html")).unwrap();
+        assert!(index_html.contains("<title>Client Review</title>"));
+        assert!(index_html.contains(r#"<meta name="robots" content="noindex,nofollow" />"#));
+        assert!(index_html
+            .contains(r#"<meta name="description" content="Shortlisted image directions." />"#));
+
+        let robots = fs::read_to_string(site_dir.join("robots.txt")).unwrap();
+        assert!(robots.contains("Disallow: /"));
     }
 
     #[test]

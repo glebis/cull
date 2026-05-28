@@ -239,6 +239,24 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
 
   save_export_image: () => '/mock/exported-slide.png',
   assemble_export_pdf: () => '/mock/exported.pdf',
+  export_static_publish_package: () => ({
+    export_dir: '/mock/static-publishing/client-review',
+    site_dir: '/mock/static-publishing/client-review/site',
+    manifest_path: '/mock/static-publishing/client-review/site/data/canvas.json',
+    instructions_path: '/mock/static-publishing/client-review/instructions/CLAUDE.md',
+    qr_svg_path: '/mock/static-publishing/client-review/site/qr.svg',
+    qr_target_url: 'http://localhost:8000/',
+    access_phrase: 'amber-canvas-river',
+    image_count: 4,
+    skipped_count: 0,
+    warnings: [],
+  }),
+  serve_static_publish_package: () => ({
+    url: 'http://127.0.0.1:8000/',
+    host: '127.0.0.1',
+    port: 8000,
+    site_dir: '/mock/static-publishing/client-review/site',
+  }),
 
   check_library_health: () => ({ purged: 0, missing_sources: 0, to_regenerate: [] }),
   regenerate_thumbnails_by_ids: () => 0,

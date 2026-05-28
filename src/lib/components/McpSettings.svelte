@@ -3,11 +3,10 @@
     import { listMcpTokens, createMcpToken, revokeMcpToken, rotateMcpToken, getAppSetting, setAppSetting, applyAppIconVariant, hasApiKey, setApiKey, deleteApiKey, validateApiKey, backfillRawPreviews } from '$lib/api';
     import type { McpToken } from '$lib/api';
     import { APP_ICON_VARIANTS, normalizeAppIconVariant, type AppIconVariantId } from '$lib/app-icons';
-    import { showToast } from '$lib/stores';
+    import { navigateTo, showToast, staticPublishingEnabled, viewMode } from '$lib/stores';
     import PrivacyDashboard from './PrivacyDashboard.svelte';
-    import StaticPublishingSettings from './StaticPublishingSettings.svelte';
 
-    let activeSettingsTab = $state<'general' | 'appearance' | 'privacy' | 'static-publishing'>('general');
+    let activeSettingsTab = $state<'general' | 'appearance' | 'privacy'>('general');
 
     let { onclose }: { onclose: () => void } = $props();
 
@@ -82,6 +81,7 @@
             autoPurge = purgeSetting === 'true';
             moduleRaw = rawSetting === 'true';
             moduleStaticPublishing = staticPublishingSetting === 'true';
+            staticPublishingEnabled.set(moduleStaticPublishing);
             appIconVariant = normalizeAppIconVariant(iconSetting);
             if (cohereEmbeddingSetting) cohereEmbeddingModel = cohereEmbeddingSetting;
             if (openaiEmbeddingSetting) openaiEmbeddingModel = openaiEmbeddingSetting;
@@ -164,9 +164,8 @@
 
     async function toggleModuleStaticPublishing() {
         await setAppSetting('module_static_publishing', moduleStaticPublishing ? 'true' : 'false');
-        if (!moduleStaticPublishing && activeSettingsTab === 'static-publishing') {
-            activeSettingsTab = 'general';
-        }
+        staticPublishingEnabled.set(moduleStaticPublishing);
+        if (!moduleStaticPublishing && $viewMode === 'publish') navigateTo('export');
         showToast(
             moduleStaticPublishing ? 'Static Publishing enabled' : 'Static Publishing disabled',
             { type: moduleStaticPublishing ? 'success' : 'info', duration: 3000 },
@@ -307,9 +306,6 @@
             <button class="settings-tab" class:active={activeSettingsTab === 'general'} onclick={() => activeSettingsTab = 'general'}>General</button>
             <button class="settings-tab" class:active={activeSettingsTab === 'appearance'} onclick={() => activeSettingsTab = 'appearance'}>Appearance</button>
             <button class="settings-tab" class:active={activeSettingsTab === 'privacy'} onclick={() => activeSettingsTab = 'privacy'}>Privacy & Data</button>
-            {#if moduleStaticPublishing}
-                <button class="settings-tab" class:active={activeSettingsTab === 'static-publishing'} onclick={() => activeSettingsTab = 'static-publishing'}>Static Publishing</button>
-            {/if}
         </div>
 
         {#if activeSettingsTab === 'privacy'}
@@ -340,8 +336,6 @@
                     {/each}
                 </div>
             </div>
-        {:else if activeSettingsTab === 'static-publishing'}
-            <StaticPublishingSettings />
         {:else if loading}
             <p class="loading">Loading...</p>
         {:else}

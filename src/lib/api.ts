@@ -177,6 +177,7 @@ export interface MenuStatePayload {
     sidebarVisible: boolean;
     hasFocusedImage: boolean;
     selectedCount: number;
+    staticPublishingEnabled: boolean;
 }
 
 // Smart Collections types
@@ -749,12 +750,21 @@ export interface StaticPublishCanvasItem {
     hidden?: boolean | null;
 }
 
+export interface StaticPublishLink {
+    label: string;
+    url: string;
+}
+
 export interface StaticPublishRequest {
     canvas_name: string;
     items: StaticPublishCanvasItem[];
     layout_json?: string | null;
     output_dir?: string | null;
     share_url?: string | null;
+    site_title?: string | null;
+    site_description?: string | null;
+    indexable?: boolean;
+    links?: StaticPublishLink[];
     include_thumbnails: boolean;
     include_web: boolean;
     include_full: boolean;

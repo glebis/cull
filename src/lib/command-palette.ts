@@ -27,6 +27,7 @@ import {
     folders,
     statusHint,
     resetLoupeTransform,
+    staticPublishingEnabled,
     viewMode,
     zenMode,
     navigateBack,
@@ -100,13 +101,14 @@ const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
     'Cmd+Backspace': 'Delete focused image permanently',
 };
 
-const VIEW_COMMANDS: Array<{ mode: ViewMode; title: string; subtitle: string; shortcut: string }> = [
+const VIEW_COMMANDS: Array<{ mode: ViewMode; title: string; subtitle: string; shortcut?: string; requiresStaticPublishing?: boolean }> = [
     { mode: 'grid', title: 'Grid View', subtitle: 'Browse thumbnails', shortcut: 'Cmd+1' },
     { mode: 'loupe', title: 'Loupe View', subtitle: 'Inspect the focused image', shortcut: 'Cmd+2' },
     { mode: 'compare', title: 'Compare View', subtitle: 'Compare selected or adjacent images', shortcut: 'Cmd+3' },
     { mode: 'canvas', title: 'Canvas View', subtitle: 'Arrange selected images spatially', shortcut: 'Cmd+4' },
     { mode: 'lineage', title: 'Lineage View', subtitle: 'Review related generations', shortcut: 'Cmd+5' },
     { mode: 'embeddings', title: 'Embeddings View', subtitle: 'Explore visual clusters', shortcut: 'Cmd+6' },
+    { mode: 'publish', title: 'Publish View', subtitle: 'Build a static site package', requiresStaticPublishing: true },
     { mode: 'export', title: 'Export View', subtitle: 'Prepare images for publishing', shortcut: 'Cmd+7' },
     { mode: 'tinder', title: 'Tinder View', subtitle: 'Fast accept or reject triage', shortcut: 'Cmd+8' },
 ];
@@ -424,16 +426,18 @@ function commandItems(): CommandPaletteItem[] {
             defaultShortcut: 'Cmd+0',
             run: () => resetLoupeTransform(),
         },
-        ...VIEW_COMMANDS.map(({ mode, title, subtitle, shortcut }): CommandPaletteItem => ({
-            id: `view.${mode}`,
-            title,
-            subtitle: get(viewMode) === mode ? 'Current view' : subtitle,
-            category: 'View',
-            kind: 'command',
-            keywords: [mode, 'tab', 'mode'],
-            defaultShortcut: shortcut,
-            run: () => navigateTo(mode),
-        })),
+        ...VIEW_COMMANDS
+            .filter(({ requiresStaticPublishing }) => !requiresStaticPublishing || get(staticPublishingEnabled))
+            .map(({ mode, title, subtitle, shortcut }): CommandPaletteItem => ({
+                id: `view.${mode}`,
+                title,
+                subtitle: get(viewMode) === mode ? 'Current view' : subtitle,
+                category: 'View',
+                kind: 'command',
+                keywords: [mode, 'tab', 'mode', ...(mode === 'publish' ? ['static', 'site', 'publishing'] : [])],
+                defaultShortcut: shortcut,
+                run: () => navigateTo(mode),
+            })),
         {
             id: 'edit.undo',
             title: 'Undo',

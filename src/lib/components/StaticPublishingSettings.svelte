@@ -2,34 +2,29 @@
     import { getAppSetting, setAppSetting, exportStaticPublishPackage, serveStaticPublishPackage } from '$lib/api';
     import type { StaticPublishResult, StaticPublishServerResult } from '$lib/api';
     import { activeCanvas, activeSession, images, selectedIds, showToast } from '$lib/stores';
-    import { buildStaticPublishRequestFromSavedCanvas, countSavedCanvasItems } from '$lib/static-publishing';
+    import { buildStaticPublishRequestFromSavedCanvas, countSavedCanvasItems, formatStaticPublishLinks, parseStaticPublishLinks } from '$lib/static-publishing';
     import { onMount } from 'svelte';
 
-    type PublishPolicy = 'manual_review' | 'auto_checks' | 'auto_agent' | 'full_auto';
-    type Schedule = 'manual' | 'daily' | 'weekly' | 'monthly' | 'on_canvas_change';
-    type Destination = 'local' | 'vercel_handoff' | 's3';
+    type PublishScenario = 'local_preview' | 'client_review' | 'agent_handoff' | 'static_host';
 
     let loading = $state(true);
     let exporting = $state(false);
-    let canvasName = $state('Current Canvas');
+    let siteTitle = $state('Current Canvas');
+    let siteDescription = $state('');
     let outputDir = $state('');
+    let shareUrl = $state('');
+    let linksText = $state('');
+    let indexable = $state(false);
     let includeThumbnails = $state(true);
     let includeWeb = $state(true);
     let includeFull = $state(false);
     let serverHost = $state('127.0.0.1');
     let serverPort = $state('8000');
-    let publishPolicy = $state<PublishPolicy>('manual_review');
-    let schedule = $state<Schedule>('manual');
-    let destination = $state<Destination>('local');
-    let provider = $state('cloudflare_r2');
-    let endpoint = $state('');
-    let region = $state('');
-    let bucket = $state('');
-    let prefix = $state('canvas');
-    let shareUrl = $state('');
+    let scenario = $state<PublishScenario>('local_preview');
     let lastResult = $state<StaticPublishResult | null>(null);
     let serverResult = $state<StaticPublishServerResult | null>(null);
     let startingServer = $state(false);
+    let parsedLinks = $derived(parseStaticPublishLinks(linksText));
 
     const sourceImages = $derived(
         $selectedIds.size > 0
@@ -51,32 +46,26 @@
             savedThumb,
             savedWeb,
             savedFull,
+            savedTitle,
+            savedDescription,
+            savedLinks,
+            savedIndexable,
             savedServerHost,
             savedServerPort,
-            savedPolicy,
-            savedSchedule,
-            savedDestination,
-            savedProvider,
-            savedEndpoint,
-            savedRegion,
-            savedBucket,
-            savedPrefix,
+            savedScenario,
             savedShareUrl,
         ] = await Promise.all([
             getAppSetting('static_publishing_output_dir'),
             getAppSetting('static_publishing_include_thumb'),
             getAppSetting('static_publishing_include_web'),
             getAppSetting('static_publishing_include_full'),
+            getAppSetting('static_publishing_site_title'),
+            getAppSetting('static_publishing_site_description'),
+            getAppSetting('static_publishing_links'),
+            getAppSetting('static_publishing_indexable'),
             getAppSetting('static_publishing_server_host'),
             getAppSetting('static_publishing_server_port'),
-            getAppSetting('static_publishing_publish_policy'),
-            getAppSetting('static_publishing_schedule'),
-            getAppSetting('static_publishing_destination'),
-            getAppSetting('static_publishing_s3_provider'),
-            getAppSetting('static_publishing_s3_endpoint'),
-            getAppSetting('static_publishing_s3_region'),
-            getAppSetting('static_publishing_s3_bucket'),
-            getAppSetting('static_publishing_s3_prefix'),
+            getAppSetting('static_publishing_scenario'),
             getAppSetting('static_publishing_share_url'),
         ]);
 
@@ -84,18 +73,14 @@
         includeThumbnails = settingIsTrue(savedThumb, true);
         includeWeb = settingIsTrue(savedWeb, true);
         includeFull = settingIsTrue(savedFull, false);
+        siteTitle = savedTitle ?? ($activeCanvas?.name || ($activeSession?.name ? `${$activeSession.name} Canvas` : 'Current Canvas'));
+        siteDescription = savedDescription ?? '';
+        linksText = savedLinks ?? '';
+        indexable = settingIsTrue(savedIndexable, false);
         serverHost = savedServerHost ?? '127.0.0.1';
         serverPort = savedServerPort ?? '8000';
-        publishPolicy = (savedPolicy as PublishPolicy | null) ?? 'manual_review';
-        schedule = (savedSchedule as Schedule | null) ?? 'manual';
-        destination = (savedDestination as Destination | null) ?? 'local';
-        provider = savedProvider ?? 'cloudflare_r2';
-        endpoint = savedEndpoint ?? '';
-        region = savedRegion ?? '';
-        bucket = savedBucket ?? '';
-        prefix = savedPrefix ?? 'canvas';
+        scenario = (savedScenario as PublishScenario | null) ?? 'local_preview';
         shareUrl = savedShareUrl ?? '';
-        canvasName = $activeCanvas?.name || ($activeSession?.name ? `${$activeSession.name} Canvas` : 'Current Canvas');
         loading = false;
     });
 
@@ -107,6 +92,11 @@
         await setAppSetting(key, value ? 'true' : 'false');
     }
 
+    async function saveLinks() {
+        linksText = formatStaticPublishLinks(parsedLinks);
+        await saveSetting('static_publishing_links', linksText);
+    }
+
     async function exportPackage() {
         if (exportSourceCount === 0) return;
         exporting = true;
@@ -116,15 +106,19 @@
                 $activeCanvas
                     ? buildStaticPublishRequestFromSavedCanvas({
                         canvas: $activeCanvas,
-                        canvasName,
+                        canvasName: siteTitle,
                         outputDir,
                         shareUrl,
+                        siteTitle,
+                        siteDescription,
+                        indexable,
+                        links: parsedLinks,
                         includeThumbnails,
                         includeWeb,
                         includeFull,
                     })
                     : {
-                        canvas_name: canvasName.trim() || 'Current Canvas',
+                        canvas_name: siteTitle.trim() || 'Current Canvas',
                         items: sourceImages.map(img => ({ image_id: img.image.id })),
                         layout_json: JSON.stringify({
                             type: 'current_view_snapshot',
@@ -132,6 +126,10 @@
                         }),
                         output_dir: outputDir.trim() || null,
                         share_url: shareUrl.trim() || null,
+                        site_title: siteTitle.trim() || null,
+                        site_description: siteDescription.trim() || null,
+                        indexable,
+                        links: parsedLinks,
                         include_thumbnails: includeThumbnails,
                         include_web: includeWeb,
                         include_full: includeFull,
@@ -184,10 +182,20 @@
     <p class="loading">Loading...</p>
 {:else}
     <div class="section">
-        <div class="section-header">Canvas Package</div>
+        <div class="section-header">Workflow</div>
         <div class="setting-row stacked">
-            <label for="static-canvas-name">Canvas name</label>
-            <input id="static-canvas-name" class="wide-input" bind:value={canvasName} />
+            <label for="static-scenario">Scenario</label>
+            <select
+                id="static-scenario"
+                class="wide-input"
+                bind:value={scenario}
+                onchange={() => saveSetting('static_publishing_scenario', scenario)}
+            >
+                <option value="local_preview">Local preview</option>
+                <option value="client_review">Client review link</option>
+                <option value="agent_handoff">Agent handoff</option>
+                <option value="static_host">Static host package</option>
+            </select>
         </div>
         <div class="setting-row stacked">
             <label for="static-output-dir">Output folder</label>
@@ -198,6 +206,36 @@
                 placeholder="Default: app data / static-publishing / canvas"
                 onblur={() => saveSetting('static_publishing_output_dir', outputDir)}
             />
+        </div>
+        <div class="setting-row">
+            <span>Source</span>
+            <span class="count">{exportSourceLabel} · {exportSourceCount} image{exportSourceCount === 1 ? '' : 's'}</span>
+        </div>
+        <button class="primary-btn" onclick={exportPackage} disabled={exporting || exportSourceCount === 0}>
+            {exporting ? 'Building...' : 'Build Static Site'}
+        </button>
+    </div>
+
+    <div class="section">
+        <div class="section-header">Site</div>
+        <div class="setting-row stacked">
+            <label for="static-site-title">Title</label>
+            <input
+                id="static-site-title"
+                class="wide-input"
+                bind:value={siteTitle}
+                onblur={() => saveSetting('static_publishing_site_title', siteTitle)}
+            />
+        </div>
+        <div class="setting-row stacked">
+            <label for="static-site-description">Description</label>
+            <textarea
+                id="static-site-description"
+                class="wide-input text-area"
+                rows="3"
+                bind:value={siteDescription}
+                onblur={() => saveSetting('static_publishing_site_description', siteDescription)}
+            ></textarea>
         </div>
         <div class="setting-row stacked">
             <label for="static-share-url">Share URL for QR</label>
@@ -210,16 +248,27 @@
             />
         </div>
         <div class="setting-row">
-            <span>Canvas source</span>
-            <span class="count">{exportSourceLabel} · {exportSourceCount} image{exportSourceCount === 1 ? '' : 's'}</span>
+            <span>Search engines</span>
+            <button class="toggle" class:on={indexable} onclick={() => { indexable = !indexable; saveBoolean('static_publishing_indexable', indexable); }}>
+                {indexable ? 'INDEX' : 'NOINDEX'}
+            </button>
         </div>
-        <button class="primary-btn" onclick={exportPackage} disabled={exporting || exportSourceCount === 0}>
-            {exporting ? 'Exporting...' : 'Export Static Site Package'}
-        </button>
+        <div class="setting-row stacked">
+            <label for="static-links">Links</label>
+            <textarea
+                id="static-links"
+                class="wide-input text-area"
+                rows="4"
+                bind:value={linksText}
+                placeholder="Project brief | https://example.com/brief"
+                onblur={saveLinks}
+            ></textarea>
+            <span class="count">{parsedLinks.length} link{parsedLinks.length === 1 ? '' : 's'} included</span>
+        </div>
     </div>
 
     <div class="section">
-        <div class="section-header">Image Variants</div>
+        <div class="section-header">Assets</div>
         <label class="check-row">
             <input type="checkbox" bind:checked={includeThumbnails} onchange={() => saveBoolean('static_publishing_include_thumb', includeThumbnails)} />
             <span>Thumb</span>
@@ -238,7 +287,7 @@
     </div>
 
     <div class="section">
-        <div class="section-header">Local Server</div>
+        <div class="section-header">Local Preview</div>
         <div class="settings-grid">
             <div class="setting-row stacked compact">
                 <label for="static-server-host">Host</label>
@@ -263,86 +312,10 @@
         </div>
     </div>
 
-    <div class="section">
-        <div class="section-header">Automation</div>
-        <div class="setting-row stacked">
-            <label for="static-policy">Publish policy</label>
-            <select
-                id="static-policy"
-                class="wide-input"
-                bind:value={publishPolicy}
-                onchange={() => saveSetting('static_publishing_publish_policy', publishPolicy)}
-            >
-                <option value="manual_review">Manual review</option>
-                <option value="auto_checks">Auto-publish if checks pass</option>
-                <option value="auto_agent">Auto-publish with agent edits</option>
-                <option value="full_auto">Fully automatic</option>
-            </select>
-        </div>
-        <div class="setting-row stacked">
-            <label for="static-schedule">Schedule</label>
-            <select
-                id="static-schedule"
-                class="wide-input"
-                bind:value={schedule}
-                onchange={() => saveSetting('static_publishing_schedule', schedule)}
-            >
-                <option value="manual">Manual</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-                <option value="on_canvas_change">On canvas change</option>
-            </select>
-        </div>
-    </div>
-
-    <div class="section">
-        <div class="section-header">Destination</div>
-        <div class="setting-row stacked">
-            <label for="static-destination">Target</label>
-            <select
-                id="static-destination"
-                class="wide-input"
-                bind:value={destination}
-                onchange={() => saveSetting('static_publishing_destination', destination)}
-            >
-                <option value="local">Local package</option>
-                <option value="vercel_handoff">Vercel handoff</option>
-                <option value="s3">S3-compatible bucket</option>
-            </select>
-        </div>
-        {#if destination === 's3'}
-            <div class="setting-row stacked">
-                <label for="static-provider">Provider profile</label>
-                <select
-                    id="static-provider"
-                    class="wide-input"
-                    bind:value={provider}
-                    onchange={() => saveSetting('static_publishing_s3_provider', provider)}
-                >
-                    <option value="cloudflare_r2">Cloudflare R2</option>
-                    <option value="aws_s3">AWS S3</option>
-                    <option value="scaleway">Scaleway</option>
-                    <option value="ovh">OVHcloud</option>
-                    <option value="hetzner">Hetzner</option>
-                    <option value="exoscale">Exoscale</option>
-                    <option value="ionos">IONOS</option>
-                    <option value="custom">Custom S3</option>
-                </select>
-            </div>
-            <div class="settings-grid">
-                <input class="wide-input" bind:value={endpoint} placeholder="Endpoint" onblur={() => saveSetting('static_publishing_s3_endpoint', endpoint)} />
-                <input class="wide-input" bind:value={region} placeholder="Region" onblur={() => saveSetting('static_publishing_s3_region', region)} />
-                <input class="wide-input" bind:value={bucket} placeholder="Bucket" onblur={() => saveSetting('static_publishing_s3_bucket', bucket)} />
-                <input class="wide-input" bind:value={prefix} placeholder="Path prefix" onblur={() => saveSetting('static_publishing_s3_prefix', prefix)} />
-            </div>
-        {/if}
-    </div>
-
     {#if lastResult}
         <div class="section result-section">
             <div class="section-header">
-                Last Export
+                Last Package
                 <div class="result-actions">
                     <button class="secondary-btn" onclick={startServer} disabled={startingServer}>
                         {startingServer ? 'Starting' : 'Start Server'}
@@ -424,6 +397,11 @@
         color: var(--text-secondary);
         opacity: 0.7;
     }
+    .text-area {
+        min-height: 72px;
+        resize: vertical;
+        line-height: 1.4;
+    }
     .check-row {
         display: grid;
         grid-template-columns: auto 1fr auto;
@@ -475,6 +453,20 @@
     .secondary-btn:disabled {
         opacity: 0.45;
         cursor: not-allowed;
+    }
+    .toggle {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg);
+        color: var(--text-secondary);
+        font-family: var(--font);
+        font-size: 11px;
+        padding: 4px 8px;
+        cursor: pointer;
+    }
+    .toggle.on {
+        border-color: var(--green);
+        color: var(--green);
     }
     .result-actions {
         display: flex;

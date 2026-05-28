@@ -35,6 +35,7 @@ import {
     loupePanY,
     resetLoupeTransform,
     settingsOpen,
+    staticPublishingEnabled,
     aboutOpen,
     navigateTo,
     showToast,
@@ -386,6 +387,9 @@ function handleMenuAction(action: string) {
         case 'view_embeddings':
             navigateTo('embeddings');
             break;
+        case 'view_publish':
+            if (get(staticPublishingEnabled)) navigateTo('publish' as ViewMode);
+            break;
         case 'view_export':
             navigateTo('export' as ViewMode);
             break;
@@ -428,6 +432,7 @@ function queueMenuStateUpdate() {
             sidebarVisible: get(sidebarVisible),
             hasFocusedImage: get(focusedImage) !== null,
             selectedCount: get(selectedIds).size,
+            staticPublishingEnabled: get(staticPublishingEnabled),
         }).catch((e) => {
             console.debug('Failed to update native menu state:', e);
         });
@@ -443,5 +448,6 @@ export async function initMenu() {
     sidebarVisible.subscribe(queueMenuStateUpdate);
     focusedImage.subscribe(queueMenuStateUpdate);
     selectedIds.subscribe(queueMenuStateUpdate);
+    staticPublishingEnabled.subscribe(queueMenuStateUpdate);
     queueMenuStateUpdate();
 }

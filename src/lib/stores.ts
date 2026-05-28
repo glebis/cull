@@ -1,7 +1,7 @@
 import { writable, derived, get, type Writable } from 'svelte/store';
 import type { ImageWithFile, SmartCollection, Session, Canvas } from './api';
 
-export type ViewMode = 'grid' | 'compare' | 'loupe' | 'canvas' | 'lineage' | 'embeddings' | 'export' | 'tinder';
+export type ViewMode = 'grid' | 'compare' | 'loupe' | 'canvas' | 'lineage' | 'embeddings' | 'publish' | 'export' | 'tinder';
 
 export const images = writable<ImageWithFile[]>([]);
 
@@ -164,6 +164,7 @@ export const selectedCount = derived(selectedIds, ($ids) => $ids.size);
 export const statusHint = writable<string | null>(null);
 
 export const sidebarVisible = writable<boolean>(true);
+export const staticPublishingEnabled = writable<boolean>(false);
 
 export const GRID_PRESETS = [
     { name: 'compact', size: 80, gap: 2 },
