@@ -2,6 +2,8 @@
 
 Local-first, keyboard-first review and curation for AI-generated image workflows on macOS.
 
+Official site: [cull.company](https://cull.company/)
+
 Terminal-inspired image viewer for batch review, comparison, curation, iteration, and export of hundreds to tens of thousands of images. Agent integration is built in through MCP, an MCP-aligned headless CLI slice, and the `cull://` URL scheme.
 
 ## What's Different
