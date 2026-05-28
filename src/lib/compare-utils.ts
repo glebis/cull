@@ -33,6 +33,21 @@ export interface SwapResult {
     newSelectedIds: Set<string>;
 }
 
+export interface ComparePresentationFlags {
+    zen: boolean;
+    imageOnly: boolean;
+}
+
+export function nextComparePresentationState(current: ComparePresentationFlags): ComparePresentationFlags {
+    if (!current.zen) {
+        return { zen: true, imageOnly: false };
+    }
+    if (!current.imageOnly) {
+        return { zen: true, imageOnly: true };
+    }
+    return { zen: false, imageOnly: false };
+}
+
 export function computeCompareSwap(
     imageIds: string[],
     selectedIds: Set<string>,

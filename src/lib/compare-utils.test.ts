@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { resolveComparePair, ratingStars, decisionLabel, computeCompareSwap } from './compare-utils';
+import {
+    resolveComparePair,
+    ratingStars,
+    decisionLabel,
+    computeCompareSwap,
+    nextComparePresentationState,
+} from './compare-utils';
 import type { ImageWithFile } from './api';
 
 function makeImage(id: string, overrides?: { star_rating?: number | null; decision?: string }): ImageWithFile {
@@ -170,5 +176,29 @@ describe('computeCompareSwap', () => {
     it('returns null for fewer than 2 images', () => {
         expect(computeCompareSwap(['a'], new Set(), 0, 0, 1)).toBeNull();
         expect(computeCompareSwap([], new Set(), 0, 0, 1)).toBeNull();
+    });
+});
+
+describe('nextComparePresentationState', () => {
+    it('cycles normal compare to existing zen, then image-only zen, then back to normal', () => {
+        expect(nextComparePresentationState({ zen: false, imageOnly: false })).toEqual({
+            zen: true,
+            imageOnly: false,
+        });
+        expect(nextComparePresentationState({ zen: true, imageOnly: false })).toEqual({
+            zen: true,
+            imageOnly: true,
+        });
+        expect(nextComparePresentationState({ zen: true, imageOnly: true })).toEqual({
+            zen: false,
+            imageOnly: false,
+        });
+    });
+
+    it('normalizes stale image-only state when global zen is already off', () => {
+        expect(nextComparePresentationState({ zen: false, imageOnly: true })).toEqual({
+            zen: true,
+            imageOnly: false,
+        });
     });
 });

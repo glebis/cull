@@ -1,6 +1,6 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
-    import { images, selectedIds, focusedIndex, compareActiveSide } from '$lib/stores';
+    import { images, selectedIds, focusedIndex, compareActiveSide, compareImageOnly, zenMode } from '$lib/stores';
     import type { ImageWithFile } from '$lib/api';
     import { isRawFormat } from '$lib/api';
     import ContextMenu from './ContextMenu.svelte';
@@ -34,6 +34,7 @@
 
     let leftName = $derived(leftImage?.path.split('/').pop() ?? '');
     let rightName = $derived(rightImage?.path.split('/').pop() ?? '');
+    let imageOnly = $derived($zenMode && $compareImageOnly);
 
     function ratingStars(img: ImageWithFile | null): number {
         return img?.selection?.star_rating ?? 0;
@@ -52,7 +53,7 @@
     }
 </script>
 
-<div class="compare-container">
+<div class="compare-container" class:images-only={imageOnly}>
     <div
         class="panel"
         class:active={$compareActiveSide === 0}
@@ -63,24 +64,30 @@
         onkeydown={() => {}}
     >
         {#if leftImage}
-            <div class="label">{leftName}</div>
+            {#if !imageOnly}
+                <div class="label">{leftName}</div>
+            {/if}
             <div class="img-wrap">
                 <img src={leftSrc} alt={leftName} draggable="false" />
             </div>
-            <div class="meta">
-                {#if ratingStars(leftImage) > 0}
-                    <span class="rating">
-                        {#each Array(ratingStars(leftImage)) as _}
-                            <span class="star">&#9733;</span>
-                        {/each}
+            {#if !imageOnly}
+                <div class="meta">
+                    {#if ratingStars(leftImage) > 0}
+                        <span class="rating">
+                            {#each Array(ratingStars(leftImage)) as _}
+                                <span class="star">&#9733;</span>
+                            {/each}
+                        </span>
+                    {/if}
+                    <span class="decision" class:accept={decisionLabel(leftImage) === 'accept'} class:reject={decisionLabel(leftImage) === 'reject'}>
+                        {decisionLabel(leftImage)}
                     </span>
-                {/if}
-                <span class="decision" class:accept={decisionLabel(leftImage) === 'accept'} class:reject={decisionLabel(leftImage) === 'reject'}>
-                    {decisionLabel(leftImage)}
-                </span>
-            </div>
+                </div>
+            {/if}
         {:else}
-            <div class="empty-panel">No image</div>
+            {#if !imageOnly}
+                <div class="empty-panel">No image</div>
+            {/if}
         {/if}
     </div>
 
@@ -96,24 +103,30 @@
         onkeydown={() => {}}
     >
         {#if rightImage}
-            <div class="label">{rightName}</div>
+            {#if !imageOnly}
+                <div class="label">{rightName}</div>
+            {/if}
             <div class="img-wrap">
                 <img src={rightSrc} alt={rightName} draggable="false" />
             </div>
-            <div class="meta">
-                {#if ratingStars(rightImage) > 0}
-                    <span class="rating">
-                        {#each Array(ratingStars(rightImage)) as _}
-                            <span class="star">&#9733;</span>
-                        {/each}
+            {#if !imageOnly}
+                <div class="meta">
+                    {#if ratingStars(rightImage) > 0}
+                        <span class="rating">
+                            {#each Array(ratingStars(rightImage)) as _}
+                                <span class="star">&#9733;</span>
+                            {/each}
+                        </span>
+                    {/if}
+                    <span class="decision" class:accept={decisionLabel(rightImage) === 'accept'} class:reject={decisionLabel(rightImage) === 'reject'}>
+                        {decisionLabel(rightImage)}
                     </span>
-                {/if}
-                <span class="decision" class:accept={decisionLabel(rightImage) === 'accept'} class:reject={decisionLabel(rightImage) === 'reject'}>
-                    {decisionLabel(rightImage)}
-                </span>
-            </div>
+                </div>
+            {/if}
         {:else}
-            <div class="empty-panel">No image</div>
+            {#if !imageOnly}
+                <div class="empty-panel">No image</div>
+            {/if}
         {/if}
     </div>
 
@@ -151,9 +164,23 @@
     .panel.active {
         border-color: var(--blue);
     }
+    .compare-container.images-only {
+        grid-template-columns: minmax(0, 1fr) 0 minmax(0, 1fr);
+    }
+    .compare-container.images-only .panel {
+        padding: 0;
+        border-width: 0;
+    }
+    .compare-container.images-only .panel.active {
+        border-color: transparent;
+    }
     .divider {
         width: 1px;
         background: var(--border);
+    }
+    .compare-container.images-only .divider {
+        width: 0;
+        background: transparent;
     }
     .label {
         font-size: 11px;

@@ -208,6 +208,56 @@ def test_compare_statusbar_does_not_resize_layout(page: Page) -> None:
     assert abs(metrics["leftPanelWidth"] - metrics["rightPanelWidth"]) <= 2, metrics
 
 
+def test_compare_shift_period_cycles_to_image_only(page: Page) -> None:
+    press(page, "Meta+3")
+    wait_mode(page, "compare")
+
+    def metrics() -> dict:
+        return page.evaluate(
+            """() => {
+                const container = document.querySelector('.compare-container');
+                const active = document.querySelector('.compare-container .panel.active');
+                const divider = document.querySelector('.compare-container .divider');
+                const activeStyle = active ? getComputedStyle(active) : null;
+                const dividerStyle = divider ? getComputedStyle(divider) : null;
+                return {
+                    imageOnly: container?.classList.contains('images-only') ?? false,
+                    statusbarCount: document.querySelectorAll('.statusbar').length,
+                    labelCount: document.querySelectorAll('.compare-container .label').length,
+                    metaCount: document.querySelectorAll('.compare-container .meta').length,
+                    activeBorderTopWidth: activeStyle?.borderTopWidth ?? '',
+                    panelPaddingTop: activeStyle?.paddingTop ?? '',
+                    dividerWidth: dividerStyle?.width ?? '',
+                };
+            }"""
+        )
+
+    press(page, "Shift+.")
+    zen = metrics()
+    assert zen["statusbarCount"] == 0, zen
+    assert zen["imageOnly"] is False, zen
+    assert zen["labelCount"] == 2, zen
+    assert zen["metaCount"] == 2, zen
+    assert zen["activeBorderTopWidth"] == "2px", zen
+
+    press(page, "Shift+.")
+    image_only = metrics()
+    assert image_only["statusbarCount"] == 0, image_only
+    assert image_only["imageOnly"] is True, image_only
+    assert image_only["labelCount"] == 0, image_only
+    assert image_only["metaCount"] == 0, image_only
+    assert image_only["activeBorderTopWidth"] == "0px", image_only
+    assert image_only["panelPaddingTop"] == "0px", image_only
+    assert image_only["dividerWidth"] == "0px", image_only
+
+    press(page, "Shift+.")
+    wait_mode(page, "compare")
+    normal = metrics()
+    assert normal["imageOnly"] is False, normal
+    assert normal["labelCount"] == 2, normal
+    assert normal["metaCount"] == 2, normal
+
+
 def test_grid_navigation(page: Page) -> None:
     press(page, "Meta+1")
     wait_mode(page, "grid")
@@ -906,6 +956,7 @@ def main() -> int:
         wait_for_app(page)
         smoke.step("S01 view switching", lambda: test_view_switching(page))
         smoke.step("S01c compare layout bounded by status bar", lambda: test_compare_statusbar_does_not_resize_layout(page))
+        smoke.step("S01d compare Shift+. image-only mode", lambda: test_compare_shift_period_cycles_to_image_only(page))
         smoke.step("S02 grid navigation", lambda: test_grid_navigation(page))
         smoke.step("S03 loupe navigation", lambda: test_loupe_navigation(page))
         smoke.step("S09/S10/S11 curation and selection", lambda: test_rating_decision_and_selection(page))
