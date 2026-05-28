@@ -3,6 +3,7 @@
     import type { ViewMode } from '$lib/stores';
     import { maybeShowShortcutReminder, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from '$lib/shortcut-reminders';
     import { visibleViewTabs } from '$lib/view-tabs';
+    import ViewTabIcon from './ViewTabIcon.svelte';
 
     let tabs = $derived(visibleViewTabs($staticPublishingEnabled));
 
@@ -40,7 +41,7 @@
                 class:active={$viewMode === tab.id}
                 onclick={() => selectTab(tab.id)}
             >
-                <span class="tab-icon">{tab.icon}</span>{tab.label}{#if tab.key}<span class="tab-key">{tab.key}</span>{/if}
+                <ViewTabIcon icon={tab.icon} />{tab.label}{#if tab.key}<span class="tab-key">{tab.key}</span>{/if}
             </button>
         {/each}
     </div>
@@ -95,11 +96,16 @@
         border: none;
         border-bottom: 2px solid transparent;
         color: var(--text-secondary);
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
         font-family: var(--font);
         font-size: 12px;
+        line-height: 1;
         padding: 8px 12px 6px;
         cursor: pointer;
         transition: all 0.15s;
+        white-space: nowrap;
     }
     .tab:hover:not(:disabled) {
         color: var(--text);
@@ -108,18 +114,9 @@
         color: var(--green);
         border-bottom-color: var(--green);
     }
-    .tab-icon {
-        margin-right: 4px;
-        font-size: 13px;
-        opacity: 0.6;
-    }
-    .tab.active .tab-icon {
-        opacity: 1;
-    }
     .tab-key {
         color: var(--text-secondary);
         font-size: 9px;
-        margin-left: 4px;
         opacity: 0.25;
     }
     .tab:hover .tab-key {
