@@ -48,6 +48,30 @@ Tokyo Night dark theme. All components MUST use these tokens, never hardcode col
 - When the UI shows wrong data, the bug is in the code, not the database
 - The database path: `~/Library/Application Support/com.glebkalinin.cull/cull.db`
 
+### License And Open Source Release
+- Cull is true open source under Apache-2.0, not source-available. Do not
+  reintroduce BSL/BUSL/source-available positioning in active product docs, app
+  metadata, or UI.
+- Keep license metadata aligned across `LICENSE.md`, `NOTICE`, `package.json`,
+  `package-lock.json`, `src-tauri/Cargo.toml`, README, and the About dialog.
+- Run `npm run audit:licenses` before publishing, before changing
+  dependency/model download policy, and after adding dependencies.
+- AI-assisted code is allowed, but do not paste generated output that appears
+  copied from public code unless the upstream license is compatible and notices
+  are preserved. Keep `AUTHORSHIP.md`, `CONTRIBUTING.md`, and
+  `docs/OPEN_SOURCE_AUDIT.md` current when provenance assumptions change.
+
+### Model And Asset Licensing
+- Apache-2.0 covers Cull source code, not third-party model weights, fonts,
+  artwork, or example assets.
+- CLIP/DINOv2 embedding downloads must stay tied to compatible model licenses
+  recorded in `docs/OPEN_SOURCE_AUDIT.md`.
+- Do not add built-in downloads for YOLO, NudeNet, or other third-party ONNX
+  weights unless source, license, attribution, checksum, and commercial-use terms
+  are documented first.
+- User-supplied local ONNX files are allowed, but the app must not imply Cull
+  grants rights to those weights.
+
 ## E2E Testing with agent-browser
 
 Tests run against `localhost:1420` in Chrome Beta via CDP. E2E tests use `tauri-mock.ts` directly (not via api.ts) for browser-only testing.
@@ -124,8 +148,15 @@ bd ready              # Find available work
 bd show <id>          # View issue details
 bd update <id> --status in_progress  # Claim work
 bd close <id>         # Complete work
-bd sync               # Sync with git
+bd vc status          # Check beads DB version-control state
+bd vc commit -m "..." # Commit beads DB changes when bd sync is unavailable
 ```
+
+Note: some installed `bd` versions do not expose `bd sync`. If `bd sync` is
+unavailable, use `bd vc status` and `bd vc commit -m "..."` for beads DB
+changes, and mention the fallback in the handoff. If bd commands fail with
+schema errors, run `bd doctor` and `bd migrate --yes` before trying any manual
+SQL repair.
 
 ## Landing the Plane (Session Completion)
 
@@ -139,7 +170,7 @@ bd sync               # Sync with git
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd sync
+   bd sync  # If unavailable: bd vc status && bd vc commit -m "..."
    git push
    git status  # MUST show "up to date with origin"
    ```
@@ -152,4 +183,3 @@ bd sync               # Sync with git
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
-
