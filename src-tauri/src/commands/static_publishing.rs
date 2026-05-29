@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::fs;
+use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -27,6 +28,7 @@ use crate::AppState;
 const MODULE_KEY: &str = "module_static_publishing";
 const SCHEMA_VERSION: &str = "cull.static_publishing.v1";
 const MAX_SNAPSHOT_LONG_EDGE: f64 = 4096.0;
+const SERVER_PORT_FALLBACK_ATTEMPTS: u16 = 20;
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct StaticPublishCanvasItem {
@@ -470,15 +472,7 @@ pub async fn serve_static_publish_package_inner(
     }
     let host = "127.0.0.1".to_string();
     let port = port.unwrap_or(8000);
-    let addr: SocketAddr = format!("{}:{}", host, port)
-        .parse()
-        .map_err(|e| format!("Invalid server address: {}", e))?;
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|e| format!("Failed to start static server on {}: {}", addr, e))?;
-    let actual_addr = listener
-        .local_addr()
-        .map_err(|e| format!("Failed to read server address: {}", e))?;
+    let (listener, actual_addr) = bind_static_publish_listener(&host, port).await?;
     let site_root = Arc::new(site_dir.clone());
 
     tauri::async_runtime::spawn(async move {
@@ -509,6 +503,68 @@ pub async fn serve_static_publish_package_inner(
         port: actual_addr.port(),
         site_dir: site_dir.to_string_lossy().to_string(),
     })
+}
+
+async fn bind_static_publish_listener(
+    host: &str,
+    port: u16,
+) -> Result<(tokio::net::TcpListener, SocketAddr), String> {
+    let mut last_addr = None;
+    let mut last_error = None;
+    let candidates = static_publish_port_candidates(port);
+    let attempted_count = candidates.len();
+
+    for candidate_port in candidates {
+        let addr: SocketAddr = format!("{}:{}", host, candidate_port)
+            .parse()
+            .map_err(|e| format!("Invalid server address: {}", e))?;
+
+        match tokio::net::TcpListener::bind(addr).await {
+            Ok(listener) => {
+                let actual_addr = listener
+                    .local_addr()
+                    .map_err(|e| format!("Failed to read server address: {}", e))?;
+                if candidate_port != port {
+                    crate::safe_eprintln!(
+                        "Static publishing: port {} was occupied, serving on {}",
+                        port,
+                        actual_addr.port()
+                    );
+                }
+                return Ok((listener, actual_addr));
+            }
+            Err(err) if err.kind() == ErrorKind::AddrInUse && candidate_port != 0 => {
+                last_addr = Some(addr);
+                last_error = Some(err);
+            }
+            Err(err) => {
+                return Err(format!(
+                    "Failed to start static server on {}: {}",
+                    addr, err
+                ));
+            }
+        }
+    }
+
+    match (last_addr, last_error) {
+        (Some(addr), Some(err)) => Err(format!(
+            "Failed to start static server near {} after trying {} ports: {}",
+            addr, attempted_count, err
+        )),
+        _ => Err("Failed to start static server: no candidate ports available".to_string()),
+    }
+}
+
+fn static_publish_port_candidates(port: u16) -> Vec<u16> {
+    if port == 0 {
+        return vec![0];
+    }
+
+    let mut candidates: Vec<u16> = (0..=SERVER_PORT_FALLBACK_ATTEMPTS)
+        .filter_map(|offset| port.checked_add(offset))
+        .collect();
+    candidates.push(0);
+    candidates
 }
 
 fn ensure_module_enabled(state: &AppState) -> Result<(), String> {
@@ -1765,6 +1821,41 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sidecar["annotations"][0]["body"], "Use this crop");
+    }
+
+    #[tokio::test]
+    async fn server_recovers_to_alternate_port_when_requested_port_is_occupied() {
+        let (state, tmp) = test_state();
+        state.db.set_setting(MODULE_KEY, "true").unwrap();
+
+        let site_dir = tmp.path().join("site");
+        fs::create_dir_all(&site_dir).unwrap();
+        fs::write(
+            site_dir.join("index.html"),
+            "<!doctype html><title>test</title>",
+        )
+        .unwrap();
+
+        let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let occupied_port = occupied.local_addr().unwrap().port();
+
+        let result = serve_static_publish_package_inner(
+            &state,
+            site_dir.to_string_lossy().to_string(),
+            Some("127.0.0.1".to_string()),
+            Some(occupied_port),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.host, "127.0.0.1");
+        assert_ne!(result.port, occupied_port);
+        assert_eq!(result.url, format!("http://127.0.0.1:{}/", result.port));
+    }
+
+    #[test]
+    fn port_candidates_include_ephemeral_fallback_at_upper_bound() {
+        assert_eq!(static_publish_port_candidates(u16::MAX), vec![u16::MAX, 0]);
     }
 
     #[test]
