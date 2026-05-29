@@ -476,7 +476,7 @@
         data-menu-index="1"
         tabindex={activeIndex === 1 ? 0 : -1}
     >
-        <span>Select</span>
+        <span>Accept</span>
         {#if currentDecision === 'accept'}<span class="check">✓</span>{/if}
     </button>
     <button
