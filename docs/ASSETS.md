@@ -45,6 +45,22 @@ Before shipping a site or app bundle, confirm:
 
 Prefer OFL or similarly permissive fonts for public source distribution.
 
+## Model Weights
+
+Cull's Apache-2.0 license covers the application source, not third-party model
+weights.
+
+Current policy:
+
+- CLIP and DINOv2 embedding downloads must point to model repositories with a
+  compatible license recorded in the open-source audit.
+- YOLO and NudeNet-compatible detection can load user-supplied local ONNX files,
+  but Cull does not ship or automatically download those weights until their
+  licenses are verified as compatible with the release goal.
+- Any future model downloader must document the model source, license,
+  attribution, checksum, and commercial-use terms before it is exposed in the UI
+  or CLI.
+
 ## Screenshots And Mockups
 
 Cull screenshots should show real product capability:
@@ -66,7 +82,7 @@ Allowed now:
 
 - local-first
 - privacy-first as a product principle
-- source-available
+- open source
 - no hidden data collection as an intended standard
 - made in Europe
 - designed to respect European expectations

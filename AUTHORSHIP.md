@@ -34,7 +34,11 @@ Development session logs (Claude Code transcripts) are retained locally as conte
 
 ## Copyright Notice
 
-Architecture and design copyright (c) 2025-present Gleb Kalinin. Implementation assisted by Claude (Anthropic) under Anthropic's Commercial Terms of Service, which assign output ownership to the customer and include copyright indemnification.
+Architecture and design copyright (c) 2025-present Gleb Kalinin.
+Implementation was assisted by Claude (Anthropic) under human direction,
+review, and integration. Provider output terms are not treated as a substitute
+for source provenance, license compatibility review, or human authorship
+documentation.
 
 ## Cloud API Providers
 
@@ -42,4 +46,9 @@ This application optionally connects to third-party cloud APIs. Each provider op
 
 ## Why This File Exists
 
-Courts in the US (USCO guidance, 2025) and Germany (2026 rulings) recognize copyright in AI-assisted works when the human provides "creative influence on the design of the concrete work itself." This file documents the human creative process to establish copyrightability under both jurisdictions. Architecture Decision Records (`docs/adr/`) provide additional evidence of human creative choices.
+Copyright protection for AI-assisted works depends on human authorship and
+jurisdiction-specific originality standards. This file documents the human
+creative process behind Cull so that the project can distinguish human
+architecture, selection, arrangement, and review from machine-assisted
+implementation details. Architecture Decision Records (`docs/adr/`) provide
+additional evidence of human creative choices.

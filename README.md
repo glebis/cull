@@ -9,7 +9,7 @@ Terminal-inspired image viewer for batch review, comparison, curation, iteration
 ## What's Different
 
 - **Keyboard-first** — vim-style navigation, every action reachable without mouse
-- **AI-native** — CLIP/DINOv2 embeddings, UMAP visualization, visual similarity, YOLO detection
+- **AI-native** — CLIP/DINOv2 embeddings, UMAP visualization, visual similarity, and user-supplied local detection models
 - **Agent-friendly** — local MCP server, headless CLI tools, and deep links share the same command model
 - **macOS-integrated** — Open With, drag-and-drop, native menus, outbound Share sheet, Reveal in Finder
 - **Non-destructive** — SQLite library with SHA-256 dedup; originals are never modified
@@ -52,7 +52,7 @@ Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 | Model download UX with progress, pause/resume, cancel, and manual commands | Done |
 | Cosine similarity search | Done |
 | UMAP visualization with auto-clustering | Done |
-| YOLO object detection and NudeNet NSFW detection controls | Done |
+| User-supplied YOLO/NudeNet-compatible detection model controls | Partial |
 | Image quality metrics, color metrics, and perceptual hashing | Done |
 | Deep link URL scheme (`cull://`) | Done |
 | MCP server over local stdio/socket plus optional token-authenticated HTTP | Done |
@@ -112,7 +112,7 @@ CLI module and output standards live in [docs/agent-cli-standards.md](docs/agent
 - Contact sheet export with labels, ratings, and metadata
 
 **AI & Detection:**
-- Automatic YOLO tagging on import
+- Automatic tagging on import when a compatible local detection model is installed
 - Florence-2 integration for zero-shot detection and captioning
 
 **Embedding Explorer:**
@@ -222,8 +222,11 @@ Dark terminal aesthetic. Monospace typography. 8px spacing grid. No decorative e
 
 See `docs/design-system.md` for the full design spec.
 
-## Source License
+## License
 
-Business Source License 1.1. Non-commercial use is permitted. Commercial use requires a separate license. Converts to Apache 2.0 on 2030-05-07. See [LICENSE.md](LICENSE.md).
+Apache License 2.0. See [LICENSE.md](LICENSE.md).
 
-This is a source-available license, not an OSI-approved open-source license. If the release goal is strict open source, choose an OSI-approved license before publishing.
+Cull is open source. Third-party dependencies, optional model weights, and example
+assets keep their own licenses; see [NOTICE](NOTICE) and
+[docs/OPEN_SOURCE_AUDIT.md](docs/OPEN_SOURCE_AUDIT.md) for the current transition
+audit.

@@ -1,6 +1,10 @@
 # Copyright of AI-Generated Code: Research Findings
 
-*Researched 2026-05-12. Applicable to Gleb Kalinin's Cull project (100% AI-generated code via Claude Code).*
+*Researched 2026-05-12. Working research notes for Cull's AI-assisted development process.*
+
+> Status: historical research notes, not a legal conclusion. For the current
+> release checklist and license audit, use
+> [OPEN_SOURCE_AUDIT.md](OPEN_SOURCE_AUDIT.md).
 
 ## TL;DR
 

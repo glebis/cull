@@ -111,14 +111,14 @@
             <div class="meta-grid" aria-label="Application details">
                 <div>
                     <span class="meta-label">License</span>
-                    <span class="meta-value">BUSL-1.1</span>
+                    <span class="meta-value">Apache-2.0</span>
                 </div>
                 <div>
                     <span class="meta-label">Repository</span>
                     <a
-                        href="https://github.com/glebis/imageview"
-                        onclick={(e) => handleCreditClick(e, 'https://github.com/glebis/imageview')}
-                    >github.com/glebis/imageview</a>
+                        href="https://github.com/glebis/cull"
+                        onclick={(e) => handleCreditClick(e, 'https://github.com/glebis/cull')}
+                    >github.com/glebis/cull</a>
                 </div>
                 <div>
                     <span class="meta-label">Copyright</span>

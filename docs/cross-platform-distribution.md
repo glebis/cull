@@ -53,7 +53,7 @@ Human-owned release blockers:
 - GitHub Actions secrets: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, `KEYCHAIN_PASSWORD`, `TAURI_SIGNING_PRIVATE_KEY`, and optionally `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 - Private backup of the Tauri updater signing key. Losing it means installed users cannot receive trusted updates from this update channel.
 - Clean-machine smoke testing on Apple Silicon and Intel macOS before publishing the draft release.
-- Final publishing decision for license and positioning: the repo is source-available under BUSL-1.1, not OSI open source.
+- Final publishing decision for license and positioning: the repo is open source under Apache-2.0.
 
 Remaining agent-track work before expanding beyond macOS:
 

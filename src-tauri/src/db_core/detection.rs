@@ -37,20 +37,6 @@ impl YoloVariant {
         }
     }
 
-    pub fn download_url(&self) -> &str {
-        match self {
-            YoloVariant::Nano => {
-                "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo11n.onnx"
-            }
-            YoloVariant::Small => {
-                "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo11s.onnx"
-            }
-            YoloVariant::Medium => {
-                "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo11m.onnx"
-            }
-        }
-    }
-
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "nano" | "n" => Some(YoloVariant::Nano),

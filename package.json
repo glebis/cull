@@ -16,9 +16,10 @@
     "test": "vitest run",
     "test:e2e": "bash tests/e2e/run-e2e.sh",
     "test:perf": "vitest run src/lib/view-utils.test.ts -t \"grid rendering performance budget\"",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "audit:licenses": "node scripts/license-audit.mjs"
   },
-  "license": "BUSL-1.1",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/glebis/cull.git"

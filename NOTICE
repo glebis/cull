@@ -1,0 +1,16 @@
+Cull
+Copyright 2025-present Gleb Kalinin
+
+Cull is licensed under the Apache License, Version 2.0.
+
+Implementation was assisted by AI coding tools under human architectural,
+product, and code-review direction. See AUTHORSHIP.md for the current authorship
+record.
+
+Third-party packages and runtime dependencies are distributed under their own
+licenses. The source tree does not intentionally vendor GPL, AGPL, or LGPL code.
+Run `npm run audit:licenses` before release to refresh the dependency and source
+license audit.
+
+Optional model weights are not part of the Apache-2.0 license grant unless they
+are explicitly distributed in this repository with compatible license terms.

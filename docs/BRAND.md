@@ -8,7 +8,7 @@ Status: working direction, not final brand law.
 **Domain:** `cull.company`
 **Alternate title lockup:** `cull.company`
 
-Cull is a source-available, local-first, agent-native archive for AI-generated creative work and visual references. It turns chaotic folders of images, videos, prompts, iterations, and loose references into coherent collections that humans and AI agents can search, curate, compose, and publish.
+Cull is an open-source, local-first, agent-native archive for AI-generated creative work and visual references. It turns chaotic folders of images, videos, prompts, iterations, and loose references into coherent collections that humans and AI agents can search, curate, compose, and publish.
 
 ## Positioning
 
@@ -38,7 +38,7 @@ The central metaphor is a huge pile of unsorted creative work becoming legible, 
 - **Agent-native:** built so agents can operate the archive directly through MCP tools.
 - **Local-first:** the archive lives on the user's machine and remains under their control.
 - **Privacy-first:** no hidden collection, tracking, or unnecessary cloud dependency.
-- **Source-available:** inspectable, extensible, and community-driven.
+- **Open-source:** inspectable, extensible, and community-driven.
 - **European-minded:** designed to respect European expectations around privacy, autonomy, and lawful data handling.
 - **Subscription-resistant:** no forced dependency on a recurring SaaS subscription.
 - **Company-independent:** no structural dependency on a single American platform company.
@@ -93,5 +93,5 @@ Use these as recurring phrases, not all at once:
 - from visual chaos to coherent work
 - local-first archive for AI creativity
 - agent-native visual archive
-- source-available reference engine
+- open-source reference engine
 - cull.company

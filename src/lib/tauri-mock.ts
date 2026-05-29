@@ -573,8 +573,12 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   list_collection_images: () => [],
   is_yolo_available: () => true,
   is_nudenet_available: () => true,
-  download_yolo_model: () => 'already_downloaded',
-  download_nudenet_model: () => 'already_downloaded',
+  download_yolo_model: () => {
+    throw new Error('Built-in YOLO downloads are disabled for the Apache-2.0 release.');
+  },
+  download_nudenet_model: () => {
+    throw new Error('Built-in NudeNet downloads are disabled for the Apache-2.0 release.');
+  },
   detect_objects: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   detect_nsfw: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   get_detection_count: (_: any, args: { model: string }) => args.model === 'yolo11m' ? 5 : 1,

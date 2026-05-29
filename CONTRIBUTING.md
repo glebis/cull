@@ -9,11 +9,27 @@
 ## Development Setup
 
 ```bash
-git clone https://github.com/glebis/imageview.git
-cd imageview
+git clone https://github.com/glebis/cull.git
+cd cull
 npm install
 npm run tauri dev
 ```
+
+## Licensing Of Contributions
+
+Cull is licensed under the Apache License 2.0. Unless you explicitly say
+otherwise in writing, contributions intentionally submitted to this repository
+are accepted under the same Apache-2.0 terms.
+
+By contributing, you certify that you have the right to submit the work and that
+it does not include code copied from unlicensed, source-available,
+non-commercial, GPL, AGPL, LGPL, or otherwise incompatible sources.
+
+AI-assisted contributions are allowed, but generated output must be reviewed as
+source code, not pasted blindly. Do not submit generated code that matches public
+code unless that public code has a compatible license and the required notices
+are preserved. When a contribution is substantially AI-assisted, mention the
+tool and the human review performed in the PR description.
 
 ## Code Style
 

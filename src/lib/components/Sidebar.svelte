@@ -2,7 +2,7 @@
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, showMissing, requestTextInput } from '$lib/stores';
-    import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, deleteCollectionApi, listSmartCollections, isYoloAvailable, isNudenetAvailable, downloadYoloModel, downloadNudenetModel, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount } from '$lib/api';
+    import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, deleteCollectionApi, listSmartCollections, isYoloAvailable, isNudenetAvailable, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { SmartCollection } from '$lib/api';
     import { onMount } from 'svelte';
@@ -257,10 +257,6 @@
     let aiExpanded = $state(true);
     let yoloReady = $state(false);
     let nudenetReady = $state(false);
-    let yoloDownloading = $state(false);
-    let nudenetDownloading = $state(false);
-    let yoloDownloadPct = $state(0);
-    let nudenetDownloadPct = $state(0);
     let yoloProcessed = $state(0);
     let nudenetProcessed = $state(0);
     let selectedYoloVariant = $state('medium');
@@ -318,40 +314,6 @@
         }
         results.sort((a, b) => b[1] - a[1]);
         detectedClasses = results;
-    }
-
-    async function handleDownloadYolo() {
-        yoloDownloading = true;
-        yoloDownloadPct = 0;
-        const unlisten = await listen<{ downloaded: number; total: number }>('yolo-download-progress', (e) => {
-            if (e.payload.total > 0) yoloDownloadPct = Math.round((e.payload.downloaded / e.payload.total) * 100);
-        });
-        try {
-            await downloadYoloModel(selectedYoloVariant);
-            yoloReady = true;
-        } catch (e) {
-            console.error('YOLO download error:', e);
-        } finally {
-            unlisten();
-            yoloDownloading = false;
-        }
-    }
-
-    async function handleDownloadNudenet() {
-        nudenetDownloading = true;
-        nudenetDownloadPct = 0;
-        const unlisten = await listen<{ downloaded: number; total: number }>('nudenet-download-progress', (e) => {
-            if (e.payload.total > 0) nudenetDownloadPct = Math.round((e.payload.downloaded / e.payload.total) * 100);
-        });
-        try {
-            await downloadNudenetModel();
-            nudenetReady = true;
-        } catch (e) {
-            console.error('NudeNet download error:', e);
-        } finally {
-            unlisten();
-            nudenetDownloading = false;
-        }
     }
 
     async function handleDetectRemaining() {
@@ -501,55 +463,35 @@
             <div class="ai-models-content">
                 <div class="model-row">
                     <span class="model-name">YOLO</span>
-                    {#if yoloDownloading}
-                        <span class="model-status downloading">
-                            {yoloDownloadPct}%
-                        </span>
-                    {:else if yoloReady}
+                    {#if yoloReady}
                         <span class="model-status ready">ready</span>
                     {:else}
-                        <span class="model-status missing">missing</span>
+                        <span class="model-status missing">external</span>
                     {/if}
                 </div>
 
-                {#if yoloDownloading}
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width: {yoloDownloadPct}%"></div>
-                    </div>
-                {/if}
-
-                {#if !yoloReady && !yoloDownloading}
+                {#if !yoloReady}
                     <div class="model-download-row">
                         <select class="variant-select" bind:value={selectedYoloVariant}>
                             <option value="nano">nano 6MB</option>
                             <option value="small">small 22MB</option>
                             <option value="medium">medium 50MB</option>
                         </select>
-                        <button class="download-btn" onclick={handleDownloadYolo}>dl</button>
+                        <span class="model-note">manual</span>
                     </div>
                 {/if}
 
                 <div class="model-row">
                     <span class="model-name">NudeNet</span>
-                    {#if nudenetDownloading}
-                        <span class="model-status downloading">
-                            {nudenetDownloadPct}%
-                        </span>
-                    {:else if nudenetReady}
+                    {#if nudenetReady}
                         <span class="model-status ready">ready</span>
                     {:else}
-                        <span class="model-status missing">missing</span>
+                        <span class="model-status missing">external</span>
                     {/if}
                 </div>
 
-                {#if nudenetDownloading}
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width: {nudenetDownloadPct}%"></div>
-                    </div>
-                {/if}
-
-                {#if !nudenetReady && !nudenetDownloading}
-                    <button class="download-btn full-width" onclick={handleDownloadNudenet}>download 12MB</button>
+                {#if !nudenetReady}
+                    <div class="model-note">manual model install</div>
                 {/if}
 
                 <div class="model-row">
@@ -961,6 +903,11 @@
         display: flex;
         gap: 4px;
         margin: 2px 0 4px;
+    }
+    .model-note {
+        color: var(--text-secondary, #565f89);
+        font-size: 10px;
+        padding: 2px 0;
     }
     .variant-select {
         flex: 1;
