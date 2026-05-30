@@ -6,6 +6,8 @@ pub mod ai;
 pub mod asset_events;
 pub mod audit;
 pub mod clipboard_monitor;
+#[cfg(target_os = "macos")]
+pub mod clipboard_monitor_macos;
 #[allow(dead_code)]
 pub mod curation;
 pub mod display;

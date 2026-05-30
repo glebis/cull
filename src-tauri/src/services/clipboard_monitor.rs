@@ -25,6 +25,11 @@ pub struct ClipboardCapture {
     pub change_count: Option<i64>,
 }
 
+pub trait ClipboardImageReader: Send + 'static {
+    fn status(&self) -> ClipboardAccessStatus;
+    fn read_if_changed(&mut self) -> Result<Option<ClipboardCapture>, String>;
+}
+
 #[derive(Debug, Default)]
 pub struct ClipboardMonitorState {
     pub running: bool,
@@ -177,6 +182,72 @@ pub fn capture_clipboard_image(
         path: path.to_string_lossy().to_string(),
         filename,
     })
+}
+
+pub fn process_reader_once<R: ClipboardImageReader>(
+    db: &crate::db_core::db::Database,
+    app_data_dir: &Path,
+    session: &ClipboardMonitorSession,
+    state: &mut ClipboardMonitorState,
+    reader: &mut R,
+) -> Result<Option<ClipboardCaptureResult>, String> {
+    let Some(capture) = reader.read_if_changed()? else {
+        return Ok(None);
+    };
+    let hash = sha256_bytes(&capture.bytes);
+    if state.last_hash.as_deref() == Some(hash.as_str()) {
+        return Ok(None);
+    }
+
+    let sequence = state.captured_count.saturating_add(1);
+    let result = capture_clipboard_image(db, app_data_dir, session, &capture, sequence)?;
+    if result.imported {
+        state.captured_count = state.captured_count.saturating_add(1);
+        state.last_hash = Some(hash);
+        state.last_change_count = capture.change_count;
+    }
+    Ok(Some(result))
+}
+
+pub fn move_capture_folder(
+    db: &crate::db_core::db::Database,
+    old_dir: &str,
+    new_dir: &Path,
+) -> Result<(), String> {
+    std::fs::create_dir_all(new_dir)
+        .map_err(|e| format!("Failed to create destination capture folder: {}", e))?;
+    let files = db
+        .list_image_files_under_path(old_dir)
+        .map_err(|e| e.to_string())?;
+    for (image_file_id, old_path) in files {
+        let old = PathBuf::from(&old_path);
+        if !old.exists() {
+            continue;
+        }
+        let Some(file_name) = old.file_name() else {
+            continue;
+        };
+        let new_path = new_dir.join(file_name);
+        std::fs::copy(&old, &new_path)
+            .map_err(|e| format!("Failed to copy clipboard capture: {}", e))?;
+        let old_size = std::fs::metadata(&old).map_err(|e| e.to_string())?.len();
+        let new_size = std::fs::metadata(&new_path).map_err(|e| e.to_string())?.len();
+        if old_size != new_size {
+            return Err(format!("Copied capture size mismatch for {}", old.display()));
+        }
+        db.update_image_file_path(&image_file_id, &new_path.to_string_lossy())
+            .map_err(|e| e.to_string())?;
+    }
+    db.set_setting(CAPTURE_DIR_SETTING, &new_dir.to_string_lossy())
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
 }
 
 fn unique_capture_filename(
@@ -388,5 +459,77 @@ mod tests {
         assert!(first.imported);
         assert!(!second.imported);
         assert_eq!(db.list_collection_images(&session.collection_id).unwrap().len(), 1);
+    }
+
+    struct FakeReader {
+        captures: std::collections::VecDeque<ClipboardCapture>,
+    }
+
+    impl ClipboardImageReader for FakeReader {
+        fn status(&self) -> ClipboardAccessStatus {
+            ClipboardAccessStatus::Supported
+        }
+
+        fn read_if_changed(&mut self) -> Result<Option<ClipboardCapture>, String> {
+            Ok(self.captures.pop_front())
+        }
+    }
+
+    #[test]
+    fn process_reader_capture_skips_same_hash_twice() {
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let tmp = tempdir().unwrap();
+        let app_data = tmp.path().join("app-data");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let session = create_monitor_session(&db, &app_data, None).unwrap();
+        let capture = ClipboardCapture {
+            bytes: png_bytes([0, 0, 255, 255]),
+            extension: "png".to_string(),
+            original_filename: None,
+            source_url: None,
+            source_app: None,
+            change_count: Some(2),
+        };
+        let mut state = ClipboardMonitorState::default();
+        let mut reader = FakeReader {
+            captures: vec![capture.clone(), capture].into(),
+        };
+
+        let first = process_reader_once(&db, &app_data, &session, &mut state, &mut reader).unwrap();
+        let second =
+            process_reader_once(&db, &app_data, &session, &mut state, &mut reader).unwrap();
+
+        assert!(first.is_some());
+        assert!(second.is_none());
+        assert_eq!(db.list_collection_images(&session.collection_id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn move_capture_folder_copies_files_and_updates_paths() {
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let tmp = tempdir().unwrap();
+        let app_data = tmp.path().join("app-data");
+        let new_dir = tmp.path().join("moved-captures");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let session = create_monitor_session(&db, &app_data, None).unwrap();
+        let capture = ClipboardCapture {
+            bytes: png_bytes([20, 30, 40, 255]),
+            extension: "png".to_string(),
+            original_filename: Some("Move Me.png".to_string()),
+            source_url: None,
+            source_app: None,
+            change_count: Some(1),
+        };
+        let result = capture_clipboard_image(&db, &app_data, &session, &capture, 1).unwrap();
+
+        move_capture_folder(&db, &session.capture_dir, &new_dir).unwrap();
+
+        let moved = new_dir.join(std::path::Path::new(&result.path).file_name().unwrap());
+        assert!(moved.exists());
+        let image = db
+            .get_images_by_ids(&[result.image_id.unwrap().as_str()])
+            .unwrap()
+            .remove(0);
+        assert_eq!(image.path, moved.to_string_lossy());
     }
 }

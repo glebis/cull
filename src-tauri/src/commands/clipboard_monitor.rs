@@ -1,5 +1,6 @@
 use crate::services::clipboard_monitor::{
-    create_monitor_session, default_capture_dir, resolve_capture_dir, ClipboardMonitorState,
+    create_monitor_session, default_capture_dir, resolve_capture_dir, ClipboardMonitorSession,
+    ClipboardMonitorState,
 };
 use crate::AppState;
 use serde::Serialize;
@@ -83,6 +84,52 @@ pub async fn start_clipboard_monitor(
         monitor.last_error = None;
     }
 
+    #[cfg(target_os = "macos")]
+    {
+        let app_clone = app.clone();
+        let db = state.db.clone();
+        let app_data_dir = state.app_data_dir.clone();
+        let session = ClipboardMonitorSession {
+            collection_id: session.collection_id.clone(),
+            collection_name: session.collection_name.clone(),
+            capture_dir: session.capture_dir.clone(),
+        };
+        crate::spawn_guarded(app.clone(), "clipboard-monitor", move || async move {
+            let mut reader = crate::services::clipboard_monitor_macos::MacPasteboardReader::new();
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(
+                crate::services::clipboard_monitor::DEFAULT_POLL_MS,
+            ));
+            loop {
+                interval.tick().await;
+                let app_state = app_clone.state::<AppState>();
+                let mut monitor = app_state.clipboard_monitor.lock();
+                if !monitor.running {
+                    break;
+                }
+                match crate::services::clipboard_monitor::process_reader_once(
+                    &db,
+                    &app_data_dir,
+                    &session,
+                    &mut monitor,
+                    &mut reader,
+                ) {
+                    Ok(Some(result)) => {
+                        let _ = app_clone.emit("clipboard-monitor:capture", &result);
+                        let _ = app_clone.emit("images:changed", ());
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        monitor.last_error = Some(error.clone());
+                        let _ = app_clone.emit(
+                            "clipboard-monitor:error",
+                            serde_json::json!({ "message": error }),
+                        );
+                    }
+                }
+            }
+        });
+    }
+
     let _ = app.emit(
         "navigate-collection",
         serde_json::json!({ "collection_id": session.collection_id }),
@@ -120,10 +167,32 @@ pub async fn set_clipboard_monitor_capture_dir(
 
 #[tauri::command]
 pub async fn move_clipboard_capture_folder(
+    app: AppHandle,
     state: State<'_, AppState>,
     new_path: String,
 ) -> Result<ClipboardMonitorStatus, String> {
-    set_clipboard_monitor_capture_dir(state, new_path).await
+    let new_dir = resolve_capture_dir(&state.db, &state.app_data_dir, Some(&new_path))?;
+    let old_dir = {
+        let monitor = state.clipboard_monitor.lock();
+        monitor
+            .capture_dir
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string())
+            .or_else(|| {
+                state
+                    .db
+                    .get_setting(crate::services::clipboard_monitor::CAPTURE_DIR_SETTING)
+                    .ok()
+                    .flatten()
+            })
+            .unwrap_or_else(|| default_capture_dir(&state.app_data_dir).to_string_lossy().to_string())
+    };
+    crate::services::clipboard_monitor::move_capture_folder(&state.db, &old_dir, &new_dir)?;
+    let _ = app.asset_protocol_scope().allow_directory(&new_dir, true);
+    let _ = app.emit("images:changed", ());
+    let mut monitor = state.clipboard_monitor.lock();
+    monitor.capture_dir = Some(new_dir);
+    Ok(status_from_state(state.inner(), &monitor))
 }
 
 #[tauri::command]

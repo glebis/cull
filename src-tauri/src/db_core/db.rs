@@ -2493,6 +2493,17 @@ impl Database {
         }
     }
 
+    pub fn list_image_files_under_path(&self, folder_path: &str) -> Result<Vec<(String, String)>> {
+        let prefix = format!("{}/", folder_path.trim_end_matches('/'));
+        let conn = self.conn.lock();
+        let mut stmt =
+            conn.prepare("SELECT id, path FROM image_files WHERE path = ?1 OR path LIKE ?2")?;
+        let rows = stmt.query_map(params![folder_path, prefix + "%"], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
     pub fn touch_image_file(&self, file_id: &str, size: u64, mtime: &str) -> Result<()> {
         let conn = self.conn.lock();
         conn.execute(
