@@ -11,12 +11,14 @@ const TRAY_MCP_STATUS_ID: &str = "mcp_status";
 const QUIT_APP_ID: &str = "quit_app";
 const TRAY_CLIPBOARD_MONITOR_ID: &str = "tray_clipboard_monitor";
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TrayMenuItemKind {
     Item,
     Check,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TrayMenuItemSpec {
     id: &'static str,
@@ -111,6 +113,7 @@ fn build_tray_menu(app: &AppHandle, clipboard_monitor_checked: bool) -> tauri::R
     )
 }
 
+#[cfg(test)]
 fn tray_menu_specs() -> Vec<TrayMenuItemSpec> {
     vec![
         TrayMenuItemSpec {
