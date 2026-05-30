@@ -192,7 +192,7 @@ fn apply_recording_badge_to_rgba(rgba: &mut [u8], width: u32, height: u32) {
     }
 
     let min_side = width.min(height) as i32;
-    let radius = (min_side / 4).max(3);
+    let radius = (min_side / 8).max(2);
     let center_x = width as i32 - radius;
     let center_y = radius;
     let radius_sq = radius * radius;
@@ -275,15 +275,21 @@ mod tests {
     }
 
     #[test]
-    fn recording_badge_draws_red_circle_on_top_right_of_icon() {
+    fn recording_badge_draws_half_size_red_circle_on_top_right_of_icon() {
         let width = 16;
         let height = 16;
         let mut rgba = vec![0u8; width * height * 4];
 
         apply_recording_badge_to_rgba(&mut rgba, width as u32, height as u32);
 
-        let badge_center = ((2 * width + 13) * 4) as usize;
+        let badge_center = ((2 * width + 14) * 4) as usize;
         assert_eq!(&rgba[badge_center..badge_center + 4], &[247, 118, 142, 255]);
+
+        let old_large_badge_pixel = ((4 * width + 9) * 4) as usize;
+        assert_eq!(
+            &rgba[old_large_badge_pixel..old_large_badge_pixel + 4],
+            &[0, 0, 0, 0]
+        );
 
         let untouched_corner = ((14 * width + 1) * 4) as usize;
         assert_eq!(&rgba[untouched_corner..untouched_corner + 4], &[0, 0, 0, 0]);
