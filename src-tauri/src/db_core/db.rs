@@ -1447,6 +1447,30 @@ impl Database {
         Ok(())
     }
 
+    pub fn set_collection_settings_json(
+        &self,
+        collection_id: &str,
+        settings_json: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE projects SET settings_json = ?2 WHERE id = ?1",
+            params![collection_id, settings_json],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_collection_settings_json(&self, collection_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare("SELECT settings_json FROM projects WHERE id = ?1")?;
+        let mut rows = stmt.query_map(params![collection_id], |row| row.get(0))?;
+        match rows.next() {
+            Some(Ok(value)) => Ok(value),
+            Some(Err(err)) => Err(err),
+            None => Ok(None),
+        }
+    }
+
     // ---- Settings methods ----
 
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
@@ -3585,6 +3609,26 @@ mod tests {
             last_seen_mtime: None,
         };
         db.insert_image_file(&file).unwrap();
+    }
+
+    #[test]
+    fn test_collection_settings_json_round_trips() {
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let collection_id = db
+            .create_collection("Clipboard 2026.05.30 14:35")
+            .unwrap();
+
+        db.set_collection_settings_json(
+            &collection_id,
+            r#"{"source":"clipboard_monitor","capture_dir":"/tmp/cull"}"#,
+        )
+        .unwrap();
+
+        let stored = db.get_collection_settings_json(&collection_id).unwrap();
+        assert_eq!(
+            stored.as_deref(),
+            Some(r#"{"source":"clipboard_monitor","capture_dir":"/tmp/cull"}"#)
+        );
     }
 
     #[test]

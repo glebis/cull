@@ -5,6 +5,7 @@
 pub mod ai;
 pub mod asset_events;
 pub mod audit;
+pub mod clipboard_monitor;
 #[allow(dead_code)]
 pub mod curation;
 pub mod display;
