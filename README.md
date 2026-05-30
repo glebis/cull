@@ -20,7 +20,7 @@ Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 
 ## Documentation
 
-- [User Guide](docs/USER_GUIDE.md) — installation, import, viewing, curation, collections, embeddings, export, CLI, and privacy basics
+- [User Guide](docs/USER_GUIDE.md) — installation, import, viewing, curation, collections, Clipboard Monitor, static publishing, embeddings, agent workflows, CLI, and privacy basics
 - [System Menu Audit](docs/SYSTEM_MENU_AUDIT.md) — complete native menu inventory and implementation status
 - [Privacy & Data Flow](docs/PRIVACY.md) — local-first behavior, opt-in cloud features, and data destinations
 - [Contributing](CONTRIBUTING.md) — setup, checks, and pull request process
