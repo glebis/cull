@@ -46,6 +46,18 @@ import {
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { folderDisplayName } from './move-menu-utils';
 
+type UnlistenFn = () => void;
+
+export interface MenuInitOptions {
+    listenTimeoutMs?: number;
+    retryDelayMs?: number;
+    stateUpdateTimeoutMs?: number;
+}
+
+const DEFAULT_LISTEN_TIMEOUT_MS = 5000;
+const DEFAULT_RETRY_DELAY_MS = 1000;
+const DEFAULT_STATE_UPDATE_TIMEOUT_MS = 5000;
+
 const IMAGE_FILTERS = [
     {
         name: 'Images',
@@ -420,34 +432,196 @@ function handleMenuAction(action: string) {
     }
 }
 
-let menuStateQueued = false;
+let menuOptions: Required<MenuInitOptions> = {
+    listenTimeoutMs: DEFAULT_LISTEN_TIMEOUT_MS,
+    retryDelayMs: DEFAULT_RETRY_DELAY_MS,
+    stateUpdateTimeoutMs: DEFAULT_STATE_UPDATE_TIMEOUT_MS,
+};
 
-function queueMenuStateUpdate() {
-    if (menuStateQueued) return;
-    menuStateQueued = true;
-    queueMicrotask(() => {
-        menuStateQueued = false;
-        updateMenuState({
-            viewMode: get(viewMode),
-            sidebarVisible: get(sidebarVisible),
-            hasFocusedImage: get(focusedImage) !== null,
-            selectedCount: get(selectedIds).size,
-            staticPublishingEnabled: get(staticPublishingEnabled),
-        }).catch((e) => {
-            console.debug('Failed to update native menu state:', e);
-        });
+let menuStateSubscriptionsStarted = false;
+let menuStateQueued = false;
+let menuStateDirty = false;
+let menuStateUpdateInFlight = false;
+let menuStateRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let menuActionUnlisten: UnlistenFn | null = null;
+let menuActionListenInFlight = false;
+let menuActionRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let menuActionListenGeneration = 0;
+
+function withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    label: string,
+    onLateResolve?: (value: T) => void
+): Promise<T> {
+    if (timeoutMs <= 0) return promise;
+
+    let settled = false;
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    return new Promise<T>((resolve, reject) => {
+        timer = setTimeout(() => {
+            timedOut = true;
+            settled = true;
+            reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+
+        promise.then(
+            (value) => {
+                if (timedOut) {
+                    onLateResolve?.(value);
+                    return;
+                }
+                if (settled) return;
+                settled = true;
+                if (timer) clearTimeout(timer);
+                resolve(value);
+            },
+            (error) => {
+                if (settled) return;
+                settled = true;
+                if (timer) clearTimeout(timer);
+                reject(error);
+            }
+        );
     });
 }
 
-export async function initMenu() {
-    await listen<string>('menu-action', (event) => {
-        handleMenuAction(event.payload);
+function currentMenuStatePayload() {
+    return {
+        viewMode: get(viewMode),
+        sidebarVisible: get(sidebarVisible),
+        hasFocusedImage: get(focusedImage) !== null,
+        selectedCount: get(selectedIds).size,
+        staticPublishingEnabled: get(staticPublishingEnabled),
+    };
+}
+
+function queueMenuStateUpdate() {
+    menuStateDirty = true;
+    if (menuStateQueued || menuStateUpdateInFlight) return;
+    menuStateQueued = true;
+    queueMicrotask(() => {
+        menuStateQueued = false;
+        flushMenuStateUpdate();
     });
+}
+
+function scheduleMenuStateRetry() {
+    if (menuStateRetryTimer) return;
+    menuStateRetryTimer = setTimeout(() => {
+        menuStateRetryTimer = null;
+        queueMenuStateUpdate();
+    }, menuOptions.retryDelayMs);
+}
+
+function flushMenuStateUpdate() {
+    if (!menuStateDirty || menuStateUpdateInFlight) return;
+
+    menuStateDirty = false;
+    menuStateUpdateInFlight = true;
+    withTimeout(
+        updateMenuState(currentMenuStatePayload()),
+        menuOptions.stateUpdateTimeoutMs,
+        'Native menu state update'
+    )
+        .catch((e) => {
+            menuStateDirty = true;
+            console.debug('Failed to update native menu state:', e);
+            scheduleMenuStateRetry();
+        })
+        .finally(() => {
+            menuStateUpdateInFlight = false;
+            if (menuStateDirty && !menuStateRetryTimer) {
+                queueMenuStateUpdate();
+            }
+        });
+}
+
+function startMenuStateSubscriptions() {
+    if (menuStateSubscriptionsStarted) return;
+    menuStateSubscriptionsStarted = true;
 
     viewMode.subscribe(queueMenuStateUpdate);
     sidebarVisible.subscribe(queueMenuStateUpdate);
     focusedImage.subscribe(queueMenuStateUpdate);
     selectedIds.subscribe(queueMenuStateUpdate);
     staticPublishingEnabled.subscribe(queueMenuStateUpdate);
+    queueMenuStateUpdate();
+}
+
+function cleanupLateMenuListener(unlisten: UnlistenFn) {
+    try {
+        unlisten();
+    } catch (e) {
+        console.debug('Failed to clean up late native menu listener:', e);
+    }
+}
+
+function scheduleMenuActionListenerRestart() {
+    if (menuActionRetryTimer) return;
+    menuActionRetryTimer = setTimeout(() => {
+        menuActionRetryTimer = null;
+        startMenuActionListener();
+    }, menuOptions.retryDelayMs);
+}
+
+function startMenuActionListener() {
+    if (menuActionUnlisten || menuActionListenInFlight) return;
+
+    menuActionListenInFlight = true;
+    const generation = ++menuActionListenGeneration;
+
+    withTimeout(
+        listen<string>('menu-action', (event) => {
+            handleMenuAction(event.payload);
+        }),
+        menuOptions.listenTimeoutMs,
+        'Native menu listener setup',
+        cleanupLateMenuListener
+    )
+        .then((unlisten) => {
+            if (generation !== menuActionListenGeneration) {
+                cleanupLateMenuListener(unlisten);
+                return;
+            }
+            menuActionUnlisten = unlisten;
+        })
+        .catch((e) => {
+            if (generation !== menuActionListenGeneration) return;
+            console.debug('Failed to start native menu listener:', e);
+            scheduleMenuActionListenerRestart();
+        })
+        .finally(() => {
+            if (generation === menuActionListenGeneration) {
+                menuActionListenInFlight = false;
+            }
+        });
+}
+
+export function restartMenuActionListener() {
+    menuActionListenGeneration += 1;
+    if (menuActionRetryTimer) {
+        clearTimeout(menuActionRetryTimer);
+        menuActionRetryTimer = null;
+    }
+    if (menuActionUnlisten) {
+        cleanupLateMenuListener(menuActionUnlisten);
+        menuActionUnlisten = null;
+    }
+    menuActionListenInFlight = false;
+    startMenuActionListener();
+}
+
+export async function initMenu(options: MenuInitOptions = {}) {
+    menuOptions = {
+        listenTimeoutMs: options.listenTimeoutMs ?? DEFAULT_LISTEN_TIMEOUT_MS,
+        retryDelayMs: options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS,
+        stateUpdateTimeoutMs: options.stateUpdateTimeoutMs ?? DEFAULT_STATE_UPDATE_TIMEOUT_MS,
+    };
+
+    startMenuStateSubscriptions();
+    startMenuActionListener();
     queueMenuStateUpdate();
 }

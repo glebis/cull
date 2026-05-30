@@ -1,0 +1,127 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { get } from 'svelte/store';
+
+const mocks = vi.hoisted(() => ({
+    listen: vi.fn(),
+    updateMenuState: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/api/event', () => ({
+    listen: mocks.listen,
+}));
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+    open: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/plugin-opener', () => ({
+    openPath: vi.fn(),
+    revealItemInDir: vi.fn(),
+}));
+
+vi.mock('./api', () => ({
+    importFolder: vi.fn(),
+    importFiles: vi.fn(),
+    redo: vi.fn(),
+    undo: vi.fn(),
+    moveImage: vi.fn(),
+    listOpenWithApplications: vi.fn(),
+    openImagesWithApplication: vi.fn(),
+    renameImage: vi.fn(),
+    shareImages: vi.fn(),
+    trashImages: vi.fn(),
+    listFolders: vi.fn(),
+    updateMenuState: mocks.updateMenuState,
+}));
+
+vi.mock('./image-loading', () => ({
+    loadAllImages: vi.fn(),
+    loadImagesForCurrentScope: vi.fn(),
+    loadImagesUntil: vi.fn(),
+}));
+
+function makeImage(id: string) {
+    return {
+        image: {
+            id,
+            sha256_hash: '',
+            width: 100,
+            height: 100,
+            format: 'jpeg',
+            file_size: 1000,
+            created_at: '',
+            imported_at: '',
+            ai_prompt: null,
+            raw_metadata: null,
+        },
+        source_label: null,
+        path: `/photos/${id}.jpg`,
+        thumbnail_path: null,
+        selection: null,
+        missing_at: null,
+    };
+}
+
+async function flushMicrotasks() {
+    await Promise.resolve();
+    await Promise.resolve();
+}
+
+describe('native menu bridge', () => {
+    beforeEach(() => {
+        vi.resetModules();
+        vi.useFakeTimers();
+        vi.clearAllMocks();
+        mocks.updateMenuState.mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('pushes menu state even when menu-action listener setup stalls', async () => {
+        mocks.listen.mockReturnValue(new Promise(() => {}) as never);
+        const [{ initMenu }, { focusedIndex, images }] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+
+        images.set([makeImage('img-1')]);
+        focusedIndex.set(0);
+        void initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        await flushMicrotasks();
+
+        expect(mocks.updateMenuState).toHaveBeenCalledWith(
+            expect.objectContaining({
+                hasFocusedImage: true,
+            })
+        );
+    });
+
+    it('restarts the menu-action listener after setup times out', async () => {
+        let restartedHandler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen
+            .mockReturnValueOnce(new Promise(() => {}) as never)
+            .mockImplementationOnce(async (_eventName, handler) => {
+                restartedHandler = handler as (event: { payload: string }) => void;
+                return vi.fn();
+            });
+
+        const [{ initMenu }, { viewMode }] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+
+        void initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        await flushMicrotasks();
+        expect(mocks.listen).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(60);
+        await vi.advanceTimersByTimeAsync(10);
+        await flushMicrotasks();
+
+        expect(mocks.listen).toHaveBeenCalledTimes(2);
+        restartedHandler?.({ payload: 'view_loupe' });
+        expect(get(viewMode)).toBe('loupe');
+    });
+});
