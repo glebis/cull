@@ -308,7 +308,7 @@
             "tabbar tabbar"
             "sidebar main"
             "statusbar statusbar";
-        grid-template-rows: 40px 1fr 32px;
+        grid-template-rows: var(--macos-titlebar-safe-area) 1fr 32px;
         grid-template-columns: 220px 1fr;
         height: 100vh;
         width: 100vw;
@@ -325,6 +325,7 @@
         grid-template-areas: "main";
         grid-template-rows: 1fr;
         grid-template-columns: 1fr;
+        padding-top: var(--macos-titlebar-safe-area);
     }
     .placeholder {
         grid-area: main;

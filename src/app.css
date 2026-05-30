@@ -62,6 +62,8 @@
     --red: #f7768e;
     --spacing: 8px;
     --radius: 4px;
+    --macos-titlebar-safe-area: 40px;
+    --macos-window-controls-width: 78px;
     --font: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
     --font-serif: 'EB Garamond', 'Georgia', 'Times New Roman', serif;
 }

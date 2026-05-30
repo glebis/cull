@@ -66,14 +66,14 @@
 
 <style>
     .tabbar {
-        height: 40px;
+        height: var(--macos-titlebar-safe-area);
         background: var(--surface);
         border-bottom: 1px solid var(--border);
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 0 var(--spacing);
-        padding-left: 78px;
+        padding-left: var(--macos-window-controls-width);
         grid-area: tabbar;
     }
     .window-name {
