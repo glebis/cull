@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+use crate::services::clipboard_monitor::ClipboardImageReader;
 use crate::services::clipboard_monitor::{
     create_monitor_session, default_capture_dir, resolve_capture_dir, ClipboardMonitorSession,
     ClipboardMonitorState,
@@ -38,17 +40,25 @@ fn status_from_state(state: &AppState, monitor: &ClipboardMonitorState) -> Clipb
     ClipboardMonitorStatus {
         running: monitor.running,
         supported: cfg!(target_os = "macos"),
-        access_status: if cfg!(target_os = "macos") {
-            "supported"
-        } else {
-            "unsupported_platform"
-        }
-        .to_string(),
+        access_status: platform_access_status(),
         collection_id: monitor.collection_id.clone(),
         collection_name: monitor.collection_name.clone(),
         capture_dir: capture_dir.to_string_lossy().to_string(),
         captured_count: monitor.captured_count,
         last_error: monitor.last_error.clone(),
+    }
+}
+
+fn platform_access_status() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        crate::services::clipboard_monitor_macos::MacPasteboardReader::new()
+            .status()
+            .label()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        crate::services::clipboard_monitor::ClipboardAccessStatus::UnsupportedPlatform.label()
     }
 }
 
@@ -82,7 +92,9 @@ pub async fn start_clipboard_monitor(
 
     let session = create_monitor_session(&state.db, &state.app_data_dir, capture_dir.as_deref())?;
     let capture_path = std::path::PathBuf::from(&session.capture_dir);
-    let _ = app.asset_protocol_scope().allow_directory(&capture_path, true);
+    let _ = app
+        .asset_protocol_scope()
+        .allow_directory(&capture_path, true);
 
     {
         let mut monitor = state.clipboard_monitor.lock();
@@ -195,7 +207,11 @@ pub async fn move_clipboard_capture_folder(
                     .ok()
                     .flatten()
             })
-            .unwrap_or_else(|| default_capture_dir(&state.app_data_dir).to_string_lossy().to_string())
+            .unwrap_or_else(|| {
+                default_capture_dir(&state.app_data_dir)
+                    .to_string_lossy()
+                    .to_string()
+            })
     };
     crate::services::clipboard_monitor::move_capture_folder(&state.db, &old_dir, &new_dir)?;
     let _ = app.asset_protocol_scope().allow_directory(&new_dir, true);

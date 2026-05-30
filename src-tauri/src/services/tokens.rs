@@ -60,6 +60,8 @@ pub fn tool_capability(tool_name: &str) -> &'static str {
         | "list_session_canvases"
         | "get_canvas_layout"
         | "get_library_stats"
+        | "get_clipboard_monitor_status"
+        | "get_last_clipboard_publish"
         | "get_detections"
         | "get_vision_metadata"
         | "get_image_quality"
@@ -81,9 +83,12 @@ pub fn tool_capability(tool_name: &str) -> &'static str {
         | "list_export_presets"
         | "assemble_pdf"
         | "export_static_publish_package"
-        | "export_static_publish_canvas" => "export:read",
+        | "export_static_publish_canvas"
+        | "publish_clipboard_collection" => "export:read",
 
-        "show_image" | "navigate_to_folder" | "show_collection" => "display:navigate",
+        "show_image" | "navigate_to_folder" | "show_collection" | "show_clipboard_collection" => {
+            "display:navigate"
+        }
 
         "download_embedding_model"
         | "generate_embeddings"

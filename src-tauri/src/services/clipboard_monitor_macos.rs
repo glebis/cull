@@ -42,10 +42,9 @@ fn read_macos_pasteboard_if_changed(
     let source_url = read_string_for_type(&pasteboard, unsafe { NSPasteboardTypeURL })
         .or_else(|| read_string_for_type(&pasteboard, unsafe { NSPasteboardTypeString }))
         .or_else(|| {
-            extract_first_url(&read_string_for_type(
-                &pasteboard,
-                unsafe { NSPasteboardTypeHTML },
-            )?)
+            extract_first_url(&read_string_for_type(&pasteboard, unsafe {
+                NSPasteboardTypeHTML
+            })?)
         });
 
     if let Some(file_url) = read_string_for_type(&pasteboard, unsafe { NSPasteboardTypeFileURL }) {
@@ -60,7 +59,9 @@ fn read_macos_pasteboard_if_changed(
                     .and_then(|ext| ext.to_str())
                     .unwrap_or("png")
                     .to_string();
-                let original_filename = path.file_name().map(|name| name.to_string_lossy().to_string());
+                let original_filename = path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string());
                 return Ok(Some(ClipboardCapture {
                     bytes,
                     extension,
