@@ -25,6 +25,7 @@ import {
     type ViewMode,
 } from './stores';
 import { importFolder, importFiles, addToCollection, listCollections, getBatchImages, listFolders, getImagesByIds, getImageByPath, drainPendingOpenParams } from './api';
+import { applyClipboardMonitorCollection } from './clipboard-monitor';
 import { clearImageScope, invalidateImageCache, loadAllImages, loadImagesForCurrentScope, loadImagesUntil, resetImagePaging } from './image-loading';
 
 interface OpenParams {
@@ -292,6 +293,10 @@ export async function initDeepLink() {
     // Listen for open-with-params events (from Rust deep link handler + open_with_params command)
     await listen<OpenParams>('open-with-params', (event) => {
         deduplicatedHandleParams(event.payload, 'open-with-params');
+    });
+
+    await listen<{ collection_id: string }>('navigate-collection', async (event) => {
+        await applyClipboardMonitorCollection(event.payload.collection_id);
     });
 
     try {

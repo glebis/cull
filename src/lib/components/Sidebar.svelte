@@ -2,9 +2,10 @@
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, showMissing, requestTextInput } from '$lib/stores';
-    import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, deleteCollectionApi, listSmartCollections, isYoloAvailable, isNudenetAvailable, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount } from '$lib/api';
+    import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, deleteCollectionApi, listSmartCollections, isYoloAvailable, isNudenetAvailable, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
-    import type { SmartCollection } from '$lib/api';
+    import type { ClipboardMonitorStatus, ClipboardPublishResult, SmartCollection } from '$lib/api';
+    import { applyClipboardMonitorCollection } from '$lib/clipboard-monitor';
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
 
@@ -16,6 +17,10 @@
     let regenProgress = $state({ current: 0, total: 0 });
     let rescanning = $state(false);
     let foldersExpanded = $state(true);
+    let clipboardStatus = $state<ClipboardMonitorStatus | null>(null);
+    let clipboardMoving = $state(false);
+    let clipboardPublishing = $state(false);
+    let clipboardPublishResult = $state<ClipboardPublishResult | null>(null);
 
     import { buildDisplayFolders } from '$lib/sidebar-utils';
     import SessionSwitcher from './SessionSwitcher.svelte';
@@ -42,6 +47,23 @@
             smartCollections.set(sc);
         } catch (e) {
             console.error('Failed to load smart collections:', e);
+        }
+        try {
+            clipboardStatus = await getClipboardMonitorStatus();
+        } catch (e) {
+            console.error('Failed to load clipboard monitor status:', e);
+        }
+        try {
+            await listen('clipboard-monitor:capture', async () => {
+                clipboardStatus = await getClipboardMonitorStatus();
+                const c = await listCollections();
+                collections.set(c);
+                if (clipboardStatus?.collection_id && get(activeCollection) === clipboardStatus.collection_id) {
+                    await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
+                }
+            });
+        } catch (e) {
+            console.error('Failed to listen for clipboard monitor captures:', e);
         }
         loadAiState().catch(e => console.error('Failed to load AI state:', e));
     });
@@ -155,6 +177,56 @@
             await refreshImages();
         } catch (e) {
             lastResult = `Error: ${e}`;
+        }
+    }
+
+    async function handleToggleClipboardMonitor() {
+        const wasRunning = clipboardStatus?.running ?? false;
+        try {
+            clipboardStatus = wasRunning
+                ? await stopClipboardMonitor()
+                : await startClipboardMonitor(null);
+            const c = await listCollections();
+            collections.set(c);
+            if (!wasRunning && clipboardStatus.collection_id) {
+                await applyClipboardMonitorCollection(clipboardStatus.collection_id);
+            }
+        } catch (e) {
+            showToast('Clipboard Monitor failed', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    async function handleMoveClipboardCaptureFolder() {
+        if (clipboardMoving) return;
+        const selected = await open({ directory: true, multiple: false });
+        if (!selected || Array.isArray(selected)) return;
+        clipboardMoving = true;
+        try {
+            clipboardStatus = await moveClipboardCaptureFolder(selected);
+            showToast('Clipboard folder moved', { detail: selected, type: 'success', duration: 8000 });
+        } catch (e) {
+            showToast('Move failed', { detail: String(e), type: 'error', duration: 10000 });
+        } finally {
+            clipboardMoving = false;
+        }
+    }
+
+    async function handlePublishClipboardCollection() {
+        if (!clipboardStatus?.collection_id || clipboardPublishing) return;
+        clipboardPublishing = true;
+        try {
+            clipboardPublishResult = await publishClipboardCollection(clipboardStatus.collection_id);
+            try {
+                await navigator.clipboard.writeText(clipboardPublishResult.url);
+            } catch (e) {
+                showToast('Published clipboard collection', { detail: `Copy failed: ${e}`, type: 'warning', duration: 8000 });
+                return;
+            }
+            showToast('Published clipboard collection', { detail: clipboardPublishResult.url, type: 'success', duration: 10000 });
+        } catch (e) {
+            showToast('Publish failed', { detail: String(e), type: 'error', duration: 10000 });
+        } finally {
+            clipboardPublishing = false;
         }
     }
 
@@ -555,6 +627,49 @@
     </div>
     {/if}
 
+    <div class="section clipboard-monitor">
+        <div class="section-header">CLIPBOARD MONITOR</div>
+        <button
+            class="section-item"
+            class:active={clipboardStatus?.running}
+            onclick={handleToggleClipboardMonitor}
+            disabled={clipboardMoving || clipboardPublishing}
+        >
+            <span class="icon">{clipboardStatus?.running ? '■' : '▶'}</span>
+            {clipboardStatus?.running ? 'Stop Monitor' : 'Monitor Clipboard'}
+        </button>
+        {#if clipboardStatus}
+            <div class="section-meta">{clipboardStatus.access_status}</div>
+            <div class="section-meta" title={clipboardStatus.capture_dir}>
+                {clipboardStatus.capture_dir.split('/').pop() || clipboardStatus.capture_dir}
+            </div>
+            {#if clipboardStatus.collection_name}
+                <div class="section-meta">{clipboardStatus.collection_name} · {clipboardStatus.captured_count}</div>
+            {/if}
+            <div class="section-actions">
+                <button
+                    class="section-item compact"
+                    onclick={handleMoveClipboardCaptureFolder}
+                    disabled={clipboardMoving}
+                >
+                    <span class="icon">↔</span>
+                    {clipboardMoving ? 'Moving...' : 'Move Folder'}
+                </button>
+                <button
+                    class="section-item compact"
+                    onclick={handlePublishClipboardCollection}
+                    disabled={!clipboardStatus.collection_id || clipboardPublishing}
+                >
+                    <span class="icon">↗</span>
+                    {clipboardPublishing ? 'Publishing...' : 'Publish'}
+                </button>
+            </div>
+            {#if clipboardPublishResult}
+                <div class="section-meta" title={clipboardPublishResult.url}>{clipboardPublishResult.url}</div>
+            {/if}
+        {/if}
+    </div>
+
     <div class="section">
         <div class="section-header">
             COLLECTIONS
@@ -657,6 +772,28 @@
     .section-item.active {
         background: rgba(122, 162, 247, 0.1);
         color: var(--blue);
+    }
+    .section-item:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+    .section-item.compact {
+        font-size: 11px;
+        padding: 5px 6px;
+    }
+    .section-actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 4px;
+        padding-top: 4px;
+    }
+    .section-meta {
+        color: var(--text-secondary);
+        font-size: 10px;
+        overflow: hidden;
+        padding: 2px 8px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .icon {
         font-size: 8px;

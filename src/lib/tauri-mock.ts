@@ -80,6 +80,17 @@ const mockCollections: [string, string, number][] = [
   ['col-picks', 'Picks', 6],
 ];
 
+let clipboardMonitorStatus = {
+  running: false,
+  supported: true,
+  access_status: 'supported',
+  collection_id: null as string | null,
+  collection_name: null as string | null,
+  capture_dir: '/mock/clipboard-captures',
+  captured_count: 0,
+  last_error: null as string | null,
+};
+
 const mockSessions = [
   {
     id: 'session-1',
@@ -256,6 +267,39 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     host: '127.0.0.1',
     port: 8000,
     site_dir: '/mock/static-publishing/client-review/site',
+  }),
+  get_clipboard_monitor_status: () => clipboardMonitorStatus,
+  start_clipboard_monitor: () => {
+    clipboardMonitorStatus = {
+      ...clipboardMonitorStatus,
+      running: true,
+      collection_id: 'col_clipboard_mock',
+      collection_name: 'Clipboard 2026.05.30 14:35',
+    };
+    if (!mockCollections.some(([id]) => id === 'col_clipboard_mock')) {
+      mockCollections.unshift(['col_clipboard_mock', 'Clipboard 2026.05.30 14:35', 0]);
+    }
+    return clipboardMonitorStatus;
+  },
+  stop_clipboard_monitor: () => {
+    clipboardMonitorStatus = { ...clipboardMonitorStatus, running: false };
+    return clipboardMonitorStatus;
+  },
+  set_clipboard_monitor_capture_dir: (_: any, args: { path: string }) => {
+    clipboardMonitorStatus = { ...clipboardMonitorStatus, capture_dir: args.path };
+    return clipboardMonitorStatus;
+  },
+  move_clipboard_capture_folder: (_: any, args: { newPath: string }) => {
+    clipboardMonitorStatus = { ...clipboardMonitorStatus, capture_dir: args.newPath };
+    return clipboardMonitorStatus;
+  },
+  publish_clipboard_collection: () => ({
+    collection_id: clipboardMonitorStatus.collection_id ?? 'col_clipboard_mock',
+    image_count: clipboardMonitorStatus.captured_count,
+    site_dir: '/mock/static-publishing/clipboard/site',
+    url: 'http://127.0.0.1:8000/',
+    manifest_path: '/mock/static-publishing/clipboard/site/data/canvas.json',
+    instructions_path: '/mock/static-publishing/clipboard/instructions/CLAUDE.md',
   }),
 
   check_library_health: () => ({ purged: 0, missing_sources: 0, to_regenerate: [] }),
@@ -570,7 +614,8 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   },
   list_images_by_folder: () => [],
   list_images_filtered: () => [],
-  list_collection_images: () => [],
+  list_collection_images: (_: any, args: { collectionId: string }) =>
+    args.collectionId === 'col_clipboard_mock' ? [makeMockImage(0), makeMockImage(1)] : [],
   is_yolo_available: () => true,
   is_nudenet_available: () => true,
   download_yolo_model: () => {

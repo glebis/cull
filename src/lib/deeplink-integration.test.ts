@@ -249,16 +249,17 @@ describe('handleParams', () => {
 });
 
 describe('initDeepLink', () => {
-    it('registers listeners for set-window-name and open-with-params', async () => {
+    it('registers listeners for window, open params, and collection navigation', async () => {
         vi.mocked(listen).mockResolvedValue(vi.fn() as never);
         vi.mocked(onOpenUrl).mockResolvedValue(undefined as never);
         vi.mocked(getCurrent).mockResolvedValue([]);
 
         await initDeepLink();
 
-        expect(listen).toHaveBeenCalledTimes(2);
+        expect(listen).toHaveBeenCalledTimes(3);
         expect(vi.mocked(listen).mock.calls[0][0]).toBe('set-window-name');
         expect(vi.mocked(listen).mock.calls[1][0]).toBe('open-with-params');
+        expect(vi.mocked(listen).mock.calls[2][0]).toBe('navigate-collection');
     });
 
     it('registers onOpenUrl handler', async () => {

@@ -359,6 +359,50 @@ export async function deleteCollectionApi(collectionId: string): Promise<void> {
     return invoke('delete_collection', { collectionId });
 }
 
+export interface ClipboardMonitorStatus {
+    running: boolean;
+    supported: boolean;
+    access_status: string;
+    collection_id: string | null;
+    collection_name: string | null;
+    capture_dir: string;
+    captured_count: number;
+    last_error: string | null;
+}
+
+export interface ClipboardPublishResult {
+    collection_id: string;
+    image_count: number;
+    site_dir: string;
+    url: string;
+    manifest_path: string;
+    instructions_path: string;
+}
+
+export async function getClipboardMonitorStatus(): Promise<ClipboardMonitorStatus> {
+    return invoke('get_clipboard_monitor_status');
+}
+
+export async function startClipboardMonitor(captureDir?: string | null): Promise<ClipboardMonitorStatus> {
+    return invoke('start_clipboard_monitor', { captureDir: captureDir ?? null });
+}
+
+export async function stopClipboardMonitor(): Promise<ClipboardMonitorStatus> {
+    return invoke('stop_clipboard_monitor');
+}
+
+export async function setClipboardMonitorCaptureDir(path: string): Promise<ClipboardMonitorStatus> {
+    return invoke('set_clipboard_monitor_capture_dir', { path });
+}
+
+export async function moveClipboardCaptureFolder(newPath: string): Promise<ClipboardMonitorStatus> {
+    return invoke('move_clipboard_capture_folder', { newPath });
+}
+
+export async function publishClipboardCollection(collectionId?: string | null): Promise<ClipboardPublishResult> {
+    return invoke('publish_clipboard_collection', { collectionId: collectionId ?? null });
+}
+
 // Smart Collection commands
 
 export async function listSmartCollections(): Promise<SmartCollection[]> {
