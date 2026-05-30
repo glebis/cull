@@ -81,7 +81,7 @@ where
     F: FnOnce() -> Fut + Send + 'static,
     Fut: std::future::Future<Output = ()> + Send,
 {
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let result = futures_util::FutureExt::catch_unwind(AssertUnwindSafe(fut())).await;
         if let Err(payload) = result {
             let msg = if let Some(s) = payload.downcast_ref::<&str>() {
