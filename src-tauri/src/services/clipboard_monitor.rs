@@ -15,6 +15,18 @@ pub enum ClipboardAccessStatus {
     Error(String),
 }
 
+impl ClipboardAccessStatus {
+    pub fn label(&self) -> String {
+        match self {
+            ClipboardAccessStatus::Supported => "supported".to_string(),
+            ClipboardAccessStatus::UnsupportedPlatform => "unsupported_platform".to_string(),
+            ClipboardAccessStatus::PermissionRequired => "permission_required".to_string(),
+            ClipboardAccessStatus::PermissionDenied => "permission_denied".to_string(),
+            ClipboardAccessStatus::Error(message) => format!("error:{message}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ClipboardCapture {
     pub bytes: Vec<u8>,
@@ -55,6 +67,8 @@ pub struct ClipboardCaptureResult {
     pub image_id: Option<String>,
     pub path: String,
     pub filename: String,
+    pub source_url: Option<String>,
+    pub source_app: Option<String>,
 }
 
 pub fn default_capture_dir(app_data_dir: &Path) -> PathBuf {
@@ -181,6 +195,8 @@ pub fn capture_clipboard_image(
         image_id,
         path: path.to_string_lossy().to_string(),
         filename,
+        source_url: capture.source_url.clone(),
+        source_app: capture.source_app.clone(),
     })
 }
 
@@ -191,6 +207,7 @@ pub fn process_reader_once<R: ClipboardImageReader>(
     state: &mut ClipboardMonitorState,
     reader: &mut R,
 ) -> Result<Option<ClipboardCaptureResult>, String> {
+    ensure_reader_access(reader.status())?;
     let Some(capture) = reader.read_if_changed()? else {
         return Ok(None);
     };
@@ -207,6 +224,22 @@ pub fn process_reader_once<R: ClipboardImageReader>(
         state.last_change_count = capture.change_count;
     }
     Ok(Some(result))
+}
+
+fn ensure_reader_access(status: ClipboardAccessStatus) -> Result<(), String> {
+    match status {
+        ClipboardAccessStatus::Supported => Ok(()),
+        ClipboardAccessStatus::UnsupportedPlatform => {
+            Err("Clipboard Monitor is not supported on this platform".to_string())
+        }
+        ClipboardAccessStatus::PermissionRequired => {
+            Err("Clipboard access permission is required".to_string())
+        }
+        ClipboardAccessStatus::PermissionDenied => {
+            Err("Clipboard access permission was denied".to_string())
+        }
+        ClipboardAccessStatus::Error(message) => Err(message),
+    }
 }
 
 pub fn move_capture_folder(
@@ -231,9 +264,14 @@ pub fn move_capture_folder(
         std::fs::copy(&old, &new_path)
             .map_err(|e| format!("Failed to copy clipboard capture: {}", e))?;
         let old_size = std::fs::metadata(&old).map_err(|e| e.to_string())?.len();
-        let new_size = std::fs::metadata(&new_path).map_err(|e| e.to_string())?.len();
+        let new_size = std::fs::metadata(&new_path)
+            .map_err(|e| e.to_string())?
+            .len();
         if old_size != new_size {
-            return Err(format!("Copied capture size mismatch for {}", old.display()));
+            return Err(format!(
+                "Copied capture size mismatch for {}",
+                old.display()
+            ));
         }
         db.update_image_file_path(&image_file_id, &new_path.to_string_lossy())
             .map_err(|e| e.to_string())?;
@@ -355,7 +393,10 @@ mod tests {
         let image: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_pixel(2, 2, Rgba(color));
         let mut bytes = Vec::new();
         image
-            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
             .unwrap();
         bytes
     }
@@ -458,7 +499,12 @@ mod tests {
 
         assert!(first.imported);
         assert!(!second.imported);
-        assert_eq!(db.list_collection_images(&session.collection_id).unwrap().len(), 1);
+        assert_eq!(
+            db.list_collection_images(&session.collection_id)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     struct FakeReader {
@@ -501,7 +547,12 @@ mod tests {
 
         assert!(first.is_some());
         assert!(second.is_none());
-        assert_eq!(db.list_collection_images(&session.collection_id).unwrap().len(), 1);
+        assert_eq!(
+            db.list_collection_images(&session.collection_id)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]

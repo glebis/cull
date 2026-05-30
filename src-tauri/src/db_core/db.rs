@@ -3625,9 +3625,7 @@ mod tests {
     #[test]
     fn test_collection_settings_json_round_trips() {
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
-        let collection_id = db
-            .create_collection("Clipboard 2026.05.30 14:35")
-            .unwrap();
+        let collection_id = db.create_collection("Clipboard 2026.05.30 14:35").unwrap();
 
         db.set_collection_settings_json(
             &collection_id,
