@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { VIEW_TABS, visibleViewTabs } from './view-tabs';
 
 const tabBarSource = readFileSync(join(process.cwd(), 'src/lib/components/TabBar.svelte'), 'utf8');
+const pageSource = readFileSync(join(process.cwd(), 'src/routes/+page.svelte'), 'utf8');
+const appCssSource = readFileSync(join(process.cwd(), 'src/app.css'), 'utf8');
 const viewTabIconPath = join(process.cwd(), 'src/lib/components/ViewTabIcon.svelte');
 const viewTabIconSource = existsSync(viewTabIconPath)
     ? readFileSync(viewTabIconPath, 'utf8')
@@ -41,5 +43,11 @@ describe('view tabs', () => {
 
     it('marks the app header as a native Tauri drag region', () => {
         expect(tabBarSource).toContain('<div class="tabbar" data-tauri-drag-region="deep">');
+    });
+
+    it('keeps zen-mode content below the macOS window controls', () => {
+        expect(appCssSource).toContain('--macos-titlebar-safe-area: 40px;');
+        expect(tabBarSource).toContain('padding-left: var(--macos-window-controls-width);');
+        expect(pageSource).toContain('padding-top: var(--macos-titlebar-safe-area);');
     });
 });
