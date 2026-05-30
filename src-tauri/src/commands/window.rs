@@ -60,6 +60,18 @@ fn tauri_icon_from_png_bytes(bytes: &[u8], id: &str) -> Result<Image<'static>, S
     Ok(Image::new_owned(rgba.into_raw(), width, height))
 }
 
+pub fn current_app_icon_image(app: &AppHandle) -> Result<Image<'static>, String> {
+    let variant_id = app
+        .state::<crate::AppState>()
+        .db
+        .get_setting("app_icon_variant")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| DEFAULT_ICON_VARIANT.to_string());
+    let variant = icon_variant_or_default(&variant_id);
+    tauri_icon_from_png_bytes(variant.bytes, variant.id)
+}
+
 pub fn apply_app_icon_variant_to_app(app: &AppHandle, variant_id: &str) -> Result<(), String> {
     let variant = icon_variant_or_default(variant_id);
     let icon = tauri_icon_from_png_bytes(variant.bytes, variant.id)?;
@@ -71,7 +83,17 @@ pub fn apply_app_icon_variant_to_app(app: &AppHandle, variant_id: &str) -> Resul
     }
 
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        tray.set_icon(Some(icon.clone()))
+        let tray_icon = if app
+            .state::<crate::AppState>()
+            .clipboard_monitor
+            .lock()
+            .running
+        {
+            crate::tray::recording_tray_icon(&icon)
+        } else {
+            icon.clone()
+        };
+        tray.set_icon(Some(tray_icon))
             .map_err(|e| format!("Failed to set tray icon: {}", e))?;
     }
 
