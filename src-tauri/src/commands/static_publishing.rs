@@ -193,6 +193,57 @@ pub fn export_static_publish_canvas_inner(
     )
 }
 
+pub fn export_static_publish_collection_inner(
+    state: &AppState,
+    collection_id: String,
+    output_dir: Option<String>,
+    share_url: Option<String>,
+) -> Result<StaticPublishResult, String> {
+    ensure_module_enabled(state)?;
+    let collections = state.db.list_collections().map_err(|e| e.to_string())?;
+    let collection_name = collections
+        .iter()
+        .find(|(id, _, _)| id == &collection_id)
+        .map(|(_, name, _)| name.clone())
+        .unwrap_or_else(|| "Clipboard Collection".to_string());
+    let images = state
+        .db
+        .list_collection_images(&collection_id)
+        .map_err(|e| e.to_string())?;
+    if images.is_empty() {
+        return Err("Collection has no images to publish".to_string());
+    }
+    let items = images
+        .into_iter()
+        .map(|image| StaticPublishCanvasItem {
+            image_id: image.image.id,
+            x: None,
+            y: None,
+            width: None,
+            height: None,
+            hidden: None,
+        })
+        .collect();
+
+    export_static_publish_package_inner(
+        state,
+        StaticPublishRequest {
+            canvas_name: collection_name.clone(),
+            items,
+            layout_json: None,
+            output_dir,
+            share_url,
+            site_title: Some(collection_name),
+            site_description: Some("Cull clipboard reference collection".to_string()),
+            indexable: false,
+            links: Vec::new(),
+            include_thumbnails: true,
+            include_web: true,
+            include_full: false,
+        },
+    )
+}
+
 fn export_static_publish_package_with_canvas_inner(
     state: &AppState,
     request: StaticPublishRequest,
@@ -1983,6 +2034,37 @@ mod tests {
 
         let robots = fs::read_to_string(site_dir.join("robots.txt")).unwrap();
         assert!(robots.contains("Disallow: /"));
+    }
+
+    #[test]
+    fn export_static_publish_collection_uses_collection_images() {
+        let (state, tmp) = test_state();
+        state.db.set_setting(MODULE_KEY, "true").unwrap();
+
+        let source_path = tmp.path().join("collection-source.png");
+        write_test_image(&source_path);
+        let image_id =
+            crate::db_core::import::import_file(&state.db, &source_path, &state.app_data_dir)
+                .unwrap()
+                .unwrap();
+        let collection_id = state.db.create_collection("Clipboard References").unwrap();
+        state
+            .db
+            .add_to_collection(&collection_id, &[&image_id])
+            .unwrap();
+
+        let result = export_static_publish_collection_inner(
+            &state,
+            collection_id.clone(),
+            Some(tmp.path().join("exports").to_string_lossy().to_string()),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(result.image_count, 1);
+        assert!(PathBuf::from(&result.site_dir)
+            .join("data/canvas.json")
+            .exists());
     }
 
     #[test]

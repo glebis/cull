@@ -18,6 +18,16 @@ pub struct ClipboardMonitorStatus {
     pub last_error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ClipboardPublishResult {
+    pub collection_id: String,
+    pub image_count: usize,
+    pub site_dir: String,
+    pub url: String,
+    pub manifest_path: String,
+    pub instructions_path: String,
+}
+
 fn status_from_state(state: &AppState, monitor: &ClipboardMonitorState) -> ClipboardMonitorStatus {
     let capture_dir = monitor
         .capture_dir
@@ -197,9 +207,48 @@ pub async fn move_clipboard_capture_folder(
 
 #[tauri::command]
 pub async fn publish_clipboard_collection(
-    _app: AppHandle,
-    _state: State<'_, AppState>,
-    _collection_id: Option<String>,
-) -> Result<serde_json::Value, String> {
-    Err("Clipboard collection publishing is wired in the publishing task".to_string())
+    app: AppHandle,
+    state: State<'_, AppState>,
+    collection_id: Option<String>,
+) -> Result<ClipboardPublishResult, String> {
+    let collection_id = collection_id
+        .or_else(|| state.clipboard_monitor.lock().collection_id.clone())
+        .or_else(|| {
+            state
+                .db
+                .get_setting(crate::services::clipboard_monitor::LAST_COLLECTION_SETTING)
+                .ok()
+                .flatten()
+        })
+        .ok_or_else(|| "No clipboard monitor collection is available".to_string())?;
+    let export = crate::commands::static_publishing::export_static_publish_collection_inner(
+        state.inner(),
+        collection_id.clone(),
+        None,
+        None,
+    )?;
+    let server = crate::commands::static_publishing::serve_static_publish_package_inner(
+        state.inner(),
+        export.site_dir.clone(),
+        Some("127.0.0.1".to_string()),
+        None,
+    )
+    .await?;
+    let result = ClipboardPublishResult {
+        collection_id,
+        image_count: export.image_count,
+        site_dir: export.site_dir,
+        url: server.url,
+        manifest_path: export.manifest_path,
+        instructions_path: export.instructions_path,
+    };
+    let _ = app.emit("clipboard-monitor:published", &result);
+    state
+        .db
+        .set_setting(
+            "clipboard_monitor_last_publish",
+            &serde_json::to_string(&result).unwrap_or_default(),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(result)
 }
