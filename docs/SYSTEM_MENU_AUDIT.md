@@ -15,7 +15,7 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 | View menu | Pass | View labels and shortcuts match the tab bar and keyboard handler. Current view and sidebar state are reflected with checkmarks. |
 | Window menu | Pass | Minimize, Zoom, and Bring All to Front use native predefined items. |
 | Help menu | Pass | Cull User Guide opens the bundled native Apple Help Book in Tips. |
-| Tray menu | Partial | Show Window and Quit are wired. Stats and MCP status are display-only placeholders until dynamic tray status refresh is implemented. |
+| Tray menu | Partial | Show Window, Clipboard Monitor, and Quit are wired. Stats and MCP status are display-only placeholders until dynamic tray status refresh is implemented. |
 
 ## App Menu
 
@@ -97,6 +97,7 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 | Label | Native ID / Event | Handler | Status |
 |---|---|---|---|
 | Show Window | `show_hide` | Toggles main window visibility | Pass |
+| Clipboard Monitor | `tray_clipboard_monitor` | Starts or stops Clipboard Monitor from the tray and mirrors the checked state when toggled in-app | Pass |
 | Loading... | `stats` | Display-only placeholder | Partial |
 | MCP: starting... | `mcp_status` | Display-only placeholder | Partial |
 | Quit Cull | `quit_app` | Exits app | Pass |
@@ -109,4 +110,5 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 - Image-specific context actions are now also exposed through the native Image menu.
 - Native menu state is now synchronized from Svelte: image actions disable with no focused image, Deselect All disables with no selection, View items are checked, and Toggle Sidebar reflects the sidebar state.
 - About Cull now opens Cull's custom in-app About dialog so the release can show the app image and linked credits instead of the default native panel.
+- Clipboard Monitor is exposed as a tray checkbox because it is the most useful outside-app workflow: Cull can capture copied AI outputs while the main window is hidden.
 - The tray status placeholders should become dynamic before a polished binary release, but they do not block a source release.

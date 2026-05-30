@@ -1,4 +1,5 @@
 use tauri::{
+    image::Image,
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, Wry,
@@ -10,6 +11,7 @@ const TRAY_STATS_ID: &str = "stats";
 const TRAY_MCP_STATUS_ID: &str = "mcp_status";
 const QUIT_APP_ID: &str = "quit_app";
 const TRAY_CLIPBOARD_MONITOR_ID: &str = "tray_clipboard_monitor";
+const RECORDING_BADGE_RGBA: [u8; 4] = [247, 118, 142, 255];
 
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,7 +76,28 @@ pub fn set_clipboard_monitor_checked(app: &AppHandle, checked: bool) -> Result<(
     let menu =
         build_tray_menu(app, checked).map_err(|e| format!("Failed to rebuild tray menu: {}", e))?;
     tray.set_menu(Some(menu))
-        .map_err(|e| format!("Failed to update tray menu: {}", e))
+        .map_err(|e| format!("Failed to update tray menu: {}", e))?;
+    set_clipboard_monitor_icon(app, checked)
+}
+
+fn set_clipboard_monitor_icon(app: &AppHandle, recording: bool) -> Result<(), String> {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return Ok(());
+    };
+    let icon = crate::commands::window::current_app_icon_image(app)?;
+    let icon = if recording {
+        recording_tray_icon(&icon)
+    } else {
+        icon
+    };
+    tray.set_icon(Some(icon))
+        .map_err(|e| format!("Failed to update tray recording icon: {}", e))
+}
+
+pub fn recording_tray_icon(base: &Image<'_>) -> Image<'static> {
+    let mut rgba = base.rgba().to_vec();
+    apply_recording_badge_to_rgba(&mut rgba, base.width(), base.height());
+    Image::new_owned(rgba, base.width(), base.height())
 }
 
 fn build_tray_menu(app: &AppHandle, clipboard_monitor_checked: bool) -> tauri::Result<Menu<Wry>> {
@@ -163,6 +186,29 @@ fn tray_action_for_id(id: &str) -> TrayMenuAction {
     }
 }
 
+fn apply_recording_badge_to_rgba(rgba: &mut [u8], width: u32, height: u32) {
+    if width == 0 || height == 0 || rgba.len() < (width as usize * height as usize * 4) {
+        return;
+    }
+
+    let min_side = width.min(height) as i32;
+    let radius = (min_side / 4).max(3);
+    let center_x = width as i32 - radius;
+    let center_y = radius;
+    let radius_sq = radius * radius;
+
+    for y in 0..height as i32 {
+        for x in 0..width as i32 {
+            let dx = x - center_x;
+            let dy = y - center_y;
+            if dx * dx + dy * dy <= radius_sq {
+                let idx = ((y as u32 * width + x as u32) * 4) as usize;
+                rgba[idx..idx + 4].copy_from_slice(&RECORDING_BADGE_RGBA);
+            }
+        }
+    }
+}
+
 fn toggle_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
@@ -226,5 +272,20 @@ mod tests {
             tray_action_for_id(TRAY_CLIPBOARD_MONITOR_ID),
             TrayMenuAction::ToggleClipboardMonitor
         );
+    }
+
+    #[test]
+    fn recording_badge_draws_red_circle_on_top_right_of_icon() {
+        let width = 16;
+        let height = 16;
+        let mut rgba = vec![0u8; width * height * 4];
+
+        apply_recording_badge_to_rgba(&mut rgba, width as u32, height as u32);
+
+        let badge_center = ((2 * width + 13) * 4) as usize;
+        assert_eq!(&rgba[badge_center..badge_center + 4], &[247, 118, 142, 255]);
+
+        let untouched_corner = ((14 * width + 1) * 4) as usize;
+        assert_eq!(&rgba[untouched_corner..untouched_corner + 4], &[0, 0, 0, 0]);
     }
 }
