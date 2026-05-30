@@ -2012,6 +2012,9 @@ mod tests {
             jobs: services::jobs::JobRegistry::default(),
             action_manager: services::undo::ActionManager::new(),
             file_watcher: parking_lot::Mutex::new(watcher::FileWatcher::new()),
+            clipboard_monitor: parking_lot::Mutex::new(
+                services::clipboard_monitor::ClipboardMonitorState::default(),
+            ),
         };
         (state, tmp)
     }

@@ -8,6 +8,7 @@ commands.allow = [
   "export_static_publish_package",
   "get_export_asset",
   "list_export_presets",
+  "publish_clipboard_collection",
   "save_export_image",
   "serve_static_publish_package",
   "validate_export_manifest",

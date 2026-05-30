@@ -9,6 +9,7 @@ commands.allow = [
   "delete_images_permanently",
   "import_files",
   "import_folder",
+  "move_clipboard_capture_folder",
   "move_image",
   "open_images_with_application",
   "regenerate_single_thumbnail",
@@ -17,6 +18,9 @@ commands.allow = [
   "rename_image",
   "rescan_sources",
   "rotate_image",
+  "set_clipboard_monitor_capture_dir",
   "share_images",
+  "start_clipboard_monitor",
+  "stop_clipboard_monitor",
   "trash_images",
 ]

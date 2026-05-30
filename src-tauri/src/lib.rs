@@ -40,6 +40,7 @@ pub struct AppState {
     pub jobs: crate::services::jobs::JobRegistry,
     pub action_manager: services::undo::ActionManager,
     pub file_watcher: Mutex<watcher::FileWatcher>,
+    pub clipboard_monitor: Mutex<services::clipboard_monitor::ClipboardMonitorState>,
 }
 
 fn install_panic_hook(app: AppHandle) {
@@ -254,6 +255,9 @@ pub fn run() {
                 jobs,
                 action_manager: services::undo::ActionManager::new(),
                 file_watcher: Mutex::new(watcher::FileWatcher::new()),
+                clipboard_monitor: Mutex::new(
+                    services::clipboard_monitor::ClipboardMonitorState::default(),
+                ),
             });
 
             // Load persisted job history from DB
@@ -407,6 +411,12 @@ pub fn run() {
             commands::jobs::cancel_job,
             commands::jobs::pause_job,
             commands::jobs::resume_job,
+            commands::clipboard_monitor::get_clipboard_monitor_status,
+            commands::clipboard_monitor::start_clipboard_monitor,
+            commands::clipboard_monitor::stop_clipboard_monitor,
+            commands::clipboard_monitor::set_clipboard_monitor_capture_dir,
+            commands::clipboard_monitor::move_clipboard_capture_folder,
+            commands::clipboard_monitor::publish_clipboard_collection,
             commands::library::list_images,
             commands::library::get_image_count,
             commands::library::list_image_ids,

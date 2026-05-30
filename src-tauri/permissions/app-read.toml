@@ -7,6 +7,7 @@ commands.allow = [
   "evaluate_smart_collection",
   "get_activity_context",
   "get_batch_images",
+  "get_clipboard_monitor_status",
   "get_data_flow_status",
   "get_image_by_path",
   "get_image_count",

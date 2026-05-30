@@ -160,6 +160,12 @@ describe('Tauri command contract', () => {
         expect(commandPermissions.get('create_mcp_token')).toEqual(['app-admin']);
         expect(commandPermissions.get('start_dictation')).toEqual(['app-ui']);
         expect(commandPermissions.get('set_rating')).toEqual(['app-curation']);
+        expect(commandPermissions.get('get_clipboard_monitor_status')).toEqual(['app-read']);
+        expect(commandPermissions.get('start_clipboard_monitor')).toEqual(['app-file-access']);
+        expect(commandPermissions.get('stop_clipboard_monitor')).toEqual(['app-file-access']);
+        expect(commandPermissions.get('set_clipboard_monitor_capture_dir')).toEqual(['app-file-access']);
+        expect(commandPermissions.get('move_clipboard_capture_folder')).toEqual(['app-file-access']);
+        expect(commandPermissions.get('publish_clipboard_collection')).toEqual(['app-export-publishing']);
     });
 
     it('targets app command capabilities only at first-party app windows', () => {
