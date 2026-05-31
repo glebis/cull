@@ -474,16 +474,32 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   ],
   get_clip_model_download_info: () => ({
     model_id: 'clip-vit-b32',
-    url: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx',
+    url: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/e0c24ed0fa57fa3e4f97f30de74c51d944036ace/model.onnx',
+    expected_sha256: 'c68d3d9a200ddd2a8c8a5510b576d4c94d1ae383bf8b36dd8c084f94e1fb4d63',
+    expected_size_bytes: 351686194,
+    spdx_license: 'MIT',
+    source_repo: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision',
+    model_card_url: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision',
     model_path: '/mock/app-data/models/clip-vit-b32-vision.onnx',
     part_path: '/mock/app-data/models/clip-vit-b32-vision.onnx.part',
-    curl_command: "mkdir -p '/mock/app-data/models' && curl -L -C - -o '/mock/app-data/models/clip-vit-b32-vision.onnx.part' 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx' && mv '/mock/app-data/models/clip-vit-b32-vision.onnx.part' '/mock/app-data/models/clip-vit-b32-vision.onnx'",
+    curl_command: "mkdir -p '/mock/app-data/models' && curl -L -C - -o '/mock/app-data/models/clip-vit-b32-vision.onnx.part' 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/e0c24ed0fa57fa3e4f97f30de74c51d944036ace/model.onnx' && test \"$(wc -c < '/mock/app-data/models/clip-vit-b32-vision.onnx.part' | tr -d '[:space:]')\" = '351686194' && printf '%s\\n' 'c68d3d9a200ddd2a8c8a5510b576d4c94d1ae383bf8b36dd8c084f94e1fb4d63  /mock/app-data/models/clip-vit-b32-vision.onnx.part' | shasum -a 256 -c - && mv '/mock/app-data/models/clip-vit-b32-vision.onnx.part' '/mock/app-data/models/clip-vit-b32-vision.onnx'",
   }),
   get_embedding_model_download_info: (_: any, args: { model: string }) => ({
     model_id: args.model,
     url: args.model === 'dinov2-vits14'
-      ? 'https://huggingface.co/sefaburak/dinov2-small-onnx/resolve/main/dinov2_vits14.onnx'
-      : 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx',
+      ? 'https://huggingface.co/sefaburak/dinov2-small-onnx/resolve/7a5e61628117b5a8bd6f5e2b2385b76da1b4582e/dinov2_vits14.onnx'
+      : 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/e0c24ed0fa57fa3e4f97f30de74c51d944036ace/model.onnx',
+    expected_sha256: args.model === 'dinov2-vits14'
+      ? '4df36ef0716a8f17d984fc7546a3a5d670fda6911eb298592250cb9e26756063'
+      : 'c68d3d9a200ddd2a8c8a5510b576d4c94d1ae383bf8b36dd8c084f94e1fb4d63',
+    expected_size_bytes: args.model === 'dinov2-vits14' ? 86644121 : 351686194,
+    spdx_license: args.model === 'dinov2-vits14' ? 'Apache-2.0' : 'MIT',
+    source_repo: args.model === 'dinov2-vits14'
+      ? 'https://huggingface.co/sefaburak/dinov2-small-onnx'
+      : 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision',
+    model_card_url: args.model === 'dinov2-vits14'
+      ? 'https://huggingface.co/sefaburak/dinov2-small-onnx'
+      : 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision',
     model_path: `/mock/app-data/models/${args.model}.onnx`,
     part_path: `/mock/app-data/models/${args.model}.onnx.part`,
     curl_command: `curl -L -C - -o '/mock/app-data/models/${args.model}.onnx.part'`,
@@ -502,6 +518,11 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       available: true,
       downloadable: true,
       downloadLabel: 'Download CLIP (~350MB)',
+      expectedSha256: 'c68d3d9a200ddd2a8c8a5510b576d4c94d1ae383bf8b36dd8c084f94e1fb4d63',
+      expectedSizeBytes: 351686194,
+      spdxLicense: 'MIT',
+      sourceRepo: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision',
+      modelCardUrl: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision',
       apiKeyProvider: null,
     },
     {
@@ -517,6 +538,11 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       available: true,
       downloadable: true,
       downloadLabel: 'Download DINOv2 (~87MB)',
+      expectedSha256: '4df36ef0716a8f17d984fc7546a3a5d670fda6911eb298592250cb9e26756063',
+      expectedSizeBytes: 86644121,
+      spdxLicense: 'Apache-2.0',
+      sourceRepo: 'https://huggingface.co/sefaburak/dinov2-small-onnx',
+      modelCardUrl: 'https://huggingface.co/sefaburak/dinov2-small-onnx',
       apiKeyProvider: null,
     },
     {
@@ -532,6 +558,11 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       available: false,
       downloadable: false,
       downloadLabel: null,
+      expectedSha256: null,
+      expectedSizeBytes: null,
+      spdxLicense: null,
+      sourceRepo: null,
+      modelCardUrl: null,
       apiKeyProvider: 'google',
     },
     {
@@ -547,6 +578,11 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       available: false,
       downloadable: false,
       downloadLabel: null,
+      expectedSha256: null,
+      expectedSizeBytes: null,
+      spdxLicense: null,
+      sourceRepo: null,
+      modelCardUrl: null,
       apiKeyProvider: 'cohere',
     },
     {
@@ -562,6 +598,11 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       available: false,
       downloadable: false,
       downloadLabel: null,
+      expectedSha256: null,
+      expectedSizeBytes: null,
+      spdxLicense: null,
+      sourceRepo: null,
+      modelCardUrl: null,
       apiKeyProvider: 'openai',
     },
     {
@@ -577,6 +618,11 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       available: true,
       downloadable: false,
       downloadLabel: null,
+      expectedSha256: null,
+      expectedSizeBytes: null,
+      spdxLicense: null,
+      sourceRepo: null,
+      modelCardUrl: null,
       apiKeyProvider: null,
     },
   ],

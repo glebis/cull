@@ -1362,14 +1362,16 @@ impl CullMcp {
         let url = spec.url.to_string();
         let model_id_for_task = spec.model_id.to_string();
         let display_name = spec.display_name.to_string();
+        let verification = spec.download_verification();
 
         tauri::async_runtime::spawn(async move {
             let state = app.state::<AppState>();
             let client = reqwest::Client::new();
-            let result = crate::services::model_download::download_model_file_controlled(
+            let result = crate::services::model_download::download_model_file_verified_controlled(
                 &client,
                 &url,
                 &model_path_for_task,
+                Some(&verification),
                 &control,
                 |progress| {
                     state.jobs.update_progress(

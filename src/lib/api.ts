@@ -462,6 +462,11 @@ export async function listTags(limit = 100, offset = 0): Promise<TagSummary[]> {
 export interface ClipModelDownloadInfo {
     model_id: string;
     url: string;
+    expected_sha256: string;
+    expected_size_bytes: number;
+    spdx_license: string;
+    source_repo: string;
+    model_card_url: string;
     model_path: string;
     part_path: string;
     curl_command: string;
@@ -482,6 +487,11 @@ export interface EmbeddingProviderInfo {
     available: boolean;
     downloadable: boolean;
     downloadLabel: string | null;
+    expectedSha256: string | null;
+    expectedSizeBytes: number | null;
+    spdxLicense: string | null;
+    sourceRepo: string | null;
+    modelCardUrl: string | null;
     apiKeyProvider: string | null;
 }
 
