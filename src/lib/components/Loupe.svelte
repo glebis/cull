@@ -27,7 +27,8 @@
     let image = $derived($focusedImage);
     let isRaw = $derived(isRawFormat(image?.image.format ?? ''));
     let sourceLoadFailed = $state(false);
-    let src = $derived(image ? convertFileSrc(chooseLoupeImagePath(image, isRaw, sourceLoadFailed)) : '');
+    let previewPath = $derived(image ? chooseLoupeImagePath(image, isRaw, sourceLoadFailed) : null);
+    let src = $derived(previewPath ? convertFileSrc(previewPath) : '');
     let filename = $derived(image?.path.split('/').pop() ?? '');
     let dimensions = $derived(image ? `${image.image.width}x${image.image.height}` : '');
     let format = $derived(image?.image.format ?? '');
@@ -173,7 +174,7 @@
 
         const currentPath = chooseLoupeImagePath(current, isRaw, sourceLoadFailed);
         const thumbnailWasShown = !!current.thumbnail_path && currentPath === current.thumbnail_path;
-        const canFallbackToThumbnail = !thumbnailWasShown && !isRaw && !sourceLoadFailed && !!current.thumbnail_path;
+        const canFallbackToThumbnail = false;
         recordImageLoadFailure({
             view: 'loupe',
             image: current,
@@ -435,17 +436,21 @@
 >
     {#if image}
         <div class="image-frame">
-            <img
-                bind:this={imgEl}
-                {src}
-                alt={filename}
-                draggable="false"
-                onerror={handleImageError}
-                class:blurred={shouldBlur}
-                class:unblurring={detectionsLoaded}
-                class:pixel-zoom={$loupeScale > 4}
-                style="transform: scale({$loupeScale}) translate({$loupePanX / $loupeScale}px, {$loupePanY / $loupeScale}px);"
-            />
+            {#if src}
+                <img
+                    bind:this={imgEl}
+                    {src}
+                    alt={filename}
+                    draggable="false"
+                    onerror={handleImageError}
+                    class:blurred={shouldBlur}
+                    class:unblurring={detectionsLoaded}
+                    class:pixel-zoom={$loupeScale > 4}
+                    style="transform: scale({$loupeScale}) translate({$loupePanX / $loupeScale}px, {$loupePanY / $loupeScale}px);"
+                />
+            {:else}
+                <div class="preview-unavailable">Preview unavailable</div>
+            {/if}
 
             {#if shouldBlur}
                 <div class="nsfw-overlay">
@@ -740,6 +745,11 @@
     }
     img.pixel-zoom {
         image-rendering: pixelated;
+    }
+    .preview-unavailable {
+        color: var(--text-secondary);
+        font-size: 14px;
+        text-align: center;
     }
     .empty {
         color: var(--text-secondary);

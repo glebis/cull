@@ -43,6 +43,7 @@
         resumeJob,
     } from '$lib/api';
     import type { EmbeddingModelDownloadInfo, EmbeddingPage, GenerationRun, ImageWithFile } from '$lib/api';
+    import { isAssetProtocolSafePath, safeAssetPreviewPath } from '$lib/view-utils';
 
     // State
     let downloading = $state(false);
@@ -641,7 +642,7 @@
         const key = `${id}_${size}`;
         if (thumbnailImages.has(key) || loadingThumbnailKeys.has(key)) return;
         const img = imageMap.get(id);
-        if (!img?.thumbnail_path) {
+        if (!img?.thumbnail_path || !isAssetProtocolSafePath(img.thumbnail_path)) {
             failedThumbnailIds = new Set([...failedThumbnailIds, id]);
             return;
         }
@@ -1212,7 +1213,7 @@
                 images: embeddingImages.map(img => ({
                     id: img.image.id,
                     path: img.path,
-                    thumbnailPath: img.thumbnail_path,
+                    thumbnailPath: safeAssetPreviewPath(img),
                 })),
             }, [vectors.buffer]);
         });
@@ -2030,12 +2031,17 @@
                 <div class="section-header">SELECTED</div>
                 {#if imageMap.get(selectedPoint.id)}
                     {@const img = imageMap.get(selectedPoint.id)!}
+                    {@const previewPath = safeAssetPreviewPath(img)}
                     <div class="selected-preview">
-                        <img
-                            src={convertFileSrc(img.thumbnail_path || img.path)}
-                            alt=""
-                            class="preview-img"
-                        />
+                        {#if previewPath}
+                            <img
+                                src={convertFileSrc(previewPath)}
+                                alt=""
+                                class="preview-img"
+                            />
+                        {:else}
+                            <div class="preview-img preview-unavailable">Preview unavailable</div>
+                        {/if}
                         <div class="preview-name">{img.path.split('/').pop()}</div>
                         <div class="preview-dims">{img.image.width} x {img.image.height}</div>
                     </div>
@@ -2089,17 +2095,22 @@
         {#if (largePreviewOpen && selectedImage) || textOutputOpen}
             <div class="embed-inspector">
                 {#if largePreviewOpen && selectedImage}
+                    {@const previewPath = safeAssetPreviewPath(selectedImage)}
                     <div class="inspector-section-block preview-block">
                         <div class="inspector-header-row">
                             <span class="section-header">PREVIEW</span>
                             <button class="inspector-close" onclick={() => { largePreviewOpen = false; saveViewState(); }} title="Close preview">×</button>
                         </div>
                         <div class="large-preview-frame">
-                            <img
-                                src={convertFileSrc(selectedImage.thumbnail_path || selectedImage.path)}
-                                alt=""
-                                class="large-preview-img"
-                            />
+                            {#if previewPath}
+                                <img
+                                    src={convertFileSrc(previewPath)}
+                                    alt=""
+                                    class="large-preview-img"
+                                />
+                            {:else}
+                                <div class="large-preview-img preview-unavailable">Preview unavailable</div>
+                            {/if}
                         </div>
                         <div class="preview-meta-grid">
                             <span>{selectedFilename}</span>
@@ -2572,6 +2583,19 @@
         margin-bottom: 6px;
     }
 
+    .preview-unavailable {
+        display: grid;
+        place-items: center;
+        min-height: 72px;
+        color: var(--text-secondary);
+        background: var(--bg);
+        border: 1px solid var(--border);
+        font-size: 10px;
+        line-height: 1.2;
+        text-align: center;
+        padding: 6px;
+    }
+
     .preview-name {
         font-size: 10px;
         color: var(--text);
@@ -2674,6 +2698,12 @@
         max-width: 100%;
         max-height: 100%;
         object-fit: contain;
+    }
+
+    .large-preview-img.preview-unavailable {
+        width: 100%;
+        height: 100%;
+        min-height: 180px;
     }
 
     .preview-meta-grid {

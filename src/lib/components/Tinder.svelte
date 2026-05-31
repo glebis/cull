@@ -5,6 +5,7 @@
     import { setDecision } from '$lib/api';
     import { onMount, onDestroy } from 'svelte';
     import type { ImageWithFile } from '$lib/api';
+    import { safeAssetPreviewPath } from '$lib/view-utils';
     import { parseVoiceCommand, filterByDecision } from '$lib/tinder-utils';
     import { invalidateImageCache } from '$lib/image-loading';
     import { withDecision, type ImageDecision } from '$lib/selection-updates';
@@ -27,8 +28,10 @@
     let totalPairs = $derived(Math.ceil($images.length / 2));
     let leftImage = $derived(pair[0]);
     let rightImage = $derived(pair[1]);
-    let leftSrc = $derived(leftImage ? convertFileSrc(leftImage.thumbnail_path ?? leftImage.path) : '');
-    let rightSrc = $derived(rightImage ? convertFileSrc(rightImage.thumbnail_path ?? rightImage.path) : '');
+    let leftPreviewPath = $derived(leftImage ? safeAssetPreviewPath(leftImage) : null);
+    let rightPreviewPath = $derived(rightImage ? safeAssetPreviewPath(rightImage) : null);
+    let leftSrc = $derived(leftPreviewPath ? convertFileSrc(leftPreviewPath) : '');
+    let rightSrc = $derived(rightPreviewPath ? convertFileSrc(rightPreviewPath) : '');
 
     $effect(() => {
         if (done) {
@@ -224,7 +227,11 @@
         <div class="tinder-pair" class:swipe-left={swipeDirection === 'left'} class:swipe-right={swipeDirection === 'right'} class:swipe-skip={swipeDirection === 'skip'}>
             <div class="tinder-card left" class:winner={swipeDirection === 'left'} class:loser={swipeDirection === 'right'}>
                 {#if leftImage}
-                    <img src={leftSrc} alt={leftImage.path.split('/').pop()} draggable="false" />
+                    {#if leftSrc}
+                        <img src={leftSrc} alt={leftImage.path.split('/').pop()} draggable="false" />
+                    {:else}
+                        <div class="preview-unavailable">Preview unavailable</div>
+                    {/if}
                     <div class="card-label">{leftImage.path.split('/').pop()}</div>
                     <button class="choose-btn" onclick={() => choose('left')} aria-label="Choose left">
                         <span class="choose-icon">&#10003;</span>
@@ -236,7 +243,11 @@
 
             <div class="tinder-card right" class:winner={swipeDirection === 'right'} class:loser={swipeDirection === 'left'}>
                 {#if rightImage}
-                    <img src={rightSrc} alt={rightImage.path.split('/').pop()} draggable="false" />
+                    {#if rightSrc}
+                        <img src={rightSrc} alt={rightImage.path.split('/').pop()} draggable="false" />
+                    {:else}
+                        <div class="preview-unavailable">Preview unavailable</div>
+                    {/if}
                     <div class="card-label">{rightImage.path.split('/').pop()}</div>
                     <button class="choose-btn" onclick={() => choose('right')} aria-label="Choose right">
                         <span class="choose-icon">&#10003;</span>
@@ -335,6 +346,12 @@
         max-width: 100%;
         max-height: calc(100% - 48px);
         object-fit: contain;
+    }
+
+    .preview-unavailable {
+        color: var(--text-secondary);
+        font-size: 12px;
+        text-align: center;
     }
 
     .card-label {

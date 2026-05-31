@@ -4,6 +4,7 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { getImagesByIds, type ImageWithFile } from '$lib/api';
     import { focusedImage, openImageInLoupe } from '$lib/stores';
+    import { safeAssetPreviewPath } from '$lib/view-utils';
     import ContextMenu from './ContextMenu.svelte';
 
     let resultImages = $state<ImageWithFile[]>([]);
@@ -46,7 +47,8 @@
     }
 
     function thumbnailUrl(img: ImageWithFile): string {
-        return convertFileSrc(img.thumbnail_path ?? img.path);
+        const previewPath = safeAssetPreviewPath(img);
+        return previewPath ? convertFileSrc(previewPath) : '';
     }
 
     function openResult(img: ImageWithFile) {
@@ -71,6 +73,7 @@
         </div>
         <div class="strip-images">
             {#each resultImages as img}
+                {@const previewUrl = thumbnailUrl(img)}
                 <button
                     class="strip-thumb"
                     class:active={$focusedImage?.image.id === img.image.id}
@@ -78,7 +81,11 @@
                     oncontextmenu={(e) => handleContextMenu(e, img)}
                     title={img.path.split('/').pop() ?? 'Generated image'}
                 >
-                    <img src={thumbnailUrl(img)} alt="" />
+                    {#if previewUrl}
+                        <img src={previewUrl} alt="" />
+                    {:else}
+                        <span class="preview-unavailable">Preview unavailable</span>
+                    {/if}
                 </button>
             {/each}
         </div>
@@ -172,5 +179,16 @@
         width: 100%;
         height: 100%;
         object-fit: contain;
+    }
+    .preview-unavailable {
+        display: grid;
+        place-items: center;
+        width: 100%;
+        height: 100%;
+        color: var(--text-secondary);
+        font-size: 10px;
+        line-height: 1.2;
+        text-align: center;
+        padding: 4px;
     }
 </style>

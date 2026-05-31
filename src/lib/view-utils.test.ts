@@ -15,6 +15,8 @@ import {
     moveCropRect,
     resizeCropRectFromHandle,
     chooseLoupeImagePath,
+    isAssetProtocolSafePath,
+    safeAssetPreviewPath,
 } from './view-utils';
 
 describe('getFilename', () => {
@@ -164,7 +166,7 @@ describe('computeGridClickSelection', () => {
 describe('chooseLoupeImagePath', () => {
     const item = {
         path: '/Users/test/Pictures/full.png',
-        thumbnail_path: '/Users/test/Library/Application Support/com.glebkalinin.cull/thumbs/img-1.jpg',
+        thumbnail_path: '/Users/test/Library/Application Support/com.glebkalinin.cull/thumbnails/img-1.jpg',
     };
 
     it('uses the thumbnail when available because imported originals are outside asset scope', () => {
@@ -177,6 +179,47 @@ describe('chooseLoupeImagePath', () => {
 
     it('uses the thumbnail for RAW images', () => {
         expect(chooseLoupeImagePath(item, true, false)).toBe(item.thumbnail_path);
+    });
+
+    it('does not fall back to an imported original when no asset-safe preview exists', () => {
+        expect(chooseLoupeImagePath({
+            path: '/Users/test/Pictures/imported/full.png',
+            thumbnail_path: null,
+        }, false, false)).toBeNull();
+    });
+
+    it('allows app-owned generated images when no thumbnail exists', () => {
+        const generated = '/Users/test/Library/Application Support/com.glebkalinin.cull/generated/img.png';
+        expect(chooseLoupeImagePath({
+            path: generated,
+            thumbnail_path: null,
+        }, false, false)).toBe(generated);
+    });
+});
+
+describe('safeAssetPreviewPath', () => {
+    it('prefers app-owned thumbnails over imported originals', () => {
+        const thumbnail = '/Users/test/Library/Application Support/com.glebkalinin.cull/thumbnails/img-1.jpg';
+        expect(safeAssetPreviewPath({
+            path: '/Users/test/Pictures/imported/full.png',
+            thumbnail_path: thumbnail,
+        })).toBe(thumbnail);
+    });
+
+    it('does not return imported originals without a safe preview', () => {
+        expect(safeAssetPreviewPath({
+            path: '/Users/test/Pictures/imported/full.png',
+            thumbnail_path: null,
+        })).toBeNull();
+    });
+
+    it('allows static app-owned generated paths', () => {
+        expect(isAssetProtocolSafePath('/Users/test/Library/Application Support/com.glebkalinin.cull/generated/img.png')).toBe(true);
+        expect(isAssetProtocolSafePath('/Users/test/.codex/generated_images/img.png')).toBe(true);
+    });
+
+    it('rejects user-selected clipboard capture directories', () => {
+        expect(isAssetProtocolSafePath('/Users/test/Desktop/Cull Clipboard/capture.png')).toBe(false);
     });
 });
 
