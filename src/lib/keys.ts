@@ -16,7 +16,7 @@ import { setRating, setDecision, createCollection, addToCollection, listCollecti
 import { showToast } from './stores';
 import { invalidateImageCache, loadImagesForCurrentScope } from './image-loading';
 import { focusImagePath } from './transform-results';
-import { commandForKeyboardEvent, openCommandPalette, recordCommandUse, runCommandPaletteItem } from './command-palette';
+import { commandForKeyboardEvent, openCommandPalette, runCommandPaletteItem } from './command-palette';
 import { recordShortcutUse, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from './shortcut-reminders';
 import { withDecision, withRating, type ImageDecision } from './selection-updates';
 
@@ -251,6 +251,12 @@ export function handleKeydown(e: KeyboardEvent) {
         return;
     }
 
+    if (e.key.toLowerCase() === 'p' && e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        openCommandPalette('commands');
+        return;
+    }
+
     if (e.key.toLowerCase() === 'p' && e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         openCommandPalette('commands');
@@ -286,7 +292,6 @@ export function handleKeydown(e: KeyboardEvent) {
     if (commandItem) {
         e.preventDefault();
         runCommandPaletteItem(commandItem)
-            .then(() => recordCommandUse(commandItem.id))
             .catch(err => console.error('Failed to run command hotkey:', err));
         return;
     }

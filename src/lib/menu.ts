@@ -45,6 +45,7 @@ import {
 } from './stores';
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { folderDisplayName } from './move-menu-utils';
+import { openCommandPalette } from './command-palette';
 
 type UnlistenFn = () => void;
 
@@ -340,6 +341,7 @@ function handleMenuAction(action: string) {
         case 'open_file':
             handleOpenFile();
             break;
+        case 'import_folder':
         case 'open_folder':
             handleOpenFolder();
             break;
@@ -359,6 +361,9 @@ function handleMenuAction(action: string) {
             break;
         case 'deselect_all':
             selectedIds.set(new Set());
+            break;
+        case 'command_palette':
+            openCommandPalette('commands');
             break;
         case 'image_share':
             handleImageShare();

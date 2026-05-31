@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     canAssignCommandHotkey,
     eventMatchesShortcut,
     findDuplicateCommandHotkeys,
     getCommandPaletteItems,
     getShortcutConflict,
+    readRecentCommandIds,
+    recordCommandUse,
     scoreCommandPaletteItem,
     shortcutFromKeyboardEvent,
     sortCommandPaletteItems,
@@ -43,6 +45,16 @@ function item(id: string, title: string, category = 'Command', extra: Partial<Co
 }
 
 describe('command palette helpers', () => {
+    beforeEach(() => {
+        const store = new Map<string, string>();
+        vi.stubGlobal('localStorage', {
+            getItem: (key: string) => store.get(key) ?? null,
+            setItem: (key: string, value: string) => store.set(key, value),
+            removeItem: (key: string) => store.delete(key),
+            clear: () => store.clear(),
+        });
+    });
+
     function resetCommandContext() {
         images.set([]);
         focusedIndex.set(0);
@@ -74,6 +86,48 @@ describe('command palette helpers', () => {
             'view.grid',
             'app.search',
         ]);
+    });
+
+    it('shows the five most recent palette commands at the top before other empty-query results', () => {
+        const items = [
+            item('app.search', 'Search Images'),
+            item('view.grid', 'Grid View'),
+            item('view.loupe', 'Loupe View'),
+            item('view.compare', 'Compare View'),
+            item('view.canvas', 'Canvas View'),
+            item('view.lineage', 'Lineage View'),
+            item('view.export', 'Export View'),
+        ];
+
+        expect(sortCommandPaletteItems(items, '', {
+            recentIds: ['view.canvas', 'view.loupe', 'view.export', 'view.compare', 'view.grid'],
+        }).map(i => i.id).slice(0, 5)).toEqual([
+            'view.canvas',
+            'view.loupe',
+            'view.export',
+            'view.compare',
+            'view.grid',
+        ]);
+    });
+
+    it('hides recent commands that do not match a non-empty query', () => {
+        const items = [
+            item('app.search', 'Search Images'),
+            item('view.grid', 'Grid View'),
+            item('view.loupe', 'Loupe View'),
+        ];
+
+        expect(sortCommandPaletteItems(items, 'grid', {
+            recentIds: ['view.loupe', 'app.search'],
+        }).map(i => i.id)).toEqual(['view.grid']);
+    });
+
+    it('keeps only the five last palette-used commands in recents', () => {
+        for (const id of ['one', 'two', 'three', 'four', 'five', 'six']) {
+            recordCommandUse(id);
+        }
+
+        expect(readRecentCommandIds()).toEqual(['six', 'five', 'four', 'three', 'two']);
     });
 
     it('filters destinations in command-only mode', () => {
@@ -111,7 +165,7 @@ describe('command palette helpers', () => {
 
         expect(getShortcutConflict('Cmd+F', 'view.grid', items, {})).toBe('Search Images');
         expect(getShortcutConflict('Cmd+F', 'app.search', items, {})).toBeNull();
-        expect(getShortcutConflict('Cmd+P', 'view.grid', items, {})).toBe('Print');
+        expect(getShortcutConflict('Cmd+P', 'view.grid', items, {})).toBe('Open command palette');
         expect(getShortcutConflict('Tab', 'view.grid', items, {})).toBe('Cycle to next view');
         expect(getShortcutConflict('Shift+Tab', 'view.grid', items, {})).toBe('Cycle to previous view');
         expect(getShortcutConflict('Cmd+L', 'view.grid', items, { 'view.loupe': 'Cmd+L' })).toBe('Loupe View');

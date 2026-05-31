@@ -51,8 +51,8 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     )?)?;
     file_menu.append(&MenuItem::with_id(
         app,
-        "open_folder",
-        "Open Folder...",
+        "import_folder",
+        "Import Folder...",
         true,
         Some::<&str>("CmdOrCtrl+Shift+O"),
     )?)?;
@@ -148,6 +148,14 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 
     // View menu
     let view_menu = Submenu::new(app, "View", true)?;
+    view_menu.append(&MenuItem::with_id(
+        app,
+        "command_palette",
+        "Command Palette...",
+        true,
+        Some::<&str>("CmdOrCtrl+P"),
+    )?)?;
+    view_menu.append(&PredefinedMenuItem::separator(app)?)?;
     view_menu.append(&CheckMenuItem::with_id(
         app,
         "view_grid",
@@ -449,11 +457,12 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
     let id = event.id().0.as_str();
     match id {
         "help" => show_cull_help(app),
-        "about" | "open_file" | "open_folder" | "settings" | "undo" | "redo" | "deselect_all"
-        | "image_share" | "image_open_default" | "image_open_with" | "image_reveal"
-        | "image_rename" | "image_move_to" | "image_trash" | "view_grid" | "view_compare"
-        | "view_loupe" | "view_canvas" | "view_lineage" | "view_embeddings" | "view_publish"
-        | "view_export" | "toggle_sidebar" | "zoom_in" | "zoom_out" | "actual_size" => {
+        "about" | "open_file" | "import_folder" | "open_folder" | "settings" | "undo" | "redo"
+        | "deselect_all" | "command_palette" | "image_share" | "image_open_default"
+        | "image_open_with" | "image_reveal" | "image_rename" | "image_move_to" | "image_trash"
+        | "view_grid" | "view_compare" | "view_loupe" | "view_canvas" | "view_lineage"
+        | "view_embeddings" | "view_publish" | "view_export" | "toggle_sidebar" | "zoom_in"
+        | "zoom_out" | "actual_size" => {
             let _ = app.emit("menu-action", id);
         }
         _ => {}

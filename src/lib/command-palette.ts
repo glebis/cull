@@ -69,9 +69,9 @@ export interface CommandHotkeyDuplicate {
 
 export const COMMAND_PALETTE_SHORTCUT_POLICY = {
     universalPalette: 'Cmd+K',
-    commandOnlyPalette: 'Cmd+Shift+P',
+    commandOnlyPalette: 'Cmd+P',
+    alternateCommandOnlyPalette: 'Cmd+Shift+P',
     imageSearch: ['/', 'Cmd+F'],
-    obsidianPresetCandidate: 'Cmd+P',
 };
 
 export const COMMAND_PINS_STORAGE_KEY = 'cull.commandPalette.pins';
@@ -80,8 +80,8 @@ export const COMMAND_HOTKEYS_STORAGE_KEY = 'cull.commandPalette.hotkeys';
 
 const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
     'Cmd+K': 'Open command palette',
+    'Cmd+P': 'Open command palette',
     'Cmd+Shift+P': 'Open command-only palette',
-    'Cmd+P': 'Print',
     'Cmd+F': 'Image search',
     '/': 'Image search',
     'Cmd+B': 'Toggle sidebar',
@@ -153,7 +153,7 @@ export function readRecentCommandIds(): string[] {
 }
 
 export function recordCommandUse(id: string): string[] {
-    const next = uniqueList([id, ...readRecentCommandIds()]).slice(0, 16);
+    const next = uniqueList([id, ...readRecentCommandIds()]).slice(0, 5);
     writeJson(COMMAND_RECENTS_STORAGE_KEY, next);
     return next;
 }
@@ -682,9 +682,10 @@ export function sortCommandPaletteItems(
     options: CommandPaletteSortOptions = {},
 ): CommandPaletteItem[] {
     const pinned = new Set(options.pinnedIds ?? []);
-    const recent = options.recentIds ?? [];
+    const recent = (options.recentIds ?? []).slice(0, 5);
     const hotkeys = options.hotkeys ?? {};
     const mode = options.mode ?? 'all';
+    const hasQuery = normalize(query).length > 0;
 
     return items
         .filter(item => isCommandPaletteItemVisible(item))
@@ -698,9 +699,10 @@ export function sortCommandPaletteItems(
         }))
         .filter(entry => entry.score > 0)
         .sort((a, b) =>
+            (!hasQuery ? b.recentRank - a.recentRank : 0) ||
             b.pinnedRank - a.pinnedRank ||
             b.score - a.score ||
-            b.recentRank - a.recentRank ||
+            (hasQuery ? b.recentRank - a.recentRank : 0) ||
             b.hasShortcut - a.hasShortcut ||
             a.item.title.localeCompare(b.item.title)
         )
@@ -810,7 +812,6 @@ export async function runCommandForKeyboardEvent(event: KeyboardEvent): Promise<
     const item = commandForKeyboardEvent(event);
     if (!item) return false;
     await runCommandPaletteItem(item);
-    recordCommandUse(item.id);
     return true;
 }
 
