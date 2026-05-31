@@ -102,6 +102,9 @@ fn redact_publish_paths(value: &mut serde_json::Value) {
                 redact_publish_paths(item);
             }
         }
+        serde_json::Value::String(text) if string_contains_local_path(text) => {
+            *value = serde_json::Value::String("[redacted:path]".to_string());
+        }
         _ => {}
     }
 }
@@ -115,12 +118,57 @@ fn is_publish_path_key(key: &str) -> bool {
             | "output_path"
             | "site_dir"
             | "source_path"
+            | "lastKnownPath"
+            | "last_known_path"
             | "manifest_path"
             | "instructions_path"
             | "qr_svg_path"
             | "snapshot_png_path"
             | "snapshot_pdf_path"
     )
+}
+
+fn string_contains_local_path(value: &str) -> bool {
+    value
+        .split(|ch: char| {
+            ch.is_whitespace() || matches!(ch, '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | ',')
+        })
+        .any(|part| part.starts_with('/') || part.starts_with("~/"))
+}
+
+fn redact_remote_string(value: Option<String>, auth: &AuthContext) -> Option<String> {
+    match value {
+        Some(text) if !can_expose_private_metadata(auth) && string_contains_local_path(&text) => {
+            Some("[redacted:path]".to_string())
+        }
+        other => other,
+    }
+}
+
+fn error_for_mcp(message: &str, auth: &AuthContext) -> String {
+    let safe_message = redact_remote_string(Some(message.to_string()), auth)
+        .unwrap_or_else(|| message.to_string());
+    format!("Error: {}", safe_message)
+}
+
+fn collection_summaries_for_mcp(
+    collections: Vec<(String, String, u32)>,
+    scoped_counts: Option<&std::collections::BTreeMap<String, u32>>,
+) -> Vec<serde_json::Value> {
+    collections
+        .into_iter()
+        .filter_map(|(id, name, global_count)| {
+            let image_count = match scoped_counts {
+                Some(counts) => *counts.get(&id)?,
+                None => global_count,
+            };
+            Some(serde_json::json!({
+                "id": id,
+                "name": name,
+                "image_count": image_count,
+            }))
+        })
+        .collect()
 }
 
 fn clamp_limit(limit: u32) -> u32 {
@@ -200,12 +248,55 @@ fn canvas_layout_for_mcp(canvas: &Canvas) -> Result<serde_json::Value, String> {
     }))
 }
 
+fn canvas_layout_for_mcp_auth(
+    canvas: &Canvas,
+    auth: &AuthContext,
+) -> Result<serde_json::Value, String> {
+    let mut value = canvas_layout_for_mcp(canvas)?;
+    if !can_expose_private_metadata(auth) {
+        redact_publish_paths(&mut value);
+    }
+    Ok(value)
+}
+
+fn clipboard_monitor_status_for_mcp(
+    running: bool,
+    collection_id: Option<String>,
+    collection_name: Option<String>,
+    capture_dir: Option<std::path::PathBuf>,
+    captured_count: u32,
+    last_error: Option<String>,
+    auth: &AuthContext,
+) -> serde_json::Value {
+    let capture_dir = match capture_dir {
+        Some(path) if can_expose_private_metadata(auth) => {
+            serde_json::Value::String(path.to_string_lossy().to_string())
+        }
+        Some(_) => serde_json::Value::String("[redacted:path]".to_string()),
+        None => serde_json::Value::Null,
+    };
+    serde_json::json!({
+        "running": running,
+        "collection_id": collection_id,
+        "collection_name": collection_name,
+        "capture_dir": capture_dir,
+        "captured_count": captured_count,
+        "last_error": redact_remote_string(last_error, auth),
+    })
+}
+
 fn model_download_response_for_mcp(
     status: &str,
     job_id: Option<String>,
     spec: &crate::db_core::embeddings::EmbeddingModelSpec,
     model_path: &std::path::Path,
+    auth: &AuthContext,
 ) -> serde_json::Value {
+    let model_path = if can_expose_private_metadata(auth) {
+        model_path.to_string_lossy().to_string()
+    } else {
+        "[redacted:path]".to_string()
+    };
     let mut value = serde_json::json!({
         "status": status,
         "model": spec.model_id,
@@ -416,6 +507,45 @@ impl CullMcp {
         };
 
         Ok(Some((images.len() as u32, folders.len(), collections)))
+    }
+
+    fn scoped_collection_counts(
+        &self,
+        state: &AppState,
+    ) -> Result<Option<std::collections::BTreeMap<String, u32>>, String> {
+        let Some(scope) = self.token_scope() else {
+            return Ok(None);
+        };
+        let mut counts = std::collections::BTreeMap::new();
+        let scope_ref = Some(scope.clone());
+
+        for (collection_id, _, _) in state.db.list_collections().map_err(|e| e.to_string())? {
+            let explicitly_allowed = scope
+                .collections
+                .as_ref()
+                .map(|allowed| allowed.contains(&collection_id))
+                .unwrap_or(false);
+            if scope.collections.is_some() && !explicitly_allowed {
+                continue;
+            }
+
+            let collection_images = state
+                .db
+                .list_collection_images(&collection_id)
+                .map_err(|e| e.to_string())?;
+            let image_count = collection_images
+                .iter()
+                .filter(|image| {
+                    tokens::image_in_scope(&scope_ref, &image.path, &[collection_id.clone()])
+                })
+                .count() as u32;
+
+            if image_count > 0 || explicitly_allowed {
+                counts.insert(collection_id, image_count);
+            }
+        }
+
+        Ok(Some(counts))
     }
 }
 
@@ -759,22 +889,13 @@ impl CullMcp {
     #[tool(description = "List all collections with image counts")]
     fn list_collections(&self, Parameters(_): Parameters<EmptyParams>) -> String {
         let state = self.app_handle.state::<AppState>();
-        let scope = self.token_scope();
+        let scoped_counts = match self.scoped_collection_counts(&state) {
+            Ok(counts) => counts,
+            Err(e) => return format!("Error: {}", e),
+        };
         match state.db.list_collections() {
             Ok(collections) => {
-                let result: Vec<serde_json::Value> = collections.iter()
-                    .filter(|(id, _, _)| {
-                        match &scope {
-                            None => true,
-                            Some(s) => match &s.collections {
-                                None => true,
-                                Some(allowed) => allowed.contains(id),
-                            }
-                        }
-                    })
-                    .map(|(id, name, count)| {
-                        serde_json::json!({"id": id, "name": name, "image_count": count})
-                    }).collect();
+                let result = collection_summaries_for_mcp(collections, scoped_counts.as_ref());
                 serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
             }
             Err(e) => format!("Error: {}", e),
@@ -1265,25 +1386,15 @@ impl CullMcp {
     fn get_clipboard_monitor_status(&self, Parameters(_): Parameters<EmptyParams>) -> String {
         let state = self.app_handle.state::<AppState>();
         let monitor = state.clipboard_monitor.lock();
-        let capture_dir = monitor
-            .capture_dir
-            .as_ref()
-            .map(|path| {
-                if self.is_remote() {
-                    serde_json::Value::String("[redacted:path]".to_string())
-                } else {
-                    serde_json::Value::String(path.to_string_lossy().to_string())
-                }
-            })
-            .unwrap_or(serde_json::Value::Null);
-        serde_json::json!({
-            "running": monitor.running,
-            "collection_id": monitor.collection_id,
-            "collection_name": monitor.collection_name,
-            "capture_dir": capture_dir,
-            "captured_count": monitor.captured_count,
-            "last_error": monitor.last_error,
-        })
+        clipboard_monitor_status_for_mcp(
+            monitor.running,
+            monitor.collection_id.clone(),
+            monitor.collection_name.clone(),
+            monitor.capture_dir.clone(),
+            monitor.captured_count,
+            monitor.last_error.clone(),
+            &self.auth,
+        )
         .to_string()
     }
 
@@ -1355,7 +1466,7 @@ impl CullMcp {
                     Ok(_) => {
                         return "Error: Access denied — collection outside token scope".to_string()
                     }
-                    Err(e) => return format!("Error: {}", e),
+                    Err(e) => return error_for_mcp(&e.to_string(), &self.auth),
                 },
             }
         }
@@ -1368,7 +1479,7 @@ impl CullMcp {
                 None,
             ) {
                 Ok(result) => result,
-                Err(e) => return format!("Error: {}", e),
+                Err(e) => return error_for_mcp(&e, &self.auth),
             };
         let server = match crate::commands::static_publishing::serve_static_publish_package_inner(
             state.inner(),
@@ -1379,7 +1490,7 @@ impl CullMcp {
         .await
         {
             Ok(result) => result,
-            Err(e) => return format!("Error: {}", e),
+            Err(e) => return error_for_mcp(&e, &self.auth),
         };
         let result = serde_json::json!({
             "collection_id": collection_id,
@@ -1575,8 +1686,14 @@ impl CullMcp {
         };
 
         if model_path.exists() {
-            return model_download_response_for_mcp("already_downloaded", None, &spec, &model_path)
-                .to_string();
+            return model_download_response_for_mcp(
+                "already_downloaded",
+                None,
+                &spec,
+                &model_path,
+                &self.auth,
+            )
+            .to_string();
         }
 
         let (job_id, _cancel_token) = state
@@ -1649,7 +1766,8 @@ impl CullMcp {
             );
         });
 
-        model_download_response_for_mcp("started", Some(job_id_ret), &spec, &model_path).to_string()
+        model_download_response_for_mcp("started", Some(job_id_ret), &spec, &model_path, &self.auth)
+            .to_string()
     }
 
     #[tool(
@@ -2194,7 +2312,7 @@ impl CullMcp {
         let state = self.app_handle.state::<AppState>();
         let scope = self.token_scope();
         match state.db.get_canvas(&params.canvas_id) {
-            Ok(Some(canvas)) => match canvas_layout_for_mcp(&canvas) {
+            Ok(Some(canvas)) => match canvas_layout_for_mcp_auth(&canvas, &self.auth) {
                 Ok(mut result) => {
                     // Filter canvas items by token scope
                     if scope.is_some() {
@@ -2286,7 +2404,7 @@ impl CullMcp {
                             return "Error: Access denied — collection outside token scope"
                                 .to_string()
                         }
-                        Err(e) => return format!("Error: {}", e),
+                        Err(e) => return error_for_mcp(&e.to_string(), &self.auth),
                     }
                 }
             }
@@ -2301,7 +2419,7 @@ impl CullMcp {
                     value.to_string()
                 }
             }
-            Err(e) => format!("Error: {}", e),
+            Err(e) => error_for_mcp(&e, &self.auth),
         }
     }
 
@@ -2338,7 +2456,7 @@ impl CullMcp {
                     value.to_string()
                 }
             }
-            Err(e) => format!("Error: {}", e),
+            Err(e) => error_for_mcp(&e, &self.auth),
         }
     }
 
@@ -2355,7 +2473,7 @@ impl CullMcp {
         let canvas = match state.db.get_canvas(&params.canvas_id) {
             Ok(Some(canvas)) => canvas,
             Ok(None) => return format!("Error: Canvas '{}' was not found", params.canvas_id),
-            Err(e) => return format!("Error: {}", e),
+            Err(e) => return error_for_mcp(&e.to_string(), &self.auth),
         };
         let document = match crate::db_core::canvas_document::CanvasDocument::from_layout_json(
             &canvas.layout_json,
@@ -2395,7 +2513,7 @@ impl CullMcp {
                     value.to_string()
                 }
             }
-            Err(e) => format!("Error: {}", e),
+            Err(e) => error_for_mcp(&e, &self.auth),
         }
     }
 
@@ -2416,7 +2534,7 @@ impl CullMcp {
         .await
         {
             Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()),
-            Err(e) => format!("Error: {}", e),
+            Err(e) => error_for_mcp(&e, &self.auth),
         }
     }
 }
@@ -2600,6 +2718,142 @@ mod tests {
         assert!(!json.contains("/Users"));
         assert!(!json.contains("manifest.json"));
         assert!(!json.contains("CLAUDE.md"));
+    }
+
+    #[test]
+    fn test_folder_scoped_collection_summaries_filter_and_scope_counts() {
+        let collections = vec![
+            ("col-a".to_string(), "In scope".to_string(), 12),
+            ("col-b".to_string(), "Out of scope".to_string(), 8),
+        ];
+        let scoped_counts = std::collections::BTreeMap::from([("col-a".to_string(), 2u32)]);
+
+        let result = super::collection_summaries_for_mcp(collections, Some(&scoped_counts));
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0]["id"], "col-a");
+        assert_eq!(result[0]["name"], "In scope");
+        assert_eq!(result[0]["image_count"], 2);
+    }
+
+    #[test]
+    fn test_remote_canvas_layout_redacts_last_known_path() {
+        let mut canvas = canvas_fixture("canvas-path", "Board", 0);
+        canvas.layout_json = r#"{
+            "version": 1,
+            "viewport": { "panX": 0, "panY": 0, "zoom": 1 },
+            "items": [{
+                "id": "item-a",
+                "imageId": "img-a",
+                "x": 0,
+                "y": 0,
+                "width": 200,
+                "height": 120,
+                "z": 0,
+                "hidden": false,
+                "label": null,
+                "groupId": null,
+                "transform": { "crop": null, "rotationDegrees": 0, "fit": "contain" },
+                "source": {
+                    "contentHash": "hash-a",
+                    "lastKnownPath": "/Users/gleb/art/private/full-file-name.png"
+                }
+            }],
+            "groups": [],
+            "connectors": [],
+            "annotations": [],
+            "export": { "defaultPresetId": null, "background": "transparent", "bounds": "content" }
+        }"#
+        .to_string();
+        let auth = AuthContext::Authenticated(make_token("viewer", None));
+
+        let result = super::canvas_layout_for_mcp_auth(&canvas, &auth).unwrap();
+        let json = result.to_string();
+
+        assert_eq!(
+            result["layout"]["items"][0]["source"]["lastKnownPath"],
+            "[redacted:path]"
+        );
+        assert!(!json.contains("/Users"));
+        assert!(!json.contains("full-file-name.png"));
+    }
+
+    #[test]
+    fn test_remote_safe_publish_value_redacts_path_bearing_strings() {
+        let value = serde_json::json!({
+            "warnings": [
+                "Failed to read /Users/gleb/Library/Application Support/com.glebkalinin.cull/site/manifest.json"
+            ],
+            "nested": {
+                "message": "Wrote /tmp/cull/private/output.png"
+            }
+        });
+
+        let redacted = super::remote_safe_publish_value(value);
+        let json = redacted.to_string();
+
+        assert_eq!(redacted["warnings"][0], "[redacted:path]");
+        assert_eq!(redacted["nested"]["message"], "[redacted:path]");
+        assert!(!json.contains("/Users"));
+        assert!(!json.contains("/tmp/cull"));
+        assert!(!json.contains("manifest.json"));
+        assert!(!json.contains("output.png"));
+    }
+
+    #[test]
+    fn test_remote_error_message_redacts_path_bearing_text() {
+        let auth = AuthContext::Authenticated(make_token("viewer", None));
+
+        let message = super::error_for_mcp(
+            "Failed to write /Users/gleb/Library/Application Support/com.glebkalinin.cull/site/index.html",
+            &auth,
+        );
+
+        assert_eq!(message, "Error: [redacted:path]");
+        assert!(!message.contains("/Users"));
+        assert!(!message.contains("index.html"));
+    }
+
+    #[test]
+    fn test_remote_clipboard_status_redacts_last_error_paths() {
+        let auth = AuthContext::Authenticated(make_token("viewer", None));
+
+        let value = super::clipboard_monitor_status_for_mcp(
+            true,
+            Some("col-1".to_string()),
+            Some("Clipboard".to_string()),
+            Some(std::path::PathBuf::from(
+                "/Users/gleb/Library/Application Support/com.glebkalinin.cull/clipboard",
+            )),
+            3,
+            Some("Failed to copy /Users/gleb/Desktop/private.png".to_string()),
+            &auth,
+        );
+        let json = value.to_string();
+
+        assert_eq!(value["capture_dir"], "[redacted:path]");
+        assert_eq!(value["last_error"], "[redacted:path]");
+        assert!(!json.contains("/Users"));
+        assert!(!json.contains("private.png"));
+    }
+
+    #[test]
+    fn test_remote_model_download_response_redacts_model_path() {
+        let auth = AuthContext::Authenticated(make_token("operator", None));
+        let spec = crate::db_core::embeddings::CLIP_MODEL_SPEC;
+
+        let value = super::model_download_response_for_mcp(
+            "started",
+            Some("job-1".to_string()),
+            &spec,
+            std::path::Path::new("/Users/gleb/Library/Application Support/com.glebkalinin.cull/models/clip-vit-b32.onnx"),
+            &auth,
+        );
+        let json = value.to_string();
+
+        assert_eq!(value["model_path"], "[redacted:path]");
+        assert!(!json.contains("/Users"));
+        assert!(!json.contains("clip-vit-b32.onnx"));
     }
 
     // --- is_remote logic ---
@@ -3132,11 +3386,13 @@ mod tests {
     #[test]
     fn test_mcp_model_download_response_includes_provenance() {
         let spec = crate::db_core::embeddings::CLIP_MODEL_SPEC;
+        let auth = AuthContext::Local;
         let response = super::model_download_response_for_mcp(
             "started",
             Some("job-1".to_string()),
             &spec,
             std::path::Path::new("/tmp/clip-vit-b32-vision.onnx"),
+            &auth,
         );
 
         assert_eq!(response["status"], "started");
