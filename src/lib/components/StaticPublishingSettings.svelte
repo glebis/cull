@@ -1,8 +1,17 @@
 <script lang="ts">
-    import { getAppSetting, setAppSetting, exportStaticPublishPackage, serveStaticPublishPackage } from '$lib/api';
+    import { convertFileSrc } from '@tauri-apps/api/core';
+    import { openPath, openUrl } from '@tauri-apps/plugin-opener';
+    import { getAppSetting, setAppSetting, exportStaticPublishPackage, serveStaticPublishPackage, stopStaticPublishServer } from '$lib/api';
     import type { StaticPublishResult, StaticPublishServerResult } from '$lib/api';
     import { activeCanvas, activeSession, images, selectedIds, showToast } from '$lib/stores';
-    import { buildStaticPublishRequestFromSavedCanvas, countSavedCanvasItems, formatStaticPublishLinks, parseStaticPublishLinks } from '$lib/static-publishing';
+    import {
+        buildStaticPublishRequestFromSavedCanvas,
+        buildStaticPublishShareItems,
+        countSavedCanvasItems,
+        formatStaticPublishLinks,
+        parseStaticPublishLinks,
+    } from '$lib/static-publishing';
+    import type { StaticPublishShareItem } from '$lib/static-publishing';
     import { onMount } from 'svelte';
 
     type PublishScenario = 'local_preview' | 'client_review' | 'agent_handoff' | 'static_host';
@@ -24,7 +33,10 @@
     let lastResult = $state<StaticPublishResult | null>(null);
     let serverResult = $state<StaticPublishServerResult | null>(null);
     let startingServer = $state(false);
+    let stoppingServer = $state(false);
     let parsedLinks = $derived(parseStaticPublishLinks(linksText));
+    let publishItems = $derived(lastResult ? buildStaticPublishShareItems(lastResult, serverResult) : []);
+    let qrImageSrc = $derived(lastResult ? convertFileSrc(lastResult.qr_svg_path) : '');
     const scenarioLabels: Record<PublishScenario, string> = {
         local_preview: 'Local preview',
         client_review: 'Client review',
@@ -126,6 +138,7 @@
     async function exportPackage() {
         if (!canBuild) return;
         exporting = true;
+        if (serverResult) await stopServer(false);
         lastResult = null;
         try {
             const result = await exportStaticPublishPackage(
@@ -180,6 +193,37 @@
         showToast('Agent notes path copied', { type: 'success', duration: 2500 });
     }
 
+    async function copyPublishItem(item: StaticPublishShareItem) {
+        await navigator.clipboard.writeText(item.value);
+        showToast(`${item.label} copied`, { type: 'success', duration: 2500 });
+    }
+
+    async function sharePublishItem(item: StaticPublishShareItem) {
+        if (navigator.share) {
+            try {
+                await navigator.share({
+                    title: item.label,
+                    text: item.value,
+                    url: item.kind === 'url' ? item.value : undefined,
+                });
+                return;
+            } catch (e) {
+                if (e instanceof DOMException && e.name === 'AbortError') return;
+            }
+        }
+        await copyPublishItem(item);
+    }
+
+    async function openPublishItem(item: StaticPublishShareItem) {
+        if (!item.openable) return;
+        try {
+            if (item.kind === 'url') await openUrl(item.value);
+            else await openPath(item.value);
+        } catch (e) {
+            showToast(`Open failed: ${e}`, { type: 'error', duration: 5000 });
+        }
+    }
+
     async function startServer() {
         if (!lastResult) return;
         const parsedPort = Number.parseInt(serverPort, 10);
@@ -201,6 +245,30 @@
         } finally {
             startingServer = false;
         }
+    }
+
+    async function stopServer(showNotification = true) {
+        stoppingServer = true;
+        try {
+            const result = await stopStaticPublishServer();
+            serverResult = null;
+            if (showNotification) {
+                showToast(result.stopped ? 'Preview stopped' : 'Preview already stopped', {
+                    detail: result.url ?? undefined,
+                    type: 'success',
+                    duration: 3500,
+                });
+            }
+        } catch (e) {
+            showToast(`Stop preview failed: ${e}`, { type: 'error' });
+        } finally {
+            stoppingServer = false;
+        }
+    }
+
+    async function toggleServer() {
+        if (serverResult) await stopServer();
+        else await startServer();
     }
 </script>
 
@@ -288,16 +356,17 @@
                     ></textarea>
                 </div>
                 <div class="setting-row stacked">
-                    <label for="static-share-url">Public URL</label>
+                    <label for="static-share-url">Public/tunnel URL</label>
                     <input
                         id="static-share-url"
                         class="wide-input"
                         type="url"
                         bind:value={shareUrl}
-                        placeholder="https://review.example.com"
+                        placeholder="https://name.ngrok-free.app or https://machine.tailnet.ts.net"
                         autocomplete="off"
                         onblur={() => saveSetting('static_publishing_share_url', shareUrl)}
                     />
+                    <span class="count">Use ngrok, Tailscale Funnel, Cloudflare Tunnel, or a static host URL for public handoff.</span>
                 </div>
                 <div class="setting-row stacked">
                     <label for="static-links">Related links</label>
@@ -384,22 +453,39 @@
                 <div class="section-header">
                     <span>Latest package</span>
                     <div class="result-actions">
-                        <button class="secondary-btn" onclick={startServer} disabled={startingServer}>
-                            {startingServer ? 'Starting preview...' : 'Start preview'}
+                        <button class="secondary-btn" onclick={toggleServer} disabled={startingServer || stoppingServer}>
+                            {startingServer ? 'Starting preview...' : stoppingServer ? 'Stopping preview...' : serverResult ? 'Stop preview' : 'Start preview'}
                         </button>
                         <button class="secondary-btn" onclick={copyHandoffPath}>Copy agent notes</button>
                     </div>
                 </div>
-                <div class="result-grid">
-                    <div class="path-row"><span>Site folder</span><code>{lastResult.site_dir}</code></div>
-                    <div class="path-row"><span>Manifest</span><code>{lastResult.manifest_path}</code></div>
-                    <div class="path-row"><span>Agent notes</span><code>{lastResult.instructions_path}</code></div>
-                    <div class="path-row"><span>QR code</span><code>{lastResult.qr_svg_path}</code></div>
-                    <div class="path-row"><span>Target URL</span><code>{lastResult.qr_target_url}</code></div>
-                    <div class="path-row"><span>Access phrase</span><code>{lastResult.access_phrase}</code></div>
-                    {#if serverResult}
-                        <div class="path-row"><span>Preview URL</span><code>{serverResult.url}</code></div>
-                    {/if}
+                <div class="result-body">
+                    <div class="qr-card">
+                        <img src={qrImageSrc} alt="QR code for target URL" />
+                        <span>QR code</span>
+                        <code>{lastResult.qr_target_url}</code>
+                    </div>
+                    <div class="result-grid">
+                        {#each publishItems as item}
+                            <div class="path-row">
+                                <span>{item.label}</span>
+                                {#if item.kind === 'url'}
+                                    <a href={item.value} onclick={(event) => { event.preventDefault(); openPublishItem(item); }}>{item.value}</a>
+                                {:else if item.openable}
+                                    <button class="value-link" onclick={() => openPublishItem(item)}>{item.value}</button>
+                                {:else}
+                                    <code>{item.value}</code>
+                                {/if}
+                                <div class="item-actions">
+                                    {#if item.openable}
+                                        <button class="mini-btn" onclick={() => openPublishItem(item)}>Open</button>
+                                    {/if}
+                                    <button class="mini-btn" onclick={() => copyPublishItem(item)}>Copy</button>
+                                    <button class="mini-btn" onclick={() => sharePublishItem(item)}>Share</button>
+                                </div>
+                            </div>
+                        {/each}
+                    </div>
                 </div>
                 {#if lastResult.warnings.length > 0}
                     <div class="warnings" role="status">
@@ -547,6 +633,9 @@
     .toggle:focus-visible,
     .primary-btn:focus-visible,
     .secondary-btn:focus-visible,
+    .mini-btn:focus-visible,
+    .value-link:focus-visible,
+    .path-row a:focus-visible,
     .check-row input:focus-visible {
         outline: 2px solid var(--blue);
         outline-offset: 2px;
@@ -675,24 +764,101 @@
     .result-section {
         border: 1px solid var(--border);
     }
+    .result-body {
+        display: grid;
+        grid-template-columns: 190px minmax(0, 1fr);
+        gap: 16px;
+        margin-top: 12px;
+        align-items: start;
+    }
+    .qr-card {
+        display: grid;
+        gap: 8px;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg);
+        min-width: 0;
+    }
+    .qr-card img {
+        display: block;
+        width: 100%;
+        aspect-ratio: 1;
+        border-radius: var(--radius);
+        background: var(--text);
+    }
+    .qr-card span {
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .qr-card code {
+        color: var(--text-secondary);
+        font-size: 11px;
+        overflow-wrap: anywhere;
+    }
     .result-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 6px 16px;
-        margin-top: 12px;
+        gap: 8px;
     }
     .path-row {
         display: grid;
-        grid-template-columns: 96px minmax(0, 1fr);
+        grid-template-columns: 86px minmax(0, 1fr) auto;
         gap: 8px;
-        align-items: baseline;
-        padding: 4px 0;
+        align-items: center;
+        padding: 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg);
         color: var(--text-secondary);
         font-size: 11px;
+        min-width: 0;
     }
-    .path-row code {
+    .path-row > span {
+        color: var(--text-secondary);
+        font-weight: 600;
+    }
+    .path-row code,
+    .path-row a,
+    .value-link {
         color: var(--text);
         overflow-wrap: anywhere;
+        min-width: 0;
+    }
+    .path-row a {
+        text-decoration: underline;
+        text-underline-offset: 2px;
+    }
+    .value-link {
+        border: 0;
+        padding: 0;
+        background: none;
+        cursor: pointer;
+        font-family: var(--font);
+        font-size: 11px;
+        text-align: left;
+    }
+    .item-actions {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+    .mini-btn {
+        min-height: 24px;
+        padding: 3px 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        color: var(--blue);
+        font-family: var(--font);
+        font-size: 10px;
+        cursor: pointer;
+    }
+    .mini-btn:hover {
+        border-color: var(--blue);
     }
     .warnings {
         display: grid;
@@ -724,6 +890,7 @@
         .publish-header,
         .publish-grid,
         .delivery-panel,
+        .result-body,
         .result-grid {
             grid-template-columns: 1fr;
         }
@@ -768,7 +935,10 @@
         }
         .path-row {
             grid-template-columns: 1fr;
-            gap: 2px;
+            gap: 6px;
+        }
+        .item-actions {
+            justify-content: flex-start;
         }
     }
 </style>

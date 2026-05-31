@@ -18,6 +18,7 @@ use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::State;
+use tokio::sync::oneshot;
 
 use crate::db_core::canvas_document::{
     CanvasDocument, CanvasExportBackground, CanvasExportBounds, CanvasItem, CanvasItemFit,
@@ -106,6 +107,54 @@ pub struct StaticPublishServerResult {
     pub host: String,
     pub port: u16,
     pub site_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StaticPublishServerStopResult {
+    pub stopped: bool,
+    pub url: Option<String>,
+}
+
+#[derive(Default)]
+pub struct StaticPublishServerState {
+    active: Option<ActiveStaticPublishServer>,
+}
+
+struct ActiveStaticPublishServer {
+    url: String,
+    stop_tx: Option<oneshot::Sender<()>>,
+}
+
+impl StaticPublishServerState {
+    fn replace(&mut self, url: String, stop_tx: oneshot::Sender<()>) {
+        if let Some(mut active) = self.active.take() {
+            if let Some(stop_tx) = active.stop_tx.take() {
+                let _ = stop_tx.send(());
+            }
+        }
+        self.active = Some(ActiveStaticPublishServer {
+            url,
+            stop_tx: Some(stop_tx),
+        });
+    }
+
+    fn stop(&mut self) -> StaticPublishServerStopResult {
+        let Some(mut active) = self.active.take() else {
+            return StaticPublishServerStopResult {
+                stopped: false,
+                url: None,
+            };
+        };
+
+        if let Some(stop_tx) = active.stop_tx.take() {
+            let _ = stop_tx.send(());
+        }
+
+        StaticPublishServerStopResult {
+            stopped: true,
+            url: Some(active.url),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -525,35 +574,59 @@ pub async fn serve_static_publish_package_inner(
     let port = port.unwrap_or(8000);
     let (listener, actual_addr) = bind_static_publish_listener(&host, port).await?;
     let site_root = Arc::new(site_dir.clone());
+    let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
 
     tauri::async_runtime::spawn(async move {
         loop {
-            let Ok((stream, _remote_addr)) = listener.accept().await else {
-                break;
-            };
-            let io = TokioIo::new(stream);
-            let site_root = site_root.clone();
-            tokio::spawn(async move {
-                let service = hyper::service::service_fn(move |req: Request<Incoming>| {
+            tokio::select! {
+                _ = &mut stop_rx => break,
+                accepted = listener.accept() => {
+                    let Ok((stream, _remote_addr)) = accepted else {
+                        break;
+                    };
+                    let io = TokioIo::new(stream);
                     let site_root = site_root.clone();
-                    async move { Ok::<_, Infallible>(serve_static_file(site_root, req).await) }
-                });
-                if let Err(err) = hyper::server::conn::http1::Builder::new()
-                    .serve_connection(io, service)
-                    .await
-                {
-                    crate::safe_eprintln!("Static publishing HTTP connection error: {}", err);
+                    tokio::spawn(async move {
+                        let service = hyper::service::service_fn(move |req: Request<Incoming>| {
+                            let site_root = site_root.clone();
+                            async move { Ok::<_, Infallible>(serve_static_file(site_root, req).await) }
+                        });
+                        if let Err(err) = hyper::server::conn::http1::Builder::new()
+                            .serve_connection(io, service)
+                            .await
+                        {
+                            crate::safe_eprintln!("Static publishing HTTP connection error: {}", err);
+                        }
+                    });
                 }
-            });
+            }
         }
     });
 
-    Ok(StaticPublishServerResult {
+    let result = StaticPublishServerResult {
         url: format!("http://{}:{}/", actual_addr.ip(), actual_addr.port()),
         host: actual_addr.ip().to_string(),
         port: actual_addr.port(),
         site_dir: site_dir.to_string_lossy().to_string(),
-    })
+    };
+    state
+        .static_publish_server
+        .lock()
+        .replace(result.url.clone(), stop_tx);
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn stop_static_publish_server(
+    state: State<'_, AppState>,
+) -> Result<StaticPublishServerStopResult, String> {
+    stop_static_publish_server_inner(state.inner()).await
+}
+
+pub async fn stop_static_publish_server_inner(
+    state: &AppState,
+) -> Result<StaticPublishServerStopResult, String> {
+    Ok(state.static_publish_server.lock().stop())
 }
 
 async fn bind_static_publish_listener(
@@ -2123,6 +2196,38 @@ mod tests {
         assert_eq!(result.url, format!("http://127.0.0.1:{}/", result.port));
     }
 
+    #[tokio::test]
+    async fn stopping_static_publish_server_clears_active_preview() {
+        let (state, tmp) = test_state();
+        state.db.set_setting(MODULE_KEY, "true").unwrap();
+
+        let site_dir = tmp.path().join("site");
+        fs::create_dir_all(&site_dir).unwrap();
+        fs::write(
+            site_dir.join("index.html"),
+            "<!doctype html><title>test</title>",
+        )
+        .unwrap();
+
+        let result = serve_static_publish_package_inner(
+            &state,
+            site_dir.to_string_lossy().to_string(),
+            Some("127.0.0.1".to_string()),
+            Some(0),
+        )
+        .await
+        .unwrap();
+
+        let stopped = stop_static_publish_server_inner(&state).await.unwrap();
+
+        assert!(stopped.stopped);
+        assert_eq!(stopped.url, Some(result.url));
+
+        let stopped_again = stop_static_publish_server_inner(&state).await.unwrap();
+        assert!(!stopped_again.stopped);
+        assert_eq!(stopped_again.url, None);
+    }
+
     #[test]
     fn port_candidates_include_ephemeral_fallback_at_upper_bound() {
         assert_eq!(static_publish_port_candidates(u16::MAX), vec![u16::MAX, 0]);
@@ -2316,6 +2421,7 @@ mod tests {
             clipboard_monitor: parking_lot::Mutex::new(
                 services::clipboard_monitor::ClipboardMonitorState::default(),
             ),
+            static_publish_server: parking_lot::Mutex::new(StaticPublishServerState::default()),
         };
         (state, tmp)
     }

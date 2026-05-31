@@ -51,6 +51,22 @@ describe('static publishing navigation contract', () => {
         expect(publishView).not.toContain('Build Static Site');
     });
 
+    it('shows publish handoff items as openable, copyable, shareable rows with an in-app QR image', () => {
+        const publishView = readProjectFile('src/lib/components/StaticPublishingSettings.svelte');
+
+        expect(publishView).toContain('Stop preview');
+        expect(publishView).toContain('stopServer');
+        expect(publishView).toContain('qrImageSrc');
+        expect(publishView).toContain('alt="QR code for target URL"');
+        expect(publishView).toContain('copyPublishItem');
+        expect(publishView).toContain('sharePublishItem');
+        expect(publishView).toContain('openPublishItem');
+        expect(publishView).toContain('buildStaticPublishShareItems');
+        expect(publishView).toContain("item.kind === 'url'");
+        expect(publishView).toContain('Tailscale');
+        expect(publishView).toContain('ngrok');
+    });
+
     it('keeps the generated static review site readable and accessible', () => {
         const staticPublishing = readProjectFile('src-tauri/src/commands/static_publishing.rs');
 

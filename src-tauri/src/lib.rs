@@ -41,6 +41,7 @@ pub struct AppState {
     pub action_manager: services::undo::ActionManager,
     pub file_watcher: Mutex<watcher::FileWatcher>,
     pub clipboard_monitor: Mutex<services::clipboard_monitor::ClipboardMonitorState>,
+    pub static_publish_server: Mutex<commands::static_publishing::StaticPublishServerState>,
 }
 
 fn install_panic_hook(app: AppHandle) {
@@ -257,6 +258,9 @@ pub fn run() {
                 file_watcher: Mutex::new(watcher::FileWatcher::new()),
                 clipboard_monitor: Mutex::new(
                     services::clipboard_monitor::ClipboardMonitorState::default(),
+                ),
+                static_publish_server: Mutex::new(
+                    commands::static_publishing::StaticPublishServerState::default(),
                 ),
             });
 
@@ -520,6 +524,7 @@ pub fn run() {
             commands::mcp::rotate_mcp_token,
             commands::static_publishing::export_static_publish_package,
             commands::static_publishing::serve_static_publish_package,
+            commands::static_publishing::stop_static_publish_server,
             commands::transform::crop_image,
             commands::transform::rotate_image,
             commands::dictation::start_dictation,

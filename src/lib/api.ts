@@ -838,12 +838,21 @@ export interface StaticPublishServerResult {
     site_dir: string;
 }
 
+export interface StaticPublishServerStopResult {
+    stopped: boolean;
+    url: string | null;
+}
+
 export async function exportStaticPublishPackage(request: StaticPublishRequest): Promise<StaticPublishResult> {
     return invoke('export_static_publish_package', { request });
 }
 
 export async function serveStaticPublishPackage(siteDir: string, host?: string | null, port?: number | null): Promise<StaticPublishServerResult> {
     return invoke('serve_static_publish_package', { siteDir, host: host ?? null, port: port ?? null });
+}
+
+export async function stopStaticPublishServer(): Promise<StaticPublishServerStopResult> {
+    return invoke('stop_static_publish_server');
 }
 
 // Lineage commands

@@ -268,6 +268,10 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     port: 8000,
     site_dir: '/mock/static-publishing/client-review/site',
   }),
+  stop_static_publish_server: () => ({
+    stopped: true,
+    url: 'http://127.0.0.1:8000/',
+  }),
   get_clipboard_monitor_status: () => clipboardMonitorStatus,
   start_clipboard_monitor: () => {
     clipboardMonitorStatus = {

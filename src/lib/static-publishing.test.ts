@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Canvas } from './api';
-import { buildStaticPublishRequestFromSavedCanvas, countSavedCanvasItems, parseStaticPublishLinks } from './static-publishing';
+import {
+    buildStaticPublishRequestFromSavedCanvas,
+    buildStaticPublishShareItems,
+    countSavedCanvasItems,
+    parseStaticPublishLinks,
+} from './static-publishing';
+import type { StaticPublishResult, StaticPublishServerResult } from './api';
 
 function canvas(layoutJson: string): Canvas {
     return {
@@ -109,5 +115,66 @@ describe('static publishing canvas helpers', () => {
             { label: 'Project brief', url: 'https://example.test/brief' },
             { label: 'Moodboard', url: 'https://example.test/moodboard' },
         ]);
+    });
+
+    it('parses public tunnel links for static publish handoff', () => {
+        expect(parseStaticPublishLinks([
+            'ngrok preview | https://cull-demo.ngrok-free.app',
+            'Tailscale Funnel | https://studio.tailnet.ts.net',
+        ].join('\n'))).toEqual([
+            { label: 'ngrok preview', url: 'https://cull-demo.ngrok-free.app' },
+            { label: 'Tailscale Funnel', url: 'https://studio.tailnet.ts.net' },
+        ]);
+    });
+
+    it('builds copyable and shareable result items with openable target and preview URLs', () => {
+        const result: StaticPublishResult = {
+            export_dir: '/tmp/cull-publish',
+            site_dir: '/tmp/cull-publish/site',
+            manifest_path: '/tmp/cull-publish/site/data/canvas.json',
+            instructions_path: '/tmp/cull-publish/instructions/CLAUDE.md',
+            qr_svg_path: '/tmp/cull-publish/site/qr.svg',
+            qr_target_url: 'https://cull-demo.ngrok-free.app/',
+            access_phrase: 'amber-canvas-river',
+            image_count: 4,
+            skipped_count: 0,
+            warnings: [],
+        };
+        const serverResult: StaticPublishServerResult = {
+            url: 'http://127.0.0.1:8000/',
+            host: '127.0.0.1',
+            port: 8000,
+            site_dir: '/tmp/cull-publish/site',
+        };
+
+        const items = buildStaticPublishShareItems(result, serverResult);
+
+        expect(items.map(item => item.id)).toEqual([
+            'site-folder',
+            'manifest',
+            'agent-notes',
+            'qr-code',
+            'target-url',
+            'access-phrase',
+            'preview-url',
+        ]);
+        expect(items.every(item => item.copyable)).toBe(true);
+        expect(items.every(item => item.shareable)).toBe(true);
+        expect(items.find(item => item.id === 'target-url')).toMatchObject({
+            label: 'Target URL',
+            value: 'https://cull-demo.ngrok-free.app/',
+            kind: 'url',
+            openable: true,
+        });
+        expect(items.find(item => item.id === 'preview-url')).toMatchObject({
+            label: 'Preview URL',
+            value: 'http://127.0.0.1:8000/',
+            kind: 'url',
+            openable: true,
+        });
+        expect(items.find(item => item.id === 'access-phrase')).toMatchObject({
+            kind: 'secret',
+            openable: false,
+        });
     });
 });
