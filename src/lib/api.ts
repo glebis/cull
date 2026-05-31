@@ -940,8 +940,8 @@ export async function rotateMcpToken(tokenId: string): Promise<string> {
     return invoke('rotate_mcp_token', { tokenId });
 }
 
-export async function cropImage(imageId: string, x: number, y: number, width: number, height: number, saveAsCopy: boolean): Promise<string> {
-    return invoke<string>('crop_image', { imageId, x, y, width, height, saveAsCopy });
+export async function cropImage(imageId: string, x: number, y: number, width: number, height: number): Promise<string> {
+    return invoke<string>('crop_image', { imageId, x, y, width, height });
 }
 
 export async function rotateImage(imageId: string, degrees: number): Promise<string> {

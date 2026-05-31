@@ -6,6 +6,7 @@
     import { images, focusedIndex, focusedImage, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
     import { getDetections, getVisionMetadata, cropImage, getImagesByIds, getGenerationRun, isRawFormat } from '$lib/api';
     import type { Detection, GenerationRun } from '$lib/api';
+    import { focusImagePath } from '$lib/transform-results';
     import {
         clientToImagePoint,
         chooseLoupeImagePath,
@@ -282,9 +283,9 @@
         if (!rect || !image || rect.width < MIN_CROP_SIZE || rect.height < MIN_CROP_SIZE) return;
         cropping = true;
         try {
-            await cropImage(image.image.id, rect.x, rect.y, rect.width, rect.height, true);
-            showToast('Image cropped', { type: 'info', duration: 2000 });
-            window.dispatchEvent(new CustomEvent('image-updated'));
+            const outputPath = await cropImage(image.image.id, rect.x, rect.y, rect.width, rect.height);
+            const focused = await focusImagePath(outputPath);
+            showToast(focused ? 'Cropped copy created' : 'Cropped copy saved', { type: 'info', duration: 2000 });
         } catch (e) {
             showToast(`Crop failed: ${e}`, { type: 'error', duration: 5000 });
         }

@@ -33,6 +33,18 @@ fn derivative_path(source: &Path, suffix: &str) -> Result<PathBuf, String> {
     Err("Could not find an available derivative file name".to_string())
 }
 
+fn register_derivative(state: &AppState, output_path: &Path) -> Result<(), String> {
+    crate::db_core::import::import_file(&state.db, output_path, &state.app_data_dir)?.ok_or_else(
+        || {
+            format!(
+                "Derivative was written but not registered: {}",
+                output_path.to_string_lossy()
+            )
+        },
+    )?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn crop_image(
     state: State<'_, AppState>,
@@ -41,9 +53,7 @@ pub async fn crop_image(
     y: u32,
     width: u32,
     height: u32,
-    save_as_copy: bool,
 ) -> Result<String, String> {
-    let _ = save_as_copy;
     let images = state
         .db
         .get_images_by_ids(&[&image_id])
@@ -72,6 +82,7 @@ pub async fn crop_image(
     cropped
         .save(&output_path)
         .map_err(|e| format!("Failed to save: {e}"))?;
+    register_derivative(&state, &output_path)?;
 
     Ok(output_path.to_string_lossy().to_string())
 }
@@ -106,6 +117,7 @@ pub async fn rotate_image(
     rotated
         .save(&output_path)
         .map_err(|e| format!("Failed to save: {e}"))?;
+    register_derivative(&state, &output_path)?;
 
     Ok(output_path.to_string_lossy().to_string())
 }
@@ -200,17 +212,9 @@ mod tests {
 
         let state = test_state(tmp.path(), &image_path, 8, 6);
 
-        let result = crop_image(
-            command_state(&state),
-            IMAGE_ID.to_string(),
-            1,
-            1,
-            4,
-            3,
-            false,
-        )
-        .await
-        .unwrap();
+        let result = crop_image(command_state(&state), IMAGE_ID.to_string(), 1, 1, 4, 3)
+            .await
+            .unwrap();
 
         assert_ne!(result, IMAGE_ID);
         assert_eq!(fs::read(&image_path).unwrap(), original_bytes);
@@ -222,6 +226,19 @@ mod tests {
         let images = state.db.get_images_by_ids(&[IMAGE_ID]).unwrap();
         assert_eq!(images[0].image.width, 8);
         assert_eq!(images[0].image.height, 6);
+
+        let derivative_file = state
+            .db
+            .get_image_file_by_path(&output_path.to_string_lossy())
+            .unwrap()
+            .expect("derivative should be imported into the library");
+        assert_ne!(derivative_file.image_id, IMAGE_ID);
+        let derivative = state
+            .db
+            .get_images_by_ids(&[derivative_file.image_id.as_str()])
+            .unwrap();
+        assert_eq!(derivative[0].image.width, 4);
+        assert_eq!(derivative[0].image.height, 3);
     }
 
     #[tokio::test]
@@ -246,5 +263,39 @@ mod tests {
         let images = state.db.get_images_by_ids(&[IMAGE_ID]).unwrap();
         assert_eq!(images[0].image.width, 8);
         assert_eq!(images[0].image.height, 6);
+
+        let derivative_file = state
+            .db
+            .get_image_file_by_path(&output_path.to_string_lossy())
+            .unwrap()
+            .expect("derivative should be imported into the library");
+        assert_ne!(derivative_file.image_id, IMAGE_ID);
+        let derivative = state
+            .db
+            .get_images_by_ids(&[derivative_file.image_id.as_str()])
+            .unwrap();
+        assert_eq!(derivative[0].image.width, 6);
+        assert_eq!(derivative[0].image.height, 8);
+    }
+
+    #[tokio::test]
+    async fn crop_uses_collision_safe_derivative_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let image_path = tmp.path().join("source.png");
+        let occupied_path = tmp.path().join("source_crop.png");
+        write_test_image(&image_path, 8, 6);
+        write_test_image(&occupied_path, 2, 2);
+        let occupied_bytes = fs::read(&occupied_path).unwrap();
+
+        let state = test_state(tmp.path(), &image_path, 8, 6);
+
+        let result = crop_image(command_state(&state), IMAGE_ID.to_string(), 1, 1, 4, 3)
+            .await
+            .unwrap();
+
+        let output_path = PathBuf::from(result);
+        assert_eq!(output_path.file_name().unwrap(), "source_crop_2.png");
+        assert_eq!(fs::read(&occupied_path).unwrap(), occupied_bytes);
+        assert_eq!(image::open(output_path).unwrap().dimensions(), (4, 3));
     }
 }

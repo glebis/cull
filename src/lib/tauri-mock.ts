@@ -373,6 +373,14 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   list_image_ids: () => Array.from({ length: 20 }, (_, i) => `img-${i}`),
   get_images_by_ids: (_: any, args: { imageIds: string[] }) =>
     args.imageIds.map(id => makeMockImage(Number(id.replace('img-', '')) || 0)),
+  get_image_by_path: (_: any, args: { path: string }) => ({
+    ...makeMockImage(0),
+    image: {
+      ...makeMockImage(0).image,
+      id: args.path.split('/').pop()?.replace(/\W+/g, '-') || 'transformed',
+    },
+    path: args.path,
+  }),
   get_embedding_count: (_: any, args?: { model?: string | null }) => {
     if (args?.model === 'dinov2-vits14') return 8;
     if (args?.model === 'gemini-embedding-2') return 0;
@@ -402,8 +410,8 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   redo: () => 'rating',
   trash_images: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   delete_images_permanently: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
-  rotate_image: (_: any, args: { imageId: string }) => `${args.imageId}_rotated.png`,
-  crop_image: (_: any, args: { imageId: string }) => args.imageId,
+  rotate_image: (_: any, args: { imageId: string }) => `/mock/library/${args.imageId}_rotated.png`,
+  crop_image: (_: any, args: { imageId: string }) => `/mock/library/${args.imageId}_crop.png`,
   get_generation_run: () => null,
   record_asset_load_event: (_: any, args: { event: any }) => ({
     id: 'asset-event-1',
