@@ -185,4 +185,13 @@ describe('Tauri command contract', () => {
             expect(capability.windows).toEqual(['main', 'window-*']);
         }
     });
+
+    it('allows the native Tauri header drag command used by data-tauri-drag-region', () => {
+        const defaultCapability = capabilityFiles().find((capability) => capability.identifier === 'default');
+        const permissions = defaultCapability?.permissions.map((permission) =>
+            typeof permission === 'string' ? permission : permission.identifier
+        );
+
+        expect(permissions).toContain('core:window:allow-start-dragging');
+    });
 });
