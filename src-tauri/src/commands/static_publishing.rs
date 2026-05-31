@@ -1275,6 +1275,24 @@ __DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
     figcaption strong { color: var(--text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .prompt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .empty { color: var(--muted); padding: 32px 0; }
+    .viewer-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px; padding: 12px; background: color-mix(in srgb, var(--image-bg) 94%, transparent); touch-action: none; }
+    .viewer-backdrop[hidden] { display: none; }
+    .viewer-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+    .viewer-title { min-width: 0; }
+    .viewer-title strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+    .viewer-title span { color: var(--muted); font-size: 12px; }
+    .viewer-actions { display: flex; gap: 8px; align-items: center; }
+    .viewer-button { min-height: 36px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+    .viewer-button:hover { border-color: var(--blue); }
+    .viewer-button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+    .viewer-close { padding: 0 12px; }
+    .viewer-stage { position: relative; display: grid; place-items: center; min-width: 0; min-height: 0; }
+    .viewer-image { display: block; max-width: 100%; max-height: calc(100vh - 132px); width: auto; height: auto; object-fit: contain; background: var(--image-bg); }
+    .viewer-prev, .viewer-next { position: absolute; top: 50%; width: 48px; height: 64px; transform: translateY(-50%); }
+    .viewer-prev { left: 0; }
+    .viewer-next { right: 0; }
+    .viewer-caption { min-height: 20px; color: var(--muted); font-size: 12px; text-align: center; overflow-wrap: anywhere; }
+    body.viewer-open { overflow: hidden; }
     @media (max-width: 1100px) {
       .header-grid, .review-layout { grid-template-columns: 1fr; }
       .review-aside { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1285,6 +1303,11 @@ __DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
       .share-card, .review-aside, .grid { grid-template-columns: 1fr; }
       .share-card img { width: 56px; height: 56px; }
       .gallery-head, .snapshot-head { align-items: flex-start; flex-direction: column; }
+      .viewer-backdrop { padding: 10px; }
+      .viewer-bar { grid-template-columns: 1fr; align-items: start; }
+      .viewer-actions { justify-content: space-between; }
+      .viewer-image { max-height: calc(100vh - 156px); }
+      .viewer-prev, .viewer-next { width: 44px; height: 56px; }
     }
   </style>
 </head>
@@ -1358,6 +1381,24 @@ __DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
       </section>
     </aside>
   </main>
+  <div id="image-viewer" class="viewer-backdrop" role="dialog" aria-modal="true" aria-labelledby="viewer-title" aria-describedby="viewer-caption" hidden>
+    <div class="viewer-bar">
+      <div class="viewer-title">
+        <strong id="viewer-title"></strong>
+        <span id="viewer-count" aria-live="polite"></span>
+      </div>
+      <div class="viewer-actions">
+        <a id="viewer-open-original" href="#" target="_blank" rel="noopener noreferrer">Open file</a>
+        <button type="button" class="viewer-close viewer-button" id="viewer-close">Close</button>
+      </div>
+    </div>
+    <div class="viewer-stage">
+      <button type="button" class="viewer-prev viewer-button" id="viewer-prev" aria-label="Previous image">Prev</button>
+      <img class="viewer-image" id="viewer-image" alt="" />
+      <button type="button" class="viewer-next viewer-button" id="viewer-next" aria-label="Next image">Next</button>
+    </div>
+    <div class="viewer-caption" id="viewer-caption"></div>
+  </div>
   <script>
     const grid = document.getElementById('grid');
     const empty = document.getElementById('empty');
@@ -1375,6 +1416,105 @@ __DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
     const publishedAt = document.getElementById('published-at');
     const visibility = document.getElementById('visibility');
     const sourceCanvas = document.getElementById('source-canvas');
+    const viewer = document.getElementById('image-viewer');
+    const viewerImage = document.getElementById('viewer-image');
+    const viewerTitle = document.getElementById('viewer-title');
+    const viewerCount = document.getElementById('viewer-count');
+    const viewerCaption = document.getElementById('viewer-caption');
+    const viewerOpenOriginal = document.getElementById('viewer-open-original');
+    const viewerPrev = document.getElementById('viewer-prev');
+    const viewerNext = document.getElementById('viewer-next');
+    const viewerClose = document.getElementById('viewer-close');
+    const viewerItems = [];
+    let viewerIndex = -1;
+    let lastFocusedCard = null;
+    let touchStartX = 0;
+    let touchStartY = 0;
+
+    function updateViewer() {
+      const item = viewerItems[viewerIndex];
+      if (!item) return;
+      viewerImage.src = item.fullSrc;
+      viewerImage.alt = item.name;
+      viewerTitle.textContent = item.name;
+      viewerCount.textContent = `${viewerIndex + 1} / ${viewerItems.length}`;
+      viewerCaption.textContent = item.details;
+      viewerOpenOriginal.href = item.fullSrc;
+      viewerPrev.disabled = viewerItems.length <= 1;
+      viewerNext.disabled = viewerItems.length <= 1;
+    }
+
+    function openViewer(index, card) {
+      if (!viewerItems[index]) return;
+      viewerIndex = index;
+      lastFocusedCard = card;
+      updateViewer();
+      viewer.hidden = false;
+      document.body.classList.add('viewer-open');
+      viewerClose.focus();
+    }
+
+    function closeViewer() {
+      if (viewer.hidden) return;
+      viewer.hidden = true;
+      document.body.classList.remove('viewer-open');
+      viewerImage.removeAttribute('src');
+      lastFocusedCard?.focus();
+    }
+
+    function showViewerImage(index) {
+      if (viewerItems.length === 0) return;
+      viewerIndex = (index + viewerItems.length) % viewerItems.length;
+      updateViewer();
+    }
+
+    function showNextViewerImage() {
+      showViewerImage(viewerIndex + 1);
+    }
+
+    function showPreviousViewerImage() {
+      showViewerImage(viewerIndex - 1);
+    }
+
+    viewerClose.addEventListener('click', closeViewer);
+    viewerPrev.addEventListener('click', showPreviousViewerImage);
+    viewerNext.addEventListener('click', showNextViewerImage);
+    viewer.addEventListener('click', event => {
+      if (event.target === viewer) closeViewer();
+    });
+    viewer.addEventListener('touchstart', event => {
+      const touch = event.changedTouches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+    }, { passive: true });
+    viewer.addEventListener('touchend', event => {
+      const touch = event.changedTouches[0];
+      const dx = touch.clientX - touchStartX;
+      const dy = touch.clientY - touchStartY;
+      if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy)) return;
+      event.preventDefault();
+      if (dx < 0) showNextViewerImage();
+      else showPreviousViewerImage();
+    }, { passive: false });
+    document.addEventListener('keydown', event => {
+      if (viewer.hidden) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeViewer();
+      } else if (event.key === 'ArrowRight' || event.key === 'l' || event.key === 'j') {
+        event.preventDefault();
+        showNextViewerImage();
+      } else if (event.key === 'ArrowLeft' || event.key === 'h' || event.key === 'k') {
+        event.preventDefault();
+        showPreviousViewerImage();
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        showViewerImage(0);
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        showViewerImage(viewerItems.length - 1);
+      }
+    });
 
     fetch('./data/canvas.json')
       .then(response => response.json())
@@ -1444,6 +1584,7 @@ __DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
           if (Number.isFinite(item.rating)) meta.push(`${item.rating} star${item.rating === 1 ? '' : 's'}`);
           if (item.source_label) meta.push(item.source_label);
           details.textContent = meta.join(' · ') || 'Image';
+          const viewerDetails = meta.join(' · ');
           cap.append(name, details);
           if (item.ai_prompt) {
             const prompt = document.createElement('span');
@@ -1451,6 +1592,16 @@ __DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
             prompt.textContent = item.ai_prompt;
             cap.append(prompt);
           }
+          const viewerItemIndex = viewerItems.length;
+          viewerItems.push({
+            name: imageName,
+            details: viewerDetails || item.ai_prompt || 'Image',
+            fullSrc: href || src,
+          });
+          card.addEventListener('click', event => {
+            event.preventDefault();
+            openViewer(viewerItemIndex, card);
+          });
           fig.append(img, cap);
           card.append(fig);
           grid.append(card);

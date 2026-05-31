@@ -64,4 +64,27 @@ describe('static publishing navigation contract', () => {
         expect(staticPublishing).toContain('rel="icon" href="qr.svg"');
         expect(staticPublishing).toContain('Share link');
     });
+
+    it('opens generated image cards in a fullscreen viewer with keyboard and swipe navigation', () => {
+        const staticPublishing = readProjectFile('src-tauri/src/commands/static_publishing.rs');
+
+        expect(staticPublishing).toContain('id="image-viewer"');
+        expect(staticPublishing).toContain('role="dialog"');
+        expect(staticPublishing).toContain('aria-modal="true"');
+        expect(staticPublishing).toContain('class="viewer-image"');
+        expect(staticPublishing).toContain('viewer-prev');
+        expect(staticPublishing).toContain('viewer-next');
+        expect(staticPublishing).toContain('viewer-close');
+        expect(staticPublishing).toContain('card.addEventListener(\'click\'');
+        expect(staticPublishing).toContain('viewerItems.push({');
+        expect(staticPublishing).toContain('openViewer(viewerItemIndex, card)');
+        expect(staticPublishing).toContain('event.key === \'Escape\'');
+        expect(staticPublishing).toContain('event.key === \'ArrowRight\' || event.key === \'l\' || event.key === \'j\'');
+        expect(staticPublishing).toContain('event.key === \'ArrowLeft\' || event.key === \'h\' || event.key === \'k\'');
+        expect(staticPublishing).toContain('event.key === \'Home\'');
+        expect(staticPublishing).toContain('event.key === \'End\'');
+        expect(staticPublishing).toContain('viewer.addEventListener(\'touchstart\'');
+        expect(staticPublishing).toContain('viewer.addEventListener(\'touchend\'');
+        expect(staticPublishing).toContain('lastFocusedCard?.focus()');
+    });
 });
