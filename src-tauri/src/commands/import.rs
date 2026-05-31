@@ -129,6 +129,7 @@ pub async fn import_folder(
         run_post_import_quality_analysis(app.clone(), new_image_ids.clone());
         run_post_import_detection(app.clone(), new_image_ids);
     }
+    let _ = crate::tray::refresh_tray_menu(&app);
 
     Ok(ImportResponse {
         imported,
@@ -222,6 +223,7 @@ pub async fn import_files(
     let image_ids_out = new_image_ids.clone();
 
     if !new_image_ids.is_empty() {
+        let _ = crate::tray::refresh_tray_menu(&app);
         run_post_import_quality_analysis(app.clone(), new_image_ids.clone());
         run_post_import_detection(app, new_image_ids);
     }
