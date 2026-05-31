@@ -35,6 +35,12 @@
     let stoppingServer = $state(false);
     let parsedLinks = $derived(parseStaticPublishLinks(linksText));
     let publishItems = $derived(lastResult ? buildStaticPublishShareItems(lastResult, serverResult) : []);
+    let packageFileItems = $derived(
+        publishItems.filter(item => item.id === 'site-folder' || item.id === 'manifest' || item.id === 'agent-notes' || item.id === 'qr-code')
+    );
+    let targetItem = $derived(publishItems.find(item => item.id === 'target-url') ?? null);
+    let previewItem = $derived(publishItems.find(item => item.id === 'preview-url') ?? null);
+    let accessPhraseItem = $derived(publishItems.find(item => item.id === 'access-phrase') ?? null);
     let qrImageSrc = $derived(lastResult ? lastResult.qr_svg_data_url : '');
     const scenarioLabels: Record<PublishScenario, string> = {
         local_preview: 'Local preview',
@@ -63,6 +69,15 @@
             : hasAssetVariant
                 ? 'Ready'
                 : 'Select an asset set'
+    );
+    const previewStatusLabel = $derived(
+        startingServer
+            ? 'Starting'
+            : stoppingServer
+                ? 'Stopping'
+                : serverResult
+                    ? 'Running'
+                    : 'Stopped'
     );
     const searchVisibilityLabel = $derived(indexable ? 'Allow indexing' : 'Keep unlisted');
 
@@ -450,7 +465,10 @@
         {#if lastResult}
             <div class="section result-section" aria-live="polite">
                 <div class="section-header">
-                    <span>Latest package</span>
+                    <div class="result-heading">
+                        <span>Site publishing</span>
+                        <span class="count">Latest package</span>
+                    </div>
                     <div class="result-actions">
                         <button class="secondary-btn" onclick={toggleServer} disabled={startingServer || stoppingServer}>
                             {startingServer ? 'Starting preview...' : stoppingServer ? 'Stopping preview...' : serverResult ? 'Stop preview' : 'Start preview'}
@@ -459,40 +477,122 @@
                     </div>
                 </div>
                 <div class="result-body">
-                    <div class="qr-card">
-                        <img src={qrImageSrc} alt="QR code for target URL" />
-                        <span>QR code</span>
-                        <code>{lastResult.qr_target_url}</code>
-                    </div>
-                    <div class="result-grid">
-                        {#each publishItems as item}
-                            <div class="path-row">
-                                <span>{item.label}</span>
-                                {#if item.kind === 'url'}
-                                    <a href={item.value} onclick={(event) => { event.preventDefault(); openPublishItem(item); }}>{item.value}</a>
-                                {:else if item.openable}
-                                    <button class="value-link" onclick={() => openPublishItem(item)}>{item.value}</button>
-                                {:else}
-                                    <code>{item.value}</code>
-                                {/if}
-                                <div class="item-actions">
-                                    {#if item.openable}
-                                        <button class="mini-btn" onclick={() => openPublishItem(item)}>Open</button>
-                                    {/if}
-                                    <button class="mini-btn" onclick={() => copyPublishItem(item)}>Copy</button>
-                                    <button class="mini-btn" onclick={() => sharePublishItem(item)}>Share</button>
+                    <div class="result-zone preview-zone">
+                        <div class="zone-header">
+                            <span>Preview</span>
+                            <span class:running={!!serverResult}>{previewStatusLabel}</span>
+                        </div>
+                        <div class="qr-frame">
+                            <img src={qrImageSrc} alt="QR code for target URL" />
+                        </div>
+                        <div class="handoff-list compact">
+                            {#if targetItem}
+                                <div class="handoff-row">
+                                    <div class="handoff-value">
+                                        <span class="handoff-label">{targetItem.label}</span>
+                                        <a
+                                            class="handoff-path"
+                                            href={targetItem.value}
+                                            title={targetItem.value}
+                                            onclick={(event) => { event.preventDefault(); openPublishItem(targetItem); }}
+                                        >
+                                            {targetItem.value}
+                                        </a>
+                                    </div>
+                                    <div class="item-actions">
+                                        <button class="mini-btn" onclick={() => openPublishItem(targetItem)}>Open</button>
+                                        <button class="mini-btn" onclick={() => copyPublishItem(targetItem)}>Copy</button>
+                                        <button class="mini-btn" onclick={() => sharePublishItem(targetItem)}>Share</button>
+                                    </div>
                                 </div>
+                            {/if}
+                            {#if previewItem}
+                                <div class="handoff-row">
+                                    <div class="handoff-value">
+                                        <span class="handoff-label">{previewItem.label}</span>
+                                        <a
+                                            class="handoff-path"
+                                            href={previewItem.value}
+                                            title={previewItem.value}
+                                            onclick={(event) => { event.preventDefault(); openPublishItem(previewItem); }}
+                                        >
+                                            {previewItem.value}
+                                        </a>
+                                    </div>
+                                    <div class="item-actions">
+                                        <button class="mini-btn" onclick={() => openPublishItem(previewItem)}>Open</button>
+                                        <button class="mini-btn" onclick={() => copyPublishItem(previewItem)}>Copy</button>
+                                        <button class="mini-btn" onclick={() => sharePublishItem(previewItem)}>Share</button>
+                                    </div>
+                                </div>
+                            {/if}
+                            {#if accessPhraseItem}
+                                <div class="handoff-row">
+                                    <div class="handoff-value">
+                                        <span class="handoff-label">{accessPhraseItem.label}</span>
+                                        <code class="handoff-path" title={accessPhraseItem.value}>{accessPhraseItem.value}</code>
+                                    </div>
+                                    <div class="item-actions">
+                                        <button class="mini-btn" onclick={() => copyPublishItem(accessPhraseItem)}>Copy</button>
+                                        <button class="mini-btn" onclick={() => sharePublishItem(accessPhraseItem)}>Share</button>
+                                    </div>
+                                </div>
+                            {/if}
+                        </div>
+                    </div>
+                    <div class="result-zone package-zone">
+                        <div class="zone-header">
+                            <span>Package files</span>
+                            <span>{packageFileItems.length} files</span>
+                        </div>
+                        <div class="handoff-list">
+                            {#each packageFileItems as item}
+                                <div class="handoff-row">
+                                    <div class="handoff-value">
+                                        <span class="handoff-label">{item.label}</span>
+                                        <code class="handoff-path" title={item.value}>{item.value}</code>
+                                    </div>
+                                    <div class="item-actions">
+                                        {#if item.openable}
+                                            <button class="mini-btn" onclick={() => openPublishItem(item)}>Open</button>
+                                        {/if}
+                                        <button class="mini-btn" onclick={() => copyPublishItem(item)}>Copy</button>
+                                        <button class="mini-btn" onclick={() => sharePublishItem(item)}>Share</button>
+                                    </div>
+                                </div>
+                            {/each}
+                        </div>
+                    </div>
+                    <div class="result-zone status-zone">
+                        <div class="zone-header">
+                            <span>Status</span>
+                            <span class:running={!!serverResult}>{previewStatusLabel}</span>
+                        </div>
+                        <div class="status-list">
+                            <div class="status-row">
+                                <span>Images</span>
+                                <strong>{lastResult.image_count}</strong>
                             </div>
-                        {/each}
+                            <div class="status-row">
+                                <span>Skipped</span>
+                                <strong>{lastResult.skipped_count}</strong>
+                            </div>
+                            <div class="status-row">
+                                <span>Preview host</span>
+                                <strong title={serverResult ? `${serverResult.host}:${serverResult.port}` : `${serverHost}:${serverPort}`}>
+                                    {serverResult ? `${serverResult.host}:${serverResult.port}` : `${serverHost}:${serverPort}`}
+                                </strong>
+                            </div>
+                        </div>
+                        {#if lastResult.warnings.length > 0}
+                            <div class="warnings" role="status">
+                                {#each lastResult.warnings as warning}
+                                    <span>{warning}</span>
+                                {/each}
+                            </div>
+                        {/if}
                     </div>
                 </div>
-                {#if lastResult.warnings.length > 0}
-                    <div class="warnings" role="status">
-                        {#each lastResult.warnings as warning}
-                            <span>{warning}</span>
-                        {/each}
-                    </div>
-                {/if}
             </div>
         {/if}
     </section>
@@ -633,8 +733,7 @@
     .primary-btn:focus-visible,
     .secondary-btn:focus-visible,
     .mini-btn:focus-visible,
-    .value-link:focus-visible,
-    .path-row a:focus-visible,
+    .handoff-path:focus-visible,
     .check-row input:focus-visible {
         outline: 2px solid var(--blue);
         outline-offset: 2px;
@@ -753,6 +852,14 @@
         border-color: var(--green);
         color: var(--green);
     }
+    .result-heading {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+    }
+    .result-heading > span:first-child {
+        color: var(--text);
+    }
     .result-actions {
         display: flex;
         gap: 6px;
@@ -762,81 +869,115 @@
     }
     .result-section {
         border: 1px solid var(--border);
+        padding: 0;
+    }
+    .result-section > .section-header {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
     }
     .result-body {
         display: grid;
-        grid-template-columns: 190px minmax(0, 1fr);
-        gap: 16px;
-        margin-top: 12px;
-        align-items: start;
+        grid-template-columns: minmax(220px, 0.85fr) minmax(360px, 1.45fr) minmax(230px, 0.85fr);
+        gap: 0;
+        min-width: 0;
     }
-    .qr-card {
+    .result-zone {
         display: grid;
+        align-content: start;
+        gap: 12px;
+        min-width: 0;
+        padding: 14px 16px;
+    }
+    .package-zone,
+    .status-zone {
+        border-left: 1px solid var(--border);
+    }
+    .zone-header {
+        display: flex;
+        justify-content: space-between;
         gap: 8px;
-        padding: 10px;
+        align-items: center;
+        min-width: 0;
+        color: var(--text-secondary);
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    .zone-header > span:first-child {
+        color: var(--text);
+    }
+    .zone-header > span:last-child {
+        max-width: 50%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .zone-header .running {
+        color: var(--green);
+    }
+    .qr-frame {
+        width: min(100%, 220px);
+        aspect-ratio: 1;
         border: 1px solid var(--border);
         border-radius: var(--radius);
         background: var(--bg);
-        min-width: 0;
+        padding: 10px;
     }
-    .qr-card img {
+    .qr-frame img {
         display: block;
         width: 100%;
-        aspect-ratio: 1;
+        height: 100%;
         border-radius: var(--radius);
         background: var(--text);
     }
-    .qr-card span {
-        color: var(--text);
-        font-size: 12px;
-        font-weight: 600;
-    }
-    .qr-card code {
-        color: var(--text-secondary);
-        font-size: 11px;
-        overflow-wrap: anywhere;
-    }
-    .result-grid {
+    .handoff-list {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        border-top: 1px solid var(--border);
+        min-width: 0;
+    }
+    .handoff-list.compact {
+        border-top: 0;
         gap: 8px;
     }
-    .path-row {
+    .handoff-row {
         display: grid;
-        grid-template-columns: 86px minmax(0, 1fr) auto;
-        gap: 8px;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
         align-items: center;
-        padding: 8px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        background: var(--bg);
+        min-width: 0;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border);
+    }
+    .handoff-list.compact .handoff-row {
+        padding: 0;
+        border-bottom: 0;
+    }
+    .handoff-value {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+    }
+    .handoff-label {
         color: var(--text-secondary);
         font-size: 11px;
-        min-width: 0;
-    }
-    .path-row > span {
-        color: var(--text-secondary);
         font-weight: 600;
+        text-transform: uppercase;
     }
-    .path-row code,
-    .path-row a,
-    .value-link {
-        color: var(--text);
-        overflow-wrap: anywhere;
+    .handoff-path {
+        display: block;
         min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text);
+        font-family: var(--font);
+        font-size: 12px;
+        line-height: 1.35;
     }
-    .path-row a {
+    a.handoff-path {
         text-decoration: underline;
         text-underline-offset: 2px;
-    }
-    .value-link {
-        border: 0;
-        padding: 0;
-        background: none;
-        cursor: pointer;
-        font-family: var(--font);
-        font-size: 11px;
-        text-align: left;
     }
     .item-actions {
         display: flex;
@@ -859,16 +1000,49 @@
     .mini-btn:hover {
         border-color: var(--blue);
     }
+    .status-list {
+        display: grid;
+        gap: 0;
+        border-top: 1px solid var(--border);
+    }
+    .status-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        min-width: 0;
+        padding: 9px 0;
+        border-bottom: 1px solid var(--border);
+        color: var(--text-secondary);
+        font-size: 11px;
+    }
+    .status-row strong {
+        min-width: 0;
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 600;
+    }
     .warnings {
         display: grid;
         gap: 4px;
-        margin-top: 10px;
         color: var(--orange);
         font-size: 11px;
     }
     @media (max-width: 1180px) {
         .publish-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .result-body {
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        }
+        .status-zone {
+            grid-column: 1 / -1;
+            border-left: 0;
+            border-top: 1px solid var(--border);
         }
         .delivery-panel {
             grid-column: 1 / -1;
@@ -889,8 +1063,7 @@
         .publish-header,
         .publish-grid,
         .delivery-panel,
-        .result-body,
-        .result-grid {
+        .result-body {
             grid-template-columns: 1fr;
         }
         .publish-header {
@@ -932,7 +1105,13 @@
         .result-actions {
             justify-content: flex-start;
         }
-        .path-row {
+        .package-zone,
+        .status-zone {
+            grid-column: auto;
+            border-left: 0;
+            border-top: 1px solid var(--border);
+        }
+        .handoff-row {
             grid-template-columns: 1fr;
             gap: 6px;
         }

@@ -55,6 +55,14 @@ describe('static publishing navigation contract', () => {
         const publishView = readProjectFile('src/lib/components/StaticPublishingSettings.svelte');
         const api = readProjectFile('src/lib/api.ts');
 
+        expect(publishView).toContain('Site publishing');
+        expect(publishView).toContain('Package files');
+        expect(publishView).toContain('class="result-zone preview-zone"');
+        expect(publishView).toContain('class="result-zone package-zone"');
+        expect(publishView).toContain('class="result-zone status-zone"');
+        expect(publishView).toContain('class="handoff-path"');
+        expect(publishView).toContain('text-overflow: ellipsis');
+        expect(publishView).toContain('white-space: nowrap');
         expect(publishView).toContain('Stop preview');
         expect(publishView).toContain('stopServer');
         expect(publishView).toContain('qrImageSrc');
@@ -64,7 +72,8 @@ describe('static publishing navigation contract', () => {
         expect(publishView).toContain('sharePublishItem');
         expect(publishView).toContain('openPublishItem');
         expect(publishView).toContain('buildStaticPublishShareItems');
-        expect(publishView).toContain("item.kind === 'url'");
+        expect(publishView).toContain('targetItem');
+        expect(publishView).not.toContain('class="path-row"');
         expect(publishView).toContain('Tailscale');
         expect(publishView).toContain('ngrok');
         expect(api).toContain('qr_svg_data_url: string');
