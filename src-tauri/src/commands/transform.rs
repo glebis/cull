@@ -1,9 +1,11 @@
 use crate::AppState;
-use image::GenericImageView;
+use image::{DynamicImage, GenericImageView, ImageFormat};
+use std::fs::OpenOptions;
+use std::io::{BufWriter, ErrorKind};
 use std::path::{Path, PathBuf};
 use tauri::State;
 
-fn derivative_path(source: &Path, suffix: &str) -> Result<PathBuf, String> {
+fn derivative_candidate_path(source: &Path, suffix: &str, index: usize) -> Result<PathBuf, String> {
     let parent = source.parent().ok_or("Invalid file path: no parent")?;
     let stem = source
         .file_stem()
@@ -11,23 +13,41 @@ fn derivative_path(source: &Path, suffix: &str) -> Result<PathBuf, String> {
         .to_string_lossy();
     let ext = source.extension().map(|ext| ext.to_string_lossy());
 
+    let indexed_suffix = if index == 0 {
+        suffix.to_string()
+    } else {
+        format!("{suffix}_{}", index + 1)
+    };
+    let file_name = match &ext {
+        Some(ext) if !ext.is_empty() => format!("{stem}_{indexed_suffix}.{ext}"),
+        _ => format!("{stem}_{indexed_suffix}"),
+    };
+    Ok(parent.join(file_name))
+}
+
+fn save_derivative_image(
+    image: &DynamicImage,
+    source: &Path,
+    suffix: &str,
+) -> Result<PathBuf, String> {
     for index in 0..10_000 {
-        let suffix = if index == 0 {
-            suffix.to_string()
-        } else {
-            format!("{suffix}_{}", index + 1)
-        };
-        let file_name = match &ext {
-            Some(ext) if !ext.is_empty() => format!("{stem}_{suffix}.{ext}"),
-            _ => format!("{stem}_{suffix}"),
-        };
-        let candidate = parent.join(file_name);
-        if !candidate
-            .try_exists()
-            .map_err(|e| format!("Failed to check output path: {e}"))?
+        let candidate = derivative_candidate_path(source, suffix, index)?;
+        let file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
         {
-            return Ok(candidate);
-        }
+            Ok(file) => file,
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(format!("Failed to create derivative file: {err}")),
+        };
+        let format = ImageFormat::from_path(&candidate)
+            .map_err(|e| format!("Unsupported derivative image format: {e}"))?;
+        let mut writer = BufWriter::new(file);
+        image
+            .write_to(&mut writer, format)
+            .map_err(|e| format!("Failed to save: {e}"))?;
+        return Ok(candidate);
     }
 
     Err("Could not find an available derivative file name".to_string())
@@ -45,10 +65,9 @@ fn register_derivative(state: &AppState, output_path: &Path) -> Result<(), Strin
     Ok(())
 }
 
-#[tauri::command]
-pub async fn crop_image(
-    state: State<'_, AppState>,
-    image_id: String,
+fn crop_image_inner(
+    state: &AppState,
+    image_id: &str,
     x: u32,
     y: u32,
     width: u32,
@@ -56,7 +75,7 @@ pub async fn crop_image(
 ) -> Result<String, String> {
     let images = state
         .db
-        .get_images_by_ids(&[&image_id])
+        .get_images_by_ids(&[image_id])
         .map_err(|e| e.to_string())?;
     let img_record = images.first().ok_or("Image not found")?;
     let path = PathBuf::from(&img_record.path);
@@ -77,25 +96,28 @@ pub async fn crop_image(
     }
 
     let cropped = img.crop_imm(x, y, width, height);
-    let output_path = derivative_path(&path, "crop")?;
-
-    cropped
-        .save(&output_path)
-        .map_err(|e| format!("Failed to save: {e}"))?;
-    register_derivative(&state, &output_path)?;
+    let output_path = save_derivative_image(&cropped, &path, "crop")?;
+    register_derivative(state, &output_path)?;
 
     Ok(output_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
-pub async fn rotate_image(
+pub async fn crop_image(
     state: State<'_, AppState>,
     image_id: String,
-    degrees: i32,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
 ) -> Result<String, String> {
+    crop_image_inner(&state, &image_id, x, y, width, height)
+}
+
+fn rotate_image_inner(state: &AppState, image_id: &str, degrees: i32) -> Result<String, String> {
     let images = state
         .db
-        .get_images_by_ids(&[&image_id])
+        .get_images_by_ids(&[image_id])
         .map_err(|e| e.to_string())?;
     let img_record = images.first().ok_or("Image not found")?;
     let path = PathBuf::from(&img_record.path);
@@ -113,13 +135,20 @@ pub async fn rotate_image(
         }
     };
 
-    let output_path = derivative_path(&path, &format!("rot{}", degrees.rem_euclid(360)))?;
-    rotated
-        .save(&output_path)
-        .map_err(|e| format!("Failed to save: {e}"))?;
-    register_derivative(&state, &output_path)?;
+    let output_path =
+        save_derivative_image(&rotated, &path, &format!("rot{}", degrees.rem_euclid(360)))?;
+    register_derivative(state, &output_path)?;
 
     Ok(output_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn rotate_image(
+    state: State<'_, AppState>,
+    image_id: String,
+    degrees: i32,
+) -> Result<String, String> {
+    rotate_image_inner(&state, &image_id, degrees)
 }
 
 #[cfg(test)]
@@ -197,12 +226,6 @@ mod tests {
         }
     }
 
-    fn command_state(state: &AppState) -> State<'_, AppState> {
-        // Tauri does not expose a public State constructor; this keeps tests on
-        // the command entrypoint without enabling extra crate features.
-        unsafe { std::mem::transmute::<&AppState, State<'_, AppState>>(state) }
-    }
-
     #[tokio::test]
     async fn crop_default_path_leaves_original_file_bytes_unchanged() {
         let tmp = tempfile::tempdir().unwrap();
@@ -212,9 +235,7 @@ mod tests {
 
         let state = test_state(tmp.path(), &image_path, 8, 6);
 
-        let result = crop_image(command_state(&state), IMAGE_ID.to_string(), 1, 1, 4, 3)
-            .await
-            .unwrap();
+        let result = crop_image_inner(&state, IMAGE_ID, 1, 1, 4, 3).unwrap();
 
         assert_ne!(result, IMAGE_ID);
         assert_eq!(fs::read(&image_path).unwrap(), original_bytes);
@@ -250,9 +271,7 @@ mod tests {
 
         let state = test_state(tmp.path(), &image_path, 8, 6);
 
-        let result = rotate_image(command_state(&state), IMAGE_ID.to_string(), 90)
-            .await
-            .unwrap();
+        let result = rotate_image_inner(&state, IMAGE_ID, 90).unwrap();
 
         assert_eq!(fs::read(&image_path).unwrap(), original_bytes);
 
@@ -289,9 +308,7 @@ mod tests {
 
         let state = test_state(tmp.path(), &image_path, 8, 6);
 
-        let result = crop_image(command_state(&state), IMAGE_ID.to_string(), 1, 1, 4, 3)
-            .await
-            .unwrap();
+        let result = crop_image_inner(&state, IMAGE_ID, 1, 1, 4, 3).unwrap();
 
         let output_path = PathBuf::from(result);
         assert_eq!(output_path.file_name().unwrap(), "source_crop_2.png");

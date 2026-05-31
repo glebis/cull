@@ -8,18 +8,17 @@ export async function focusImagePath(path: string): Promise<boolean> {
     let targetIndex = -1;
     images.update(current => {
         targetIndex = current.findIndex(item => item.image.id === image.image.id);
-        if (targetIndex < 0) return current;
+        if (targetIndex < 0) {
+            targetIndex = current.length;
+            return [...current, image];
+        }
         const next = [...current];
         next[targetIndex] = image;
         return next;
     });
 
-    if (targetIndex >= 0) {
-        focusedImageOverride.set(null);
-        focusedIndex.set(targetIndex);
-    } else {
-        focusedImageOverride.set(image);
-    }
+    focusedImageOverride.set(null);
+    focusedIndex.set(targetIndex);
 
     return true;
 }
