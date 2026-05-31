@@ -1,6 +1,6 @@
 use crate::AppState;
 use image::{DynamicImage, GenericImageView, ImageFormat};
-use std::io::BufWriter;
+use std::io::{BufWriter, Seek, Write};
 use std::path::{Path, PathBuf};
 use tauri::State;
 
@@ -24,6 +24,21 @@ fn derivative_candidate_path(source: &Path, suffix: &str, index: usize) -> Resul
     Ok(parent.join(file_name))
 }
 
+fn write_derivative_image<W: Write + Seek>(
+    image: &DynamicImage,
+    format: ImageFormat,
+    output: &mut W,
+) -> Result<(), String> {
+    let mut writer = BufWriter::new(output);
+    image
+        .write_to(&mut writer, format)
+        .map_err(|e| format!("Failed to save: {e}"))?;
+    writer
+        .flush()
+        .map_err(|e| format!("Failed to flush derivative temp file: {e}"))?;
+    Ok(())
+}
+
 fn save_derivative_image(
     image: &DynamicImage,
     source: &Path,
@@ -43,12 +58,7 @@ fn save_derivative_image(
             .prefix(".cull-transform-")
             .tempfile_in(parent)
             .map_err(|e| format!("Failed to create derivative temp file: {e}"))?;
-        {
-            let mut writer = BufWriter::new(temp.as_file_mut());
-            image
-                .write_to(&mut writer, format)
-                .map_err(|e| format!("Failed to save: {e}"))?;
-        }
+        write_derivative_image(image, format, temp.as_file_mut())?;
         temp.as_file_mut()
             .sync_all()
             .map_err(|e| format!("Failed to sync derivative temp file: {e}"))?;
@@ -171,6 +181,7 @@ mod tests {
     use crate::{services, watcher};
     use image::{ImageBuffer, Rgba};
     use std::fs;
+    use std::io::{Cursor, Seek, SeekFrom, Write};
     use std::path::{Path, PathBuf};
 
     const IMAGE_ID: &str = "image-1";
@@ -343,5 +354,42 @@ mod tests {
             .filter(|name| name.starts_with(".cull-transform-"))
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+
+    struct FlushFailWriter {
+        inner: Cursor<Vec<u8>>,
+    }
+
+    impl Write for FlushFailWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.inner.write(buf)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "injected flush failure",
+            ))
+        }
+    }
+
+    impl Seek for FlushFailWriter {
+        fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+            self.inner.seek(pos)
+        }
+    }
+
+    #[test]
+    fn derivative_writer_reports_flush_errors() {
+        let image = image::DynamicImage::new_rgba8(2, 2);
+        let mut writer = FlushFailWriter {
+            inner: Cursor::new(Vec::new()),
+        };
+
+        let result = write_derivative_image(&image, ImageFormat::Png, &mut writer);
+
+        assert!(result
+            .unwrap_err()
+            .contains("Failed to flush derivative temp file"),);
     }
 }
