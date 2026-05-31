@@ -100,6 +100,28 @@ fn canvas_layout_for_mcp(canvas: &Canvas) -> Result<serde_json::Value, String> {
     }))
 }
 
+fn model_download_response_for_mcp(
+    status: &str,
+    job_id: Option<String>,
+    spec: &crate::db_core::embeddings::EmbeddingModelSpec,
+    model_path: &std::path::Path,
+) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "status": status,
+        "model": spec.model_id,
+        "model_path": model_path,
+        "expected_sha256": spec.expected_sha256,
+        "expected_size_bytes": spec.expected_size_bytes,
+        "spdx_license": spec.spdx_license,
+        "source_repo": spec.source_repo,
+        "model_card_url": spec.model_card_url,
+    });
+    if let Some(job_id) = job_id {
+        value["job_id"] = serde_json::Value::String(job_id);
+    }
+    value
+}
+
 #[derive(Debug, Clone)]
 pub struct CullMcp {
     pub app_handle: tauri::AppHandle,
@@ -1342,12 +1364,8 @@ impl CullMcp {
         };
 
         if model_path.exists() {
-            return serde_json::json!({
-                "status": "already_downloaded",
-                "model": spec.model_id,
-                "model_path": model_path,
-            })
-            .to_string();
+            return model_download_response_for_mcp("already_downloaded", None, &spec, &model_path)
+                .to_string();
         }
 
         let (job_id, _cancel_token) = state
@@ -1420,13 +1438,7 @@ impl CullMcp {
             );
         });
 
-        serde_json::json!({
-            "status": "started",
-            "job_id": job_id_ret,
-            "model": spec.model_id,
-            "model_path": model_path,
-        })
-        .to_string()
+        model_download_response_for_mcp("started", Some(job_id_ret), &spec, &model_path).to_string()
     }
 
     #[tool(
@@ -2791,6 +2803,26 @@ mod tests {
                 tool
             );
         }
+    }
+
+    #[test]
+    fn test_mcp_model_download_response_includes_provenance() {
+        let spec = crate::db_core::embeddings::CLIP_MODEL_SPEC;
+        let response = super::model_download_response_for_mcp(
+            "started",
+            Some("job-1".to_string()),
+            &spec,
+            std::path::Path::new("/tmp/clip-vit-b32-vision.onnx"),
+        );
+
+        assert_eq!(response["status"], "started");
+        assert_eq!(response["job_id"], "job-1");
+        assert_eq!(response["model"], spec.model_id);
+        assert_eq!(response["expected_sha256"], spec.expected_sha256);
+        assert_eq!(response["expected_size_bytes"], spec.expected_size_bytes);
+        assert_eq!(response["spdx_license"], spec.spdx_license);
+        assert_eq!(response["source_repo"], spec.source_repo);
+        assert_eq!(response["model_card_url"], spec.model_card_url);
     }
 
     #[test]

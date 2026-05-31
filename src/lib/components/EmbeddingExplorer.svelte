@@ -1919,6 +1919,29 @@
                         <div class="section-header" style="margin-top: 10px">MANUAL DOWNLOAD</div>
                         {#if selectedDownloadInfo}
                             <div class="manual-path">{selectedDownloadInfo.model_path}</div>
+                            <div class="download-provenance">
+                                <div class="provenance-row">
+                                    <span>License</span>
+                                    <span class="provenance-value">{selectedDownloadInfo.spdx_license}</span>
+                                </div>
+                                <div class="provenance-row">
+                                    <span>Size</span>
+                                    <span class="provenance-value">{formatBytes(selectedDownloadInfo.expected_size_bytes)}</span>
+                                </div>
+                                <div class="provenance-row">
+                                    <span>Source</span>
+                                    <a class="provenance-link" href={selectedDownloadInfo.source_repo} target="_blank" rel="noreferrer">
+                                        {selectedDownloadInfo.source_repo}
+                                    </a>
+                                </div>
+                                <div class="provenance-row">
+                                    <span>Model card</span>
+                                    <a class="provenance-link" href={selectedDownloadInfo.model_card_url} target="_blank" rel="noreferrer">
+                                        {selectedDownloadInfo.model_card_url}
+                                    </a>
+                                </div>
+                                <div class="provenance-hash">{selectedDownloadInfo.expected_sha256}</div>
+                            </div>
                             <pre class="manual-cmd">{selectedDownloadInfo.curl_command}</pre>
                         {:else}
                             <pre class="manual-cmd">{modelNameForProvider(selectedProvider)}</pre>
@@ -2873,6 +2896,46 @@
         margin-bottom: 6px;
         word-break: break-all;
         line-height: 1.4;
+    }
+
+    .download-provenance {
+        display: grid;
+        gap: 4px;
+        margin-bottom: 6px;
+        padding: 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text-secondary);
+        font-size: 9px;
+        line-height: 1.4;
+    }
+
+    .provenance-row {
+        display: grid;
+        grid-template-columns: 56px minmax(0, 1fr);
+        gap: 6px;
+        min-width: 0;
+    }
+
+    .provenance-value,
+    .provenance-link,
+    .provenance-hash {
+        min-width: 0;
+        color: var(--text);
+        overflow-wrap: anywhere;
+    }
+
+    .provenance-link {
+        text-decoration: none;
+    }
+
+    .provenance-link:hover {
+        color: var(--blue);
+    }
+
+    .provenance-hash {
+        font-family: 'JetBrains Mono', monospace;
+        color: var(--green);
     }
 
     .manual-cmd {
