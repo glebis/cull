@@ -2352,19 +2352,22 @@ impl Database {
         validate_delete_folder_path(folder)?;
 
         let conn = self.conn.lock();
-        let pattern = format!("{}/%", folder);
+        let prefix = format!("{}/", folder.trim_end_matches('/'));
+        let prefix_len = prefix.len() as i64;
 
         // Get image IDs that ONLY exist in this folder (no other paths)
         let mut stmt = conn.prepare(
             "SELECT DISTINCT f.image_id FROM image_files f
-             WHERE f.path LIKE ?1 AND f.missing_at IS NULL
+             WHERE substr(f.path, 1, ?2) COLLATE BINARY = ?1 COLLATE BINARY
+             AND f.missing_at IS NULL
              AND f.image_id NOT IN (
                  SELECT image_id FROM image_files
-                 WHERE path NOT LIKE ?1 AND missing_at IS NULL
+                 WHERE substr(path, 1, ?2) COLLATE BINARY != ?1 COLLATE BINARY
+                 AND missing_at IS NULL
              )",
         )?;
         let image_ids: Vec<String> = stmt
-            .query_map(params![pattern], |row| row.get(0))?
+            .query_map(params![&prefix, prefix_len], |row| row.get(0))?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -2377,8 +2380,9 @@ impl Database {
 
         // Also delete file records from this folder for images that still exist elsewhere
         conn.execute(
-            "DELETE FROM image_files WHERE path LIKE ?1",
-            params![pattern],
+            "DELETE FROM image_files
+             WHERE substr(path, 1, ?2) COLLATE BINARY = ?1 COLLATE BINARY",
+            params![&prefix, prefix_len],
         )?;
 
         Ok(count)
@@ -3744,6 +3748,20 @@ mod tests {
         let remaining = db.list_images(100, 0).unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].image.id, "adjacent");
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_keeps_case_distinct_folder() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "lower", "hash-delete-lower", "/tmp/a/lower.png");
+        insert_test_image_at_path(&db, "upper", "hash-delete-upper", "/tmp/A/upper.png");
+
+        let deleted = db.delete_images_by_folder("/tmp/a").unwrap();
+
+        assert_eq!(deleted, 1);
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].image.id, "upper");
     }
 
     #[test]
