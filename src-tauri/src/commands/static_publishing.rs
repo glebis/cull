@@ -1230,82 +1230,133 @@ fn render_index_html(manifest: &Value) -> String {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>__TITLE__</title>
+  <link rel="icon" href="qr.svg" type="image/svg+xml" />
 __DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
   <style>
-    :root { color-scheme: dark; --bg: #08080c; --surface: #0c0c12; --border: #1a1a2e; --text: #e0e0e0; --muted: #7a7fa0; --blue: #7aa2f7; --green: #9ece6a; }
+    :root { color-scheme: dark; --bg: #08080c; --surface: #0c0c12; --border: #1a1a2e; --text: #e0e0e0; --muted: #7a7fa0; --blue: #7aa2f7; --green: #9ece6a; --orange: #e0af68; --paper: #ffffff; --image-bg: #050508; }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     a { color: var(--blue); }
+    a:focus-visible, .card:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
     .skip-link { position: absolute; left: 12px; top: -48px; z-index: 10; padding: 8px 10px; background: var(--green); color: var(--bg); border-radius: 4px; }
     .skip-link:focus { top: 12px; }
-    header { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 14px 18px; background: color-mix(in srgb, var(--bg) 92%, transparent); border-bottom: 1px solid var(--border); backdrop-filter: blur(18px); }
-    h1 { margin: 0; font-size: 15px; font-weight: 700; }
-    h2 { margin: 0; font-size: 13px; }
+    header { position: sticky; top: 0; z-index: 2; background: color-mix(in srgb, var(--bg) 92%, transparent); border-bottom: 1px solid var(--border); backdrop-filter: blur(18px); }
+    .header-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 360px); gap: 18px; align-items: end; width: min(1320px, 100%); margin: 0 auto; padding: 18px; }
+    h1 { margin: 0; font-size: 22px; line-height: 1.2; font-weight: 700; }
+    h2 { margin: 0; font-size: 13px; line-height: 1.3; }
+    .eyebrow { margin: 0 0 4px; color: var(--green); font-size: 11px; font-weight: 700; text-transform: uppercase; }
     .meta { color: var(--muted); font-size: 12px; }
-    .description { margin: 4px 0 0; max-width: 70ch; color: var(--muted); font-size: 12px; }
-    .site-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .description { margin: 6px 0 0; max-width: 74ch; color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .site-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .site-links:empty { display: none; }
-    .site-links a { border: 1px solid var(--border); border-radius: 4px; padding: 3px 7px; text-decoration: none; }
-    .site-links a:focus-visible, .card:focus-visible, .snapshot-links a:focus-visible, .share a:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
-    .share { display: flex; gap: 10px; align-items: center; min-width: 0; }
-    .share img { width: 56px; height: 56px; border-radius: 4px; background: white; }
-    .share a { color: var(--blue); overflow-wrap: anywhere; }
-    main { padding: 18px; }
-    .snapshot { margin-bottom: 18px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); overflow: hidden; }
-    .snapshot-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border); }
-    .snapshot-links { display: flex; gap: 10px; }
-    .snapshot img { display: block; width: 100%; height: auto; background: #ffffff; }
-    .gallery-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 10px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
-    .card { display: block; color: inherit; text-decoration: none; border-radius: 4px; }
+    .site-links a { border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; text-decoration: none; }
+    .share-card { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; align-items: center; padding: 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); min-width: 0; }
+    .share-card img { width: 64px; height: 64px; border-radius: 4px; background: var(--paper); }
+    .share-card strong { display: block; margin-bottom: 3px; font-size: 12px; }
+    .share-card a { display: block; overflow-wrap: anywhere; font-size: 12px; }
+    .review-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 300px); gap: 18px; width: min(1320px, 100%); margin: 0 auto; padding: 18px; align-items: start; }
+    .review-main { display: grid; gap: 18px; min-width: 0; }
+    .review-aside { position: sticky; top: 118px; display: grid; gap: 12px; min-width: 0; }
+    .summary-card, .snapshot { border: 1px solid var(--border); border-radius: 4px; background: var(--surface); overflow: hidden; }
+    .summary-card { padding: 12px; }
+    dl { display: grid; gap: 10px; margin: 12px 0 0; }
+    dl div { display: grid; gap: 2px; }
+    dt { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+    dd { margin: 0; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+    .snapshot-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 12px; border-bottom: 1px solid var(--border); }
+    .snapshot-links { display: flex; flex-wrap: wrap; gap: 10px; }
+    .snapshot img { display: block; width: 100%; height: auto; background: var(--paper); }
+    .gallery-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .card { display: block; color: inherit; text-decoration: none; border-radius: 4px; min-width: 0; }
     figure { margin: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); overflow: hidden; height: 100%; }
-    figure img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: #050508; }
-    figcaption { display: grid; gap: 3px; padding: 8px; min-height: 56px; color: var(--muted); font-size: 11px; }
+    figure img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: var(--image-bg); }
+    figcaption { display: grid; gap: 4px; padding: 9px; min-height: 72px; color: var(--muted); font-size: 11px; line-height: 1.35; }
     figcaption strong { color: var(--text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .prompt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .empty { color: var(--muted); padding: 32px 0; }
-    @media (max-width: 640px) {
-      header { align-items: flex-start; flex-direction: column; }
-      .share img { width: 48px; height: 48px; }
-      main { padding: 12px; }
-      .gallery-head { flex-direction: column; gap: 4px; }
-      .grid { grid-template-columns: 1fr; gap: 8px; }
+    @media (max-width: 1100px) {
+      .header-grid, .review-layout { grid-template-columns: 1fr; }
+      .review-aside { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 680px) {
+      .header-grid, .review-layout { padding: 12px; }
+      .share-card, .review-aside, .grid { grid-template-columns: 1fr; }
+      .share-card img { width: 56px; height: 56px; }
+      .gallery-head, .snapshot-head { align-items: flex-start; flex-direction: column; }
     }
   </style>
 </head>
 <body>
-  <a class="skip-link" href="#gallery">Skip to gallery</a>
+  <a class="skip-link" href="#gallery">Skip to images</a>
   <header>
-    <div>
-      <h1 id="title">Cull Canvas</h1>
-      <p class="description" id="description" hidden></p>
-      <div class="meta" id="summary"></div>
-      <nav class="site-links" id="site-links" aria-label="Related links"></nav>
-    </div>
-    <div class="share">
-      <img id="qr" alt="QR code" src="qr.svg" />
-      <a id="share-url" href="#"></a>
+    <div class="header-grid">
+      <div>
+        <p class="eyebrow">Cull review</p>
+        <h1 id="title">Cull Canvas</h1>
+        <p class="description" id="description" hidden></p>
+        <div class="meta" id="summary"></div>
+        <nav class="site-links" id="site-links" aria-label="Related links"></nav>
+      </div>
+      <aside class="share-card" aria-labelledby="share-title">
+        <img id="qr" alt="QR code for share link" src="qr.svg" />
+        <div>
+          <strong id="share-title">Share link</strong>
+          <a id="share-url" href="#"></a>
+        </div>
+      </aside>
     </div>
   </header>
-  <main>
-    <section id="snapshot" class="snapshot" hidden>
-      <div class="snapshot-head">
-        <strong>Canvas snapshot</strong>
-        <div class="snapshot-links">
-          <a id="snapshot-png" href="#">PNG</a>
-          <a id="snapshot-pdf" href="#">PDF</a>
+  <main class="review-layout">
+    <div class="review-main">
+      <section id="snapshot" class="snapshot" aria-labelledby="snapshot-title" hidden>
+        <div class="snapshot-head">
+          <h2 id="snapshot-title">Canvas snapshot</h2>
+          <div class="snapshot-links">
+            <a id="snapshot-png" href="#">PNG</a>
+            <a id="snapshot-pdf" href="#">PDF</a>
+          </div>
         </div>
-      </div>
-      <img id="snapshot-image" alt="Canvas snapshot" />
-    </section>
-    <section id="gallery" aria-labelledby="gallery-title">
-      <div class="gallery-head">
-        <h2 id="gallery-title">Images</h2>
-        <div class="meta" id="gallery-summary" role="status"></div>
-      </div>
-      <div id="grid" class="grid"></div>
-    </section>
-    <p id="empty" class="empty" hidden>No images in this package.</p>
+        <img id="snapshot-image" alt="Canvas snapshot" />
+      </section>
+      <section id="gallery" aria-labelledby="gallery-title">
+        <div class="gallery-head">
+          <h2 id="gallery-title">Images</h2>
+          <div class="meta" id="gallery-summary" role="status" aria-live="polite"></div>
+        </div>
+        <div id="grid" class="grid"></div>
+      </section>
+      <p id="empty" class="empty" hidden>No images in this package.</p>
+    </div>
+    <aside class="review-aside" aria-label="Package details">
+      <section class="summary-card" aria-labelledby="package-title">
+        <h2 id="package-title">Package</h2>
+        <dl>
+          <div>
+            <dt>Images</dt>
+            <dd id="package-count">0</dd>
+          </div>
+          <div>
+            <dt>Published</dt>
+            <dd id="published-at">Loading</dd>
+          </div>
+          <div>
+            <dt>Visibility</dt>
+            <dd id="visibility">Unlisted</dd>
+          </div>
+        </dl>
+      </section>
+      <section class="summary-card" aria-labelledby="source-title">
+        <h2 id="source-title">Source</h2>
+        <dl>
+          <div>
+            <dt>Canvas</dt>
+            <dd id="source-canvas">Cull Canvas</dd>
+          </div>
+        </dl>
+      </section>
+    </aside>
   </main>
   <script>
     const grid = document.getElementById('grid');
@@ -1320,6 +1371,10 @@ __DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
     const snapshotImage = document.getElementById('snapshot-image');
     const snapshotPng = document.getElementById('snapshot-png');
     const snapshotPdf = document.getElementById('snapshot-pdf');
+    const packageCount = document.getElementById('package-count');
+    const publishedAt = document.getElementById('published-at');
+    const visibility = document.getElementById('visibility');
+    const sourceCanvas = document.getElementById('source-canvas');
 
     fetch('./data/canvas.json')
       .then(response => response.json())
@@ -1333,16 +1388,26 @@ __DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
           description.hidden = false;
           description.textContent = site.description;
         }
-        const generated = new Date(data.generated_at).toLocaleString();
-        summary.textContent = `${images.length} images · Published ${generated}`;
-        gallerySummary.textContent = `${images.length} image${images.length === 1 ? '' : 's'}`;
-        shareUrl.textContent = data.share?.url || window.location.href;
-        shareUrl.href = data.share?.url || window.location.href;
+        const imageLabel = `${images.length} image${images.length === 1 ? '' : 's'}`;
+        const generatedDate = new Date(data.generated_at);
+        const generated = Number.isNaN(generatedDate.getTime())
+          ? 'Unknown'
+          : generatedDate.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', hour12: false });
+        summary.textContent = `${imageLabel} · Published ${generated}`;
+        gallerySummary.textContent = imageLabel;
+        packageCount.textContent = String(images.length);
+        publishedAt.textContent = generated;
+        visibility.textContent = site.indexable ? 'Indexable' : 'Unlisted';
+        sourceCanvas.textContent = data.canvas?.name || data.canvas_name || pageTitle;
+        const shareTarget = data.share?.url || window.location.href;
+        shareUrl.textContent = shareTarget;
+        shareUrl.href = shareTarget;
         for (const link of site.links || []) {
           if (!link.label || !link.url) continue;
           const a = document.createElement('a');
           a.href = link.url;
           a.textContent = link.label;
+          a.target = '_blank';
           a.rel = 'noopener noreferrer';
           siteLinks.append(a);
         }
@@ -1365,15 +1430,18 @@ __DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
           const fig = document.createElement('figure');
           const img = document.createElement('img');
           img.loading = 'lazy';
+          img.decoding = 'async';
           img.src = src;
-          img.alt = item.ai_prompt || item.filename || item.id;
+          const imageName = item.filename || item.id || 'Published image';
+          img.alt = imageName;
+          card.setAttribute('aria-label', `Open ${imageName}`);
           const cap = document.createElement('figcaption');
           const name = document.createElement('strong');
-          name.textContent = item.filename || item.id;
+          name.textContent = imageName;
           const details = document.createElement('span');
           const meta = [];
           if (Number.isFinite(item.width) && Number.isFinite(item.height)) meta.push(`${item.width}x${item.height}`);
-          if (Number.isFinite(item.rating)) meta.push(`${item.rating} stars`);
+          if (Number.isFinite(item.rating)) meta.push(`${item.rating} star${item.rating === 1 ? '' : 's'}`);
           if (item.source_label) meta.push(item.source_label);
           details.textContent = meta.join(' · ') || 'Image';
           cap.append(name, details);

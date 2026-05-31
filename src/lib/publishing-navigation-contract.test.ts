@@ -33,7 +33,35 @@ describe('static publishing navigation contract', () => {
     it('uses publishing language for the generated site result panel', () => {
         const publishView = readProjectFile('src/lib/components/StaticPublishingSettings.svelte');
 
-        expect(publishView).toContain('Last Package');
+        expect(publishView).toContain('Latest package');
         expect(publishView).not.toContain('Last Export');
+    });
+
+    it('keeps the Publish view organized as an accessible two-to-three column workflow', () => {
+        const publishView = readProjectFile('src/lib/components/StaticPublishingSettings.svelte');
+
+        expect(publishView).toContain('class="publish-grid"');
+        expect(publishView).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
+        expect(publishView).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
+        expect(publishView).toContain('aria-live="polite"');
+        expect(publishView).toContain('aria-pressed={indexable}');
+        expect(publishView).toContain('Search visibility');
+        expect(publishView).toContain('Copy agent notes');
+        expect(publishView).not.toContain('Search engines');
+        expect(publishView).not.toContain('Build Static Site');
+    });
+
+    it('keeps the generated static review site readable and accessible', () => {
+        const staticPublishing = readProjectFile('src-tauri/src/commands/static_publishing.rs');
+
+        expect(staticPublishing).toContain('class="review-layout"');
+        expect(staticPublishing).toContain('class="review-aside"');
+        expect(staticPublishing).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
+        expect(staticPublishing).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
+        expect(staticPublishing).toContain('aria-live="polite"');
+        expect(staticPublishing).toContain("toLocaleString('en-GB'");
+        expect(staticPublishing).toContain('img.alt = imageName');
+        expect(staticPublishing).toContain('rel="icon" href="qr.svg"');
+        expect(staticPublishing).toContain('Share link');
     });
 });
