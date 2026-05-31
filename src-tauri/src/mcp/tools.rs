@@ -23,6 +23,106 @@ fn redact_path(path: &str) -> String {
         .unwrap_or_else(|| "[redacted]".to_string())
 }
 
+fn can_expose_private_metadata(auth: &AuthContext) -> bool {
+    match auth {
+        AuthContext::Local => true,
+        AuthContext::Authenticated(token) => token.role == tokens::ROLE_ADMIN,
+    }
+}
+
+fn generation_run_for_mcp(
+    run: &crate::db_core::models::GenerationRun,
+    auth: &AuthContext,
+) -> serde_json::Value {
+    if can_expose_private_metadata(auth) {
+        return serde_json::to_value(run).unwrap_or(serde_json::Value::Null);
+    }
+
+    serde_json::json!({
+        "id": &run.id,
+        "prompt": serde_json::Value::Null,
+        "negative_prompt": serde_json::Value::Null,
+        "provider": &run.provider,
+        "model": &run.model,
+        "seed": &run.seed,
+        "parent_run_id": &run.parent_run_id,
+        "source_type": &run.source_type,
+        "created_at": &run.created_at,
+        "imported_at": &run.imported_at,
+    })
+}
+
+fn library_stats_for_mcp(
+    image_count: u32,
+    folder_count: usize,
+    collection_count: usize,
+    scoped_counts: Option<(u32, usize, usize)>,
+) -> serde_json::Value {
+    match scoped_counts {
+        Some((images, folders, collections)) => serde_json::json!({
+            "image_count": images,
+            "folder_count": folders,
+            "collection_count": collections,
+            "scope": "scoped",
+        }),
+        None => serde_json::json!({
+            "image_count": image_count,
+            "folder_count": folder_count,
+            "collection_count": collection_count,
+            "scope": "global",
+        }),
+    }
+}
+
+fn quality_count_for_mcp(global_count: u32, scoped_count: Option<u32>) -> serde_json::Value {
+    match scoped_count {
+        Some(count) => serde_json::json!({ "count": count, "scope": "scoped" }),
+        None => serde_json::json!({ "count": global_count, "scope": "global" }),
+    }
+}
+
+fn remote_safe_publish_value(mut value: serde_json::Value) -> serde_json::Value {
+    redact_publish_paths(&mut value);
+    value
+}
+
+fn redact_publish_paths(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map.iter_mut() {
+                if is_publish_path_key(key) {
+                    *child = serde_json::Value::String("[redacted:path]".to_string());
+                } else {
+                    redact_publish_paths(child);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                redact_publish_paths(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_publish_path_key(key: &str) -> bool {
+    matches!(
+        key,
+        "capture_dir"
+            | "export_dir"
+            | "output_dir"
+            | "output_path"
+            | "site_dir"
+            | "source_path"
+            | "manifest_path"
+            | "instructions_path"
+            | "qr_svg_path"
+            | "snapshot_png_path"
+            | "snapshot_pdf_path"
+    )
+}
+
 fn clamp_limit(limit: u32) -> u32 {
     limit.min(100).max(1)
 }
@@ -189,12 +289,12 @@ impl CullMcp {
     }
 
     fn is_remote(&self) -> bool {
-        !matches!(self.auth, AuthContext::Local)
+        !can_expose_private_metadata(&self.auth)
     }
 
     fn maybe_redact_path(&self, path: &str) -> serde_json::Value {
         if self.is_remote() {
-            serde_json::Value::String(redact_path(path))
+            serde_json::Value::String("[redacted:path]".to_string())
         } else {
             serde_json::Value::String(path.to_string())
         }
@@ -236,6 +336,86 @@ impl CullMcp {
             )),
             _ => Ok(()),
         }
+    }
+
+    fn scoped_images(
+        &self,
+        state: &AppState,
+    ) -> Result<Option<Vec<crate::db_core::models::ImageWithFile>>, String> {
+        let Some(scope) = self.token_scope() else {
+            return Ok(None);
+        };
+
+        let scope_ref = Some(scope.clone());
+        let mut images_by_id = std::collections::BTreeMap::new();
+
+        if scope.folders.is_some() {
+            for image in state
+                .db
+                .list_images(100_000, 0)
+                .map_err(|e| e.to_string())?
+            {
+                if tokens::image_in_scope(&scope_ref, &image.path, &[]) {
+                    images_by_id.insert(image.image.id.clone(), image);
+                }
+            }
+        }
+
+        if let Some(collections) = &scope.collections {
+            for collection_id in collections {
+                for image in state
+                    .db
+                    .list_collection_images(collection_id)
+                    .map_err(|e| e.to_string())?
+                {
+                    if tokens::image_in_scope(&scope_ref, &image.path, &[collection_id.clone()]) {
+                        images_by_id.insert(image.image.id.clone(), image);
+                    }
+                }
+            }
+        }
+
+        Ok(Some(images_by_id.into_values().collect()))
+    }
+
+    fn scoped_library_counts(
+        &self,
+        state: &AppState,
+    ) -> Result<Option<(u32, usize, usize)>, String> {
+        let Some(scope) = self.token_scope() else {
+            return Ok(None);
+        };
+        let Some(images) = self.scoped_images(state)? else {
+            return Ok(None);
+        };
+
+        let mut folders = std::collections::BTreeSet::new();
+        for image in &images {
+            if let Some(parent) = std::path::Path::new(&image.path).parent() {
+                folders.insert(parent.to_string_lossy().to_string());
+            }
+        }
+
+        let collections = if let Some(collection_ids) = &scope.collections {
+            collection_ids.len()
+        } else {
+            let mut count = 0usize;
+            for (collection_id, _, _) in state.db.list_collections().map_err(|e| e.to_string())? {
+                let collection_images = state
+                    .db
+                    .list_collection_images(&collection_id)
+                    .map_err(|e| e.to_string())?;
+                if collection_images
+                    .iter()
+                    .any(|image| tokens::image_in_scope(&Some(scope.clone()), &image.path, &[]))
+                {
+                    count += 1;
+                }
+            }
+            count
+        };
+
+        Ok(Some((images.len() as u32, folders.len(), collections)))
     }
 }
 
@@ -481,16 +661,16 @@ impl CullMcp {
     #[tool(description = "Get library statistics: image count, folder count, collection count")]
     fn get_library_stats(&self, Parameters(_): Parameters<EmptyParams>) -> String {
         let state = self.app_handle.state::<AppState>();
+        let scoped_counts = match self.scoped_library_counts(&state) {
+            Ok(counts) => counts,
+            Err(e) => return format!("Error: {}", e),
+        };
         let image_count = state.db.image_count().unwrap_or(0);
         let folders = state.db.list_folders().unwrap_or_default();
         let collections = state.db.list_collections().unwrap_or_default();
 
-        serde_json::json!({
-            "image_count": image_count,
-            "folder_count": folders.len(),
-            "collection_count": collections.len(),
-        })
-        .to_string()
+        library_stats_for_mcp(image_count, folders.len(), collections.len(), scoped_counts)
+            .to_string()
     }
 
     #[tool(
@@ -913,8 +1093,23 @@ impl CullMcp {
     #[tool(description = "Get count of images with stored blur, focus, and exposure metrics")]
     fn get_quality_count(&self) -> String {
         let state = self.app_handle.state::<AppState>();
+        let scoped_count = match self.scoped_images(&state) {
+            Ok(Some(images)) => {
+                let mut count = 0u32;
+                for image in images {
+                    match state.db.get_image_quality_metrics(&image.image.id) {
+                        Ok(Some(_)) => count += 1,
+                        Ok(None) => {}
+                        Err(e) => return format!("Error: {}", e),
+                    }
+                }
+                Some(count)
+            }
+            Ok(None) => None,
+            Err(e) => return format!("Error: {}", e),
+        };
         match state.db.quality_metrics_count() {
-            Ok(count) => serde_json::json!({ "count": count }).to_string(),
+            Ok(count) => quality_count_for_mcp(count, scoped_count).to_string(),
             Err(e) => format!("Error: {}", e),
         }
     }
@@ -928,7 +1123,7 @@ impl CullMcp {
         }
         let state = self.app_handle.state::<AppState>();
         match state.db.get_generation_run_for_image(&params.image_id) {
-            Ok(Some(run)) => serde_json::to_string(&run).unwrap_or_else(|_| "null".to_string()),
+            Ok(Some(run)) => generation_run_for_mcp(&run, &self.auth).to_string(),
             Ok(None) => "null".to_string(),
             Err(e) => format!("Error: {}", e),
         }
@@ -1073,7 +1268,13 @@ impl CullMcp {
         let capture_dir = monitor
             .capture_dir
             .as_ref()
-            .map(|path| self.maybe_redact_path(&path.to_string_lossy()))
+            .map(|path| {
+                if self.is_remote() {
+                    serde_json::Value::String("[redacted:path]".to_string())
+                } else {
+                    serde_json::Value::String(path.to_string_lossy().to_string())
+                }
+            })
             .unwrap_or(serde_json::Value::Null);
         serde_json::json!({
             "running": monitor.running,
@@ -1191,18 +1392,28 @@ impl CullMcp {
         let _ = state
             .db
             .set_setting("clipboard_monitor_last_publish", &result.to_string());
+        if self.is_remote() {
+            return remote_safe_publish_value(result).to_string();
+        }
         result.to_string()
     }
 
     #[tool(description = "Return the last successful Clipboard Monitor publish result")]
     fn get_last_clipboard_publish(&self, Parameters(_): Parameters<EmptyParams>) -> String {
         let state = self.app_handle.state::<AppState>();
-        state
+        let raw = state
             .db
             .get_setting("clipboard_monitor_last_publish")
             .ok()
             .flatten()
-            .unwrap_or_else(|| serde_json::json!({"status":"none"}).to_string())
+            .unwrap_or_else(|| serde_json::json!({"status":"none"}).to_string());
+        if !self.is_remote() {
+            return raw;
+        }
+        match serde_json::from_str::<serde_json::Value>(&raw) {
+            Ok(value) => remote_safe_publish_value(value).to_string(),
+            Err(_) => serde_json::json!({"status":"unavailable"}).to_string(),
+        }
     }
 
     // --- Import tools ---
@@ -2082,7 +2293,14 @@ impl CullMcp {
         }
 
         match crate::services::export::export_images(&state.db, &state.app_data_dir, params) {
-            Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()),
+            Ok(result) => {
+                let value = serde_json::to_value(&result).unwrap_or_else(|_| serde_json::json!({}));
+                if self.is_remote() {
+                    remote_safe_publish_value(value).to_string()
+                } else {
+                    value.to_string()
+                }
+            }
             Err(e) => format!("Error: {}", e),
         }
     }
@@ -2112,7 +2330,14 @@ impl CullMcp {
             state.inner(),
             params,
         ) {
-            Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()),
+            Ok(result) => {
+                let value = serde_json::to_value(&result).unwrap_or_else(|_| serde_json::json!({}));
+                if self.is_remote() {
+                    remote_safe_publish_value(value).to_string()
+                } else {
+                    value.to_string()
+                }
+            }
             Err(e) => format!("Error: {}", e),
         }
     }
@@ -2162,7 +2387,14 @@ impl CullMcp {
             state.inner(),
             params,
         ) {
-            Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()),
+            Ok(result) => {
+                let value = serde_json::to_value(&result).unwrap_or_else(|_| serde_json::json!({}));
+                if self.is_remote() {
+                    remote_safe_publish_value(value).to_string()
+                } else {
+                    value.to_string()
+                }
+            }
             Err(e) => format!("Error: {}", e),
         }
     }
@@ -2294,6 +2526,80 @@ mod tests {
             super::redact_path("/Users/gleb/My Art/image 001.png"),
             "image 001.png"
         );
+    }
+
+    #[test]
+    fn test_scoped_generation_run_redacts_private_fields_by_default() {
+        let auth = AuthContext::Authenticated(make_token(
+            "viewer",
+            Some(r#"{"folders":["/Users/gleb/art/share"]}"#.to_string()),
+        ));
+        let run = generation_run_fixture();
+
+        let value = super::generation_run_for_mcp(&run, &auth);
+        let json = value.to_string();
+
+        assert_eq!(value["id"], "run-1");
+        assert_eq!(value["prompt"], serde_json::Value::Null);
+        assert!(value.get("source_path").is_none());
+        assert!(value.get("raw_metadata_json").is_none());
+        assert!(!json.contains("/Users"));
+        assert!(!json.contains("private prompt"));
+        assert!(!json.contains("source_path"));
+        assert!(!json.contains("raw_metadata_json"));
+    }
+
+    #[test]
+    fn test_local_generation_run_preserves_private_fields() {
+        let run = generation_run_fixture();
+
+        let value = super::generation_run_for_mcp(&run, &AuthContext::Local);
+
+        assert_eq!(value["prompt"], "private prompt");
+        assert_eq!(value["source_path"], "/Users/gleb/art/share/image.json");
+        assert_eq!(value["raw_metadata_json"], r#"{"prompt":"private prompt"}"#);
+    }
+
+    #[test]
+    fn test_scoped_library_stats_do_not_return_global_counts() {
+        let stats = super::library_stats_for_mcp(12, 4, 3, Some((2, 1, 1)));
+
+        assert_eq!(stats["image_count"], 2);
+        assert_eq!(stats["folder_count"], 1);
+        assert_eq!(stats["collection_count"], 1);
+        assert_eq!(stats["scope"], "scoped");
+        assert_ne!(stats["image_count"], 12);
+    }
+
+    #[test]
+    fn test_scoped_quality_count_does_not_return_global_count() {
+        let count = super::quality_count_for_mcp(9, Some(2));
+
+        assert_eq!(count["count"], 2);
+        assert_eq!(count["scope"], "scoped");
+        assert_ne!(count["count"], 9);
+    }
+
+    #[test]
+    fn test_remote_clipboard_publish_value_redacts_local_paths() {
+        let value = serde_json::json!({
+            "collection_id": "col-1",
+            "image_count": 2,
+            "site_dir": "/Users/gleb/Library/Application Support/com.glebkalinin.cull/static-publishing/site",
+            "url": "http://127.0.0.1:8000",
+            "manifest_path": "/Users/gleb/Library/Application Support/com.glebkalinin.cull/static-publishing/site/data/manifest.json",
+            "instructions_path": "/Users/gleb/Library/Application Support/com.glebkalinin.cull/static-publishing/site/CLAUDE.md",
+        });
+
+        let redacted = super::remote_safe_publish_value(value);
+        let json = redacted.to_string();
+
+        assert_eq!(redacted["site_dir"], "[redacted:path]");
+        assert_eq!(redacted["manifest_path"], "[redacted:path]");
+        assert_eq!(redacted["instructions_path"], "[redacted:path]");
+        assert!(!json.contains("/Users"));
+        assert!(!json.contains("manifest.json"));
+        assert!(!json.contains("CLAUDE.md"));
     }
 
     // --- is_remote logic ---
@@ -2770,6 +3076,24 @@ mod tests {
             sort_order,
             created_at: "2026-05-15T00:00:00Z".to_string(),
             updated_at: "2026-05-15T01:00:00Z".to_string(),
+        }
+    }
+
+    fn generation_run_fixture() -> crate::db_core::models::GenerationRun {
+        crate::db_core::models::GenerationRun {
+            id: "run-1".to_string(),
+            prompt: Some("private prompt".to_string()),
+            negative_prompt: Some("private negative".to_string()),
+            provider: Some("openai".to_string()),
+            model: Some("gpt-image-1".to_string()),
+            settings_json: r#"{"quality":"high"}"#.to_string(),
+            seed: Some("123".to_string()),
+            parent_run_id: None,
+            source_type: "sidecar".to_string(),
+            source_path: Some("/Users/gleb/art/share/image.json".to_string()),
+            raw_metadata_json: Some(r#"{"prompt":"private prompt"}"#.to_string()),
+            created_at: Some("2026-05-30T12:00:00Z".to_string()),
+            imported_at: "2026-05-30T12:01:00Z".to_string(),
         }
     }
 
