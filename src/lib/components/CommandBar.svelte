@@ -4,6 +4,7 @@
     import { listen } from '@tauri-apps/api/event';
     import { smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, searchOpen, viewMode, navigateTo, navigateBack } from '$lib/stores';
     import type { FilterNode } from '$lib/api';
+    import { buildSearchPresetLists, type SearchPreset, type SearchPresetKind } from '$lib/search-presets';
     import RuleBuilder from './RuleBuilder.svelte';
     import { onMount, onDestroy, tick } from 'svelte';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
@@ -18,12 +19,17 @@
     let isApplying = $state(false);
     let isListening = $state(false);
     let applyRequestId = $state(0);
+    let searchPresetRequestId = 0;
     let dictationLocale = $state('en-US');
 
     let saving = $state(false);
     let collectionName = $state('');
     let savedMessage = $state('');
     let savedTimeout: ReturnType<typeof setTimeout> | null = null;
+    let savedSearchPresets: SearchPreset[] = $state([]);
+    let autoSearchPresets: SearchPreset[] = $state([]);
+    let isLoadingSearchPresets = $state(false);
+    let activeAppliedPresetKind: SearchPresetKind | null = $state(null);
 
     let silenceTimer: ReturnType<typeof setTimeout> | null = null;
     let unlisteners: Array<() => void> = [];
@@ -33,6 +39,27 @@
     let barEl: HTMLDivElement | undefined = $state();
 
     let applyDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    async function rebuildSearchPresetLists(collections = $smartCollections) {
+        const lists = await buildSearchPresetLists(collections, countSmartCollection);
+        savedSearchPresets = lists.saved;
+        autoSearchPresets = lists.auto;
+    }
+
+    async function loadSearchPresets() {
+        const reqId = ++searchPresetRequestId;
+        isLoadingSearchPresets = true;
+        try {
+            const updated = await listSmartCollections();
+            if (reqId !== searchPresetRequestId) return;
+            $smartCollections = updated;
+            await rebuildSearchPresetLists(updated);
+        } catch (e) {
+            console.error('Failed to load search presets:', e);
+        } finally {
+            if (reqId === searchPresetRequestId) isLoadingSearchPresets = false;
+        }
+    }
 
     function activateAdHocFilter(filterJson: string, count: number | null) {
         $activeSmartCollection = {
@@ -67,6 +94,7 @@
     // Open when searchOpen store becomes true
     $effect(() => {
         if ($searchOpen) {
+            loadSearchPresets();
             tick().then(() => inputEl?.focus());
         }
     });
@@ -108,11 +136,24 @@
             isListening = false;
         });
         unlisteners.push(unlistenError);
+
+        const unlistenImagesChanged = await listen<void>('images:changed', () => {
+            loadSearchPresets();
+        });
+        unlisteners.push(unlistenImagesChanged);
+
+        const onSessionEventsRefresh = () => loadSearchPresets();
+        window.addEventListener('session-events-refresh', onSessionEventsRefresh);
+        unlisteners.push(() => window.removeEventListener('session-events-refresh', onSessionEventsRefresh));
+
+        await loadSearchPresets();
     });
 
     onDestroy(() => {
         unlisteners.forEach(fn => fn());
         if (silenceTimer) clearTimeout(silenceTimer);
+        if (savedTimeout) clearTimeout(savedTimeout);
+        if (applyDebounceTimer) clearTimeout(applyDebounceTimer);
     });
 
     function generateName(q: string): string {
@@ -148,6 +189,7 @@
             showRules = false;
             applied = false;
             saving = false;
+            activeAppliedPresetKind = null;
             return;
         }
         const filterJson = await parseNlQuery(query);
@@ -156,6 +198,7 @@
         applied = false;
         saving = false;
         isDirtyFromManualEdit = false;
+        activeAppliedPresetKind = null;
         await handleApply();
     }
 
@@ -191,6 +234,7 @@
     function handleFilterChange(next: FilterNode) {
         parsedFilter = next;
         isDirtyFromManualEdit = true;
+        activeAppliedPresetKind = null;
         debouncedApply();
     }
 
@@ -219,6 +263,7 @@
         saving = false;
         savedMessage = '';
         isDirtyFromManualEdit = false;
+        activeAppliedPresetKind = null;
         isCollapsed = false;
         $searchOpen = false;
         navigateBack();
@@ -238,6 +283,7 @@
         saving = false;
         savedMessage = '';
         isDirtyFromManualEdit = false;
+        activeAppliedPresetKind = null;
         isCollapsed = false;
         $searchOpen = false;
     }
@@ -250,6 +296,7 @@
         saving = false;
         savedMessage = '';
         isDirtyFromManualEdit = false;
+        activeAppliedPresetKind = null;
     }
 
     function expandFromCollapse() {
@@ -278,6 +325,7 @@
             await createSmartCollection(collectionName.trim(), filterJson, nlQuery);
             const updated = await listSmartCollections();
             $smartCollections = updated;
+            await rebuildSearchPresetLists(updated);
 
             const saved = updated.find(sc => sc.name === collectionName.trim());
             if (saved) {
@@ -295,6 +343,7 @@
             parsedFilter = null;
             applied = false;
             isDirtyFromManualEdit = false;
+            activeAppliedPresetKind = null;
             $searchOpen = false;
 
             if (savedTimeout) clearTimeout(savedTimeout);
@@ -302,6 +351,35 @@
         } catch (e) {
             console.error('Failed to save collection:', e);
         }
+    }
+
+    async function handlePresetSelect(preset: SearchPreset) {
+        query = preset.query;
+        parsedFilter = JSON.parse(preset.filterJson);
+        showRules = true;
+        saving = false;
+        isDirtyFromManualEdit = false;
+        activeAppliedPresetKind = preset.kind;
+
+        if (preset.kind === 'saved') {
+            const saved = $smartCollections.find(sc => sc.id === preset.id);
+            if (saved) {
+                $activeSmartCollection = saved;
+                $activeFolder = null;
+                $activeCollection = null;
+                $activeDetectedClass = null;
+                matchCount = preset.imageCount;
+                applied = true;
+                if ($viewMode !== 'grid') {
+                    navigateTo('grid');
+                }
+                await loadImagesForCurrentScope({ force: true });
+                return;
+            }
+        }
+
+        applied = false;
+        await handleApply();
     }
 
     function handleNameKeydown(e: KeyboardEvent) {
@@ -359,7 +437,7 @@
                 bind:this={inputEl}
                 bind:value={query}
                 onkeydown={handleKeydown}
-                placeholder="landscape midjourney 4 stars or more..."
+                placeholder="Search images..."
                 class="command-input"
                 role="searchbox"
                 aria-label="Search images"
@@ -388,6 +466,48 @@
             <button class="close-btn" onclick={handleClose}>×</button>
         </div>
 
+        {#if !query.trim() && !showRules && !saving && (savedSearchPresets.length > 0 || autoSearchPresets.length > 0 || isLoadingSearchPresets)}
+            <div class="search-presets-panel">
+                {#if savedSearchPresets.length > 0}
+                    <div class="preset-section">
+                        <div class="preset-section-header">SAVED</div>
+                        <div class="preset-list">
+                            {#each savedSearchPresets as preset}
+                                <button
+                                    class="search-preset-btn"
+                                    onclick={() => handlePresetSelect(preset)}
+                                    title={`${preset.imageCount} images`}
+                                >
+                                    <span class="preset-name">{preset.name}</span>
+                                    <span class="preset-count">{preset.imageCount}</span>
+                                </button>
+                            {/each}
+                        </div>
+                    </div>
+                {/if}
+
+                {#if autoSearchPresets.length > 0}
+                    <div class="preset-section">
+                        <div class="preset-section-header">SUGGESTED</div>
+                        <div class="preset-list">
+                            {#each autoSearchPresets as preset}
+                                <button
+                                    class="search-preset-btn auto"
+                                    onclick={() => handlePresetSelect(preset)}
+                                    title={`${preset.imageCount} images`}
+                                >
+                                    <span class="preset-name">{preset.name}</span>
+                                    <span class="preset-count">{preset.imageCount}</span>
+                                </button>
+                            {/each}
+                        </div>
+                    </div>
+                {:else if isLoadingSearchPresets}
+                    <div class="preset-loading">Loading presets...</div>
+                {/if}
+            </div>
+        {/if}
+
         {#if showRules && parsedFilter}
             <div class="parsed-rules" class:dimmed={saving}>
                 <div class="rules-header">
@@ -399,7 +519,7 @@
                         <button class="apply-btn" onclick={handleApply} disabled={isApplying}>
                             {isApplying ? '...' : applied ? 'Refresh' : 'Apply'}
                         </button>
-                        {#if applied && !saving}
+                        {#if applied && !saving && activeAppliedPresetKind !== 'saved'}
                             <button class="save-btn" onclick={handleSaveStart}>Save Collection</button>
                         {/if}
                     </div>
@@ -679,6 +799,88 @@
         color: var(--red);
         border-color: rgba(247, 118, 142, 0.4);
         background: rgba(247, 118, 142, 0.08);
+    }
+
+    .search-presets-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 14px 16px 16px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-top: none;
+        border-radius: 0 0 8px 8px;
+    }
+
+    .preset-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .preset-section-header {
+        color: var(--text-secondary);
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+    }
+
+    .preset-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .search-preset-btn {
+        min-height: 30px;
+        max-width: 180px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 10px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        cursor: pointer;
+        font-family: var(--font);
+        font-size: 12px;
+        transition: border-color 120ms, color 120ms, transform 80ms;
+    }
+
+    .search-preset-btn:hover {
+        border-color: var(--blue);
+        color: var(--blue);
+    }
+
+    .search-preset-btn:active {
+        transform: translateY(1px);
+    }
+
+    .search-preset-btn.auto {
+        color: var(--text-secondary);
+    }
+
+    .search-preset-btn.auto:hover {
+        color: var(--blue);
+    }
+
+    .preset-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .preset-count {
+        color: var(--text-secondary);
+        flex-shrink: 0;
+        font-size: 11px;
+    }
+
+    .preset-loading {
+        color: var(--text-secondary);
+        font-size: 12px;
     }
 
     .parsed-rules {
