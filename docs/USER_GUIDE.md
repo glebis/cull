@@ -43,9 +43,17 @@ Cull has seven primary views:
 | `Cmd+4` | Canvas | Arrange selected images spatially |
 | `Cmd+5` | Lineage | Inspect generation runs and image relationships |
 | `Cmd+6` | Embedding Explorer | Explore visual clusters and similarity |
-| `Cmd+0` | Export | Build exports from selected or collected images |
+| `Cmd+7` | Export | Build exports from selected or collected images |
 
 The same view shortcuts are used by the tab bar, keyboard handler, and native View menu.
+
+## Command Palette
+
+Use `Cmd+P` or **View > Command Palette...** to open the Command Palette in command-only mode. Use `Cmd+K` to open the broader palette that includes commands and destinations such as folders, collections, and smart collections. `Cmd+Shift+P` is also supported as a command-only shortcut for VS Code-style muscle memory.
+
+Type to fuzzy-search the available commands. Non-matching rows are hidden while you search, rows show their category and shortcut, `ArrowUp` and `ArrowDown` move the selected row, and `Enter` runs the selected command. `Escape` closes the palette.
+
+The palette keeps the last five commands launched through the palette at the top of the empty command list, matching standard command palette behavior in tools like VS Code and Obsidian.
 
 ## Review And Curate
 
@@ -96,7 +104,7 @@ Static publishing turns a collection into a local shareable site without changin
 
 ## Export Images
 
-Use the Export view (`Cmd+0`) to prepare selected images or a collection for output. The current CLI slice also supports exporting a collection to a folder while preserving originals:
+Use the Export view (`Cmd+7`) to prepare selected images or a collection for output. The current CLI slice also supports exporting a collection to a folder while preserving originals:
 
 ```bash
 cull --json export_images --collection_id <id> --output_dir ~/Desktop/export --format original

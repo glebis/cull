@@ -40,6 +40,7 @@ Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 | Embedding Explorer (UMAP 2D scatter + k-means clustering) | Done |
 | Zen mode (fullscreen, hides all chrome) | Done |
 | Vim-style keyboard navigation (hjkl, arrows, Home/End, PgUp/PgDn) | Done |
+| Command Palette with fuzzy command search, shortcut badges, and top-five recents | Done |
 | Star ratings (1-5), accept/reject/undecide curation | Done |
 | Color labels (schema ready, UI pending) | Partial |
 | SQLite library with SHA-256 dedup | Done |
@@ -190,7 +191,21 @@ Search, contact-sheet, and export deep-link verbs are roadmap items.
 | `Cmd+4` | Canvas |
 | `Cmd+5` | Lineage |
 | `Cmd+6` | Embedding Explorer |
-| `Cmd+0` | Export |
+| `Cmd+7` | Export |
+
+### Command Palette
+
+| Key | Action |
+|-----|--------|
+| `Cmd+P` | Open Command Palette in command-only mode |
+| `Cmd+K` | Open Command Palette with commands and destinations |
+| `Cmd+Shift+P` | Open Command Palette in command-only mode |
+| Type to search | Fuzzy-filter commands; non-matches are hidden |
+| `ArrowUp` / `ArrowDown` | Move selected result |
+| `Enter` | Run selected command |
+| `Escape` | Close palette |
+
+Command rows show their category and shortcut. The five most recent commands launched from the palette appear at the top before the normal command list.
 
 ### Curation
 
