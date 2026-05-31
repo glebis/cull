@@ -194,4 +194,19 @@ describe('Tauri command contract', () => {
 
         expect(permissions).toContain('core:window:allow-start-dragging');
     });
+
+    it('allows opening generated local files from share results', () => {
+        const defaultCapability = capabilityFiles().find((capability) => capability.identifier === 'default');
+        const openPathPermission = defaultCapability?.permissions.find((permission) =>
+            typeof permission !== 'string' && permission.identifier === 'opener:allow-open-path'
+        );
+
+        expect(openPathPermission).toEqual({
+            identifier: 'opener:allow-open-path',
+            allow: [
+                { path: '$HOME/**/*' },
+                { path: '$APPDATA/**/*' },
+            ],
+        });
+    });
 });
