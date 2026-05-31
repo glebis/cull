@@ -44,12 +44,18 @@ impl Database {
     pub fn open(db_path: &Path) -> Result<Self> {
         let should_consider_backup = should_consider_migration_backup(db_path);
         let conn = Connection::open(db_path)?;
+        Self::configure_connection(&conn)?;
         let db = Database {
             conn: Arc::new(Mutex::new(conn)),
         };
         db.preflight_migrations(db_path, should_consider_backup)?;
         db.run_migrations()?;
         Ok(db)
+    }
+
+    fn configure_connection(conn: &Connection) -> Result<()> {
+        conn.pragma_update(None, "foreign_keys", true)?;
+        Ok(())
     }
 
     fn preflight_migrations(&self, db_path: &Path, should_consider_backup: bool) -> Result<()> {
@@ -3620,6 +3626,64 @@ mod tests {
             last_seen_mtime: None,
         };
         db.insert_image_file(&file).unwrap();
+    }
+
+    #[test]
+    fn test_configure_connection_enables_foreign_keys() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+
+        Database::configure_connection(&conn).unwrap();
+
+        let enabled: i64 = conn
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        assert_eq!(enabled, 1);
+    }
+
+    #[test]
+    fn test_reopen_enables_foreign_key_cascades() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("runtime.db");
+
+        {
+            let db = Database::open(&db_path).unwrap();
+            insert_test_image(&db, "img-1", "hash-1");
+            db.set_rating("img-1", 4).unwrap();
+            let collection_id = db.create_collection("Cascade Check").unwrap();
+            db.add_to_collection(&collection_id, &["img-1"]).unwrap();
+        }
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock();
+        conn.execute("DELETE FROM images WHERE id = ?1", params!["img-1"])
+            .unwrap();
+
+        let image_files: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM image_files WHERE image_id = ?1",
+                params!["img-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let selections: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM selections WHERE image_id = ?1",
+                params!["img-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let collection_items: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM collection_items WHERE image_id = ?1",
+                params!["img-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(image_files, 0);
+        assert_eq!(selections, 0);
+        assert_eq!(collection_items, 0);
     }
 
     #[test]
