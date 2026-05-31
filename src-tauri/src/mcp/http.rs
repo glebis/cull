@@ -1,6 +1,6 @@
 use bytes::{Bytes, BytesMut};
 use http_body_util::{BodyExt, Full};
-use hyper::body::Incoming;
+use hyper::body::{Body as HttpBody, Incoming};
 use hyper_util::rt::TokioIo;
 use rmcp::transport::streamable_http_server::{
     session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
@@ -99,14 +99,17 @@ fn request_content_length(headers: &http::HeaderMap) -> Option<u64> {
         .and_then(|value| value.parse::<u64>().ok())
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum RequestBodyError {
     TooLarge,
     ReadFailed,
+    TimedOut,
 }
 
 async fn read_limited_request_body(
     req: hyper::Request<Incoming>,
     max_bytes: u64,
+    timeout: Duration,
 ) -> Result<hyper::Request<Full<Bytes>>, RequestBodyError> {
     if classify_request_body_size(request_content_length(req.headers()), max_bytes)
         == BodySizeDecision::RejectTooLarge
@@ -114,7 +117,28 @@ async fn read_limited_request_body(
         return Err(RequestBodyError::TooLarge);
     }
 
-    let (parts, mut body) = req.into_parts();
+    let (parts, body) = req.into_parts();
+    let bytes = collect_limited_body_with_timeout(body, max_bytes, timeout).await?;
+    Ok(hyper::Request::from_parts(parts, Full::new(bytes)))
+}
+
+async fn collect_limited_body_with_timeout<B>(
+    body: B,
+    max_bytes: u64,
+    timeout: Duration,
+) -> Result<Bytes, RequestBodyError>
+where
+    B: HttpBody<Data = Bytes> + Unpin,
+{
+    tokio::time::timeout(timeout, collect_limited_body(body, max_bytes))
+        .await
+        .map_err(|_| RequestBodyError::TimedOut)?
+}
+
+async fn collect_limited_body<B>(mut body: B, max_bytes: u64) -> Result<Bytes, RequestBodyError>
+where
+    B: HttpBody<Data = Bytes> + Unpin,
+{
     let mut bytes = BytesMut::new();
     while let Some(frame) = body.frame().await {
         let frame = frame.map_err(|_| RequestBodyError::ReadFailed)?;
@@ -126,7 +150,7 @@ async fn read_limited_request_body(
         }
     }
 
-    Ok(hyper::Request::from_parts(parts, Full::new(bytes.freeze())))
+    Ok(bytes.freeze())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -411,7 +435,13 @@ async fn run_http_server(
                         }
                     };
 
-                    let req = match read_limited_request_body(req, MCP_HTTP_MAX_BODY_BYTES).await {
+                    let req = match read_limited_request_body(
+                        req,
+                        MCP_HTTP_MAX_BODY_BYTES,
+                        MCP_HTTP_REQUEST_TIMEOUT,
+                    )
+                    .await
+                    {
                         Ok(req) => req,
                         Err(RequestBodyError::TooLarge) => {
                             return Ok(hyper::Response::builder()
@@ -423,6 +453,12 @@ async fn run_http_server(
                             return Ok(hyper::Response::builder()
                                 .status(400)
                                 .body(Full::new(Bytes::from("Bad Request")))
+                                .unwrap());
+                        }
+                        Err(RequestBodyError::TimedOut) => {
+                            return Ok(hyper::Response::builder()
+                                .status(408)
+                                .body(Full::new(Bytes::from("Request Timeout")))
                                 .unwrap());
                         }
                     };
@@ -624,6 +660,24 @@ mod tests {
             classify_request_body_size(Some(1024), 1024),
             BodySizeDecision::Accept
         );
+    }
+
+    #[tokio::test]
+    async fn test_streaming_body_rejects_bytes_past_limit_without_content_length() {
+        let result = collect_limited_body(Full::new(Bytes::from_static(b"12345")), 4).await;
+
+        assert_eq!(result.unwrap_err(), RequestBodyError::TooLarge);
+    }
+
+    #[tokio::test]
+    async fn test_body_read_times_out_instead_of_holding_concurrency_permit() {
+        let body = http_body_util::StreamBody::new(futures_util::stream::pending::<
+            Result<hyper::body::Frame<Bytes>, std::convert::Infallible>,
+        >());
+
+        let result = collect_limited_body_with_timeout(body, 1024, Duration::from_millis(1)).await;
+
+        assert_eq!(result.unwrap_err(), RequestBodyError::TimedOut);
     }
 
     #[test]
