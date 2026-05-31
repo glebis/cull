@@ -243,6 +243,9 @@ mod tests {
             clipboard_monitor: parking_lot::Mutex::new(
                 services::clipboard_monitor::ClipboardMonitorState::default(),
             ),
+            static_publish_server: parking_lot::Mutex::new(
+                crate::commands::static_publishing::StaticPublishServerState::default(),
+            ),
         }
     }
 
