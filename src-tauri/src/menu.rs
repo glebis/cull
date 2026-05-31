@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use std::path::PathBuf;
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu};
+use tauri::menu::{
+    CheckMenuItem, Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu, HELP_SUBMENU_ID,
+};
 use tauri::{AppHandle, Emitter, Manager, Wry};
 
 const CULL_HELP_BOOK_ID: &str = "com.glebkalinin.cull.help";
@@ -246,7 +248,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     menu.append(&window_menu)?;
 
     // Help menu
-    let help_menu = Submenu::new(app, "Help", true)?;
+    let help_menu = Submenu::with_id(app, HELP_SUBMENU_ID, "Help", true)?;
     help_menu.append(&MenuItem::with_id(
         app,
         "help",

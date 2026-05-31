@@ -28,6 +28,13 @@ describe('Help menu contract', () => {
         expect(menuSource).not.toContain('"Cull Help"');
     });
 
+    it('registers the Help submenu with Tauri so macOS adds the native search field', () => {
+        const menuSource = readProjectFile('src-tauri/src/menu.rs');
+
+        expect(menuSource).toContain('HELP_SUBMENU_ID');
+        expect(menuSource).toContain('Submenu::with_id(app, HELP_SUBMENU_ID, "Help", true)');
+    });
+
     it('registers a native macOS Help Book in the app plist', () => {
         const plist = readProjectFile('src-tauri/Info.plist');
 
