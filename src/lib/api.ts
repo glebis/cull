@@ -944,8 +944,8 @@ export async function cropImage(imageId: string, x: number, y: number, width: nu
     return invoke<string>('crop_image', { imageId, x, y, width, height, saveAsCopy });
 }
 
-export async function rotateImage(imageId: string, degrees: number): Promise<void> {
-    return invoke<void>('rotate_image', { imageId, degrees });
+export async function rotateImage(imageId: string, degrees: number): Promise<string> {
+    return invoke<string>('rotate_image', { imageId, degrees });
 }
 
 export async function getGenerationRun(imageId: string): Promise<GenerationRun | null> {

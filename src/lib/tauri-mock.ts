@@ -402,7 +402,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   redo: () => 'rating',
   trash_images: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   delete_images_permanently: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
-  rotate_image: () => undefined,
+  rotate_image: (_: any, args: { imageId: string }) => `${args.imageId}_rotated.png`,
   crop_image: (_: any, args: { imageId: string }) => args.imageId,
   get_generation_run: () => null,
   record_asset_load_event: (_: any, args: { event: any }) => ({

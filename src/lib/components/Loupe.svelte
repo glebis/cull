@@ -282,7 +282,7 @@
         if (!rect || !image || rect.width < MIN_CROP_SIZE || rect.height < MIN_CROP_SIZE) return;
         cropping = true;
         try {
-            await cropImage(image.image.id, rect.x, rect.y, rect.width, rect.height, false);
+            await cropImage(image.image.id, rect.x, rect.y, rect.width, rect.height, true);
             showToast('Image cropped', { type: 'info', duration: 2000 });
             window.dispatchEvent(new CustomEvent('image-updated'));
         } catch (e) {
