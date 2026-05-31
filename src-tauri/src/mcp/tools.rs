@@ -86,6 +86,14 @@ fn remote_safe_publish_value(mut value: serde_json::Value) -> serde_json::Value 
     value
 }
 
+fn json_response_for_mcp(value: serde_json::Value, auth: &AuthContext) -> serde_json::Value {
+    if can_expose_private_metadata(auth) {
+        value
+    } else {
+        remote_safe_publish_value(value)
+    }
+}
+
 fn redact_publish_paths(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
@@ -1542,8 +1550,11 @@ impl CullMcp {
         }
         let state = self.app_handle.state::<AppState>();
         match crate::services::import::import_folder(&state.db, &state.app_data_dir, params) {
-            Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()),
-            Err(e) => format!("Error: {}", e),
+            Ok(result) => {
+                let value = serde_json::to_value(&result).unwrap_or_else(|_| serde_json::json!({}));
+                json_response_for_mcp(value, &self.auth).to_string()
+            }
+            Err(e) => error_for_mcp(&e, &self.auth),
         }
     }
 
@@ -1564,8 +1575,11 @@ impl CullMcp {
         }
         let state = self.app_handle.state::<AppState>();
         match crate::services::import::import_files(&state.db, &state.app_data_dir, params) {
-            Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()),
-            Err(e) => format!("Error: {}", e),
+            Ok(result) => {
+                let value = serde_json::to_value(&result).unwrap_or_else(|_| serde_json::json!({}));
+                json_response_for_mcp(value, &self.auth).to_string()
+            }
+            Err(e) => error_for_mcp(&e, &self.auth),
         }
     }
 
@@ -2798,6 +2812,31 @@ mod tests {
         assert!(!json.contains("/tmp/cull"));
         assert!(!json.contains("manifest.json"));
         assert!(!json.contains("output.png"));
+    }
+
+    #[test]
+    fn test_remote_json_response_redacts_import_error_paths() {
+        let auth = AuthContext::Authenticated(make_token("operator", None));
+        let value = serde_json::json!({
+            "imported": 0,
+            "skipped": 1,
+            "errors": [
+                "/Users/gleb/art/private/broken.png: Unsupported image format"
+            ],
+            "batch_id": null,
+            "image_ids": [],
+        });
+
+        let redacted = super::json_response_for_mcp(value.clone(), &auth);
+
+        assert_eq!(redacted["errors"][0], "[redacted:path]");
+        assert!(!redacted.to_string().contains("/Users"));
+        assert!(!redacted.to_string().contains("broken.png"));
+
+        let local = super::json_response_for_mcp(value, &AuthContext::Local);
+        assert!(local
+            .to_string()
+            .contains("/Users/gleb/art/private/broken.png"));
     }
 
     #[test]
