@@ -85,9 +85,6 @@ pub async fn import_folder(
     }
 
     let _ = state.db.add_library_root(&folder_path);
-    let _ = app
-        .asset_protocol_scope()
-        .allow_directory(&folder_path, true);
 
     let batch_id = if !new_image_ids.is_empty() {
         let batch = db
@@ -179,11 +176,6 @@ pub async fn import_files(
             Ok(None) => skipped += 1,
             Err(e) => errors.push(format!("{}: {}", path_str, e)),
         }
-    }
-
-    let asset_scope = app.asset_protocol_scope();
-    for path in &file_paths {
-        let _ = asset_scope.allow_file(path);
     }
 
     let batch_id = if !new_image_ids.is_empty() {

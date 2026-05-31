@@ -102,9 +102,6 @@ pub fn start_clipboard_monitor_inner(
 
     let session = create_monitor_session(&state.db, &state.app_data_dir, capture_dir.as_deref())?;
     let capture_path = std::path::PathBuf::from(&session.capture_dir);
-    let _ = app
-        .asset_protocol_scope()
-        .allow_directory(&capture_path, true);
 
     {
         let mut monitor = state.clipboard_monitor.lock();
@@ -231,7 +228,6 @@ pub async fn move_clipboard_capture_folder(
             })
     };
     crate::services::clipboard_monitor::move_capture_folder(&state.db, &old_dir, &new_dir)?;
-    let _ = app.asset_protocol_scope().allow_directory(&new_dir, true);
     let _ = app.emit("images:changed", ());
     let mut monitor = state.clipboard_monitor.lock();
     monitor.capture_dir = Some(new_dir);

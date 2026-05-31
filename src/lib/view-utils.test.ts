@@ -167,8 +167,8 @@ describe('chooseLoupeImagePath', () => {
         thumbnail_path: '/Users/test/Library/Application Support/com.glebkalinin.cull/thumbs/img-1.jpg',
     };
 
-    it('uses the full image before a source load failure', () => {
-        expect(chooseLoupeImagePath(item, false, false)).toBe(item.path);
+    it('uses the thumbnail when available because imported originals are outside asset scope', () => {
+        expect(chooseLoupeImagePath(item, false, false)).toBe(item.thumbnail_path);
     });
 
     it('falls back to the thumbnail after a source load failure', () => {

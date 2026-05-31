@@ -2,7 +2,6 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { images, selectedIds, focusedIndex, compareActiveSide, compareImageOnly, zenMode } from '$lib/stores';
     import type { ImageWithFile } from '$lib/api';
-    import { isRawFormat } from '$lib/api';
     import ContextMenu from './ContextMenu.svelte';
 
     // Resolve the two images to compare
@@ -29,8 +28,8 @@
     let leftImage = $derived(pair[0]);
     let rightImage = $derived(pair[1]);
 
-    let leftSrc = $derived(leftImage ? (isRawFormat(leftImage.image.format) ? convertFileSrc(leftImage.thumbnail_path ?? leftImage.path) : convertFileSrc(leftImage.path)) : '');
-    let rightSrc = $derived(rightImage ? (isRawFormat(rightImage.image.format) ? convertFileSrc(rightImage.thumbnail_path ?? rightImage.path) : convertFileSrc(rightImage.path)) : '');
+    let leftSrc = $derived(leftImage ? convertFileSrc(leftImage.thumbnail_path ?? leftImage.path) : '');
+    let rightSrc = $derived(rightImage ? convertFileSrc(rightImage.thumbnail_path ?? rightImage.path) : '');
 
     let leftName = $derived(leftImage?.path.split('/').pop() ?? '');
     let rightName = $derived(rightImage?.path.split('/').pop() ?? '');

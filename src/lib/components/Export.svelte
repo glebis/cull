@@ -44,7 +44,7 @@
 
         for (const asset of manifest.assets) {
             if (asset.kind === 'source') {
-                const resp = await getExportAsset(asset.uri, 'original');
+                const resp = await getExportAsset(asset.uri, 'preview');
                 imageSrcs[asset.id] = convertFileSrc(resp.path);
             }
         }

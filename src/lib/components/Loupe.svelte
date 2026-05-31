@@ -171,8 +171,9 @@
         const current = image;
         if (!current) return;
 
-        const canFallbackToThumbnail = !isRaw && !sourceLoadFailed && !!current.thumbnail_path;
-        const thumbnailWasShown = isRaw || sourceLoadFailed;
+        const currentPath = chooseLoupeImagePath(current, isRaw, sourceLoadFailed);
+        const thumbnailWasShown = !!current.thumbnail_path && currentPath === current.thumbnail_path;
+        const canFallbackToThumbnail = !thumbnailWasShown && !isRaw && !sourceLoadFailed && !!current.thumbnail_path;
         recordImageLoadFailure({
             view: 'loupe',
             image: current,

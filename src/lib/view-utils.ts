@@ -108,7 +108,7 @@ export function chooseLoupeImagePath(
     isRaw: boolean,
     sourceLoadFailed: boolean
 ): string {
-    if ((isRaw || sourceLoadFailed) && image.thumbnail_path) {
+    if (image.thumbnail_path) {
         return image.thumbnail_path;
     }
     return image.path;

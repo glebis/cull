@@ -232,13 +232,6 @@ pub fn run() {
                 }
             };
 
-            if let Ok(roots) = db.list_library_roots() {
-                let asset_scope = app.asset_protocol_scope();
-                for root in roots {
-                    let _ = asset_scope.allow_directory(root, true);
-                }
-            }
-
             let model_dir = app_data_dir.join("models");
             let embedding_engine = Mutex::new(EmbeddingEngine::new(&model_dir));
             let detection_engine = Mutex::new(DetectionEngine::new_yolo(&model_dir));
