@@ -1,7 +1,6 @@
 use crate::AppState;
 use image::{DynamicImage, GenericImageView, ImageFormat};
-use std::fs::OpenOptions;
-use std::io::{BufWriter, ErrorKind};
+use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use tauri::State;
 
@@ -32,22 +31,32 @@ fn save_derivative_image(
 ) -> Result<PathBuf, String> {
     for index in 0..10_000 {
         let candidate = derivative_candidate_path(source, suffix, index)?;
-        let file = match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
-        {
-            Ok(file) => file,
-            Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
-            Err(err) => return Err(format!("Failed to create derivative file: {err}")),
-        };
+        if candidate.exists() {
+            continue;
+        }
         let format = ImageFormat::from_path(&candidate)
             .map_err(|e| format!("Unsupported derivative image format: {e}"))?;
-        let mut writer = BufWriter::new(file);
-        image
-            .write_to(&mut writer, format)
-            .map_err(|e| format!("Failed to save: {e}"))?;
-        return Ok(candidate);
+        let parent = candidate
+            .parent()
+            .ok_or("Invalid derivative file path: no parent")?;
+        let mut temp = tempfile::Builder::new()
+            .prefix(".cull-transform-")
+            .tempfile_in(parent)
+            .map_err(|e| format!("Failed to create derivative temp file: {e}"))?;
+        {
+            let mut writer = BufWriter::new(temp.as_file_mut());
+            image
+                .write_to(&mut writer, format)
+                .map_err(|e| format!("Failed to save: {e}"))?;
+        }
+        temp.as_file_mut()
+            .sync_all()
+            .map_err(|e| format!("Failed to sync derivative temp file: {e}"))?;
+        match temp.persist_noclobber(&candidate) {
+            Ok(_) => return Ok(candidate),
+            Err(err) if err.error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(format!("Failed to install derivative file: {}", err.error)),
+        }
     }
 
     Err("Could not find an available derivative file name".to_string())
@@ -314,5 +323,25 @@ mod tests {
         assert_eq!(output_path.file_name().unwrap(), "source_crop_2.png");
         assert_eq!(fs::read(&occupied_path).unwrap(), occupied_bytes);
         assert_eq!(image::open(output_path).unwrap().dimensions(), (4, 3));
+    }
+
+    #[test]
+    fn derivative_save_error_does_not_leave_final_output_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let image_path = tmp.path().join("source.invalid");
+        fs::write(&image_path, b"source bytes").unwrap();
+        let image = image::DynamicImage::new_rgba8(2, 2);
+
+        let result = save_derivative_image(&image, &image_path, "crop");
+
+        assert!(result.is_err());
+        assert!(!tmp.path().join("source_crop.invalid").exists());
+        let leftovers: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(".cull-transform-"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
     }
 }
