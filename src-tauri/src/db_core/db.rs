@@ -2353,7 +2353,7 @@ impl Database {
 
         let conn = self.conn.lock();
         let prefix = format!("{}/", folder.trim_end_matches('/'));
-        let prefix_len = prefix.len() as i64;
+        let prefix_len = prefix.chars().count() as i64;
 
         // Get image IDs that ONLY exist in this folder (no other paths)
         let mut stmt = conn.prepare(
@@ -3420,12 +3420,6 @@ fn validate_delete_folder_path(folder: &str) -> Result<()> {
         ));
     }
 
-    if folder.contains('%') || folder.contains('_') {
-        return Err(SqlError::InvalidParameterName(
-            "folder path must not contain SQL LIKE wildcards".to_string(),
-        ));
-    }
-
     let path = Path::new(folder);
     if !path.is_absolute() {
         return Err(SqlError::InvalidParameterName(
@@ -3707,28 +3701,41 @@ mod tests {
     }
 
     #[test]
-    fn test_delete_images_by_folder_rejects_like_wildcard_percent() {
+    fn test_delete_images_by_folder_treats_percent_as_literal_path_character() {
         let db = test_db();
-        insert_test_image_at_path(&db, "img-1", "hash-delete-percent", "/tmp/a/img-1.png");
+        insert_test_image_at_path(&db, "inside", "hash-delete-percent", "/tmp/a%b/inside.png");
+        insert_test_image_at_path(&db, "outside", "hash-keep-percent", "/tmp/axb/outside.png");
 
-        let result = db.delete_images_by_folder("/tmp/%");
+        let deleted = db.delete_images_by_folder("/tmp/a%b").unwrap();
 
-        assert!(result.is_err(), "LIKE percent wildcard should be rejected");
-        assert_eq!(db.list_images(100, 0).unwrap().len(), 1);
+        assert_eq!(deleted, 1);
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].image.id, "outside");
     }
 
     #[test]
-    fn test_delete_images_by_folder_rejects_like_wildcard_underscore() {
+    fn test_delete_images_by_folder_treats_underscore_as_literal_path_character() {
         let db = test_db();
-        insert_test_image_at_path(&db, "img-1", "hash-delete-underscore", "/tmp/ab/img-1.png");
-
-        let result = db.delete_images_by_folder("/tmp/a_");
-
-        assert!(
-            result.is_err(),
-            "LIKE underscore wildcard should be rejected"
+        insert_test_image_at_path(
+            &db,
+            "inside",
+            "hash-delete-underscore",
+            "/tmp/a_b/inside.png",
         );
-        assert_eq!(db.list_images(100, 0).unwrap().len(), 1);
+        insert_test_image_at_path(
+            &db,
+            "outside",
+            "hash-keep-underscore",
+            "/tmp/axb/outside.png",
+        );
+
+        let deleted = db.delete_images_by_folder("/tmp/a_b").unwrap();
+
+        assert_eq!(deleted, 1);
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].image.id, "outside");
     }
 
     #[test]
@@ -3762,6 +3769,25 @@ mod tests {
         let remaining = db.list_images(100, 0).unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].image.id, "upper");
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_handles_non_ascii_folder_names() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "inside", "hash-delete-nonascii", "/tmp/ä/inside.png");
+        insert_test_image_at_path(
+            &db,
+            "adjacent",
+            "hash-keep-nonascii",
+            "/tmp/äx/adjacent.png",
+        );
+
+        let deleted = db.delete_images_by_folder("/tmp/ä").unwrap();
+
+        assert_eq!(deleted, 1);
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].image.id, "adjacent");
     }
 
     #[test]
