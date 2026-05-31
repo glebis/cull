@@ -137,6 +137,13 @@ fn quarantine_path_for(part_path: &Path) -> PathBuf {
     part_path.with_file_name(file_name)
 }
 
+pub fn quarantine_invalid_model_file(path: &Path) -> Result<PathBuf, String> {
+    let quarantine_path = quarantine_path_for(path);
+    fs::rename(path, &quarantine_path)
+        .map_err(|e| format!("Failed to quarantine invalid model file: {}", e))?;
+    Ok(quarantine_path)
+}
+
 pub fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = fs::File::open(path).map_err(|e| format!("Model file open error: {}", e))?;
     let mut hasher = Sha256::new();

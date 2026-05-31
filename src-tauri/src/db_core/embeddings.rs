@@ -255,7 +255,21 @@ impl EmbeddingEngine {
                 spec.model_id
             ));
         }
-        crate::services::model_download::verify_model_file(&path, &spec.download_verification())?;
+        if let Err(err) =
+            crate::services::model_download::verify_model_file(&path, &spec.download_verification())
+        {
+            return Err(
+                match crate::services::model_download::quarantine_invalid_model_file(&path) {
+                    Ok(quarantine_path) => format!(
+                        "{}; quarantined installed model at {}. Download '{}' again.",
+                        err,
+                        quarantine_path.to_string_lossy(),
+                        spec.model_id
+                    ),
+                    Err(quarantine_err) => format!("{}; {}", err, quarantine_err),
+                },
+            );
+        }
         let session = Session::builder()
             .map_err(|e| format!("Failed to create session builder: {}", e))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
@@ -346,6 +360,8 @@ fn extract_embedding(data: &[f32], dims: usize) -> Result<Vec<f32>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::StreamExt;
+    use sha2::{Digest, Sha256};
 
     #[test]
     fn dinov2_model_spec_points_to_small_onnx_feature_model() {
@@ -398,6 +414,59 @@ mod tests {
             assert!(spec.source_repo.starts_with("https://huggingface.co/"));
             assert!(spec.model_card_url.starts_with("https://huggingface.co/"));
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "downloads large pinned model files; run manually before changing pinned hashes"]
+    async fn pinned_download_urls_match_expected_hashes() {
+        let client = reqwest::Client::new();
+        for spec in [CLIP_MODEL_SPEC, DINO_V2_SMALL_MODEL_SPEC] {
+            let response = client
+                .get(spec.url)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap();
+            let mut stream = response.bytes_stream();
+            let mut hasher = Sha256::new();
+            let mut size = 0_u64;
+
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.unwrap();
+                size += chunk.len() as u64;
+                hasher.update(&chunk);
+            }
+
+            assert_eq!(size, spec.expected_size_bytes, "{}", spec.model_id);
+            assert_eq!(
+                format!("{:x}", hasher.finalize()),
+                spec.expected_sha256,
+                "{}",
+                spec.model_id
+            );
+        }
+    }
+
+    #[test]
+    fn load_model_quarantines_tampered_installed_file_before_use() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut engine = EmbeddingEngine::new(tmp.path());
+        let model_path = engine.model_path_for(CLIP_MODEL_ID).unwrap();
+        std::fs::write(&model_path, b"not the pinned model").unwrap();
+
+        let err = engine.load_model_for(CLIP_MODEL_ID).unwrap_err();
+
+        assert!(err.contains("size mismatch"), "{err}");
+        assert!(err.contains("quarantined installed model"), "{err}");
+        assert!(!model_path.exists());
+        let quarantined = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with("clip-vit-b32-vision.onnx.invalid-"))
+            .count();
+        assert_eq!(quarantined, 1);
     }
 
     #[test]
