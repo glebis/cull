@@ -2349,6 +2349,8 @@ impl Database {
     }
 
     pub fn delete_images_by_folder(&self, folder: &str) -> Result<u32> {
+        validate_delete_folder_path(folder)?;
+
         let conn = self.conn.lock();
         let pattern = format!("{}/%", folder);
 
@@ -3407,6 +3409,41 @@ fn migration_error(message: String) -> SqlError {
     SqlError::SqliteFailure(ffi::Error::new(ffi::SQLITE_ERROR), Some(message))
 }
 
+fn validate_delete_folder_path(folder: &str) -> Result<()> {
+    if folder.is_empty() {
+        return Err(SqlError::InvalidParameterName(
+            "folder path must not be empty".to_string(),
+        ));
+    }
+
+    if folder.contains('%') || folder.contains('_') {
+        return Err(SqlError::InvalidParameterName(
+            "folder path must not contain SQL LIKE wildcards".to_string(),
+        ));
+    }
+
+    let path = Path::new(folder);
+    if !path.is_absolute() {
+        return Err(SqlError::InvalidParameterName(
+            "folder path must be absolute".to_string(),
+        ));
+    }
+
+    let has_non_root_component = path.components().any(|component| {
+        !matches!(
+            component,
+            std::path::Component::RootDir | std::path::Component::Prefix(_)
+        )
+    });
+    if !has_non_root_component {
+        return Err(SqlError::InvalidParameterName(
+            "folder path must not be filesystem root".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 fn decode_embedding_bytes(bytes: &[u8]) -> Vec<f32> {
     bytes
         .chunks_exact(4)
@@ -3603,6 +3640,10 @@ mod tests {
     }
 
     fn insert_test_image(db: &Database, id: &str, hash: &str) {
+        insert_test_image_at_path(db, id, hash, &format!("/tmp/{}.png", id));
+    }
+
+    fn insert_test_image_at_path(db: &Database, id: &str, hash: &str, path: &str) {
         let img = Image {
             id: id.to_string(),
             sha256_hash: hash.to_string(),
@@ -3619,13 +3660,90 @@ mod tests {
         let file = ImageFile {
             id: format!("f-{}", id),
             image_id: id.to_string(),
-            path: format!("/tmp/{}.png", id),
+            path: path.to_string(),
             last_seen_at: "2026-05-07T00:00:00Z".to_string(),
             missing_at: None,
             last_seen_size: None,
             last_seen_mtime: None,
         };
         db.insert_image_file(&file).unwrap();
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_rejects_empty_folder() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "img-1", "hash-delete-empty", "/tmp/a/img-1.png");
+
+        let result = db.delete_images_by_folder("");
+
+        assert!(result.is_err(), "empty folder path should be rejected");
+        assert_eq!(db.list_images(100, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_rejects_root_folder() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "img-1", "hash-delete-root", "/tmp/a/img-1.png");
+
+        let result = db.delete_images_by_folder("/");
+
+        assert!(result.is_err(), "root folder path should be rejected");
+        assert_eq!(db.list_images(100, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_rejects_relative_folder() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "img-1", "hash-delete-relative", "/tmp/a/img-1.png");
+
+        let result = db.delete_images_by_folder("tmp/a");
+
+        assert!(result.is_err(), "relative folder path should be rejected");
+        assert_eq!(db.list_images(100, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_rejects_like_wildcard_percent() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "img-1", "hash-delete-percent", "/tmp/a/img-1.png");
+
+        let result = db.delete_images_by_folder("/tmp/%");
+
+        assert!(result.is_err(), "LIKE percent wildcard should be rejected");
+        assert_eq!(db.list_images(100, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_rejects_like_wildcard_underscore() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "img-1", "hash-delete-underscore", "/tmp/ab/img-1.png");
+
+        let result = db.delete_images_by_folder("/tmp/a_");
+
+        assert!(
+            result.is_err(),
+            "LIKE underscore wildcard should be rejected"
+        );
+        assert_eq!(db.list_images(100, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_keeps_adjacent_prefix_folder() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "inside", "hash-delete-inside", "/tmp/a/inside.png");
+        insert_test_image_at_path(
+            &db,
+            "adjacent",
+            "hash-delete-adjacent",
+            "/tmp/abc/adjacent.png",
+        );
+
+        let deleted = db.delete_images_by_folder("/tmp/a").unwrap();
+
+        assert_eq!(deleted, 1);
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].image.id, "adjacent");
     }
 
     #[test]
