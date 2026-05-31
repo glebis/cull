@@ -88,6 +88,7 @@ let clipboardMonitorStatus = {
   collection_name: null as string | null,
   capture_dir: '/mock/clipboard-captures',
   captured_count: 0,
+  capture_existing_on_start: false,
   last_error: null as string | null,
 };
 
@@ -292,6 +293,10 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   },
   set_clipboard_monitor_capture_dir: (_: any, args: { path: string }) => {
     clipboardMonitorStatus = { ...clipboardMonitorStatus, capture_dir: args.path };
+    return clipboardMonitorStatus;
+  },
+  set_clipboard_monitor_capture_existing_on_start: (_: any, args: { enabled: boolean }) => {
+    clipboardMonitorStatus = { ...clipboardMonitorStatus, capture_existing_on_start: args.enabled };
     return clipboardMonitorStatus;
   },
   move_clipboard_capture_folder: (_: any, args: { newPath: string }) => {

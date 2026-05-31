@@ -2,7 +2,7 @@
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, showMissing, requestTextInput } from '$lib/stores';
-    import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, deleteCollectionApi, listSmartCollections, isYoloAvailable, isNudenetAvailable, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
+    import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, deleteCollectionApi, listSmartCollections, isYoloAvailable, isNudenetAvailable, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, SmartCollection } from '$lib/api';
     import { applyClipboardMonitorCollection } from '$lib/clipboard-monitor';
@@ -208,6 +208,15 @@
             showToast('Move failed', { detail: String(e), type: 'error', duration: 10000 });
         } finally {
             clipboardMoving = false;
+        }
+    }
+
+    async function handleClipboardCaptureExistingChange(event: Event) {
+        const enabled = (event.currentTarget as HTMLInputElement).checked;
+        try {
+            clipboardStatus = await setClipboardMonitorCaptureExistingOnStart(enabled);
+        } catch (e) {
+            showToast('Clipboard setting failed', { detail: String(e), type: 'error', duration: 8000 });
         }
     }
 
@@ -646,6 +655,15 @@
             {#if clipboardStatus.collection_name}
                 <div class="section-meta">{clipboardStatus.collection_name} · {clipboardStatus.captured_count}</div>
             {/if}
+            <label class="clipboard-option">
+                <input
+                    type="checkbox"
+                    checked={clipboardStatus.capture_existing_on_start}
+                    onchange={handleClipboardCaptureExistingChange}
+                    disabled={clipboardMoving || clipboardPublishing}
+                />
+                <span>Capture current image on start</span>
+            </label>
             <div class="section-actions">
                 <button
                     class="section-item compact"
@@ -794,6 +812,20 @@
         padding: 2px 8px;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+    .clipboard-option {
+        align-items: flex-start;
+        color: var(--text-secondary);
+        display: flex;
+        font-size: 11px;
+        gap: 6px;
+        line-height: 1.3;
+        padding: 6px 8px 2px;
+    }
+    .clipboard-option input {
+        accent-color: var(--blue);
+        flex: none;
+        margin: 1px 0 0;
     }
     .icon {
         font-size: 8px;

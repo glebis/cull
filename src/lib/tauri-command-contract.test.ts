@@ -163,6 +163,7 @@ describe('Tauri command contract', () => {
         expect(commandPermissions.get('get_clipboard_monitor_status')).toEqual(['app-read']);
         expect(commandPermissions.get('start_clipboard_monitor')).toEqual(['app-file-access']);
         expect(commandPermissions.get('stop_clipboard_monitor')).toEqual(['app-file-access']);
+        expect(commandPermissions.get('set_clipboard_monitor_capture_existing_on_start')).toEqual(['app-file-access']);
         expect(commandPermissions.get('set_clipboard_monitor_capture_dir')).toEqual(['app-file-access']);
         expect(commandPermissions.get('move_clipboard_capture_folder')).toEqual(['app-file-access']);
         expect(commandPermissions.get('publish_clipboard_collection')).toEqual(['app-export-publishing']);

@@ -367,6 +367,7 @@ export interface ClipboardMonitorStatus {
     collection_name: string | null;
     capture_dir: string;
     captured_count: number;
+    capture_existing_on_start: boolean;
     last_error: string | null;
 }
 
@@ -393,6 +394,10 @@ export async function stopClipboardMonitor(): Promise<ClipboardMonitorStatus> {
 
 export async function setClipboardMonitorCaptureDir(path: string): Promise<ClipboardMonitorStatus> {
     return invoke('set_clipboard_monitor_capture_dir', { path });
+}
+
+export async function setClipboardMonitorCaptureExistingOnStart(enabled: boolean): Promise<ClipboardMonitorStatus> {
+    return invoke('set_clipboard_monitor_capture_existing_on_start', { enabled });
 }
 
 export async function moveClipboardCaptureFolder(newPath: string): Promise<ClipboardMonitorStatus> {

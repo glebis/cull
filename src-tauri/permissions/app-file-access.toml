@@ -18,6 +18,7 @@ commands.allow = [
   "rename_image",
   "rescan_sources",
   "rotate_image",
+  "set_clipboard_monitor_capture_existing_on_start",
   "set_clipboard_monitor_capture_dir",
   "share_images",
   "start_clipboard_monitor",

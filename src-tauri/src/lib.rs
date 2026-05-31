@@ -399,6 +399,7 @@ pub fn run() {
             commands::clipboard_monitor::start_clipboard_monitor,
             commands::clipboard_monitor::stop_clipboard_monitor,
             commands::clipboard_monitor::set_clipboard_monitor_capture_dir,
+            commands::clipboard_monitor::set_clipboard_monitor_capture_existing_on_start,
             commands::clipboard_monitor::move_clipboard_capture_folder,
             commands::clipboard_monitor::publish_clipboard_collection,
             commands::library::list_images,

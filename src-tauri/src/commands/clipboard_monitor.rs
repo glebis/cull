@@ -1,7 +1,8 @@
 #[cfg(target_os = "macos")]
 use crate::services::clipboard_monitor::ClipboardImageReader;
 use crate::services::clipboard_monitor::{
-    create_monitor_session, default_capture_dir, resolve_capture_dir, ClipboardMonitorSession,
+    capture_existing_on_start_enabled, create_monitor_session, default_capture_dir,
+    resolve_capture_dir, set_capture_existing_on_start, ClipboardMonitorSession,
     ClipboardMonitorState,
 };
 use crate::AppState;
@@ -17,6 +18,7 @@ pub struct ClipboardMonitorStatus {
     pub collection_name: Option<String>,
     pub capture_dir: String,
     pub captured_count: u32,
+    pub capture_existing_on_start: bool,
     pub last_error: Option<String>,
 }
 
@@ -45,6 +47,11 @@ fn status_from_state(state: &AppState, monitor: &ClipboardMonitorState) -> Clipb
         collection_name: monitor.collection_name.clone(),
         capture_dir: capture_dir.to_string_lossy().to_string(),
         captured_count: monitor.captured_count,
+        capture_existing_on_start: if monitor.running {
+            monitor.capture_existing_on_start
+        } else {
+            capture_existing_on_start_enabled(&state.db).unwrap_or(false)
+        },
         last_error: monitor.last_error.clone(),
     }
 }
@@ -102,6 +109,7 @@ pub fn start_clipboard_monitor_inner(
 
     let session = create_monitor_session(&state.db, &state.app_data_dir, capture_dir.as_deref())?;
     let capture_path = std::path::PathBuf::from(&session.capture_dir);
+    let capture_existing_on_start = capture_existing_on_start_enabled(&state.db)?;
 
     {
         let mut monitor = state.clipboard_monitor.lock();
@@ -110,6 +118,10 @@ pub fn start_clipboard_monitor_inner(
         monitor.collection_name = Some(session.collection_name.clone());
         monitor.capture_dir = Some(capture_path);
         monitor.captured_count = 0;
+        monitor.capture_existing_on_start = capture_existing_on_start;
+        monitor.baseline_complete = capture_existing_on_start;
+        monitor.last_change_count = None;
+        monitor.last_hash = None;
         monitor.last_error = None;
     }
 
@@ -198,6 +210,20 @@ pub async fn set_clipboard_monitor_capture_dir(
         .map_err(|e| e.to_string())?;
     let mut monitor = state.clipboard_monitor.lock();
     monitor.capture_dir = Some(capture_dir);
+    Ok(status_from_state(state.inner(), &monitor))
+}
+
+#[tauri::command]
+pub async fn set_clipboard_monitor_capture_existing_on_start(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<ClipboardMonitorStatus, String> {
+    set_capture_existing_on_start(&state.db, enabled)?;
+    let mut monitor = state.clipboard_monitor.lock();
+    monitor.capture_existing_on_start = enabled;
+    if enabled {
+        monitor.baseline_complete = true;
+    }
     Ok(status_from_state(state.inner(), &monitor))
 }
 
