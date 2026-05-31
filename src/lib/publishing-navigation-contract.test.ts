@@ -53,10 +53,12 @@ describe('static publishing navigation contract', () => {
 
     it('shows publish handoff items as openable, copyable, shareable rows with an in-app QR image', () => {
         const publishView = readProjectFile('src/lib/components/StaticPublishingSettings.svelte');
+        const api = readProjectFile('src/lib/api.ts');
 
         expect(publishView).toContain('Stop preview');
         expect(publishView).toContain('stopServer');
         expect(publishView).toContain('qrImageSrc');
+        expect(publishView).toContain('lastResult.qr_svg_data_url');
         expect(publishView).toContain('alt="QR code for target URL"');
         expect(publishView).toContain('copyPublishItem');
         expect(publishView).toContain('sharePublishItem');
@@ -65,6 +67,7 @@ describe('static publishing navigation contract', () => {
         expect(publishView).toContain("item.kind === 'url'");
         expect(publishView).toContain('Tailscale');
         expect(publishView).toContain('ngrok');
+        expect(api).toContain('qr_svg_data_url: string');
     });
 
     it('keeps the generated static review site readable and accessible', () => {

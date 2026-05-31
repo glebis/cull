@@ -834,6 +834,7 @@ export interface StaticPublishResult {
     manifest_path: string;
     instructions_path: string;
     qr_svg_path: string;
+    qr_svg_data_url: string;
     qr_target_url: string;
     access_phrase: string;
     image_count: number;

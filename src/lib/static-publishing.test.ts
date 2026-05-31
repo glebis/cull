@@ -134,6 +134,7 @@ describe('static publishing canvas helpers', () => {
             manifest_path: '/tmp/cull-publish/site/data/canvas.json',
             instructions_path: '/tmp/cull-publish/instructions/CLAUDE.md',
             qr_svg_path: '/tmp/cull-publish/site/qr.svg',
+            qr_svg_data_url: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',
             qr_target_url: 'https://cull-demo.ngrok-free.app/',
             access_phrase: 'amber-canvas-river',
             image_count: 4,

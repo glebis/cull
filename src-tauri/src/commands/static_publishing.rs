@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use base64::Engine;
 use bytes::Bytes;
 use chrono::Utc;
 use http_body_util::Full;
@@ -92,6 +93,7 @@ pub struct StaticPublishResult {
     pub manifest_path: String,
     pub instructions_path: String,
     pub qr_svg_path: String,
+    pub qr_svg_data_url: String,
     pub snapshot_png_path: Option<String>,
     pub snapshot_pdf_path: Option<String>,
     pub qr_target_url: String,
@@ -402,7 +404,7 @@ fn export_static_publish_package_with_canvas_inner(
     };
     let access_phrase = generate_access_phrase();
     let qr_svg_path = site_dir.join("qr.svg");
-    write_qr_svg(&qr_svg_path, &share_url)?;
+    let qr_svg_data_url = write_qr_svg(&qr_svg_path, &share_url)?;
     let site_title = normalize_optional_text(request.site_title.as_deref())
         .or_else(|| normalize_optional_text(Some(&request.canvas_name)))
         .unwrap_or_else(|| "Cull Canvas".to_string());
@@ -481,6 +483,7 @@ fn export_static_publish_package_with_canvas_inner(
         manifest_path: manifest_path.to_string_lossy().to_string(),
         instructions_path: instructions_path.to_string_lossy().to_string(),
         qr_svg_path: qr_svg_path.to_string_lossy().to_string(),
+        qr_svg_data_url,
         snapshot_png_path: snapshot.as_ref().map(|snapshot| snapshot.png_path.clone()),
         snapshot_pdf_path: snapshot.as_ref().map(|snapshot| snapshot.pdf_path.clone()),
         qr_target_url: share_url,
@@ -1154,7 +1157,7 @@ fn write_json(path: &Path, value: &Value) -> Result<(), String> {
     fs::write(path, payload).map_err(|e| format!("Failed to write {}: {}", path.display(), e))
 }
 
-fn write_qr_svg(path: &Path, target: &str) -> Result<(), String> {
+fn write_qr_svg(path: &Path, target: &str) -> Result<String, String> {
     let code =
         QrCode::new(target.as_bytes()).map_err(|e| format!("Failed to build QR code: {}", e))?;
     let image = code
@@ -1163,7 +1166,9 @@ fn write_qr_svg(path: &Path, target: &str) -> Result<(), String> {
         .dark_color(svg::Color("#08080c"))
         .light_color(svg::Color("#ffffff"))
         .build();
-    fs::write(path, image).map_err(|e| format!("Failed to write QR code: {}", e))
+    fs::write(path, &image).map_err(|e| format!("Failed to write QR code: {}", e))?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(image.as_bytes());
+    Ok(format!("data:image/svg+xml;base64,{}", encoded))
 }
 
 fn write_robots_txt(site_dir: &Path, indexable: bool) -> Result<(), String> {
@@ -1849,6 +1854,17 @@ mod tests {
         assert_eq!(result.image_count, 1);
         assert_eq!(result.skipped_count, 0);
         assert_eq!(result.qr_target_url, "https://example.test/canvas/");
+        assert!(result
+            .qr_svg_data_url
+            .starts_with("data:image/svg+xml;base64,"));
+        let qr_svg = base64::engine::general_purpose::STANDARD
+            .decode(
+                result
+                    .qr_svg_data_url
+                    .trim_start_matches("data:image/svg+xml;base64,"),
+            )
+            .unwrap();
+        assert!(String::from_utf8(qr_svg).unwrap().contains("<svg"));
         assert_eq!(result.access_phrase.split('-').count(), 3);
 
         let site_dir = PathBuf::from(&result.site_dir);

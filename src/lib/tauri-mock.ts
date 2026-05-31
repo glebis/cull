@@ -256,6 +256,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     manifest_path: '/mock/static-publishing/client-review/site/data/canvas.json',
     instructions_path: '/mock/static-publishing/client-review/instructions/CLAUDE.md',
     qr_svg_path: '/mock/static-publishing/client-review/site/qr.svg',
+    qr_svg_data_url: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyODAiIGhlaWdodD0iMjgwIiB2aWV3Qm94PSIwIDAgMjgwIDI4MCI+PHJlY3Qgd2lkdGg9IjI4MCIgaGVpZ2h0PSIyODAiIGZpbGw9IiNmZmYiLz48ZyBmaWxsPSIjMDgwODBjIj48cmVjdCB4PSIyNCIgeT0iMjQiIHdpZHRoPSI1NiIgaGVpZ2h0PSI1NiIvPjxyZWN0IHg9IjIwMCIgeT0iMjQiIHdpZHRoPSI1NiIgaGVpZ2h0PSI1NiIvPjxyZWN0IHg9IjI0IiB5PSIyMDAiIHdpZHRoPSI1NiIgaGVpZ2h0PSI1NiIvPjxyZWN0IHg9IjEwNCIgeT0iMTA0IiB3aWR0aD0iMTYiIGhlaWdodD0iMTYiLz48cmVjdCB4PSIxMzYiIHk9IjEwNCIgd2lkdGg9IjMyIiBoZWlnaHQ9IjE2Ii8+PHJlY3QgeD0iMTg0IiB5PSIxMjAiIHdpZHRoPSIxNiIgaGVpZ2h0PSI0OCIvPjxyZWN0IHg9IjEwNCIgeT0iMTUyIiB3aWR0aD0iNDgiIGhlaWdodD0iMTYiLz48cmVjdCB4PSIxNTIiIHk9IjE4NCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjE2Ii8+PHJlY3QgeD0iMjMyIiB5PSIxODQiIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIvPjxyZWN0IHg9IjEwNCIgeT0iMjE2IiB3aWR0aD0iMTYiIGhlaWdodD0iNDAiLz48cmVjdCB4PSIxMzYiIHk9IjIzMiIgd2lkdGg9IjMyIiBoZWlnaHQ9IjI0Ii8+PC9nPjwvc3ZnPg==',
     qr_target_url: 'http://localhost:8000/',
     access_phrase: 'amber-canvas-river',
     image_count: 4,

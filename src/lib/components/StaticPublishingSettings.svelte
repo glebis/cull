@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { convertFileSrc } from '@tauri-apps/api/core';
     import { openPath, openUrl } from '@tauri-apps/plugin-opener';
     import { getAppSetting, setAppSetting, exportStaticPublishPackage, serveStaticPublishPackage, stopStaticPublishServer } from '$lib/api';
     import type { StaticPublishResult, StaticPublishServerResult } from '$lib/api';
@@ -36,7 +35,7 @@
     let stoppingServer = $state(false);
     let parsedLinks = $derived(parseStaticPublishLinks(linksText));
     let publishItems = $derived(lastResult ? buildStaticPublishShareItems(lastResult, serverResult) : []);
-    let qrImageSrc = $derived(lastResult ? convertFileSrc(lastResult.qr_svg_path) : '');
+    let qrImageSrc = $derived(lastResult ? lastResult.qr_svg_data_url : '');
     const scenarioLabels: Record<PublishScenario, string> = {
         local_preview: 'Local preview',
         client_review: 'Client review',
