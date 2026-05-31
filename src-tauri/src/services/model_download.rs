@@ -239,6 +239,9 @@ where
         .map_err(|e| format!("Request error: {}", e))?;
     let status = response.status();
     if !status.is_success() {
+        if resume_from > 0 && part_path.exists() {
+            let _ = fs::rename(&part_path, quarantine_path_for(&part_path));
+        }
         return Err(format!("Download HTTP error: {}", status));
     }
 
@@ -463,6 +466,7 @@ mod tests {
     use bytes::Bytes;
     use futures_util::stream;
     use std::fs;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
     async fn stream_failure_keeps_partial_file_and_does_not_create_final_model() {
@@ -626,5 +630,58 @@ mod tests {
         pause.resume();
         task.await.unwrap().unwrap();
         assert_eq!(fs::read(&final_path).unwrap(), b"model bytes");
+    }
+
+    #[tokio::test]
+    async fn non_success_resume_response_quarantines_stale_part_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let final_path = tmp.path().join("clip-vit-b32-vision.onnx");
+        let part_path = part_path_for(&final_path);
+        fs::write(&part_path, b"stale full-size bytes").unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buffer = [0_u8; 1024];
+            let read = stream.read(&mut buffer).await.unwrap();
+            let request = String::from_utf8_lossy(&buffer[..read]);
+            assert!(
+                request.to_ascii_lowercase().contains("range: bytes=21-"),
+                "{request}"
+            );
+            stream
+                .write_all(b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let verification = ModelDownloadVerification {
+            expected_size: 11,
+            expected_sha256: "90ba33786887ce4234ec0081512cce01a0b1b4aa05c4bf71c473e744e05db0f8",
+        };
+        let result = download_model_file_verified_controlled(
+            &client,
+            &format!("http://{addr}/model.onnx"),
+            &final_path,
+            Some(&verification),
+            &DownloadControl::default(),
+            |_| {},
+        )
+        .await;
+
+        server.await.unwrap();
+        assert!(result.unwrap_err().contains("416"),);
+        assert!(!final_path.exists());
+        assert!(!part_path.exists());
+
+        let quarantined = fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with("clip-vit-b32-vision.onnx.part.invalid-"))
+            .count();
+        assert_eq!(quarantined, 1);
     }
 }

@@ -33,6 +33,11 @@ pub fn get_embedding_model_download_info(
     Ok(serde_json::json!({
         "model_id": spec.model_id,
         "url": spec.url,
+        "expected_sha256": spec.expected_sha256,
+        "expected_size_bytes": spec.expected_size_bytes,
+        "spdx_license": spec.spdx_license,
+        "source_repo": spec.source_repo,
+        "model_card_url": spec.model_card_url,
         "model_path": model_path,
         "part_path": part_path,
         "available": model_path.exists(),
@@ -60,18 +65,28 @@ pub fn download_embedding_model(ctx: &HeadlessContext, params: Value) -> Result<
         .build()
         .map_err(|e| format!("Failed to create runtime: {}", e))?;
     let client = reqwest::Client::new();
-    let outcome = runtime.block_on(crate::services::model_download::download_model_file(
-        &client,
-        spec.url,
-        &model_path,
-        |_progress| {},
-    ))?;
+    let verification = spec.download_verification();
+    let outcome = runtime.block_on(
+        crate::services::model_download::download_model_file_verified_controlled(
+            &client,
+            spec.url,
+            &model_path,
+            Some(&verification),
+            &crate::services::model_download::DownloadControl::default(),
+            |_progress| {},
+        ),
+    )?;
 
     Ok(serde_json::json!({
         "status": if outcome.resumed { "resumed" } else { "downloaded" },
         "model": spec.model_id,
         "model_path": model_path,
         "downloaded": outcome.downloaded,
+        "expected_sha256": spec.expected_sha256,
+        "expected_size_bytes": spec.expected_size_bytes,
+        "spdx_license": spec.spdx_license,
+        "source_repo": spec.source_repo,
+        "model_card_url": spec.model_card_url,
     }))
 }
 
@@ -99,4 +114,58 @@ pub fn generate_embeddings(ctx: &HeadlessContext, params: Value) -> Result<Value
     })?;
 
     serde_json::to_value(result).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db_core::db::Database;
+    use crate::db_core::embeddings::CLIP_MODEL_SPEC;
+
+    fn test_context() -> (tempfile::TempDir, HeadlessContext) {
+        let tmp = tempfile::tempdir().unwrap();
+        let app_data_dir = tmp.path().join("app-data");
+        std::fs::create_dir_all(&app_data_dir).unwrap();
+        let db = Database::open(&app_data_dir.join("cull.db")).unwrap();
+        (tmp, HeadlessContext { db, app_data_dir })
+    }
+
+    #[test]
+    fn download_info_includes_checksum_size_and_provenance() {
+        let (_tmp, ctx) = test_context();
+
+        let info =
+            get_embedding_model_download_info(&ctx, serde_json::json!({ "model": "clip-vit-b32" }))
+                .unwrap();
+
+        assert_eq!(info["model_id"], CLIP_MODEL_SPEC.model_id);
+        assert_eq!(info["url"], CLIP_MODEL_SPEC.url);
+        assert_eq!(info["expected_sha256"], CLIP_MODEL_SPEC.expected_sha256);
+        assert_eq!(
+            info["expected_size_bytes"],
+            CLIP_MODEL_SPEC.expected_size_bytes
+        );
+        assert_eq!(info["spdx_license"], CLIP_MODEL_SPEC.spdx_license);
+        assert_eq!(info["source_repo"], CLIP_MODEL_SPEC.source_repo);
+        assert_eq!(info["model_card_url"], CLIP_MODEL_SPEC.model_card_url);
+    }
+
+    #[test]
+    fn headless_cli_download_uses_verified_downloader() {
+        let source = include_str!("embeddings.rs");
+        let download_body = source
+            .split("pub fn download_embedding_model")
+            .nth(1)
+            .and_then(|rest| rest.split("pub fn generate_embeddings").next())
+            .expect("download_embedding_model should be followed by generate_embeddings");
+
+        assert!(
+            download_body.contains("download_model_file_verified_controlled"),
+            "{download_body}"
+        );
+        assert!(
+            !download_body.contains("download_model_file("),
+            "{download_body}"
+        );
+    }
 }
