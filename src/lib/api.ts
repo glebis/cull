@@ -668,6 +668,10 @@ export async function drainPendingOpenParams<T>(): Promise<T[]> {
     return invoke<T[]>('drain_pending_open_params');
 }
 
+export async function openDeepLinkUrls(urls: string[]): Promise<void> {
+    return invoke('open_deep_link_urls', { urls });
+}
+
 // Vision / Ollama commands
 export async function checkOllama(): Promise<string[]> {
     return invoke('check_ollama');

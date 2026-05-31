@@ -17,8 +17,8 @@ mod tray;
 mod watcher;
 
 use crate::commands::deeplink::{
-    emit_open_params, file_path_from_url, open_params_for_drag_drop_paths,
-    open_params_for_file_paths, parse_deep_link,
+    emit_open_params, open_params_for_drag_drop_paths, open_params_for_file_paths,
+    open_params_for_urls, parse_deep_link,
 };
 use crate::db_core::db::Database;
 use crate::db_core::detection::DetectionEngine;
@@ -375,22 +375,8 @@ pub fn run() {
                         event.payload()
                     );
                     if let Ok(urls) = serde_json::from_str::<Vec<String>>(event.payload()) {
-                        let file_paths: Vec<String> = urls
-                            .iter()
-                            .filter_map(|url| file_path_from_url(url))
-                            .collect();
-                        if let Some(params) = open_params_for_file_paths(file_paths) {
+                        for params in open_params_for_urls(&urls) {
                             let _ = emit_open_params(&handle, params);
-                        }
-
-                        for url in urls {
-                            crate::safe_eprintln!("[deep-link] Processing URL: {}", url);
-                            if url.starts_with("cull://") {
-                                match parse_deep_link(&url) {
-                                    Ok(params) => { let _ = emit_open_params(&handle, params); }
-                                    Err(e) => crate::safe_eprintln!("[deep-link] Deep link rejected: {}", e),
-                                }
-                            }
                         }
                     }
                 });
@@ -406,6 +392,7 @@ pub fn run() {
             commands::import::regenerate_single_thumbnail,
             commands::import::rescan_sources,
             commands::deeplink::drain_pending_open_params,
+            commands::deeplink::open_deep_link_urls,
             commands::jobs::get_job,
             commands::jobs::list_jobs,
             commands::jobs::cancel_job,
