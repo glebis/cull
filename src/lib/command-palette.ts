@@ -60,6 +60,7 @@ export interface CommandPaletteSortOptions {
     mode?: CommandPaletteMode;
     pinnedIds?: string[];
     recentIds?: string[];
+    frequencies?: Record<string, number>;
     hotkeys?: Record<string, string>;
 }
 
@@ -78,6 +79,7 @@ export const COMMAND_PALETTE_SHORTCUT_POLICY = {
 
 export const COMMAND_PINS_STORAGE_KEY = 'cull.commandPalette.pins';
 export const COMMAND_RECENTS_STORAGE_KEY = 'cull.commandPalette.recents';
+export const COMMAND_FREQUENCY_STORAGE_KEY = 'cull.commandPalette.frequency';
 export const COMMAND_HOTKEYS_STORAGE_KEY = 'cull.commandPalette.hotkeys';
 
 const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
@@ -150,6 +152,17 @@ export function setCommandPinned(id: string, pinned: boolean): string[] {
     return next;
 }
 
+// Drop pinned IDs that no longer correspond to a live palette item (e.g. a
+// collection or folder that was deleted), so stale pins do not accumulate.
+// Built-in command IDs are always considered valid even if not currently
+// visible due to context predicates.
+export function pruneStalePins(liveIds: Iterable<string>): string[] {
+    const live = new Set(liveIds);
+    const pruned = readPinnedCommandIds().filter(id => live.has(id) || !id.startsWith('scope.'));
+    writeJson(COMMAND_PINS_STORAGE_KEY, pruned);
+    return pruned;
+}
+
 export function readRecentCommandIds(): string[] {
     return uniqueList(readJson<string[]>(COMMAND_RECENTS_STORAGE_KEY, []));
 }
@@ -157,7 +170,14 @@ export function readRecentCommandIds(): string[] {
 export function recordCommandUse(id: string): string[] {
     const next = uniqueList([id, ...readRecentCommandIds()]).slice(0, 16);
     writeJson(COMMAND_RECENTS_STORAGE_KEY, next);
+    const freq = readCommandFrequencies();
+    freq[id] = (freq[id] ?? 0) + 1;
+    writeJson(COMMAND_FREQUENCY_STORAGE_KEY, freq);
     return next;
+}
+
+export function readCommandFrequencies(): Record<string, number> {
+    return readJson<Record<string, number>>(COMMAND_FREQUENCY_STORAGE_KEY, {});
 }
 
 export function removeRecentCommand(id: string): string[] {
@@ -750,6 +770,7 @@ export function sortCommandPaletteItems(
 ): CommandPaletteItem[] {
     const pinned = new Set(options.pinnedIds ?? []);
     const recent = options.recentIds ?? [];
+    const frequencies = options.frequencies ?? {};
     const hotkeys = options.hotkeys ?? {};
     const mode = options.mode ?? 'all';
 
@@ -761,6 +782,7 @@ export function sortCommandPaletteItems(
             score: scoreCommandPaletteItem(query, item),
             pinnedRank: pinned.has(item.id) ? 1 : 0,
             recentRank: recent.includes(item.id) ? recent.length - recent.indexOf(item.id) : 0,
+            frequentRank: frequencies[item.id] ?? 0,
             hasShortcut: shortcutForItem(item, hotkeys) ? 1 : 0,
         }))
         .filter(entry => entry.score > 0)
@@ -768,6 +790,7 @@ export function sortCommandPaletteItems(
             b.pinnedRank - a.pinnedRank ||
             b.score - a.score ||
             b.recentRank - a.recentRank ||
+            b.frequentRank - a.frequentRank ||
             b.hasShortcut - a.hasShortcut ||
             a.item.title.localeCompare(b.item.title)
         )

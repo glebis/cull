@@ -19,9 +19,11 @@
         canAssignCommandHotkey,
         getCommandPaletteItems,
         getShortcutConflict,
+        readCommandFrequencies,
         readCommandHotkeys,
         readPinnedCommandIds,
         readRecentCommandIds,
+        pruneStalePins,
         recordCommandUse,
         removeRecentCommand,
         runCommandPaletteItem,
@@ -40,6 +42,7 @@
     let selectedIndex = $state(0);
     let pinnedIds = $state<string[]>([]);
     let recentIds = $state<string[]>([]);
+    let frequencies = $state<Record<string, number>>({});
     let hotkeys = $state<Record<string, string>>({});
     let contextMenu = $state<{ itemId: string; x: number; y: number } | null>(null);
     let hotkeyTargetId = $state<string | null>(null);
@@ -51,6 +54,7 @@
         mode: $commandPaletteMode,
         pinnedIds,
         recentIds,
+        frequencies,
         hotkeys,
     }));
     let selectedItem = $derived(visibleItems[selectedIndex] ?? null);
@@ -69,11 +73,15 @@
     function refreshPreferences() {
         pinnedIds = readPinnedCommandIds();
         recentIds = readRecentCommandIds();
+        frequencies = readCommandFrequencies();
         hotkeys = readCommandHotkeys();
     }
 
     function refreshItems() {
         items = getCommandPaletteItems($commandPaletteMode);
+        // Drop pins for destinations that no longer exist (deleted collections,
+        // folders, etc.) so stale entries don't linger in storage.
+        pinnedIds = pruneStalePins(items.map(item => item.id));
     }
 
     function setMode(mode: CommandPaletteMode) {
@@ -94,6 +102,7 @@
         contextMenu = null;
         await runCommandPaletteItem(item);
         recentIds = recordCommandUse(item.id);
+        frequencies = readCommandFrequencies();
         closePalette();
     }
 

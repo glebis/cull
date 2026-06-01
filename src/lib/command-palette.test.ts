@@ -1,12 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
     canAssignCommandHotkey,
     eventMatchesShortcut,
     findDuplicateCommandHotkeys,
     getCommandPaletteItems,
     getShortcutConflict,
+    pruneStalePins,
+    readCommandFrequencies,
+    recordCommandUse,
     scoreCommandPaletteItem,
     shortcutFromKeyboardEvent,
+    setCommandPinned,
+    readPinnedCommandIds,
     sortCommandPaletteItems,
     type CommandPaletteItem,
 } from './command-palette';
@@ -293,5 +298,63 @@ describe('command palette destination providers', () => {
         expect(ids).not.toContain('scope.session.s1');
         expect(ids).not.toContain('scope.detected.person');
         expect(ids).not.toContain('scope.all');
+    });
+});
+
+describe('command palette frequency and pin persistence', () => {
+    beforeEach(() => {
+        const store = new Map<string, string>();
+        const stub = {
+            getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+            setItem: (k: string, v: string) => void store.set(k, String(v)),
+            removeItem: (k: string) => void store.delete(k),
+            clear: () => store.clear(),
+        };
+        (globalThis as { localStorage?: unknown }).localStorage = stub;
+    });
+
+    it('counts command usage frequency across calls', () => {
+        recordCommandUse('view.grid');
+        recordCommandUse('view.grid');
+        recordCommandUse('view.loupe');
+
+        const freq = readCommandFrequencies();
+        expect(freq['view.grid']).toBe(2);
+        expect(freq['view.loupe']).toBe(1);
+    });
+
+    it('ranks more frequently used items above less frequent ones at equal score', () => {
+        const items = [
+            item('view.grid', 'Grid View'),
+            item('view.loupe', 'Loupe View'),
+        ];
+        // Same fuzzy score (empty query), differ only by frequency.
+        const sorted = sortCommandPaletteItems(items, '', {
+            frequencies: { 'view.loupe': 5, 'view.grid': 1 },
+        });
+        expect(sorted.map(i => i.id)).toEqual(['view.loupe', 'view.grid']);
+    });
+
+    it('still ranks pinned items above more frequent unpinned items', () => {
+        const items = [
+            item('view.grid', 'Grid View'),
+            item('view.loupe', 'Loupe View'),
+        ];
+        const sorted = sortCommandPaletteItems(items, '', {
+            pinnedIds: ['view.grid'],
+            frequencies: { 'view.loupe': 99 },
+        });
+        expect(sorted[0].id).toBe('view.grid');
+    });
+
+    it('prunes pinned ids that no longer correspond to live items', () => {
+        setCommandPinned('view.grid', true);
+        setCommandPinned('scope.collection.deleted', true);
+        expect(readPinnedCommandIds()).toContain('scope.collection.deleted');
+
+        const kept = pruneStalePins(['view.grid', 'view.loupe']);
+        expect(kept).toContain('view.grid');
+        expect(kept).not.toContain('scope.collection.deleted');
+        expect(readPinnedCommandIds()).not.toContain('scope.collection.deleted');
     });
 });
