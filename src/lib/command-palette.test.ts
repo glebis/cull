@@ -11,12 +11,21 @@ import {
     type CommandPaletteItem,
 } from './command-palette';
 import {
+    activeCollection,
+    activeDetectedClass,
+    activeFolder,
+    activeSmartCollection,
     collectMode,
     collectModeTarget,
     collections,
+    detectedClasses,
     focusedIndex,
+    folders,
     images,
     selectedIds,
+    sessions,
+    sessionCanvases,
+    smartCollections,
     staticPublishingEnabled,
 } from './stores';
 
@@ -212,5 +221,77 @@ describe('command palette helpers', () => {
             .find(i => i.id === 'collection.add-focused-to-collect-target');
 
         expect(command?.disabled).toBe(false);
+    });
+});
+
+describe('command palette destination providers', () => {
+    function resetDestinations() {
+        images.set([]);
+        focusedIndex.set(0);
+        collections.set([]);
+        smartCollections.set([]);
+        folders.set([]);
+        sessions.set([]);
+        sessionCanvases.set([]);
+        detectedClasses.set([]);
+        activeCollection.set(null);
+        activeFolder.set(null);
+        activeSmartCollection.set(null);
+        activeDetectedClass.set(null);
+    }
+
+    it('always offers the All Images destination', () => {
+        resetDestinations();
+        const ids = getCommandPaletteItems('all').map(i => i.id);
+        expect(ids).toContain('scope.all');
+    });
+
+    it('exposes sessions as destinations with image counts', () => {
+        resetDestinations();
+        sessions.set([
+            { id: 's1', name: 'Wedding Shoot', description: null, folder_path: '/p', settings_json: null, created_at: '', image_count: 42 },
+        ] as never);
+
+        const session = getCommandPaletteItems('all').find(i => i.id === 'scope.session.s1');
+        expect(session).toBeTruthy();
+        expect(session?.kind).toBe('destination');
+        expect(session?.category).toBe('Session');
+        expect(session?.title).toBe('Wedding Shoot');
+        expect(session?.subtitle).toContain('42');
+    });
+
+    it('exposes canvases of the active session as destinations', () => {
+        resetDestinations();
+        sessionCanvases.set([
+            { id: 'c1', session_id: 's1', name: 'Hero Wall', canvas_type: 'manual', layout_json: '{}', filter_json: null, grid_config_json: null, sort_order: 0, created_at: '', updated_at: '' },
+        ] as never);
+
+        const canvas = getCommandPaletteItems('all').find(i => i.id === 'scope.canvas.c1');
+        expect(canvas).toBeTruthy();
+        expect(canvas?.category).toBe('Canvas');
+        expect(canvas?.title).toBe('Hero Wall');
+    });
+
+    it('exposes detected classes as destinations with counts', () => {
+        resetDestinations();
+        detectedClasses.set([['person', 12], ['dog', 3]]);
+
+        const person = getCommandPaletteItems('all').find(i => i.id === 'scope.detected.person');
+        expect(person).toBeTruthy();
+        expect(person?.category).toBe('Detection');
+        expect(person?.subtitle).toContain('12');
+    });
+
+    it('omits destinations in command-only mode', () => {
+        resetDestinations();
+        sessions.set([
+            { id: 's1', name: 'Wedding Shoot', description: null, folder_path: '/p', settings_json: null, created_at: '', image_count: 1 },
+        ] as never);
+        detectedClasses.set([['person', 1]]);
+
+        const ids = getCommandPaletteItems('commands').map(i => i.id);
+        expect(ids).not.toContain('scope.session.s1');
+        expect(ids).not.toContain('scope.detected.person');
+        expect(ids).not.toContain('scope.all');
     });
 });

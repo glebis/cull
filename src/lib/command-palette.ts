@@ -11,12 +11,14 @@ import {
     collections,
     commandPaletteMode,
     commandPaletteOpen,
+    detectedClasses,
     focusedIndex,
     images,
     requestCollectionTarget,
     requestTextInput,
     searchOpen,
     selectedIds,
+    sessions,
     sessionCanvases,
     settingsOpen,
     showDetectionBoxes,
@@ -36,7 +38,7 @@ import {
     type ViewMode,
 } from './stores';
 import { invalidateImageCache, loadAllImages, loadImagesForCurrentScope } from './image-loading';
-import { addToCollection, createCollection, listCollections, redo, setDecision, setRating, undo } from './api';
+import { addToCollection, createCollection, listCanvases, listCollections, redo, setDecision, setRating, undo, validateSessionFolder, type Canvas, type Session } from './api';
 import { withDecision, withRating, type ImageDecision } from './selection-updates';
 
 export type CommandPaletteItemKind = 'command' | 'destination';
@@ -222,6 +224,41 @@ async function openSmartCollection(id: string) {
     activeCollection.set(null);
     activeDetectedClass.set(null);
     await loadImagesForCurrentScope();
+}
+
+async function openDetectedClass(className: string) {
+    clearNavigationScope();
+    activeSmartCollection.set(null);
+    activeFolder.set(null);
+    activeCollection.set(null);
+    activeDetectedClass.set(className);
+    await loadImagesForCurrentScope();
+}
+
+async function openSession(session: Session) {
+    // Mirrors SessionSwitcher.selectSession: validate the folder, load its
+    // canvases, then switch the active session and reload images for the scope.
+    activeCanvas.set(null);
+    try {
+        const valid = await validateSessionFolder(session.id);
+        if (!valid) {
+            showToast('Session folder missing — files may be unavailable', { type: 'warning' });
+        }
+        sessionCanvases.set(await listCanvases(session.id));
+    } catch {
+        sessionCanvases.set([]);
+    }
+    activeSmartCollection.set(null);
+    activeFolder.set(null);
+    activeCollection.set(null);
+    activeDetectedClass.set(null);
+    activeSession.set(session);
+    await loadImagesForCurrentScope();
+}
+
+function openCanvas(canvas: Canvas) {
+    activeCanvas.set(canvas);
+    navigateTo('canvas');
 }
 
 async function setFocusedRating(rating: number) {
@@ -575,6 +612,9 @@ function destinationItems(): CommandPaletteItem[] {
     const activeCollectionId = get(activeCollection);
     const activeFolderPath = get(activeFolder);
     const activeSmartId = get(activeSmartCollection)?.id ?? null;
+    const activeSessionId = get(activeSession)?.id ?? null;
+    const activeCanvasId = get(activeCanvas)?.id ?? null;
+    const activeClass = get(activeDetectedClass);
 
     return [
         {
@@ -586,6 +626,33 @@ function destinationItems(): CommandPaletteItem[] {
             keywords: ['library', 'root'],
             run: openAllImages,
         },
+        ...get(sessions).map((session): CommandPaletteItem => ({
+            id: `scope.session.${session.id}`,
+            title: session.name,
+            subtitle: session.id === activeSessionId ? 'Current session' : `${session.image_count} images`,
+            category: 'Session',
+            kind: 'destination',
+            keywords: ['session', session.id, session.description ?? ''],
+            run: () => openSession(session),
+        })),
+        ...get(sessionCanvases).map((canvas): CommandPaletteItem => ({
+            id: `scope.canvas.${canvas.id}`,
+            title: canvas.name,
+            subtitle: canvas.id === activeCanvasId ? 'Current canvas' : `Canvas · ${canvas.canvas_type}`,
+            category: 'Canvas',
+            kind: 'destination',
+            keywords: ['canvas', canvas.id, canvas.canvas_type],
+            run: () => openCanvas(canvas),
+        })),
+        ...get(detectedClasses).map(([className, count]): CommandPaletteItem => ({
+            id: `scope.detected.${className}`,
+            title: className,
+            subtitle: className === activeClass ? 'Current detection filter' : `${count} images`,
+            category: 'Detection',
+            kind: 'destination',
+            keywords: ['detected', 'object', 'class', className],
+            run: () => openDetectedClass(className),
+        })),
         ...get(smartCollections)
             .filter(item => Boolean(item.filter_json))
             .map((item): CommandPaletteItem => ({

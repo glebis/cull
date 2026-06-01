@@ -197,6 +197,9 @@ export const activeFolder = writable<string | null>(null);
 export const minSizeFilter = writable<number>(0);
 export const showMissing = writable<boolean>(false);
 export const activeDetectedClass = writable<string | null>(null);
+// Detected object classes with image counts, populated by the AI panel. Exposed
+// globally so the command palette can offer them as navigation destinations.
+export const detectedClasses = writable<[string, number][]>([]);
 
 // Custom dialogs
 export interface TextInputDialogOptions {
