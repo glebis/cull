@@ -5,6 +5,7 @@ commands.allow = [
   "apply_export_patches",
   "assemble_export_pdf",
   "create_export_manifest",
+  "export_images_to_folder",
   "export_static_publish_package",
   "get_export_asset",
   "list_export_presets",

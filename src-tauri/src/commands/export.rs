@@ -239,6 +239,18 @@ pub async fn apply_export_patches(
     Ok(patch::apply_patches(manifest, patches))
 }
 
+/// Export images (from a collection, folder, or explicit IDs) to a destination
+/// folder with optional format conversion and a filename naming template.
+/// Wraps the shared `services::export::export_images` orchestrator so the GUI
+/// and MCP share one code path.
+#[tauri::command]
+pub async fn export_images_to_folder(
+    state: State<'_, AppState>,
+    params: crate::services::export::ExportImagesParams,
+) -> Result<crate::services::export::ExportImagesResult, String> {
+    crate::services::export::export_images(&state.db, &state.app_data_dir, params)
+}
+
 #[tauri::command]
 pub async fn list_export_presets() -> Result<Vec<PresetInfo>, String> {
     let infos: Vec<PresetInfo> = presets::PRESETS

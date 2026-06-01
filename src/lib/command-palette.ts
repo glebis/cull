@@ -12,6 +12,7 @@ import {
     commandPaletteMode,
     commandPaletteOpen,
     detectedClasses,
+    exportFolderOpen,
     focusedIndex,
     images,
     requestCollectionTarget,
@@ -672,6 +673,15 @@ function commandItems(): CommandPaletteItem[] {
             keywords: ['deselect'],
             disabled: selectedCount === 0,
             run: () => selectedIds.set(new Set()),
+        },
+        {
+            id: 'collection.export-to-folder',
+            title: 'Export to Folder…',
+            subtitle: 'Export the current scope with format conversion and naming template',
+            category: 'Collections',
+            kind: 'command',
+            keywords: ['export', 'save', 'folder', 'convert', 'deliver', 'output'],
+            run: () => exportFolderOpen.set(true),
         },
         {
             id: 'collection.create-from-selection',

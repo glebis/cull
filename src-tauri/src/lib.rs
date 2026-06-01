@@ -519,6 +519,7 @@ pub fn run() {
             commands::export::validate_export_manifest,
             commands::export::apply_export_patches,
             commands::export::list_export_presets,
+            commands::export::export_images_to_folder,
             commands::export::get_export_asset,
             commands::export::save_export_image,
             commands::export::assemble_export_pdf,

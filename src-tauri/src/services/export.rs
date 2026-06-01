@@ -254,18 +254,133 @@ fn export_one_image(
 }
 
 fn export_stem(source: &Path, image_id: &str, idx: usize, naming: &str) -> Result<String, String> {
+    // Preset keywords kept for back-compat with existing MCP callers.
     match naming {
-        "original" => Ok(source
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(image_id)
-            .to_string()),
-        "id" => Ok(image_id.to_string()),
-        "index" => Ok(format!("{:04}", idx + 1)),
-        other => Err(format!(
-            "Unsupported naming '{}'. Supported: original, id, index",
-            other
-        )),
+        "original" => {
+            return Ok(source
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(image_id)
+                .to_string())
+        }
+        "id" => return Ok(image_id.to_string()),
+        "index" => return Ok(format!("{:04}", idx + 1)),
+        _ => {}
+    }
+
+    // Otherwise treat `naming` as a filename template with {name}, {id},
+    // {index}, and {index1} tokens. {index} is zero-padded (0001), {index1}
+    // is the bare 1-based ordinal.
+    if naming.contains('{') {
+        return render_naming_template(source, image_id, idx, naming);
+    }
+
+    Err(format!(
+        "Unsupported naming '{}'. Use a preset (original, id, index) or a template such as '{{index}}_{{name}}'",
+        naming
+    ))
+}
+
+fn render_naming_template(
+    source: &Path,
+    image_id: &str,
+    idx: usize,
+    template: &str,
+) -> Result<String, String> {
+    let name = source
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(image_id);
+    let rendered = template
+        .replace("{name}", name)
+        .replace("{id}", image_id)
+        .replace("{index1}", &format!("{}", idx + 1))
+        .replace("{index}", &format!("{:04}", idx + 1));
+
+    // Reject any leftover/unknown tokens so typos fail loudly instead of
+    // producing files with literal braces in their names.
+    if rendered.contains('{') || rendered.contains('}') {
+        return Err(format!(
+            "Naming template '{}' has unknown tokens. Supported: {{name}}, {{id}}, {{index}}, {{index1}}",
+            template
+        ));
+    }
+
+    let sanitized = sanitize_stem(&rendered);
+    if sanitized.is_empty() {
+        return Err(format!("Naming template '{}' produced an empty filename", template));
+    }
+    Ok(sanitized)
+}
+
+// Strip path separators and characters that are invalid in filenames so a
+// template can't escape the output directory or produce an unwritable name.
+fn sanitize_stem(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0' => '_',
+            _ => c,
+        })
+        .collect::<String>()
+        .trim()
+        .trim_matches('.')
+        .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preset_naming_keywords_still_work() {
+        let src = Path::new("/photos/sunset.jpg");
+        assert_eq!(export_stem(src, "img-1", 0, "original").unwrap(), "sunset");
+        assert_eq!(export_stem(src, "img-1", 0, "id").unwrap(), "img-1");
+        assert_eq!(export_stem(src, "img-1", 4, "index").unwrap(), "0005");
+    }
+
+    #[test]
+    fn template_tokens_render() {
+        let src = Path::new("/photos/sunset.jpg");
+        assert_eq!(
+            export_stem(src, "img-9", 2, "{index}_{name}").unwrap(),
+            "0003_sunset"
+        );
+        assert_eq!(
+            export_stem(src, "img-9", 2, "{index1}-{id}").unwrap(),
+            "3-img-9"
+        );
+    }
+
+    #[test]
+    fn template_rejects_unknown_tokens() {
+        let src = Path::new("/photos/sunset.jpg");
+        assert!(export_stem(src, "img-1", 0, "{bogus}").is_err());
+    }
+
+    #[test]
+    fn template_sanitizes_path_separators() {
+        let src = Path::new("/photos/sunset.jpg");
+        // A template that would otherwise inject a path separator is flattened.
+        assert_eq!(
+            export_stem(src, "a/b", 0, "{id}").unwrap(),
+            "a_b"
+        );
+    }
+
+    #[test]
+    fn unsupported_plain_naming_errors() {
+        let src = Path::new("/photos/sunset.jpg");
+        assert!(export_stem(src, "img-1", 0, "weird").is_err());
+    }
+
+    #[test]
+    fn validate_export_format_accepts_known_formats() {
+        for fmt in ["original", "png", "jpg", "jpeg", "webp"] {
+            assert!(validate_export_format(fmt).is_ok());
+        }
+        assert!(validate_export_format("gif").is_err());
     }
 }
 

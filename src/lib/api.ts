@@ -473,6 +473,38 @@ export async function deleteCollectionApi(collectionId: string): Promise<void> {
     return invoke('delete_collection', { collectionId });
 }
 
+export interface ExportImagesParams {
+    image_ids?: string[] | null;
+    collection_id?: string | null;
+    folder_path?: string | null;
+    output_dir: string;
+    format?: string | null;
+    flatten?: boolean | null;
+    naming?: string | null;
+}
+
+export interface ExportedImage {
+    image_id: string;
+    source_path: string;
+    output_path: string;
+    format: string;
+    bytes_written: number;
+}
+
+export interface ExportImagesResult {
+    exported: number;
+    skipped: number;
+    errors: string[];
+    output_dir: string;
+    files: ExportedImage[];
+}
+
+// Export images to a destination folder with optional format conversion and a
+// filename naming template. Provide exactly one selector.
+export async function exportImagesToFolder(params: ExportImagesParams): Promise<ExportImagesResult> {
+    return invoke('export_images_to_folder', { params });
+}
+
 export interface ClipboardMonitorStatus {
     running: boolean;
     supported: boolean;

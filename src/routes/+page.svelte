@@ -14,6 +14,7 @@
     import CommandBar from '$lib/components/CommandBar.svelte';
     import CommandPalette from '$lib/components/CommandPalette.svelte';
     import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
+    import ExportFolderDialog from '$lib/components/ExportFolderDialog.svelte';
     import Export from '$lib/components/Export.svelte';
     import StaticPublishingSettings from '$lib/components/StaticPublishingSettings.svelte';
     import Toast from '$lib/components/Toast.svelte';
@@ -356,6 +357,7 @@
     <GenerationResultsStrip />
     <CommandPalette />
     <KeyboardShortcuts />
+    <ExportFolderDialog />
 
     {#if $settingsOpen}
         <McpSettings onclose={() => settingsOpen.set(false)} />
