@@ -19,6 +19,7 @@ import {
     searchOpen,
     selectedIds,
     sessions,
+    shortcutsOpen,
     sessionCanvases,
     settingsOpen,
     showDetectionBoxes,
@@ -205,6 +206,46 @@ export function setCommandHotkey(id: string, shortcut: string | null): Record<st
 
 export function shortcutForItem(item: CommandPaletteItem, hotkeys: Record<string, string>): string | undefined {
     return hotkeys[item.id] ?? item.defaultShortcut;
+}
+
+// Clear every custom hotkey assignment, reverting all commands to their defaults.
+export function resetCommandHotkeys(): Record<string, string> {
+    writeJson(COMMAND_HOTKEYS_STORAGE_KEY, {});
+    return {};
+}
+
+export interface CommandShortcutRow {
+    id: string;
+    title: string;
+    category: string;
+    shortcut?: string;
+    isCustom: boolean;
+    conflict: boolean;
+}
+
+// Flatten the registry into an inspectable list of shortcut rows for the
+// keyboard-shortcuts settings surface. Flags any binding that collides with
+// another command's effective binding.
+export function listCommandShortcuts(
+    items: CommandPaletteItem[],
+    hotkeys: Record<string, string>,
+): CommandShortcutRow[] {
+    const counts = new Map<string, number>();
+    for (const item of items) {
+        const shortcut = shortcutForItem(item, hotkeys);
+        if (shortcut) counts.set(shortcut, (counts.get(shortcut) ?? 0) + 1);
+    }
+    return items.map(item => {
+        const shortcut = shortcutForItem(item, hotkeys);
+        return {
+            id: item.id,
+            title: item.title,
+            category: item.category,
+            shortcut,
+            isCustom: Boolean(hotkeys[item.id]),
+            conflict: Boolean(shortcut && (counts.get(shortcut) ?? 0) > 1),
+        };
+    });
 }
 
 function clearNavigationScope() {
@@ -488,6 +529,15 @@ function commandItems(): CommandPaletteItem[] {
             kind: 'command',
             keywords: ['workflow', 'automation', 'sequence', 'macro', 'save'],
             run: createWorkflowFromRecents,
+        },
+        {
+            id: 'app.keyboard-shortcuts',
+            title: 'View Keyboard Shortcuts',
+            subtitle: 'Browse, customize, and reset command shortcuts',
+            category: 'App',
+            kind: 'command',
+            keywords: ['hotkeys', 'keybindings', 'shortcuts', 'help', 'customize'],
+            run: () => shortcutsOpen.set(true),
         },
         {
             id: 'app.reload-images',

@@ -418,6 +418,8 @@ export const searchOpen = writable<boolean>(false);
 export type CommandPaletteMode = 'all' | 'commands';
 export const commandPaletteOpen = writable<boolean>(false);
 export const commandPaletteMode = writable<CommandPaletteMode>('all');
+// Searchable keyboard-shortcuts reference / customization panel.
+export const shortcutsOpen = writable<boolean>(false);
 
 export const focusedImage = derived(
     [images, focusedIndex, focusedImageOverride],

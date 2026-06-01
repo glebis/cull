@@ -5,10 +5,14 @@ import {
     findDuplicateCommandHotkeys,
     getCommandPaletteItems,
     getShortcutConflict,
+    listCommandShortcuts,
     pruneStalePins,
     readCommandFrequencies,
+    readCommandHotkeys,
     recordCommandUse,
+    resetCommandHotkeys,
     scoreCommandPaletteItem,
+    setCommandHotkey,
     shortcutFromKeyboardEvent,
     setCommandPinned,
     readPinnedCommandIds,
@@ -356,5 +360,55 @@ describe('command palette frequency and pin persistence', () => {
         expect(kept).toContain('view.grid');
         expect(kept).not.toContain('scope.collection.deleted');
         expect(readPinnedCommandIds()).not.toContain('scope.collection.deleted');
+    });
+});
+
+describe('command palette shortcut inspection', () => {
+    beforeEach(() => {
+        const store = new Map<string, string>();
+        (globalThis as { localStorage?: unknown }).localStorage = {
+            getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+            setItem: (k: string, v: string) => void store.set(k, String(v)),
+            removeItem: (k: string) => void store.delete(k),
+            clear: () => store.clear(),
+        };
+    });
+
+    it('lists every command with its effective shortcut and custom/default origin', () => {
+        const items = [
+            item('view.grid', 'Grid View', 'View', { defaultShortcut: 'Cmd+1' }),
+            item('view.loupe', 'Loupe View', 'View'),
+        ];
+        const rows = listCommandShortcuts(items, { 'view.loupe': 'Cmd+L' });
+
+        const grid = rows.find(r => r.id === 'view.grid');
+        const loupe = rows.find(r => r.id === 'view.loupe');
+        expect(grid?.shortcut).toBe('Cmd+1');
+        expect(grid?.isCustom).toBe(false);
+        expect(loupe?.shortcut).toBe('Cmd+L');
+        expect(loupe?.isCustom).toBe(true);
+    });
+
+    it('flags rows that duplicate another binding', () => {
+        const items = [
+            item('view.grid', 'Grid View', 'View', { defaultShortcut: 'Cmd+1' }),
+            item('view.loupe', 'Loupe View', 'View'),
+        ];
+        const rows = listCommandShortcuts(items, { 'view.loupe': 'Cmd+1' });
+        expect(rows.find(r => r.id === 'view.grid')?.conflict).toBe(true);
+        expect(rows.find(r => r.id === 'view.loupe')?.conflict).toBe(true);
+    });
+
+    it('reset clears all custom hotkeys but leaves defaults intact', () => {
+        setCommandHotkey('view.loupe', 'Cmd+L');
+        expect(readCommandHotkeys()['view.loupe']).toBe('Cmd+L');
+
+        resetCommandHotkeys();
+        expect(readCommandHotkeys()).toEqual({});
+
+        const items = [item('view.loupe', 'Loupe View', 'View', { defaultShortcut: 'Cmd+2' })];
+        const rows = listCommandShortcuts(items, readCommandHotkeys());
+        expect(rows[0].shortcut).toBe('Cmd+2');
+        expect(rows[0].isCustom).toBe(false);
     });
 });
