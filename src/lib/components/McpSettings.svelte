@@ -13,6 +13,7 @@
     let tokens = $state<McpToken[]>([]);
     let closeToTray = $state(true);
     let confirmTrash = $state(true);
+    let autoUpdate = $state(true);
     let httpEnabled = $state(false);
     let httpPort = $state('9847');
     let loading = $state(true);
@@ -58,10 +59,11 @@
 
     onMount(async () => {
         try {
-            const [toks, ctSetting, trashSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting, iconSetting, cohereEmbeddingSetting, openaiEmbeddingSetting, ollamaEmbeddingUrlSetting, ollamaEmbeddingModelSetting] = await Promise.all([
+            const [toks, ctSetting, trashSetting, autoUpdateSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting, iconSetting, cohereEmbeddingSetting, openaiEmbeddingSetting, ollamaEmbeddingUrlSetting, ollamaEmbeddingModelSetting] = await Promise.all([
                 listMcpTokens(),
                 getAppSetting('close_to_tray'),
                 getAppSetting('skip_trash_confirm'),
+                getAppSetting('auto_update_enabled'),
                 getAppSetting('mcp_http_enabled'),
                 getAppSetting('mcp_http_port'),
                 getAppSetting('auto_purge_missing'),
@@ -76,6 +78,7 @@
             tokens = toks;
             closeToTray = ctSetting !== 'false';
             confirmTrash = trashSetting !== 'true';
+            autoUpdate = autoUpdateSetting !== 'false';
             httpEnabled = httpSetting === 'true';
             if (portSetting) httpPort = portSetting;
             autoPurge = purgeSetting === 'true';
@@ -116,6 +119,12 @@
     async function toggleConfirmTrash() {
         confirmTrash = !confirmTrash;
         await setAppSetting('skip_trash_confirm', confirmTrash ? 'false' : 'true');
+    }
+
+    async function toggleAutoUpdate() {
+        autoUpdate = !autoUpdate;
+        await setAppSetting('auto_update_enabled', autoUpdate ? 'true' : 'false');
+        window.dispatchEvent(new CustomEvent('auto-update-setting-changed'));
     }
 
     async function toggleHttp() {
@@ -351,6 +360,12 @@
                     <span>Confirm before Trash</span>
                     <button class="toggle" class:on={confirmTrash} onclick={toggleConfirmTrash}>
                         {confirmTrash ? 'ON' : 'OFF'}
+                    </button>
+                </div>
+                <div class="setting-row">
+                    <span>Auto update</span>
+                    <button class="toggle" class:on={autoUpdate} onclick={toggleAutoUpdate}>
+                        {autoUpdate ? 'ON' : 'OFF'}
                     </button>
                 </div>
                 <div class="setting-row">

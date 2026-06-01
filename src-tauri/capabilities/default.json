@@ -9,6 +9,8 @@
     "dialog:default",
     "dialog:allow-confirm",
     "dialog:allow-ask",
-    "deep-link:default"
+    "deep-link:default",
+    "updater:default",
+    "process:default"
   ]
 }

@@ -23,6 +23,13 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     app_menu.append(&PredefinedMenuItem::separator(app)?)?;
     app_menu.append(&MenuItem::with_id(
         app,
+        "check_update",
+        "Check for Update...",
+        true,
+        None::<&str>,
+    )?)?;
+    app_menu.append(&MenuItem::with_id(
+        app,
         "settings",
         "Settings...",
         true,
@@ -454,12 +461,12 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
     let id = event.id().0.as_str();
     match id {
         "help" => show_cull_help(app),
-        "about" | "open_file" | "open_folder" | "settings" | "undo" | "redo" | "deselect_all"
-        | "image_share" | "image_open_default" | "image_open_with" | "image_reveal"
-        | "image_rename" | "image_move_to" | "image_trash" | "view_grid" | "view_compare"
-        | "view_loupe" | "view_canvas" | "view_lineage" | "view_embeddings" | "view_publish"
-        | "view_export" | "toggle_sidebar" | "zoom_in" | "zoom_out" | "actual_size"
-        | "github_wiki" => {
+        "about" | "check_update" | "open_file" | "open_folder" | "settings" | "undo" | "redo"
+        | "deselect_all" | "image_share" | "image_open_default" | "image_open_with"
+        | "image_reveal" | "image_rename" | "image_move_to" | "image_trash" | "view_grid"
+        | "view_compare" | "view_loupe" | "view_canvas" | "view_lineage" | "view_embeddings"
+        | "view_publish" | "view_export" | "toggle_sidebar" | "zoom_in" | "zoom_out"
+        | "actual_size" | "github_wiki" => {
             let _ = app.emit("menu-action", id);
         }
         _ => {}
