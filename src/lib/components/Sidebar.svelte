@@ -167,7 +167,7 @@
     async function handleDeleteFolder(event: Event, folder: string) {
         event.stopPropagation();
         const name = folderName(folder);
-        if (!window.confirm(`Delete folder "${name}" and its unique images from library?`)) return;
+        if (!window.confirm(`Remove folder from library "${name}"? Cull records for images that only exist in this folder will be removed. Original files stay on disk.`)) return;
         try {
             const count = await apiDeleteFolder(folder);
             lastResult = `Removed ${count} images from "${name}"`;
@@ -491,7 +491,7 @@
                                 <span class="folder-label">{folder.name}</span>
                                 <span class="count">({folder.count})</span>
                             </button>
-                            <button class="delete-btn" onclick={(e: Event) => handleDeleteFolder(e, folder.fullPath)} title="Remove folder">&times;</button>
+                            <button class="delete-btn" onclick={(e: Event) => handleDeleteFolder(e, folder.fullPath)} title="Remove folder from library">&times;</button>
                         {:else}
                             <span class="section-item folder-group">
                                 <span class="icon">▾</span>
@@ -538,7 +538,7 @@
                     {#if yoloReady}
                         <span class="model-status ready">ready</span>
                     {:else}
-                        <span class="model-status missing">external</span>
+                        <span class="model-status missing">manual install</span>
                     {/if}
                 </div>
 
@@ -549,7 +549,7 @@
                             <option value="small">small 22MB</option>
                             <option value="medium">medium 50MB</option>
                         </select>
-                        <span class="model-note">manual</span>
+                        <span class="model-note">Install model manually</span>
                     </div>
                 {/if}
 
@@ -558,12 +558,12 @@
                     {#if nudenetReady}
                         <span class="model-status ready">ready</span>
                     {:else}
-                        <span class="model-status missing">external</span>
+                        <span class="model-status missing">manual install</span>
                     {/if}
                 </div>
 
                 {#if !nudenetReady}
-                    <div class="model-note">manual model install</div>
+                    <div class="model-note">Install model manually</div>
                 {/if}
 
                 <div class="model-row">
@@ -582,7 +582,7 @@
                     </div>
                     {#if yoloProcessed < $totalCount}
                         <button class="detect-btn" onclick={handleDetectRemaining} disabled={detectingBatch}>
-                            {detectingBatch ? 'detecting...' : `> detect remaining ${$totalCount - yoloProcessed}`}
+                            {detectingBatch ? 'Detecting...' : `Analyze uncatalogued images (${ $totalCount - yoloProcessed })`}
                         </button>
                     {/if}
                 {/if}
@@ -594,7 +594,7 @@
                     </div>
                     {#if visionProcessed < $totalCount}
                         <button class="detect-btn" onclick={handleAnalyzeBatch} disabled={analyzingBatch}>
-                            {analyzingBatch ? 'analyzing...' : `> analyze remaining ${$totalCount - visionProcessed}`}
+                            {analyzingBatch ? 'Analyzing...' : `Analyze uncatalogued images (${ $totalCount - visionProcessed })`}
                         </button>
                     {/if}
                 {/if}
@@ -661,7 +661,7 @@
                     disabled={!clipboardStatus.collection_id || clipboardPublishing}
                 >
                     <span class="icon">↗</span>
-                    {clipboardPublishing ? 'Publishing...' : 'Publish'}
+                    {clipboardPublishing ? 'Publishing...' : 'Publish clipboard collection'}
                 </button>
             </div>
             {#if clipboardPublishResult}
@@ -770,7 +770,7 @@
         background: var(--border);
     }
     .section-item.active {
-        background: rgba(122, 162, 247, 0.1);
+        background: color-mix(in srgb, var(--blue) 10%, transparent);
         color: var(--blue);
     }
     .section-item:disabled {
@@ -812,7 +812,7 @@
         background: var(--border);
     }
     .folder-row.active {
-        background: rgba(122, 162, 247, 0.1);
+        background: color-mix(in srgb, var(--blue) 10%, transparent);
     }
     .folder-row.active .section-item {
         color: var(--blue);
@@ -841,7 +841,7 @@
         display: inline;
     }
     .delete-btn:hover {
-        color: var(--red, #f7768e);
+        color: var(--red);
     }
     .folders-toggle {
         font-size: 11px;
@@ -859,7 +859,7 @@
         margin-top: 4px;
     }
     .folders-toggle:hover {
-        color: var(--text-primary, #cdd6f4);
+        color: var(--text);
     }
     .toggle-arrow {
         font-size: 8px;
@@ -914,7 +914,7 @@
         background: var(--border);
     }
     .preset-btn.active {
-        background: rgba(122, 162, 247, 0.15);
+        background: color-mix(in srgb, var(--blue) 15%, transparent);
         color: var(--blue);
         border-color: var(--blue);
     }
@@ -928,7 +928,7 @@
         cursor: pointer;
     }
     .show-missing-toggle:hover {
-        color: var(--text-primary, #cdd6f4);
+        color: var(--text);
     }
     .show-missing-toggle input {
         accent-color: var(--blue);
@@ -950,7 +950,7 @@
     }
     .collect-indicator {
         font-size: 10px;
-        color: var(--green, #9ece6a);
+        color: var(--green);
         padding: 2px 8px 4px;
         font-style: italic;
     }
@@ -973,7 +973,7 @@
     }
     .import-btn {
         width: 100%;
-        background: rgba(122, 162, 247, 0.15);
+        background: color-mix(in srgb, var(--blue) 15%, transparent);
         color: var(--blue);
         border: 1px solid var(--border);
         font-family: var(--font);
@@ -984,7 +984,7 @@
         transition: all 0.15s;
     }
     .import-btn:hover:not(:disabled) {
-        background: rgba(122, 162, 247, 0.25);
+        background: color-mix(in srgb, var(--blue) 25%, transparent);
         border-color: var(--blue);
     }
     .import-btn:disabled {
@@ -992,7 +992,7 @@
         cursor: not-allowed;
     }
     .import-btn.secondary {
-        background: rgba(122, 162, 247, 0.08);
+        background: color-mix(in srgb, var(--blue) 8%, transparent);
         font-size: 10px;
         padding: 4px 8px;
         margin-top: 4px;
@@ -1009,31 +1009,31 @@
         font-size: 11px;
     }
     .model-name {
-        color: var(--text-primary, #e0e0e0);
+        color: var(--text);
         font-weight: 600;
     }
     .model-status {
         font-size: 10px;
     }
     .model-status.ready {
-        color: var(--green, #9ece6a);
+        color: var(--green);
     }
     .model-status.missing {
-        color: var(--text-secondary, #565f89);
+        color: var(--text-secondary);
     }
     .model-status.downloading {
-        color: var(--orange, #e0af68);
+        color: var(--orange);
     }
     .progress-bar {
         height: 3px;
-        background: var(--border, #1a1a2e);
+        background: var(--border);
         border-radius: 2px;
         margin: 2px 0 4px;
         overflow: hidden;
     }
     .progress-fill {
         height: 100%;
-        background: var(--blue, #7aa2f7);
+        background: var(--blue);
         transition: width 0.3s;
     }
     .model-download-row {
@@ -1042,7 +1042,7 @@
         margin: 2px 0 4px;
     }
     .model-note {
-        color: var(--text-secondary, #565f89);
+        color: var(--text-secondary);
         font-size: 10px;
         padding: 2px 0;
     }
@@ -1050,25 +1050,25 @@
         flex: 1;
         font-size: 10px;
         padding: 2px 4px;
-        background: var(--bg, #08080c);
-        color: var(--text-primary, #e0e0e0);
-        border: 1px solid var(--border, #1a1a2e);
-        border-radius: var(--radius, 4px);
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
         font-family: inherit;
     }
     .download-btn {
         font-size: 10px;
         padding: 2px 6px;
-        background: rgba(122, 162, 247, 0.15);
-        color: var(--blue, #7aa2f7);
-        border: 1px solid var(--border, #1a1a2e);
-        border-radius: var(--radius, 4px);
+        background: color-mix(in srgb, var(--blue) 15%, transparent);
+        color: var(--blue);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
         cursor: pointer;
         font-family: inherit;
     }
     .download-btn:hover {
-        background: rgba(122, 162, 247, 0.25);
-        border-color: var(--blue, #7aa2f7);
+        background: color-mix(in srgb, var(--blue) 25%, transparent);
+        border-color: var(--blue);
     }
     .download-btn.full-width {
         width: 100%;
@@ -1078,37 +1078,37 @@
         display: flex;
         justify-content: space-between;
         font-size: 10px;
-        color: var(--text-secondary, #565f89);
+        color: var(--text-secondary);
         padding: 4px 0 2px;
     }
     .processed-label {
-        color: var(--text-secondary, #565f89);
+        color: var(--text-secondary);
     }
     .processed-count {
-        color: var(--text-primary, #e0e0e0);
+        color: var(--text);
     }
     .detect-btn {
         width: 100%;
         font-size: 10px;
         padding: 3px 6px;
         background: none;
-        color: var(--blue, #7aa2f7);
+        color: var(--blue);
         border: none;
         cursor: pointer;
         font-family: inherit;
         text-align: left;
     }
     .detect-btn:hover:not(:disabled) {
-        color: var(--text-primary, #e0e0e0);
+        color: var(--text);
     }
     .detect-btn:disabled {
-        color: var(--text-secondary, #565f89);
+        color: var(--text-secondary);
         cursor: not-allowed;
     }
     .detected-header {
         font-size: 9px;
         font-weight: 700;
-        color: var(--text-secondary, #565f89);
+        color: var(--text-secondary);
         letter-spacing: 0.1em;
         padding: 6px 0 2px;
     }
@@ -1116,7 +1116,7 @@
         padding: 2px 0;
     }
     .class-tag {
-        color: var(--purple, #bb9af7);
+        color: var(--purple);
     }
     .pinned-indicator {
         display: flex;
@@ -1124,22 +1124,22 @@
         gap: 6px;
         padding: 6px 12px;
         margin: 4px 8px;
-        background: var(--bg-elevated, #2a2a3e);
+        background: var(--bg);
         border-radius: 6px;
-        border: 1px solid var(--accent, #8cc63f);
+        border: 1px solid var(--green);
         font-size: 12px;
     }
     .pin-icon { font-size: 14px; }
-    .pin-name { color: var(--text-primary, #eee); flex: 1; }
+    .pin-name { color: var(--text); flex: 1; }
     .pin-action {
         background: none;
         border: none;
-        color: var(--text-secondary, #888);
+        color: var(--text-secondary);
         cursor: pointer;
         font-size: 11px;
         font-family: inherit;
     }
-    .pin-action:hover { color: var(--text-primary, #eee); }
+    .pin-action:hover { color: var(--text); }
     .pin-btn {
         background: none;
         border: none;

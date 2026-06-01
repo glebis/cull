@@ -248,9 +248,14 @@
             />
         </div>
         <div class="setting-row">
-            <span>Search engines</span>
-            <button class="toggle" class:on={indexable} onclick={() => { indexable = !indexable; saveBoolean('static_publishing_indexable', indexable); }}>
-                {indexable ? 'INDEX' : 'NOINDEX'}
+            <span>Allow search indexing</span>
+            <button
+                class="toggle"
+                class:on={indexable}
+                onclick={() => { indexable = !indexable; saveBoolean('static_publishing_indexable', indexable); }}
+                aria-pressed={indexable}
+            >
+                {indexable ? 'ALLOWED' : 'BLOCKED'}
             </button>
         </div>
         <div class="setting-row stacked">
@@ -318,7 +323,7 @@
                 Last Package
                 <div class="result-actions">
                     <button class="secondary-btn" onclick={startServer} disabled={startingServer}>
-                        {startingServer ? 'Starting' : 'Start Server'}
+                        {startingServer ? 'Starting' : 'Start Local Preview'}
                     </button>
                     <button class="secondary-btn" onclick={copyHandoffPath}>Copy Handoff</button>
                 </div>

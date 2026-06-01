@@ -1851,13 +1851,28 @@
             </label>
 
             <div class="toggle-grid">
-                <button class="toggle-pill" class:active={largePreviewOpen} onclick={() => { largePreviewOpen = !largePreviewOpen; saveViewState(); }}>
+                <button
+                    class="toggle-pill"
+                    class:active={largePreviewOpen}
+                    onclick={() => { largePreviewOpen = !largePreviewOpen; saveViewState(); }}
+                    aria-pressed={largePreviewOpen}
+                >
                     Preview
                 </button>
-                <button class="toggle-pill" class:active={textOutputOpen} onclick={() => { textOutputOpen = !textOutputOpen; saveViewState(); }}>
+                <button
+                    class="toggle-pill"
+                    class:active={textOutputOpen}
+                    onclick={() => { textOutputOpen = !textOutputOpen; saveViewState(); }}
+                    aria-pressed={textOutputOpen}
+                >
                     Text
                 </button>
-                <button class="toggle-pill" class:active={canvasLabelsOpen} onclick={() => { canvasLabelsOpen = !canvasLabelsOpen; requestDraw(); saveViewState(); }}>
+                <button
+                    class="toggle-pill"
+                    class:active={canvasLabelsOpen}
+                    onclick={() => { canvasLabelsOpen = !canvasLabelsOpen; requestDraw(); saveViewState(); }}
+                    aria-pressed={canvasLabelsOpen}
+                >
                     Labels
                 </button>
             </div>
@@ -2163,7 +2178,7 @@
     }
 
     .warning-section {
-        background: rgba(224, 175, 104, 0.08);
+        background: color-mix(in srgb, var(--orange) 8%, transparent);
     }
 
     .warning-row {
@@ -2185,12 +2200,12 @@
     }
 
     .action-btn.warning {
-        background: rgba(224, 175, 104, 0.15);
+        background: color-mix(in srgb, var(--orange) 15%, transparent);
         color: var(--orange);
     }
 
     .action-btn.warning:hover:not(:disabled) {
-        background: rgba(224, 175, 104, 0.25);
+        background: color-mix(in srgb, var(--orange) 25%, transparent);
         border-color: var(--orange);
     }
 
@@ -2294,7 +2309,7 @@
     .action-btn {
         width: 100%;
         margin-top: 8px;
-        background: rgba(122, 162, 247, 0.15);
+        background: color-mix(in srgb, var(--blue) 15%, transparent);
         color: var(--blue);
         border: 1px solid var(--border);
         font-family: var(--font);
@@ -2306,7 +2321,7 @@
     }
 
     .action-btn:hover:not(:disabled) {
-        background: rgba(122, 162, 247, 0.25);
+        background: color-mix(in srgb, var(--blue) 25%, transparent);
         border-color: var(--blue);
     }
 
@@ -2506,11 +2521,11 @@
     }
 
     .cluster-item:hover {
-        background: rgba(255, 255, 255, 0.05);
+        background: color-mix(in srgb, var(--text) 5%, transparent);
     }
 
     .cluster-item.active {
-        background: rgba(122, 162, 247, 0.1);
+        background: color-mix(in srgb, var(--blue) 10%, transparent);
     }
 
     .cluster-item.all {
@@ -2605,11 +2620,10 @@
 
     .inspector-section-block {
         min-height: 0;
-        background: color-mix(in srgb, var(--surface) 94%, transparent);
+        background: color-mix(in srgb, var(--surface) 96%, var(--bg));
         border: 1px solid var(--border);
         border-radius: var(--radius);
         box-shadow: 0 14px 40px color-mix(in srgb, var(--bg) 70%, transparent);
-        backdrop-filter: blur(14px);
     }
 
     .preview-block {
@@ -2849,7 +2863,7 @@
         font-family: 'JetBrains Mono', monospace;
         font-size: 9px;
         color: var(--text-secondary);
-        background: rgba(0, 0, 0, 0.3);
+        background: color-mix(in srgb, var(--bg) 70%, var(--surface));
         padding: 6px;
         border-radius: var(--radius);
         overflow-x: auto;
@@ -2903,7 +2917,7 @@
     }
 
     .config-section {
-        background: rgba(0, 0, 0, 0.15);
+        background: color-mix(in srgb, var(--bg) 55%, var(--surface));
     }
 
     .key-missing-text {
@@ -2922,7 +2936,7 @@
         cursor: pointer;
     }
     .settings-link-btn:hover {
-        background: rgba(122, 162, 247, 0.1);
+        background: color-mix(in srgb, var(--blue) 10%, transparent);
     }
 
     @media (max-width: 920px) {

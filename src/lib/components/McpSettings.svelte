@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    import { onMount, tick } from 'svelte';
     import { listMcpTokens, createMcpToken, revokeMcpToken, rotateMcpToken, getAppSetting, setAppSetting, applyAppIconVariant, hasApiKey, setApiKey, deleteApiKey, validateApiKey, backfillRawPreviews } from '$lib/api';
     import type { McpToken } from '$lib/api';
     import { APP_ICON_VARIANTS, normalizeAppIconVariant, type AppIconVariantId } from '$lib/app-icons';
@@ -34,6 +34,7 @@
     let openaiEmbeddingModel = $state('text-embedding-3-large');
     let ollamaEmbeddingUrl = $state('http://localhost:11434/api/embed');
     let ollamaEmbeddingModel = $state('embeddinggemma');
+    let panelElement = $state<HTMLDivElement | null>(null);
 
     interface ApiKeyState {
         exists: boolean;
@@ -58,6 +59,7 @@
     ];
 
     onMount(async () => {
+        void tick().then(() => panelElement?.focus());
         try {
             const [toks, ctSetting, trashSetting, autoUpdateSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting, iconSetting, cohereEmbeddingSetting, openaiEmbeddingSetting, ollamaEmbeddingUrlSetting, ollamaEmbeddingModelSetting] = await Promise.all([
                 listMcpTokens(),
@@ -303,12 +305,21 @@
     }
 </script>
 
-<div class="overlay" onclick={onclose} onkeydown={(e) => e.key === 'Escape' && onclose()} role="dialog" tabindex="-1">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="overlay" onclick={onclose} onkeydown={(e) => e.key === 'Escape' && onclose()} tabindex="-1">
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-    <div class="panel" onclick={(e) => e.stopPropagation()} role="document">
+    <div
+        class="panel"
+        bind:this={panelElement}
+        onclick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        tabindex="-1"
+    >
         <div class="panel-header">
-            <h2>Settings</h2>
-            <button class="close-btn" onclick={onclose}>&times;</button>
+            <h2 id="settings-title">Settings</h2>
+            <button class="close-btn" onclick={onclose} aria-label="Close settings">&times;</button>
         </div>
 
         <div class="settings-tabs">
@@ -352,26 +363,26 @@
                 <div class="section-header">General</div>
                 <div class="setting-row">
                     <span>Close to tray</span>
-                    <button class="toggle" class:on={closeToTray} onclick={toggleCloseToTray}>
+                    <button class="toggle" class:on={closeToTray} onclick={toggleCloseToTray} aria-pressed={closeToTray}>
                         {closeToTray ? 'ON' : 'OFF'}
                     </button>
                 </div>
                 <div class="setting-row">
                     <span>Confirm before Trash</span>
-                    <button class="toggle" class:on={confirmTrash} onclick={toggleConfirmTrash}>
+                    <button class="toggle" class:on={confirmTrash} onclick={toggleConfirmTrash} aria-pressed={confirmTrash}>
                         {confirmTrash ? 'ON' : 'OFF'}
                     </button>
                 </div>
                 <div class="setting-row">
                     <span>Auto update</span>
-                    <button class="toggle" class:on={autoUpdate} onclick={toggleAutoUpdate}>
+                    <button class="toggle" class:on={autoUpdate} onclick={toggleAutoUpdate} aria-pressed={autoUpdate}>
                         {autoUpdate ? 'ON' : 'OFF'}
                     </button>
                 </div>
                 <div class="setting-row">
-                    <span>HTTP server</span>
+                    <span>Remote access settings</span>
                     <div class="row-right">
-                        <button class="toggle" class:on={httpEnabled} onclick={toggleHttp}>
+                        <button class="toggle" class:on={httpEnabled} onclick={toggleHttp} aria-pressed={httpEnabled}>
                             {httpEnabled ? 'ON' : 'OFF'}
                         </button>
                         {#if httpEnabled}
@@ -392,7 +403,7 @@
                 {/if}
                 <div class="setting-row">
                     <span>Auto-purge missing files</span>
-                    <button class="toggle" class:on={autoPurge} onclick={toggleAutoPurge}>
+                    <button class="toggle" class:on={autoPurge} onclick={toggleAutoPurge} aria-pressed={autoPurge}>
                         {autoPurge ? 'ON' : 'OFF'}
                     </button>
                 </div>
@@ -585,7 +596,7 @@
     .overlay {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.6);
+        background: color-mix(in srgb, var(--bg) 78%, transparent);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -876,10 +887,10 @@
         text-transform: uppercase;
         font-weight: 600;
     }
-    .role-viewer { background: rgba(122, 162, 247, 0.2); color: var(--blue); }
-    .role-curator { background: rgba(224, 175, 104, 0.2); color: var(--orange); }
-    .role-operator { background: rgba(187, 154, 247, 0.2); color: var(--purple); }
-    .role-admin { background: rgba(247, 118, 142, 0.2); color: var(--red); }
+    .role-viewer { background: color-mix(in srgb, var(--blue) 20%, transparent); color: var(--blue); }
+    .role-curator { background: color-mix(in srgb, var(--orange) 20%, transparent); color: var(--orange); }
+    .role-operator { background: color-mix(in srgb, var(--purple) 20%, transparent); color: var(--purple); }
+    .role-admin { background: color-mix(in srgb, var(--red) 20%, transparent); color: var(--red); }
     .token-used {
         font-size: 11px;
         color: var(--text-secondary);
@@ -901,7 +912,7 @@
     .action-btn:hover { border-color: var(--text-secondary); color: var(--text); }
     .action-btn.danger:hover { border-color: var(--red); color: var(--red); }
     .secret-reveal {
-        background: rgba(158, 206, 106, 0.05);
+        background: color-mix(in srgb, var(--green) 5%, transparent);
         border: 1px solid var(--green);
         border-radius: var(--radius);
         margin: 0 20px 0 20px;

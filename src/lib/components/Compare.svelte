@@ -44,6 +44,17 @@
         return img?.selection?.decision ?? 'undecided';
     }
 
+    function comparePanelLabel(side: 'Left' | 'Right', img: ImageWithFile | null): string {
+        const name = img?.path.split('/').pop() ?? 'empty slot';
+        return `${side} compare panel: ${name}`;
+    }
+
+    function handlePanelKeydown(e: KeyboardEvent, side: 0 | 1) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        compareActiveSide.set(side);
+    }
+
     let ctxMenu = $state<{ visible: boolean; x: number; y: number; image: ImageWithFile | null }>({ visible: false, x: 0, y: 0, image: null });
 
     function handleContextMenu(e: MouseEvent, img: ImageWithFile | null) {
@@ -61,7 +72,9 @@
         oncontextmenu={(e) => handleContextMenu(e, leftImage)}
         role="button"
         tabindex="0"
-        onkeydown={() => {}}
+        aria-label={comparePanelLabel('Left', leftImage)}
+        aria-pressed={$compareActiveSide === 0}
+        onkeydown={(e) => handlePanelKeydown(e, 0)}
     >
         {#if leftImage}
             {#if !imageOnly}
@@ -100,7 +113,9 @@
         oncontextmenu={(e) => handleContextMenu(e, rightImage)}
         role="button"
         tabindex="0"
-        onkeydown={() => {}}
+        aria-label={comparePanelLabel('Right', rightImage)}
+        aria-pressed={$compareActiveSide === 1}
+        onkeydown={(e) => handlePanelKeydown(e, 1)}
     >
         {#if rightImage}
             {#if !imageOnly}
@@ -163,6 +178,10 @@
     }
     .panel.active {
         border-color: var(--blue);
+    }
+    .panel:focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: -4px;
     }
     .compare-container.images-only {
         grid-template-columns: minmax(0, 1fr) 0 minmax(0, 1fr);

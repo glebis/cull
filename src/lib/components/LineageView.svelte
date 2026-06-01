@@ -270,11 +270,11 @@
     .lineage-header h2 {
         margin: 0;
         font-size: 16px;
-        color: var(--text-primary, #eee);
+        color: var(--text);
     }
     .scope-label {
-        background: var(--bg-elevated, #2a2a3e);
-        color: var(--accent-warm, #e0a060);
+        background: var(--surface);
+        color: var(--orange);
         padding: 2px 8px;
         border-radius: 4px;
         font-size: 12px;
@@ -285,26 +285,26 @@
         white-space: nowrap;
     }
     .group-count {
-        color: var(--text-secondary, #888);
+        color: var(--text-secondary);
         font-size: 13px;
     }
     .layout-toggle {
         margin-left: auto;
-        background: var(--bg-elevated, #2a2a3e);
-        border: 1px solid var(--border, #444);
-        color: var(--text-secondary, #aaa);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
         padding: 4px 10px;
         border-radius: 4px;
         cursor: pointer;
         font-size: 12px;
     }
-    .layout-toggle:hover { color: var(--text-primary, #eee); }
+    .layout-toggle:hover { color: var(--text); }
 
     /* Timeline */
     .timeline-strip {
         margin-bottom: 20px;
         padding: 12px;
-        background: var(--bg-elevated, #1e1e2e);
+        background: var(--surface);
         border-radius: 8px;
     }
     .strip-header {
@@ -316,19 +316,19 @@
     .group-name {
         background: none;
         border: none;
-        color: var(--accent-warm, #e0a060);
+        color: var(--orange);
         font-weight: 600;
         font-size: 13px;
         cursor: pointer;
         padding: 0;
     }
     .group-meta {
-        color: var(--text-secondary, #666);
+        color: var(--text-secondary);
         font-size: 11px;
     }
     .detection-badge {
-        background: var(--bg-hover, #333);
-        color: var(--text-secondary, #888);
+        background: var(--bg);
+        color: var(--text-secondary);
         padding: 1px 6px;
         border-radius: 3px;
         font-size: 10px;
@@ -337,11 +337,11 @@
         margin-left: auto;
         background: none;
         border: none;
-        color: var(--text-secondary, #555);
+        color: var(--text-secondary);
         cursor: pointer;
         font-size: 14px;
     }
-    .strip-action:hover { color: var(--text-primary, #eee); }
+    .strip-action:hover { color: var(--text); }
     .strip-images {
         display: flex;
         align-items: center;
@@ -367,7 +367,7 @@
         opacity: 0.8;
     }
     .arrow {
-        color: var(--text-secondary, #444);
+        color: var(--text-secondary);
         font-size: 16px;
         flex-shrink: 0;
     }
@@ -386,7 +386,7 @@
         position: absolute;
         bottom: 4px;
         left: 4px;
-        color: var(--accent, #8cc63f);
+        color: var(--orange);
         font-size: 10px;
     }
 
@@ -398,9 +398,9 @@
         overflow-x: auto;
     }
     .group-tab {
-        background: var(--bg-elevated, #2a2a3e);
-        border: 1px solid var(--border, #333);
-        color: var(--text-secondary, #888);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
         padding: 6px 14px;
         border-radius: 6px;
         cursor: pointer;
@@ -408,9 +408,9 @@
         white-space: nowrap;
     }
     .group-tab.active {
-        background: var(--accent-warm, #e0a060);
-        color: #1a1a2e;
-        border-color: var(--accent-warm, #e0a060);
+        background: var(--orange);
+        color: var(--bg);
+        border-color: var(--orange);
     }
     .tab-count {
         margin-left: 4px;
@@ -426,7 +426,7 @@
         cursor: pointer;
         border-radius: 8px;
         overflow: hidden;
-        background: var(--bg-elevated, #1e1e2e);
+        background: var(--surface);
     }
     .comparison-cell img {
         display: block;
@@ -438,7 +438,7 @@
     .cell-name {
         padding: 4px 8px;
         font-size: 11px;
-        color: var(--text-secondary, #888);
+        color: var(--text-secondary);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -450,8 +450,8 @@
         align-items: center;
         justify-content: center;
         min-height: 200px;
-        color: var(--text-secondary, #888);
+        color: var(--text-secondary);
         font-size: 14px;
     }
-    .hint { font-size: 12px; color: var(--text-secondary, #666); }
+    .hint { font-size: 12px; color: var(--text-secondary); }
 </style>
