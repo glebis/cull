@@ -182,6 +182,7 @@ export const compareImages = writable<ImageWithFile[]>([]);
 export const compareIndex = writable<number>(0);
 export const compareActiveSide = writable<0 | 1>(0);
 export const compareImageOnly = writable<boolean>(false);
+export const exportImageOnly = writable<boolean>(false);
 export const loupeScale = writable<number>(1);
 export const loupePanX = writable<number>(0);
 export const loupePanY = writable<number>(0);

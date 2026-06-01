@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import {
     images, selectedIds, focusedIndex, thumbnailSize, statusHint, viewMode,
     compareActiveSide, compareImages, loupeScale, loupePanX, loupePanY,
-    sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode, compareImageOnly,
+    sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode, compareImageOnly, exportImageOnly,
     collections, collectMode, collectModeTarget, activeCollection,
     showDetectionBoxes, showDetectionInspector, nsfwMode,
     navigateTo, navigateBack, searchOpen, focusedImage, activeSession,
@@ -10,6 +10,7 @@ import {
     staticPublishingEnabled,
 } from './stores';
 import { computeCompareSwap, nextComparePresentationState } from './compare-utils';
+import { nextExportPresentationState } from './presentation-utils';
 import type { NsfwMode } from './stores';
 import type { ViewMode } from './stores';
 import { setRating, setDecision, createCollection, addToCollection, listCollections, rotateImage, undo, redo } from './api';
@@ -318,7 +319,7 @@ export function handleKeydown(e: KeyboardEvent) {
         }
     }
 
-    // Shift+. (>) toggles zen mode; compare cycles through an image-only state too.
+    // Shift+. (>) toggles zen mode; compare/export cycle through an image-only state too.
     if (e.key === '>' || (e.shiftKey && e.key === '.')) {
         e.preventDefault();
         if (mode === 'compare') {
@@ -328,6 +329,15 @@ export function handleKeydown(e: KeyboardEvent) {
             });
             zenMode.set(next.zen);
             compareImageOnly.set(next.imageOnly);
+            return;
+        }
+        if (mode === 'export') {
+            const next = nextExportPresentationState({
+                zen: get(zenMode),
+                imageOnly: get(exportImageOnly),
+            });
+            zenMode.set(next.zen);
+            exportImageOnly.set(next.imageOnly);
             return;
         }
         zenMode.update(v => !v);

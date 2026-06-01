@@ -1,4 +1,5 @@
 import type { ImageWithFile } from './api';
+import { nextThreeStagePresentationState, type PresentationFlags } from './presentation-utils';
 
 export type ComparePair = readonly [ImageWithFile | null, ImageWithFile | null];
 
@@ -33,19 +34,10 @@ export interface SwapResult {
     newSelectedIds: Set<string>;
 }
 
-export interface ComparePresentationFlags {
-    zen: boolean;
-    imageOnly: boolean;
-}
+export type ComparePresentationFlags = PresentationFlags;
 
 export function nextComparePresentationState(current: ComparePresentationFlags): ComparePresentationFlags {
-    if (!current.zen) {
-        return { zen: true, imageOnly: false };
-    }
-    if (!current.imageOnly) {
-        return { zen: true, imageOnly: true };
-    }
-    return { zen: false, imageOnly: false };
+    return nextThreeStagePresentationState(current);
 }
 
 export function computeCompareSwap(

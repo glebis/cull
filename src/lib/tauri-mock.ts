@@ -45,6 +45,10 @@ function mockImagePath(i: number): string {
   return `/mock/image-${i}.png`;
 }
 
+function mockThumbnailPath(i: number): string {
+  return `/Users/test/Library/Application Support/com.glebkalinin.cull/thumbnails/image-${i}.jpg`;
+}
+
 function makeMockImage(i: number) {
   return {
     image: {
@@ -58,7 +62,7 @@ function makeMockImage(i: number) {
       imported_at: '2026-05-01',
     },
     path: mockImagePath(i),
-    thumbnail_path: null,
+    thumbnail_path: mockThumbnailPath(i),
     selection: i % 3 === 0 ? {
       image_id: `img-${i}`,
       project_id: null,

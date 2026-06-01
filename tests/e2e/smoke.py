@@ -258,6 +258,67 @@ def test_compare_shift_period_cycles_to_image_only(page: Page) -> None:
     assert normal["metaCount"] == 2, normal
 
 
+def test_export_shift_period_cycles_to_image_only(page: Page) -> None:
+    press(page, "Meta+7")
+    wait_mode(page, "export")
+    expect(page.locator(".export-toolbar")).to_be_visible(timeout=10_000)
+    expect(page.locator(".preview-card").first).to_be_visible(timeout=10_000)
+
+    def metrics() -> dict:
+        return page.evaluate(
+            """() => {
+                const view = document.querySelector('.export-view');
+                const grid = document.querySelector('.image-only-grid');
+                const firstImage = document.querySelector('.image-only-grid img');
+                const firstImageBox = firstImage?.getBoundingClientRect();
+                const viewBox = view?.getBoundingClientRect();
+                return {
+                    imageOnly: view?.classList.contains('images-only') ?? false,
+                    statusbarCount: document.querySelectorAll('.statusbar').length,
+                    toolbarCount: document.querySelectorAll('.export-toolbar').length,
+                    buttonCount: document.querySelectorAll('.export-view button').length,
+                    selectCount: document.querySelectorAll('.export-view select').length,
+                    labelCount: document.querySelectorAll('.export-view .preview-label').length,
+                    slideTextCount: document.querySelectorAll('.export-view .headline, .export-view .body, .export-view .caption, .export-view .label').length,
+                    imageOnlyGridCount: grid ? 1 : 0,
+                    imageOnlyImageCount: document.querySelectorAll('.image-only-grid img').length,
+                    firstImageWidth: firstImageBox?.width ?? 0,
+                    firstImageHeight: firstImageBox?.height ?? 0,
+                    viewWidth: viewBox?.width ?? 0,
+                    viewHeight: viewBox?.height ?? 0,
+                };
+            }"""
+        )
+
+    press(page, "Shift+.")
+    zen = metrics()
+    assert zen["statusbarCount"] == 0, zen
+    assert zen["imageOnly"] is False, zen
+    assert zen["toolbarCount"] == 1, zen
+    assert zen["labelCount"] > 0, zen
+
+    press(page, "Shift+.")
+    image_only = metrics()
+    assert image_only["statusbarCount"] == 0, image_only
+    assert image_only["imageOnly"] is True, image_only
+    assert image_only["toolbarCount"] == 0, image_only
+    assert image_only["buttonCount"] == 0, image_only
+    assert image_only["selectCount"] == 0, image_only
+    assert image_only["labelCount"] == 0, image_only
+    assert image_only["slideTextCount"] == 0, image_only
+    assert image_only["imageOnlyGridCount"] == 1, image_only
+    assert image_only["imageOnlyImageCount"] > 0, image_only
+    assert image_only["firstImageWidth"] >= image_only["viewWidth"] * 0.2, image_only
+    assert image_only["firstImageHeight"] >= image_only["viewHeight"] * 0.2, image_only
+
+    press(page, "Shift+.")
+    wait_mode(page, "export")
+    normal = metrics()
+    assert normal["imageOnly"] is False, normal
+    assert normal["toolbarCount"] == 1, normal
+    assert normal["labelCount"] > 0, normal
+
+
 def test_grid_navigation(page: Page) -> None:
     press(page, "Meta+1")
     wait_mode(page, "grid")
@@ -292,6 +353,7 @@ def test_loupe_navigation(page: Page) -> None:
     press(page, "Home")
     press(page, "Enter")
     wait_mode(page, "loupe")
+    ensure_nsfw_mode(page, "show")
     expect(page.locator(".statusbar")).to_contain_text("image-0.png | 1920x1080 | png")
 
     press(page, "ArrowRight")
@@ -586,6 +648,7 @@ def test_loupe_zoom(page: Page) -> None:
     press(page, "Home")
     press(page, "Enter")
     wait_mode(page, "loupe")
+    ensure_nsfw_mode(page, "show")
 
     # Zoom in
     press(page, "+")
@@ -957,6 +1020,7 @@ def main() -> int:
         smoke.step("S01 view switching", lambda: test_view_switching(page))
         smoke.step("S01c compare layout bounded by status bar", lambda: test_compare_statusbar_does_not_resize_layout(page))
         smoke.step("S01d compare Shift+. image-only mode", lambda: test_compare_shift_period_cycles_to_image_only(page))
+        smoke.step("S01e export Shift+. image-only mode", lambda: test_export_shift_period_cycles_to_image_only(page))
         smoke.step("S02 grid navigation", lambda: test_grid_navigation(page))
         smoke.step("S03 loupe navigation", lambda: test_loupe_navigation(page))
         smoke.step("S09/S10/S11 curation and selection", lambda: test_rating_decision_and_selection(page))

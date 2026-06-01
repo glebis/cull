@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { images, selectedIds, showToast } from '$lib/stores';
+    import { exportImageOnly, images, selectedIds, showToast, zenMode } from '$lib/stores';
     import { createExportManifest, listExportPresets, getExportAsset } from '$lib/export-api';
     import type { ExportManifest, PresetInfo, ExportTarget } from '$lib/export-types';
     import { convertFileSrc } from '@tauri-apps/api/core';
@@ -17,6 +17,7 @@
     let exporting = $state(false);
     let exportProgress = $state({ current: 0, total: 0, label: '' });
     let renderRefs: Record<string, HTMLDivElement> = $state({});
+    let imageOnly = $derived($zenMode && $exportImageOnly);
 
     let selectedImages = $derived(
         $selectedIds.size > 0
@@ -28,6 +29,18 @@
         return manifest !== null ? manifest.targets[0] : undefined;
     }
     let activeTarget = $derived(getActiveTarget());
+
+    let imageOnlySrcByImageId = $derived.by(() => {
+        const srcs: Record<string, string> = {};
+        if (!manifest) return srcs;
+
+        manifest.source.image_ids.forEach((imageId, index) => {
+            const slide = manifest?.slides[index];
+            if (!slide) return;
+            srcs[imageId] = imageSrcs[slide.image.asset_id] ?? '';
+        });
+        return srcs;
+    });
 
     let previewScale = $derived(
         activeTarget ? Math.min(300 / activeTarget.width, 400 / activeTarget.height, 1) : 0.25
@@ -126,28 +139,30 @@
     });
 </script>
 
-<div class="export-view">
-    <div class="export-toolbar">
-        <div class="template-picker">
-            <button class:active={template === 'bleed'} onclick={() => handleTemplateChange('bleed')}>Bleed</button>
-            <button class:active={template === 'editorial'} onclick={() => handleTemplateChange('editorial')}>Editorial</button>
-            <button class:active={template === 'terminal'} onclick={() => handleTemplateChange('terminal')}>Terminal</button>
+<div class="export-view" class:images-only={imageOnly}>
+    {#if !imageOnly}
+        <div class="export-toolbar">
+            <div class="template-picker">
+                <button class:active={template === 'bleed'} onclick={() => handleTemplateChange('bleed')}>Bleed</button>
+                <button class:active={template === 'editorial'} onclick={() => handleTemplateChange('editorial')}>Editorial</button>
+                <button class:active={template === 'terminal'} onclick={() => handleTemplateChange('terminal')}>Terminal</button>
+            </div>
+
+            <div class="preset-picker">
+                <select onchange={(e) => handlePresetChange(e.currentTarget.value)} value={selectedPreset}>
+                    {#each presets as preset}
+                        <option value={preset.id}>{preset.platform} — {preset.format} ({preset.width}×{preset.height})</option>
+                    {/each}
+                </select>
+            </div>
+
+            <button class="export-btn" onclick={exportSlides} disabled={exporting || !manifest}>
+                {exporting ? 'Exporting...' : activeTarget?.mime === 'application/pdf' ? 'Export PDF' : 'Export PNGs'}
+            </button>
         </div>
+    {/if}
 
-        <div class="preset-picker">
-            <select onchange={(e) => handlePresetChange(e.currentTarget.value)} value={selectedPreset}>
-                {#each presets as preset}
-                    <option value={preset.id}>{preset.platform} — {preset.format} ({preset.width}×{preset.height})</option>
-                {/each}
-            </select>
-        </div>
-
-        <button class="export-btn" onclick={exportSlides} disabled={exporting || !manifest}>
-            {exporting ? 'Exporting...' : activeTarget?.mime === 'application/pdf' ? 'Export PDF' : 'Export PNGs'}
-        </button>
-    </div>
-
-    {#if exporting && exportProgress.total > 0}
+    {#if !imageOnly && exporting && exportProgress.total > 0}
         <div class="export-progress" role="status" aria-live="polite">
             <span>{exportProgress.label}</span>
             <span>{exportProgress.current}/{exportProgress.total}</span>
@@ -161,6 +176,15 @@
         <div class="empty-state">
             <span class="empty-title">No images selected</span>
             <span class="empty-hint">Select images in the grid view, then switch to export</span>
+        </div>
+    {:else if imageOnly && manifest}
+        <div class="image-only-grid">
+            {#each selectedImages as selectedImage}
+                {@const src = imageOnlySrcByImageId[selectedImage.image.id] ?? ''}
+                {#if src}
+                    <img src={src} alt="" draggable="false" />
+                {/if}
+            {/each}
         </div>
     {:else if manifest && activeTarget}
         <div class="preview-grid">
@@ -206,6 +230,15 @@
         flex-direction: column;
         overflow: hidden;
         background: var(--bg);
+    }
+
+    .export-view.images-only {
+        background: var(--bg);
+    }
+
+    .export-view.images-only .export-toolbar,
+    .export-view.images-only .preview-label {
+        display: none;
     }
 
     .export-toolbar {
@@ -254,7 +287,7 @@
     .export-btn {
         margin-left: auto;
         background: var(--green);
-        color: #08080c;
+        color: var(--bg);
         border: none;
         font-family: var(--font);
         font-size: 12px;
@@ -301,6 +334,28 @@
         flex-wrap: wrap;
         gap: 20px;
         align-content: flex-start;
+    }
+
+    .image-only-grid {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+        grid-auto-rows: minmax(0, 1fr);
+        gap: 2px;
+        padding: 0;
+        overflow: hidden;
+        background: var(--bg);
+    }
+
+    .image-only-grid img {
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        object-fit: contain;
+        display: block;
+        background: var(--bg);
     }
 
     .preview-card {
