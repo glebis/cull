@@ -3,6 +3,7 @@ import { get } from 'svelte/store';
 
 const mocks = vi.hoisted(() => ({
     listen: vi.fn(),
+    openUrl: vi.fn(),
     updateMenuState: vi.fn(),
 }));
 
@@ -15,6 +16,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 }));
 
 vi.mock('@tauri-apps/plugin-opener', () => ({
+    openUrl: mocks.openUrl,
     openPath: vi.fn(),
     revealItemInDir: vi.fn(),
 }));
@@ -123,5 +125,23 @@ describe('native menu bridge', () => {
         expect(mocks.listen).toHaveBeenCalledTimes(2);
         restartedHandler?.({ payload: 'view_loupe' });
         expect(get(viewMode)).toBe('loupe');
+    });
+
+    it('opens the GitHub wiki when the native Help menu action fires', async () => {
+        let handler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, next) => {
+            handler = next as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+
+        const { initMenu } = await import('./menu');
+
+        void initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        await flushMicrotasks();
+
+        handler?.({ payload: 'github_wiki' });
+        await flushMicrotasks();
+
+        expect(mocks.openUrl).toHaveBeenCalledWith('https://github.com/glebis/cull/wiki');
     });
 });
