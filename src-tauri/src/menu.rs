@@ -219,73 +219,81 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         Some::<&str>("CmdOrCtrl+B"),
     )?)?;
     view_menu.append(&PredefinedMenuItem::separator(app)?)?;
-    view_menu.append(&MenuItem::with_id(
+    let preview_display_menu = Submenu::new(app, "Preview Display", true)?;
+    preview_display_menu.append(&MenuItem::with_id(
         app,
         "view_preview_display",
-        "Preview Display",
+        "Open Preview Display",
         true,
         Some::<&str>("CmdOrCtrl+Shift+P"),
     )?)?;
-    view_menu.append(&MenuItem::with_id(
+    preview_display_menu.append(&MenuItem::with_id(
         app,
         "preview_display_move_monitor",
-        "Move Preview Display to Display...",
+        "Move to Display...",
         true,
         None::<&str>,
     )?)?;
-    view_menu.append(&MenuItem::with_id(
+    preview_display_menu.append(&MenuItem::with_id(
         app,
         "preview_display_fullscreen",
-        "Fullscreen Preview Display",
+        "Fullscreen",
         true,
         None::<&str>,
     )?)?;
-    view_menu.append(&MenuItem::with_id(
+    preview_display_menu.append(&PredefinedMenuItem::separator(app)?)?;
+
+    let preview_display_web_stream_menu = Submenu::new(app, "Web Stream", true)?;
+    preview_display_web_stream_menu.append(&MenuItem::with_id(
         app,
         "preview_display_start_web_stream",
-        "Start Preview Display Web Stream",
+        "Start Local Web Stream",
         true,
         None::<&str>,
     )?)?;
-    view_menu.append(&MenuItem::with_id(
+    preview_display_web_stream_menu.append(&MenuItem::with_id(
         app,
         "preview_display_start_lan_web_stream",
-        "Start Preview Display LAN Web Stream",
+        "Start LAN Web Stream",
         true,
         None::<&str>,
     )?)?;
-    view_menu.append(&MenuItem::with_id(
+    preview_display_web_stream_menu.append(&MenuItem::with_id(
         app,
         "preview_display_copy_web_stream_url",
-        "Copy Preview Display Web URL",
+        "Copy Web URL",
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&MenuItem::with_id(
+    preview_display_web_stream_menu.append(&MenuItem::with_id(
         app,
         "preview_display_stop_web_stream",
-        "Stop Preview Display Web Stream",
+        "Stop Web Stream",
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_menu.append(&preview_display_web_stream_menu)?;
+    preview_display_menu.append(&PredefinedMenuItem::separator(app)?)?;
+    preview_display_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_freeze",
-        "Freeze Preview Display",
+        "Freeze",
         true,
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_blank",
-        "Blank Preview Display",
+        "Blank",
         true,
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&PredefinedMenuItem::separator(app)?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_menu.append(&PredefinedMenuItem::separator(app)?)?;
+
+    let preview_display_presets_menu = Submenu::new(app, "Presets", true)?;
+    preview_display_presets_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_preset_image_only",
         "Image Only",
@@ -293,7 +301,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         true,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_presets_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_preset_client_review",
         "Client Review",
@@ -301,7 +309,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_presets_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_preset_metadata_review",
         "Metadata Review",
@@ -309,8 +317,10 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&PredefinedMenuItem::separator(app)?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_menu.append(&preview_display_presets_menu)?;
+
+    let preview_display_fields_menu = Submenu::new(app, "Metadata Fields", true)?;
+    preview_display_fields_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_field_filename",
         "Show Filename",
@@ -318,7 +328,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_fields_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_field_rating",
         "Show Rating",
@@ -326,7 +336,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_fields_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_field_decision",
         "Show Decision",
@@ -334,7 +344,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_fields_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_field_dimensions",
         "Show Dimensions",
@@ -342,7 +352,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_fields_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_field_format",
         "Show Format",
@@ -350,7 +360,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_fields_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_field_source",
         "Show Source",
@@ -358,7 +368,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_fields_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_field_prompt",
         "Show Prompt",
@@ -366,7 +376,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_fields_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_field_tags",
         "Show Tags",
@@ -374,7 +384,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_fields_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_field_histogram",
         "Show Histogram",
@@ -382,71 +392,77 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&PredefinedMenuItem::separator(app)?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_menu.append(&preview_display_fields_menu)?;
+
+    let preview_display_info_rail_menu = Submenu::new(app, "Info Rail", true)?;
+    preview_display_info_rail_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_rail_left",
-        "Info Rail Left",
+        "Left",
         true,
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_info_rail_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_rail_right",
-        "Info Rail Right",
+        "Right",
         true,
         true,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_info_rail_menu.append(&PredefinedMenuItem::separator(app)?)?;
+    preview_display_info_rail_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_rail_width_narrow",
-        "Info Rail Narrow",
+        "Narrow",
         true,
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_info_rail_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_rail_width_medium",
-        "Info Rail Medium",
+        "Medium",
         true,
         true,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_info_rail_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_rail_width_wide",
-        "Info Rail Wide",
+        "Wide",
         true,
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_info_rail_menu.append(&PredefinedMenuItem::separator(app)?)?;
+    preview_display_info_rail_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_text_small",
-        "Info Text Small",
+        "Small Text",
         true,
         false,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_info_rail_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_text_medium",
-        "Info Text Medium",
+        "Medium Text",
         true,
         true,
         None::<&str>,
     )?)?;
-    view_menu.append(&CheckMenuItem::with_id(
+    preview_display_info_rail_menu.append(&CheckMenuItem::with_id(
         app,
         "preview_display_text_large",
-        "Info Text Large",
+        "Large Text",
         true,
         false,
         None::<&str>,
     )?)?;
+    preview_display_menu.append(&preview_display_info_rail_menu)?;
+    view_menu.append(&preview_display_menu)?;
     view_menu.append(&PredefinedMenuItem::separator(app)?)?;
     view_menu.append(&MenuItem::with_id(
         app,

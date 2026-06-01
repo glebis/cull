@@ -9,6 +9,14 @@ function source(path: string): string {
 }
 
 describe('Preview Display control contract', () => {
+    function viewMenuSource(): string {
+        const menu = source('src-tauri/src/menu.rs');
+        const start = menu.indexOf('// View menu');
+        const end = menu.indexOf('menu.append(&view_menu)?;', start);
+
+        return menu.slice(start, end);
+    }
+
     it('adds View menu actions for freeze, blank, and presets', () => {
         const menu = source('src-tauri/src/menu.rs');
 
@@ -75,5 +83,13 @@ describe('Preview Display control contract', () => {
         expect(page).toContain('previewDisplayFrozen');
         expect(page).toContain('previewDisplayBlanked');
         expect(page).toContain('previewSyncImageId');
+    });
+
+    it('keeps Preview Display controls nested instead of crowding the top-level View menu', () => {
+        const viewMenu = viewMenuSource();
+
+        expect(viewMenu).toContain('Submenu::new(app, "Preview Display", true)?');
+        expect(viewMenu).toContain('view_menu.append(&preview_display_menu)?');
+        expect(viewMenu).not.toMatch(/view_menu\.append\(&(?:Check)?MenuItem::with_id\(\s*app,\s*"preview_display_/);
     });
 });
