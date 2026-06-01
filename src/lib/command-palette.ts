@@ -40,6 +40,7 @@ import {
 import { invalidateImageCache, loadAllImages, loadImagesForCurrentScope } from './image-loading';
 import { addToCollection, createCollection, listCanvases, listCollections, redo, setDecision, setRating, undo, validateSessionFolder, type Canvas, type Session } from './api';
 import { withDecision, withRating, type ImageDecision } from './selection-updates';
+import { createWorkflow, readWorkflows, runWorkflow, type CommandWorkflow } from './workflows';
 
 export type CommandPaletteItemKind = 'command' | 'destination';
 
@@ -390,6 +391,68 @@ async function addFocusedImageToCollectTarget() {
     statusHint.set('Added to collection. Space for next, B to exit');
 }
 
+export const WORKFLOW_CREATE_COMMAND_ID = 'workflow.create-from-recents';
+
+async function executeWorkflow(workflow: CommandWorkflow) {
+    const result = await runWorkflow(workflow, {
+        resolveItem: id => getCommandPaletteItems('all').find(item => item.id === id),
+        confirm: item =>
+            typeof window !== 'undefined' && typeof window.confirm === 'function'
+                ? window.confirm(`Run destructive step "${item.title}"?`)
+                : true,
+    });
+
+    if (result.cancelled) {
+        statusHint.set(`Workflow "${workflow.name}" cancelled`);
+        setTimeout(() => statusHint.set(null), 2000);
+        return;
+    }
+    if (!result.ok) {
+        showToast(result.error ?? 'Workflow failed', { type: 'error', duration: 6000 });
+        return;
+    }
+    showToast(`Workflow "${workflow.name}" complete`, { type: 'success', duration: 3000 });
+    window.dispatchEvent(new CustomEvent('reload-images'));
+}
+
+async function createWorkflowFromRecents() {
+    // Recent IDs are stored most-recent-first; a workflow should replay them in
+    // the order they were used, so reverse to chronological and drop meta steps.
+    const steps = readRecentCommandIds()
+        .filter(id => id !== WORKFLOW_CREATE_COMMAND_ID && !id.startsWith('workflow.'))
+        .reverse();
+    if (steps.length === 0) {
+        statusHint.set('Run some commands first to capture a workflow');
+        setTimeout(() => statusHint.set(null), 2500);
+        return;
+    }
+
+    const name = await requestTextInput({
+        title: 'Save Workflow from Recent Commands',
+        label: 'Workflow name',
+        description: `${steps.length} recent command${steps.length === 1 ? '' : 's'} will be saved as a runnable sequence.`,
+        placeholder: 'Workflow name',
+        confirmLabel: 'Save',
+    });
+    if (!name?.trim()) return;
+
+    createWorkflow(name.trim(), steps);
+    statusHint.set(`Saved workflow "${name.trim()}"`);
+    setTimeout(() => statusHint.set(null), 2500);
+}
+
+function workflowItems(): CommandPaletteItem[] {
+    return readWorkflows().map((workflow): CommandPaletteItem => ({
+        id: workflow.id,
+        title: workflow.name,
+        subtitle: `Workflow · ${workflow.steps.length} step${workflow.steps.length === 1 ? '' : 's'}`,
+        category: 'Workflow',
+        kind: 'command',
+        keywords: ['workflow', 'automation', 'sequence', 'run'],
+        run: () => executeWorkflow(workflow),
+    }));
+}
+
 function commandItems(): CommandPaletteItem[] {
     const hasImage = Boolean(get(images)[get(focusedIndex)]);
     const selectedCount = get(selectedIds).size;
@@ -416,6 +479,15 @@ function commandItems(): CommandPaletteItem[] {
             kind: 'command',
             keywords: ['preferences', 'configuration', 'mcp'],
             run: () => settingsOpen.set(true),
+        },
+        {
+            id: WORKFLOW_CREATE_COMMAND_ID,
+            title: 'Save Workflow from Recent Commands',
+            subtitle: 'Capture your recent command sequence as a runnable workflow',
+            category: 'Workflow',
+            kind: 'command',
+            keywords: ['workflow', 'automation', 'sequence', 'macro', 'save'],
+            run: createWorkflowFromRecents,
         },
         {
             id: 'app.reload-images',
@@ -706,7 +778,7 @@ function destinationItems(): CommandPaletteItem[] {
 }
 
 export function getCommandPaletteItems(mode: CommandPaletteMode = get(commandPaletteMode)): CommandPaletteItem[] {
-    const commands = commandItems();
+    const commands = [...workflowItems(), ...commandItems()];
     if (mode === 'commands') return commands;
     return [...commands, ...destinationItems()];
 }

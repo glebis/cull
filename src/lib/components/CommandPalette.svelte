@@ -10,11 +10,13 @@
         focusedImage,
         folders,
         images,
+        requestTextInput,
         selectedIds,
         smartCollections,
         viewMode,
         type CommandPaletteMode,
     } from '$lib/stores';
+    import { renameWorkflow, deleteWorkflow } from '$lib/workflows';
     import {
         canAssignCommandHotkey,
         getCommandPaletteItems,
@@ -32,6 +34,7 @@
         shortcutForItem,
         shortcutFromKeyboardEvent,
         sortCommandPaletteItems,
+        WORKFLOW_CREATE_COMMAND_ID,
         type CommandPaletteItem,
     } from '$lib/command-palette';
 
@@ -183,6 +186,30 @@
     function clearRecent(item: CommandPaletteItem) {
         recentIds = removeRecentCommand(item.id);
         contextMenu = null;
+    }
+
+    function isWorkflowItem(item: CommandPaletteItem) {
+        return item.id.startsWith('workflow.') && item.id !== WORKFLOW_CREATE_COMMAND_ID;
+    }
+
+    async function renameWorkflowItem(item: CommandPaletteItem) {
+        contextMenu = null;
+        const name = await requestTextInput({
+            title: 'Rename Workflow',
+            label: 'Workflow name',
+            placeholder: item.title,
+            confirmLabel: 'Rename',
+        });
+        if (!name?.trim()) return;
+        renameWorkflow(item.id, name.trim());
+        refreshItems();
+    }
+
+    function deleteWorkflowItem(item: CommandPaletteItem) {
+        contextMenu = null;
+        pinnedIds = setCommandPinned(item.id, false);
+        deleteWorkflow(item.id);
+        refreshItems();
     }
 
     function startHotkeyCapture(item: CommandPaletteItem) {
@@ -393,6 +420,14 @@
                     {#if recentIds.includes(contextItem.id)}
                         <button type="button" role="menuitem" onclick={() => clearRecent(contextItem)}>
                             Remove from Recents
+                        </button>
+                    {/if}
+                    {#if isWorkflowItem(contextItem)}
+                        <button type="button" role="menuitem" onclick={() => renameWorkflowItem(contextItem)}>
+                            Rename Workflow...
+                        </button>
+                        <button type="button" role="menuitem" class="danger" onclick={() => deleteWorkflowItem(contextItem)}>
+                            Delete Workflow
                         </button>
                     {/if}
                     <button type="button" role="menuitem" onclick={() => copyCommandId(contextItem)}>
