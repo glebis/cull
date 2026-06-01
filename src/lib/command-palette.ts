@@ -83,6 +83,7 @@ export const COMMAND_PINS_STORAGE_KEY = 'cull.commandPalette.pins';
 export const COMMAND_RECENTS_STORAGE_KEY = 'cull.commandPalette.recents';
 export const COMMAND_FREQUENCY_STORAGE_KEY = 'cull.commandPalette.frequency';
 export const COMMAND_HOTKEYS_STORAGE_KEY = 'cull.commandPalette.hotkeys';
+export const COMMAND_ALIASES_STORAGE_KEY = 'cull.commandPalette.aliases';
 
 const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
     'Cmd+K': 'Open command palette',
@@ -190,6 +191,34 @@ export function removeRecentCommand(id: string): string[] {
 
 export function readCommandHotkeys(): Record<string, string> {
     return readJson<Record<string, string>>(COMMAND_HOTKEYS_STORAGE_KEY, {});
+}
+
+export function readCommandAliases(): Record<string, string> {
+    return readJson<Record<string, string>>(COMMAND_ALIASES_STORAGE_KEY, {});
+}
+
+// Set or clear a user alias — extra search terms that make a command easier to
+// find by the words the user actually thinks in.
+export function setCommandAlias(id: string, alias: string | null): Record<string, string> {
+    const aliases = { ...readCommandAliases() };
+    const trimmed = alias?.trim();
+    if (trimmed) aliases[id] = trimmed;
+    else delete aliases[id];
+    writeJson(COMMAND_ALIASES_STORAGE_KEY, aliases);
+    return aliases;
+}
+
+// Fold stored aliases into each item's keywords so the existing fuzzy scorer
+// matches them with no scoring-path changes.
+export function applyCommandAliases(
+    items: CommandPaletteItem[],
+    aliases: Record<string, string>,
+): CommandPaletteItem[] {
+    return items.map(item => {
+        const alias = aliases[item.id];
+        if (!alias) return item;
+        return { ...item, keywords: [...(item.keywords ?? []), alias] };
+    });
 }
 
 export function setCommandHotkey(id: string, shortcut: string | null): Record<string, string> {
@@ -829,8 +858,8 @@ function destinationItems(): CommandPaletteItem[] {
 
 export function getCommandPaletteItems(mode: CommandPaletteMode = get(commandPaletteMode)): CommandPaletteItem[] {
     const commands = [...workflowItems(), ...commandItems()];
-    if (mode === 'commands') return commands;
-    return [...commands, ...destinationItems()];
+    const all = mode === 'commands' ? commands : [...commands, ...destinationItems()];
+    return applyCommandAliases(all, readCommandAliases());
 }
 
 export function isCommandPaletteItemVisible(item: CommandPaletteItem): boolean {

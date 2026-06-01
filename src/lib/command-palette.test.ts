@@ -399,6 +399,23 @@ describe('command palette shortcut inspection', () => {
         expect(rows.find(r => r.id === 'view.loupe')?.conflict).toBe(true);
     });
 
+    it('persists command aliases and makes them searchable', async () => {
+        const { setCommandAlias, readCommandAliases, applyCommandAliases } = await import('./command-palette');
+        setCommandAlias('view.grid', 'gallery wall');
+        expect(readCommandAliases()['view.grid']).toBe('gallery wall');
+
+        const items = applyCommandAliases([item('view.grid', 'Grid View', 'View')], readCommandAliases());
+        // The alias term should now produce a positive fuzzy score.
+        expect(scoreCommandPaletteItem('gallery', items[0])).toBeGreaterThan(0);
+    });
+
+    it('clears an alias when set to null', async () => {
+        const { setCommandAlias, readCommandAliases } = await import('./command-palette');
+        setCommandAlias('view.grid', 'gallery');
+        setCommandAlias('view.grid', null);
+        expect(readCommandAliases()['view.grid']).toBeUndefined();
+    });
+
     it('reset clears all custom hotkeys but leaves defaults intact', () => {
         setCommandHotkey('view.loupe', 'Cmd+L');
         expect(readCommandHotkeys()['view.loupe']).toBe('Cmd+L');

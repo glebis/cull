@@ -12,6 +12,7 @@
         images,
         requestTextInput,
         selectedIds,
+        shortcutsOpen,
         smartCollections,
         viewMode,
         type CommandPaletteMode,
@@ -33,6 +34,7 @@
         setCommandPinned,
         shortcutForItem,
         shortcutFromKeyboardEvent,
+        setCommandAlias,
         sortCommandPaletteItems,
         WORKFLOW_CREATE_COMMAND_ID,
         type CommandPaletteItem,
@@ -190,6 +192,26 @@
 
     function isWorkflowItem(item: CommandPaletteItem) {
         return item.id.startsWith('workflow.') && item.id !== WORKFLOW_CREATE_COMMAND_ID;
+    }
+
+    async function addAlias(item: CommandPaletteItem) {
+        contextMenu = null;
+        const alias = await requestTextInput({
+            title: 'Add Alias',
+            label: 'Search alias',
+            description: `Extra search terms for "${item.title}". Leave empty to clear.`,
+            placeholder: 'e.g. gallery wall',
+            confirmLabel: 'Save',
+        });
+        if (alias === null) return;
+        setCommandAlias(item.id, alias.trim() || null);
+        refreshItems();
+    }
+
+    function openInSettings() {
+        contextMenu = null;
+        closePalette();
+        shortcutsOpen.set(true);
     }
 
     async function renameWorkflowItem(item: CommandPaletteItem) {
@@ -407,7 +429,7 @@
                         Run
                     </button>
                     <button type="button" role="menuitem" onclick={() => togglePinned(contextItem)}>
-                        {isPinned(contextItem) ? 'Unpin Result' : 'Pin Result'}
+                        {isPinned(contextItem) ? 'Unfavorite' : 'Favorite'}
                     </button>
                     <button type="button" role="menuitem" onclick={() => startHotkeyCapture(contextItem)}>
                         Set Hotkey...
@@ -417,6 +439,9 @@
                             Clear Hotkey
                         </button>
                     {/if}
+                    <button type="button" role="menuitem" onclick={() => addAlias(contextItem)}>
+                        Add Alias...
+                    </button>
                     {#if recentIds.includes(contextItem.id)}
                         <button type="button" role="menuitem" onclick={() => clearRecent(contextItem)}>
                             Remove from Recents
@@ -432,6 +457,9 @@
                     {/if}
                     <button type="button" role="menuitem" onclick={() => copyCommandId(contextItem)}>
                         Copy Command ID
+                    </button>
+                    <button type="button" role="menuitem" onclick={openInSettings}>
+                        Open in Settings
                     </button>
                 </div>
             {/if}

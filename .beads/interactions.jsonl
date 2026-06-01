@@ -99,3 +99,5 @@
 {"id":"int-4b703cbd","kind":"field_change","created_at":"2026-06-01T23:24:13.87239Z","actor":"glebis","issue_id":"imageview-zu0.5","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-eeff3023","kind":"field_change","created_at":"2026-06-01T23:27:54.797619Z","actor":"glebis","issue_id":"imageview-zu0.6","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-21084684","kind":"field_change","created_at":"2026-06-01T23:28:12.567983Z","actor":"glebis","issue_id":"imageview-zu0.7","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+{"id":"int-9439b214","kind":"field_change","created_at":"2026-06-01T23:30:50.638358Z","actor":"glebis","issue_id":"imageview-zu0.7","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-ca10d8d0","kind":"field_change","created_at":"2026-06-01T23:31:04.523005Z","actor":"glebis","issue_id":"imageview-zu0.9","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
