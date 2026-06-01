@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
     listen: vi.fn(),
     openUrl: vi.fn(),
     updateMenuState: vi.fn(),
+    getPreviewDisplayWebStreamStatus: vi.fn(),
     checkForUpdates: vi.fn(),
 }));
 
@@ -35,6 +36,13 @@ vi.mock('./api', () => ({
     trashImages: vi.fn(),
     listFolders: vi.fn(),
     updateMenuState: mocks.updateMenuState,
+    openPreviewDisplay: vi.fn(),
+    listPreviewDisplayMonitors: vi.fn(),
+    placePreviewDisplay: vi.fn(),
+    startPreviewDisplayWebStream: vi.fn(),
+    stopPreviewDisplayWebStream: vi.fn(),
+    getPreviewDisplayWebStreamStatus: mocks.getPreviewDisplayWebStreamStatus,
+    setAppSetting: vi.fn(),
 }));
 
 vi.mock('./image-loading', () => ({
@@ -80,6 +88,14 @@ describe('native menu bridge', () => {
         vi.useFakeTimers();
         vi.clearAllMocks();
         mocks.updateMenuState.mockResolvedValue(undefined);
+        mocks.getPreviewDisplayWebStreamStatus.mockResolvedValue({
+            active: false,
+            url: null,
+            host: null,
+            bound_host: null,
+            port: null,
+            remote_access: false,
+        });
     });
 
     afterEach(() => {

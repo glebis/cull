@@ -12,7 +12,7 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 | File menu | Pass | Open File and Open Folder are wired to import flows. Close Window uses the native predefined item. |
 | Edit menu | Pass | Undo and Redo are wired to Cull's undo stack. Cut, Copy, Paste, Select All use native predefined items. Deselect All clears image selection and is disabled when nothing is selected. |
 | Image menu | Pass | Current image/selection actions mirror the context menu and are disabled when no image is focused. |
-| View menu | Pass | View labels and shortcuts match the tab bar and keyboard handler. Current view and sidebar state are reflected with checkmarks. |
+| View menu | Pass | View labels and shortcuts match the tab bar and keyboard handler. Current view, sidebar, Preview Display, and web stream state are reflected where applicable. |
 | Window menu | Pass | Minimize, Zoom, and Bring All to Front use native predefined items. |
 | Help menu | Pass | Cull User Guide opens the bundled native Apple Help Book in Tips. |
 | Tray menu | Partial | Show Window, Clipboard Monitor, and Quit are wired. Stats and MCP status are display-only placeholders until dynamic tray status refresh is implemented. |
@@ -73,6 +73,17 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 | Embedding Explorer | `Cmd+6` | `view_embeddings` | Navigates to Embedding Explorer; checked when active | Pass |
 | Export | `Cmd+0` | `view_export` | Navigates to Export; checked when active | Pass |
 | Toggle Sidebar | `Cmd+B` | `toggle_sidebar` | Toggles sidebar visibility; checked when sidebar is visible | Pass |
+| Preview Display | `Cmd+Shift+P` | `view_preview_display` | Opens or focuses the dedicated Preview Display window | Pass |
+| Move Preview Display to Display... | none | `preview_display_move_monitor` | Shows available displays and moves the Preview Display to the selected monitor | Pass |
+| Fullscreen Preview Display | none | `preview_display_fullscreen` | Fullscreens Preview Display on the saved/default display | Pass |
+| Start Preview Display Web Stream | none | `preview_display_start_web_stream` | Starts a tokenized local-network preview URL and copies it | Pass |
+| Copy Preview Display Web URL | none | `preview_display_copy_web_stream_url` | Copies the active tokenized web stream URL; disabled when inactive | Pass |
+| Stop Preview Display Web Stream | none | `preview_display_stop_web_stream` | Stops the active web stream and invalidates the token; disabled when inactive | Pass |
+| Freeze Preview Display | none | `preview_display_freeze` | Holds the currently displayed image while main-window focus changes | Pass |
+| Blank Preview Display | none | `preview_display_blank` | Hides Preview Display output without mutating library data | Pass |
+| Image Only | none | `preview_display_preset_image_only` | Uses the image-only Preview Display preset; checked when active | Pass |
+| Client Review | none | `preview_display_preset_client_review` | Uses the client-review Preview Display preset; checked when active | Pass |
+| Metadata Review | none | `preview_display_preset_metadata_review` | Uses the metadata-review Preview Display preset; checked when active | Pass |
 | Zoom In | `Cmd++` | `zoom_in` | Increases grid thumbnail size and Loupe scale | Pass |
 | Zoom Out | `Cmd+-` | `zoom_out` | Decreases grid thumbnail size and Loupe scale | Pass |
 | Actual Size | none | `actual_size` | Resets Loupe scale to 1x | Pass |
@@ -111,4 +122,5 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 - Native menu state is now synchronized from Svelte: image actions disable with no focused image, Deselect All disables with no selection, View items are checked, and Toggle Sidebar reflects the sidebar state.
 - About Cull now opens Cull's custom in-app About dialog so the release can show the app image and linked credits instead of the default native panel.
 - Clipboard Monitor is exposed as a tray checkbox because it is the most useful outside-app workflow: Cull can capture copied AI outputs while the main window is hidden.
+- Preview Display is exposed from View with `Cmd+Shift+P`, monitor placement, freeze/blank controls, presets, and tokenized web stream lifecycle items.
 - The tray status placeholders should become dynamic before a polished binary release, but they do not block a source release.

@@ -1,5 +1,7 @@
 <script lang="ts">
     import { viewMode, totalCount, images, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections, activeFolder, folders, activeSmartCollection, activeDetectedClass, imageLoadState, showDetectionBoxes, nsfwMode } from '$lib/stores';
+    import { previewDisplayBlanked, previewDisplayFrozen, previewDisplayWebStreamStatus } from '$lib/preview-display-store';
+    import { previewDisplayStatusLabel } from '$lib/preview-display';
     import { derived } from 'svelte/store';
 
     const displayCount = derived(
@@ -34,6 +36,11 @@
             return found ? found[1] : null;
         }
     );
+
+    const previewStatus = derived(
+        [previewDisplayFrozen, previewDisplayBlanked],
+        ([$frozen, $blanked]) => previewDisplayStatusLabel($frozen, $blanked)
+    );
 </script>
 
 <div class="statusbar">
@@ -56,6 +63,14 @@
         {#if $statusHint}
             <span class="sep">|</span>
             <span class="status-hint">{$statusHint}</span>
+        {/if}
+        {#if $previewStatus}
+            <span class="sep">|</span>
+            <span class="preview-status">{$previewStatus}</span>
+        {/if}
+        {#if $previewDisplayWebStreamStatus.active}
+            <span class="sep">|</span>
+            <span class="preview-status" title={$previewDisplayWebStreamStatus.url ?? ''}>Preview web live</span>
         {/if}
     </div>
     <div class="right">
@@ -139,6 +154,11 @@
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .preview-status {
+        color: var(--orange);
+        font-weight: 700;
         white-space: nowrap;
     }
     .collection-name {

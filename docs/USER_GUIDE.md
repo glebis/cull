@@ -47,6 +47,16 @@ Cull has seven primary views:
 
 The same view shortcuts are used by the tab bar, keyboard handler, and native View menu.
 
+## Preview Display
+
+Use **View > Preview Display** or `Cmd+Shift+P` to open a separate display window. The main Cull window remains the control surface while Preview Display shows the current focused image on another monitor or an iPad used as a macOS Sidecar display.
+
+Use **View > Move Preview Display to Display...** and **View > Fullscreen Preview Display** for external monitor placement. Use **Freeze Preview Display** to hold the current image while navigating privately, and **Blank Preview Display** to hide the image without changing library data.
+
+For an iPad or browser on the local network, use **View > Start Preview Display Web Stream**. Cull copies a tokenized live URL; stop it with **View > Stop Preview Display Web Stream**. Treat the URL as a secret because anyone on the reachable network with the full URL can view the streamed preview.
+
+More details and limitations are in [Preview Display](preview-display.md).
+
 ## Review And Curate
 
 Use the grid or loupe to move through images and apply lightweight curation metadata:

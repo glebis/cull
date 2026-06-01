@@ -16,6 +16,7 @@ pub mod lineage;
 pub mod mcp;
 pub mod perceptual_hash;
 pub mod privacy;
+pub mod preview;
 pub mod quality;
 pub mod raw;
 pub mod selection;

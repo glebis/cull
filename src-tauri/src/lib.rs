@@ -11,6 +11,7 @@ pub mod extensions;
 mod logging;
 mod mcp;
 mod menu;
+pub mod preview;
 pub mod raw;
 mod services;
 mod tray;
@@ -24,6 +25,8 @@ use crate::db_core::db::Database;
 use crate::db_core::detection::DetectionEngine;
 use crate::db_core::embeddings::EmbeddingEngine;
 use crate::db_core::secrets::{KeychainStore, SecretStore};
+use crate::preview::state::PreviewStateStore;
+use crate::preview::web_stream::PreviewWebStreamController;
 use parking_lot::Mutex;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
@@ -41,6 +44,8 @@ pub struct AppState {
     pub action_manager: services::undo::ActionManager,
     pub file_watcher: Mutex<watcher::FileWatcher>,
     pub clipboard_monitor: Mutex<services::clipboard_monitor::ClipboardMonitorState>,
+    pub preview_state: PreviewStateStore,
+    pub preview_web_stream: PreviewWebStreamController,
 }
 
 fn install_panic_hook(app: AppHandle) {
@@ -258,6 +263,8 @@ pub fn run() {
                 clipboard_monitor: Mutex::new(
                     services::clipboard_monitor::ClipboardMonitorState::default(),
                 ),
+                preview_state: PreviewStateStore::default(),
+                preview_web_stream: PreviewWebStreamController::default(),
             });
 
             // Load persisted job history from DB
@@ -566,6 +573,14 @@ pub fn run() {
             commands::privacy::get_data_flow_status,
             commands::privacy::get_api_audit_log,
             commands::privacy::export_audit_log,
+            commands::preview::get_preview_state,
+            commands::preview::update_preview_state,
+            commands::preview::open_preview_display,
+            commands::preview::list_preview_display_monitors,
+            commands::preview::place_preview_display,
+            commands::preview::start_preview_display_web_stream,
+            commands::preview::stop_preview_display_web_stream,
+            commands::preview::get_preview_display_web_stream_status,
             commands::diagnostics::record_asset_load_event,
             commands::diagnostics::get_asset_load_events,
         ])

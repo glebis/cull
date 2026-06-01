@@ -15,8 +15,17 @@ import {
     trashImages,
     listFolders,
     updateMenuState,
+    openPreviewDisplay,
+    listPreviewDisplayMonitors,
+    placePreviewDisplay,
+    startPreviewDisplayWebStream,
+    stopPreviewDisplayWebStream,
+    getPreviewDisplayWebStreamStatus,
+    setAppSetting,
     type ImageWithFile,
     type OpenWithApplication,
+    type PreviewDisplayMode,
+    type PreviewWebStreamStatus,
 } from './api';
 import {
     images,
@@ -43,6 +52,20 @@ import {
     folders,
     type ViewMode,
 } from './stores';
+import {
+    PREVIEW_DISPLAY_MODE_SETTING,
+    PREVIEW_DISPLAY_OVERLAY_SETTING,
+    previewDisplayBlanked,
+    previewDisplayFrozen,
+    previewDisplayMode,
+    previewDisplayOverlay,
+    previewDisplayWebStreamStatus,
+    setPreviewDisplayBlanked,
+    setPreviewDisplayFrozen,
+    setPreviewDisplayMode,
+    setPreviewDisplayWebStreamStatus,
+} from './preview-display-store';
+import { overlayForPreviewDisplayMode } from './preview-display';
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { folderDisplayName } from './move-menu-utils';
 import { checkForUpdates } from './update-manager';
@@ -342,6 +365,131 @@ async function handleGitHubWiki() {
     }
 }
 
+function handlePreviewDisplayFreeze() {
+    const next = !get(previewDisplayFrozen);
+    setPreviewDisplayFrozen(next);
+    showToast(next ? 'Preview Display frozen' : 'Preview Display live', { type: 'info', duration: 3000 });
+}
+
+function handlePreviewDisplayBlank() {
+    const next = !get(previewDisplayBlanked);
+    setPreviewDisplayBlanked(next);
+    showToast(next ? 'Preview Display blanked' : 'Preview Display visible', { type: 'info', duration: 3000 });
+}
+
+async function handlePreviewDisplayPreset(mode: PreviewDisplayMode) {
+    const overlay = overlayForPreviewDisplayMode(mode);
+    setPreviewDisplayMode(mode);
+    try {
+        await setAppSetting(PREVIEW_DISPLAY_MODE_SETTING, mode);
+        await setAppSetting(PREVIEW_DISPLAY_OVERLAY_SETTING, JSON.stringify(overlay));
+    } catch (e) {
+        showToast('Preview Display preset not saved', { detail: String(e), type: 'warning', duration: 6000 });
+    }
+}
+
+function displayLabel(monitor: { name: string | null; width: number; height: number; primary: boolean }, index: number): string {
+    const name = monitor.name || `Display ${index + 1}`;
+    return `${name}${monitor.primary ? ' (Primary)' : ''} ${monitor.width}x${monitor.height}`;
+}
+
+async function handlePreviewDisplayMoveMonitor() {
+    try {
+        const monitors = await listPreviewDisplayMonitors();
+        if (monitors.length === 0) {
+            showToast('No displays available', { type: 'warning' });
+            return;
+        }
+        showToast('Move Preview Display', {
+            detail: 'Choose display',
+            duration: 12000,
+            actions: monitors.slice(0, 4).map((monitor, index) => ({
+                label: displayLabel(monitor, index),
+                onclick: () => {
+                    placePreviewDisplay(monitor.id, false).catch((e) => {
+                        showToast('Preview Display move failed', { detail: String(e), type: 'error', duration: 8000 });
+                    });
+                },
+            })),
+        });
+    } catch (e) {
+        showToast('Display list unavailable', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
+async function handlePreviewDisplayFullscreen() {
+    try {
+        await placePreviewDisplay(null, true);
+    } catch (e) {
+        showToast('Preview Display fullscreen failed', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
+async function copyPreviewDisplayWebStreamUrl(status: PreviewWebStreamStatus = get(previewDisplayWebStreamStatus)) {
+    if (!status.active || !status.url) {
+        showToast('Preview Display web stream is not running', { type: 'warning', duration: 4000 });
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(status.url);
+        showToast('Preview Display URL copied', { detail: status.url, type: 'success', duration: 8000 });
+    } catch (e) {
+        showToast('Preview Display URL ready', { detail: `${status.url} Copy failed: ${String(e)}`, type: 'warning', duration: 10000 });
+    }
+}
+
+function showPreviewDisplayWebStreamToast(status: PreviewWebStreamStatus) {
+    if (!status.url) return;
+    showToast('Preview Display web stream live', {
+        detail: status.url,
+        type: 'success',
+        duration: 12000,
+        actions: [
+            {
+                label: 'Open',
+                onclick: () => {
+                    openUrl(status.url!).catch((e) => {
+                        showToast('Could not open Preview Display URL', { detail: String(e), type: 'error', duration: 8000 });
+                    });
+                },
+            },
+            {
+                label: 'Copy',
+                onclick: () => {
+                    copyPreviewDisplayWebStreamUrl(status);
+                },
+            },
+            {
+                label: 'Stop',
+                onclick: () => {
+                    handlePreviewDisplayStopWebStream();
+                },
+            },
+        ],
+    });
+}
+
+async function handlePreviewDisplayStartWebStream() {
+    try {
+        const status = await startPreviewDisplayWebStream('0.0.0.0', null);
+        setPreviewDisplayWebStreamStatus(status);
+        await copyPreviewDisplayWebStreamUrl(status);
+        showPreviewDisplayWebStreamToast(status);
+    } catch (e) {
+        showToast('Preview Display web stream failed', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
+async function handlePreviewDisplayStopWebStream() {
+    try {
+        const status = await stopPreviewDisplayWebStream();
+        setPreviewDisplayWebStreamStatus(status);
+        showToast('Preview Display web stream stopped', { type: 'info', duration: 4000 });
+    } catch (e) {
+        showToast('Preview Display web stream stop failed', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
 function handleMenuAction(action: string) {
     switch (action) {
         case 'about':
@@ -417,6 +565,41 @@ function handleMenuAction(action: string) {
             break;
         case 'toggle_sidebar':
             sidebarVisible.update((v) => !v);
+            break;
+        case 'view_preview_display':
+            openPreviewDisplay().catch((e) => {
+                showToast('Preview Display failed', { detail: String(e), type: 'error', duration: 8000 });
+            });
+            break;
+        case 'preview_display_move_monitor':
+            handlePreviewDisplayMoveMonitor();
+            break;
+        case 'preview_display_fullscreen':
+            handlePreviewDisplayFullscreen();
+            break;
+        case 'preview_display_start_web_stream':
+            handlePreviewDisplayStartWebStream();
+            break;
+        case 'preview_display_copy_web_stream_url':
+            copyPreviewDisplayWebStreamUrl();
+            break;
+        case 'preview_display_stop_web_stream':
+            handlePreviewDisplayStopWebStream();
+            break;
+        case 'preview_display_freeze':
+            handlePreviewDisplayFreeze();
+            break;
+        case 'preview_display_blank':
+            handlePreviewDisplayBlank();
+            break;
+        case 'preview_display_preset_image_only':
+            handlePreviewDisplayPreset('image_only');
+            break;
+        case 'preview_display_preset_client_review':
+            handlePreviewDisplayPreset('client_review');
+            break;
+        case 'preview_display_preset_metadata_review':
+            handlePreviewDisplayPreset('metadata_review');
             break;
         case 'zoom_in':
             thumbnailSize.update((s) => Math.min(s + 40, 600));
@@ -511,6 +694,10 @@ function currentMenuStatePayload() {
         hasFocusedImage: get(focusedImage) !== null,
         selectedCount: get(selectedIds).size,
         staticPublishingEnabled: get(staticPublishingEnabled),
+        previewDisplayFrozen: get(previewDisplayFrozen),
+        previewDisplayBlanked: get(previewDisplayBlanked),
+        previewDisplayMode: get(previewDisplayMode),
+        previewDisplayWebStreamActive: get(previewDisplayWebStreamStatus).active,
     };
 }
 
@@ -564,6 +751,11 @@ function startMenuStateSubscriptions() {
     focusedImage.subscribe(queueMenuStateUpdate);
     selectedIds.subscribe(queueMenuStateUpdate);
     staticPublishingEnabled.subscribe(queueMenuStateUpdate);
+    previewDisplayFrozen.subscribe(queueMenuStateUpdate);
+    previewDisplayBlanked.subscribe(queueMenuStateUpdate);
+    previewDisplayMode.subscribe(queueMenuStateUpdate);
+    previewDisplayOverlay.subscribe(queueMenuStateUpdate);
+    previewDisplayWebStreamStatus.subscribe(queueMenuStateUpdate);
     queueMenuStateUpdate();
 }
 
@@ -638,6 +830,9 @@ export async function initMenu(options: MenuInitOptions = {}) {
     };
 
     startMenuStateSubscriptions();
+    getPreviewDisplayWebStreamStatus()
+        .then(setPreviewDisplayWebStreamStatus)
+        .catch((e) => console.debug('Failed to read Preview Display web stream status:', e));
     startMenuActionListener();
     queueMenuStateUpdate();
 }

@@ -26,11 +26,25 @@
     import TextInputDialog from '$lib/components/TextInputDialog.svelte';
     import CollectionTargetDialog from '$lib/components/CollectionTargetDialog.svelte';
     import GenerationResultsStrip from '$lib/components/GenerationResultsStrip.svelte';
+    import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled } from '$lib/stores';
-    import { trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections } from '$lib/api';
+    import { totalCount, images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled } from '$lib/stores';
+    import { trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
+    import { isPreviewDisplayRoute, nextPreviewFocusPayload, previewSyncImageId } from '$lib/preview-display';
+    import {
+        PREVIEW_DISPLAY_MODE_SETTING,
+        PREVIEW_DISPLAY_OVERLAY_SETTING,
+        parsePreviewDisplayMode,
+        parsePreviewDisplayOverlay,
+        previewDisplayBlanked,
+        previewDisplayFrozen,
+        previewDisplayMode,
+        previewDisplayOverlay,
+        setPreviewDisplayMode,
+        setPreviewDisplayOverlay,
+    } from '$lib/preview-display-store';
     import { saveAppState, restoreAppStateBeforeImages, applyRestoredViewState, type PersistedState } from '$lib/persistence';
     import { loadImagesForCurrentScope, type ImageLoadOptions } from '$lib/image-loading';
     import { listen } from '@tauri-apps/api/event';
@@ -40,6 +54,9 @@
     let trashConfirmVisible = $state(false);
     let trashConfirmFileName = $state('');
     let skipTrashConfirmSession = $state(false);
+    const previewDisplayWindow = isPreviewDisplayRoute();
+    let previewSyncState = $state<PreviewState | null>(null);
+    let lastPreviewSyncKey = $state('');
 
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
     let noSidebar = $derived(immersive || !$sidebarVisible);
@@ -117,8 +134,60 @@
         }
     }
 
+    async function restorePreviewDisplaySettings() {
+        const mode = parsePreviewDisplayMode(await getAppSetting(PREVIEW_DISPLAY_MODE_SETTING));
+        setPreviewDisplayMode(mode);
+        const overlay = parsePreviewDisplayOverlay(await getAppSetting(PREVIEW_DISPLAY_OVERLAY_SETTING));
+        if (overlay) setPreviewDisplayOverlay(overlay);
+    }
+
+    async function syncFocusedImageToPreviewDisplay(image: ImageWithFile | null) {
+        const payload = nextPreviewFocusPayload(image, previewSyncState);
+        const imageId = previewSyncImageId(image, previewSyncState, $previewDisplayFrozen, $previewDisplayBlanked);
+        const syncKey = JSON.stringify({
+            imageId,
+            displayMode: $previewDisplayMode,
+            overlay: $previewDisplayOverlay,
+            frozen: $previewDisplayFrozen,
+            blanked: $previewDisplayBlanked,
+        });
+        if (syncKey === lastPreviewSyncKey) return;
+        lastPreviewSyncKey = syncKey;
+        previewSyncState = await updatePreviewState(
+            imageId,
+            $previewDisplayMode ?? payload.displayMode,
+            $previewDisplayOverlay ?? payload.overlay,
+            $previewDisplayFrozen,
+            $previewDisplayBlanked
+        );
+    }
+
+    function handleWindowKeydown(event: KeyboardEvent) {
+        if (previewDisplayWindow) return;
+        handleKeydown(event);
+    }
+
+    $effect(() => {
+        const image = $focusedImage;
+        const frozen = $previewDisplayFrozen;
+        const blanked = $previewDisplayBlanked;
+        const mode = $previewDisplayMode;
+        const overlay = $previewDisplayOverlay;
+        if (previewDisplayWindow) return;
+        void frozen;
+        void blanked;
+        void mode;
+        void overlay;
+        syncFocusedImageToPreviewDisplay(image).catch((e) => {
+            console.debug('Failed to sync Preview Display focus:', e);
+        });
+    });
+
     onMount(() => {
+        if (previewDisplayWindow) return;
+
         const init = async () => {
+            await restorePreviewDisplaySettings();
             const restored = restoreAppStateBeforeImages();
             await restoreSmartCollectionScope(restored);
             const restoredLoadedCount = restored?.loadedImageCount ?? 0;
@@ -224,82 +293,86 @@
     });
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
+<svelte:window onkeydown={handleWindowKeydown} />
 
-<UpdateBanner />
-<div class="app-shell" class:no-sidebar={noSidebar} class:zen={$zenMode}>
-    {#if !$zenMode}
-        <TabBar />
-    {/if}
-    {#if !noSidebar && !$zenMode}
-        <Sidebar />
-    {/if}
-    <ImportBanner />
-    {#if $viewMode === 'grid'}
-        <div class="main-with-commandbar">
-            <div class="command-bar-area">
-                <CommandBar />
+{#if previewDisplayWindow}
+    <PreviewDisplay />
+{:else}
+    <UpdateBanner />
+    <div class="app-shell" class:no-sidebar={noSidebar} class:zen={$zenMode}>
+        {#if !$zenMode}
+            <TabBar />
+        {/if}
+        {#if !noSidebar && !$zenMode}
+            <Sidebar />
+        {/if}
+        <ImportBanner />
+        {#if $viewMode === 'grid'}
+            <div class="main-with-commandbar">
+                <div class="command-bar-area">
+                    <CommandBar />
+                </div>
+                <Grid />
             </div>
-            <Grid />
-        </div>
-    {:else if $viewMode === 'compare'}
-        <Compare />
-    {:else if $viewMode === 'loupe'}
-        <Loupe />
-    {:else if $viewMode === 'embeddings'}
-        <EmbeddingExplorer />
-    {:else if $viewMode === 'publish' && $staticPublishingEnabled}
-        <div class="publish-view">
-            <StaticPublishingSettings />
-        </div>
-    {:else if $viewMode === 'export'}
-        <Export />
-    {:else if $viewMode === 'lineage'}
-        <LineageView />
-    {:else if $viewMode === 'canvas'}
-        <Canvas />
-    {:else if $viewMode === 'tinder'}
-        <Tinder />
-    {:else}
-        <div class="placeholder">
-            <span class="placeholder-label">{$viewMode}</span>
-            <span class="placeholder-text">Coming soon</span>
-        </div>
+        {:else if $viewMode === 'compare'}
+            <Compare />
+        {:else if $viewMode === 'loupe'}
+            <Loupe />
+        {:else if $viewMode === 'embeddings'}
+            <EmbeddingExplorer />
+        {:else if $viewMode === 'publish' && $staticPublishingEnabled}
+            <div class="publish-view">
+                <StaticPublishingSettings />
+            </div>
+        {:else if $viewMode === 'export'}
+            <Export />
+        {:else if $viewMode === 'lineage'}
+            <LineageView />
+        {:else if $viewMode === 'canvas'}
+            <Canvas />
+        {:else if $viewMode === 'tinder'}
+            <Tinder />
+        {:else}
+            <div class="placeholder">
+                <span class="placeholder-label">{$viewMode}</span>
+                <span class="placeholder-text">Coming soon</span>
+            </div>
+        {/if}
+        {#if !$zenMode}
+            <StatusBar />
+        {/if}
+
+        <Toast />
+
+        {#if dragOver}
+            <div class="drop-overlay">
+                <div class="drop-label">Drop to import</div>
+            </div>
+        {/if}
+    </div>
+
+    <JobProgressPanel />
+    <GenerationResultsStrip />
+    <CommandPalette />
+
+    {#if $settingsOpen}
+        <McpSettings onclose={() => settingsOpen.set(false)} />
     {/if}
-    {#if !$zenMode}
-        <StatusBar />
+
+    {#if $aboutOpen}
+        <AboutDialog onclose={() => aboutOpen.set(false)} />
     {/if}
 
-    <Toast />
+    <TrashConfirmDialog
+        visible={trashConfirmVisible}
+        fileName={trashConfirmFileName}
+        onconfirm={handleTrashConfirm}
+        oncancel={() => trashConfirmVisible = false}
+    />
 
-    {#if dragOver}
-        <div class="drop-overlay">
-            <div class="drop-label">Drop to import</div>
-        </div>
-    {/if}
-</div>
-
-<JobProgressPanel />
-<GenerationResultsStrip />
-<CommandPalette />
-
-{#if $settingsOpen}
-    <McpSettings onclose={() => settingsOpen.set(false)} />
+    <TextInputDialog />
+    <CollectionTargetDialog />
 {/if}
-
-{#if $aboutOpen}
-    <AboutDialog onclose={() => aboutOpen.set(false)} />
-{/if}
-
-<TrashConfirmDialog
-    visible={trashConfirmVisible}
-    fileName={trashConfirmFileName}
-    onconfirm={handleTrashConfirm}
-    oncancel={() => trashConfirmVisible = false}
-/>
-
-<TextInputDialog />
-<CollectionTargetDialog />
 
 <style>
     .app-shell {

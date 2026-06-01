@@ -221,6 +221,90 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     view_menu.append(&PredefinedMenuItem::separator(app)?)?;
     view_menu.append(&MenuItem::with_id(
         app,
+        "view_preview_display",
+        "Preview Display",
+        true,
+        Some::<&str>("CmdOrCtrl+Shift+P"),
+    )?)?;
+    view_menu.append(&MenuItem::with_id(
+        app,
+        "preview_display_move_monitor",
+        "Move Preview Display to Display...",
+        true,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&MenuItem::with_id(
+        app,
+        "preview_display_fullscreen",
+        "Fullscreen Preview Display",
+        true,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&MenuItem::with_id(
+        app,
+        "preview_display_start_web_stream",
+        "Start Preview Display Web Stream",
+        true,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&MenuItem::with_id(
+        app,
+        "preview_display_copy_web_stream_url",
+        "Copy Preview Display Web URL",
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&MenuItem::with_id(
+        app,
+        "preview_display_stop_web_stream",
+        "Stop Preview Display Web Stream",
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_freeze",
+        "Freeze Preview Display",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_blank",
+        "Blank Preview Display",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&PredefinedMenuItem::separator(app)?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_preset_image_only",
+        "Image Only",
+        true,
+        true,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_preset_client_review",
+        "Client Review",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_preset_metadata_review",
+        "Metadata Review",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&PredefinedMenuItem::separator(app)?)?;
+    view_menu.append(&MenuItem::with_id(
+        app,
         "zoom_in",
         "Zoom In",
         true,
@@ -282,6 +366,18 @@ pub struct MenuStatePayload {
     selected_count: usize,
     #[serde(default)]
     static_publishing_enabled: bool,
+    #[serde(default)]
+    preview_display_frozen: bool,
+    #[serde(default)]
+    preview_display_blanked: bool,
+    #[serde(default = "default_preview_display_mode")]
+    preview_display_mode: String,
+    #[serde(default)]
+    preview_display_web_stream_active: bool,
+}
+
+fn default_preview_display_mode() -> String {
+    "image_only".to_string()
 }
 
 #[tauri::command]
@@ -302,6 +398,38 @@ pub async fn update_menu_state(app: AppHandle, state: MenuStatePayload) -> Resul
     }
 
     set_menu_item_checked(&app, "toggle_sidebar", state.sidebar_visible)?;
+    set_menu_item_checked(&app, "preview_display_freeze", state.preview_display_frozen)?;
+    set_menu_item_checked(&app, "preview_display_blank", state.preview_display_blanked)?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_preset_image_only",
+        state.preview_display_mode == "image_only",
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_preset_client_review",
+        state.preview_display_mode == "client_review",
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_preset_metadata_review",
+        state.preview_display_mode == "metadata_review",
+    )?;
+    set_menu_item_enabled(
+        &app,
+        "preview_display_start_web_stream",
+        !state.preview_display_web_stream_active,
+    )?;
+    set_menu_item_enabled(
+        &app,
+        "preview_display_copy_web_stream_url",
+        state.preview_display_web_stream_active,
+    )?;
+    set_menu_item_enabled(
+        &app,
+        "preview_display_stop_web_stream",
+        state.preview_display_web_stream_active,
+    )?;
     set_menu_item_enabled(&app, "deselect_all", state.selected_count > 0)?;
 
     for id in [
@@ -465,8 +593,14 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
         | "deselect_all" | "image_share" | "image_open_default" | "image_open_with"
         | "image_reveal" | "image_rename" | "image_move_to" | "image_trash" | "view_grid"
         | "view_compare" | "view_loupe" | "view_canvas" | "view_lineage" | "view_embeddings"
-        | "view_publish" | "view_export" | "toggle_sidebar" | "zoom_in" | "zoom_out"
-        | "actual_size" | "github_wiki" => {
+        | "view_publish" | "view_export" | "toggle_sidebar" | "view_preview_display"
+        | "preview_display_move_monitor" | "preview_display_fullscreen"
+        | "preview_display_start_web_stream" | "preview_display_copy_web_stream_url"
+        | "preview_display_stop_web_stream"
+        | "preview_display_freeze" | "preview_display_blank"
+        | "preview_display_preset_image_only" | "preview_display_preset_client_review"
+        | "preview_display_preset_metadata_review" | "zoom_in" | "zoom_out" | "actual_size"
+        | "github_wiki" => {
             let _ = app.emit("menu-action", id);
         }
         _ => {}

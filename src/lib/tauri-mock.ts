@@ -4,15 +4,17 @@ export type UnlistenFn = () => void;
 const mockListeners = new Map<string, Map<number, MockListener>>();
 let nextListenerId = 1;
 
+function emitMockEvent(event: string, payload: any) {
+  const listeners = mockListeners.get(event);
+  if (!listeners) return;
+  for (const handler of listeners.values()) {
+    handler({ event, payload });
+  }
+}
+
 if (typeof window !== 'undefined') {
   (window as any).__CULL_E2E_MOCK__ = true;
-  (window as any).__CULL_E2E_EMIT__ = (event: string, payload: any) => {
-    const listeners = mockListeners.get(event);
-    if (!listeners) return;
-    for (const handler of listeners.values()) {
-      handler({ event, payload });
-    }
-  };
+  (window as any).__CULL_E2E_EMIT__ = emitMockEvent;
 }
 
 const MOCK_SMART_COLLECTIONS = [
@@ -89,6 +91,30 @@ let clipboardMonitorStatus = {
   capture_dir: '/mock/clipboard-captures',
   captured_count: 0,
   last_error: null as string | null,
+};
+
+let previewWebStreamStatus = {
+  active: false,
+  url: null as string | null,
+  host: null as string | null,
+  bound_host: null as string | null,
+  port: null as number | null,
+  remote_access: false,
+};
+
+let previewState = {
+  image_id: null as string | null,
+  display_mode: 'image_only',
+  overlay: {
+    showFilename: false,
+    showRating: false,
+    showDecision: false,
+    showMetadataRail: false,
+  },
+  frozen: false,
+  blanked: false,
+  version: 0,
+  updated_at_ms: 0,
 };
 
 const mockSessions = [
@@ -268,6 +294,67 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     port: 8000,
     site_dir: '/mock/static-publishing/client-review/site',
   }),
+  open_preview_display: () => 'preview-display',
+  list_preview_display_monitors: () => [
+    {
+      id: 'built-in-retina-display-0x0-3024x1964',
+      name: 'Built-in Retina Display',
+      x: 0,
+      y: 0,
+      width: 3024,
+      height: 1964,
+      scale_factor: 2,
+      primary: true,
+    },
+    {
+      id: 'sidecar-ipad-3024x0-2732x2048',
+      name: 'Sidecar iPad',
+      x: 3024,
+      y: 0,
+      width: 2732,
+      height: 2048,
+      scale_factor: 2,
+      primary: false,
+    },
+  ],
+  place_preview_display: () => 'preview-display',
+  get_preview_state: () => previewState,
+  update_preview_state: (_: any, args: any) => {
+    previewState = {
+      image_id: args.imageId ?? null,
+      display_mode: args.displayMode ?? previewState.display_mode,
+      overlay: args.overlay ?? previewState.overlay,
+      frozen: args.frozen ?? previewState.frozen,
+      blanked: args.blanked ?? previewState.blanked,
+      version: previewState.version + 1,
+      updated_at_ms: Date.now(),
+    };
+    emitMockEvent('preview:state-changed', previewState);
+    return previewState;
+  },
+  get_preview_display_web_stream_status: () => previewWebStreamStatus,
+  start_preview_display_web_stream: () => {
+    previewWebStreamStatus = {
+      active: true,
+      url: 'http://127.0.0.1:8723/?token=mock-preview-token',
+      host: '127.0.0.1',
+      bound_host: '127.0.0.1',
+      port: 8723,
+      remote_access: false,
+    };
+    return previewWebStreamStatus;
+  },
+  stop_preview_display_web_stream: () => {
+    previewWebStreamStatus = {
+      active: false,
+      url: null,
+      host: null,
+      bound_host: null,
+      port: null,
+      remote_access: false,
+    };
+    return previewWebStreamStatus;
+  },
   get_clipboard_monitor_status: () => clipboardMonitorStatus,
   start_clipboard_monitor: () => {
     clipboardMonitorStatus = {

@@ -178,6 +178,93 @@ export interface MenuStatePayload {
     hasFocusedImage: boolean;
     selectedCount: number;
     staticPublishingEnabled: boolean;
+    previewDisplayFrozen: boolean;
+    previewDisplayBlanked: boolean;
+    previewDisplayMode: PreviewDisplayMode;
+    previewDisplayWebStreamActive: boolean;
+}
+
+export type PreviewDisplayMode = 'image_only' | 'client_review' | 'metadata_review';
+
+export interface PreviewOverlayConfig {
+    showFilename: boolean;
+    showRating: boolean;
+    showDecision: boolean;
+    showMetadataRail: boolean;
+}
+
+export interface PreviewState {
+    image_id: string | null;
+    display_mode: PreviewDisplayMode;
+    overlay: PreviewOverlayConfig;
+    frozen: boolean;
+    blanked: boolean;
+    version: number;
+    updated_at_ms: number;
+}
+
+export interface PreviewDisplayMonitor {
+    id: string;
+    name: string | null;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    scale_factor: number;
+    primary: boolean;
+}
+
+export interface PreviewWebStreamStatus {
+    active: boolean;
+    url: string | null;
+    host: string | null;
+    bound_host: string | null;
+    port: number | null;
+    remote_access: boolean;
+}
+
+export async function openPreviewDisplay(): Promise<string> {
+    return invoke<string>('open_preview_display');
+}
+
+export async function listPreviewDisplayMonitors(): Promise<PreviewDisplayMonitor[]> {
+    return invoke<PreviewDisplayMonitor[]>('list_preview_display_monitors');
+}
+
+export async function placePreviewDisplay(monitorId: string | null, fullscreen: boolean): Promise<string> {
+    return invoke<string>('place_preview_display', { monitorId, fullscreen });
+}
+
+export async function startPreviewDisplayWebStream(host?: string | null, port?: number | null): Promise<PreviewWebStreamStatus> {
+    return invoke<PreviewWebStreamStatus>('start_preview_display_web_stream', { host: host ?? null, port: port ?? null });
+}
+
+export async function stopPreviewDisplayWebStream(): Promise<PreviewWebStreamStatus> {
+    return invoke<PreviewWebStreamStatus>('stop_preview_display_web_stream');
+}
+
+export async function getPreviewDisplayWebStreamStatus(): Promise<PreviewWebStreamStatus> {
+    return invoke<PreviewWebStreamStatus>('get_preview_display_web_stream_status');
+}
+
+export async function getPreviewState(): Promise<PreviewState> {
+    return invoke<PreviewState>('get_preview_state');
+}
+
+export async function updatePreviewState(
+    imageId: string | null,
+    displayMode: PreviewDisplayMode,
+    overlay: PreviewOverlayConfig,
+    frozen?: boolean,
+    blanked?: boolean
+): Promise<PreviewState> {
+    return invoke<PreviewState>('update_preview_state', {
+        imageId,
+        displayMode,
+        overlay,
+        frozen,
+        blanked,
+    });
 }
 
 // Smart Collections types
