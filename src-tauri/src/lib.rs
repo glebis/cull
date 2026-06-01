@@ -581,6 +581,7 @@ pub fn run() {
             commands::preview::start_preview_display_web_stream,
             commands::preview::stop_preview_display_web_stream,
             commands::preview::get_preview_display_web_stream_status,
+            commands::preview::get_image_histogram,
             commands::diagnostics::record_asset_load_event,
             commands::diagnostics::get_asset_load_events,
         ])

@@ -25,6 +25,9 @@ describe('Preview Display UI contract', () => {
         expect(component).toContain("listen<PreviewState>('preview:state-changed'");
         expect(component).toContain('getPreviewState');
         expect(component).toContain('getImagesByIds');
+        expect(component).toContain('listImageTags');
+        expect(component).toContain('getGenerationRun');
+        expect(component).toContain('getImageHistogram');
         expect(component).toContain('convertFileSrc');
         expect(component).toContain('previewDisplayImageSourcePath');
         expect(component).not.toContain('trashImages');
@@ -41,5 +44,18 @@ describe('Preview Display UI contract', () => {
         expect(page).toContain('nextPreviewFocusPayload');
         expect(page).toContain('updatePreviewState');
         expect(page).toContain('$focusedImage');
+    });
+
+    it('renders bounded info rail fields without overlapping the image', () => {
+        const component = source('src/lib/components/PreviewDisplay.svelte');
+
+        expect(component).toContain("data-side={previewState?.overlay.railSide");
+        expect(component).toContain("data-width={previewState?.overlay.railWidth");
+        expect(component).toContain("data-text={previewState?.overlay.railTextSize");
+        expect(component).toContain('prompt-preview');
+        expect(component).toContain('tag-list');
+        expect(component).toContain('histogram-panel');
+        expect(component).toContain('line-clamp');
+        expect(component).toContain('max-height');
     });
 });

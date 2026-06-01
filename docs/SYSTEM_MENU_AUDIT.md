@@ -76,7 +76,8 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 | Preview Display | `Cmd+Shift+P` | `view_preview_display` | Opens or focuses the dedicated Preview Display window | Pass |
 | Move Preview Display to Display... | none | `preview_display_move_monitor` | Shows available displays and moves the Preview Display to the selected monitor | Pass |
 | Fullscreen Preview Display | none | `preview_display_fullscreen` | Fullscreens Preview Display on the saved/default display | Pass |
-| Start Preview Display Web Stream | none | `preview_display_start_web_stream` | Starts a tokenized local-network preview URL and copies it | Pass |
+| Start Preview Display Web Stream | none | `preview_display_start_web_stream` | Starts a tokenized localhost preview URL and copies it | Pass |
+| Start Preview Display LAN Web Stream | none | `preview_display_start_lan_web_stream` | Explicitly starts a tokenized local-network preview URL for another device and copies it | Pass |
 | Copy Preview Display Web URL | none | `preview_display_copy_web_stream_url` | Copies the active tokenized web stream URL; disabled when inactive | Pass |
 | Stop Preview Display Web Stream | none | `preview_display_stop_web_stream` | Stops the active web stream and invalidates the token; disabled when inactive | Pass |
 | Freeze Preview Display | none | `preview_display_freeze` | Holds the currently displayed image while main-window focus changes | Pass |
@@ -84,6 +85,10 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 | Image Only | none | `preview_display_preset_image_only` | Uses the image-only Preview Display preset; checked when active | Pass |
 | Client Review | none | `preview_display_preset_client_review` | Uses the client-review Preview Display preset; checked when active | Pass |
 | Metadata Review | none | `preview_display_preset_metadata_review` | Uses the metadata-review Preview Display preset; checked when active | Pass |
+| Show Filename/Rating/Decision/Dimensions/Format/Source/Prompt/Tags/Histogram | none | `preview_display_field_*` | Toggles individual Preview Display rail fields; checked when active | Pass |
+| Info Rail Left/Right | none | `preview_display_rail_left`, `preview_display_rail_right` | Moves the Preview Display info rail within bounded choices | Pass |
+| Info Rail Narrow/Medium/Wide | none | `preview_display_rail_width_*` | Sets the Preview Display rail width within bounded choices | Pass |
+| Info Text Small/Medium/Large | none | `preview_display_text_*` | Sets the Preview Display rail text size within bounded choices | Pass |
 | Zoom In | `Cmd++` | `zoom_in` | Increases grid thumbnail size and Loupe scale | Pass |
 | Zoom Out | `Cmd+-` | `zoom_out` | Decreases grid thumbnail size and Loupe scale | Pass |
 | Actual Size | none | `actual_size` | Resets Loupe scale to 1x | Pass |
@@ -122,5 +127,5 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 - Native menu state is now synchronized from Svelte: image actions disable with no focused image, Deselect All disables with no selection, View items are checked, and Toggle Sidebar reflects the sidebar state.
 - About Cull now opens Cull's custom in-app About dialog so the release can show the app image and linked credits instead of the default native panel.
 - Clipboard Monitor is exposed as a tray checkbox because it is the most useful outside-app workflow: Cull can capture copied AI outputs while the main window is hidden.
-- Preview Display is exposed from View with `Cmd+Shift+P`, monitor placement, freeze/blank controls, presets, and tokenized web stream lifecycle items.
+- Preview Display is exposed from View with `Cmd+Shift+P`, monitor placement, freeze/blank controls, presets, field-level rail controls, histogram display, and tokenized localhost/LAN web stream lifecycle items.
 - The tray status placeholders should become dynamic before a polished binary release, but they do not block a source release.

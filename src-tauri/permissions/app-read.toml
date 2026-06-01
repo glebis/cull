@@ -11,6 +11,7 @@ commands.allow = [
   "get_data_flow_status",
   "get_image_by_path",
   "get_image_count",
+  "get_image_histogram",
   "get_images_by_ids",
   "get_iteration_siblings",
   "get_lineage_group_images",

@@ -249,6 +249,13 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     )?)?;
     view_menu.append(&MenuItem::with_id(
         app,
+        "preview_display_start_lan_web_stream",
+        "Start Preview Display LAN Web Stream",
+        true,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&MenuItem::with_id(
+        app,
         "preview_display_copy_web_stream_url",
         "Copy Preview Display Web URL",
         false,
@@ -298,6 +305,144 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         app,
         "preview_display_preset_metadata_review",
         "Metadata Review",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&PredefinedMenuItem::separator(app)?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_field_filename",
+        "Show Filename",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_field_rating",
+        "Show Rating",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_field_decision",
+        "Show Decision",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_field_dimensions",
+        "Show Dimensions",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_field_format",
+        "Show Format",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_field_source",
+        "Show Source",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_field_prompt",
+        "Show Prompt",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_field_tags",
+        "Show Tags",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_field_histogram",
+        "Show Histogram",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&PredefinedMenuItem::separator(app)?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_rail_left",
+        "Info Rail Left",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_rail_right",
+        "Info Rail Right",
+        true,
+        true,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_rail_width_narrow",
+        "Info Rail Narrow",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_rail_width_medium",
+        "Info Rail Medium",
+        true,
+        true,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_rail_width_wide",
+        "Info Rail Wide",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_text_small",
+        "Info Text Small",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_text_medium",
+        "Info Text Medium",
+        true,
+        true,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_text_large",
+        "Info Text Large",
         true,
         false,
         None::<&str>,
@@ -373,6 +518,8 @@ pub struct MenuStatePayload {
     #[serde(default = "default_preview_display_mode")]
     preview_display_mode: String,
     #[serde(default)]
+    preview_display_overlay: crate::preview::state::PreviewOverlayConfig,
+    #[serde(default)]
     preview_display_web_stream_active: bool,
 }
 
@@ -415,9 +562,102 @@ pub async fn update_menu_state(app: AppHandle, state: MenuStatePayload) -> Resul
         "preview_display_preset_metadata_review",
         state.preview_display_mode == "metadata_review",
     )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_field_filename",
+        state.preview_display_overlay.show_filename,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_field_rating",
+        state.preview_display_overlay.show_rating,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_field_decision",
+        state.preview_display_overlay.show_decision,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_field_dimensions",
+        state.preview_display_overlay.show_dimensions,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_field_format",
+        state.preview_display_overlay.show_format,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_field_source",
+        state.preview_display_overlay.show_source,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_field_prompt",
+        state.preview_display_overlay.show_prompt,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_field_tags",
+        state.preview_display_overlay.show_tags,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_field_histogram",
+        state.preview_display_overlay.show_histogram,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_rail_left",
+        state.preview_display_overlay.rail_side == crate::preview::state::PreviewRailSide::Left,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_rail_right",
+        state.preview_display_overlay.rail_side == crate::preview::state::PreviewRailSide::Right,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_rail_width_narrow",
+        state.preview_display_overlay.rail_width == crate::preview::state::PreviewRailWidth::Narrow,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_rail_width_medium",
+        state.preview_display_overlay.rail_width == crate::preview::state::PreviewRailWidth::Medium,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_rail_width_wide",
+        state.preview_display_overlay.rail_width == crate::preview::state::PreviewRailWidth::Wide,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_text_small",
+        state.preview_display_overlay.rail_text_size
+            == crate::preview::state::PreviewRailTextSize::Small,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_text_medium",
+        state.preview_display_overlay.rail_text_size
+            == crate::preview::state::PreviewRailTextSize::Medium,
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_text_large",
+        state.preview_display_overlay.rail_text_size
+            == crate::preview::state::PreviewRailTextSize::Large,
+    )?;
     set_menu_item_enabled(
         &app,
         "preview_display_start_web_stream",
+        !state.preview_display_web_stream_active,
+    )?;
+    set_menu_item_enabled(
+        &app,
+        "preview_display_start_lan_web_stream",
         !state.preview_display_web_stream_active,
     )?;
     set_menu_item_enabled(
@@ -589,17 +829,62 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
     let id = event.id().0.as_str();
     match id {
         "help" => show_cull_help(app),
-        "about" | "check_update" | "open_file" | "open_folder" | "settings" | "undo" | "redo"
-        | "deselect_all" | "image_share" | "image_open_default" | "image_open_with"
-        | "image_reveal" | "image_rename" | "image_move_to" | "image_trash" | "view_grid"
-        | "view_compare" | "view_loupe" | "view_canvas" | "view_lineage" | "view_embeddings"
-        | "view_publish" | "view_export" | "toggle_sidebar" | "view_preview_display"
-        | "preview_display_move_monitor" | "preview_display_fullscreen"
-        | "preview_display_start_web_stream" | "preview_display_copy_web_stream_url"
+        "about"
+        | "check_update"
+        | "open_file"
+        | "open_folder"
+        | "settings"
+        | "undo"
+        | "redo"
+        | "deselect_all"
+        | "image_share"
+        | "image_open_default"
+        | "image_open_with"
+        | "image_reveal"
+        | "image_rename"
+        | "image_move_to"
+        | "image_trash"
+        | "view_grid"
+        | "view_compare"
+        | "view_loupe"
+        | "view_canvas"
+        | "view_lineage"
+        | "view_embeddings"
+        | "view_publish"
+        | "view_export"
+        | "toggle_sidebar"
+        | "view_preview_display"
+        | "preview_display_move_monitor"
+        | "preview_display_fullscreen"
+        | "preview_display_start_web_stream"
+        | "preview_display_start_lan_web_stream"
+        | "preview_display_copy_web_stream_url"
         | "preview_display_stop_web_stream"
-        | "preview_display_freeze" | "preview_display_blank"
-        | "preview_display_preset_image_only" | "preview_display_preset_client_review"
-        | "preview_display_preset_metadata_review" | "zoom_in" | "zoom_out" | "actual_size"
+        | "preview_display_freeze"
+        | "preview_display_blank"
+        | "preview_display_preset_image_only"
+        | "preview_display_preset_client_review"
+        | "preview_display_preset_metadata_review"
+        | "preview_display_field_filename"
+        | "preview_display_field_rating"
+        | "preview_display_field_decision"
+        | "preview_display_field_dimensions"
+        | "preview_display_field_format"
+        | "preview_display_field_source"
+        | "preview_display_field_prompt"
+        | "preview_display_field_tags"
+        | "preview_display_field_histogram"
+        | "preview_display_rail_left"
+        | "preview_display_rail_right"
+        | "preview_display_rail_width_narrow"
+        | "preview_display_rail_width_medium"
+        | "preview_display_rail_width_wide"
+        | "preview_display_text_small"
+        | "preview_display_text_medium"
+        | "preview_display_text_large"
+        | "zoom_in"
+        | "zoom_out"
+        | "actual_size"
         | "github_wiki" => {
             let _ = app.emit("menu-action", id);
         }

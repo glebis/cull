@@ -11,12 +11,44 @@ pub enum PreviewDisplayMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewRailSide {
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewRailWidth {
+    Narrow,
+    Medium,
+    Wide,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewRailTextSize {
+    Small,
+    Medium,
+    Large,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewOverlayConfig {
     pub show_filename: bool,
     pub show_rating: bool,
     pub show_decision: bool,
     pub show_metadata_rail: bool,
+    pub show_dimensions: bool,
+    pub show_format: bool,
+    pub show_source: bool,
+    pub show_prompt: bool,
+    pub show_tags: bool,
+    pub show_histogram: bool,
+    pub rail_side: PreviewRailSide,
+    pub rail_width: PreviewRailWidth,
+    pub rail_text_size: PreviewRailTextSize,
 }
 
 impl Default for PreviewOverlayConfig {
@@ -26,6 +58,15 @@ impl Default for PreviewOverlayConfig {
             show_rating: false,
             show_decision: false,
             show_metadata_rail: false,
+            show_dimensions: false,
+            show_format: false,
+            show_source: false,
+            show_prompt: false,
+            show_tags: false,
+            show_histogram: false,
+            rail_side: PreviewRailSide::Right,
+            rail_width: PreviewRailWidth::Medium,
+            rail_text_size: PreviewRailTextSize::Medium,
         }
     }
 }

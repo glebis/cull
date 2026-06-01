@@ -1,6 +1,7 @@
 use cull_lib::preview::web_stream::{
-    constant_time_token_matches, preview_web_stream_port_candidates, preview_web_stream_url,
-    token_from_query, PreviewWebStreamToken,
+    constant_time_token_matches, preview_web_stream_bind_host, preview_web_stream_port_candidates,
+    preview_web_stream_public_host, preview_web_stream_url, token_from_query,
+    PreviewWebStreamToken,
 };
 
 #[test]
@@ -10,6 +11,19 @@ fn preview_web_stream_url_contains_session_token() {
     let url = preview_web_stream_url("127.0.0.1", 8723, &token);
 
     assert_eq!(url, "http://127.0.0.1:8723/?token=token-123");
+}
+
+#[test]
+fn preview_web_stream_defaults_to_loopback_and_requires_explicit_lan_bind() {
+    assert_eq!(preview_web_stream_bind_host(None), "127.0.0.1");
+    assert_eq!(preview_web_stream_bind_host(Some("")), "127.0.0.1");
+    assert_eq!(preview_web_stream_bind_host(Some("localhost")), "127.0.0.1");
+    assert_eq!(preview_web_stream_bind_host(Some("0.0.0.0")), "0.0.0.0");
+    assert_eq!(
+        preview_web_stream_bind_host(Some("192.168.0.4")),
+        "127.0.0.1"
+    );
+    assert_eq!(preview_web_stream_public_host("127.0.0.1"), "127.0.0.1");
 }
 
 #[test]

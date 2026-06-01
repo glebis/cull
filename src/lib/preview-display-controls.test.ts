@@ -3,7 +3,9 @@ import {
     overlayForPreviewDisplayMode,
     previewDisplayStatusLabel,
     previewSyncImageId,
+    withPreviewDisplayField,
 } from './preview-display';
+import { parsePreviewDisplayOverlay } from './preview-display-store';
 import type { ImageWithFile, PreviewState } from './api';
 
 function image(id: string): ImageWithFile {
@@ -36,6 +38,15 @@ const frozenState: PreviewState = {
         showRating: true,
         showDecision: true,
         showMetadataRail: false,
+        showDimensions: false,
+        showFormat: false,
+        showSource: false,
+        showPrompt: false,
+        showTags: false,
+        showHistogram: false,
+        railSide: 'right',
+        railWidth: 'medium',
+        railTextSize: 'medium',
     },
     frozen: true,
     blanked: false,
@@ -50,18 +61,73 @@ describe('Preview Display controls', () => {
             showRating: false,
             showDecision: false,
             showMetadataRail: false,
+            showDimensions: false,
+            showFormat: false,
+            showSource: false,
+            showPrompt: false,
+            showTags: false,
+            showHistogram: false,
+            railSide: 'right',
+            railWidth: 'medium',
+            railTextSize: 'medium',
         });
         expect(overlayForPreviewDisplayMode('client_review')).toEqual({
             showFilename: true,
             showRating: true,
             showDecision: true,
             showMetadataRail: false,
+            showDimensions: false,
+            showFormat: false,
+            showSource: false,
+            showPrompt: false,
+            showTags: false,
+            showHistogram: false,
+            railSide: 'right',
+            railWidth: 'medium',
+            railTextSize: 'medium',
         });
         expect(overlayForPreviewDisplayMode('metadata_review')).toEqual({
             showFilename: true,
             showRating: true,
             showDecision: true,
             showMetadataRail: true,
+            showDimensions: true,
+            showFormat: true,
+            showSource: true,
+            showPrompt: true,
+            showTags: true,
+            showHistogram: false,
+            railSide: 'right',
+            railWidth: 'medium',
+            railTextSize: 'medium',
+        });
+    });
+
+    it('parses persisted field toggles and bounds invalid rail options', () => {
+        expect(parsePreviewDisplayOverlay(JSON.stringify({
+            showFilename: true,
+            showDimensions: true,
+            showSource: true,
+            showPrompt: true,
+            showTags: true,
+            showHistogram: true,
+            railSide: 'top',
+            railWidth: 'huge',
+            railTextSize: 'microscopic',
+        }))).toEqual({
+            showFilename: true,
+            showRating: false,
+            showDecision: false,
+            showMetadataRail: false,
+            showDimensions: true,
+            showFormat: false,
+            showSource: true,
+            showPrompt: true,
+            showTags: true,
+            showHistogram: true,
+            railSide: 'right',
+            railWidth: 'medium',
+            railTextSize: 'medium',
         });
     });
 
@@ -76,5 +142,16 @@ describe('Preview Display controls', () => {
         expect(previewDisplayStatusLabel(true, false)).toBe('Preview frozen');
         expect(previewDisplayStatusLabel(false, true)).toBe('Preview blanked');
         expect(previewDisplayStatusLabel(true, true)).toBe('Preview blanked');
+    });
+
+    it('hides the metadata rail when the last rail field is disabled', () => {
+        const enabled = withPreviewDisplayField(overlayForPreviewDisplayMode('image_only'), 'showPrompt', true);
+
+        expect(enabled.showMetadataRail).toBe(true);
+
+        const disabled = withPreviewDisplayField(enabled, 'showPrompt', false);
+
+        expect(disabled.showPrompt).toBe(false);
+        expect(disabled.showMetadataRail).toBe(false);
     });
 });

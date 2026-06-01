@@ -35,6 +35,7 @@ Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 |---------|--------|
 | Grid view with 4 thumbnail presets (80-400px) | Done |
 | Loupe view with zoom/pan (up to 20x) | Done |
+| Loupe RGB/luma histogram with clipping warnings | Done |
 | Compare view (side-by-side pairs) | Done |
 | Canvas view with freeform placement, resize, crop, rotate, and notes | Done |
 | Lineage view with timeline and comparison layouts | Done |
@@ -103,7 +104,6 @@ CLI module and output standards live in [docs/agent-cli-standards.md](docs/agent
 
 **Viewing & Metadata:**
 - EXIF/IPTC/XMP metadata display panel
-- Histogram with per-channel RGB and clipping warnings
 - CLIP text-to-image search
 - Semantic similarity search UI for visually similar images
 - Expanded EXIF/XMP generation metadata coverage beyond current C2PA, PNG text, sidecar, and source-detection coverage

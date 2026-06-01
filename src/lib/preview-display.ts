@@ -1,4 +1,12 @@
-import type { ImageWithFile, PreviewDisplayMode, PreviewOverlayConfig, PreviewState } from './api';
+import type {
+    ImageWithFile,
+    PreviewDisplayMode,
+    PreviewOverlayConfig,
+    PreviewRailSide,
+    PreviewRailTextSize,
+    PreviewRailWidth,
+    PreviewState,
+} from './api';
 import { isRawFormat, updatePreviewState } from './api';
 import { chooseLoupeImagePath } from './view-utils';
 
@@ -7,6 +15,15 @@ export const DEFAULT_PREVIEW_OVERLAY: PreviewOverlayConfig = {
     showRating: false,
     showDecision: false,
     showMetadataRail: false,
+    showDimensions: false,
+    showFormat: false,
+    showSource: false,
+    showPrompt: false,
+    showTags: false,
+    showHistogram: false,
+    railSide: 'right',
+    railWidth: 'medium',
+    railTextSize: 'medium',
 };
 
 export function isPreviewDisplayRoute(search?: string): boolean {
@@ -28,6 +45,7 @@ export function nextPreviewFocusPayload(image: ImageWithFile | null, current: Pr
 export function overlayForPreviewDisplayMode(mode: PreviewDisplayMode): PreviewOverlayConfig {
     if (mode === 'client_review') {
         return {
+            ...DEFAULT_PREVIEW_OVERLAY,
             showFilename: true,
             showRating: true,
             showDecision: true,
@@ -36,13 +54,80 @@ export function overlayForPreviewDisplayMode(mode: PreviewDisplayMode): PreviewO
     }
     if (mode === 'metadata_review') {
         return {
+            ...DEFAULT_PREVIEW_OVERLAY,
             showFilename: true,
             showRating: true,
             showDecision: true,
             showMetadataRail: true,
+            showDimensions: true,
+            showFormat: true,
+            showSource: true,
+            showPrompt: true,
+            showTags: true,
         };
     }
     return DEFAULT_PREVIEW_OVERLAY;
+}
+
+export type PreviewDisplayField =
+    | 'showFilename'
+    | 'showRating'
+    | 'showDecision'
+    | 'showDimensions'
+    | 'showFormat'
+    | 'showSource'
+    | 'showPrompt'
+    | 'showTags'
+    | 'showHistogram';
+
+function previewDisplayRailFieldVisible(overlay: PreviewOverlayConfig): boolean {
+    return overlay.showDimensions
+        || overlay.showFormat
+        || overlay.showSource
+        || overlay.showPrompt
+        || overlay.showTags
+        || overlay.showHistogram;
+}
+
+export function previewDisplayRailVisible(overlay: PreviewOverlayConfig): boolean {
+    return overlay.showMetadataRail
+        || previewDisplayRailFieldVisible(overlay);
+}
+
+export function withPreviewDisplayField(
+    overlay: PreviewOverlayConfig,
+    field: PreviewDisplayField,
+    value: boolean
+): PreviewOverlayConfig {
+    const next = {
+        ...overlay,
+        [field]: value,
+    };
+    return {
+        ...next,
+        showMetadataRail: previewDisplayRailFieldVisible(next),
+    };
+}
+
+export function withPreviewDisplayRailSide(
+    overlay: PreviewOverlayConfig,
+    railSide: PreviewRailSide
+): PreviewOverlayConfig {
+    return { ...overlay, railSide };
+}
+
+export function withPreviewDisplayRailWidth(
+    overlay: PreviewOverlayConfig,
+    railWidth: PreviewRailWidth
+): PreviewOverlayConfig {
+    return { ...overlay, railWidth };
+}
+
+export function withPreviewDisplayRailTextSize(
+    overlay: PreviewOverlayConfig,
+    railTextSize: PreviewRailTextSize
+): PreviewOverlayConfig {
+    return { ...overlay, railTextSize };
 }
 
 export function previewSyncImageId(

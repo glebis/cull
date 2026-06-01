@@ -1,5 +1,12 @@
 import { writable } from 'svelte/store';
-import type { PreviewDisplayMode, PreviewOverlayConfig, PreviewWebStreamStatus } from './api';
+import type {
+    PreviewDisplayMode,
+    PreviewOverlayConfig,
+    PreviewRailSide,
+    PreviewRailTextSize,
+    PreviewRailWidth,
+    PreviewWebStreamStatus,
+} from './api';
 import { DEFAULT_PREVIEW_OVERLAY, overlayForPreviewDisplayMode } from './preview-display';
 
 export const PREVIEW_DISPLAY_MODE_SETTING = 'preview_display_mode';
@@ -49,12 +56,36 @@ export function parsePreviewDisplayOverlay(value: string | null): PreviewOverlay
     try {
         const parsed = JSON.parse(value) as Partial<PreviewOverlayConfig>;
         return {
+            ...DEFAULT_PREVIEW_OVERLAY,
             showFilename: parsed.showFilename === true,
             showRating: parsed.showRating === true,
             showDecision: parsed.showDecision === true,
             showMetadataRail: parsed.showMetadataRail === true,
+            showDimensions: parsed.showDimensions === true,
+            showFormat: parsed.showFormat === true,
+            showSource: parsed.showSource === true,
+            showPrompt: parsed.showPrompt === true,
+            showTags: parsed.showTags === true,
+            showHistogram: parsed.showHistogram === true,
+            railSide: validRailSide(parsed.railSide) ? parsed.railSide : DEFAULT_PREVIEW_OVERLAY.railSide,
+            railWidth: validRailWidth(parsed.railWidth) ? parsed.railWidth : DEFAULT_PREVIEW_OVERLAY.railWidth,
+            railTextSize: validRailTextSize(parsed.railTextSize)
+                ? parsed.railTextSize
+                : DEFAULT_PREVIEW_OVERLAY.railTextSize,
         };
     } catch {
         return null;
     }
+}
+
+function validRailSide(value: unknown): value is PreviewRailSide {
+    return value === 'left' || value === 'right';
+}
+
+function validRailWidth(value: unknown): value is PreviewRailWidth {
+    return value === 'narrow' || value === 'medium' || value === 'wide';
+}
+
+function validRailTextSize(value: unknown): value is PreviewRailTextSize {
+    return value === 'small' || value === 'medium' || value === 'large';
 }
