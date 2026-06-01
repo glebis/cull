@@ -1,3 +1,4 @@
+use crate::preview::histogram::{load_image_histogram, ImageHistogram};
 use crate::preview::state::{PreviewDisplayMode, PreviewOverlayConfig, PreviewState};
 use crate::preview::web_stream::{PreviewWebStreamStatus, PREVIEW_WEB_STREAM_CHANGED_EVENT};
 use crate::preview::window::{
@@ -292,6 +293,21 @@ pub async fn get_preview_display_web_stream_status(
     state: State<'_, AppState>,
 ) -> Result<PreviewWebStreamStatus, String> {
     Ok(state.preview_web_stream.status())
+}
+
+#[tauri::command]
+pub async fn get_image_histogram(
+    state: State<'_, AppState>,
+    image_id: String,
+) -> Result<Option<ImageHistogram>, String> {
+    let images = state
+        .db
+        .get_images_by_ids(&[image_id.as_str()])
+        .map_err(|e| e.to_string())?;
+    let Some(image) = images.first() else {
+        return Ok(None);
+    };
+    load_image_histogram(image, &state.app_data_dir).map(Some)
 }
 
 fn emit_preview_web_stream_status(

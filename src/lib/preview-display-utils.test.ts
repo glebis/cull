@@ -33,6 +33,7 @@ const metadataState: PreviewState = {
     image_id: 'old',
     display_mode: 'metadata_review',
     overlay: {
+        ...DEFAULT_PREVIEW_OVERLAY,
         showFilename: true,
         showRating: true,
         showDecision: true,

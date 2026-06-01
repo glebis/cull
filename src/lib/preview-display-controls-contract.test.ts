@@ -26,6 +26,36 @@ describe('Preview Display control contract', () => {
         expect(menu).toContain('preview_display_mode');
     });
 
+    it('adds View menu field toggles and bounded info rail controls', () => {
+        const menu = source('src-tauri/src/menu.rs');
+        const frontendMenu = source('src/lib/menu.ts');
+
+        for (const id of [
+            'preview_display_field_filename',
+            'preview_display_field_rating',
+            'preview_display_field_decision',
+            'preview_display_field_dimensions',
+            'preview_display_field_format',
+            'preview_display_field_source',
+            'preview_display_field_prompt',
+            'preview_display_field_tags',
+            'preview_display_field_histogram',
+            'preview_display_rail_left',
+            'preview_display_rail_right',
+            'preview_display_rail_width_narrow',
+            'preview_display_rail_width_medium',
+            'preview_display_rail_width_wide',
+            'preview_display_text_small',
+            'preview_display_text_medium',
+            'preview_display_text_large',
+        ]) {
+            expect(menu).toContain(`"${id}"`);
+            expect(frontendMenu).toContain(`case '${id}'`);
+        }
+
+        expect(menu).toContain('preview_display_overlay');
+    });
+
     it('handles menu actions in the main window and persists preset settings', () => {
         const frontendMenu = source('src/lib/menu.ts');
 

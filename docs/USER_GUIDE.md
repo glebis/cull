@@ -61,7 +61,9 @@ Use **View > Preview Display** or `Cmd+Shift+D` to open a separate display windo
 
 Use **View > Move Preview Display to Display...** and **View > Fullscreen Preview Display** for external monitor placement. Use **Freeze Preview Display** to hold the current image while navigating privately, and **Blank Preview Display** to hide the image without changing library data.
 
-For an iPad or browser on the local network, use **View > Start Preview Display Web Stream**. Cull copies a tokenized live URL; stop it with **View > Stop Preview Display Web Stream**. Treat the URL as a secret because anyone on the reachable network with the full URL can view the streamed preview.
+Use the Preview Display preset, field, and rail controls in the View menu to choose whether the external viewer sees only the image, review status, metadata, prompt/tags, or the RGB/luma histogram. Rail side, width, and text size are bounded so long prompt and tag text truncates instead of overlapping the image.
+
+Use **View > Start Preview Display Web Stream** for a tokenized localhost preview URL. For an iPad or browser on the local network, use **View > Start Preview Display LAN Web Stream**. Cull copies the live URL; stop it with **View > Stop Preview Display Web Stream**. Treat the URL as a secret because anyone on the reachable network with the full URL can view the streamed preview.
 
 More details and limitations are in [Preview Display](preview-display.md).
 
@@ -83,6 +85,8 @@ Use the grid or loupe to move through images and apply lightweight curation meta
 | `Cmd+Shift+Z` | Redo supported library actions |
 
 Selection, ratings, and decisions are stored in the local Cull database. Originals are not rewritten.
+
+Loupe also shows a compact RGB/luma histogram overlay for the focused image. When the luma edge bins indicate likely clipping, Cull labels clipped shadows and highlights directly in the overlay.
 
 ## Collections
 

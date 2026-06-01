@@ -24,6 +24,7 @@ fn preview_state_update_round_trips_image_and_overlay_config() {
         show_rating: true,
         show_decision: true,
         show_metadata_rail: false,
+        ..PreviewOverlayConfig::default()
     };
 
     let state = store.update(

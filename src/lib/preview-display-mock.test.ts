@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { invoke } from './tauri-mock';
+import { DEFAULT_PREVIEW_OVERLAY } from './preview-display';
 
 describe('Preview Display E2E mock', () => {
     it('supports the native preview window and shared preview state commands', async () => {
@@ -14,6 +15,7 @@ describe('Preview Display E2E mock', () => {
             imageId: 'img-2',
             displayMode: 'client_review',
             overlay: {
+                ...DEFAULT_PREVIEW_OVERLAY,
                 showFilename: true,
                 showRating: true,
                 showDecision: true,
