@@ -33,7 +33,18 @@ tool and the human review performed in the PR description.
 
 ## Code Style
 
-Run `npm run ci` before pushing to run the same checks as GitHub Actions.
+Run the Cull preflight wrapper before pushing:
+
+```bash
+npm run preflight -- quick    # Svelte check + Vitest
+npm run preflight -- full     # quick + Rust fmt, clippy, and tests
+npm run preflight -- release  # full + license audit and production build
+```
+
+Use `full` for normal pull requests and `release` before publishing or changing
+license/model download policy. Do not use `bd preflight --check` for Cull
+readiness; this bd version's embedded preflight is a generic Go/Nix checklist
+and is not configurable for Cull.
 
 **Rust:** `npm run ci:rust` runs `cargo fmt --all -- --check`, `cargo clippy --all-targets`, and `cargo test --all-targets`.
 

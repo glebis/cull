@@ -10,6 +10,7 @@
     "ci": "bash scripts/check-ci.sh",
     "ci:frontend": "bash scripts/check-ci.sh frontend",
     "ci:rust": "bash scripts/check-ci.sh rust",
+    "preflight": "bash scripts/preflight.sh",
     "land:feature": "bash scripts/land-feature.sh",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
