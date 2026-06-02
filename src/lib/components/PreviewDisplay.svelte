@@ -141,87 +141,96 @@
 </script>
 
 <div class="preview-display" data-state={loadState}>
-    {#if loadState === 'ready' && image}
-        <img
-            class="preview-image"
-            src={imageSrc}
-            alt={filename}
-            draggable="false"
-            onerror={handleImageError}
-        />
-        {#if previewState?.overlay.showFilename || previewState?.overlay.showRating || previewState?.overlay.showDecision || railVisible}
-            <aside
-                class="preview-info"
-                aria-label="Preview image details"
-                data-side={previewState?.overlay.railSide}
-                data-width={previewState?.overlay.railWidth}
-                data-text={previewState?.overlay.railTextSize}
-            >
-                {#if previewState?.overlay.showFilename}
-                    <div class="info-primary">{filename}</div>
-                {/if}
-                {#if previewState?.overlay.showRating || previewState?.overlay.showDecision}
-                    <div class="info-row">
-                        {#if previewState?.overlay.showRating}
-                            <span>{rating ? `${rating} stars` : 'Unrated'}</span>
-                        {/if}
-                        {#if previewState?.overlay.showDecision}
-                            <span>{decision}</span>
-                        {/if}
-                    </div>
-                {/if}
-                {#if railVisible}
-                    <div class="info-grid">
-                        {#if previewState?.overlay.showDimensions}
-                            <div class="label">Dimensions</div>
-                            <div class="value">{dimensions}</div>
-                        {/if}
-                        {#if previewState?.overlay.showFormat}
-                            <div class="label">Format</div>
-                            <div class="value">{image.image.format}</div>
-                        {/if}
-                        {#if previewState?.overlay.showSource}
-                            <div class="label">Source</div>
-                            <div class="value line-clamp">{sourceSummary || 'Unknown'}</div>
-                        {/if}
-                        {#if previewState?.overlay.showPrompt}
-                            <div class="label">Prompt</div>
-                            <div class="value prompt-preview line-clamp">{promptPreview || 'No prompt'}</div>
-                        {/if}
-                        {#if previewState?.overlay.showTags}
-                            <div class="label">Tags</div>
-                            <div class="value tag-list line-clamp">{tagSummary || 'No tags'}</div>
-                        {/if}
-                    </div>
-                    {#if previewState?.overlay.showHistogram}
-                        <div class="histogram-panel" aria-label="RGB histogram">
-                            {#if histogram}
-                                <svg class="histogram-svg" viewBox="0 0 255 64" preserveAspectRatio="none">
-                                    <polyline class="histogram-line luma" points={lumaPoints} />
-                                    <polyline class="histogram-line red" points={redPoints} />
-                                    <polyline class="histogram-line green" points={greenPoints} />
-                                    <polyline class="histogram-line blue" points={bluePoints} />
-                                </svg>
-                                <div class="histogram-source">{histogram.source}</div>
-                            {:else}
-                                <div class="value">Histogram unavailable</div>
+    <header
+        class="preview-header"
+        data-tauri-drag-region="deep"
+        aria-label="Preview Display window header"
+    >
+        <span class="preview-title" data-tauri-drag-region="deep">Preview Display</span>
+    </header>
+    <main class="preview-stage">
+        {#if loadState === 'ready' && image}
+            <img
+                class="preview-image"
+                src={imageSrc}
+                alt={filename}
+                draggable="false"
+                onerror={handleImageError}
+            />
+            {#if previewState?.overlay.showFilename || previewState?.overlay.showRating || previewState?.overlay.showDecision || railVisible}
+                <aside
+                    class="preview-info"
+                    aria-label="Preview image details"
+                    data-side={previewState?.overlay.railSide}
+                    data-width={previewState?.overlay.railWidth}
+                    data-text={previewState?.overlay.railTextSize}
+                >
+                    {#if previewState?.overlay.showFilename}
+                        <div class="info-primary">{filename}</div>
+                    {/if}
+                    {#if previewState?.overlay.showRating || previewState?.overlay.showDecision}
+                        <div class="info-row">
+                            {#if previewState?.overlay.showRating}
+                                <span>{rating ? `${rating} stars` : 'Unrated'}</span>
+                            {/if}
+                            {#if previewState?.overlay.showDecision}
+                                <span>{decision}</span>
                             {/if}
                         </div>
                     {/if}
-                {/if}
-            </aside>
+                    {#if railVisible}
+                        <div class="info-grid">
+                            {#if previewState?.overlay.showDimensions}
+                                <div class="label">Dimensions</div>
+                                <div class="value">{dimensions}</div>
+                            {/if}
+                            {#if previewState?.overlay.showFormat}
+                                <div class="label">Format</div>
+                                <div class="value">{image.image.format}</div>
+                            {/if}
+                            {#if previewState?.overlay.showSource}
+                                <div class="label">Source</div>
+                                <div class="value line-clamp">{sourceSummary || 'Unknown'}</div>
+                            {/if}
+                            {#if previewState?.overlay.showPrompt}
+                                <div class="label">Prompt</div>
+                                <div class="value prompt-preview line-clamp">{promptPreview || 'No prompt'}</div>
+                            {/if}
+                            {#if previewState?.overlay.showTags}
+                                <div class="label">Tags</div>
+                                <div class="value tag-list line-clamp">{tagSummary || 'No tags'}</div>
+                            {/if}
+                        </div>
+                        {#if previewState?.overlay.showHistogram}
+                            <div class="histogram-panel" aria-label="RGB histogram">
+                                {#if histogram}
+                                    <svg class="histogram-svg" viewBox="0 0 255 64" preserveAspectRatio="none">
+                                        <polyline class="histogram-line luma" points={lumaPoints} />
+                                        <polyline class="histogram-line red" points={redPoints} />
+                                        <polyline class="histogram-line green" points={greenPoints} />
+                                        <polyline class="histogram-line blue" points={bluePoints} />
+                                    </svg>
+                                    <div class="histogram-source">{histogram.source}</div>
+                                {:else}
+                                    <div class="value">Histogram unavailable</div>
+                                {/if}
+                            </div>
+                        {/if}
+                    {/if}
+                </aside>
+            {/if}
+        {:else if loadState === 'loading'}
+            <div class="preview-message">Loading</div>
+        {:else if loadState === 'missing'}
+            <div class="preview-message">Image unavailable</div>
+        {:else if loadState === 'error'}
+            <div class="preview-message">Preview unavailable</div>
+        {:else if loadState === 'blanked'}
+            <div class="preview-message">Preview blanked</div>
+        {:else}
+            <div class="preview-message">No image selected</div>
         {/if}
-    {:else if loadState === 'loading'}
-        <div class="preview-message">Loading</div>
-    {:else if loadState === 'missing'}
-        <div class="preview-message">Image unavailable</div>
-    {:else if loadState === 'error'}
-        <div class="preview-message">Preview unavailable</div>
-    {:else if loadState === 'blanked'}
-        <div class="preview-message">Preview blanked</div>
-    {:else}
-        <div class="preview-message">No image selected</div>
-    {/if}
+    </main>
 </div>
 
 <style>
@@ -231,14 +240,45 @@
         background: var(--bg);
         color: var(--text);
         display: grid;
+        grid-template-rows: var(--macos-titlebar-safe-area) minmax(0, 1fr);
+        overflow: hidden;
+        position: relative;
+    }
+
+    .preview-header {
+        height: var(--macos-titlebar-safe-area);
+        padding-left: var(--macos-window-controls-width);
+        padding-right: var(--spacing);
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+
+    .preview-title {
+        color: var(--text-secondary);
+        font-size: 11px;
+        line-height: 1;
+        text-transform: uppercase;
+        letter-spacing: 0;
+    }
+
+    .preview-stage {
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        display: grid;
         place-items: center;
         overflow: hidden;
         position: relative;
     }
 
     .preview-image {
-        max-width: 100vw;
-        max-height: 100vh;
+        max-width: 100%;
+        max-height: 100%;
         width: auto;
         height: auto;
         object-fit: contain;
@@ -257,7 +297,7 @@
         right: 16px;
         bottom: 16px;
         width: min(360px, calc(100vw - 32px));
-        max-height: calc(100vh - 32px);
+        max-height: calc(100% - 32px);
         padding: 12px;
         border: 1px solid var(--border);
         border-radius: var(--radius);
