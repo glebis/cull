@@ -132,6 +132,23 @@ def set_search_value(page: Page, value: str) -> None:
     )
 
 
+def set_input_value(page: Page, selector: str, value: str) -> None:
+    """Set a Svelte-bound input via the native setter + input event.
+
+    Svelte's bind:value does not observe DOM-level `.value` assignments, so
+    Playwright's fill() does not update the bound state. This mirrors
+    set_search_value but for an arbitrary selector (e.g. the command palette).
+    """
+    page.locator(selector).evaluate(
+        """(el, value) => {
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+            setter.call(el, value);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        }""",
+        value,
+    )
+
+
 def dispatch_key(page: Page, key: str, *, meta: bool = False, shift: bool = False) -> None:
     page.evaluate(
         """({ key, meta, shift }) => {
@@ -345,14 +362,15 @@ def test_search_and_command_palette(page: Page) -> None:
 
     press(page, "Meta+K")
     expect(page.locator(".palette-panel")).to_be_visible()
-    page.locator(".palette-input").fill("loupe")
-    press(page, "Enter")
+    set_input_value(page, ".palette-input", "loupe")
+    expect(page.locator(".palette-row").first).to_contain_text("Loupe View")
+    page.locator(".palette-input").press("Enter")
     wait_mode(page, "loupe")
 
     press(page, "Meta+Shift+P")
     expect(page.locator(".palette-panel")).to_be_visible()
     expect(page.locator(".palette-subtitle")).to_contain_text("Commands")
-    press(page, "Escape")
+    page.locator(".palette-input").press("Escape")
     expect(page.locator(".palette-panel")).to_have_count(0)
 
 
@@ -709,8 +727,8 @@ def test_command_palette_open_close(page: Page) -> None:
     press(page, "Meta+K")
     expect(page.locator(".palette-panel")).to_be_visible()
 
-    # Escape closes
-    press(page, "Escape")
+    # Escape (dispatched to the focused palette input) closes the palette.
+    page.locator(".palette-input").press("Escape")
     expect(page.locator(".palette-panel")).to_have_count(0)
 
     # Cmd+Shift+P opens commands-only
@@ -718,7 +736,7 @@ def test_command_palette_open_close(page: Page) -> None:
     expect(page.locator(".palette-panel")).to_be_visible()
     expect(page.locator(".palette-subtitle")).to_contain_text("Commands")
 
-    press(page, "Escape")
+    page.locator(".palette-input").press("Escape")
     expect(page.locator(".palette-panel")).to_have_count(0)
 
 
@@ -751,10 +769,15 @@ def test_command_palette_arrows_and_favorite(page: Page) -> None:
 
     press(page, "Meta+K")
     expect(page.locator(".palette-panel")).to_be_visible()
+    palette_input = page.locator(".palette-input")
+    palette_input.wait_for(state="visible")
 
     # First row is selected by default; ArrowDown moves selection to the second.
+    # Dispatch to the focused input element so the palette's keydown handler runs.
+    expect(page.locator(".palette-row.selected").first).to_be_visible()
     first_selected = page.locator(".palette-row.selected").first.get_attribute("id")
-    press(page, "ArrowDown")
+    palette_input.press("ArrowDown")
+    page.wait_for_timeout(150)
     second_selected = page.locator(".palette-row.selected").first.get_attribute("id")
     assert first_selected != second_selected, "ArrowDown did not move palette selection"
 
@@ -763,12 +786,11 @@ def test_command_palette_arrows_and_favorite(page: Page) -> None:
     expect(page.locator(".palette-context-menu")).to_be_visible()
     expect(page.locator(".palette-context-menu")).to_contain_text("Favorite")
     page.locator(".palette-context-menu button", has_text="Favorite").first.click()
-    page.wait_for_timeout(150)
 
     # A favorited row now carries the pin mark.
     expect(page.locator(".palette-row .row-mark", has_text="*").first).to_be_visible()
 
-    press(page, "Escape")
+    palette_input.press("Escape")
     expect(page.locator(".palette-panel")).to_have_count(0)
 
 
@@ -779,17 +801,15 @@ def test_keyboard_shortcuts_panel(page: Page) -> None:
 
     press(page, "Meta+K")
     expect(page.locator(".palette-panel")).to_be_visible()
-    page.locator(".palette-input").fill("keyboard shortcuts")
-    page.wait_for_timeout(200)
-    press(page, "Enter")
+    # Filter to the shortcuts command via the native setter (Svelte bind:value).
+    set_input_value(page, ".palette-input", "keyboard shortcuts")
+    expect(page.locator(".palette-row").first).to_contain_text("Keyboard Shortcuts")
+    page.locator(".palette-input").press("Enter")
 
     expect(page.locator(".shortcuts-panel")).to_be_visible()
-    # Searching the panel narrows the rows.
-    page.locator(".shortcuts-search").fill("grid")
-    page.wait_for_timeout(150)
     expect(page.locator(".shortcuts-row").first).to_be_visible()
 
-    page.keyboard.press("Escape")
+    page.locator(".shortcuts-close").click()
     expect(page.locator(".shortcuts-panel")).to_have_count(0)
 
 

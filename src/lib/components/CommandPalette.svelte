@@ -82,11 +82,13 @@
         hotkeys = readCommandHotkeys();
     }
 
-    function refreshItems() {
-        items = getCommandPaletteItems($commandPaletteMode);
-        // Drop pins for destinations that no longer exist (deleted collections,
-        // folders, etc.) so stale entries don't linger in storage.
-        pinnedIds = pruneStalePins(items.map(item => item.id));
+    function refreshItems(): CommandPaletteItem[] {
+        // Return the freshly computed list so callers can use it WITHOUT reading
+        // the `items` $state — reading that state inside an $effect would make the
+        // effect depend on it and re-run (resetting query) whenever items change.
+        const computed = getCommandPaletteItems($commandPaletteMode);
+        items = computed;
+        return computed;
     }
 
     function setMode(mode: CommandPaletteMode) {
@@ -293,7 +295,12 @@
             query = '';
             selectedIndex = 0;
             refreshPreferences();
-            refreshItems();
+            const live = refreshItems();
+            // Drop pins for destinations that no longer exist (deleted
+            // collections, folders, etc.). Done once per open against the local
+            // list — never by reading the `items` $state, which would make this
+            // effect re-run on every item change and clear the query mid-type.
+            pinnedIds = pruneStalePins(live.map(item => item.id));
             tick().then(() => inputEl?.focus());
         }
     });

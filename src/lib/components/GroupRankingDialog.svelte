@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { untrack } from 'svelte';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { groupRankingOpen, showToast } from '$lib/stores';
     import {
@@ -22,9 +23,11 @@
         return `group_winner:${groupId}`;
     }
 
+    // Depend only on $groupRankingOpen; untrack loadGroups so its state reads
+    // don't make this effect re-run and freeze the dialog's reactivity.
     $effect(() => {
         if ($groupRankingOpen) {
-            loadGroups();
+            untrack(() => loadGroups());
         }
     });
 

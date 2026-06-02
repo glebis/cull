@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { untrack } from 'svelte';
     import { shortcutsOpen } from '$lib/stores';
     import {
         canAssignCommandHotkey,
@@ -23,12 +24,17 @@
         rows = listCommandShortcuts(getCommandPaletteItems('all'), hotkeys);
     }
 
+    // Only depend on $shortcutsOpen — untrack the resets/refresh so reading
+    // state inside refresh() doesn't make this effect re-run and freeze the
+    // component's store reactivity (which would stop the panel from closing).
     $effect(() => {
         if ($shortcutsOpen) {
-            query = '';
-            captureId = null;
-            capturedShortcut = '';
-            refresh();
+            untrack(() => {
+                query = '';
+                captureId = null;
+                capturedShortcut = '';
+                refresh();
+            });
         }
     });
 
