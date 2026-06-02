@@ -26,11 +26,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: lts/*
+          node-version-file: .node-version
           cache: npm
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@1.89.0
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
