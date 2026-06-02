@@ -424,6 +424,8 @@ export const shortcutsOpen = writable<boolean>(false);
 export const exportFolderOpen = writable<boolean>(false);
 // Contact sheet export dialog.
 export const contactSheetOpen = writable<boolean>(false);
+// Best-of-group ranking dialog.
+export const groupRankingOpen = writable<boolean>(false);
 
 export const focusedImage = derived(
     [images, focusedIndex, focusedImageOverride],

@@ -16,6 +16,7 @@
     import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
     import ExportFolderDialog from '$lib/components/ExportFolderDialog.svelte';
     import ContactSheetDialog from '$lib/components/ContactSheetDialog.svelte';
+    import GroupRankingDialog from '$lib/components/GroupRankingDialog.svelte';
     import Export from '$lib/components/Export.svelte';
     import StaticPublishingSettings from '$lib/components/StaticPublishingSettings.svelte';
     import Toast from '$lib/components/Toast.svelte';
@@ -360,6 +361,7 @@
     <KeyboardShortcuts />
     <ExportFolderDialog />
     <ContactSheetDialog />
+    <GroupRankingDialog />
 
     {#if $settingsOpen}
         <McpSettings onclose={() => settingsOpen.set(false)} />

@@ -14,6 +14,7 @@ import {
     contactSheetOpen,
     detectedClasses,
     exportFolderOpen,
+    groupRankingOpen,
     focusedIndex,
     images,
     requestCollectionTarget,
@@ -778,6 +779,15 @@ function commandItems(): CommandPaletteItem[] {
             disabled: !hasImage,
             run: () => setFocusedDecision(decision),
         })),
+        {
+            id: 'curation.best-of-group',
+            title: 'Best of Group Ranking…',
+            subtitle: 'Suggested winner per similarity group with score components',
+            category: 'AI',
+            kind: 'command',
+            keywords: ['best', 'group', 'rank', 'winner', 'similar', 'duplicate', 'pick'],
+            run: () => groupRankingOpen.set(true),
+        },
         {
             id: 'detection.toggle-boxes',
             title: 'Toggle Detection Boxes',
