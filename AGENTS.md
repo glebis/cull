@@ -158,6 +158,21 @@ changes, and mention the fallback in the handoff. If bd commands fail with
 schema errors, run `npm run bd -- doctor` and `npm run bd -- migrate --yes` before trying any manual
 SQL repair.
 
+## Cull Preflight
+
+Use `npm run preflight -- <quick|full|release>` for project readiness checks:
+
+```bash
+npm run preflight -- quick    # npm run check; npm test
+npm run preflight -- full     # quick + cargo fmt/clippy/tests
+npm run preflight -- release  # full + npm run audit:licenses; npm run build
+```
+
+Do not use `bd preflight --check` for Cull readiness. In the installed bd
+version, embedded bd preflight cannot be configured for this repo and runs a
+generic Go/Nix checklist (`go test`, `golangci-lint`, `gofmt`, `go.sum`,
+`default.nix`) that does not apply to Cull.
+
 ## Feature Landing Flow
 
 Use the feature landing flow when a feature branch is complete and the user asks
