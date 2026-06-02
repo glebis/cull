@@ -139,7 +139,11 @@ type FilterNode =
 
 ## bd Issue Tracking
 
-This project uses **bd** (beads) for issue tracking. Run `npm run bd -- onboard` to get started; the wrapper in `scripts/bd.sh` resolves multiple `bd` binaries on PATH deterministically.
+This project uses **bd** (beads) for issue tracking. Run `npm run bd -- onboard`
+to get started; the wrapper in `scripts/bd.sh` resolves multiple `bd` binaries
+on PATH deterministically. Run `npm run bd -- prime` for current workflow
+context, and run `npm run hooks:install` to install bd hooks plus Cull's tiered
+hook chain.
 
 ## Quick Reference
 
@@ -150,6 +154,12 @@ npm run bd -- update <id> --status in_progress  # Claim work
 npm run bd -- close <id>         # Complete work
 npm run bd -- vc status          # Check beads DB version-control state
 npm run bd -- vc commit -m "..." # Commit beads DB changes when bd sync is unavailable
+npm run hooks:install # Install bd hooks plus Cull pre-commit/pre-push checks
+npm run preflight:hook    # Fast commit-time checks
+npm run preflight:quick   # Frontend check and tests
+npm run preflight:full    # Full pre-push checks
+npm run preflight:release # Full + license audit + production build
+npm run land              # Verify, sync/rebase/push, and print final status
 ```
 
 Note: some installed `bd` versions do not expose `bd sync`. If `npm run bd -- sync` is
@@ -160,10 +170,11 @@ SQL repair.
 
 ## Cull Preflight
 
-Use `npm run preflight -- <quick|full|release>` for project readiness checks:
+Use `npm run preflight -- <hook|quick|full|release>` for project readiness checks:
 
 ```bash
-npm run preflight -- quick    # npm run check; npm test
+npm run preflight -- hook     # shell syntax; no app tauri-mock imports
+npm run preflight -- quick    # hook + npm run check; npm test
 npm run preflight -- full     # quick + cargo fmt/clippy/tests
 npm run preflight -- release  # full + npm run audit:licenses; npm run build
 ```
@@ -189,6 +200,10 @@ The flow merges the feature branch into `main`, runs `npm run check`,
 `npm run bd -- vc status`, pushes `main`, and watches main CI. Signed app artifacts are a
 separate tag/manual Release workflow step.
 
+Hook behavior is documented in `docs/dev-workflow-hooks.md`. The hook installer
+uses bd chaining and Cull-managed markers so existing user hook content outside
+managed sections is preserved.
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
@@ -200,10 +215,7 @@ separate tag/manual Release workflow step.
 3. **Update issue status** - Close finished work, update in-progress items
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
-   git pull --rebase
-   npm run bd -- sync  # If unavailable: npm run bd -- vc status && npm run bd -- vc commit -m "..."
-   git push
-   git status  # MUST show "up to date with origin"
+   npm run land
    ```
 5. **Clean up** - Clear stashes, prune remote branches
 6. **Verify** - All changes committed AND pushed

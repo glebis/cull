@@ -11,14 +11,16 @@ describe('Cull preflight command', () => {
         expect(packageJson.scripts.preflight).toBe('bash scripts/preflight.sh');
     });
 
-    it('provides quick, full, and release tiers for the real Cull checks', () => {
+    it('provides hook, quick, full, and release tiers for the real Cull checks', () => {
         expect(existsSync(scriptPath)).toBe(true);
 
         const source = readFileSync(scriptPath, 'utf8');
         expect(source).toMatch(/^#!\/usr\/bin\/env bash/);
+        expect(source).toContain('hook)');
         expect(source).toContain('quick)');
         expect(source).toContain('full)');
         expect(source).toContain('release)');
+        expect(source).toContain('tauri-mock');
         expect(source).toContain('npm run check');
         expect(source).toContain('npm test');
         expect(source).toContain('cargo fmt --all -- --check');
@@ -42,6 +44,6 @@ describe('Cull preflight command', () => {
         expect(contributing).toContain('npm run preflight -- release');
         expect(agents).toContain('Do not use `bd preflight --check`');
         expect(agents).toContain('embedded bd preflight cannot be configured');
-        expect(agents).toContain('npm run preflight -- <quick|full|release>');
+        expect(agents).toContain('npm run preflight -- <hook|quick|full|release>');
     });
 });
