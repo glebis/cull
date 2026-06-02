@@ -47,6 +47,16 @@ Cull has seven primary views:
 
 The same view shortcuts are used by the tab bar, keyboard handler, and native View menu.
 
+## Command Palette
+
+Press `Cmd+K` to open the command palette — a fast, keyboard-first launcher for every action, view, and destination. Type to filter; use the arrow keys and `Enter` to run. Switch between **All** (commands and destinations) and **Commands** only with the segmented control at the top.
+
+- **Destinations**: jump to All Images, smart collections, manual collections, folders, sessions, the active session's canvases, and detected object classes. Selecting a destination clears conflicting scopes and reloads images, exactly like the sidebar.
+- **Ranking**: pinned (favorited) results come first, then the best query match, then your most recent and most frequently used commands. Frequent commands rise over time.
+- **Result actions**: right-click a row (or press `Shift+F10`) for Run, Favorite/Unfavorite, Set Hotkey…, Add Alias…, Remove from Recents, Copy Command ID, and Open in Settings. Aliases add your own search terms to a command.
+- **Keyboard shortcuts**: run **View Keyboard Shortcuts** to browse every command's binding, search them, customize a hotkey (with conflict and reserved-key detection), or reset everything to defaults.
+- **Workflows**: run **Save Workflow from Recent Commands** to capture your recent command sequence as a reusable workflow. Saved workflows appear in the palette as runnable, favoritable items; rename or delete them from the row context menu. Workflows validate each step's context before running and confirm destructive steps.
+
 ## Preview Display
 
 Use **View > Preview Display** or `Cmd+Shift+P` to open a separate display window. The main Cull window remains the control surface while Preview Display shows the current focused image on another monitor or an iPad used as a macOS Sidecar display.
@@ -80,6 +90,19 @@ Selection, ratings, and decisions are stored in the local Cull database. Origina
 
 Loupe also shows a compact RGB/luma histogram overlay for the focused image. When the luma edge bins indicate likely clipping, Cull labels clipped shadows and highlights directly in the overlay.
 
+### Best Of Group
+
+After generating similarity groups in the Embedding Explorer, run **Best of Group Ranking…** from the palette. Each group shows a suggested winner with an explainable breakdown — rating, decision, focus quality, and representativeness — and you can override the winner per group. Nothing is ever auto-deleted or auto-selected; the suggestion is advisory.
+
+### Client Feedback
+
+Client feedback is stored **separately** from your own curator ratings and decisions, so the two never overwrite each other:
+
+- **Toggle Client Favorite** marks the focused image as a client pick.
+- **Add Client Comment…** attaches a client note to the focused image.
+
+Both are surfaced alongside curator data in the delivery CSV export.
+
 ## Collections
 
 Collections let you group images without copying source files.
@@ -90,7 +113,13 @@ Collections let you group images without copying source files.
 
 ## Export Images
 
-Use the Export view (`Cmd+0`) to prepare selected images or a collection for output. The current CLI slice also supports exporting a collection to a folder while preserving originals:
+Use the Export view (`Cmd+0`) to prepare selected images or a collection for output. Three export workflows are also available directly from the command palette:
+
+- **Export to Folder…** — export the current scope (selection, collection, folder, or whole library) to a destination folder with optional format conversion (`original`, `png`, `jpg`, `webp`) and a filename naming template. Templates support `{name}`, `{id}`, `{index}`, and `{index1}` tokens, or the preset keywords `original`, `id`, and `index`.
+- **Export Contact Sheet…** — render a configurable grid montage (columns, cell size) of the current images to a PNG, with per-cell captions for filename, star rating, and dimensions.
+- **Export Delivery List (CSV)…** — write a CSV of the current scope with separate columns for curator rating/decision and client favorite/comment, suitable for proof and final delivery lists.
+
+The same folder export is available from the CLI slice:
 
 ```bash
 cull --json export_images --collection_id <id> --output_dir ~/Desktop/export --format original
@@ -101,6 +130,8 @@ Export operations write new files to the chosen destination and do not rewrite y
 ## Embeddings And Search
 
 Cull supports local CLIP embeddings through ONNX Runtime. Local embeddings run on your machine and do not send images to an external service.
+
+Run **Find Similar to Focused Image** from the palette (or right-click → Find Similar) to replace the current view with the images most visually similar to the focused one, ranked by embedding similarity.
 
 Optional cloud embedding and generation providers require your own API key. Keys are stored in the OS keychain where supported. See [Privacy & Data Flow](PRIVACY.md) before enabling cloud features for sensitive images.
 

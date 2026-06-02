@@ -111,3 +111,4 @@
 {"id":"int-c8ceb5e4","kind":"field_change","created_at":"2026-06-02T00:07:58.146378Z","actor":"glebis","issue_id":"imageview-y1f.2","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-fd74836b","kind":"field_change","created_at":"2026-06-02T00:17:54.961049Z","actor":"glebis","issue_id":"imageview-y1f.2","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-62c5f8f6","kind":"field_change","created_at":"2026-06-02T00:18:02.819521Z","actor":"glebis","issue_id":"imageview-54w","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+{"id":"int-e005358f","kind":"field_change","created_at":"2026-06-02T00:20:57.631026Z","actor":"glebis","issue_id":"imageview-54w","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
