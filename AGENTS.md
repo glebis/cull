@@ -139,23 +139,23 @@ type FilterNode =
 
 ## bd Issue Tracking
 
-This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
+This project uses **bd** (beads) for issue tracking. Run `npm run bd -- onboard` to get started; the wrapper in `scripts/bd.sh` resolves multiple `bd` binaries on PATH deterministically.
 
 ## Quick Reference
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
-bd close <id>         # Complete work
-bd vc status          # Check beads DB version-control state
-bd vc commit -m "..." # Commit beads DB changes when bd sync is unavailable
+npm run bd -- ready              # Find available work
+npm run bd -- show <id>          # View issue details
+npm run bd -- update <id> --status in_progress  # Claim work
+npm run bd -- close <id>         # Complete work
+npm run bd -- vc status          # Check beads DB version-control state
+npm run bd -- vc commit -m "..." # Commit beads DB changes when bd sync is unavailable
 ```
 
-Note: some installed `bd` versions do not expose `bd sync`. If `bd sync` is
-unavailable, use `bd vc status` and `bd vc commit -m "..."` for beads DB
+Note: some installed `bd` versions do not expose `bd sync`. If `npm run bd -- sync` is
+unavailable, use `npm run bd -- vc status` and `npm run bd -- vc commit -m "..."` for beads DB
 changes, and mention the fallback in the handoff. If bd commands fail with
-schema errors, run `bd doctor` and `bd migrate --yes` before trying any manual
+schema errors, run `npm run bd -- doctor` and `npm run bd -- migrate --yes` before trying any manual
 SQL repair.
 
 ## Feature Landing Flow
@@ -170,8 +170,8 @@ npm run land:feature -- <feature-branch>
 ```
 
 The flow merges the feature branch into `main`, runs `npm run check`,
-`npm test`, and `npm run build`, falls back from unavailable `bd sync` to
-`bd vc status`, pushes `main`, and watches main CI. Signed app artifacts are a
+`npm test`, and `npm run build`, falls back from unavailable `npm run bd -- sync` to
+`npm run bd -- vc status`, pushes `main`, and watches main CI. Signed app artifacts are a
 separate tag/manual Release workflow step.
 
 ## Landing the Plane (Session Completion)
@@ -186,7 +186,7 @@ separate tag/manual Release workflow step.
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd sync  # If unavailable: bd vc status && bd vc commit -m "..."
+   npm run bd -- sync  # If unavailable: npm run bd -- vc status && npm run bd -- vc commit -m "..."
    git push
    git status  # MUST show "up to date with origin"
    ```
