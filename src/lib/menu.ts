@@ -16,6 +16,7 @@ import {
     listFolders,
     updateMenuState,
     openPreviewDisplay,
+    setPreviewDisplayAlwaysOnTop as setPreviewDisplayAlwaysOnTopNative,
     listPreviewDisplayMonitors,
     placePreviewDisplay,
     startPreviewDisplayWebStream,
@@ -34,6 +35,7 @@ import {
     focusedImage,
     sidebarVisible,
     thumbnailSize,
+    showLoupeHistogram,
     activeFolder,
     activeCollection,
     activeSmartCollection,
@@ -55,12 +57,14 @@ import {
 import {
     PREVIEW_DISPLAY_MODE_SETTING,
     PREVIEW_DISPLAY_OVERLAY_SETTING,
+    previewDisplayAlwaysOnTop,
     previewDisplayBlanked,
     previewDisplayFrozen,
     previewDisplayMode,
     previewDisplayOverlay,
     previewDisplayWebStreamStatus,
     setPreviewDisplayBlanked,
+    setPreviewDisplayAlwaysOnTop,
     setPreviewDisplayFrozen,
     setPreviewDisplayMode,
     setPreviewDisplayOverlay,
@@ -385,6 +389,22 @@ function handlePreviewDisplayBlank() {
     showToast(next ? 'Preview Display blanked' : 'Preview Display visible', { type: 'info', duration: 3000 });
 }
 
+async function handlePreviewDisplayAlwaysOnTop() {
+    const previous = get(previewDisplayAlwaysOnTop);
+    const next = !previous;
+    setPreviewDisplayAlwaysOnTop(next);
+    try {
+        await setPreviewDisplayAlwaysOnTopNative(next);
+        showToast(next ? 'Preview Display stays on top' : 'Preview Display normal stacking', {
+            type: 'info',
+            duration: 3000,
+        });
+    } catch (e) {
+        setPreviewDisplayAlwaysOnTop(previous);
+        showToast('Preview Display stacking failed', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
 async function handlePreviewDisplayPreset(mode: PreviewDisplayMode) {
     const overlay = overlayForPreviewDisplayMode(mode);
     setPreviewDisplayMode(mode);
@@ -588,6 +608,9 @@ function handleMenuAction(action: string) {
         case 'toggle_sidebar':
             sidebarVisible.update((v) => !v);
             break;
+        case 'view_loupe_histogram':
+            showLoupeHistogram.update((visible) => !visible);
+            break;
         case 'view_preview_display':
             openPreviewDisplay().catch((e) => {
                 showToast('Preview Display failed', { detail: String(e), type: 'error', duration: 8000 });
@@ -598,6 +621,9 @@ function handleMenuAction(action: string) {
             break;
         case 'preview_display_fullscreen':
             handlePreviewDisplayFullscreen();
+            break;
+        case 'preview_display_always_on_top':
+            handlePreviewDisplayAlwaysOnTop();
             break;
         case 'preview_display_start_web_stream':
             handlePreviewDisplayStartWebStream('127.0.0.1');
@@ -770,8 +796,10 @@ function currentMenuStatePayload() {
         hasFocusedImage: get(focusedImage) !== null,
         selectedCount: get(selectedIds).size,
         staticPublishingEnabled: get(staticPublishingEnabled),
+        showLoupeHistogram: get(showLoupeHistogram),
         previewDisplayFrozen: get(previewDisplayFrozen),
         previewDisplayBlanked: get(previewDisplayBlanked),
+        previewDisplayAlwaysOnTop: get(previewDisplayAlwaysOnTop),
         previewDisplayMode: get(previewDisplayMode),
         previewDisplayOverlay: get(previewDisplayOverlay),
         previewDisplayWebStreamActive: get(previewDisplayWebStreamStatus).active,
@@ -828,8 +856,10 @@ function startMenuStateSubscriptions() {
     focusedImage.subscribe(queueMenuStateUpdate);
     selectedIds.subscribe(queueMenuStateUpdate);
     staticPublishingEnabled.subscribe(queueMenuStateUpdate);
+    showLoupeHistogram.subscribe(queueMenuStateUpdate);
     previewDisplayFrozen.subscribe(queueMenuStateUpdate);
     previewDisplayBlanked.subscribe(queueMenuStateUpdate);
+    previewDisplayAlwaysOnTop.subscribe(queueMenuStateUpdate);
     previewDisplayMode.subscribe(queueMenuStateUpdate);
     previewDisplayOverlay.subscribe(queueMenuStateUpdate);
     previewDisplayWebStreamStatus.subscribe(queueMenuStateUpdate);

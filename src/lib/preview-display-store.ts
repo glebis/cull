@@ -11,9 +11,11 @@ import { DEFAULT_PREVIEW_OVERLAY, overlayForPreviewDisplayMode } from './preview
 
 export const PREVIEW_DISPLAY_MODE_SETTING = 'preview_display_mode';
 export const PREVIEW_DISPLAY_OVERLAY_SETTING = 'preview_display_overlay';
+export const PREVIEW_DISPLAY_ALWAYS_ON_TOP_SETTING = 'preview_display_always_on_top';
 
 export const previewDisplayFrozen = writable(false);
 export const previewDisplayBlanked = writable(false);
+export const previewDisplayAlwaysOnTop = writable(false);
 export const previewDisplayMode = writable<PreviewDisplayMode>('image_only');
 export const previewDisplayOverlay = writable<PreviewOverlayConfig>(DEFAULT_PREVIEW_OVERLAY);
 export const previewDisplayWebStreamStatus = writable<PreviewWebStreamStatus>({
@@ -31,6 +33,10 @@ export function setPreviewDisplayFrozen(value: boolean) {
 
 export function setPreviewDisplayBlanked(value: boolean) {
     previewDisplayBlanked.set(value);
+}
+
+export function setPreviewDisplayAlwaysOnTop(value: boolean) {
+    previewDisplayAlwaysOnTop.set(value);
 }
 
 export function setPreviewDisplayMode(mode: PreviewDisplayMode) {

@@ -14,6 +14,7 @@ commands.allow = [
   "place_preview_display",
   "rename_window",
   "send_to_window",
+  "set_preview_display_always_on_top",
   "start_preview_display_web_stream",
   "start_dictation",
   "stop_preview_display_web_stream",

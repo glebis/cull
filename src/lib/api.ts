@@ -178,8 +178,10 @@ export interface MenuStatePayload {
     hasFocusedImage: boolean;
     selectedCount: number;
     staticPublishingEnabled: boolean;
+    showLoupeHistogram: boolean;
     previewDisplayFrozen: boolean;
     previewDisplayBlanked: boolean;
+    previewDisplayAlwaysOnTop: boolean;
     previewDisplayMode: PreviewDisplayMode;
     previewDisplayOverlay: PreviewOverlayConfig;
     previewDisplayWebStreamActive: boolean;
@@ -248,6 +250,10 @@ export interface ImageHistogram {
 
 export async function openPreviewDisplay(): Promise<string> {
     return invoke<string>('open_preview_display');
+}
+
+export async function setPreviewDisplayAlwaysOnTop(alwaysOnTop: boolean): Promise<boolean> {
+    return invoke<boolean>('set_preview_display_always_on_top', { alwaysOnTop });
 }
 
 export async function listPreviewDisplayMonitors(): Promise<PreviewDisplayMonitor[]> {

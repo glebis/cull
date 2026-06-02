@@ -1,6 +1,7 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { listen } from '@tauri-apps/api/event';
+    import { getCurrentWindow } from '@tauri-apps/api/window';
     import { onMount } from 'svelte';
     import {
         getGenerationRun,
@@ -28,6 +29,11 @@
     let loadState = $state<DisplayLoadState>('loading');
     let sourceLoadFailed = $state(false);
     let requestSeq = 0;
+    let headerVisible = $state(true);
+    let pointerOverHeader = $state(false);
+    let blankMessageVisible = $state(false);
+    let headerHideTimer: ReturnType<typeof setTimeout> | null = null;
+    let blankMessageTimer: ReturnType<typeof setTimeout> | null = null;
 
     let imageSrc = $derived(image ? convertFileSrc(previewDisplayImageSourcePath(image, sourceLoadFailed)) : '');
     let filename = $derived(image?.path.split('/').pop() ?? '');
@@ -51,6 +57,67 @@
         generationRun = null;
         tags = [];
         histogram = null;
+    }
+
+    function clearHeaderHideTimer() {
+        if (!headerHideTimer) return;
+        clearTimeout(headerHideTimer);
+        headerHideTimer = null;
+    }
+
+    function scheduleHeaderHide() {
+        clearHeaderHideTimer();
+        headerHideTimer = setTimeout(() => {
+            if (!pointerOverHeader) headerVisible = false;
+        }, 1500);
+    }
+
+    function showPreviewHeader() {
+        headerVisible = true;
+        if (!pointerOverHeader) scheduleHeaderHide();
+    }
+
+    function handlePreviewPointerMove() {
+        showPreviewHeader();
+    }
+
+    function handleHeaderPointerEnter() {
+        pointerOverHeader = true;
+        headerVisible = true;
+        clearHeaderHideTimer();
+    }
+
+    function handleHeaderPointerLeave() {
+        pointerOverHeader = false;
+        scheduleHeaderHide();
+    }
+
+    function handleHeaderPointerDown(event: PointerEvent) {
+        if (!event.isPrimary || event.button !== 0) return;
+        event.preventDefault();
+        void getCurrentWindow().startDragging().catch((e) => {
+            console.debug('Failed to start Preview Display window drag:', e);
+        });
+    }
+
+    function clearBlankMessageTimer() {
+        if (!blankMessageTimer) return;
+        clearTimeout(blankMessageTimer);
+        blankMessageTimer = null;
+    }
+
+    function hideBlankMessage() {
+        clearBlankMessageTimer();
+        blankMessageVisible = false;
+    }
+
+    function showBlankMessageTemporarily() {
+        clearBlankMessageTimer();
+        blankMessageVisible = true;
+        blankMessageTimer = setTimeout(() => {
+            blankMessageVisible = false;
+            blankMessageTimer = null;
+        }, 3000);
     }
 
     async function loadDetails(next: PreviewState, imageId: string, seq: number) {
@@ -80,8 +147,11 @@
             requestSeq++;
             image = null;
             loadState = 'blanked';
+            showBlankMessageTemporarily();
             return;
         }
+
+        hideBlankMessage();
 
         if (!next.image_id) {
             requestSeq++;
@@ -133,18 +203,27 @@
                 loadState = 'error';
             });
         });
+        scheduleHeaderHide();
 
         return () => {
             stateUnlisten.then((fn) => fn());
+            clearHeaderHideTimer();
+            clearBlankMessageTimer();
         };
     });
 </script>
 
-<div class="preview-display" data-state={loadState}>
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="preview-display" data-state={loadState} onpointermove={handlePreviewPointerMove}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <header
         class="preview-header"
+        class:hidden={!headerVisible}
         data-tauri-drag-region="deep"
         aria-label="Preview Display window header"
+        onpointerenter={handleHeaderPointerEnter}
+        onpointerleave={handleHeaderPointerLeave}
+        onpointerdown={handleHeaderPointerDown}
     >
         <span class="preview-title" data-tauri-drag-region="deep">Preview Display</span>
     </header>
@@ -226,7 +305,9 @@
         {:else if loadState === 'error'}
             <div class="preview-message">Preview unavailable</div>
         {:else if loadState === 'blanked'}
-            <div class="preview-message">Preview blanked</div>
+            {#if blankMessageVisible}
+                <div class="preview-message">Preview is Blanked</div>
+            {/if}
         {:else}
             <div class="preview-message">No image selected</div>
         {/if}
@@ -240,12 +321,17 @@
         background: var(--bg);
         color: var(--text);
         display: grid;
-        grid-template-rows: var(--macos-titlebar-safe-area) minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
         overflow: hidden;
         position: relative;
     }
 
     .preview-header {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 20;
         height: var(--macos-titlebar-safe-area);
         padding-left: var(--macos-window-controls-width);
         padding-right: var(--spacing);
@@ -256,6 +342,13 @@
         justify-content: center;
         user-select: none;
         -webkit-user-select: none;
+        transition: opacity 150ms ease, transform 150ms ease;
+    }
+
+    .preview-header.hidden {
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(calc(-1 * var(--macos-titlebar-safe-area)));
     }
 
     .preview-title {

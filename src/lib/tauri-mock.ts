@@ -304,6 +304,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     site_dir: '/mock/static-publishing/client-review/site',
   }),
   open_preview_display: () => 'preview-display',
+  set_preview_display_always_on_top: (_: any, args: any) => args.alwaysOnTop === true,
   list_preview_display_monitors: () => [
     {
       id: 'built-in-retina-display-0x0-3024x1964',

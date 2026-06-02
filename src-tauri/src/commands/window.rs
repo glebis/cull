@@ -172,6 +172,7 @@ pub async fn create_window(app: AppHandle, name: Option<String>) -> Result<Strin
         .flatten()
         .unwrap_or_else(|| DEFAULT_ICON_VARIANT.to_string());
     let _ = apply_app_icon_variant_to_app(&app, &icon_variant);
+    let _ = crate::menu::refresh_window_menu(&app);
 
     // Tell the new window its name via an event after a short delay
     // (the JS runtime needs time to initialize)
@@ -222,6 +223,7 @@ pub async fn rename_window(app: AppHandle, label: String, new_name: String) -> R
             "name": new_name,
         }),
     );
+    let _ = crate::menu::refresh_window_menu(&app);
     Ok(())
 }
 

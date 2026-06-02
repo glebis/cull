@@ -183,4 +183,36 @@ describe('native menu bridge', () => {
 
         expect(mocks.checkForUpdates).toHaveBeenCalledWith('manual');
     });
+
+    it('toggles the Loupe histogram from the native View menu and syncs checked state', async () => {
+        let handler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, next) => {
+            handler = next as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+
+        const [{ initMenu }, { showLoupeHistogram }] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+
+        void initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        await flushMicrotasks();
+
+        expect(mocks.updateMenuState).toHaveBeenCalledWith(
+            expect.objectContaining({
+                showLoupeHistogram: false,
+            })
+        );
+
+        handler?.({ payload: 'view_loupe_histogram' });
+        await flushMicrotasks();
+
+        expect(get(showLoupeHistogram)).toBe(true);
+        expect(mocks.updateMenuState).toHaveBeenCalledWith(
+            expect.objectContaining({
+                showLoupeHistogram: true,
+            })
+        );
+    });
 });

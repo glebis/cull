@@ -582,6 +582,7 @@ pub fn run() {
             commands::preview::get_preview_state,
             commands::preview::update_preview_state,
             commands::preview::open_preview_display,
+            commands::preview::set_preview_display_always_on_top,
             commands::preview::list_preview_display_monitors,
             commands::preview::place_preview_display,
             commands::preview::start_preview_display_web_stream,
@@ -674,6 +675,15 @@ pub fn run() {
                     }
                     _ => {}
                 }
+            }
+
+            if let tauri::RunEvent::WindowEvent {
+                event:
+                    tauri::WindowEvent::Destroyed | tauri::WindowEvent::Focused(_),
+                ..
+            } = &event
+            {
+                let _ = menu::refresh_window_menu(app);
             }
 
             drop(event);
