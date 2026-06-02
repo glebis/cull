@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 19;
+const CURRENT_SCHEMA_VERSION: i64 = 20;
 
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, "core_schema"),
@@ -33,6 +33,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (17, "image_tags"),
     (18, "perceptual_hashes"),
     (19, "image_color_metrics"),
+    (20, "schema_compatibility_v20"),
 ];
 
 #[derive(Clone)]
@@ -138,6 +139,9 @@ impl Database {
         self.run_migration_step(19, "image_color_metrics", || {
             self.migrate_image_color_metrics()
         })?;
+        // Compatibility marker for databases created by pre-release builds that
+        // advanced PRAGMA user_version to 20 without requiring additional schema.
+        self.run_migration_step(20, "schema_compatibility_v20", || Ok(()))?;
         Ok(())
     }
 
@@ -3542,8 +3546,10 @@ mod migration_safety_tests {
         let db_path = tmp.path().join("cull.db");
         let db = Database::open(&db_path).unwrap();
 
+        // Use a version far beyond any real migration so this synthetic failure
+        // never collides with an actually-applied step.
         let err = db
-            .run_migration_step(20, "failing_test_step", || {
+            .run_migration_step(9999, "failing_test_step", || {
                 let conn = db.conn.lock();
                 conn.execute_batch("CREATE TABLE migration_failure_probe (id INTEGER);")?;
                 Err(migration_error("synthetic migration failure".to_string()))
@@ -3564,7 +3570,7 @@ mod migration_safety_tests {
 
         let (status, error): (String, String) = conn
             .query_row(
-                "SELECT status, error FROM schema_migration_steps WHERE version = 20",
+                "SELECT status, error FROM schema_migration_steps WHERE version = 9999",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -3602,6 +3608,29 @@ mod migration_safety_tests {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(backup_version, 0);
+    }
+
+    #[test]
+    fn test_open_accepts_schema_version_20_database() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("version_20.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "
+            PRAGMA user_version = 20;
+            CREATE TABLE app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            ",
+        )
+        .unwrap();
+        drop(conn);
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock();
+        let user_version = user_version(&conn).unwrap();
+        assert_eq!(user_version, CURRENT_SCHEMA_VERSION);
     }
 
     #[test]

@@ -204,6 +204,46 @@ Hook behavior is documented in `docs/dev-workflow-hooks.md`. The hook installer
 uses bd chaining and Cull-managed markers so existing user hook content outside
 managed sections is preserved.
 
+### Hook Behavior
+
+- Pre-commit runs `scripts/preflight.sh quick` by default.
+- Pre-push runs `scripts/preflight.sh full` by default.
+- Use `CULL_PRE_COMMIT_TIER=<tier>` or `CULL_PRE_PUSH_TIER=<tier>` only for
+  deliberate overrides.
+- Use `CULL_HOOK_SKIP_CHECKS=1` sparingly, and mention it in handoff when used.
+- Use `CULL_PREFLIGHT_DRY_RUN=1` to print planned preflight commands without
+  executing them.
+- Use `CULL_PREFLIGHT_SKIP_E2E=1` to skip browser E2E inside the release tier.
+
+## Branch And Merge Safety
+
+- Inspect `git log main..<branch>` and `git diff --stat main...<branch>` before
+  merging any branch.
+- If a branch contains unrelated work, do not direct-merge it. Use a temporary
+  worktree from `origin/main` and cherry-pick only the scoped commits.
+- Never resolve conflicts by discarding user changes. If unrelated dirty work is
+  present, preserve it on a separate branch/worktree and keep the merge scoped.
+- Delete remote branches after successful merge, but preserve local dirty work
+  under a clearly named branch rather than forcing deletion.
+
+## Landing A Session
+
+Use `npm run land` after changes are committed. It requires a clean worktree,
+runs the full preflight tier unless `--skip-checks` is used, reports bd
+version-control state, falls back when `bd sync` is unavailable, pulls with
+rebase, pushes, and prints final git/bd status.
+
+Useful variants:
+
+```bash
+npm run land -- --release
+npm run land -- --skip-checks
+npm run land -- --dry-run
+npm run land -- --no-push
+```
+
+The landing script does not delete, reset, or clean user files.
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
