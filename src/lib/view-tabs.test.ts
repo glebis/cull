@@ -45,6 +45,17 @@ describe('view tabs', () => {
         expect(tabBarSource).toContain('<div class="tabbar" data-tauri-drag-region="deep">');
     });
 
+    it('uses an icon-only Preview Display launcher instead of showing window title text', () => {
+        expect(tabBarSource).toContain("import { openPreviewDisplay } from '$lib/api';");
+        expect(tabBarSource).toContain('class="preview-display-launch"');
+        expect(tabBarSource).toContain('class="preview-display-icon"');
+        expect(tabBarSource).toContain('onclick={openPreviewDisplayWindow}');
+        expect(tabBarSource).toContain('openPreviewDisplay().catch');
+        expect(tabBarSource).not.toContain('windowName');
+        expect(tabBarSource).not.toContain('class="window-name"');
+        expect(tabBarSource).not.toContain('Cull Preview Display');
+    });
+
     it('keeps zen-mode content below the macOS window controls', () => {
         expect(appCssSource).toContain('--macos-titlebar-safe-area: 40px;');
         expect(tabBarSource).toContain('padding-left: var(--macos-window-controls-width);');
