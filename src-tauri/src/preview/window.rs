@@ -1,6 +1,6 @@
 pub const PREVIEW_DISPLAY_LABEL: &str = "preview-display";
 pub const PREVIEW_DISPLAY_TITLE: &str = "Cull Preview Display";
-pub const PREVIEW_DISPLAY_URL: &str = "index.html?previewDisplay=1";
+pub const PREVIEW_DISPLAY_URL: &str = "?previewDisplay=1";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PreviewDisplayWindowSpec {
