@@ -316,8 +316,6 @@ pub async fn check_library_health(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     /// Verify that the trash crate can handle filenames with special characters
     /// that would have caused AppleScript injection with the old implementation.
     #[test]

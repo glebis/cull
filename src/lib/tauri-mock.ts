@@ -314,6 +314,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     url: 'http://127.0.0.1:8000/',
   }),
   open_preview_display: () => 'preview-display',
+  set_preview_display_always_on_top: (_: any, args: any) => args.alwaysOnTop === true,
   list_preview_display_monitors: () => [
     {
       id: 'built-in-retina-display-0x0-3024x1964',

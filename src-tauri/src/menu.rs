@@ -9,6 +9,8 @@ const CULL_HELP_BOOK_ID: &str = "com.glebkalinin.cull.help";
 const CULL_HELP_PAGE: &str = "index.html";
 const VIEW_PUBLISH_ID: &str = "view_publish";
 const VIEW_EXPORT_ID: &str = "view_export";
+const WINDOW_MENU_ID: &str = "window_menu";
+const WINDOW_MENU_FOCUS_PREFIX: &str = "window_focus:";
 
 pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let menu = Menu::new(app)?;
@@ -228,6 +230,14 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         true,
         Some::<&str>("CmdOrCtrl+B"),
     )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
+        "view_loupe_histogram",
+        "Loupe Histogram",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
     view_menu.append(&PredefinedMenuItem::separator(app)?)?;
     let preview_display_menu = Submenu::new(app, "Preview Display", true)?;
     preview_display_menu.append(&MenuItem::with_id(
@@ -249,6 +259,14 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         "preview_display_fullscreen",
         "Fullscreen",
         true,
+        None::<&str>,
+    )?)?;
+    preview_display_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_always_on_top",
+        "Always on Top",
+        true,
+        false,
         None::<&str>,
     )?)?;
     preview_display_menu.append(&PredefinedMenuItem::separator(app)?)?;
@@ -500,11 +518,13 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     menu.append(&view_menu)?;
 
     // Window menu
-    let window_menu = Submenu::new(app, "Window", true)?;
+    let window_menu = Submenu::with_id(app, WINDOW_MENU_ID, "Window", true)?;
     window_menu.append(&PredefinedMenuItem::minimize(app, None)?)?;
     window_menu.append(&PredefinedMenuItem::maximize(app, Some("Zoom"))?)?;
     window_menu.append(&PredefinedMenuItem::separator(app)?)?;
     window_menu.append(&PredefinedMenuItem::bring_all_to_front(app, None)?)?;
+    window_menu.append(&PredefinedMenuItem::separator(app)?)?;
+    append_window_menu_items(app, &window_menu)?;
     menu.append(&window_menu)?;
 
     // Help menu
@@ -538,9 +558,13 @@ pub struct MenuStatePayload {
     #[serde(default)]
     static_publishing_enabled: bool,
     #[serde(default)]
+    show_loupe_histogram: bool,
+    #[serde(default)]
     preview_display_frozen: bool,
     #[serde(default)]
     preview_display_blanked: bool,
+    #[serde(default)]
+    preview_display_always_on_top: bool,
     #[serde(default = "default_preview_display_mode")]
     preview_display_mode: String,
     #[serde(default)]
@@ -571,8 +595,14 @@ pub async fn update_menu_state(app: AppHandle, state: MenuStatePayload) -> Resul
     }
 
     set_menu_item_checked(&app, "toggle_sidebar", state.sidebar_visible)?;
+    set_menu_item_checked(&app, "view_loupe_histogram", state.show_loupe_histogram)?;
     set_menu_item_checked(&app, "preview_display_freeze", state.preview_display_frozen)?;
     set_menu_item_checked(&app, "preview_display_blank", state.preview_display_blanked)?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_always_on_top",
+        state.preview_display_always_on_top,
+    )?;
     set_menu_item_checked(
         &app,
         "preview_display_preset_image_only",
@@ -711,6 +741,116 @@ pub async fn update_menu_state(app: AppHandle, state: MenuStatePayload) -> Resul
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WindowMenuEntry {
+    label: String,
+    title: String,
+    focused: bool,
+}
+
+fn window_menu_item_id(label: &str) -> String {
+    format!("{}{}", WINDOW_MENU_FOCUS_PREFIX, label)
+}
+
+fn window_label_from_menu_item_id(id: &str) -> Option<&str> {
+    id.strip_prefix(WINDOW_MENU_FOCUS_PREFIX)
+}
+
+fn window_menu_title(label: &str, title: String) -> String {
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        label.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn window_menu_rank(label: &str) -> u8 {
+    if label == "main" {
+        0
+    } else if label == crate::preview::window::PREVIEW_DISPLAY_LABEL {
+        1
+    } else {
+        2
+    }
+}
+
+fn sort_window_menu_entries(entries: &mut [WindowMenuEntry]) {
+    entries.sort_by(|a, b| {
+        window_menu_rank(&a.label)
+            .cmp(&window_menu_rank(&b.label))
+            .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+            .then_with(|| a.label.cmp(&b.label))
+    });
+}
+
+fn current_window_menu_entries(app: &AppHandle) -> Vec<WindowMenuEntry> {
+    let mut entries = app
+        .webview_windows()
+        .into_iter()
+        .map(|(label, window)| WindowMenuEntry {
+            title: window_menu_title(&label, window.title().unwrap_or_else(|_| label.clone())),
+            focused: window.is_focused().unwrap_or(false),
+            label,
+        })
+        .collect::<Vec<_>>();
+    sort_window_menu_entries(&mut entries);
+    entries
+}
+
+fn append_window_menu_items(app: &AppHandle, window_menu: &Submenu<Wry>) -> tauri::Result<()> {
+    for entry in current_window_menu_entries(app) {
+        let item = CheckMenuItem::with_id(
+            app,
+            window_menu_item_id(&entry.label),
+            entry.title,
+            true,
+            entry.focused,
+            None::<&str>,
+        )?;
+        window_menu.append(&item)?;
+    }
+    Ok(())
+}
+
+fn remove_window_menu_items(window_menu: &Submenu<Wry>) -> Result<(), String> {
+    let children = window_menu.items().map_err(|e| e.to_string())?;
+    for child in &children {
+        if window_label_from_menu_item_id(child.id().0.as_str()).is_none() {
+            continue;
+        }
+        match child {
+            MenuItemKind::MenuItem(item) => window_menu.remove(item),
+            MenuItemKind::Check(item) => window_menu.remove(item),
+            MenuItemKind::Icon(item) => window_menu.remove(item),
+            MenuItemKind::Submenu(item) => window_menu.remove(item),
+            MenuItemKind::Predefined(item) => window_menu.remove(item),
+        }
+        .map_err(|e| format!("Failed to remove Window menu item: {}", e))?;
+    }
+    Ok(())
+}
+
+pub fn refresh_window_menu(app: &AppHandle) -> Result<(), String> {
+    let Some(MenuItemKind::Submenu(window_menu)) = find_menu_item(app, WINDOW_MENU_ID)? else {
+        return Ok(());
+    };
+    remove_window_menu_items(&window_menu)?;
+    append_window_menu_items(app, &window_menu)
+        .map_err(|e| format!("Failed to refresh Window menu: {}", e))
+}
+
+fn focus_window_from_menu(app: &AppHandle, label: &str) {
+    let Some(window) = app.get_webview_window(label) else {
+        let _ = refresh_window_menu(app);
+        return;
+    };
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+    let _ = refresh_window_menu(app);
 }
 
 fn sync_static_publishing_menu_item(app: &AppHandle, enabled: bool) -> Result<(), String> {
@@ -853,12 +993,15 @@ fn remove_menu_item_from_items(items: Vec<MenuItemKind<Wry>>, id: &str) -> Resul
 
 pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
     let id = event.id().0.as_str();
+    if let Some(label) = window_label_from_menu_item_id(id) {
+        focus_window_from_menu(app, label);
+        return;
+    }
     match id {
         "help" => show_cull_help(app),
         "about"
         | "open_file"
         | "import_folder"
-        | "check_update"
         | "open_folder"
         | "settings"
         | "undo"
@@ -882,9 +1025,11 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
         | "view_export"
         | "view_tinder"
         | "toggle_sidebar"
+        | "view_loupe_histogram"
         | "view_preview_display"
         | "preview_display_move_monitor"
         | "preview_display_fullscreen"
+        | "preview_display_always_on_top"
         | "preview_display_start_web_stream"
         | "preview_display_start_lan_web_stream"
         | "preview_display_copy_web_stream_url"
@@ -918,6 +1063,65 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
             let _ = app.emit("menu-action", id);
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_menu_ids_round_trip_labels() {
+        let id = window_menu_item_id("preview-display");
+
+        assert_eq!(id, "window_focus:preview-display");
+        assert_eq!(
+            window_label_from_menu_item_id(&id),
+            Some("preview-display")
+        );
+        assert_eq!(window_label_from_menu_item_id("view_grid"), None);
+    }
+
+    #[test]
+    fn window_menu_title_falls_back_to_label() {
+        assert_eq!(
+            window_menu_title("preview-display", "Cull Preview Display".to_string()),
+            "Cull Preview Display"
+        );
+        assert_eq!(window_menu_title("window-2", "   ".to_string()), "window-2");
+    }
+
+    #[test]
+    fn window_menu_entries_sort_main_then_preview_then_named_windows() {
+        let mut entries = vec![
+            WindowMenuEntry {
+                label: "window-3".to_string(),
+                title: "Zed".to_string(),
+                focused: false,
+            },
+            WindowMenuEntry {
+                label: crate::preview::window::PREVIEW_DISPLAY_LABEL.to_string(),
+                title: "Cull Preview Display".to_string(),
+                focused: false,
+            },
+            WindowMenuEntry {
+                label: "window-2".to_string(),
+                title: "Alpha".to_string(),
+                focused: false,
+            },
+            WindowMenuEntry {
+                label: "main".to_string(),
+                title: "Cull".to_string(),
+                focused: true,
+            },
+        ];
+
+        sort_window_menu_entries(&mut entries);
+
+        assert_eq!(
+            entries.iter().map(|entry| entry.label.as_str()).collect::<Vec<_>>(),
+            vec!["main", "preview-display", "window-2", "window-3"]
+        );
     }
 }
 
