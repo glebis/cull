@@ -50,7 +50,7 @@ printpdf = "0.7"
 thiserror = "1"
 parking_lot = "0.12"
 schemars = "1.2"
-rmcp = { version = "1.6", features = ["server", "macros", "transport-streamable-http-server"] }
+rmcp = { version = "1.7", features = ["server", "macros", "transport-streamable-http-server"] }
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "http1"] }
 http-body-util = "0.1"
