@@ -46,6 +46,7 @@ import { addToCollection, createCollection, getClientFeedback, listCanvases, lis
 import { withDecision, withRating, type ImageDecision } from './selection-updates';
 import { createWorkflow, readWorkflows, runWorkflow, type CommandWorkflow } from './workflows';
 import { buildDeliveryCsv, type DeliveryRow } from './delivery-csv';
+import { loadSimilarImages } from './similarity';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 
 export type CommandPaletteItemKind = 'command' | 'destination';
@@ -873,6 +874,26 @@ function commandItems(): CommandPaletteItem[] {
             disabled: !hasImage,
             run: () => setFocusedDecision(decision),
         })),
+        {
+            id: 'curation.find-similar',
+            title: 'Find Similar to Focused Image',
+            subtitle: hasImage ? focusedImageTitle() : 'Focus an image first',
+            category: 'AI',
+            kind: 'command',
+            keywords: ['similar', 'semantic', 'embedding', 'clip', 'look alike', 'duplicate'],
+            disabled: !hasImage,
+            run: async () => {
+                const image = get(images)[get(focusedIndex)];
+                if (!image) return;
+                try {
+                    const count = await loadSimilarImages(image.image.id, 30);
+                    statusHint.set(count > 0 ? `Showing ${count} similar images` : 'No similar images found');
+                } catch (e) {
+                    showToast('Similarity search failed', { detail: String(e), type: 'error', duration: 6000 });
+                }
+                setTimeout(() => statusHint.set(null), 2500);
+            },
+        },
         {
             id: 'curation.best-of-group',
             title: 'Best of Group Ranking…',
