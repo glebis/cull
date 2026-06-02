@@ -3,6 +3,7 @@ identifier = "app-file-access"
 description = "Allows file-system changing commands for imports, thumbnails, deletes, moves, shares, transforms, and raw previews."
 commands.allow = [
   "backfill_raw_previews",
+  "copy_image_to_clipboard",
   "create_subfolder",
   "crop_image",
   "delete_folder",
@@ -12,6 +13,7 @@ commands.allow = [
   "move_clipboard_capture_folder",
   "move_image",
   "open_images_with_application",
+  "paste_image_from_clipboard",
   "regenerate_single_thumbnail",
   "regenerate_thumbnails",
   "regenerate_thumbnails_by_ids",

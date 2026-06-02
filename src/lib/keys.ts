@@ -7,19 +7,20 @@ import {
     showDetectionBoxes, showDetectionInspector, nsfwMode,
     navigateTo, navigateBack, searchOpen, focusedImage, activeSession,
     requestTextInput, requestCollectionTarget, selectionAnchorIndex, resetLoupeTransform,
-    staticPublishingEnabled,
+    staticPublishingEnabled, activeFolder,
 } from './stores';
 import { computeCompareSwap, nextComparePresentationState } from './compare-utils';
 import { nextExportPresentationState } from './presentation-utils';
 import type { NsfwMode } from './stores';
 import type { ViewMode } from './stores';
-import { setRating, setDecision, createCollection, addToCollection, listCollections, rotateImage, undo, redo } from './api';
+import { setRating, setDecision, createCollection, addToCollection, listCollections, rotateImage, undo, redo, copyImageToClipboard, pasteImageFromClipboard } from './api';
 import { showToast } from './stores';
 import { invalidateImageCache, loadImagesForCurrentScope } from './image-loading';
 import { focusImagePath } from './transform-results';
 import { commandForKeyboardEvent, openCommandPalette, runCommandPaletteItem } from './command-palette';
 import { recordShortcutUse, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from './shortcut-reminders';
 import { withDecision, withRating, type ImageDecision } from './selection-updates';
+import { pasteDestinationForContext } from './clipboard-actions';
 
 let waitingForStar = false;
 
@@ -208,6 +209,51 @@ function getCompareActiveIndex(): number {
     return idx + side;
 }
 
+function filenameForPath(path: string): string {
+    return path.split('/').filter(Boolean).pop() ?? path;
+}
+
+function currentClipboardImage() {
+    if (get(viewMode) === 'compare') {
+        return get(images)[getCompareActiveIndex()] ?? null;
+    }
+    return get(focusedImage);
+}
+
+async function handleCopyCurrentImage() {
+    const img = currentClipboardImage();
+    if (!img) {
+        showToast('No current image to copy', { type: 'warning', duration: 3000 });
+        return;
+    }
+
+    try {
+        await copyImageToClipboard(img.image.id);
+        showToast('Copied image', { detail: filenameForPath(img.path), type: 'success', duration: 2500 });
+    } catch (err) {
+        console.error('Failed to copy image:', err);
+        showToast('Could not copy image', { detail: String(err), type: 'error', duration: 5000 });
+    }
+}
+
+async function handlePasteImage() {
+    const destination = pasteDestinationForContext(get(activeFolder), get(focusedImage)?.path ?? null);
+    if (!destination) {
+        showToast('No folder available for paste', { type: 'warning', duration: 3500 });
+        return;
+    }
+
+    try {
+        const result = await pasteImageFromClipboard(destination, get(activeSession)?.id ?? null);
+        invalidateImageCache();
+        await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
+        showToast('Pasted image', { detail: filenameForPath(result.path), type: 'success', duration: 3500 });
+    } catch (err) {
+        console.error('Failed to paste image:', err);
+        showToast('Could not paste image', { detail: String(err), type: 'error', duration: 5000 });
+    }
+}
+
 function compareNextPair() {
     const imgs = get(images);
     const idx = get(focusedIndex);
@@ -268,6 +314,18 @@ export function handleKeydown(e: KeyboardEvent) {
 
     const tag = (e.target as HTMLElement)?.tagName;
     if (['BUTTON', 'A', 'SELECT'].includes(tag) && (e.key === ' ' || e.key === 'Enter')) return;
+
+    if (e.key.toLowerCase() === 'c' && e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        void handleCopyCurrentImage();
+        return;
+    }
+
+    if (e.key.toLowerCase() === 'v' && e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        void handlePasteImage();
+        return;
+    }
 
     if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();

@@ -172,6 +172,11 @@ export interface OpenWithApplication {
     is_default: boolean;
 }
 
+export interface PastedImageResult {
+    path: string;
+    image_id: string | null;
+}
+
 export interface MenuStatePayload {
     viewMode: string;
     sidebarVisible: boolean;
@@ -1092,6 +1097,17 @@ export async function deleteCanvas(canvasId: string): Promise<void> {
 }
 
 // File management
+export async function copyImageToClipboard(imageId: string): Promise<void> {
+    return invoke<void>('copy_image_to_clipboard', { imageId });
+}
+
+export async function pasteImageFromClipboard(
+    destinationFolder: string,
+    sessionId: string | null = null,
+): Promise<PastedImageResult> {
+    return invoke<PastedImageResult>('paste_image_from_clipboard', { destinationFolder, sessionId });
+}
+
 export async function moveImage(imageId: string, destinationFolder: string): Promise<string> {
     return invoke<string>('move_image', { imageId, destinationFolder });
 }

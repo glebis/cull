@@ -1,14 +1,31 @@
 use crate::AppState;
 use serde::Serialize;
 use std::collections::HashSet;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Emitter, State, Window};
+use tauri::{AppHandle, Emitter, Manager, State, Window};
+
+const CLIPBOARD_PASTE_DATE_FORMAT_SETTING: &str = "clipboard_paste_date_format";
+const DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT: &str = "%Y-%m-%d";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct OpenWithApplication {
     name: String,
     path: String,
     is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PastedImageResult {
+    path: String,
+    image_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ClipboardImagePayload {
+    bytes: Vec<u8>,
+    extension: String,
+    original_filename: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -50,6 +67,396 @@ fn rollback_disk_move(kind: DiskMove, old_path: &Path, new_path: &Path) {
             let _ = std::fs::remove_file(new_path);
         }
     }
+}
+
+fn sanitize_extension(extension: &str) -> String {
+    let cleaned: String = extension
+        .trim()
+        .trim_start_matches('.')
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    if cleaned.is_empty() {
+        "png".to_string()
+    } else {
+        cleaned
+    }
+}
+
+fn split_numeric_suffix(stem: &str) -> Option<(&str, &str)> {
+    let digits_start = stem
+        .char_indices()
+        .rev()
+        .find(|(_, ch)| !ch.is_ascii_digit())
+        .map(|(idx, ch)| idx + ch.len_utf8())
+        .unwrap_or(0);
+    if digits_start >= stem.len() {
+        return None;
+    }
+    Some((&stem[..digits_start], &stem[digits_start..]))
+}
+
+fn folder_wide_numeric_sequence(file_names: &[String], extension: &str) -> Option<String> {
+    let mut prefix: Option<String> = None;
+    let mut width: Option<usize> = None;
+    let mut max_number = 0u64;
+    let mut matched = 0usize;
+
+    for file_name in file_names {
+        let path = Path::new(file_name);
+        let Some(file_ext) = path.extension().and_then(|ext| ext.to_str()) else {
+            continue;
+        };
+        if !file_ext.eq_ignore_ascii_case(extension) {
+            continue;
+        }
+        let stem = path.file_stem().and_then(|stem| stem.to_str())?;
+        let (candidate_prefix, digits) = split_numeric_suffix(stem)?;
+        if digits.is_empty() {
+            return None;
+        }
+        let candidate_width = digits.len();
+        let number = digits.parse::<u64>().ok()?;
+
+        match (&prefix, width) {
+            (Some(existing_prefix), Some(existing_width))
+                if existing_prefix == candidate_prefix && existing_width == candidate_width => {}
+            (None, None) => {
+                prefix = Some(candidate_prefix.to_string());
+                width = Some(candidate_width);
+            }
+            _ => return None,
+        }
+
+        matched += 1;
+        max_number = max_number.max(number);
+    }
+
+    let prefix = prefix?;
+    let width = width?;
+    if matched == 0 {
+        return None;
+    }
+    Some(format!(
+        "{}{:0width$}.{}",
+        prefix,
+        max_number + 1,
+        extension,
+        width = width
+    ))
+}
+
+fn sanitize_filename_part(value: &str, fallback: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in value.trim().chars() {
+        let next = if ch.is_ascii_alphanumeric() || ch == '.' || ch == '_' || ch == '-' {
+            Some(ch.to_ascii_lowercase())
+        } else if ch.is_whitespace() || ch == '/' || ch == '\\' {
+            Some('-')
+        } else {
+            None
+        };
+
+        if let Some(ch) = next {
+            if ch == '-' {
+                if !last_dash && !out.is_empty() {
+                    out.push(ch);
+                }
+                last_dash = true;
+            } else {
+                out.push(ch);
+                last_dash = false;
+            }
+        }
+    }
+
+    let cleaned = out.trim_matches(['-', '.', '_']).to_string();
+    if cleaned.is_empty() {
+        fallback.to_string()
+    } else {
+        cleaned
+    }
+}
+
+fn unique_filename(directory: &Path, base: &str, extension: &str) -> String {
+    let first = format!("{}.{}", base, extension);
+    if !directory.join(&first).exists() {
+        return first;
+    }
+
+    for n in 2.. {
+        let candidate = format!("{}-{:02}.{}", base, n, extension);
+        if !directory.join(&candidate).exists() {
+            return candidate;
+        }
+    }
+    unreachable!("unbounded filename counter should always find a candidate")
+}
+
+fn next_paste_filename(
+    directory: &Path,
+    extension: &str,
+    original_filename: Option<&str>,
+    date_prefix: &str,
+) -> Result<String, String> {
+    let extension = sanitize_extension(extension);
+    let file_names = std::fs::read_dir(directory)
+        .map_err(|e| format!("Failed to read destination folder: {}", e))?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().map(|ty| ty.is_file()).unwrap_or(false))
+        .filter_map(|entry| entry.file_name().to_str().map(|name| name.to_string()))
+        .collect::<Vec<_>>();
+
+    if let Some(candidate) = folder_wide_numeric_sequence(&file_names, &extension) {
+        if !directory.join(&candidate).exists() {
+            return Ok(candidate);
+        }
+    }
+
+    let date = sanitize_filename_part(date_prefix, "pasted");
+    let source = original_filename
+        .and_then(|name| {
+            Path::new(name)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(|stem| sanitize_filename_part(stem, "image"))
+        })
+        .unwrap_or_else(|| "image".to_string());
+    let base = format!("{}-{}", date, source);
+
+    Ok(unique_filename(directory, &base, &extension))
+}
+
+fn render_path_as_png_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    let image = image::open(path).map_err(|e| format!("Failed to decode image: {}", e))?;
+    let mut bytes = Vec::new();
+    image
+        .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .map_err(|e| format!("Failed to encode image for clipboard: {}", e))?;
+    Ok(bytes)
+}
+
+fn target_is_in_library(destination: &Path, roots: &[String]) -> bool {
+    let dest_canonical =
+        std::fs::canonicalize(destination).unwrap_or_else(|_| destination.to_path_buf());
+    roots.iter().any(|root| {
+        let root_path = PathBuf::from(root);
+        let root_canonical = std::fs::canonicalize(&root_path).unwrap_or(root_path);
+        dest_canonical.starts_with(&root_canonical)
+    })
+}
+
+fn clipboard_date_prefix(state: &AppState) -> String {
+    let format = state
+        .db
+        .get_setting(CLIPBOARD_PASTE_DATE_FORMAT_SETTING)
+        .ok()
+        .flatten()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT.to_string());
+    chrono::Local::now().format(&format).to_string()
+}
+
+#[cfg(target_os = "macos")]
+fn nsdata_to_vec(data: &objc2_foundation::NSData) -> Vec<u8> {
+    let len = data.length();
+    let mut bytes = vec![0u8; len];
+    if len > 0 {
+        let ptr =
+            std::ptr::NonNull::new(bytes.as_mut_ptr().cast()).expect("vec pointer is not null");
+        unsafe { data.getBytes_length(ptr, len) };
+    }
+    bytes
+}
+
+#[cfg(target_os = "macos")]
+fn read_string_for_pasteboard_type(
+    pasteboard: &objc2_app_kit::NSPasteboard,
+    ty: &objc2_app_kit::NSPasteboardType,
+) -> Option<String> {
+    pasteboard.stringForType(ty).map(|value| value.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn read_file_url_from_pasteboard(pasteboard: &objc2_app_kit::NSPasteboard) -> Option<PathBuf> {
+    use objc2_app_kit::NSPasteboardTypeFileURL;
+    use objc2_foundation::{NSString, NSURL};
+
+    let file_url = read_string_for_pasteboard_type(pasteboard, unsafe { NSPasteboardTypeFileURL })?;
+    let url = NSURL::URLWithString(&NSString::from_str(&file_url))?;
+    url.to_file_path()
+}
+
+#[cfg(target_os = "macos")]
+fn read_image_from_clipboard() -> Result<Option<ClipboardImagePayload>, String> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG, NSPasteboardTypeTIFF};
+
+    let pasteboard = NSPasteboard::generalPasteboard();
+
+    if let Some(path) = read_file_url_from_pasteboard(&pasteboard) {
+        let module_raw = false;
+        if crate::extensions::is_image_path(&path, module_raw) && path.exists() {
+            let bytes = std::fs::read(&path)
+                .map_err(|e| format!("Failed to read clipboard file URL: {}", e))?;
+            let extension = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("png")
+                .to_string();
+            let original_filename = path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string());
+            return Ok(Some(ClipboardImagePayload {
+                bytes,
+                extension,
+                original_filename,
+            }));
+        }
+    }
+
+    if let Some(data) = pasteboard.dataForType(unsafe { NSPasteboardTypePNG }) {
+        return Ok(Some(ClipboardImagePayload {
+            bytes: nsdata_to_vec(&data),
+            extension: "png".to_string(),
+            original_filename: None,
+        }));
+    }
+
+    if let Some(data) = pasteboard.dataForType(unsafe { NSPasteboardTypeTIFF }) {
+        return Ok(Some(ClipboardImagePayload {
+            bytes: nsdata_to_vec(&data),
+            extension: "tiff".to_string(),
+            original_filename: None,
+        }));
+    }
+
+    Ok(None)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_image_from_clipboard() -> Result<Option<ClipboardImagePayload>, String> {
+    Err("Image clipboard paste is currently available on macOS only".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn copy_path_to_clipboard(path: &Path) -> Result<(), String> {
+    use objc2_app_kit::{
+        NSPasteboard, NSPasteboardTypeFileURL, NSPasteboardTypePNG, NSPasteboardTypeString,
+        NSPasteboardTypeURL,
+    };
+    use objc2_foundation::{NSData, NSString, NSURL};
+
+    let url = NSURL::from_file_path(path)
+        .ok_or_else(|| format!("Invalid image path for clipboard: {}", path.display()))?;
+    let url_string = url
+        .absoluteString()
+        .ok_or_else(|| format!("Invalid file URL for clipboard: {}", path.display()))?
+        .to_string();
+    let path_string = path.to_string_lossy().to_string();
+
+    let pasteboard = NSPasteboard::generalPasteboard();
+    pasteboard.clearContents();
+
+    let url_ns = NSString::from_str(&url_string);
+    let mut wrote = pasteboard.setString_forType(&url_ns, unsafe { NSPasteboardTypeFileURL });
+    wrote |= pasteboard.setString_forType(&url_ns, unsafe { NSPasteboardTypeURL });
+    let path_ns = NSString::from_str(&path_string);
+    let _ = pasteboard.setString_forType(&path_ns, unsafe { NSPasteboardTypeString });
+
+    if let Ok(png_bytes) = render_path_as_png_bytes(path) {
+        let data = NSData::with_bytes(&png_bytes);
+        wrote |= pasteboard.setData_forType(Some(&data), unsafe { NSPasteboardTypePNG });
+    }
+
+    if wrote {
+        Ok(())
+    } else {
+        Err("Failed to write image to clipboard".to_string())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn copy_path_to_clipboard(_path: &Path) -> Result<(), String> {
+    Err("Image clipboard copy is currently available on macOS only".to_string())
+}
+
+#[tauri::command]
+pub async fn copy_image_to_clipboard(
+    state: State<'_, AppState>,
+    image_id: String,
+) -> Result<(), String> {
+    let images = state
+        .db
+        .get_images_by_ids(&[&image_id])
+        .map_err(|e| e.to_string())?;
+    let img = images
+        .first()
+        .ok_or_else(|| format!("Image '{}' not found", image_id))?;
+    let path = PathBuf::from(&img.path);
+    if !path.exists() {
+        return Err(format!("Cannot copy missing file: {}", img.path));
+    }
+
+    copy_path_to_clipboard(&path)
+}
+
+#[tauri::command]
+pub async fn paste_image_from_clipboard(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    destination_folder: String,
+    session_id: Option<String>,
+) -> Result<PastedImageResult, String> {
+    let destination = PathBuf::from(&destination_folder);
+    if !destination.is_dir() {
+        return Err("Destination folder does not exist".to_string());
+    }
+
+    let payload = read_image_from_clipboard()?
+        .ok_or_else(|| "Clipboard does not contain an image".to_string())?;
+    let date_prefix = clipboard_date_prefix(&state);
+    let filename = next_paste_filename(
+        &destination,
+        &payload.extension,
+        payload.original_filename.as_deref(),
+        &date_prefix,
+    )?;
+    let target = destination.join(filename);
+    std::fs::write(&target, &payload.bytes)
+        .map_err(|e| format!("Failed to write pasted image: {}", e))?;
+
+    let image_id = crate::db_core::import::import_file(&state.db, &target, &state.app_data_dir)?;
+
+    if let (Some(active_session_id), Some(image_id)) = (session_id.as_deref(), image_id.as_deref())
+    {
+        let _ = state.db.add_to_collection(active_session_id, &[image_id]);
+    }
+
+    let target_str = target.to_string_lossy().to_string();
+    let _ = app.asset_protocol_scope().allow_file(&target_str);
+
+    let roots = state.db.list_library_roots().map_err(|e| e.to_string())?;
+    if !target_is_in_library(&destination, &roots) {
+        if let Err(e) = state.db.add_library_root(&destination_folder) {
+            crate::safe_eprintln!(
+                "[files] Failed to add paste destination as library root: {}",
+                e
+            );
+        } else {
+            let mut fw = state.file_watcher.lock();
+            let _ = fw.watch_folder(&destination_folder);
+            let _ = app.emit("folders:changed", ());
+        }
+    }
+
+    let _ = app.emit("images:changed", ());
+
+    Ok(PastedImageResult {
+        path: target_str,
+        image_id,
+    })
 }
 
 #[tauri::command]
@@ -596,5 +1003,39 @@ mod tests {
             app_display_name(Path::new("/Applications/Preview.app")),
             "Preview"
         );
+    }
+
+    #[test]
+    fn paste_filename_continues_folder_wide_numeric_sequence() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("file_01.png"), b"one").unwrap();
+        std::fs::write(dir.path().join("file_02.png"), b"two").unwrap();
+
+        let name =
+            next_paste_filename(dir.path(), "png", Some("ignored.png"), "2026-06-02").unwrap();
+
+        assert_eq!(name, "file_03.png");
+    }
+
+    #[test]
+    fn paste_filename_uses_configured_date_prefix_without_sequence() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("portrait.png"), b"existing").unwrap();
+
+        let name =
+            next_paste_filename(dir.path(), "png", Some("Source Image.png"), "2026.06.02").unwrap();
+
+        assert_eq!(name, "2026.06.02-source-image.png");
+    }
+
+    #[test]
+    fn paste_filename_adds_counter_for_date_prefix_collisions() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("2026-06-02-source-image.png"), b"existing").unwrap();
+
+        let name =
+            next_paste_filename(dir.path(), "png", Some("Source Image.png"), "2026-06-02").unwrap();
+
+        assert_eq!(name, "2026-06-02-source-image-02.png");
     }
 }
