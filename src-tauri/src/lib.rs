@@ -103,6 +103,14 @@ where
     });
 }
 
+pub(crate) fn reveal_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
 fn run_stdio_bridge() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -183,9 +191,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             crate::safe_eprintln!("[single-instance] Second instance args: {:?}", args);
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.set_focus();
-            }
+            reveal_main_window(app);
             let mut file_paths = Vec::new();
             for arg in &args {
                 if arg.starts_with("cull://") {
@@ -586,9 +592,15 @@ pub fn run() {
                 }
             }
 
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = &event {
+                reveal_main_window(app);
+            }
+
             // Handle files opened via Finder "Open With"
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = &event {
+                reveal_main_window(app);
                 let file_paths: Vec<String> = urls
                     .iter()
                     .filter_map(|url| {

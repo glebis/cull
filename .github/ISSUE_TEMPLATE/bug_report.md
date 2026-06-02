@@ -19,3 +19,9 @@ labels: bug
 **Environment**
 - OS:
 - Cull version:
+
+**Acceptance criteria**
+
+- [ ] The bug is reproduced by an automated test or documented manual reproduction.
+- [ ] The expected behavior is restored without regressing existing workflows.
+- [ ] User-visible errors or recovery steps are updated if behavior changes.

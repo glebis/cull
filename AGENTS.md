@@ -74,7 +74,7 @@ Tokyo Night dark theme. All components MUST use these tokens, never hardcode col
 
 ## E2E Testing with agent-browser
 
-Tests run against `localhost:1420` in Chrome Beta via CDP. E2E tests use `tauri-mock.ts` directly (not via api.ts) for browser-only testing.
+Tests run against `localhost:1420` in Chrome Beta via CDP. E2E tests use `tauri-mock.ts` directly (not via api.ts) for browser-only testing. The browser smoke suite is classified as a manual pre-push gate for covered UI/browser changes; see `docs/e2e-testing-policy.md` for the required file areas and non-CI status.
 
 ### Prerequisites
 ```bash

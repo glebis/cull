@@ -18,6 +18,13 @@ describe('CI quality gate contract', () => {
     );
   });
 
+  it('keeps local helper worktrees out of Vitest discovery', () => {
+    const viteConfig = read('vite.config.js');
+
+    expect(viteConfig).toContain('configDefaults.exclude');
+    expect(viteConfig).toContain('"**/.worktrees/**"');
+  });
+
   it('uses locked Rust dependencies and encodes Clippy warning policy in CI', () => {
     const checkCi = read('scripts/check-ci.sh');
     const releaseWorkflow = read('.github/workflows/release.yml');

@@ -1,0 +1,21 @@
+name: feature
+description: |
+  ## Problem
+  What user problem does this solve?
+
+  ## Proposed Solution
+  What should be built?
+
+  ## Acceptance Criteria
+  - [ ] The user-facing behavior is defined clearly enough for implementation.
+  - [ ] Edge cases, errors, and non-goals are captured.
+  - [ ] Verification steps or tests are identified before work starts.
+
+type: feature
+priority: 2
+labels:
+  - enhancement
+acceptance_criteria: |
+  - [ ] The user-facing behavior is defined clearly enough for implementation.
+  - [ ] Edge cases, errors, and non-goals are captured.
+  - [ ] Verification steps or tests are identified before work starts.

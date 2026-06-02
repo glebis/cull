@@ -50,6 +50,8 @@ and is not configurable for Cull.
 
 **Svelte/TypeScript:** `npm run ci:frontend` runs `npm ci`, `npm run check`, `npm test`, and `npm run build`.
 
+**Browser E2E:** `npm run test:e2e` is a manual pre-push gate for covered UI/browser changes, including UI navigation, command palette/search flows, drag/drop affordances, preview display, and Tauri mock behavior. It is not part of `npm run ci` or GitHub CI yet; see [Browser E2E Testing Policy](docs/e2e-testing-policy.md).
+
 ## Issue Tracking
 
 This project uses [beads](https://github.com/gastownhall/beads) (`bd`) for issue tracking. Issues live in `.beads/` alongside the code.

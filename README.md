@@ -225,7 +225,7 @@ npm install
 npm run tauri dev
 ```
 
-Prerequisites: Rust 1.89.0 and Node.js 20.20.2. The repository pins these versions in `rust-toolchain.toml`, `.node-version`, and `.nvmrc`; see [docs/toolchain.md](docs/toolchain.md) for setup details, the `bd` wrapper, and dependency update automation.
+Prerequisites: Rust 1.89.0 and Node.js 20.20.2. The repository pins these versions in `rust-toolchain.toml`, `.node-version`, and `.nvmrc`; see [docs/toolchain.md](docs/toolchain.md) for setup details, the `bd` wrapper script, and dependency update automation.
 
 ## Distribution
 

@@ -85,29 +85,29 @@ require_clean_worktree() {
 }
 
 bd_command_exists() {
-  bd "$1" --help >/dev/null 2>&1
+  bash scripts/bd.sh "$1" --help >/dev/null 2>&1
 }
 
 sync_bd_state() {
-  if ! command -v bd >/dev/null 2>&1; then
+  if ! bash scripts/bd.sh --help >/dev/null 2>&1; then
     echo "bd not found; skipping bd status" >&2
     return 0
   fi
 
-  run bd vc status
+  run bash scripts/bd.sh vc status
 
   if bd_command_exists sync; then
-    run bd sync
+    run bash scripts/bd.sh sync
     return 0
   fi
 
   echo "bd sync is unavailable; using bd vc status and bd dolt remote inspection."
-  run bd vc status
+  run bash scripts/bd.sh vc status
 
   local remotes
-  remotes="$(bd dolt remote list 2>/dev/null || true)"
+  remotes="$(bash scripts/bd.sh dolt remote list 2>/dev/null || true)"
   if [ -n "$remotes" ] && ! printf '%s\n' "$remotes" | grep -q "No remotes configured"; then
-    run bd dolt push
+    run bash scripts/bd.sh dolt push
   else
     echo "No bd Dolt remote configured; bd changes must be carried by tracked .beads JSONL files."
   fi

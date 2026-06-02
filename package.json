@@ -26,7 +26,8 @@
     "test:perf": "vitest run src/lib/view-utils.test.ts -t \"grid rendering performance budget\"",
     "test:watch": "vitest",
     "audit:licenses": "node scripts/license-audit.mjs",
-    "bd": "bash scripts/bd.sh"
+    "bd": "bash scripts/bd.sh",
+    "lint:issues": "node scripts/check-beads-acceptance.mjs"
   },
   "license": "Apache-2.0",
   "repository": {

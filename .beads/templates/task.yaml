@@ -1,0 +1,17 @@
+name: task
+description: |
+  ## Context
+  What needs to change, and why?
+
+  ## Acceptance Criteria
+  - [ ] The desired behavior is described in user-observable terms.
+  - [ ] Edge cases, non-goals, and safety constraints are captured.
+  - [ ] Verification steps or tests are identified before implementation starts.
+
+type: task
+priority: 2
+labels: []
+acceptance_criteria: |
+  - [ ] The desired behavior is described in user-observable terms.
+  - [ ] Edge cases, non-goals, and safety constraints are captured.
+  - [ ] Verification steps or tests are identified before implementation starts.
