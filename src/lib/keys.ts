@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import {
     images, selectedIds, focusedIndex, thumbnailSize, statusHint, viewMode,
     compareActiveSide, compareImages, loupeScale, loupePanX, loupePanY,
-    sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode, compareImageOnly,
+    sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode, compareImageOnly, exportImageOnly,
     collections, collectMode, collectModeTarget, activeCollection,
     showDetectionBoxes, showDetectionInspector, nsfwMode,
     navigateTo, navigateBack, searchOpen, focusedImage, activeSession,
@@ -10,12 +10,14 @@ import {
     staticPublishingEnabled,
 } from './stores';
 import { computeCompareSwap, nextComparePresentationState } from './compare-utils';
+import { nextExportPresentationState } from './presentation-utils';
 import type { NsfwMode } from './stores';
 import type { ViewMode } from './stores';
 import { setRating, setDecision, createCollection, addToCollection, listCollections, rotateImage, undo, redo } from './api';
 import { showToast } from './stores';
 import { invalidateImageCache, loadImagesForCurrentScope } from './image-loading';
-import { commandForKeyboardEvent, openCommandPalette, recordCommandUse, runCommandPaletteItem } from './command-palette';
+import { focusImagePath } from './transform-results';
+import { commandForKeyboardEvent, openCommandPalette, runCommandPaletteItem } from './command-palette';
 import { recordShortcutUse, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from './shortcut-reminders';
 import { withDecision, withRating, type ImageDecision } from './selection-updates';
 
@@ -250,6 +252,12 @@ export function handleKeydown(e: KeyboardEvent) {
         return;
     }
 
+    if (e.key.toLowerCase() === 'p' && e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        openCommandPalette('commands');
+        return;
+    }
+
     if (e.key.toLowerCase() === 'p' && e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         openCommandPalette('commands');
@@ -285,7 +293,6 @@ export function handleKeydown(e: KeyboardEvent) {
     if (commandItem) {
         e.preventDefault();
         runCommandPaletteItem(commandItem)
-            .then(() => recordCommandUse(commandItem.id))
             .catch(err => console.error('Failed to run command hotkey:', err));
         return;
     }
@@ -312,7 +319,7 @@ export function handleKeydown(e: KeyboardEvent) {
         }
     }
 
-    // Shift+. (>) toggles zen mode; compare cycles through an image-only state too.
+    // Shift+. (>) toggles zen mode; compare/export cycle through an image-only state too.
     if (e.key === '>' || (e.shiftKey && e.key === '.')) {
         e.preventDefault();
         if (mode === 'compare') {
@@ -322,6 +329,15 @@ export function handleKeydown(e: KeyboardEvent) {
             });
             zenMode.set(next.zen);
             compareImageOnly.set(next.imageOnly);
+            return;
+        }
+        if (mode === 'export') {
+            const next = nextExportPresentationState({
+                zen: get(zenMode),
+                imageOnly: get(exportImageOnly),
+            });
+            zenMode.set(next.zen);
+            exportImageOnly.set(next.imageOnly);
             return;
         }
         zenMode.update(v => !v);
@@ -846,9 +862,7 @@ function handleLoupeKeys(e: KeyboardEvent) {
         e.preventDefault();
         const img = get(focusedImage);
         if (img) {
-            rotateImage(img.image.id, 270).then(() => {
-                window.dispatchEvent(new CustomEvent('image-updated'));
-            }).catch(err => console.error('Rotate failed:', err));
+            rotateImage(img.image.id, 270).then(focusImagePath).catch(err => console.error('Rotate failed:', err));
         }
         return;
     }
@@ -856,9 +870,7 @@ function handleLoupeKeys(e: KeyboardEvent) {
         e.preventDefault();
         const img = get(focusedImage);
         if (img) {
-            rotateImage(img.image.id, 90).then(() => {
-                window.dispatchEvent(new CustomEvent('image-updated'));
-            }).catch(err => console.error('Rotate failed:', err));
+            rotateImage(img.image.id, 90).then(focusImagePath).catch(err => console.error('Rotate failed:', err));
         }
         return;
     }

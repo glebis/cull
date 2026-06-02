@@ -45,6 +45,10 @@ function mockImagePath(i: number): string {
   return `/mock/image-${i}.png`;
 }
 
+function mockThumbnailPath(i: number): string {
+  return `/Users/test/Library/Application Support/com.glebkalinin.cull/thumbnails/image-${i}.jpg`;
+}
+
 function makeMockImage(i: number) {
   return {
     image: {
@@ -58,7 +62,7 @@ function makeMockImage(i: number) {
       imported_at: '2026-05-01',
     },
     path: mockImagePath(i),
-    thumbnail_path: null,
+    thumbnail_path: mockThumbnailPath(i),
     selection: i % 3 === 0 ? {
       image_id: `img-${i}`,
       project_id: null,
@@ -88,6 +92,7 @@ let clipboardMonitorStatus = {
   collection_name: null as string | null,
   capture_dir: '/mock/clipboard-captures',
   captured_count: 0,
+  capture_existing_on_start: false,
   last_error: null as string | null,
 };
 
@@ -256,6 +261,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     manifest_path: '/mock/static-publishing/client-review/site/data/canvas.json',
     instructions_path: '/mock/static-publishing/client-review/instructions/CLAUDE.md',
     qr_svg_path: '/mock/static-publishing/client-review/site/qr.svg',
+    qr_svg_data_url: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyODAiIGhlaWdodD0iMjgwIiB2aWV3Qm94PSIwIDAgMjgwIDI4MCI+PHJlY3Qgd2lkdGg9IjI4MCIgaGVpZ2h0PSIyODAiIGZpbGw9IiNmZmYiLz48ZyBmaWxsPSIjMDgwODBjIj48cmVjdCB4PSIyNCIgeT0iMjQiIHdpZHRoPSI1NiIgaGVpZ2h0PSI1NiIvPjxyZWN0IHg9IjIwMCIgeT0iMjQiIHdpZHRoPSI1NiIgaGVpZ2h0PSI1NiIvPjxyZWN0IHg9IjI0IiB5PSIyMDAiIHdpZHRoPSI1NiIgaGVpZ2h0PSI1NiIvPjxyZWN0IHg9IjEwNCIgeT0iMTA0IiB3aWR0aD0iMTYiIGhlaWdodD0iMTYiLz48cmVjdCB4PSIxMzYiIHk9IjEwNCIgd2lkdGg9IjMyIiBoZWlnaHQ9IjE2Ii8+PHJlY3QgeD0iMTg0IiB5PSIxMjAiIHdpZHRoPSIxNiIgaGVpZ2h0PSI0OCIvPjxyZWN0IHg9IjEwNCIgeT0iMTUyIiB3aWR0aD0iNDgiIGhlaWdodD0iMTYiLz48cmVjdCB4PSIxNTIiIHk9IjE4NCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjE2Ii8+PHJlY3QgeD0iMjMyIiB5PSIxODQiIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIvPjxyZWN0IHg9IjEwNCIgeT0iMjE2IiB3aWR0aD0iMTYiIGhlaWdodD0iNDAiLz48cmVjdCB4PSIxMzYiIHk9IjIzMiIgd2lkdGg9IjMyIiBoZWlnaHQ9IjI0Ii8+PC9nPjwvc3ZnPg==',
     qr_target_url: 'http://localhost:8000/',
     access_phrase: 'amber-canvas-river',
     image_count: 4,
@@ -267,6 +273,10 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     host: '127.0.0.1',
     port: 8000,
     site_dir: '/mock/static-publishing/client-review/site',
+  }),
+  stop_static_publish_server: () => ({
+    stopped: true,
+    url: 'http://127.0.0.1:8000/',
   }),
   get_clipboard_monitor_status: () => clipboardMonitorStatus,
   start_clipboard_monitor: () => {
@@ -287,6 +297,10 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   },
   set_clipboard_monitor_capture_dir: (_: any, args: { path: string }) => {
     clipboardMonitorStatus = { ...clipboardMonitorStatus, capture_dir: args.path };
+    return clipboardMonitorStatus;
+  },
+  set_clipboard_monitor_capture_existing_on_start: (_: any, args: { enabled: boolean }) => {
+    clipboardMonitorStatus = { ...clipboardMonitorStatus, capture_existing_on_start: args.enabled };
     return clipboardMonitorStatus;
   },
   move_clipboard_capture_folder: (_: any, args: { newPath: string }) => {
@@ -369,6 +383,14 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   list_image_ids: () => Array.from({ length: 20 }, (_, i) => `img-${i}`),
   get_images_by_ids: (_: any, args: { imageIds: string[] }) =>
     args.imageIds.map(id => makeMockImage(Number(id.replace('img-', '')) || 0)),
+  get_image_by_path: (_: any, args: { path: string }) => ({
+    ...makeMockImage(0),
+    image: {
+      ...makeMockImage(0).image,
+      id: args.path.split('/').pop()?.replace(/\W+/g, '-') || 'transformed',
+    },
+    path: args.path,
+  }),
   get_embedding_count: (_: any, args?: { model?: string | null }) => {
     if (args?.model === 'dinov2-vits14') return 8;
     if (args?.model === 'gemini-embedding-2') return 0;
@@ -398,8 +420,8 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   redo: () => 'rating',
   trash_images: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   delete_images_permanently: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
-  rotate_image: () => undefined,
-  crop_image: (_: any, args: { imageId: string }) => args.imageId,
+  rotate_image: (_: any, args: { imageId: string }) => `/mock/library/${args.imageId}_rotated.png`,
+  crop_image: (_: any, args: { imageId: string }) => `/mock/library/${args.imageId}_crop.png`,
   get_generation_run: () => null,
   record_asset_load_event: (_: any, args: { event: any }) => ({
     id: 'asset-event-1',
@@ -462,16 +484,32 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   ],
   get_clip_model_download_info: () => ({
     model_id: 'clip-vit-b32',
-    url: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx',
+    url: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/e0c24ed0fa57fa3e4f97f30de74c51d944036ace/model.onnx',
+    expected_sha256: 'c68d3d9a200ddd2a8c8a5510b576d4c94d1ae383bf8b36dd8c084f94e1fb4d63',
+    expected_size_bytes: 351686194,
+    spdx_license: 'MIT',
+    source_repo: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision',
+    model_card_url: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision',
     model_path: '/mock/app-data/models/clip-vit-b32-vision.onnx',
     part_path: '/mock/app-data/models/clip-vit-b32-vision.onnx.part',
-    curl_command: "mkdir -p '/mock/app-data/models' && curl -L -C - -o '/mock/app-data/models/clip-vit-b32-vision.onnx.part' 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx' && mv '/mock/app-data/models/clip-vit-b32-vision.onnx.part' '/mock/app-data/models/clip-vit-b32-vision.onnx'",
+    curl_command: "mkdir -p '/mock/app-data/models' && curl -L -C - -o '/mock/app-data/models/clip-vit-b32-vision.onnx.part' 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/e0c24ed0fa57fa3e4f97f30de74c51d944036ace/model.onnx' && test \"$(wc -c < '/mock/app-data/models/clip-vit-b32-vision.onnx.part' | tr -d '[:space:]')\" = '351686194' && printf '%s\\n' 'c68d3d9a200ddd2a8c8a5510b576d4c94d1ae383bf8b36dd8c084f94e1fb4d63  /mock/app-data/models/clip-vit-b32-vision.onnx.part' | shasum -a 256 -c - && mv '/mock/app-data/models/clip-vit-b32-vision.onnx.part' '/mock/app-data/models/clip-vit-b32-vision.onnx'",
   }),
   get_embedding_model_download_info: (_: any, args: { model: string }) => ({
     model_id: args.model,
     url: args.model === 'dinov2-vits14'
-      ? 'https://huggingface.co/sefaburak/dinov2-small-onnx/resolve/main/dinov2_vits14.onnx'
-      : 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx',
+      ? 'https://huggingface.co/sefaburak/dinov2-small-onnx/resolve/7a5e61628117b5a8bd6f5e2b2385b76da1b4582e/dinov2_vits14.onnx'
+      : 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/e0c24ed0fa57fa3e4f97f30de74c51d944036ace/model.onnx',
+    expected_sha256: args.model === 'dinov2-vits14'
+      ? '4df36ef0716a8f17d984fc7546a3a5d670fda6911eb298592250cb9e26756063'
+      : 'c68d3d9a200ddd2a8c8a5510b576d4c94d1ae383bf8b36dd8c084f94e1fb4d63',
+    expected_size_bytes: args.model === 'dinov2-vits14' ? 86644121 : 351686194,
+    spdx_license: args.model === 'dinov2-vits14' ? 'Apache-2.0' : 'MIT',
+    source_repo: args.model === 'dinov2-vits14'
+      ? 'https://huggingface.co/sefaburak/dinov2-small-onnx'
+      : 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision',
+    model_card_url: args.model === 'dinov2-vits14'
+      ? 'https://huggingface.co/sefaburak/dinov2-small-onnx'
+      : 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision',
     model_path: `/mock/app-data/models/${args.model}.onnx`,
     part_path: `/mock/app-data/models/${args.model}.onnx.part`,
     curl_command: `curl -L -C - -o '/mock/app-data/models/${args.model}.onnx.part'`,
@@ -490,6 +528,11 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       available: true,
       downloadable: true,
       downloadLabel: 'Download CLIP (~350MB)',
+      expectedSha256: 'c68d3d9a200ddd2a8c8a5510b576d4c94d1ae383bf8b36dd8c084f94e1fb4d63',
+      expectedSizeBytes: 351686194,
+      spdxLicense: 'MIT',
+      sourceRepo: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision',
+      modelCardUrl: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision',
       apiKeyProvider: null,
     },
     {
@@ -505,6 +548,11 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       available: true,
       downloadable: true,
       downloadLabel: 'Download DINOv2 (~87MB)',
+      expectedSha256: '4df36ef0716a8f17d984fc7546a3a5d670fda6911eb298592250cb9e26756063',
+      expectedSizeBytes: 86644121,
+      spdxLicense: 'Apache-2.0',
+      sourceRepo: 'https://huggingface.co/sefaburak/dinov2-small-onnx',
+      modelCardUrl: 'https://huggingface.co/sefaburak/dinov2-small-onnx',
       apiKeyProvider: null,
     },
     {
@@ -520,6 +568,11 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       available: false,
       downloadable: false,
       downloadLabel: null,
+      expectedSha256: null,
+      expectedSizeBytes: null,
+      spdxLicense: null,
+      sourceRepo: null,
+      modelCardUrl: null,
       apiKeyProvider: 'google',
     },
     {
@@ -535,6 +588,11 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       available: false,
       downloadable: false,
       downloadLabel: null,
+      expectedSha256: null,
+      expectedSizeBytes: null,
+      spdxLicense: null,
+      sourceRepo: null,
+      modelCardUrl: null,
       apiKeyProvider: 'cohere',
     },
     {
@@ -550,6 +608,11 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       available: false,
       downloadable: false,
       downloadLabel: null,
+      expectedSha256: null,
+      expectedSizeBytes: null,
+      spdxLicense: null,
+      sourceRepo: null,
+      modelCardUrl: null,
       apiKeyProvider: 'openai',
     },
     {
@@ -565,6 +628,11 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       available: true,
       downloadable: false,
       downloadLabel: null,
+      expectedSha256: null,
+      expectedSizeBytes: null,
+      spdxLicense: null,
+      sourceRepo: null,
+      modelCardUrl: null,
       apiKeyProvider: null,
     },
   ],

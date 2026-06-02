@@ -28,6 +28,13 @@ describe('Help menu contract', () => {
         expect(menuSource).not.toContain('"Cull Help"');
     });
 
+    it('registers the Help submenu with Tauri so macOS adds the native search field', () => {
+        const menuSource = readProjectFile('src-tauri/src/menu.rs');
+
+        expect(menuSource).toContain('HELP_SUBMENU_ID');
+        expect(menuSource).toContain('Submenu::with_id(app, HELP_SUBMENU_ID, "Help", true)');
+    });
+
     it('registers a native macOS Help Book in the app plist', () => {
         const plist = readProjectFile('src-tauri/Info.plist');
 
@@ -86,6 +93,7 @@ describe('Help menu contract', () => {
 
     it('keeps the user guide covering the core user workflows', () => {
         const guide = readProjectFile('docs/USER_GUIDE.md');
+        const helpIndex = readProjectFile(`${helpBookRoot}/Resources/English.lproj/index.html`);
 
         for (const heading of [
             '## Install And Run From Source',
@@ -93,12 +101,25 @@ describe('Help menu contract', () => {
             '## Navigate Views',
             '## Review And Curate',
             '## Collections',
+            '## Clipboard Monitor',
+            '## Static Publishing',
             '## Embeddings And Search',
+            '## Agent And MCP Workflows',
             '## Export Images',
             '## Privacy Defaults',
             '## CLI',
         ]) {
             expect(guide).toContain(heading);
+        }
+
+        for (const helpTopic of [
+            'Clipboard Monitor',
+            'Static publishing',
+            'Agent and MCP workflows',
+            'Monitor Clipboard',
+            'Publish clipboard collection',
+        ]) {
+            expect(helpIndex).toContain(helpTopic);
         }
     });
 });

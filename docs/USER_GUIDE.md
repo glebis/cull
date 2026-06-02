@@ -1,6 +1,6 @@
 # Cull User Guide
 
-Cull is a local-first desktop image viewer for reviewing, comparing, curating, searching, and exporting AI-generated image sets. The app stores its library metadata in SQLite and never modifies original image files during normal viewing or curation.
+Cull is a local-first desktop image viewer for reviewing, comparing, curating, searching, monitoring, and exporting AI-generated image sets. The app stores its library metadata in SQLite and never modifies original image files during normal viewing or curation.
 
 ## Install And Run From Source
 
@@ -43,9 +43,17 @@ Cull has seven primary views:
 | `Cmd+4` | Canvas | Arrange selected images spatially |
 | `Cmd+5` | Lineage | Inspect generation runs and image relationships |
 | `Cmd+6` | Embedding Explorer | Explore visual clusters and similarity |
-| `Cmd+0` | Export | Build exports from selected or collected images |
+| `Cmd+7` | Export | Build exports from selected or collected images |
 
 The same view shortcuts are used by the tab bar, keyboard handler, and native View menu.
+
+## Command Palette
+
+Use `Cmd+P` or **View > Command Palette...** to open the Command Palette in command-only mode. Use `Cmd+K` to open the broader palette that includes commands and destinations such as folders, collections, and smart collections. `Cmd+Shift+P` is also supported as a command-only shortcut for VS Code-style muscle memory.
+
+Type to fuzzy-search the available commands. Non-matching rows are hidden while you search, rows show their category and shortcut, `ArrowUp` and `ArrowDown` move the selected row, and `Enter` runs the selected command. `Escape` closes the palette.
+
+The palette keeps the last five commands launched through the palette at the top of the empty command list, matching standard command palette behavior in tools like VS Code and Obsidian.
 
 ## Review And Curate
 
@@ -74,9 +82,29 @@ Collections let you group images without copying source files.
 - Use the sidebar to browse collections.
 - Use Export view to prepare a collection for output.
 
+## Clipboard Monitor
+
+Clipboard Monitor is for reference-gathering sessions where images arrive through the macOS clipboard, for example from a browser, generator, or design tool.
+
+- Use the sidebar **Monitor Clipboard** control to start or stop monitoring.
+- Starting a monitor session creates a new collection named like `Clipboard 2026.05.30 14:35`, focuses the grid on that collection, and stores each changed clipboard image as a real file.
+- Captures use the default `Clipboard Captures` folder inside Cull's app data folder unless you choose **Move Folder**.
+- The sidebar shows the access status, active capture folder, collection name, and captured image count.
+- Use **Publish** to publish the clipboard collection as a static reference set and copy the published URL when available.
+
+Clipboard access is explicit. Stop the monitor when the reference-gathering session is finished.
+
+## Static Publishing
+
+Static publishing turns a collection into a local shareable site without changing the original source images.
+
+- Use the static publishing controls from Export view for regular collections.
+- Use **Publish** in Clipboard Monitor to publish the current clipboard collection directly.
+- Published sites include a manifest, image assets, and agent instructions so a recipient or agent can inspect the reference set without opening the Cull database.
+
 ## Export Images
 
-Use the Export view (`Cmd+0`) to prepare selected images or a collection for output. The current CLI slice also supports exporting a collection to a folder while preserving originals:
+Use the Export view (`Cmd+7`) to prepare selected images or a collection for output. The current CLI slice also supports exporting a collection to a folder while preserving originals:
 
 ```bash
 cull --json export_images --collection_id <id> --output_dir ~/Desktop/export --format original
@@ -89,6 +117,14 @@ Export operations write new files to the chosen destination and do not rewrite y
 Cull supports local CLIP embeddings through ONNX Runtime. Local embeddings run on your machine and do not send images to an external service.
 
 Optional cloud embedding and generation providers require your own API key. Keys are stored in the OS keychain where supported. See [Privacy & Data Flow](PRIVACY.md) before enabling cloud features for sensitive images.
+
+## Agent And MCP Workflows
+
+Cull exposes an agent-friendly workflow surface through MCP-aligned commands and menu actions.
+
+- The tray menu includes window, Clipboard Monitor, MCP status, and quit actions.
+- MCP tools can inspect library state, work with collections, and publish clipboard monitor collections when the server is enabled.
+- The MCP HTTP server is disabled by default; enable it only when you need remote agent access.
 
 ## CLI
 
@@ -114,6 +150,7 @@ By default, Cull is local-first:
 
 - Image viewing, thumbnails, ratings, collections, and SQLite metadata are local.
 - Local CLIP embeddings use ONNX Runtime on your machine.
+- Clipboard Monitor writes captured clipboard images to your selected local capture folder.
 - Cloud providers are opt-in and require your own API key.
 - The MCP HTTP server is disabled unless explicitly enabled.
 

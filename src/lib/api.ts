@@ -367,6 +367,7 @@ export interface ClipboardMonitorStatus {
     collection_name: string | null;
     capture_dir: string;
     captured_count: number;
+    capture_existing_on_start: boolean;
     last_error: string | null;
 }
 
@@ -393,6 +394,10 @@ export async function stopClipboardMonitor(): Promise<ClipboardMonitorStatus> {
 
 export async function setClipboardMonitorCaptureDir(path: string): Promise<ClipboardMonitorStatus> {
     return invoke('set_clipboard_monitor_capture_dir', { path });
+}
+
+export async function setClipboardMonitorCaptureExistingOnStart(enabled: boolean): Promise<ClipboardMonitorStatus> {
+    return invoke('set_clipboard_monitor_capture_existing_on_start', { enabled });
 }
 
 export async function moveClipboardCaptureFolder(newPath: string): Promise<ClipboardMonitorStatus> {
@@ -462,6 +467,11 @@ export async function listTags(limit = 100, offset = 0): Promise<TagSummary[]> {
 export interface ClipModelDownloadInfo {
     model_id: string;
     url: string;
+    expected_sha256: string;
+    expected_size_bytes: number;
+    spdx_license: string;
+    source_repo: string;
+    model_card_url: string;
     model_path: string;
     part_path: string;
     curl_command: string;
@@ -482,6 +492,11 @@ export interface EmbeddingProviderInfo {
     available: boolean;
     downloadable: boolean;
     downloadLabel: string | null;
+    expectedSha256: string | null;
+    expectedSizeBytes: number | null;
+    spdxLicense: string | null;
+    sourceRepo: string | null;
+    modelCardUrl: string | null;
     apiKeyProvider: string | null;
 }
 
@@ -668,6 +683,10 @@ export async function drainPendingOpenParams<T>(): Promise<T[]> {
     return invoke<T[]>('drain_pending_open_params');
 }
 
+export async function openDeepLinkUrls(urls: string[]): Promise<void> {
+    return invoke('open_deep_link_urls', { urls });
+}
+
 // Vision / Ollama commands
 export async function checkOllama(): Promise<string[]> {
     return invoke('check_ollama');
@@ -820,6 +839,7 @@ export interface StaticPublishResult {
     manifest_path: string;
     instructions_path: string;
     qr_svg_path: string;
+    qr_svg_data_url: string;
     qr_target_url: string;
     access_phrase: string;
     image_count: number;
@@ -834,12 +854,21 @@ export interface StaticPublishServerResult {
     site_dir: string;
 }
 
+export interface StaticPublishServerStopResult {
+    stopped: boolean;
+    url: string | null;
+}
+
 export async function exportStaticPublishPackage(request: StaticPublishRequest): Promise<StaticPublishResult> {
     return invoke('export_static_publish_package', { request });
 }
 
 export async function serveStaticPublishPackage(siteDir: string, host?: string | null, port?: number | null): Promise<StaticPublishServerResult> {
     return invoke('serve_static_publish_package', { siteDir, host: host ?? null, port: port ?? null });
+}
+
+export async function stopStaticPublishServer(): Promise<StaticPublishServerStopResult> {
+    return invoke('stop_static_publish_server');
 }
 
 // Lineage commands
@@ -927,12 +956,12 @@ export async function rotateMcpToken(tokenId: string): Promise<string> {
     return invoke('rotate_mcp_token', { tokenId });
 }
 
-export async function cropImage(imageId: string, x: number, y: number, width: number, height: number, saveAsCopy: boolean): Promise<string> {
-    return invoke<string>('crop_image', { imageId, x, y, width, height, saveAsCopy });
+export async function cropImage(imageId: string, x: number, y: number, width: number, height: number): Promise<string> {
+    return invoke<string>('crop_image', { imageId, x, y, width, height });
 }
 
-export async function rotateImage(imageId: string, degrees: number): Promise<void> {
-    return invoke<void>('rotate_image', { imageId, degrees });
+export async function rotateImage(imageId: string, degrees: number): Promise<string> {
+    return invoke<string>('rotate_image', { imageId, degrees });
 }
 
 export async function getGenerationRun(imageId: string): Promise<GenerationRun | null> {

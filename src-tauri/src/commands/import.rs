@@ -85,9 +85,6 @@ pub async fn import_folder(
     }
 
     let _ = state.db.add_library_root(&folder_path);
-    let _ = app
-        .asset_protocol_scope()
-        .allow_directory(&folder_path, true);
 
     let batch_id = if !new_image_ids.is_empty() {
         let batch = db
@@ -129,6 +126,7 @@ pub async fn import_folder(
         run_post_import_quality_analysis(app.clone(), new_image_ids.clone());
         run_post_import_detection(app.clone(), new_image_ids);
     }
+    let _ = crate::tray::refresh_tray_menu(&app);
 
     Ok(ImportResponse {
         imported,
@@ -180,11 +178,6 @@ pub async fn import_files(
         }
     }
 
-    let asset_scope = app.asset_protocol_scope();
-    for path in &file_paths {
-        let _ = asset_scope.allow_file(path);
-    }
-
     let batch_id = if !new_image_ids.is_empty() {
         let batch = db
             .create_import_batch("cli", new_image_ids.len() as u32, session_id.as_deref())
@@ -222,6 +215,7 @@ pub async fn import_files(
     let image_ids_out = new_image_ids.clone();
 
     if !new_image_ids.is_empty() {
+        let _ = crate::tray::refresh_tray_menu(&app);
         run_post_import_quality_analysis(app.clone(), new_image_ids.clone());
         run_post_import_detection(app, new_image_ids);
     }

@@ -33,6 +33,7 @@
         type CanvasViewItem,
     } from '$lib/canvas-view-model';
     import type { CanvasCrop } from '$lib/canvas-document';
+    import { safeAssetPreviewPath } from '$lib/view-utils';
     import ContextMenu from './ContextMenu.svelte';
 
     type CropPoint = { x: number; y: number };
@@ -479,6 +480,7 @@
             {@const rating = item.image.selection?.star_rating ?? 0}
             {@const decision = item.image.selection?.decision ?? 'undecided'}
             {@const annotations = itemAnnotations(item)}
+            {@const previewPath = safeAssetPreviewPath(item.image)}
             <div
                 class="canvas-item"
                 class:selected={$selectedIds.has(item.imageId)}
@@ -496,12 +498,16 @@
                 onkeydown={(e) => handleItemKeydown(e, item)}
             >
                 <div class="image-stage">
-                    <img
-                        src={item.image.thumbnail_path ? convertFileSrc(item.image.thumbnail_path) : convertFileSrc(item.image.path)}
-                        alt=""
-                        draggable="false"
-                        style={cropImageStyle(item)}
-                    />
+                    {#if previewPath}
+                        <img
+                            src={convertFileSrc(previewPath)}
+                            alt=""
+                            draggable="false"
+                            style={cropImageStyle(item)}
+                        />
+                    {:else}
+                        <div class="preview-unavailable">Preview unavailable</div>
+                    {/if}
                 </div>
                 {#if cropModeItemId === item.id}
                     {@const cropSelection = cropSelectionForItem(item)}
@@ -663,6 +669,16 @@
         position: absolute;
         object-fit: cover;
         display: block;
+    }
+    .preview-unavailable {
+        display: grid;
+        place-items: center;
+        width: 100%;
+        height: 100%;
+        color: var(--text-secondary);
+        background: var(--surface);
+        font-size: 11px;
+        text-align: center;
     }
     .crop-overlay {
         position: absolute;

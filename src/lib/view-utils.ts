@@ -103,15 +103,41 @@ export interface LoupeImagePathCandidate {
     thumbnail_path?: string | null;
 }
 
+const CULL_APP_DIR_SEGMENT = '/com.glebkalinin.cull/';
+const CODEX_GENERATED_IMAGES_SEGMENT = '/.codex/generated_images/';
+
+function normalizeAssetPath(path: string): string {
+    return path.replace(/\\/g, '/');
+}
+
+export function isAssetProtocolSafePath(path: string | null | undefined): path is string {
+    if (!path) return false;
+    const normalized = normalizeAssetPath(path);
+    return (
+        normalized.includes(`${CULL_APP_DIR_SEGMENT}thumbnails/`) ||
+        normalized.includes(`${CULL_APP_DIR_SEGMENT}generated/`) ||
+        normalized.includes(CODEX_GENERATED_IMAGES_SEGMENT)
+    );
+}
+
+export function safeAssetPreviewPath(image: LoupeImagePathCandidate): string | null {
+    if (isAssetProtocolSafePath(image.thumbnail_path)) {
+        return image.thumbnail_path;
+    }
+    if (isAssetProtocolSafePath(image.path)) {
+        return image.path;
+    }
+    return null;
+}
+
 export function chooseLoupeImagePath(
     image: LoupeImagePathCandidate,
     isRaw: boolean,
     sourceLoadFailed: boolean
-): string {
-    if ((isRaw || sourceLoadFailed) && image.thumbnail_path) {
-        return image.thumbnail_path;
-    }
-    return image.path;
+): string | null {
+    void isRaw;
+    void sourceLoadFailed;
+    return safeAssetPreviewPath(image);
 }
 
 export function computeGridLayout(

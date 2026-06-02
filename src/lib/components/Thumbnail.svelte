@@ -3,6 +3,7 @@
     import type { ImageWithFile } from '$lib/api';
     import { regenerateSingleThumbnail } from '$lib/api';
     import { recordImageLoadFailure } from '$lib/diagnostics';
+    import { safeAssetPreviewPath } from '$lib/view-utils';
     import ContextMenu from './ContextMenu.svelte';
 
     interface Props {
@@ -17,11 +18,8 @@
 
     let { item, size, focused, selected, onclick, ondblclick, loading = 'lazy' }: Props = $props();
 
-    let src = $derived(
-        item.thumbnail_path
-            ? convertFileSrc(item.thumbnail_path)
-            : convertFileSrc(item.path)
-    );
+    let previewPath = $derived(safeAssetPreviewPath(item));
+    let src = $derived(previewPath ? convertFileSrc(previewPath) : '');
 
     let rating = $derived(item.selection?.star_rating ?? 0);
     let decision = $derived(item.selection?.decision ?? 'undecided');
@@ -101,8 +99,10 @@
         <div class="fallback-text">{filename}</div>
     {:else if regenerating}
         <div class="regenerating"></div>
-    {:else}
+    {:else if src}
         <img {src} alt={filename} {loading} decoding="async" draggable="false" onerror={handleImgError} />
+    {:else}
+        <div class="fallback-text">{filename}</div>
     {/if}
 
     {#if item.missing_at}

@@ -13,6 +13,13 @@ const QUIT_APP_ID: &str = "quit_app";
 const TRAY_CLIPBOARD_MONITOR_ID: &str = "tray_clipboard_monitor";
 const RECORDING_BADGE_RGBA: [u8; 4] = [247, 118, 142, 255];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TrayMenuState {
+    image_count: Option<u32>,
+    mcp_connections: u32,
+    clipboard_monitor_checked: bool,
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TrayMenuItemKind {
@@ -21,10 +28,10 @@ enum TrayMenuItemKind {
 }
 
 #[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct TrayMenuItemSpec {
     id: &'static str,
-    label: &'static str,
+    label: String,
     kind: TrayMenuItemKind,
     enabled: bool,
     checked: bool,
@@ -39,7 +46,7 @@ enum TrayMenuAction {
 }
 
 pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
-    let menu = build_tray_menu(app, false)?;
+    let menu = build_tray_menu(app, current_tray_menu_state(app, None))?;
 
     let _tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(app.default_window_icon().unwrap().clone())
@@ -69,12 +76,22 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+pub fn refresh_tray_menu(app: &AppHandle) -> Result<(), String> {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return Ok(());
+    };
+    let menu = build_tray_menu(app, current_tray_menu_state(app, None))
+        .map_err(|e| format!("Failed to rebuild tray menu: {}", e))?;
+    tray.set_menu(Some(menu))
+        .map_err(|e| format!("Failed to update tray menu: {}", e))
+}
+
 pub fn set_clipboard_monitor_checked(app: &AppHandle, checked: bool) -> Result<(), String> {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return Ok(());
     };
-    let menu =
-        build_tray_menu(app, checked).map_err(|e| format!("Failed to rebuild tray menu: {}", e))?;
+    let menu = build_tray_menu(app, current_tray_menu_state(app, Some(checked)))
+        .map_err(|e| format!("Failed to rebuild tray menu: {}", e))?;
     tray.set_menu(Some(menu))
         .map_err(|e| format!("Failed to update tray menu: {}", e))?;
     set_clipboard_monitor_icon(app, checked)
@@ -100,7 +117,20 @@ pub fn recording_tray_icon(base: &Image<'_>) -> Image<'static> {
     Image::new_owned(rgba, base.width(), base.height())
 }
 
-fn build_tray_menu(app: &AppHandle, clipboard_monitor_checked: bool) -> tauri::Result<Menu<Wry>> {
+fn current_tray_menu_state(
+    app: &AppHandle,
+    clipboard_monitor_checked: Option<bool>,
+) -> TrayMenuState {
+    let state = app.state::<crate::AppState>();
+    TrayMenuState {
+        image_count: state.db.image_count().ok(),
+        mcp_connections: crate::mcp::socket::active_connections(),
+        clipboard_monitor_checked: clipboard_monitor_checked
+            .unwrap_or_else(|| state.clipboard_monitor.lock().running),
+    }
+}
+
+fn build_tray_menu(app: &AppHandle, state: TrayMenuState) -> tauri::Result<Menu<Wry>> {
     let show_hide = MenuItem::with_id(app, SHOW_HIDE_ID, "Show Window", true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
     let clipboard_monitor = CheckMenuItem::with_id(
@@ -108,17 +138,13 @@ fn build_tray_menu(app: &AppHandle, clipboard_monitor_checked: bool) -> tauri::R
         TRAY_CLIPBOARD_MONITOR_ID,
         "Clipboard Monitor",
         cfg!(target_os = "macos"),
-        clipboard_monitor_checked,
+        state.clipboard_monitor_checked,
         None::<&str>,
     )?;
-    let stats = MenuItem::with_id(app, TRAY_STATS_ID, "Loading...", false, None::<&str>)?;
-    let mcp_status = MenuItem::with_id(
-        app,
-        TRAY_MCP_STATUS_ID,
-        "MCP: starting...",
-        false,
-        None::<&str>,
-    )?;
+    let stats_label = tray_library_label(state.image_count);
+    let mcp_label = tray_mcp_label(state.mcp_connections);
+    let stats = MenuItem::with_id(app, TRAY_STATS_ID, &stats_label, false, None::<&str>)?;
+    let mcp_status = MenuItem::with_id(app, TRAY_MCP_STATUS_ID, &mcp_label, false, None::<&str>)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, QUIT_APP_ID, "Quit Cull", true, None::<&str>)?;
 
@@ -138,43 +164,68 @@ fn build_tray_menu(app: &AppHandle, clipboard_monitor_checked: bool) -> tauri::R
 
 #[cfg(test)]
 fn tray_menu_specs() -> Vec<TrayMenuItemSpec> {
+    tray_menu_specs_for_state(TrayMenuState {
+        image_count: Some(0),
+        mcp_connections: 0,
+        clipboard_monitor_checked: false,
+    })
+}
+
+#[cfg(test)]
+fn tray_menu_specs_for_state(state: TrayMenuState) -> Vec<TrayMenuItemSpec> {
     vec![
         TrayMenuItemSpec {
             id: SHOW_HIDE_ID,
-            label: "Show Window",
+            label: "Show Window".to_string(),
             kind: TrayMenuItemKind::Item,
             enabled: true,
             checked: false,
         },
         TrayMenuItemSpec {
             id: TRAY_CLIPBOARD_MONITOR_ID,
-            label: "Clipboard Monitor",
+            label: "Clipboard Monitor".to_string(),
             kind: TrayMenuItemKind::Check,
             enabled: cfg!(target_os = "macos"),
-            checked: false,
+            checked: state.clipboard_monitor_checked,
         },
         TrayMenuItemSpec {
             id: TRAY_STATS_ID,
-            label: "Loading...",
+            label: tray_library_label(state.image_count),
             kind: TrayMenuItemKind::Item,
             enabled: false,
             checked: false,
         },
         TrayMenuItemSpec {
             id: TRAY_MCP_STATUS_ID,
-            label: "MCP: starting...",
+            label: tray_mcp_label(state.mcp_connections),
             kind: TrayMenuItemKind::Item,
             enabled: false,
             checked: false,
         },
         TrayMenuItemSpec {
             id: QUIT_APP_ID,
-            label: "Quit Cull",
+            label: "Quit Cull".to_string(),
             kind: TrayMenuItemKind::Item,
             enabled: true,
             checked: false,
         },
     ]
+}
+
+fn tray_library_label(image_count: Option<u32>) -> String {
+    match image_count {
+        Some(1) => "Library: 1 image".to_string(),
+        Some(count) => format!("Library: {count} images"),
+        None => "Library: unavailable".to_string(),
+    }
+}
+
+fn tray_mcp_label(connections: u32) -> String {
+    match connections {
+        0 => "MCP: idle".to_string(),
+        1 => "MCP: 1 connection".to_string(),
+        count => format!("MCP: {count} connections"),
+    }
 }
 
 fn tray_action_for_id(id: &str) -> TrayMenuAction {
@@ -272,6 +323,55 @@ mod tests {
             tray_action_for_id(TRAY_CLIPBOARD_MONITOR_ID),
             TrayMenuAction::ToggleClipboardMonitor
         );
+    }
+
+    #[test]
+    fn tray_menu_uses_dynamic_library_and_mcp_labels() {
+        let specs = tray_menu_specs_for_state(TrayMenuState {
+            image_count: Some(42),
+            mcp_connections: 2,
+            clipboard_monitor_checked: true,
+        });
+
+        let stats = specs
+            .iter()
+            .find(|item| item.id == TRAY_STATS_ID)
+            .expect("stats tray item exists");
+        let mcp = specs
+            .iter()
+            .find(|item| item.id == TRAY_MCP_STATUS_ID)
+            .expect("mcp tray item exists");
+        let clipboard = specs
+            .iter()
+            .find(|item| item.id == TRAY_CLIPBOARD_MONITOR_ID)
+            .expect("clipboard monitor tray item exists");
+
+        assert_eq!(stats.label, "Library: 42 images");
+        assert_eq!(mcp.label, "MCP: 2 connections");
+        assert!(clipboard.checked);
+        assert!(!specs.iter().any(|item| item.label == "Loading..."));
+        assert!(!specs.iter().any(|item| item.label == "MCP: starting..."));
+    }
+
+    #[test]
+    fn tray_menu_pluralizes_single_image_and_idle_mcp() {
+        let specs = tray_menu_specs_for_state(TrayMenuState {
+            image_count: Some(1),
+            mcp_connections: 0,
+            clipboard_monitor_checked: false,
+        });
+
+        let stats = specs
+            .iter()
+            .find(|item| item.id == TRAY_STATS_ID)
+            .expect("stats tray item exists");
+        let mcp = specs
+            .iter()
+            .find(|item| item.id == TRAY_MCP_STATUS_ID)
+            .expect("mcp tray item exists");
+
+        assert_eq!(stats.label, "Library: 1 image");
+        assert_eq!(mcp.label, "MCP: idle");
     }
 
     #[test]

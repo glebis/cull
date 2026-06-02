@@ -45,6 +45,7 @@ pub async fn start_socket_server(
         let handle = app_handle.clone();
 
         CONNECTION_COUNT.fetch_add(1, Ordering::Relaxed);
+        let _ = crate::tray::refresh_tray_menu(&handle);
 
         tokio::spawn(async move {
             crate::safe_eprintln!(
@@ -52,7 +53,7 @@ pub async fn start_socket_server(
                 CONNECTION_COUNT.load(Ordering::Relaxed)
             );
 
-            let mcp = CullMcp::new(handle);
+            let mcp = CullMcp::new(handle.clone());
             let (read, write) = tokio::io::split(stream);
 
             match mcp.serve((read, write)).await {
@@ -67,6 +68,7 @@ pub async fn start_socket_server(
             }
 
             CONNECTION_COUNT.fetch_sub(1, Ordering::Relaxed);
+            let _ = crate::tray::refresh_tray_menu(&handle);
             crate::safe_eprintln!(
                 "MCP client disconnected (active: {})",
                 CONNECTION_COUNT.load(Ordering::Relaxed)

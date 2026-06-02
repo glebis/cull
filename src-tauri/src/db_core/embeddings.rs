@@ -19,7 +19,13 @@ pub struct EmbeddingModelSpec {
     pub model_id: &'static str,
     pub display_name: &'static str,
     pub url: &'static str,
+    pub revision: &'static str,
     pub file_name: &'static str,
+    pub expected_sha256: &'static str,
+    pub expected_size_bytes: u64,
+    pub spdx_license: &'static str,
+    pub source_repo: &'static str,
+    pub model_card_url: &'static str,
     pub input_name: &'static str,
     pub output_name: &'static str,
     pub input_size: u32,
@@ -44,8 +50,14 @@ pub struct EmbeddingProviderSpec {
 pub const CLIP_MODEL_SPEC: EmbeddingModelSpec = EmbeddingModelSpec {
     model_id: CLIP_MODEL_ID,
     display_name: "CLIP ViT-B/32",
-    url: "https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx",
+    url: "https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/e0c24ed0fa57fa3e4f97f30de74c51d944036ace/model.onnx",
+    revision: "e0c24ed0fa57fa3e4f97f30de74c51d944036ace",
     file_name: "clip-vit-b32-vision.onnx",
+    expected_sha256: "c68d3d9a200ddd2a8c8a5510b576d4c94d1ae383bf8b36dd8c084f94e1fb4d63",
+    expected_size_bytes: 351_686_194,
+    spdx_license: "MIT",
+    source_repo: "https://huggingface.co/Qdrant/clip-ViT-B-32-vision",
+    model_card_url: "https://huggingface.co/Qdrant/clip-ViT-B-32-vision",
     input_name: "input",
     output_name: "output",
     input_size: 224,
@@ -57,8 +69,14 @@ pub const CLIP_MODEL_SPEC: EmbeddingModelSpec = EmbeddingModelSpec {
 pub const DINO_V2_SMALL_MODEL_SPEC: EmbeddingModelSpec = EmbeddingModelSpec {
     model_id: DINO_V2_SMALL_MODEL_ID,
     display_name: "DINOv2 ViT-S/14",
-    url: "https://huggingface.co/sefaburak/dinov2-small-onnx/resolve/main/dinov2_vits14.onnx",
+    url: "https://huggingface.co/sefaburak/dinov2-small-onnx/resolve/7a5e61628117b5a8bd6f5e2b2385b76da1b4582e/dinov2_vits14.onnx",
+    revision: "7a5e61628117b5a8bd6f5e2b2385b76da1b4582e",
     file_name: "dinov2-vits14.onnx",
+    expected_sha256: "4df36ef0716a8f17d984fc7546a3a5d670fda6911eb298592250cb9e26756063",
+    expected_size_bytes: 86_644_121,
+    spdx_license: "Apache-2.0",
+    source_repo: "https://huggingface.co/sefaburak/dinov2-small-onnx",
+    model_card_url: "https://huggingface.co/sefaburak/dinov2-small-onnx",
     input_name: "input",
     output_name: "output",
     input_size: 224,
@@ -173,6 +191,17 @@ pub fn embedding_provider_for_model(model_id: &str) -> Option<EmbeddingProviderS
         .copied()
 }
 
+impl EmbeddingModelSpec {
+    pub fn download_verification(
+        &self,
+    ) -> crate::services::model_download::ModelDownloadVerification {
+        crate::services::model_download::ModelDownloadVerification {
+            expected_size: self.expected_size_bytes,
+            expected_sha256: self.expected_sha256,
+        }
+    }
+}
+
 pub struct EmbeddingEngine {
     pub session: Option<Mutex<Session>>,
     loaded_model_id: Option<String>,
@@ -225,6 +254,21 @@ impl EmbeddingEngine {
                 "Model '{}' not downloaded. Download it first.",
                 spec.model_id
             ));
+        }
+        if let Err(err) =
+            crate::services::model_download::verify_model_file(&path, &spec.download_verification())
+        {
+            return Err(
+                match crate::services::model_download::quarantine_invalid_model_file(&path) {
+                    Ok(quarantine_path) => format!(
+                        "{}; quarantined installed model at {}. Download '{}' again.",
+                        err,
+                        quarantine_path.to_string_lossy(),
+                        spec.model_id
+                    ),
+                    Err(quarantine_err) => format!("{}; {}", err, quarantine_err),
+                },
+            );
         }
         let session = Session::builder()
             .map_err(|e| format!("Failed to create session builder: {}", e))?
@@ -316,6 +360,8 @@ fn extract_embedding(data: &[f32], dims: usize) -> Result<Vec<f32>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::StreamExt;
+    use sha2::{Digest, Sha256};
 
     #[test]
     fn dinov2_model_spec_points_to_small_onnx_feature_model() {
@@ -325,14 +371,102 @@ mod tests {
         assert_eq!(spec.file_name, "dinov2-vits14.onnx");
         assert_eq!(
             spec.url,
-            "https://huggingface.co/sefaburak/dinov2-small-onnx/resolve/main/dinov2_vits14.onnx"
+            "https://huggingface.co/sefaburak/dinov2-small-onnx/resolve/7a5e61628117b5a8bd6f5e2b2385b76da1b4582e/dinov2_vits14.onnx"
         );
+        assert_eq!(spec.revision, "7a5e61628117b5a8bd6f5e2b2385b76da1b4582e");
+        assert_eq!(
+            spec.expected_sha256,
+            "4df36ef0716a8f17d984fc7546a3a5d670fda6911eb298592250cb9e26756063"
+        );
+        assert_eq!(spec.expected_size_bytes, 86_644_121);
+        assert_eq!(spec.spdx_license, "Apache-2.0");
         assert_eq!(spec.input_size, 224);
         assert_eq!(spec.output_dims, 384);
         assert_eq!(spec.input_name, "input");
         assert_eq!(spec.output_name, "output");
         assert_eq!(spec.mean, [0.485, 0.456, 0.406]);
         assert_eq!(spec.std, [0.229, 0.224, 0.225]);
+    }
+
+    #[test]
+    fn built_in_downloadable_model_specs_are_pinned_and_have_provenance() {
+        for spec in [CLIP_MODEL_SPEC, DINO_V2_SMALL_MODEL_SPEC] {
+            assert!(
+                !spec.url.contains("/resolve/main/"),
+                "{} uses a mutable download URL",
+                spec.model_id
+            );
+            assert!(
+                spec.url.contains("/resolve/") && spec.url.contains(spec.revision),
+                "{} does not use its pinned revision in the URL",
+                spec.model_id
+            );
+            assert_eq!(spec.expected_sha256.len(), 64);
+            assert!(
+                spec.expected_sha256
+                    .chars()
+                    .all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase()),
+                "{} checksum is not lowercase hex",
+                spec.model_id
+            );
+            assert!(spec.expected_size_bytes > 0);
+            assert!(!spec.spdx_license.is_empty());
+            assert!(spec.source_repo.starts_with("https://huggingface.co/"));
+            assert!(spec.model_card_url.starts_with("https://huggingface.co/"));
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "downloads large pinned model files; run manually before changing pinned hashes"]
+    async fn pinned_download_urls_match_expected_hashes() {
+        let client = reqwest::Client::new();
+        for spec in [CLIP_MODEL_SPEC, DINO_V2_SMALL_MODEL_SPEC] {
+            let response = client
+                .get(spec.url)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap();
+            let mut stream = response.bytes_stream();
+            let mut hasher = Sha256::new();
+            let mut size = 0_u64;
+
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.unwrap();
+                size += chunk.len() as u64;
+                hasher.update(&chunk);
+            }
+
+            assert_eq!(size, spec.expected_size_bytes, "{}", spec.model_id);
+            assert_eq!(
+                format!("{:x}", hasher.finalize()),
+                spec.expected_sha256,
+                "{}",
+                spec.model_id
+            );
+        }
+    }
+
+    #[test]
+    fn load_model_quarantines_tampered_installed_file_before_use() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut engine = EmbeddingEngine::new(tmp.path());
+        let model_path = engine.model_path_for(CLIP_MODEL_ID).unwrap();
+        std::fs::write(&model_path, b"not the pinned model").unwrap();
+
+        let err = engine.load_model_for(CLIP_MODEL_ID).unwrap_err();
+
+        assert!(err.contains("size mismatch"), "{err}");
+        assert!(err.contains("quarantined installed model"), "{err}");
+        assert!(!model_path.exists());
+        let quarantined = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with("clip-vit-b32-vision.onnx.invalid-"))
+            .count();
+        assert_eq!(quarantined, 1);
     }
 
     #[test]

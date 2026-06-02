@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 
 const mocks = vi.hoisted(() => ({
+    dialogOpen: vi.fn(),
+    importFolder: vi.fn(),
+    importFiles: vi.fn(),
     listen: vi.fn(),
+    loadAllImages: vi.fn(),
+    loadImagesForCurrentScope: vi.fn(),
+    loadImagesUntil: vi.fn(),
     updateMenuState: vi.fn(),
 }));
 
@@ -11,7 +17,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 }));
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
-    open: vi.fn(),
+    open: mocks.dialogOpen,
 }));
 
 vi.mock('@tauri-apps/plugin-opener', () => ({
@@ -20,8 +26,8 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
 }));
 
 vi.mock('./api', () => ({
-    importFolder: vi.fn(),
-    importFiles: vi.fn(),
+    importFolder: mocks.importFolder,
+    importFiles: mocks.importFiles,
     redo: vi.fn(),
     undo: vi.fn(),
     moveImage: vi.fn(),
@@ -35,9 +41,9 @@ vi.mock('./api', () => ({
 }));
 
 vi.mock('./image-loading', () => ({
-    loadAllImages: vi.fn(),
-    loadImagesForCurrentScope: vi.fn(),
-    loadImagesUntil: vi.fn(),
+    loadAllImages: mocks.loadAllImages,
+    loadImagesForCurrentScope: mocks.loadImagesForCurrentScope,
+    loadImagesUntil: mocks.loadImagesUntil,
 }));
 
 function makeImage(id: string) {
@@ -123,5 +129,60 @@ describe('native menu bridge', () => {
         expect(mocks.listen).toHaveBeenCalledTimes(2);
         restartedHandler?.({ payload: 'view_loupe' });
         expect(get(viewMode)).toBe('loupe');
+    });
+
+    it('opens the command palette in commands mode from the native menu', async () => {
+        let menuHandler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, handler) => {
+            menuHandler = handler as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+
+        const [{ initMenu }, { commandPaletteMode, commandPaletteOpen }] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+
+        await initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        await flushMicrotasks();
+
+        menuHandler?.({ payload: 'command_palette' });
+
+        expect(get(commandPaletteOpen)).toBe(true);
+        expect(get(commandPaletteMode)).toBe('commands');
+    });
+
+    it('imports the selected folder from the native Import Folder menu action', async () => {
+        let menuHandler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, handler) => {
+            menuHandler = handler as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+
+        const [{ initMenu }, stores] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+
+        mocks.dialogOpen.mockResolvedValue('/photos/new-import' as never);
+        mocks.importFolder.mockResolvedValue({
+            imported: 1,
+            skipped: 0,
+            errors: [],
+            batch_id: null,
+            image_ids: ['img-1'],
+        } as never);
+        mocks.loadImagesForCurrentScope.mockResolvedValue(undefined as never);
+
+        await initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        await flushMicrotasks();
+
+        menuHandler?.({ payload: 'import_folder' });
+        await flushMicrotasks();
+
+        expect(mocks.dialogOpen).toHaveBeenCalledWith({ directory: true });
+        expect(mocks.importFolder).toHaveBeenCalledWith('/photos/new-import');
+        expect(get(stores.activeFolder)).toBe('/photos/new-import');
+        expect(get(stores.viewMode)).toBe('grid');
     });
 });

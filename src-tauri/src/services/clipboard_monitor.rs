@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 pub const CAPTURE_DIR_SETTING: &str = "clipboard_monitor_capture_dir";
 pub const LAST_COLLECTION_SETTING: &str = "clipboard_monitor_last_collection_id";
+pub const CAPTURE_EXISTING_ON_START_SETTING: &str = "clipboard_monitor_capture_existing_on_start";
 pub const DEFAULT_POLL_MS: u64 = 750;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -49,6 +50,8 @@ pub struct ClipboardMonitorState {
     pub collection_name: Option<String>,
     pub capture_dir: Option<PathBuf>,
     pub captured_count: u32,
+    pub capture_existing_on_start: bool,
+    pub baseline_complete: bool,
     pub last_change_count: Option<i64>,
     pub last_hash: Option<String>,
     pub last_error: Option<String>,
@@ -92,6 +95,32 @@ pub fn resolve_capture_dir(
         return validate_capture_dir(PathBuf::from(saved));
     }
     Ok(default_capture_dir(app_data_dir))
+}
+
+pub fn capture_existing_on_start_enabled(
+    db: &crate::db_core::db::Database,
+) -> Result<bool, String> {
+    let Some(value) = db
+        .get_setting(CAPTURE_EXISTING_ON_START_SETTING)
+        .map_err(|e| e.to_string())?
+    else {
+        return Ok(false);
+    };
+    Ok(matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    ))
+}
+
+pub fn set_capture_existing_on_start(
+    db: &crate::db_core::db::Database,
+    enabled: bool,
+) -> Result<(), String> {
+    db.set_setting(
+        CAPTURE_EXISTING_ON_START_SETTING,
+        if enabled { "true" } else { "false" },
+    )
+    .map_err(|e| e.to_string())
 }
 
 fn validate_capture_dir(path: PathBuf) -> Result<PathBuf, String> {
@@ -208,7 +237,19 @@ pub fn process_reader_once<R: ClipboardImageReader>(
     reader: &mut R,
 ) -> Result<Option<ClipboardCaptureResult>, String> {
     ensure_reader_access(reader.status())?;
-    let Some(capture) = reader.read_if_changed()? else {
+    let capture = reader.read_if_changed()?;
+    if !state.baseline_complete {
+        state.baseline_complete = true;
+        if !state.capture_existing_on_start {
+            if let Some(capture) = capture {
+                state.last_hash = Some(sha256_bytes(&capture.bytes));
+                state.last_change_count = capture.change_count;
+            }
+            return Ok(None);
+        }
+    }
+
+    let Some(capture) = capture else {
         return Ok(None);
     };
     let hash = sha256_bytes(&capture.bytes);
@@ -453,6 +494,19 @@ mod tests {
     }
 
     #[test]
+    fn capture_existing_on_start_setting_defaults_to_false_and_round_trips() {
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+
+        assert!(!capture_existing_on_start_enabled(&db).unwrap());
+
+        set_capture_existing_on_start(&db, true).unwrap();
+        assert!(capture_existing_on_start_enabled(&db).unwrap());
+
+        set_capture_existing_on_start(&db, false).unwrap();
+        assert!(!capture_existing_on_start_enabled(&db).unwrap());
+    }
+
+    #[test]
     fn capture_bytes_writes_file_imports_and_adds_to_collection() {
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
         let tmp = tempdir().unwrap();
@@ -521,6 +575,20 @@ mod tests {
         }
     }
 
+    struct OptionalFakeReader {
+        captures: std::collections::VecDeque<Option<ClipboardCapture>>,
+    }
+
+    impl ClipboardImageReader for OptionalFakeReader {
+        fn status(&self) -> ClipboardAccessStatus {
+            ClipboardAccessStatus::Supported
+        }
+
+        fn read_if_changed(&mut self) -> Result<Option<ClipboardCapture>, String> {
+            Ok(self.captures.pop_front().flatten())
+        }
+    }
+
     #[test]
     fn process_reader_capture_skips_same_hash_twice() {
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
@@ -536,7 +604,10 @@ mod tests {
             source_app: None,
             change_count: Some(2),
         };
-        let mut state = ClipboardMonitorState::default();
+        let mut state = ClipboardMonitorState {
+            capture_existing_on_start: true,
+            ..Default::default()
+        };
         let mut reader = FakeReader {
             captures: vec![capture.clone(), capture].into(),
         };
@@ -552,6 +623,74 @@ mod tests {
                 .unwrap()
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn process_reader_captures_next_image_after_empty_default_baseline() {
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let tmp = tempdir().unwrap();
+        let app_data = tmp.path().join("app-data");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let session = create_monitor_session(&db, &app_data, None).unwrap();
+        let capture = ClipboardCapture {
+            bytes: png_bytes([12, 34, 56, 255]),
+            extension: "png".to_string(),
+            original_filename: None,
+            source_url: None,
+            source_app: None,
+            change_count: Some(13),
+        };
+        let mut state = ClipboardMonitorState::default();
+        let mut reader = OptionalFakeReader {
+            captures: vec![None, Some(capture)].into(),
+        };
+
+        let first = process_reader_once(&db, &app_data, &session, &mut state, &mut reader).unwrap();
+        let second =
+            process_reader_once(&db, &app_data, &session, &mut state, &mut reader).unwrap();
+
+        assert!(first.is_none());
+        assert!(second.is_some());
+        assert_eq!(state.captured_count, 1);
+        assert_eq!(
+            db.list_collection_images(&session.collection_id)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn process_reader_skips_current_clipboard_image_by_default() {
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let tmp = tempdir().unwrap();
+        let app_data = tmp.path().join("app-data");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let session = create_monitor_session(&db, &app_data, None).unwrap();
+        let capture = ClipboardCapture {
+            bytes: png_bytes([220, 20, 60, 255]),
+            extension: "png".to_string(),
+            original_filename: None,
+            source_url: None,
+            source_app: None,
+            change_count: Some(12),
+        };
+        let mut state = ClipboardMonitorState::default();
+        let mut reader = FakeReader {
+            captures: vec![capture].into(),
+        };
+
+        let result =
+            process_reader_once(&db, &app_data, &session, &mut state, &mut reader).unwrap();
+
+        assert!(result.is_none());
+        assert_eq!(state.captured_count, 0);
+        assert_eq!(
+            db.list_collection_images(&session.collection_id)
+                .unwrap()
+                .len(),
+            0
         );
     }
 

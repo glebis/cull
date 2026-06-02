@@ -6,6 +6,7 @@ commands.allow = [
   "create_window",
   "drain_pending_open_params",
   "list_windows",
+  "open_deep_link_urls",
   "open_with_params",
   "rename_window",
   "send_to_window",

@@ -1,5 +1,5 @@
-import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrent } from '@tauri-apps/plugin-deep-link';
 import { get } from 'svelte/store';
 import {
     viewMode,
@@ -24,7 +24,7 @@ import {
     collections,
     type ViewMode,
 } from './stores';
-import { importFolder, importFiles, addToCollection, listCollections, getBatchImages, listFolders, getImagesByIds, getImageByPath, drainPendingOpenParams } from './api';
+import { importFolder, importFiles, addToCollection, listCollections, getBatchImages, listFolders, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls } from './api';
 import { applyClipboardMonitorCollection } from './clipboard-monitor';
 import { clearImageScope, invalidateImageCache, loadAllImages, loadImagesForCurrentScope, loadImagesUntil, resetImagePaging } from './image-loading';
 
@@ -236,37 +236,6 @@ export async function handleParams(params: OpenParams) {
     }
 }
 
-export function parseDeepLinkUrl(url: string): OpenParams {
-    try {
-        const parsed = new URL(url);
-        const p = parsed.searchParams;
-
-        const pathsRaw = p.get('paths');
-        return {
-            path: p.get('path'),
-            paths: pathsRaw ? pathsRaw.split(',') : null,
-            folder: p.get('folder'),
-            view: p.get('view') ?? inferViewFromAction(parsed.hostname || parsed.pathname.replace(/^\/+/, '')),
-            size: p.has('size') ? parseInt(p.get('size')!) : null,
-            zoom: p.has('zoom') ? parseInt(p.get('zoom')!) : null,
-            fullscreen: p.get('fullscreen') === 'true',
-            focus: p.has('focus') ? parseInt(p.get('focus')!) : null,
-            image_id: p.get('image_id') ?? p.get('imageId'),
-            gap: p.has('gap') ? parseInt(p.get('gap')!) : null,
-        };
-    } catch (e) {
-        console.error('Deep link: failed to parse URL', url, e);
-        return {};
-    }
-}
-
-export function inferViewFromAction(action: string): string | null {
-    if (['grid', 'loupe', 'compare'].includes(action)) {
-        return action;
-    }
-    return null;
-}
-
 let lastHandledKey = '';
 let lastHandledAt = 0;
 
@@ -308,28 +277,16 @@ export async function initDeepLink() {
         console.warn('Deep link: pending open params not available', e);
     }
 
-    // Listen for deep link URLs opened while app is running (macOS)
     try {
-        await onOpenUrl((urls) => {
-            for (const url of urls) {
-                const params = parseDeepLinkUrl(url);
-                deduplicatedHandleParams(params, 'onOpenUrl');
-            }
-        });
-    } catch (e) {
-        console.warn('Deep link: onOpenUrl not available', e);
-    }
-
-    // Check if app was launched via deep link
-    try {
-        const current = await getCurrent();
-        if (current && current.length > 0) {
-            for (const url of current) {
-                const params = parseDeepLinkUrl(url);
-                deduplicatedHandleParams(params, 'getCurrent');
-            }
+        const currentUrls = await getCurrent();
+        if (currentUrls && currentUrls.length > 0) {
+            await openDeepLinkUrls(currentUrls);
         }
     } catch (e) {
-        console.warn('Deep link: getCurrent not available', e);
+        console.warn('Deep link: startup URLs not available', e);
     }
+
+    // Raw cull:// URLs are parsed and validated in Rust before they reach the UI.
+    // The frontend may ferry startup URLs from the deep-link plugin back to Rust,
+    // but it only consumes structured OpenParams after filesystem path validation.
 }

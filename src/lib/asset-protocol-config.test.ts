@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import config from '../../src-tauri/tauri.conf.json';
 
 describe('Tauri asset protocol config', () => {
@@ -24,5 +26,19 @@ describe('Tauri asset protocol config', () => {
             '$APPDATA/generated/**/*',
             '$HOME/.codex/generated_images/**/*',
         ]);
+    });
+
+    it('does not expand the asset protocol scope at runtime for imported originals', () => {
+        const runtimeSources = [
+            '../../src-tauri/src/lib.rs',
+            '../../src-tauri/src/commands/import.rs',
+            '../../src-tauri/src/commands/clipboard_monitor.rs',
+        ].map(path => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8'));
+
+        for (const source of runtimeSources) {
+            expect(source).not.toContain('.asset_protocol_scope()');
+            expect(source).not.toContain('allow_directory(');
+            expect(source).not.toContain('allow_file(');
+        }
     });
 });

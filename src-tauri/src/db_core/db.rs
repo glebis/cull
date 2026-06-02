@@ -44,12 +44,18 @@ impl Database {
     pub fn open(db_path: &Path) -> Result<Self> {
         let should_consider_backup = should_consider_migration_backup(db_path);
         let conn = Connection::open(db_path)?;
+        Self::configure_connection(&conn)?;
         let db = Database {
             conn: Arc::new(Mutex::new(conn)),
         };
         db.preflight_migrations(db_path, should_consider_backup)?;
         db.run_migrations()?;
         Ok(db)
+    }
+
+    fn configure_connection(conn: &Connection) -> Result<()> {
+        conn.pragma_update(None, "foreign_keys", true)?;
+        Ok(())
     }
 
     fn preflight_migrations(&self, db_path: &Path, should_consider_backup: bool) -> Result<()> {
@@ -2343,20 +2349,25 @@ impl Database {
     }
 
     pub fn delete_images_by_folder(&self, folder: &str) -> Result<u32> {
+        validate_delete_folder_path(folder)?;
+
         let conn = self.conn.lock();
-        let pattern = format!("{}/%", folder);
+        let prefix = format!("{}/", folder.trim_end_matches('/'));
+        let prefix_len = prefix.chars().count() as i64;
 
         // Get image IDs that ONLY exist in this folder (no other paths)
         let mut stmt = conn.prepare(
             "SELECT DISTINCT f.image_id FROM image_files f
-             WHERE f.path LIKE ?1 AND f.missing_at IS NULL
+             WHERE substr(f.path, 1, ?2) COLLATE BINARY = ?1 COLLATE BINARY
+             AND f.missing_at IS NULL
              AND f.image_id NOT IN (
                  SELECT image_id FROM image_files
-                 WHERE path NOT LIKE ?1 AND missing_at IS NULL
+                 WHERE substr(path, 1, ?2) COLLATE BINARY != ?1 COLLATE BINARY
+                 AND missing_at IS NULL
              )",
         )?;
         let image_ids: Vec<String> = stmt
-            .query_map(params![pattern], |row| row.get(0))?
+            .query_map(params![&prefix, prefix_len], |row| row.get(0))?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -2369,8 +2380,9 @@ impl Database {
 
         // Also delete file records from this folder for images that still exist elsewhere
         conn.execute(
-            "DELETE FROM image_files WHERE path LIKE ?1",
-            params![pattern],
+            "DELETE FROM image_files
+             WHERE substr(path, 1, ?2) COLLATE BINARY = ?1 COLLATE BINARY",
+            params![&prefix, prefix_len],
         )?;
 
         Ok(count)
@@ -3401,6 +3413,35 @@ fn migration_error(message: String) -> SqlError {
     SqlError::SqliteFailure(ffi::Error::new(ffi::SQLITE_ERROR), Some(message))
 }
 
+fn validate_delete_folder_path(folder: &str) -> Result<()> {
+    if folder.is_empty() {
+        return Err(SqlError::InvalidParameterName(
+            "folder path must not be empty".to_string(),
+        ));
+    }
+
+    let path = Path::new(folder);
+    if !path.is_absolute() {
+        return Err(SqlError::InvalidParameterName(
+            "folder path must be absolute".to_string(),
+        ));
+    }
+
+    let has_non_root_component = path.components().any(|component| {
+        !matches!(
+            component,
+            std::path::Component::RootDir | std::path::Component::Prefix(_)
+        )
+    });
+    if !has_non_root_component {
+        return Err(SqlError::InvalidParameterName(
+            "folder path must not be filesystem root".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 fn decode_embedding_bytes(bytes: &[u8]) -> Vec<f32> {
     bytes
         .chunks_exact(4)
@@ -3597,6 +3638,10 @@ mod tests {
     }
 
     fn insert_test_image(db: &Database, id: &str, hash: &str) {
+        insert_test_image_at_path(db, id, hash, &format!("/tmp/{}.png", id));
+    }
+
+    fn insert_test_image_at_path(db: &Database, id: &str, hash: &str, path: &str) {
         let img = Image {
             id: id.to_string(),
             sha256_hash: hash.to_string(),
@@ -3613,13 +3658,194 @@ mod tests {
         let file = ImageFile {
             id: format!("f-{}", id),
             image_id: id.to_string(),
-            path: format!("/tmp/{}.png", id),
+            path: path.to_string(),
             last_seen_at: "2026-05-07T00:00:00Z".to_string(),
             missing_at: None,
             last_seen_size: None,
             last_seen_mtime: None,
         };
         db.insert_image_file(&file).unwrap();
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_rejects_empty_folder() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "img-1", "hash-delete-empty", "/tmp/a/img-1.png");
+
+        let result = db.delete_images_by_folder("");
+
+        assert!(result.is_err(), "empty folder path should be rejected");
+        assert_eq!(db.list_images(100, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_rejects_root_folder() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "img-1", "hash-delete-root", "/tmp/a/img-1.png");
+
+        let result = db.delete_images_by_folder("/");
+
+        assert!(result.is_err(), "root folder path should be rejected");
+        assert_eq!(db.list_images(100, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_rejects_relative_folder() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "img-1", "hash-delete-relative", "/tmp/a/img-1.png");
+
+        let result = db.delete_images_by_folder("tmp/a");
+
+        assert!(result.is_err(), "relative folder path should be rejected");
+        assert_eq!(db.list_images(100, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_treats_percent_as_literal_path_character() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "inside", "hash-delete-percent", "/tmp/a%b/inside.png");
+        insert_test_image_at_path(&db, "outside", "hash-keep-percent", "/tmp/axb/outside.png");
+
+        let deleted = db.delete_images_by_folder("/tmp/a%b").unwrap();
+
+        assert_eq!(deleted, 1);
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].image.id, "outside");
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_treats_underscore_as_literal_path_character() {
+        let db = test_db();
+        insert_test_image_at_path(
+            &db,
+            "inside",
+            "hash-delete-underscore",
+            "/tmp/a_b/inside.png",
+        );
+        insert_test_image_at_path(
+            &db,
+            "outside",
+            "hash-keep-underscore",
+            "/tmp/axb/outside.png",
+        );
+
+        let deleted = db.delete_images_by_folder("/tmp/a_b").unwrap();
+
+        assert_eq!(deleted, 1);
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].image.id, "outside");
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_keeps_adjacent_prefix_folder() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "inside", "hash-delete-inside", "/tmp/a/inside.png");
+        insert_test_image_at_path(
+            &db,
+            "adjacent",
+            "hash-delete-adjacent",
+            "/tmp/abc/adjacent.png",
+        );
+
+        let deleted = db.delete_images_by_folder("/tmp/a").unwrap();
+
+        assert_eq!(deleted, 1);
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].image.id, "adjacent");
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_keeps_case_distinct_folder() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "lower", "hash-delete-lower", "/tmp/a/lower.png");
+        insert_test_image_at_path(&db, "upper", "hash-delete-upper", "/tmp/A/upper.png");
+
+        let deleted = db.delete_images_by_folder("/tmp/a").unwrap();
+
+        assert_eq!(deleted, 1);
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].image.id, "upper");
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_handles_non_ascii_folder_names() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "inside", "hash-delete-nonascii", "/tmp/ä/inside.png");
+        insert_test_image_at_path(
+            &db,
+            "adjacent",
+            "hash-keep-nonascii",
+            "/tmp/äx/adjacent.png",
+        );
+
+        let deleted = db.delete_images_by_folder("/tmp/ä").unwrap();
+
+        assert_eq!(deleted, 1);
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].image.id, "adjacent");
+    }
+
+    #[test]
+    fn test_configure_connection_enables_foreign_keys() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+
+        Database::configure_connection(&conn).unwrap();
+
+        let enabled: i64 = conn
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        assert_eq!(enabled, 1);
+    }
+
+    #[test]
+    fn test_reopen_enables_foreign_key_cascades() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("runtime.db");
+
+        {
+            let db = Database::open(&db_path).unwrap();
+            insert_test_image(&db, "img-1", "hash-1");
+            db.set_rating("img-1", 4).unwrap();
+            let collection_id = db.create_collection("Cascade Check").unwrap();
+            db.add_to_collection(&collection_id, &["img-1"]).unwrap();
+        }
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock();
+        conn.execute("DELETE FROM images WHERE id = ?1", params!["img-1"])
+            .unwrap();
+
+        let image_files: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM image_files WHERE image_id = ?1",
+                params!["img-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let selections: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM selections WHERE image_id = ?1",
+                params!["img-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let collection_items: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM collection_items WHERE image_id = ?1",
+                params!["img-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(image_files, 0);
+        assert_eq!(selections, 0);
+        assert_eq!(collection_items, 0);
     }
 
     #[test]

@@ -2,9 +2,10 @@ use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use reqwest::header;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::fmt::Display;
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -25,6 +26,12 @@ pub struct ModelDownloadProgress {
 pub struct ModelDownloadOutcome {
     pub downloaded: u64,
     pub resumed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelDownloadVerification {
+    pub expected_size: u64,
+    pub expected_sha256: &'static str,
 }
 
 #[derive(Clone)]
@@ -117,6 +124,66 @@ pub fn part_path_for(destination: &Path) -> PathBuf {
     destination.with_file_name(part_name)
 }
 
+fn quarantine_path_for(part_path: &Path) -> PathBuf {
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    let mut file_name = part_path
+        .file_name()
+        .map(|name| name.to_os_string())
+        .unwrap_or_else(|| "model.part".into());
+    file_name.push(format!(".invalid-{suffix}"));
+    part_path.with_file_name(file_name)
+}
+
+pub fn quarantine_invalid_model_file(path: &Path) -> Result<PathBuf, String> {
+    let quarantine_path = quarantine_path_for(path);
+    fs::rename(path, &quarantine_path)
+        .map_err(|e| format!("Failed to quarantine invalid model file: {}", e))?;
+    Ok(quarantine_path)
+}
+
+pub fn sha256_file(path: &Path) -> Result<String, String> {
+    let mut file = fs::File::open(path).map_err(|e| format!("Model file open error: {}", e))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|e| format!("Model file read error: {}", e))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+pub fn verify_model_file(
+    path: &Path,
+    verification: &ModelDownloadVerification,
+) -> Result<(), String> {
+    let actual_size = fs::metadata(path)
+        .map_err(|e| format!("Model metadata error: {}", e))?
+        .len();
+    if actual_size != verification.expected_size {
+        return Err(format!(
+            "Model size mismatch: downloaded {} bytes, expected {} bytes",
+            actual_size, verification.expected_size
+        ));
+    }
+
+    let actual_sha256 = sha256_file(path)?;
+    if actual_sha256 != verification.expected_sha256 {
+        return Err(format!(
+            "Model SHA-256 mismatch: got {}, expected {}",
+            actual_sha256, verification.expected_sha256
+        ));
+    }
+    Ok(())
+}
+
 #[allow(dead_code)]
 pub async fn download_model_file<F>(
     client: &reqwest::Client,
@@ -142,6 +209,20 @@ pub async fn download_model_file_controlled<F>(
     url: &str,
     destination: &Path,
     control: &DownloadControl,
+    progress: F,
+) -> Result<ModelDownloadOutcome, String>
+where
+    F: FnMut(ModelDownloadProgress),
+{
+    download_model_file_verified_controlled(client, url, destination, None, control, progress).await
+}
+
+pub async fn download_model_file_verified_controlled<F>(
+    client: &reqwest::Client,
+    url: &str,
+    destination: &Path,
+    verification: Option<&ModelDownloadVerification>,
+    control: &DownloadControl,
     mut progress: F,
 ) -> Result<ModelDownloadOutcome, String>
 where
@@ -165,24 +246,28 @@ where
         .map_err(|e| format!("Request error: {}", e))?;
     let status = response.status();
     if !status.is_success() {
+        if resume_from > 0 && part_path.exists() {
+            let _ = fs::rename(&part_path, quarantine_path_for(&part_path));
+        }
         return Err(format!("Download HTTP error: {}", status));
     }
 
     let mut write_offset = resume_from;
     let resumed = resume_from > 0 && status == reqwest::StatusCode::PARTIAL_CONTENT;
     if resume_from > 0 && !resumed {
-        let _ = fs::remove_file(&part_path);
+        let _ = fs::rename(&part_path, quarantine_path_for(&part_path));
         write_offset = 0;
     }
 
     let total = response
         .content_length()
         .map(|remaining| remaining + write_offset);
-    write_stream_to_model_file_controlled(
+    write_stream_to_model_file_inner(
         destination,
         write_offset,
         total,
         response.bytes_stream(),
+        verification,
         control,
         &mut progress,
     )
@@ -222,7 +307,59 @@ pub async fn write_stream_to_model_file_controlled<S, E, F>(
     destination: &Path,
     resume_from: u64,
     total: Option<u64>,
+    stream: S,
+    control: &DownloadControl,
+    progress: F,
+) -> Result<u64, String>
+where
+    S: Stream<Item = Result<Bytes, E>> + Unpin,
+    E: Display,
+    F: FnMut(ModelDownloadProgress),
+{
+    write_stream_to_model_file_inner(
+        destination,
+        resume_from,
+        total,
+        stream,
+        None,
+        control,
+        progress,
+    )
+    .await
+}
+
+pub async fn write_stream_to_model_file_verified_controlled<S, E, F>(
+    destination: &Path,
+    resume_from: u64,
+    total: Option<u64>,
+    stream: S,
+    verification: &ModelDownloadVerification,
+    control: &DownloadControl,
+    progress: F,
+) -> Result<u64, String>
+where
+    S: Stream<Item = Result<Bytes, E>> + Unpin,
+    E: Display,
+    F: FnMut(ModelDownloadProgress),
+{
+    write_stream_to_model_file_inner(
+        destination,
+        resume_from,
+        total,
+        stream,
+        Some(verification),
+        control,
+        progress,
+    )
+    .await
+}
+
+async fn write_stream_to_model_file_inner<S, E, F>(
+    destination: &Path,
+    resume_from: u64,
+    total: Option<u64>,
     mut stream: S,
+    verification: Option<&ModelDownloadVerification>,
     control: &DownloadControl,
     mut progress: F,
 ) -> Result<u64, String>
@@ -293,6 +430,24 @@ where
         }
     }
 
+    if let Some(verification) = verification {
+        if let Err(err) = verify_model_file(&part_path, verification) {
+            let quarantine_path = quarantine_path_for(&part_path);
+            let quarantine_result = fs::rename(&part_path, &quarantine_path);
+            return Err(match quarantine_result {
+                Ok(()) => format!(
+                    "{}; quarantined partial download at {}",
+                    err,
+                    quarantine_path.to_string_lossy()
+                ),
+                Err(quarantine_err) => format!(
+                    "{}; failed to quarantine partial download: {}",
+                    err, quarantine_err
+                ),
+            });
+        }
+    }
+
     fs::rename(&part_path, destination)
         .map_err(|e| format!("Atomic model install error: {}", e))?;
     emit_progress(&mut progress, downloaded, total, "complete");
@@ -318,6 +473,7 @@ mod tests {
     use bytes::Bytes;
     use futures_util::stream;
     use std::fs;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
     async fn stream_failure_keeps_partial_file_and_does_not_create_final_model() {
@@ -350,6 +506,62 @@ mod tests {
 
         assert_eq!(fs::read(&final_path).unwrap(), b"model bytes");
         assert!(!part_path_for(&final_path).exists());
+    }
+
+    #[tokio::test]
+    async fn wrong_hash_refuses_install_and_leaves_no_final_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let final_path = tmp.path().join("clip-vit-b32-vision.onnx");
+        let stream = stream::iter(vec![Ok::<Bytes, &'static str>(Bytes::from_static(
+            b"model bytes",
+        ))]);
+        let verification = ModelDownloadVerification {
+            expected_size: 11,
+            expected_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+        };
+
+        let result = write_stream_to_model_file_verified_controlled(
+            &final_path,
+            0,
+            Some(11),
+            stream,
+            &verification,
+            &DownloadControl::default(),
+            |_| {},
+        )
+        .await;
+
+        let err = result.unwrap_err();
+        assert!(err.contains("SHA-256 mismatch"), "{err}");
+        assert!(!final_path.exists());
+    }
+
+    #[tokio::test]
+    async fn wrong_expected_size_refuses_install_and_leaves_no_final_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let final_path = tmp.path().join("clip-vit-b32-vision.onnx");
+        let stream = stream::iter(vec![Ok::<Bytes, &'static str>(Bytes::from_static(
+            b"model bytes",
+        ))]);
+        let verification = ModelDownloadVerification {
+            expected_size: 12,
+            expected_sha256: "90ba33786887ce4234ec0081512cce01a0b1b4aa05c4bf71c473e744e05db0f8",
+        };
+
+        let result = write_stream_to_model_file_verified_controlled(
+            &final_path,
+            0,
+            Some(11),
+            stream,
+            &verification,
+            &DownloadControl::default(),
+            |_| {},
+        )
+        .await;
+
+        let err = result.unwrap_err();
+        assert!(err.contains("size mismatch"), "{err}");
+        assert!(!final_path.exists());
     }
 
     #[tokio::test]
@@ -425,5 +637,58 @@ mod tests {
         pause.resume();
         task.await.unwrap().unwrap();
         assert_eq!(fs::read(&final_path).unwrap(), b"model bytes");
+    }
+
+    #[tokio::test]
+    async fn non_success_resume_response_quarantines_stale_part_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let final_path = tmp.path().join("clip-vit-b32-vision.onnx");
+        let part_path = part_path_for(&final_path);
+        fs::write(&part_path, b"stale full-size bytes").unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buffer = [0_u8; 1024];
+            let read = stream.read(&mut buffer).await.unwrap();
+            let request = String::from_utf8_lossy(&buffer[..read]);
+            assert!(
+                request.to_ascii_lowercase().contains("range: bytes=21-"),
+                "{request}"
+            );
+            stream
+                .write_all(b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let verification = ModelDownloadVerification {
+            expected_size: 11,
+            expected_sha256: "90ba33786887ce4234ec0081512cce01a0b1b4aa05c4bf71c473e744e05db0f8",
+        };
+        let result = download_model_file_verified_controlled(
+            &client,
+            &format!("http://{addr}/model.onnx"),
+            &final_path,
+            Some(&verification),
+            &DownloadControl::default(),
+            |_| {},
+        )
+        .await;
+
+        server.await.unwrap();
+        assert!(result.unwrap_err().contains("416"),);
+        assert!(!final_path.exists());
+        assert!(!part_path.exists());
+
+        let quarantined = fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with("clip-vit-b32-vision.onnx.part.invalid-"))
+            .count();
+        assert_eq!(quarantined, 1);
     }
 }

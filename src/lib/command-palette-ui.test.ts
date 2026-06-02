@@ -7,6 +7,7 @@ const componentSource = readFileSync(
     'utf8',
 );
 const keySource = readFileSync(join(process.cwd(), 'src/lib/keys.ts'), 'utf8');
+const menuSource = readFileSync(join(process.cwd(), 'src-tauri/src/menu.rs'), 'utf8');
 
 describe('command palette UI contract', () => {
     it('wires the query input as an accessible combobox controlling the result list', () => {
@@ -18,8 +19,17 @@ describe('command palette UI contract', () => {
     });
 
     it('keeps global palette shortcuts in the app keyboard pipeline', () => {
+        expect(keySource).toContain("e.key.toLowerCase() === 'p' && e.metaKey && !e.shiftKey");
+        expect(keySource).toContain("openCommandPalette('commands')");
         expect(keySource).toContain("openCommandPalette('all')");
         expect(keySource).toContain("openCommandPalette('commands')");
+    });
+
+    it('exposes the command palette from the native View menu', () => {
+        expect(menuSource).toContain('"command_palette"');
+        expect(menuSource).toContain('"Command Palette..."');
+        expect(menuSource).toContain('Some::<&str>("CmdOrCtrl+P")');
+        expect(menuSource).toMatch(/"command_palette"[\s\S]*app\.emit\("menu-action", id\)/);
     });
 
     it('does not hardcode colors in the palette styles', () => {
