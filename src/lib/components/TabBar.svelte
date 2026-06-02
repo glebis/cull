@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { viewMode, thumbnailSize, windowName, navigateTo, showToast, staticPublishingEnabled } from '$lib/stores';
+    import { openPreviewDisplay } from '$lib/api';
+    import { viewMode, thumbnailSize, navigateTo, showToast, staticPublishingEnabled } from '$lib/stores';
     import type { ViewMode } from '$lib/stores';
     import { maybeShowShortcutReminder, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from '$lib/shortcut-reminders';
     import { visibleViewTabs } from '$lib/view-tabs';
@@ -28,12 +29,31 @@
             });
         });
     }
+
+    function openPreviewDisplayWindow() {
+        openPreviewDisplay().catch((e) => {
+            showToast('Preview Display failed', {
+                detail: String(e),
+                type: 'error',
+                duration: 8000,
+            });
+        });
+    }
 </script>
 
 <div class="tabbar" data-tauri-drag-region="deep">
-    {#if $windowName && $windowName !== 'Cull'}
-        <span class="window-name">{$windowName}</span>
-    {/if}
+    <button
+        class="preview-display-launch"
+        type="button"
+        aria-label="Open Preview Display"
+        title="Open Preview Display"
+        onclick={openPreviewDisplayWindow}
+    >
+        <span class="preview-display-icon" aria-hidden="true">
+            <span class="preview-display-screen"></span>
+            <span class="preview-display-stand"></span>
+        </span>
+    </button>
     <div class="tabs">
         {#each tabs as tab}
             <button
@@ -76,14 +96,62 @@
         padding-left: var(--macos-window-controls-width);
         grid-area: tabbar;
     }
-    .window-name {
-        font-size: 11px;
+
+    .preview-display-launch {
+        width: 28px;
+        height: 28px;
+        border: 1px solid transparent;
+        border-radius: var(--radius);
+        background: transparent;
         color: var(--text-secondary);
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+        flex: 0 0 auto;
         margin-right: 8px;
-        padding-right: 8px;
-        border-right: 1px solid var(--border);
-        white-space: nowrap;
     }
+
+    .preview-display-launch:hover {
+        color: var(--blue);
+        border-color: var(--border);
+        background: color-mix(in srgb, var(--blue) 10%, transparent);
+    }
+
+    .preview-display-icon {
+        width: 17px;
+        height: 17px;
+        display: grid;
+        grid-template-rows: 12px 5px;
+        justify-items: center;
+        align-items: start;
+    }
+
+    .preview-display-screen {
+        width: 17px;
+        height: 11px;
+        border: 1.5px solid currentColor;
+        border-radius: 2px;
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 16%, transparent);
+    }
+
+    .preview-display-stand {
+        width: 9px;
+        height: 5px;
+        border-bottom: 1.5px solid currentColor;
+        position: relative;
+    }
+
+    .preview-display-stand::before {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: -1px;
+        width: 1.5px;
+        height: 5px;
+        background: currentColor;
+        transform: translateX(-50%);
+    }
+
     .tabs {
         display: flex;
         gap: 2px;
