@@ -76,13 +76,18 @@ Tracked as `imageview-2w6.3`.
 
 ### 4. CI misses a production frontend build
 
-`npm run ci:frontend` runs `npm ci`, `npm run check`, and `npm test`, but not
-`npm run build`. Svelte check and Vitest catch many failures, but they do not
-prove the production bundle builds.
+`npm run ci:frontend` previously ran `npm ci`, `npm run check`, and `npm test`,
+but not `npm run build`. Svelte check and Vitest catch many failures, but they
+do not prove the production bundle builds.
 
 Recommendation: add `npm run build` to the frontend CI tier or document a clear
 reason to keep it out. Also decide and encode whether Rust checks should use
 locked dependency resolution and strict Clippy warning policy.
+
+Status: resolved in `imageview-2w6.4`; frontend CI now runs `npm run build`,
+and Rust CI uses locked dependency resolution for Clippy/tests. Clippy warnings
+remain report-only until `imageview-2w6.11` cleans up the current warning
+backlog.
 
 Tracked as `imageview-2w6.4`.
 
@@ -154,7 +159,8 @@ npm run ci
 ```
 
 After hardening, this should also include the production frontend build or call
-a dedicated `npm run preflight:full`.
+a dedicated `npm run preflight:full`. `npm run ci` now includes the production
+frontend build.
 
 ### Release check
 
