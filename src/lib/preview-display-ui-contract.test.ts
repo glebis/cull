@@ -58,4 +58,15 @@ describe('Preview Display UI contract', () => {
         expect(component).toContain('line-clamp');
         expect(component).toContain('max-height');
     });
+
+    it('keeps the Preview Display header draggable like a macOS window titlebar', () => {
+        const component = source('src/lib/components/PreviewDisplay.svelte');
+
+        expect(component).toContain('class="preview-header"');
+        expect(component).toContain('data-tauri-drag-region="deep"');
+        expect(component).toContain('aria-label="Preview Display window header"');
+        expect(component).toContain('grid-template-rows: var(--macos-titlebar-safe-area) minmax(0, 1fr)');
+        expect(component).toContain('padding-left: var(--macos-window-controls-width)');
+        expect(component).toContain('class="preview-stage"');
+    });
 });
