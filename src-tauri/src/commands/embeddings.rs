@@ -4,13 +4,32 @@ use serde::Serialize;
 use std::path::Path;
 use tauri::{AppHandle, Emitter, State};
 
+/// Google Generative Language "list models" endpoint used to validate a key.
+/// The key travels in the `x-goog-api-key` header, never as a query parameter,
+/// so it cannot leak through request/proxy logs, crash strings, or traces.
+const GOOGLE_MODELS_VALIDATION_URL: &str =
+    "https://generativelanguage.googleapis.com/v1beta/models";
+
+/// Build the Google key-validation request with the API key in the
+/// `x-goog-api-key` header. Centralised so the auth transport is unit-testable
+/// and can never drift back to a `key=` query parameter.
+fn google_validation_request(client: &reqwest::Client, key: &str) -> reqwest::RequestBuilder {
+    client
+        .get(GOOGLE_MODELS_VALIDATION_URL)
+        .header("x-goog-api-key", key)
+}
+
 /// Redact API keys from error messages to prevent leaking secrets in UI toasts and logs.
 /// Replaces the value of any `key=...` query parameter with `REDACTED`.
 fn redact_api_key(error_msg: &str) -> String {
     use regex::Regex;
-    // Match `key=<value>` where value runs until whitespace, `&`, `"`, `'`, or end of string
-    let re = Regex::new(r#"(?i)\bkey=[^\s&"']+"#).expect("redact regex must compile");
-    re.replace_all(error_msg, "key=REDACTED").into_owned()
+    use std::sync::OnceLock;
+    // Match `key=<value>` where value runs until whitespace, `&`, `"`, `'`, or end of string.
+    // Compiled once: this runs on error paths but recompiling per call is wasteful.
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r#"(?i)\bkey=[^\s&"']+"#).expect("redact regex must compile"))
+        .replace_all(error_msg, "key=REDACTED")
+        .into_owned()
 }
 
 use crate::db_core::embeddings::{
@@ -649,6 +668,45 @@ mod tests {
     }
 
     #[test]
+    fn google_models_url_carries_no_api_key_query_param() {
+        // The Google key-validation request must send the key via the
+        // x-goog-api-key header, never as a query param that can leak in logs.
+        assert!(
+            !GOOGLE_MODELS_VALIDATION_URL.contains("key="),
+            "Google models validation URL must not contain a key= query param: {}",
+            GOOGLE_MODELS_VALIDATION_URL
+        );
+    }
+
+    #[test]
+    fn google_validation_request_sends_key_in_header_not_url() {
+        let sentinel = "AIzaSySentinelKeyShouldNeverAppear";
+        let req = google_validation_request(&reqwest::Client::new(), sentinel)
+            .build()
+            .expect("request must build");
+
+        // Key travels in the header...
+        assert_eq!(
+            req.headers()
+                .get("x-goog-api-key")
+                .map(|v| v.to_str().unwrap()),
+            Some(sentinel)
+        );
+        // ...and never in the URL.
+        assert_eq!(req.url().query(), None);
+        let url = req.url().as_str();
+        assert!(!url.contains("key="), "URL leaked a key= param: {}", url);
+        assert!(!url.contains(sentinel), "URL leaked the API key: {}", url);
+    }
+
+    #[test]
+    fn redact_api_key_is_a_backstop_for_legacy_key_urls() {
+        // Defensive: even if a key= URL surfaces in an error elsewhere, redaction strips it.
+        let leaked = "error: https://x/v1beta/models?key=AIzaSySentinelKeyShouldNeverAppear";
+        assert!(!redact_api_key(leaked).contains("AIzaSySentinelKeyShouldNeverAppear"));
+    }
+
+    #[test]
     fn ollama_model_available_accepts_latest_tag_alias() {
         let models = vec![
             "embeddinggemma:latest".to_string(),
@@ -816,12 +874,7 @@ pub async fn validate_api_key(provider: String, key: String) -> Result<bool, Str
     let client = reqwest::Client::new();
     match provider.as_str() {
         "google" => {
-            let url = format!(
-                "https://generativelanguage.googleapis.com/v1beta/models?key={}",
-                key
-            );
-            let resp = client
-                .get(&url)
+            let resp = google_validation_request(&client, &key)
                 .send()
                 .await
                 .map_err(|e| redact_api_key(&format!("{}", e)))?;
