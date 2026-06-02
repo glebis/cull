@@ -158,6 +158,22 @@ changes, and mention the fallback in the handoff. If bd commands fail with
 schema errors, run `bd doctor` and `bd migrate --yes` before trying any manual
 SQL repair.
 
+## Feature Landing Flow
+
+Use the feature landing flow when a feature branch is complete and the user asks
+to merge, build, land it on `main`, or make it part of the latest main builds.
+Do not use it for WIP branches, dirty worktrees, PR-only review, or signed
+release packaging.
+
+```bash
+npm run land:feature -- <feature-branch>
+```
+
+The flow merges the feature branch into `main`, runs `npm run check`,
+`npm test`, and `npm run build`, falls back from unavailable `bd sync` to
+`bd vc status`, pushes `main`, and watches main CI. Signed app artifacts are a
+separate tag/manual Release workflow step.
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
