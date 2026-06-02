@@ -11,6 +11,7 @@ commands.allow = [
   "list_export_presets",
   "publish_clipboard_collection",
   "save_export_image",
+  "save_png_to_path",
   "serve_static_publish_package",
   "validate_export_manifest",
 ]

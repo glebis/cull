@@ -522,6 +522,7 @@ pub fn run() {
             commands::export::export_images_to_folder,
             commands::export::get_export_asset,
             commands::export::save_export_image,
+            commands::export::save_png_to_path,
             commands::export::assemble_export_pdf,
             commands::lineage::list_lineage_groups,
             commands::lineage::get_lineage_group_images,

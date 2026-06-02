@@ -505,6 +505,12 @@ export async function exportImagesToFolder(params: ExportImagesParams): Promise<
     return invoke('export_images_to_folder', { params });
 }
 
+// Write a base64-encoded PNG (e.g. a canvas-rendered contact sheet) to an
+// absolute path chosen via the native save dialog.
+export async function savePngToPath(outputPath: string, base64Data: string): Promise<string> {
+    return invoke('save_png_to_path', { outputPath, base64Data });
+}
+
 export interface ClipboardMonitorStatus {
     running: boolean;
     supported: boolean;

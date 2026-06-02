@@ -422,6 +422,8 @@ export const commandPaletteMode = writable<CommandPaletteMode>('all');
 export const shortcutsOpen = writable<boolean>(false);
 // Collection/scope export-to-folder dialog.
 export const exportFolderOpen = writable<boolean>(false);
+// Contact sheet export dialog.
+export const contactSheetOpen = writable<boolean>(false);
 
 export const focusedImage = derived(
     [images, focusedIndex, focusedImageOverride],

@@ -11,6 +11,7 @@ import {
     collections,
     commandPaletteMode,
     commandPaletteOpen,
+    contactSheetOpen,
     detectedClasses,
     exportFolderOpen,
     focusedIndex,
@@ -682,6 +683,15 @@ function commandItems(): CommandPaletteItem[] {
             kind: 'command',
             keywords: ['export', 'save', 'folder', 'convert', 'deliver', 'output'],
             run: () => exportFolderOpen.set(true),
+        },
+        {
+            id: 'collection.export-contact-sheet',
+            title: 'Export Contact Sheet…',
+            subtitle: 'Render a configurable grid of the current images as a PNG',
+            category: 'Collections',
+            kind: 'command',
+            keywords: ['contact sheet', 'montage', 'grid', 'proof', 'thumbnails', 'export'],
+            run: () => contactSheetOpen.set(true),
         },
         {
             id: 'collection.create-from-selection',
