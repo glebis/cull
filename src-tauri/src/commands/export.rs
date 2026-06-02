@@ -399,6 +399,20 @@ pub async fn save_png_to_path(output_path: String, base64_data: String) -> Resul
     Ok(path.to_string_lossy().to_string())
 }
 
+/// Write UTF-8 text (e.g. a delivery CSV) to a user-chosen absolute path from
+/// the native save dialog.
+#[tauri::command]
+pub async fn save_text_to_path(output_path: String, contents: String) -> Result<String, String> {
+    let path = PathBuf::from(&output_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory '{}': {}", parent.display(), e))?;
+    }
+    std::fs::write(&path, contents.as_bytes())
+        .map_err(|e| format!("Failed to write '{}': {}", path.display(), e))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 pub async fn assemble_export_pdf(
     state: State<'_, AppState>,

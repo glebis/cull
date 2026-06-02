@@ -42,9 +42,11 @@ import {
     type ViewMode,
 } from './stores';
 import { invalidateImageCache, loadAllImages, loadImagesForCurrentScope } from './image-loading';
-import { addToCollection, createCollection, listCanvases, listCollections, redo, setDecision, setRating, undo, validateSessionFolder, type Canvas, type Session } from './api';
+import { addToCollection, createCollection, getClientFeedback, listCanvases, listClientFeedback, listCollections, redo, saveTextToPath, setClientFeedback, setDecision, setRating, undo, validateSessionFolder, type Canvas, type Session } from './api';
 import { withDecision, withRating, type ImageDecision } from './selection-updates';
 import { createWorkflow, readWorkflows, runWorkflow, type CommandWorkflow } from './workflows';
+import { buildDeliveryCsv, type DeliveryRow } from './delivery-csv';
+import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 
 export type CommandPaletteItemKind = 'command' | 'destination';
 
@@ -514,6 +516,69 @@ async function createWorkflowFromRecents() {
     setTimeout(() => statusHint.set(null), 2500);
 }
 
+async function toggleFocusedClientFavorite() {
+    const image = get(images)[get(focusedIndex)];
+    if (!image) return;
+    const existing = await getClientFeedback(image.image.id);
+    const nextFavorite = !(existing?.favorite ?? false);
+    await setClientFeedback(image.image.id, nextFavorite, existing?.comment ?? null);
+    statusHint.set(nextFavorite ? 'Client favorite added' : 'Client favorite removed');
+    setTimeout(() => statusHint.set(null), 2000);
+}
+
+async function addFocusedClientComment() {
+    const image = get(images)[get(focusedIndex)];
+    if (!image) return;
+    const existing = await getClientFeedback(image.image.id);
+    const comment = await requestTextInput({
+        title: 'Client Comment',
+        label: 'Comment',
+        description: 'Stored separately from your curator rating and decision.',
+        placeholder: 'Client feedback…',
+        confirmLabel: 'Save',
+    });
+    if (comment === null) return;
+    await setClientFeedback(image.image.id, existing?.favorite ?? false, comment.trim() || null);
+    statusHint.set('Client comment saved');
+    setTimeout(() => statusHint.set(null), 2000);
+}
+
+async function exportDeliveryCsv() {
+    const items = get(images);
+    if (items.length === 0) {
+        statusHint.set('No images to export');
+        setTimeout(() => statusHint.set(null), 2000);
+        return;
+    }
+    const target = await saveDialog({
+        title: 'Save delivery list',
+        defaultPath: 'delivery-list.csv',
+        filters: [{ name: 'CSV', extensions: ['csv'] }],
+    });
+    if (!target) return;
+
+    const feedback = await listClientFeedback();
+    const byId = new Map(feedback.map(f => [f.image_id, f]));
+    const rows: DeliveryRow[] = items.map(item => {
+        const fb = byId.get(item.image.id);
+        return {
+            filename: item.path.split('/').filter(Boolean).pop() ?? item.image.id,
+            path: item.path,
+            rating: item.selection?.star_rating ?? 0,
+            decision: item.selection?.decision ?? 'undecided',
+            clientFavorite: fb?.favorite ?? false,
+            clientComment: fb?.comment ?? '',
+        };
+    });
+
+    try {
+        const written = await saveTextToPath(target, buildDeliveryCsv(rows));
+        showToast(`Delivery list saved (${rows.length} rows)`, { detail: written, type: 'success', duration: 6000 });
+    } catch (e) {
+        showToast('Delivery export failed', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
 function workflowItems(): CommandPaletteItem[] {
     return readWorkflows().map((workflow): CommandPaletteItem => ({
         id: workflow.id,
@@ -684,6 +749,35 @@ function commandItems(): CommandPaletteItem[] {
             kind: 'command',
             keywords: ['export', 'save', 'folder', 'convert', 'deliver', 'output'],
             run: () => exportFolderOpen.set(true),
+        },
+        {
+            id: 'collection.export-delivery-csv',
+            title: 'Export Delivery List (CSV)…',
+            subtitle: 'CSV of the current scope with curator + client feedback columns',
+            category: 'Collections',
+            kind: 'command',
+            keywords: ['csv', 'delivery', 'list', 'client', 'export', 'proof', 'final'],
+            run: exportDeliveryCsv,
+        },
+        {
+            id: 'client.toggle-favorite',
+            title: 'Toggle Client Favorite',
+            subtitle: hasImage ? focusedImageTitle() : 'Focus an image first',
+            category: 'Client',
+            kind: 'command',
+            keywords: ['client', 'favorite', 'feedback', 'proof'],
+            disabled: !hasImage,
+            run: toggleFocusedClientFavorite,
+        },
+        {
+            id: 'client.add-comment',
+            title: 'Add Client Comment…',
+            subtitle: hasImage ? focusedImageTitle() : 'Focus an image first',
+            category: 'Client',
+            kind: 'command',
+            keywords: ['client', 'comment', 'feedback', 'note'],
+            disabled: !hasImage,
+            run: addFocusedClientComment,
         },
         {
             id: 'collection.export-contact-sheet',

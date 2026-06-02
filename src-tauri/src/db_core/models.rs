@@ -66,6 +66,16 @@ pub struct ImageWithFile {
     pub missing_at: Option<String>,
 }
 
+/// Client-side feedback on an image, stored separately from the curator's own
+/// `Selection` so the two never overwrite each other.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientFeedback {
+    pub image_id: String,
+    pub favorite: bool,
+    pub comment: Option<String>,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageQualityMetrics {
     pub image_id: String,

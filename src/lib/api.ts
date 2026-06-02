@@ -511,6 +511,31 @@ export async function savePngToPath(outputPath: string, base64Data: string): Pro
     return invoke('save_png_to_path', { outputPath, base64Data });
 }
 
+// Write UTF-8 text (e.g. a delivery CSV) to an absolute path.
+export async function saveTextToPath(outputPath: string, contents: string): Promise<string> {
+    return invoke('save_text_to_path', { outputPath, contents });
+}
+
+export interface ClientFeedback {
+    image_id: string;
+    favorite: boolean;
+    comment: string | null;
+    updated_at: string;
+}
+
+// Client feedback is stored separately from curator selections.
+export async function setClientFeedback(imageId: string, favorite: boolean, comment: string | null): Promise<void> {
+    return invoke('set_client_feedback', { imageId, favorite, comment: comment ?? null });
+}
+
+export async function getClientFeedback(imageId: string): Promise<ClientFeedback | null> {
+    return invoke('get_client_feedback', { imageId });
+}
+
+export async function listClientFeedback(): Promise<ClientFeedback[]> {
+    return invoke('list_client_feedback');
+}
+
 export interface ClipboardMonitorStatus {
     running: boolean;
     supported: boolean;

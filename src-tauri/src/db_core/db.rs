@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 19;
+const CURRENT_SCHEMA_VERSION: i64 = 20;
 
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, "core_schema"),
@@ -33,6 +33,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (17, "image_tags"),
     (18, "perceptual_hashes"),
     (19, "image_color_metrics"),
+    (20, "client_feedback"),
 ];
 
 #[derive(Clone)]
@@ -132,6 +133,7 @@ impl Database {
         self.run_migration_step(19, "image_color_metrics", || {
             self.migrate_image_color_metrics()
         })?;
+        self.run_migration_step(20, "client_feedback", || self.migrate_client_feedback())?;
         Ok(())
     }
 
@@ -448,6 +450,82 @@ impl Database {
             CREATE INDEX IF NOT EXISTS image_color_colorfulness_idx ON image_color_metrics(colorfulness);",
         )?;
         Ok(())
+    }
+
+    // Client feedback is intentionally a separate table from `selections` so
+    // client favorites/comments never overwrite the curator's own ratings and
+    // decisions. They are surfaced side by side in delivery exports.
+    fn migrate_client_feedback(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS client_feedback (
+                image_id TEXT PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+                favorite INTEGER NOT NULL DEFAULT 0,
+                comment TEXT,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS client_feedback_favorite_idx ON client_feedback(favorite);",
+        )?;
+        Ok(())
+    }
+
+    /// Upsert client feedback for an image. Passing `favorite=false` and an
+    /// empty/None comment leaves a cleared-but-present row, which is harmless.
+    pub fn set_client_feedback(
+        &self,
+        image_id: &str,
+        favorite: bool,
+        comment: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO client_feedback (image_id, favorite, comment, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(image_id) DO UPDATE SET
+                favorite = excluded.favorite,
+                comment = excluded.comment,
+                updated_at = excluded.updated_at",
+            params![image_id, favorite as i64, comment, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_client_feedback(&self, image_id: &str) -> Result<Option<ClientFeedback>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT image_id, favorite, comment, updated_at FROM client_feedback WHERE image_id = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![image_id], |row| {
+            let fav: i64 = row.get(1)?;
+            Ok(ClientFeedback {
+                image_id: row.get(0)?,
+                favorite: fav != 0,
+                comment: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        })?;
+        match rows.next() {
+            Some(r) => Ok(Some(r?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn list_client_feedback(&self) -> Result<Vec<ClientFeedback>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT image_id, favorite, comment, updated_at FROM client_feedback ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let fav: i64 = row.get(1)?;
+            Ok(ClientFeedback {
+                image_id: row.get(0)?,
+                favorite: fav != 0,
+                comment: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>>>()
     }
 
     fn migrate_library_roots(&self) -> Result<()> {
@@ -3423,6 +3501,72 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 }
 
 #[cfg(test)]
+mod client_feedback_tests {
+    use super::*;
+
+    fn seed_image(db: &Database, id: &str) {
+        db.insert_image(&Image {
+            id: id.to_string(),
+            sha256_hash: format!("hash-{}", id),
+            width: 100,
+            height: 100,
+            format: "png".to_string(),
+            file_size: 1024,
+            created_at: "2026-05-07T00:00:00Z".to_string(),
+            imported_at: "2026-05-07T00:00:00Z".to_string(),
+            ai_prompt: None,
+            raw_metadata: None,
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn set_get_and_list_client_feedback_roundtrip() {
+        let db = Database::open(Path::new(":memory:")).unwrap();
+        seed_image(&db, "img-1");
+        seed_image(&db, "img-2");
+
+        assert!(db.get_client_feedback("img-1").unwrap().is_none());
+
+        db.set_client_feedback("img-1", true, Some("Love this one")).unwrap();
+        let fb = db.get_client_feedback("img-1").unwrap().unwrap();
+        assert!(fb.favorite);
+        assert_eq!(fb.comment.as_deref(), Some("Love this one"));
+
+        // Upsert updates in place rather than duplicating.
+        db.set_client_feedback("img-1", false, None).unwrap();
+        let fb = db.get_client_feedback("img-1").unwrap().unwrap();
+        assert!(!fb.favorite);
+        assert!(fb.comment.is_none());
+
+        db.set_client_feedback("img-2", true, Some("maybe")).unwrap();
+        assert_eq!(db.list_client_feedback().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn client_feedback_does_not_touch_selections() {
+        let db = Database::open(Path::new(":memory:")).unwrap();
+        seed_image(&db, "img-1");
+        db.set_rating("img-1", 4).unwrap();
+        db.set_client_feedback("img-1", true, Some("client pick")).unwrap();
+
+        // Curator rating in `selections` is untouched by the separate client
+        // feedback row.
+        let stored_rating: Option<i64> = {
+            let conn = db.conn.lock();
+            conn.query_row(
+                "SELECT star_rating FROM selections WHERE image_id = ?1 AND project_id = '__global__'",
+                params!["img-1"],
+                |row| row.get(0),
+            )
+            .ok()
+        };
+        assert_eq!(stored_rating, Some(4));
+        assert!(db.get_client_feedback("img-1").unwrap().unwrap().favorite);
+    }
+}
+
+#[cfg(test)]
 mod migration_safety_tests {
     use super::*;
     use std::fs;
@@ -3501,8 +3645,10 @@ mod migration_safety_tests {
         let db_path = tmp.path().join("cull.db");
         let db = Database::open(&db_path).unwrap();
 
+        // Use a version far beyond any real migration so this synthetic failure
+        // never collides with an actually-applied step.
         let err = db
-            .run_migration_step(20, "failing_test_step", || {
+            .run_migration_step(9999, "failing_test_step", || {
                 let conn = db.conn.lock();
                 conn.execute_batch("CREATE TABLE migration_failure_probe (id INTEGER);")?;
                 Err(migration_error("synthetic migration failure".to_string()))
@@ -3523,7 +3669,7 @@ mod migration_safety_tests {
 
         let (status, error): (String, String) = conn
             .query_row(
-                "SELECT status, error FROM schema_migration_steps WHERE version = 20",
+                "SELECT status, error FROM schema_migration_steps WHERE version = 9999",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
