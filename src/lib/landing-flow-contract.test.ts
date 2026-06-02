@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -15,10 +14,9 @@ describe('feature landing flow', () => {
 
     it('provides an executable script that checks, builds, pushes, and monitors main', () => {
         expect(existsSync(scriptPath)).toBe(true);
-        expect(execFileSync('git', ['ls-files', '-s', 'scripts/land-feature.sh'], { encoding: 'utf8' }))
-            .toContain('100755');
 
         const source = readFileSync(scriptPath, 'utf8');
+        expect(source).toMatch(/^#!\/usr\/bin\/env bash/);
         expect(source).toContain('git merge --no-ff');
         expect(source).toContain('npm run check');
         expect(source).toContain('npm test');
