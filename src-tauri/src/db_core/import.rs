@@ -48,6 +48,18 @@ pub fn sync_file(
 
     let metadata = fs::metadata(file_path).map_err(|e| format!("Stat error: {}", e))?;
     let file_size = metadata.len();
+
+    // Refuse to read pathologically large files into memory; skip rather than
+    // risk a memory cliff during normal import.
+    if !import_size_within_limit(file_size) {
+        crate::safe_eprintln!(
+            "[import] skipping oversized file ({} bytes > {} limit): {}",
+            file_size,
+            MAX_IMPORT_FILE_BYTES,
+            file_path.display()
+        );
+        return Ok(SyncOutcome::Skipped);
+    }
     let mtime = metadata
         .modified()
         .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
@@ -78,8 +90,7 @@ pub fn sync_file(
             return Ok(SyncOutcome::Restored);
         }
 
-        let data = fs::read(file_path).map_err(|e| format!("Read error: {}", e))?;
-        let hash = compute_hash(&data);
+        let hash = hash_file(file_path).map_err(|e| format!("Read error: {}", e))?;
 
         if let Some(img) = db.find_by_hash(&hash).map_err(|e| e.to_string())? {
             if img.id == existing_file.image_id {
@@ -108,6 +119,8 @@ pub fn sync_file(
             return Ok(SyncOutcome::ContentChanged { image_id: img.id });
         }
 
+        // New content: only now read the bytes (source detection / decode need them).
+        let data = fs::read(file_path).map_err(|e| format!("Read error: {}", e))?;
         let (image_id, decoded) =
             create_image_record(db, file_path, &hash, &ext, &data, can_decode, module_raw)?;
         let _ = db.repoint_image_file(&existing_file.id, &image_id, file_size, &mtime);
@@ -138,8 +151,7 @@ pub fn sync_file(
     }
 
     // New path
-    let data = fs::read(file_path).map_err(|e| format!("Read error: {}", e))?;
-    let hash = compute_hash(&data);
+    let hash = hash_file(file_path).map_err(|e| format!("Read error: {}", e))?;
 
     if let Some(existing_img) = db.find_by_hash(&hash).map_err(|e| e.to_string())? {
         let file_record = ImageFile {
@@ -158,6 +170,8 @@ pub fn sync_file(
         });
     }
 
+    // New content: only now read the bytes (source detection / decode need them).
+    let data = fs::read(file_path).map_err(|e| format!("Read error: {}", e))?;
     let (image_id, decoded) =
         create_image_record(db, file_path, &hash, &ext, &data, can_decode, module_raw)?;
     let file_record = ImageFile {
@@ -249,10 +263,39 @@ fn create_image_record(
     Ok((image_id, decoded))
 }
 
+/// Whole-buffer SHA-256, retained as a test reference for `hash_file`'s streaming
+/// implementation. Production import paths hash via `hash_file` (streaming IO).
+#[cfg(test)]
 fn compute_hash(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
     format!("{:x}", hasher.finalize())
+}
+
+/// Upper bound on files we will read fully into memory during import. Pathological
+/// or malicious TIFF/PSD/RAW/GIF can be enormous; reject them up front rather than
+/// risking a memory cliff. Generous enough for legitimate high-resolution art.
+const MAX_IMPORT_FILE_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
+
+fn import_size_within_limit(size: u64) -> bool {
+    size <= MAX_IMPORT_FILE_BYTES
+}
+
+/// Stream a file through SHA-256 in fixed-size chunks so the whole file never
+/// needs to live in a single `Vec<u8>` just to compute its content hash.
+fn hash_file(path: &Path) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn run_source_detection(
@@ -379,5 +422,40 @@ fn run_color_metrics(
 
     if let Ok(metrics) = result {
         let _ = db.store_image_color_metrics(&metrics);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn hash_file_matches_in_memory_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("blob.bin");
+        let bytes: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(&bytes)
+            .unwrap();
+
+        // Streaming hash must equal the whole-buffer hash for the same content.
+        assert_eq!(hash_file(&path).unwrap(), compute_hash(&bytes));
+    }
+
+    #[test]
+    fn hash_file_handles_empty_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.bin");
+        std::fs::File::create(&path).unwrap();
+        assert_eq!(hash_file(&path).unwrap(), compute_hash(&[]));
+    }
+
+    #[test]
+    fn import_size_within_limit_boundary() {
+        assert!(import_size_within_limit(0));
+        assert!(import_size_within_limit(MAX_IMPORT_FILE_BYTES));
+        assert!(!import_size_within_limit(MAX_IMPORT_FILE_BYTES + 1));
     }
 }
