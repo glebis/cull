@@ -51,7 +51,7 @@
             for (const group of allGroups) {
                 const imgs = await getLineageGroupImages(group.id);
                 const contextImgs = imgs.filter(img => contextImageIds.has(img.image.id));
-                if (contextImgs.length > 0) {
+                if (contextImgs.length >= 2) {
                     filtered.push({ ...group, image_count: contextImgs.length });
                     imgMap.set(group.id, contextImgs);
                 }
@@ -59,7 +59,9 @@
 
             groups = filtered;
             groupImages = imgMap;
-            if (filtered.length > 0 && !selectedGroupId) {
+            if (filtered.length === 0) {
+                selectedGroupId = null;
+            } else if (!selectedGroupId || !imgMap.has(selectedGroupId)) {
                 selectedGroupId = filtered[0].id;
             }
         } catch (e) {
@@ -148,7 +150,7 @@
     {:else if groups.length === 0}
         <div class="empty">
             <p>No lineage groups in <strong>{scopeLabel}</strong></p>
-            <p class="hint">Import multiple variants of the same image to see them grouped here.</p>
+            <p class="hint">Lineage appears when at least two variants are visible in this scope.</p>
         </div>
     {:else if $lineageLayout === 'timeline'}
         <!-- TIMELINE LAYOUT -->
@@ -313,6 +315,11 @@
     .layout-toggle:hover { color: var(--text-primary, #eee); }
 
     /* Timeline */
+    .timeline-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+        gap: calc(var(--spacing) * 2);
+    }
     .timeline-strip {
         margin-bottom: 20px;
         padding: 12px;
@@ -324,6 +331,7 @@
         align-items: center;
         gap: 8px;
         margin-bottom: 10px;
+        min-width: 0;
     }
     .group-name {
         background: none;
@@ -333,6 +341,15 @@
         font-size: 13px;
         cursor: pointer;
         padding: 0;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .group-meta,
+    .detection-badge,
+    .strip-action {
+        flex-shrink: 0;
     }
     .group-meta {
         color: var(--text-secondary, #666);
@@ -358,7 +375,8 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        overflow-x: auto;
+        flex-wrap: wrap;
+        overflow: hidden;
         padding-bottom: 4px;
     }
     .strip-thumb {

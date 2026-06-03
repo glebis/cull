@@ -201,10 +201,12 @@ impl Database {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT lg.id, lg.name, lg.created_at, lg.detection_method, lg.detection_score,
-                    COUNT(i.id) as cnt
+                    COUNT(DISTINCT i.id) as cnt
              FROM lineage_groups lg
-             LEFT JOIN images i ON i.lineage_group_id = lg.id
+             JOIN images i ON i.lineage_group_id = lg.id
+             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              GROUP BY lg.id
+             HAVING COUNT(DISTINCT i.id) >= 2
              ORDER BY lg.created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -639,6 +641,32 @@ mod tests {
         assert_eq!(images.len(), 2);
         assert!(images[0].path.ends_with("ig_a.png"));
         assert!(images[1].path.ends_with("ig_b.png"));
+    }
+
+    #[test]
+    fn test_list_lineage_groups_excludes_singletons() {
+        let db = Database::open(Path::new(":memory:")).unwrap();
+        insert_test_image(&db, "solo", "/tmp/solo.png");
+        insert_test_image(&db, "pair-a", "/tmp/pair_a.png");
+        insert_test_image(&db, "pair-b", "/tmp/pair_b.png");
+
+        let solo_group = db
+            .create_lineage_group("solo series", "manual", 100.0)
+            .unwrap();
+        db.assign_to_lineage_group("solo", &solo_group, 0).unwrap();
+
+        let pair_group = db
+            .create_lineage_group("pair series", "manual", 100.0)
+            .unwrap();
+        db.assign_to_lineage_group("pair-a", &pair_group, 0)
+            .unwrap();
+        db.assign_to_lineage_group("pair-b", &pair_group, 1)
+            .unwrap();
+
+        let groups = db.list_lineage_groups().unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].id, pair_group);
+        assert_eq!(groups[0].image_count, 2);
     }
 
     #[test]

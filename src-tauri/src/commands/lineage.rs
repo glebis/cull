@@ -30,6 +30,10 @@ pub async fn create_lineage_group_manual(
     name: String,
     image_ids: Vec<String>,
 ) -> Result<String, String> {
+    if image_ids.len() < 2 {
+        return Err("Lineage groups need at least two images".to_string());
+    }
+
     let group_id = state
         .db
         .create_lineage_group(&name, "manual", 100.0)
