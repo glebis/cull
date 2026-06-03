@@ -237,12 +237,20 @@ impl FilterNode {
                         vec![SqlValue::Text(format!("%{}%", v))],
                     )),
                     (RuleOp::In, FilterValue::StringArray(vals)) => {
+                        // An empty allow-list matches nothing; `IN ()` is invalid SQL.
+                        if vals.is_empty() {
+                            return Ok(("1=0".to_string(), vec![]));
+                        }
                         let placeholders: Vec<&str> = vals.iter().map(|_| "?").collect();
                         let params: Vec<SqlValue> =
                             vals.iter().map(|v| SqlValue::Text(v.clone())).collect();
                         Ok((format!("{} IN ({})", col, placeholders.join(",")), params))
                     }
                     (RuleOp::NotIn, FilterValue::StringArray(vals)) => {
+                        // An empty deny-list excludes nothing; `NOT IN ()` is invalid SQL.
+                        if vals.is_empty() {
+                            return Ok(("1=1".to_string(), vec![]));
+                        }
                         let placeholders: Vec<&str> = vals.iter().map(|_| "?").collect();
                         let params: Vec<SqlValue> =
                             vals.iter().map(|v| SqlValue::Text(v.clone())).collect();
@@ -262,10 +270,29 @@ impl FilterNode {
                     (RuleOp::IsNotEmpty, _) => {
                         Ok((format!("({} IS NOT NULL AND {} != '')", col, col), vec![]))
                     }
-                    (RuleOp::LastNDays, FilterValue::Number(days)) => Ok((
-                        format!("{} >= datetime('now', '-{} days')", col, *days as i64),
-                        vec![],
-                    )),
+                    (RuleOp::LastNDays, FilterValue::Number(days)) => {
+                        // `days` is interpolated into SQL, so it must be a finite,
+                        // non-negative whole number. Reject NaN/inf/negative/fractional
+                        // rather than silently casting to a wrong or future window.
+                        // Finite, non-negative, whole, and within a sane upper
+                        // bound (100 years) so astronomically large values can't
+                        // produce a degenerate datetime modifier.
+                        const MAX_DAYS: f64 = 36_500.0;
+                        if !days.is_finite()
+                            || *days < 0.0
+                            || days.fract() != 0.0
+                            || *days > MAX_DAYS
+                        {
+                            return Err(format!(
+                                "last_n_days requires a whole number of days in 0..={}, got {}",
+                                MAX_DAYS as i64, days
+                            ));
+                        }
+                        Ok((
+                            format!("{} >= datetime('now', '-{} days')", col, *days as i64),
+                            vec![],
+                        ))
+                    }
                     (RuleOp::ThisWeek, _) => Ok((
                         format!("{} >= datetime('now', 'weekday 0', '-7 days')", col),
                         vec![],
@@ -519,6 +546,74 @@ mod tests {
         let json = serde_json::to_string(&filter).unwrap();
         assert!(json.contains("last_n_days"));
         assert!(json.contains("imported_at"));
+    }
+
+    #[test]
+    fn in_with_empty_array_matches_nothing() {
+        let filter = FilterNode::Rule {
+            field: Field::SourceLabel,
+            op: RuleOp::In,
+            value: FilterValue::StringArray(vec![]),
+        };
+        // Must not emit invalid `IN ()`; an empty allow-list matches nothing.
+        let (sql, params) = filter.to_sql_clause().unwrap();
+        assert!(!sql.contains("IN ()"), "must not emit invalid IN (): {sql}");
+        assert!(params.is_empty());
+        assert!(sql.contains("1=0") || sql.contains("0=1"));
+    }
+
+    #[test]
+    fn not_in_with_empty_array_matches_everything() {
+        let filter = FilterNode::Rule {
+            field: Field::SourceLabel,
+            op: RuleOp::NotIn,
+            value: FilterValue::StringArray(vec![]),
+        };
+        let (sql, params) = filter.to_sql_clause().unwrap();
+        assert!(
+            !sql.contains("NOT IN ()"),
+            "must not emit invalid NOT IN (): {sql}"
+        );
+        assert!(params.is_empty());
+        assert!(sql.contains("1=1"));
+    }
+
+    #[test]
+    fn last_n_days_rejects_non_integer_and_negative_values() {
+        for bad in [-1.0, 3.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e9] {
+            let filter = FilterNode::Rule {
+                field: Field::ImportedAt,
+                op: RuleOp::LastNDays,
+                value: FilterValue::Number(bad),
+            };
+            assert!(
+                filter.to_sql_clause().is_err(),
+                "last_n_days must reject {bad}"
+            );
+        }
+        // A valid window still compiles.
+        let ok = FilterNode::Rule {
+            field: Field::ImportedAt,
+            op: RuleOp::LastNDays,
+            value: FilterValue::Number(7.0),
+        };
+        assert!(ok.to_sql_clause().is_ok());
+    }
+
+    #[test]
+    fn clip_similarity_fields_are_rejected_not_emitted_as_columns() {
+        for field in [Field::ClipSimilarTo, Field::ClipTextMatch] {
+            let filter = FilterNode::Rule {
+                field,
+                op: RuleOp::Gte,
+                value: FilterValue::Number(0.5),
+            };
+            // Must error rather than emit the literal "unsupported" column.
+            assert!(
+                filter.to_sql_clause().is_err(),
+                "CLIP similarity is not SQL-expressible and must error"
+            );
+        }
     }
 
     #[test]
