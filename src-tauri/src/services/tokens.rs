@@ -509,7 +509,9 @@ pub fn image_id_in_scope(
     if scope.is_none() {
         return Ok(true);
     }
-    let images = db.get_images_by_ids(&[image_id]).map_err(|e| e.to_string())?;
+    let images = db
+        .get_images_by_ids(&[image_id])
+        .map_err(|e| e.to_string())?;
     let Some(img) = images.first() else {
         return Ok(false);
     };
@@ -524,8 +526,10 @@ pub fn image_id_in_scope(
     // image's tags by normalized name so casing/whitespace differences still match.
     if let Some(scope_tags) = scope.as_ref().and_then(|s| s.tags.as_ref()) {
         let image_tags = db.list_image_tags(image_id).map_err(|e| e.to_string())?;
-        let image_norms: std::collections::HashSet<&str> =
-            image_tags.iter().map(|t| t.normalized_name.as_str()).collect();
+        let image_norms: std::collections::HashSet<&str> = image_tags
+            .iter()
+            .map(|t| t.normalized_name.as_str())
+            .collect();
         for tag in scope_tags {
             if let Some(norm) = crate::db_core::tags::normalize_tag_name(tag) {
                 if image_norms.contains(norm.as_str()) {
