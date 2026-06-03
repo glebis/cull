@@ -39,8 +39,10 @@ cargo test --manifest-path src-tauri/Cargo.toml --features test-support \
   --test compat_golden db_fixture_opens_and_satisfies_invariants
 ```
 
-Freeze a new fixture (`v22.db`, …) whenever `CURRENT_SCHEMA_VERSION` advances;
-keep older fixtures so each is tested forever.
+**Timing matters:** freeze a fixture for version `N` *while the code is still at
+`N`* — commit `vN.db`, then add migration `N+1`. Freezing *after* bumping the
+schema captures the new state and tests nothing. Keep every old fixture so each
+version stays tested forever.
 
 ## Add the next contract test
 

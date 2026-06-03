@@ -9,9 +9,12 @@
 //! Requires the `test-support` feature:
 //!   cargo test --features test-support --test compat_golden
 //!
-//! Refresh the frozen fixture when CURRENT_SCHEMA_VERSION advances:
+//! Freeze a fixture for the CURRENT schema, then add it to the suite. Crucially,
+//! freeze BEFORE advancing CURRENT_SCHEMA_VERSION: commit `v<N>.db` while the code
+//! is still at v<N>, *then* add migration v<N+1>. That way each committed fixture
+//! is a genuine OLDER-version DB, and the guard proves new code opens it. Keep
+//! every old fixture so each version stays tested forever.
 //!   cargo test --features test-support --test compat_golden -- --ignored regenerate_db_fixture
-//! (keep older fixtures so each version is tested forever).
 
 use std::path::{Path, PathBuf};
 
