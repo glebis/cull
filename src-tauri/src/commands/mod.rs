@@ -6,6 +6,7 @@ pub mod detection;
 pub mod diagnostics;
 pub mod dictation;
 pub mod embeddings;
+pub mod exchange;
 pub mod export;
 pub mod files;
 pub mod generation;

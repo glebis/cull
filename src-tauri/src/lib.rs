@@ -6,6 +6,7 @@ mod cloud;
 mod commands;
 mod db_core;
 mod dictation;
+pub mod exchange;
 mod export;
 pub mod extensions;
 mod logging;
@@ -514,6 +515,9 @@ pub fn run() {
             commands::export::get_export_asset,
             commands::export::save_export_image,
             commands::export::assemble_export_pdf,
+            commands::exchange::export_cull_exchange,
+            commands::exchange::preview_cull_exchange_import,
+            commands::exchange::import_cull_exchange,
             commands::lineage::list_lineage_groups,
             commands::lineage::get_lineage_group_images,
             commands::lineage::create_lineage_group_manual,

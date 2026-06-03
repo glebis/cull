@@ -185,6 +185,32 @@ export interface MenuStatePayload {
     staticPublishingEnabled: boolean;
 }
 
+export interface CullExchangeExportOptions {
+    target_dir: string;
+    image_ids?: string[] | null;
+    copy_originals: boolean;
+    include_xmp: boolean;
+}
+
+export interface CullExchangeImportPreview {
+    valid: boolean;
+    format: string;
+    version: number;
+    image_count: number;
+    collection_count: number;
+    smart_collection_count: number;
+    generation_run_count: number;
+    missing_originals: string[];
+    errors: string[];
+}
+
+export interface CullExchangeImportResult {
+    imported_images: number;
+    imported_collections: number;
+    imported_smart_collections: number;
+    imported_generation_runs: number;
+}
+
 // Smart Collections types
 
 export interface FilterGroup {
@@ -242,6 +268,18 @@ export async function importFiles(filePaths: string[], sessionId?: string | null
     const result = await invoke<ImportResponse>('import_files', { filePaths, sessionId: sessionId ?? null });
     emitSessionEventsRefresh();
     return result;
+}
+
+export async function exportCullExchange(options: CullExchangeExportOptions): Promise<string> {
+    return invoke<string>('export_cull_exchange', { options });
+}
+
+export async function previewCullExchangeImport(bundleDir: string): Promise<CullExchangeImportPreview> {
+    return invoke<CullExchangeImportPreview>('preview_cull_exchange_import', { bundleDir });
+}
+
+export async function importCullExchange(bundleDir: string): Promise<CullExchangeImportResult> {
+    return invoke<CullExchangeImportResult>('import_cull_exchange', { bundleDir });
 }
 
 export async function regenerateThumbnails(): Promise<number> {
