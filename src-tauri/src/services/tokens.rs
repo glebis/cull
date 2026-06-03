@@ -494,6 +494,31 @@ pub fn image_in_scope(
     false
 }
 
+/// DB-backed per-image scope check shared by all MCP image-id tools.
+///
+/// Loads the image's path AND collection membership before evaluating the
+/// token scope, so a collection-scoped token authorizes the same images for
+/// per-image tools (get_image, set_rating, …) that it can reach via collection
+/// listing. Previously callers passed an empty membership slice, which made
+/// collection-scoped tokens reject in-scope images.
+pub fn image_id_in_scope(
+    db: &crate::db_core::db::Database,
+    scope: &Option<TokenScope>,
+    image_id: &str,
+) -> Result<bool, String> {
+    if scope.is_none() {
+        return Ok(true);
+    }
+    let images = db.get_images_by_ids(&[image_id]).map_err(|e| e.to_string())?;
+    let Some(img) = images.first() else {
+        return Ok(false);
+    };
+    let collections = db
+        .image_collection_ids(image_id)
+        .map_err(|e| e.to_string())?;
+    Ok(image_in_scope(scope, &img.path, &collections))
+}
+
 pub fn folder_in_scope(scope: &Option<TokenScope>, folder_path: &str) -> bool {
     let s = match scope {
         None => return true,
@@ -566,6 +591,71 @@ mod tests {
             secrets,
             app_handle: None,
         }
+    }
+
+    fn insert_test_image(db: &Database, id: &str, path: &str) {
+        db.insert_image(&crate::db_core::models::Image {
+            id: id.to_string(),
+            sha256_hash: format!("hash-{id}"),
+            width: 10,
+            height: 10,
+            format: "png".to_string(),
+            file_size: 1,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            imported_at: "2026-01-01T00:00:00Z".to_string(),
+            ai_prompt: None,
+            raw_metadata: None,
+        })
+        .unwrap();
+        db.insert_image_file(&crate::db_core::models::ImageFile {
+            id: format!("file-{id}"),
+            image_id: id.to_string(),
+            path: path.to_string(),
+            last_seen_at: "2026-01-01T00:00:00Z".to_string(),
+            missing_at: None,
+            last_seen_size: None,
+            last_seen_mtime: None,
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn image_id_in_scope_honors_collection_membership() {
+        let (db, ..) = test_context();
+        insert_test_image(&db, "imgA", "/lib/a.png");
+        insert_test_image(&db, "imgB", "/lib/b.png");
+        let col = db.create_collection("C1").unwrap();
+        db.add_to_collection(&col, &["imgA"]).unwrap();
+
+        let scope = Some(TokenScope {
+            collections: Some(vec![col.clone()]),
+            folders: None,
+            tags: None,
+        });
+
+        // imgA is in the scoped collection -> allowed; imgB is not -> denied.
+        assert!(image_id_in_scope(&db, &scope, "imgA").unwrap());
+        assert!(!image_id_in_scope(&db, &scope, "imgB").unwrap());
+        // No scope -> always allowed; unknown id -> denied.
+        assert!(image_id_in_scope(&db, &None, "imgB").unwrap());
+        assert!(!image_id_in_scope(&db, &scope, "ghost").unwrap());
+    }
+
+    #[test]
+    fn image_collection_ids_returns_memberships() {
+        let (db, ..) = test_context();
+        insert_test_image(&db, "imgA", "/lib/a.png");
+        let c1 = db.create_collection("C1").unwrap();
+        let c2 = db.create_collection("C2").unwrap();
+        db.add_to_collection(&c1, &["imgA"]).unwrap();
+        db.add_to_collection(&c2, &["imgA"]).unwrap();
+
+        let mut ids = db.image_collection_ids("imgA").unwrap();
+        ids.sort();
+        let mut expected = vec![c1, c2];
+        expected.sort();
+        assert_eq!(ids, expected);
+        assert!(db.image_collection_ids("imgB").unwrap().is_empty());
     }
 
     #[test]
