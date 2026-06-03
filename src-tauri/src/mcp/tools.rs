@@ -406,6 +406,25 @@ impl CullMcp {
         }
     }
 
+    /// Split a token scope into the three SQL filter dimensions. Tag names are
+    /// normalized to match `tags.normalized_name`. Absent dimensions map to
+    /// empty vecs; an empty dimension contributes NO clause to the OR filter
+    /// (it neither broadens nor matches), so scope isolation is preserved.
+    fn scope_dimensions(scope: &TokenScope) -> (Vec<String>, Vec<String>, Vec<String>) {
+        let folders = scope.folders.clone().unwrap_or_default();
+        let collections = scope.collections.clone().unwrap_or_default();
+        let tag_norms = scope
+            .tags
+            .as_ref()
+            .map(|tags| {
+                tags.iter()
+                    .filter_map(|t| crate::db_core::tags::normalize_tag_name(t))
+                    .collect()
+            })
+            .unwrap_or_default();
+        (folders, collections, tag_norms)
+    }
+
     fn scoped_images(
         &self,
         state: &AppState,
@@ -414,36 +433,15 @@ impl CullMcp {
             return Ok(None);
         };
 
-        let scope_ref = Some(scope.clone());
-        let mut images_by_id = std::collections::BTreeMap::new();
+        // SQL-level union (folder/collection/tag) with no in-memory cap; the
+        // query already returns a deduped DISTINCT set ordered stably.
+        let (folders, collections, tag_norms) = Self::scope_dimensions(&scope);
+        let images = state
+            .db
+            .list_images_in_scope(&folders, &collections, &tag_norms, u32::MAX, 0)
+            .map_err(|e| e.to_string())?;
 
-        if scope.folders.is_some() {
-            for image in state
-                .db
-                .list_images(100_000, 0)
-                .map_err(|e| e.to_string())?
-            {
-                if tokens::image_in_scope(&scope_ref, &image.path, &[]) {
-                    images_by_id.insert(image.image.id.clone(), image);
-                }
-            }
-        }
-
-        if let Some(collections) = &scope.collections {
-            for collection_id in collections {
-                for image in state
-                    .db
-                    .list_collection_images(collection_id)
-                    .map_err(|e| e.to_string())?
-                {
-                    if tokens::image_in_scope(&scope_ref, &image.path, &[collection_id.clone()]) {
-                        images_by_id.insert(image.image.id.clone(), image);
-                    }
-                }
-            }
-        }
-
-        Ok(Some(images_by_id.into_values().collect()))
+        Ok(Some(images))
     }
 
     fn scoped_library_counts(
@@ -787,15 +785,25 @@ impl CullMcp {
         let state = self.app_handle.state::<AppState>();
         let offset = params.offset.unwrap_or(0);
         let limit = clamp_limit(params.limit.unwrap_or(50));
-        let scope = self.token_scope();
-        let fetch_limit = if scope.is_some() { limit * 3 } else { limit };
 
-        match state.db.list_images(fetch_limit, offset) {
+        // Scoped tokens filter and paginate at the SQL level (folder/collection/
+        // tag union), so pages are correct for sparse scopes and large libraries
+        // without the old `limit * 3` heuristic. Unscoped (local) tokens list
+        // the whole library.
+        let images = match self.token_scope() {
+            Some(scope) => {
+                let (folders, collections, tag_norms) = Self::scope_dimensions(&scope);
+                state
+                    .db
+                    .list_images_in_scope(&folders, &collections, &tag_norms, limit, offset)
+            }
+            None => state.db.list_images(limit, offset),
+        };
+
+        match images {
             Ok(images) => {
                 let result: Vec<serde_json::Value> = images
                     .iter()
-                    .filter(|img| tokens::image_in_scope(&scope, &img.path, &[]))
-                    .take(limit as usize)
                     .map(|img| {
                         serde_json::json!({
                             "id": img.image.id,

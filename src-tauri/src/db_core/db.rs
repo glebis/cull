@@ -42,6 +42,35 @@ pub struct Database {
     pub(crate) conn: Arc<Mutex<Connection>>,
 }
 
+/// Map a row from the standard image+file+selection SELECT (the 16-column
+/// projection used by `list_images` and `list_images_in_scope`) into an
+/// `ImageWithFile`. Shared so the two list queries cannot drift apart.
+fn map_image_with_file_row(row: &rusqlite::Row) -> rusqlite::Result<ImageWithFile> {
+    let star: Option<u8> = row.get(9)?;
+    let color: Option<String> = row.get(10)?;
+    let decision: Option<String> = row.get(11)?;
+    let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
+    Ok(ImageWithFile {
+        image: Image {
+            id: row.get(0)?,
+            sha256_hash: row.get(1)?,
+            width: row.get(2)?,
+            height: row.get(3)?,
+            format: row.get(4)?,
+            file_size: row.get(5)?,
+            created_at: row.get(6)?,
+            imported_at: row.get(7)?,
+            ai_prompt: row.get(13)?,
+            raw_metadata: row.get(14)?,
+        },
+        path: row.get(8)?,
+        thumbnail_path: None,
+        selection,
+        source_label: row.get(12)?,
+        missing_at: row.get(15)?,
+    })
+}
+
 impl Database {
     pub fn open(db_path: &Path) -> Result<Self> {
         let should_consider_backup = should_consider_migration_backup(db_path);
@@ -1203,35 +1232,88 @@ impl Database {
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
              GROUP BY i.id
-             ORDER BY i.imported_at DESC
+             ORDER BY i.imported_at DESC, i.id ASC
              LIMIT ?1 OFFSET ?2",
         )?;
-        let rows = stmt.query_map(params![limit, offset], |row| {
-            let star: Option<u8> = row.get(9)?;
-            let color: Option<String> = row.get(10)?;
-            let decision: Option<String> = row.get(11)?;
-            let selection =
-                Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
-            Ok(ImageWithFile {
-                image: Image {
-                    id: row.get(0)?,
-                    sha256_hash: row.get(1)?,
-                    width: row.get(2)?,
-                    height: row.get(3)?,
-                    format: row.get(4)?,
-                    file_size: row.get(5)?,
-                    created_at: row.get(6)?,
-                    imported_at: row.get(7)?,
-                    ai_prompt: row.get(13)?,
-                    raw_metadata: row.get(14)?,
-                },
-                path: row.get(8)?,
-                thumbnail_path: None,
-                selection,
-                source_label: row.get(12)?,
-                missing_at: row.get(15)?,
-            })
-        })?;
+        let rows = stmt.query_map(params![limit, offset], map_image_with_file_row)?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
+    /// Scoped, paginated image listing for MCP tokens. Filters at the SQL level
+    /// by the UNION of folder-prefix, collection membership, and tag membership,
+    /// so a scoped token can page through large libraries without the previous
+    /// in-memory `limit * 3` heuristic or 100k cap. With no dimensions the scope
+    /// matches nothing and an empty Vec is returned — callers must NOT use this
+    /// for unscoped (full-admin) tokens. Folder matching uses an indexed path
+    /// prefix for enumeration here; per-image authorization still goes through
+    /// the canonical `tokens::image_in_scope`/`is_path_under` boundary check.
+    pub fn list_images_in_scope(
+        &self,
+        folders: &[String],
+        collections: &[String],
+        tag_norms: &[String],
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<ImageWithFile>> {
+        use rusqlite::types::Value;
+
+        if folders.is_empty() && collections.is_empty() && tag_norms.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut clauses: Vec<String> = Vec::new();
+        let mut args: Vec<Value> = Vec::new();
+
+        for folder in folders {
+            let folder = folder.trim_end_matches('/');
+            // Exact folder OR any descendant. The trailing "/%" keeps sibling
+            // prefixes like /artisan from matching a /art scope.
+            clauses.push("(f.path = ? OR f.path LIKE ? || '/%')".to_string());
+            args.push(Value::Text(folder.to_string()));
+            args.push(Value::Text(folder.to_string()));
+        }
+        if !collections.is_empty() {
+            let placeholders = vec!["?"; collections.len()].join(",");
+            clauses.push(format!(
+                "i.id IN (SELECT image_id FROM collection_items WHERE collection_id IN ({}))",
+                placeholders
+            ));
+            for c in collections {
+                args.push(Value::Text(c.clone()));
+            }
+        }
+        if !tag_norms.is_empty() {
+            let placeholders = vec!["?"; tag_norms.len()].join(",");
+            clauses.push(format!(
+                "i.id IN (SELECT it.image_id FROM image_tags it JOIN tags t ON t.id = it.tag_id \
+                 WHERE t.normalized_name IN ({}))",
+                placeholders
+            ));
+            for t in tag_norms {
+                args.push(Value::Text(t.clone()));
+            }
+        }
+
+        let sql = format!(
+            "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
+                    i.created_at, i.imported_at, f.path,
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
+                    i.raw_metadata, f.missing_at
+             FROM images i
+             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+             LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             WHERE {}
+             GROUP BY i.id
+             ORDER BY i.imported_at DESC, i.id ASC
+             LIMIT ? OFFSET ?",
+            clauses.join(" OR ")
+        );
+        args.push(Value::Integer(limit as i64));
+        args.push(Value::Integer(offset as i64));
+
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(args), map_image_with_file_row)?;
         rows.collect::<Result<Vec<_>>>()
     }
 
@@ -3880,6 +3962,97 @@ mod tests {
             last_seen_mtime: None,
         };
         db.insert_image_file(&file).unwrap();
+    }
+
+    #[test]
+    fn list_images_in_scope_collection_paginates_completely() {
+        let db = test_db();
+        let col = db.create_collection("C1").unwrap();
+        // 5 in the scoped collection, 3 outside it.
+        for i in 0..5 {
+            insert_test_image(&db, &format!("in{i}"), &format!("h-in{i}"));
+        }
+        for i in 0..3 {
+            insert_test_image(&db, &format!("out{i}"), &format!("h-out{i}"));
+        }
+        let in_ids: Vec<&str> = ["in0", "in1", "in2", "in3", "in4"].to_vec();
+        db.add_to_collection(&col, &in_ids).unwrap();
+
+        let cols = vec![col.clone()];
+        // Page through with a small limit; the union of all pages must be exactly
+        // the 5 scoped images, with no truncation or out-of-scope leakage.
+        let mut seen = std::collections::BTreeSet::new();
+        for offset in (0..6).step_by(2) {
+            let page = db.list_images_in_scope(&[], &cols, &[], 2, offset).unwrap();
+            assert!(page.len() <= 2);
+            for img in page {
+                assert!(in_ids.contains(&img.image.id.as_str()));
+                seen.insert(img.image.id);
+            }
+        }
+        assert_eq!(seen.len(), 5, "all scoped images returned across pages");
+    }
+
+    #[test]
+    fn list_images_in_scope_folder_prefix_is_exact() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "a", "h-a", "/art/a.png");
+        insert_test_image_at_path(&db, "b", "h-b", "/artisan/b.png");
+        insert_test_image_at_path(&db, "c", "h-c", "/art/sub/c.png");
+
+        let folders = vec!["/art".to_string()];
+        let ids: std::collections::BTreeSet<String> = db
+            .list_images_in_scope(&folders, &[], &[], 100, 0)
+            .unwrap()
+            .into_iter()
+            .map(|i| i.image.id)
+            .collect();
+        // /art and /art/sub match; the sibling prefix /artisan must NOT.
+        assert!(ids.contains("a"));
+        assert!(ids.contains("c"));
+        assert!(!ids.contains("b"));
+    }
+
+    #[test]
+    fn list_images_in_scope_union_of_dimensions() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "byFolder", "h1", "/art/x.png");
+        insert_test_image_at_path(&db, "byColl", "h2", "/other/y.png");
+        insert_test_image_at_path(&db, "byTag", "h3", "/other/z.png");
+        insert_test_image_at_path(&db, "none", "h4", "/other/n.png");
+        let col = db.create_collection("C1").unwrap();
+        db.add_to_collection(&col, &["byColl"]).unwrap();
+        db.add_image_tag("byTag", "public", "user", "manual", None)
+            .unwrap();
+
+        let ids: std::collections::BTreeSet<String> = db
+            .list_images_in_scope(
+                &["/art".to_string()],
+                &[col],
+                &["public".to_string()],
+                100,
+                0,
+            )
+            .unwrap()
+            .into_iter()
+            .map(|i| i.image.id)
+            .collect();
+        assert!(ids.contains("byFolder"));
+        assert!(ids.contains("byColl"));
+        assert!(ids.contains("byTag"));
+        assert!(!ids.contains("none"));
+        assert_eq!(ids.len(), 3);
+    }
+
+    #[test]
+    fn list_images_in_scope_empty_dimensions_returns_nothing() {
+        let db = test_db();
+        insert_test_image(&db, "a", "h-a");
+        // No folders/collections/tags -> matches nothing (must NOT return all rows).
+        assert!(db
+            .list_images_in_scope(&[], &[], &[], 100, 0)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
