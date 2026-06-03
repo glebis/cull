@@ -3831,54 +3831,41 @@ mod migration_safety_tests {
 
     #[test]
     fn test_open_accepts_schema_version_20_database() {
+        // A realistic v20 database: fully migrated (all core tables present) but
+        // predating migration 21. Open must run migration 21 and bring it current.
         let tmp = tempfile::tempdir().unwrap();
         let db_path = tmp.path().join("version_20.db");
-        let conn = Connection::open(&db_path).unwrap();
-        conn.execute_batch(
-            "
-            PRAGMA user_version = 20;
-            CREATE TABLE app_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-            ",
-        )
-        .unwrap();
-        drop(conn);
+        {
+            let _ = Database::open(&db_path).unwrap(); // full migrate, all tables
+        }
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch("DROP TABLE IF EXISTS client_feedback; PRAGMA user_version = 20;")
+                .unwrap();
+        }
 
         let db = Database::open(&db_path).unwrap();
         let conn = db.conn.lock();
         assert!(table_exists(&conn, "client_feedback").unwrap());
+        assert!(table_exists(&conn, "images").unwrap());
         let user_version = user_version(&conn).unwrap();
         assert_eq!(user_version, CURRENT_SCHEMA_VERSION);
     }
 
     #[test]
     fn test_open_accepts_schema_version_21_database() {
+        // A realistic v21 database: already fully migrated. Re-open must accept it
+        // unchanged (and pass schema-invariant verification).
         let tmp = tempfile::tempdir().unwrap();
         let db_path = tmp.path().join("version_21.db");
-        let conn = Connection::open(&db_path).unwrap();
-        conn.execute_batch(
-            "
-            PRAGMA user_version = 21;
-            CREATE TABLE app_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-            CREATE TABLE client_feedback (
-                image_id TEXT PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
-                favorite INTEGER NOT NULL DEFAULT 0,
-                comment TEXT,
-                updated_at TEXT NOT NULL
-            );
-            ",
-        )
-        .unwrap();
-        drop(conn);
+        {
+            let _ = Database::open(&db_path).unwrap(); // migrate to current (21)
+        }
 
         let db = Database::open(&db_path).unwrap();
         let conn = db.conn.lock();
         assert!(table_exists(&conn, "client_feedback").unwrap());
+        assert!(table_exists(&conn, "images").unwrap());
         let user_version = user_version(&conn).unwrap();
         assert_eq!(user_version, CURRENT_SCHEMA_VERSION);
     }
