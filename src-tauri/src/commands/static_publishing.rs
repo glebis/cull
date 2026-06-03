@@ -550,6 +550,39 @@ pub async fn serve_static_publish_package(
     serve_static_publish_package_inner(state.inner(), site_dir, host, port).await
 }
 
+/// Verify a directory is a Cull static-publishing package before serving it.
+/// Requires an index.html and a parseable `data/canvas.json` manifest carrying
+/// the Cull schema marker, so arbitrary local directories cannot be served.
+fn validate_cull_static_package(site_dir: &Path) -> Result<(), String> {
+    if !site_dir.join("index.html").exists() {
+        return Err(format!(
+            "No static package index.html exists at {}",
+            site_dir.display()
+        ));
+    }
+    let manifest_path = site_dir.join("data").join("canvas.json");
+    let raw = std::fs::read_to_string(&manifest_path).map_err(|_| {
+        format!(
+            "Not a Cull static package: missing data/canvas.json at {}",
+            site_dir.display()
+        )
+    })?;
+    let manifest: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
+        format!(
+            "Invalid Cull static package manifest (data/canvas.json): {}",
+            e
+        )
+    })?;
+    let schema = manifest.get("schema").and_then(|v| v.as_str());
+    if schema != Some(SCHEMA_VERSION) {
+        return Err(format!(
+            "Not a Cull static package: data/canvas.json schema marker is {:?}, expected {:?}",
+            schema, SCHEMA_VERSION
+        ));
+    }
+    Ok(())
+}
+
 pub async fn serve_static_publish_package_inner(
     state: &AppState,
     site_dir: String,
@@ -559,12 +592,12 @@ pub async fn serve_static_publish_package_inner(
     ensure_module_enabled(state)?;
 
     let site_dir = PathBuf::from(site_dir);
-    if !site_dir.join("index.html").exists() {
-        return Err(format!(
-            "No static package index.html exists at {}",
-            site_dir.display()
-        ));
-    }
+    // Only serve directories that are genuinely Cull export packages — an
+    // index.html alone is not sufficient, or the command could be coaxed into
+    // serving arbitrary local directories on localhost. The access phrase in the
+    // manifest is host-level UX guidance, not server-side auth, so the gate here
+    // is package identity.
+    validate_cull_static_package(&site_dir)?;
 
     let requested_host = host.unwrap_or_else(|| "127.0.0.1".to_string());
     if requested_host != "127.0.0.1" && requested_host != "localhost" && requested_host != "::1" {
@@ -1771,6 +1804,68 @@ mod tests {
         assert_eq!(slugify("Current Canvas!"), "current-canvas");
     }
 
+    fn write_pkg(dir: &std::path::Path, index: bool, canvas_json: Option<&str>) {
+        if index {
+            std::fs::write(dir.join("index.html"), "<html></html>").unwrap();
+        }
+        if let Some(json) = canvas_json {
+            std::fs::create_dir_all(dir.join("data")).unwrap();
+            std::fs::write(dir.join("data").join("canvas.json"), json).unwrap();
+        }
+    }
+
+    #[test]
+    fn validate_cull_static_package_accepts_real_package() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_pkg(
+            tmp.path(),
+            true,
+            Some(&format!(r#"{{"schema":"{}","images":[]}}"#, SCHEMA_VERSION)),
+        );
+        assert!(validate_cull_static_package(tmp.path()).is_ok());
+    }
+
+    #[test]
+    fn validate_cull_static_package_rejects_index_only_dir() {
+        // A bare directory with index.html (e.g. an arbitrary website) is not a
+        // Cull package and must not be served.
+        let tmp = tempfile::tempdir().unwrap();
+        write_pkg(tmp.path(), true, None);
+        let err = validate_cull_static_package(tmp.path()).unwrap_err();
+        assert!(err.contains("canvas.json"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_cull_static_package_rejects_invalid_or_foreign_manifest() {
+        // Malformed JSON.
+        let bad = tempfile::tempdir().unwrap();
+        write_pkg(bad.path(), true, Some("{not json"));
+        assert!(validate_cull_static_package(bad.path()).is_err());
+
+        // Valid JSON but not a Cull manifest (no schema marker).
+        let foreign = tempfile::tempdir().unwrap();
+        write_pkg(foreign.path(), true, Some(r#"{"hello":"world"}"#));
+        assert!(validate_cull_static_package(foreign.path()).is_err());
+
+        // Valid JSON with a *different* schema marker (future/foreign format).
+        let wrong_schema = tempfile::tempdir().unwrap();
+        write_pkg(
+            wrong_schema.path(),
+            true,
+            Some(r#"{"schema":"other.format.v9"}"#),
+        );
+        assert!(validate_cull_static_package(wrong_schema.path()).is_err());
+
+        // Missing index.html entirely.
+        let no_index = tempfile::tempdir().unwrap();
+        write_pkg(
+            no_index.path(),
+            false,
+            Some(&format!(r#"{{"schema":"{}"}}"#, SCHEMA_VERSION)),
+        );
+        assert!(validate_cull_static_package(no_index.path()).is_err());
+    }
+
     #[test]
     fn sanitize_ext_removes_unexpected_chars() {
         assert_eq!(sanitize_ext("jpeg"), "jpg");
@@ -2188,10 +2283,15 @@ mod tests {
         state.db.set_setting(MODULE_KEY, "true").unwrap();
 
         let site_dir = tmp.path().join("site");
-        fs::create_dir_all(&site_dir).unwrap();
+        fs::create_dir_all(site_dir.join("data")).unwrap();
         fs::write(
             site_dir.join("index.html"),
             "<!doctype html><title>test</title>",
+        )
+        .unwrap();
+        fs::write(
+            site_dir.join("data").join("canvas.json"),
+            format!(r#"{{"schema":"{}","images":[]}}"#, SCHEMA_VERSION),
         )
         .unwrap();
 
@@ -2218,10 +2318,15 @@ mod tests {
         state.db.set_setting(MODULE_KEY, "true").unwrap();
 
         let site_dir = tmp.path().join("site");
-        fs::create_dir_all(&site_dir).unwrap();
+        fs::create_dir_all(site_dir.join("data")).unwrap();
         fs::write(
             site_dir.join("index.html"),
             "<!doctype html><title>test</title>",
+        )
+        .unwrap();
+        fs::write(
+            site_dir.join("data").join("canvas.json"),
+            format!(r#"{{"schema":"{}","images":[]}}"#, SCHEMA_VERSION),
         )
         .unwrap();
 
