@@ -413,6 +413,12 @@ pub async fn paste_image_from_clipboard(
     if !destination.is_dir() {
         return Err("Destination folder does not exist".to_string());
     }
+    // Apply the shared path policy: a paste destination is an explicitly chosen
+    // folder, but must still never be a sensitive directory (e.g. ~/.ssh).
+    crate::db_core::path_policy::validate_path(
+        &destination_folder,
+        crate::db_core::path_policy::PathMode::UserPicked,
+    )?;
 
     let payload = read_image_from_clipboard()?
         .ok_or_else(|| "Clipboard does not contain an image".to_string())?;
