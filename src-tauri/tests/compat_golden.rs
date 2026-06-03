@@ -36,7 +36,7 @@ fn db_fixture_opens_and_satisfies_invariants() {
     std::fs::copy(&src, &work).expect("copy fixture");
 
     // Opening an older DB under current code must migrate it cleanly...
-    let db = cull_lib::db_core::db::Database::open(&work)
+    let db = cull_lib::test_support::Database::open(&work)
         .expect("a frozen older DB must open cleanly under current code");
     // ...and the resulting schema must satisfy all invariants.
     db.verify_schema_invariants_for_test()
@@ -52,7 +52,7 @@ fn regenerate_db_fixture() {
     std::fs::create_dir_all(out.parent().unwrap()).unwrap();
     let _ = std::fs::remove_file(&out);
     // Opening a fresh path runs the full migration chain at the current schema.
-    let db = cull_lib::db_core::db::Database::open(&out).expect("open fresh db");
+    let db = cull_lib::test_support::Database::open(&out).expect("open fresh db");
     drop(db);
     assert!(out.exists(), "fixture should have been written to {}", out.display());
 }
