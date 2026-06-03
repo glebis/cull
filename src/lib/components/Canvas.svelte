@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onDestroy } from 'svelte';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import {
         activeCanvas,
@@ -34,6 +35,11 @@
     } from '$lib/canvas-view-model';
     import type { CanvasCrop } from '$lib/canvas-document';
     import { safeAssetPreviewPath } from '$lib/view-utils';
+    import {
+        computeVisibleCanvasItems,
+        capCanvasItems,
+        CANVAS_RENDER_CAP,
+    } from '$lib/canvas-utils';
     import ContextMenu from './ContextMenu.svelte';
 
     type CropPoint = { x: number; y: number };
@@ -68,6 +74,37 @@
     let cropDraft = $state<CropDraft | null>(null);
     let loadedCanvasKey = $state('');
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Viewport culling + render cap (P2): only mount items intersecting the viewport.
+    const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
+    let viewportWidth = $state(0);
+    let viewportHeight = $state(0);
+
+    $effect(() => {
+        if (!canvasEl) return;
+        const ro = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                viewportWidth = entry.contentRect.width;
+                viewportHeight = entry.contentRect.height;
+            }
+        });
+        ro.observe(canvasEl);
+        return () => ro.disconnect();
+    });
+
+    // Cull to the viewport (with a generous margin) then cap the rendered node count.
+    let visibleCanvas = $derived.by(() => {
+        const culled = computeVisibleCanvasItems(
+            canvasItems,
+            { panX, panY, zoom, width: viewportWidth, height: viewportHeight },
+            { margin: Math.max(viewportWidth, viewportHeight) },
+        );
+        return capCanvasItems(culled, CANVAS_RENDER_CAP);
+    });
+
+    onDestroy(() => {
+        if (saveTimer) clearTimeout(saveTimer);
+    });
 
     function handleResizeMouseDown(e: MouseEvent, item: CanvasViewItem) {
         e.stopPropagation();
@@ -475,12 +512,17 @@
     class:space-pan={spacePanActive}
     class:panning={panning}
 >
+    {#if visibleCanvas.droppedCount > 0}
+        <div class="canvas-cap-banner" aria-live="polite">
+            Showing {visibleCanvas.rendered.length} of {canvasItems.length} — zoom in to see more
+        </div>
+    {/if}
     <div class="canvas-layer" style="transform: translate({panX}px, {panY}px) scale({zoom});">
-        {#each canvasItems as item (item.id)}
+        {#each visibleCanvas.rendered as item (item.id)}
             {@const rating = item.image.selection?.star_rating ?? 0}
             {@const decision = item.image.selection?.decision ?? 'undecided'}
             {@const annotations = itemAnnotations(item)}
-            {@const previewPath = safeAssetPreviewPath(item.image)}
+            {@const previewPath = safeAssetPreviewPath(item.image, { displayPx: Math.max(item.width, item.height) * zoom, dpr })}
             <div
                 class="canvas-item"
                 class:selected={$selectedIds.has(item.imageId)}
@@ -610,6 +652,20 @@
 </div>
 
 <style>
+    .canvas-cap-banner {
+        position: absolute;
+        top: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 10;
+        padding: 4px 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        color: var(--text-secondary);
+        font-size: 11px;
+        pointer-events: none;
+    }
     .canvas-viewport {
         grid-area: main;
         overflow: hidden;

@@ -17,6 +17,11 @@ import {
     chooseLoupeImagePath,
     isAssetProtocolSafePath,
     safeAssetPreviewPath,
+    pickThumbnailVariant,
+    THUMBNAIL_SIZES,
+    computeScrollDirection,
+    computeOverscan,
+    computePrefetchIndices,
 } from './view-utils';
 
 describe('getFilename', () => {
@@ -586,5 +591,161 @@ describe('loupe crop coordinates', () => {
             width: 10,
             height: 10,
         });
+    });
+});
+
+describe('pickThumbnailVariant', () => {
+    const base = '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123.jpg';
+
+    it('exposes the four generated sizes mirroring the Rust array', () => {
+        expect(THUMBNAIL_SIZES).toEqual([64, 128, 256, 800]);
+    });
+
+    it('picks the smallest variant for a 64px tile at dpr 1', () => {
+        expect(pickThumbnailVariant(base, 64, { dpr: 1 })).toBe(
+            '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123_64.jpg'
+        );
+    });
+
+    it('accounts for device pixel ratio (64px @ dpr 2 -> 128)', () => {
+        expect(pickThumbnailVariant(base, 64, { dpr: 2 })).toBe(
+            '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123_128.jpg'
+        );
+    });
+
+    it('returns the base path (800px) when target exceeds 256 (160px @ dpr 2 = 320)', () => {
+        expect(pickThumbnailVariant(base, 160, { dpr: 2 })).toBe(base);
+    });
+
+    it('picks 256 for a 256px tile at dpr 1', () => {
+        expect(pickThumbnailVariant(base, 256, { dpr: 1 })).toBe(
+            '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123_256.jpg'
+        );
+    });
+
+    it('clamps dpr by maxDprMultiplier (default 2)', () => {
+        // 160px @ dpr 3 would be 480, but clamped to 2 -> 320 -> base
+        expect(pickThumbnailVariant(base, 160, { dpr: 3 })).toBe(base);
+    });
+
+    it('returns the base when the target exceeds all sizes', () => {
+        expect(pickThumbnailVariant(base, 2000, { dpr: 2 })).toBe(base);
+    });
+
+    it('uses the smallest size for non-positive display sizes', () => {
+        expect(pickThumbnailVariant(base, 0, { dpr: 1 })).toBe(
+            '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123_64.jpg'
+        );
+    });
+
+    it('leaves a path without a .jpg filename untouched', () => {
+        const weird = '/some/dir/no-extension';
+        expect(pickThumbnailVariant(weird, 64, { dpr: 1 })).toBe(weird);
+    });
+
+    it('preserves the extension casing for .JPG', () => {
+        const jpgUpper =
+            '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123.JPG';
+        expect(pickThumbnailVariant(jpgUpper, 64, { dpr: 1 })).toBe(
+            '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123_64.JPG'
+        );
+    });
+});
+
+describe('safeAssetPreviewPath with display size', () => {
+    const thumb = '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123.jpg';
+
+    it('is back-compatible without options (returns base thumbnail)', () => {
+        expect(safeAssetPreviewPath({ path: '/x/orig.png', thumbnail_path: thumb })).toBe(thumb);
+    });
+
+    it('selects a variant when displayPx is provided', () => {
+        expect(
+            safeAssetPreviewPath({ path: '/x/orig.png', thumbnail_path: thumb }, { displayPx: 64, dpr: 1 })
+        ).toBe('/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123_64.jpg');
+    });
+
+    it('never rewrites the original image path (no variants exist for originals)', () => {
+        const safeOriginal =
+            '/Users/u/Library/Application Support/com.glebkalinin.cull/generated/orig.jpg';
+        expect(
+            safeAssetPreviewPath({ path: safeOriginal, thumbnail_path: null }, { displayPx: 64, dpr: 1 })
+        ).toBe(safeOriginal);
+    });
+
+    it('returns null for unsafe paths', () => {
+        expect(
+            safeAssetPreviewPath({ path: '/etc/passwd', thumbnail_path: null }, { displayPx: 64 })
+        ).toBeNull();
+    });
+});
+
+describe('computeScrollDirection', () => {
+    it('reports down when scrolling forward beyond the threshold', () => {
+        expect(computeScrollDirection(0, 100, 'none')).toBe('down');
+    });
+
+    it('reports up when scrolling backward beyond the threshold', () => {
+        expect(computeScrollDirection(200, 100, 'down')).toBe('up');
+    });
+
+    it('keeps the previous direction for sub-threshold jitter (hysteresis)', () => {
+        expect(computeScrollDirection(100, 102, 'down', 4)).toBe('down');
+        expect(computeScrollDirection(100, 98, 'up', 4)).toBe('up');
+    });
+
+    it('defaults to none when there is no prior direction and no movement', () => {
+        expect(computeScrollDirection(100, 100, 'none')).toBe('none');
+    });
+});
+
+describe('computeOverscan', () => {
+    it('biases overscan ahead when scrolling down', () => {
+        expect(computeOverscan('down', 3)).toEqual({ before: 1, after: 6 });
+    });
+
+    it('biases overscan behind (above) when scrolling up', () => {
+        expect(computeOverscan('up', 3)).toEqual({ before: 6, after: 1 });
+    });
+
+    it('uses a balanced window when direction is none', () => {
+        expect(computeOverscan('none', 3)).toEqual({ before: 2, after: 3 });
+    });
+
+    it('treats baseRows as at least 1', () => {
+        expect(computeOverscan('down', 0)).toEqual({ before: 1, after: 2 });
+    });
+});
+
+describe('computePrefetchIndices', () => {
+    // 4 cols, cellSize 100, container 300 tall (3 visible rows), 100 items (25 rows)
+    const args = { cols: 4, cellSize: 100, containerHeight: 300, total: 100, prefetchRows: 2 };
+
+    it('warms the rows just below the window when scrolling down', () => {
+        // scrollTop 0 -> visible rows 0..2 -> warm rows 3..4 -> indices 12..19
+        const idx = computePrefetchIndices(0, args.containerHeight, args.cols, args.cellSize, args.total, 'down', args.prefetchRows);
+        expect(idx).toEqual([12, 13, 14, 15, 16, 17, 18, 19]);
+    });
+
+    it('warms the rows just above the window when scrolling up', () => {
+        // scrollTop 1000 -> firstVisibleRow 10 -> warm rows 8..9 -> indices 32..39
+        const idx = computePrefetchIndices(1000, args.containerHeight, args.cols, args.cellSize, args.total, 'up', args.prefetchRows);
+        expect(idx).toEqual([32, 33, 34, 35, 36, 37, 38, 39]);
+    });
+
+    it('clamps at the end of the list', () => {
+        // near the bottom there is nothing more to warm downward
+        const idx = computePrefetchIndices(2200, args.containerHeight, args.cols, args.cellSize, args.total, 'down', args.prefetchRows);
+        expect(idx).toEqual([]);
+    });
+
+    it('clamps at the top of the list when scrolling up', () => {
+        const idx = computePrefetchIndices(0, args.containerHeight, args.cols, args.cellSize, args.total, 'up', args.prefetchRows);
+        expect(idx).toEqual([]);
+    });
+
+    it('returns nothing for a degenerate layout', () => {
+        expect(computePrefetchIndices(0, 300, 0, 100, 100, 'down', 2)).toEqual([]);
+        expect(computePrefetchIndices(0, 300, 4, 0, 100, 'down', 2)).toEqual([]);
     });
 });
