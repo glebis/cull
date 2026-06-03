@@ -17,6 +17,8 @@ import {
     chooseLoupeImagePath,
     isAssetProtocolSafePath,
     safeAssetPreviewPath,
+    pickThumbnailVariant,
+    THUMBNAIL_SIZES,
 } from './view-utils';
 
 describe('getFilename', () => {
@@ -586,5 +588,91 @@ describe('loupe crop coordinates', () => {
             width: 10,
             height: 10,
         });
+    });
+});
+
+describe('pickThumbnailVariant', () => {
+    const base = '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123.jpg';
+
+    it('exposes the four generated sizes mirroring the Rust array', () => {
+        expect(THUMBNAIL_SIZES).toEqual([64, 128, 256, 800]);
+    });
+
+    it('picks the smallest variant for a 64px tile at dpr 1', () => {
+        expect(pickThumbnailVariant(base, 64, { dpr: 1 })).toBe(
+            '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123_64.jpg'
+        );
+    });
+
+    it('accounts for device pixel ratio (64px @ dpr 2 -> 128)', () => {
+        expect(pickThumbnailVariant(base, 64, { dpr: 2 })).toBe(
+            '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123_128.jpg'
+        );
+    });
+
+    it('returns the base path (800px) when target exceeds 256 (160px @ dpr 2 = 320)', () => {
+        expect(pickThumbnailVariant(base, 160, { dpr: 2 })).toBe(base);
+    });
+
+    it('picks 256 for a 256px tile at dpr 1', () => {
+        expect(pickThumbnailVariant(base, 256, { dpr: 1 })).toBe(
+            '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123_256.jpg'
+        );
+    });
+
+    it('clamps dpr by maxDprMultiplier (default 2)', () => {
+        // 160px @ dpr 3 would be 480, but clamped to 2 -> 320 -> base
+        expect(pickThumbnailVariant(base, 160, { dpr: 3 })).toBe(base);
+    });
+
+    it('returns the base when the target exceeds all sizes', () => {
+        expect(pickThumbnailVariant(base, 2000, { dpr: 2 })).toBe(base);
+    });
+
+    it('uses the smallest size for non-positive display sizes', () => {
+        expect(pickThumbnailVariant(base, 0, { dpr: 1 })).toBe(
+            '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123_64.jpg'
+        );
+    });
+
+    it('leaves a path without a .jpg filename untouched', () => {
+        const weird = '/some/dir/no-extension';
+        expect(pickThumbnailVariant(weird, 64, { dpr: 1 })).toBe(weird);
+    });
+
+    it('preserves the extension casing for .JPG', () => {
+        const jpgUpper =
+            '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123.JPG';
+        expect(pickThumbnailVariant(jpgUpper, 64, { dpr: 1 })).toBe(
+            '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123_64.JPG'
+        );
+    });
+});
+
+describe('safeAssetPreviewPath with display size', () => {
+    const thumb = '/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123.jpg';
+
+    it('is back-compatible without options (returns base thumbnail)', () => {
+        expect(safeAssetPreviewPath({ path: '/x/orig.png', thumbnail_path: thumb })).toBe(thumb);
+    });
+
+    it('selects a variant when displayPx is provided', () => {
+        expect(
+            safeAssetPreviewPath({ path: '/x/orig.png', thumbnail_path: thumb }, { displayPx: 64, dpr: 1 })
+        ).toBe('/Users/u/Library/Application Support/com.glebkalinin.cull/thumbnails/abc123_64.jpg');
+    });
+
+    it('never rewrites the original image path (no variants exist for originals)', () => {
+        const safeOriginal =
+            '/Users/u/Library/Application Support/com.glebkalinin.cull/generated/orig.jpg';
+        expect(
+            safeAssetPreviewPath({ path: safeOriginal, thumbnail_path: null }, { displayPx: 64, dpr: 1 })
+        ).toBe(safeOriginal);
+    });
+
+    it('returns null for unsafe paths', () => {
+        expect(
+            safeAssetPreviewPath({ path: '/etc/passwd', thumbnail_path: null }, { displayPx: 64 })
+        ).toBeNull();
     });
 });

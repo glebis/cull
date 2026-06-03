@@ -18,8 +18,19 @@
 
     let { item, size, focused, selected, onclick, ondblclick, loading = 'lazy' }: Props = $props();
 
-    let previewPath = $derived(safeAssetPreviewPath(item));
-    let src = $derived(previewPath ? convertFileSrc(previewPath) : '');
+    const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
+    // Base thumbnail (largest variant) and the size-appropriate variant for this tile.
+    let basePreviewPath = $derived(safeAssetPreviewPath(item));
+    let variantPreviewPath = $derived(safeAssetPreviewPath(item, { displayPx: size, dpr }));
+    // If the size-specific variant fails to load, fall back to the base thumbnail.
+    let useBaseFallback = $state(false);
+    // Reset the fallback whenever this cell is reused for a different image.
+    $effect(() => {
+        item.image.id;
+        useBaseFallback = false;
+    });
+    let activePreviewPath = $derived(useBaseFallback ? basePreviewPath : variantPreviewPath);
+    let src = $derived(activePreviewPath ? convertFileSrc(activePreviewPath) : '');
 
     let rating = $derived(item.selection?.star_rating ?? 0);
     let decision = $derived(item.selection?.decision ?? 'undecided');
@@ -47,6 +58,12 @@
 
     async function handleImgError() {
         if (regenerating) return;
+        // Step 1: a size-specific variant may not exist (e.g. images thumbnailed before
+        // multi-size generation). Fall back to the base thumbnail before regenerating.
+        if (!useBaseFallback && variantPreviewPath && basePreviewPath && variantPreviewPath !== basePreviewPath) {
+            useBaseFallback = true;
+            return;
+        }
         recordImageLoadFailure({
             view: 'thumbnail',
             image: item,
