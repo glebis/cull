@@ -34,11 +34,13 @@
             return found ? found[1] : null;
         }
     );
+
+    const modeLabel = derived(viewMode, ($mode) => $mode === 'tinder' ? 'Speed Review' : $mode);
 </script>
 
 <div class="statusbar">
     <div class="left">
-        <span class="mode">{$viewMode}</span>
+        <span class="mode">{$modeLabel}</span>
         {#if $collectionName}
             <span class="sep">|</span>
             <span class="collection-name">{$collectionName}</span>

@@ -38,7 +38,7 @@
             statusHint.set(`Done! ${stats.accepted} accepted, ${stats.rejected} rejected, ${stats.skipped} skipped`);
         } else {
             const current = pairIndex + 1;
-            statusHint.set(`Tinder ${current}/${totalPairs} — ← accept left, → accept right, ↓ skip, Z undo`);
+            statusHint.set(`Speed Review ${current}/${totalPairs} — ← accept left, → accept right, ↓ skip, Z undo`);
         }
         return () => statusHint.set(null);
     });
@@ -188,7 +188,7 @@
     ontouchstart={handleTouchStart}
     ontouchend={handleTouchEnd}
     role="application"
-    aria-label="Tinder comparison mode"
+    aria-label="Speed Review comparison mode"
 >
     {#if done}
         <div class="done-screen">

@@ -95,7 +95,7 @@ const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
     'Cmd+6': 'Embeddings view',
     'Cmd+7': 'Export view',
     'Cmd+0': 'Actual Size',
-    'Cmd+8': 'Tinder view',
+    'Cmd+8': 'Speed Review view',
     'Tab': 'Cycle to next view',
     'Shift+Tab': 'Cycle to previous view',
     'Backspace': 'Move focused image to Trash',
@@ -111,7 +111,7 @@ const VIEW_COMMANDS: Array<{ mode: ViewMode; title: string; subtitle: string; sh
     { mode: 'embeddings', title: 'Embeddings View', subtitle: 'Explore visual clusters', shortcut: 'Cmd+6' },
     { mode: 'publish', title: 'Publish View', subtitle: 'Build a static site package', requiresStaticPublishing: true },
     { mode: 'export', title: 'Export View', subtitle: 'Prepare images for publishing', shortcut: 'Cmd+7' },
-    { mode: 'tinder', title: 'Tinder View', subtitle: 'Fast accept or reject triage', shortcut: 'Cmd+8' },
+    { mode: 'tinder', title: 'Speed Review', subtitle: 'Fast accept or reject triage', shortcut: 'Cmd+8' },
 ];
 
 function storageAvailable(): boolean {

@@ -192,6 +192,7 @@ Search, contact-sheet, and export deep-link verbs are roadmap items.
 | `Cmd+5` | Lineage |
 | `Cmd+6` | Embedding Explorer |
 | `Cmd+7` | Export |
+| `Cmd+8` | Speed Review |
 
 ### Command Palette
 

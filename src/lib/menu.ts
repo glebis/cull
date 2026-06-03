@@ -419,6 +419,9 @@ function handleMenuAction(action: string) {
         case 'view_export':
             navigateTo('export' as ViewMode);
             break;
+        case 'view_tinder':
+            viewMode.set('tinder' as ViewMode);
+            break;
         case 'toggle_sidebar':
             sidebarVisible.update((v) => !v);
             break;

@@ -212,6 +212,13 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         false,
         Some::<&str>("CmdOrCtrl+7"),
     )?)?;
+    view_menu.append(&MenuItem::with_id(
+        app,
+        "view_tinder",
+        "Speed Review",
+        true,
+        Some::<&str>("CmdOrCtrl+8"),
+    )?)?;
     view_menu.append(&PredefinedMenuItem::separator(app)?)?;
     view_menu.append(&CheckMenuItem::with_id(
         app,
@@ -468,8 +475,8 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
         | "deselect_all" | "command_palette" | "image_share" | "image_open_default"
         | "image_open_with" | "image_reveal" | "image_rename" | "image_move_to" | "image_trash"
         | "view_grid" | "view_compare" | "view_loupe" | "view_canvas" | "view_lineage"
-        | "view_embeddings" | "view_publish" | "view_export" | "toggle_sidebar" | "zoom_in"
-        | "zoom_out" | "actual_size" | "github_wiki" => {
+        | "view_embeddings" | "view_publish" | "view_export" | "view_tinder" | "toggle_sidebar"
+        | "zoom_in" | "zoom_out" | "actual_size" | "github_wiki" => {
             let _ = app.emit("menu-action", id);
         }
         _ => {}
