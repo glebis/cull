@@ -516,7 +516,26 @@ pub fn image_id_in_scope(
     let collections = db
         .image_collection_ids(image_id)
         .map_err(|e| e.to_string())?;
-    Ok(image_in_scope(scope, &img.path, &collections))
+    if image_in_scope(scope, &img.path, &collections) {
+        return Ok(true);
+    }
+
+    // Tag scope (union with folder/collection). Match scope tag names against the
+    // image's tags by normalized name so casing/whitespace differences still match.
+    if let Some(scope_tags) = scope.as_ref().and_then(|s| s.tags.as_ref()) {
+        let image_tags = db.list_image_tags(image_id).map_err(|e| e.to_string())?;
+        let image_norms: std::collections::HashSet<&str> =
+            image_tags.iter().map(|t| t.normalized_name.as_str()).collect();
+        for tag in scope_tags {
+            if let Some(norm) = crate::db_core::tags::normalize_tag_name(tag) {
+                if image_norms.contains(norm.as_str()) {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+
+    Ok(false)
 }
 
 pub fn folder_in_scope(scope: &Option<TokenScope>, folder_path: &str) -> bool {
@@ -639,6 +658,95 @@ mod tests {
         // No scope -> always allowed; unknown id -> denied.
         assert!(image_id_in_scope(&db, &None, "imgB").unwrap());
         assert!(!image_id_in_scope(&db, &scope, "ghost").unwrap());
+    }
+
+    #[test]
+    fn image_id_in_scope_honors_tag_membership() {
+        let (db, ..) = test_context();
+        insert_test_image(&db, "imgA", "/lib/a.png");
+        insert_test_image(&db, "imgB", "/lib/b.png");
+        db.add_image_tag("imgA", "public", "user", "manual", None)
+            .unwrap();
+
+        let scope = Some(TokenScope {
+            collections: None,
+            folders: None,
+            tags: Some(vec!["public".to_string()]),
+        });
+
+        // Tagged image allowed; untagged denied.
+        assert!(image_id_in_scope(&db, &scope, "imgA").unwrap());
+        assert!(!image_id_in_scope(&db, &scope, "imgB").unwrap());
+    }
+
+    #[test]
+    fn image_id_in_scope_tag_match_is_normalized() {
+        let (db, ..) = test_context();
+        insert_test_image(&db, "imgA", "/lib/a.png");
+        db.add_image_tag("imgA", "Public", "user", "manual", None)
+            .unwrap();
+        // Scope spelled differently but normalizes to the same tag.
+        let scope = Some(TokenScope {
+            collections: None,
+            folders: None,
+            tags: Some(vec![" PUBLIC ".to_string()]),
+        });
+        assert!(image_id_in_scope(&db, &scope, "imgA").unwrap());
+    }
+
+    #[test]
+    fn image_id_in_scope_empty_tags_grants_nothing() {
+        let (db, ..) = test_context();
+        insert_test_image(&db, "imgA", "/lib/a.png");
+        db.add_image_tag("imgA", "public", "user", "manual", None)
+            .unwrap();
+        // An explicit empty tags list grants no tag-based access.
+        let scope = Some(TokenScope {
+            collections: None,
+            folders: None,
+            tags: Some(vec![]),
+        });
+        assert!(!image_id_in_scope(&db, &scope, "imgA").unwrap());
+    }
+
+    #[test]
+    fn image_id_in_scope_unnormalizable_scope_tag_is_ignored() {
+        let (db, ..) = test_context();
+        insert_test_image(&db, "imgA", "/lib/a.png");
+        db.add_image_tag("imgA", "public", "user", "manual", None)
+            .unwrap();
+        // A scope tag that normalizes to nothing is a safe no-op, not a grant.
+        let scope = Some(TokenScope {
+            collections: None,
+            folders: None,
+            tags: Some(vec!["!!!".to_string()]),
+        });
+        assert!(!image_id_in_scope(&db, &scope, "imgA").unwrap());
+    }
+
+    #[test]
+    fn image_id_in_scope_union_across_folder_collection_tag() {
+        let (db, ..) = test_context();
+        insert_test_image(&db, "byFolder", "/art/x.png");
+        insert_test_image(&db, "byCollection", "/other/y.png");
+        insert_test_image(&db, "byTag", "/other/z.png");
+        insert_test_image(&db, "none", "/other/n.png");
+        let col = db.create_collection("C1").unwrap();
+        db.add_to_collection(&col, &["byCollection"]).unwrap();
+        db.add_image_tag("byTag", "public", "user", "manual", None)
+            .unwrap();
+
+        let scope = Some(TokenScope {
+            collections: Some(vec![col]),
+            folders: Some(vec!["/art".to_string()]),
+            tags: Some(vec!["public".to_string()]),
+        });
+
+        // Any one of folder / collection / tag membership grants access (union).
+        assert!(image_id_in_scope(&db, &scope, "byFolder").unwrap());
+        assert!(image_id_in_scope(&db, &scope, "byCollection").unwrap());
+        assert!(image_id_in_scope(&db, &scope, "byTag").unwrap());
+        assert!(!image_id_in_scope(&db, &scope, "none").unwrap());
     }
 
     #[test]
