@@ -173,6 +173,46 @@ impl Database {
         // advanced PRAGMA user_version to 20 without requiring additional schema.
         self.run_migration_step(20, "schema_compatibility_v20", || Ok(()))?;
         self.run_migration_step(21, "client_feedback", || self.migrate_client_feedback())?;
+
+        // A high PRAGMA user_version alone is not proof the schema is complete:
+        // a partially-applied prerelease migration can leave the version high
+        // while tables are missing, and migration_already_applied would then
+        // skip recreating them. Verify the core tables actually exist so such
+        // corruption is detected here rather than surfacing as runtime errors.
+        self.verify_schema_invariants()?;
+        Ok(())
+    }
+
+    /// Required tables that must exist after migrations complete. Missing any of
+    /// these indicates a partially-migrated/corrupt database despite a high
+    /// user_version.
+    fn verify_schema_invariants(&self) -> Result<()> {
+        const REQUIRED_TABLES: &[&str] = &[
+            "images",
+            "image_files",
+            "selections",
+            "projects",
+            "collection_items",
+            "tags",
+            "image_tags",
+            "generation_runs",
+            "schema_migrations",
+        ];
+        let conn = self.conn.lock();
+        let mut missing = Vec::new();
+        for table in REQUIRED_TABLES {
+            if !table_exists(&conn, table)? {
+                missing.push(*table);
+            }
+        }
+        if !missing.is_empty() {
+            return Err(migration_error(format!(
+                "database failed schema invariant check (user_version={} claims migrations applied) \
+                 but required tables are missing: {}. The database may be partially migrated or corrupt.",
+                user_version(&conn)?,
+                missing.join(", ")
+            )));
+        }
         Ok(())
     }
 
@@ -3971,6 +4011,28 @@ mod tests {
             last_seen_mtime: None,
         };
         db.insert_image_file(&file).unwrap();
+    }
+
+    #[test]
+    fn verify_schema_invariants_passes_for_fresh_db() {
+        let db = test_db();
+        assert!(db.verify_schema_invariants().is_ok());
+    }
+
+    #[test]
+    fn verify_schema_invariants_detects_missing_required_table() {
+        let db = test_db();
+        // Simulate a partially-migrated DB whose user_version claims completion
+        // but is missing a required table. user_version is unchanged (still high).
+        db.conn
+            .lock()
+            .execute_batch("DROP TABLE image_tags")
+            .unwrap();
+        let err = db.verify_schema_invariants().unwrap_err();
+        assert!(
+            err.to_string().contains("image_tags"),
+            "error should name the missing table: {err}"
+        );
     }
 
     #[test]
