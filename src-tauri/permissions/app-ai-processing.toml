@@ -57,5 +57,6 @@ commands.allow = [
   "set_api_key",
   "set_ollama_config",
   "set_ollama_embedding_config",
+  "start_ocr_batch",
   "validate_api_key",
 ]

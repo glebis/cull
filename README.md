@@ -21,6 +21,7 @@ Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 ## Documentation
 
 - [User Guide](docs/USER_GUIDE.md) — installation, import, viewing, curation, collections, Clipboard Monitor, static publishing, embeddings, agent workflows, CLI, and privacy basics
+- [Preview Display](docs/preview-display.md) — external monitor, Sidecar, and tokenized local web preview behavior
 - [System Menu Audit](docs/SYSTEM_MENU_AUDIT.md) — complete native menu inventory and implementation status
 - [Privacy & Data Flow](docs/PRIVACY.md) — local-first behavior, opt-in cloud features, and data destinations
 - [Contributing](CONTRIBUTING.md) — setup, checks, and pull request process
@@ -38,6 +39,7 @@ Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 | Canvas view with freeform placement, resize, crop, rotate, and notes | Done |
 | Lineage view with timeline and comparison layouts | Done |
 | Embedding Explorer (UMAP 2D scatter + k-means clustering) | Done |
+| Preview Display native window and tokenized local web stream | Done |
 | Zen mode (fullscreen, hides all chrome) | Done |
 | Vim-style keyboard navigation (hjkl, arrows, Home/End, PgUp/PgDn) | Done |
 | Command Palette with fuzzy command search, shortcut badges, and top-five recents | Done |
@@ -193,6 +195,7 @@ Search, contact-sheet, and export deep-link verbs are roadmap items.
 | `Cmd+6` | Embedding Explorer |
 | `Cmd+7` | Export |
 | `Cmd+8` | Speed Review |
+| `Cmd+Shift+D` | Preview Display |
 
 ### Command Palette
 

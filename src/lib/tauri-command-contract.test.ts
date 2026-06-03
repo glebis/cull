@@ -169,6 +169,16 @@ describe('Tauri command contract', () => {
         expect(commandPermissions.get('publish_clipboard_collection')).toEqual(['app-export-publishing']);
     });
 
+    it('exposes Preview Display state commands through the UI capability', () => {
+        const registered = new Set(registeredCommandNames());
+        const commandPermissions = activeAppCommandPermissions();
+
+        expect(registered.has('get_preview_state')).toBe(true);
+        expect(registered.has('update_preview_state')).toBe(true);
+        expect(commandPermissions.get('get_preview_state')).toEqual(['app-ui']);
+        expect(commandPermissions.get('update_preview_state')).toEqual(['app-ui']);
+    });
+
     it('targets app command capabilities only at first-party app windows', () => {
         const appCapabilities = capabilityFiles().filter((capability) => capability.identifier.startsWith('app-'));
 

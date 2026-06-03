@@ -1,6 +1,6 @@
 # Privacy & Data Flow
 
-*Last updated: 2026-05-21*
+*Last updated: 2026-06-01*
 
 This document describes what data Cull sends to external services, where it goes, and under what legal framework each provider operates.
 
@@ -20,6 +20,7 @@ Cull is local-first. All core features (viewing, rating, collections, CLIP searc
 | OpenRouter generation | OpenRouter servers (US) | Prompt + optional image + API key | Yes |
 | MCP server (local) | Unix socket (localhost) | Metadata, paths | No |
 | MCP server (HTTP) | Network-exposed | Metadata, paths, thumbnails | If enabled |
+| Preview Display web stream | Local network URL | Current preview image + selected display metadata | If started |
 | SQLite database | Local file | Nothing | No |
 
 ## Provider Compliance Details
@@ -103,6 +104,12 @@ Cull is local-first. All core features (viewing, rating, collections, CLIP searc
 2. **For cloud features with privacy:** Use provider accounts with documented retention, training, residency, and DPA settings.
 3. **Avoid for sensitive images:** Any free or proxy tier whose current terms you have not reviewed.
 4. **EU/GDPR compliance:** Confirm a current DPA, transfer mechanism, data residency setting, and retention setting before processing images of identifiable people.
+
+## Local-Network Preview Display
+
+Preview Display's native Tauri window is local to the Mac display environment. The optional **Preview Display Web Stream** is different: it starts a local HTTP server and creates a tokenized URL for an iPad or browser on the same network.
+
+Treat that URL as a secret. Anyone who can reach the Mac on the local network and has the full tokenized URL can view the streamed preview image and the enabled display metadata until the stream is stopped.
 
 ## For Developers / Self-hosters
 

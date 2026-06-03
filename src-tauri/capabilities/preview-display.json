@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "preview-display",
+  "description": "Read-only Preview Display window for external review surfaces.",
+  "windows": ["preview-display"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "app-read",
+    "app-ui"
+  ]
+}

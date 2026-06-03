@@ -55,6 +55,16 @@ Type to fuzzy-search the available commands. Non-matching rows are hidden while 
 
 The palette keeps the last five commands launched through the palette at the top of the empty command list, matching standard command palette behavior in tools like VS Code and Obsidian.
 
+## Preview Display
+
+Use **View > Preview Display** or `Cmd+Shift+D` to open a separate display window. The main Cull window remains the control surface while Preview Display shows the current focused image on another monitor or an iPad used as a macOS Sidecar display.
+
+Use **View > Move Preview Display to Display...** and **View > Fullscreen Preview Display** for external monitor placement. Use **Freeze Preview Display** to hold the current image while navigating privately, and **Blank Preview Display** to hide the image without changing library data.
+
+For an iPad or browser on the local network, use **View > Start Preview Display Web Stream**. Cull copies a tokenized live URL; stop it with **View > Stop Preview Display Web Stream**. Treat the URL as a secret because anyone on the reachable network with the full URL can view the streamed preview.
+
+More details and limitations are in [Preview Display](preview-display.md).
+
 ## Review And Curate
 
 Use the grid or loupe to move through images and apply lightweight curation metadata:
