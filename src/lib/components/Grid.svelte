@@ -1,7 +1,19 @@
 <script lang="ts">
+    import { onDestroy } from 'svelte';
+    import { convertFileSrc } from '@tauri-apps/api/core';
     import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState } from '$lib/stores';
     import { IMAGE_PAGE_SIZE, loadMoreImagesForCurrentScope } from '$lib/image-loading';
-    import { computeGridClickSelection, computeGridLayout, computeVisibleItems } from '$lib/view-utils';
+    import {
+        computeGridClickSelection,
+        computeGridLayout,
+        computeVisibleItems,
+        computeScrollDirection,
+        computeOverscan,
+        computePrefetchIndices,
+        safeAssetPreviewPath,
+        type ScrollDirection,
+    } from '$lib/view-utils';
+    import { createPrefetchCache } from '$lib/prefetch-cache';
     import Thumbnail from './Thumbnail.svelte';
 
     let containerEl: HTMLDivElement | undefined = $state(undefined);
@@ -22,14 +34,56 @@
     let totalHeight = $derived(layout.totalHeight);
     let preloadRows = $derived(Math.max(2, Math.ceil(IMAGE_PAGE_SIZE / Math.max(cols, 1))));
 
+    // Scroll-direction-aware prefetch + bounded decode-warming cache (P1).
+    const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
+    let prevScrollTop = 0;
+    let scrollDir = $state<ScrollDirection>('none');
+    // Bound warmed images to a few screens' worth; evicted entries release their decode.
+    const prefetch = createPrefetchCache(300);
+
+    let overscan = $derived(computeOverscan(scrollDir, preloadRows));
+
     let visibleItems = $derived.by(() => {
         const imgs = $images;
         return computeVisibleItems(scrollTop, containerHeight, layout.cols, layout.cellSize, imgs.length, {
-            overscanRowsBefore: 2,
-            overscanRowsAfter: preloadRows,
+            overscanRowsBefore: overscan.before,
+            overscanRowsAfter: overscan.after,
         })
             .map(({ index, x, y }) => ({ index, item: imgs[index], x, y }));
     });
+
+    function warmPrefetch() {
+        if (cellSize <= 0 || cols <= 0) return;
+        const imgs = $images;
+        const indices = computePrefetchIndices(
+            scrollTop,
+            containerHeight,
+            cols,
+            cellSize,
+            imgs.length,
+            scrollDir,
+            Math.max(2, preloadRows),
+        );
+        for (const i of indices) {
+            const item = imgs[i];
+            if (!item) continue;
+            const previewPath = safeAssetPreviewPath(item, { displayPx: size, dpr });
+            if (previewPath) prefetch.warm(convertFileSrc(previewPath));
+        }
+    }
+
+    // Release warmed images when the scope changes (first item identity changes).
+    let prevScopeKey: string | null = null;
+    $effect(() => {
+        const imgs = $images;
+        const scopeKey = imgs.length > 0 ? imgs[0].image.id : null;
+        if (scopeKey !== prevScopeKey) {
+            prevScopeKey = scopeKey;
+            prefetch.clear();
+        }
+    });
+
+    onDestroy(() => prefetch.clear());
 
     function maybeLoadMore() {
         if (!$imageLoadState.hasMore || $imageLoadState.loading || $imageLoadState.loadingMore) return;
@@ -41,9 +95,13 @@
     }
 
     function onScroll(e: Event) {
-        scrollTop = (e.target as HTMLDivElement).scrollTop;
+        const nextScrollTop = (e.target as HTMLDivElement).scrollTop;
+        scrollDir = computeScrollDirection(prevScrollTop, nextScrollTop, scrollDir);
+        prevScrollTop = nextScrollTop;
+        scrollTop = nextScrollTop;
         gridScrollTop.set(scrollTop);
         maybeLoadMore();
+        warmPrefetch();
     }
 
     function handleClick(index: number, event: MouseEvent | KeyboardEvent) {
@@ -91,6 +149,7 @@
         $imageLoadState.loading;
         $imageLoadState.loadingMore;
         maybeLoadMore();
+        warmPrefetch();
     });
 
     $effect(() => {

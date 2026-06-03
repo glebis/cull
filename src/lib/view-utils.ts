@@ -269,6 +269,82 @@ export function computeVisibleItems(
     return items;
 }
 
+export type ScrollDirection = 'up' | 'down' | 'none';
+
+/**
+ * Determine scroll direction with hysteresis: deltas smaller than `threshold` keep the
+ * previous direction so jitter near zero does not flip the prefetch/overscan bias.
+ */
+export function computeScrollDirection(
+    prevScrollTop: number,
+    scrollTop: number,
+    prevDirection: ScrollDirection,
+    threshold = 4
+): ScrollDirection {
+    const delta = scrollTop - prevScrollTop;
+    if (delta > threshold) return 'down';
+    if (delta < -threshold) return 'up';
+    return prevDirection;
+}
+
+export interface OverscanRows {
+    before: number;
+    after: number;
+}
+
+/**
+ * Asymmetric overscan: render extra rows ahead in the travel direction (so scrolling never
+ * reveals blanks) and fewer behind. `baseRows` is treated as at least 1.
+ */
+export function computeOverscan(direction: ScrollDirection, baseRows: number): OverscanRows {
+    const base = Math.max(1, Math.trunc(baseRows) || 0);
+    if (direction === 'down') return { before: 1, after: base * 2 };
+    if (direction === 'up') return { before: base * 2, after: 1 };
+    return { before: 2, after: base };
+}
+
+/**
+ * Flat item indices for the rows just beyond the rendered window in the travel direction —
+ * the "next screen" to decode-warm ahead of mounting. Distinct from the mounted window.
+ */
+export function computePrefetchIndices(
+    scrollTop: number,
+    containerHeight: number,
+    cols: number,
+    cellSize: number,
+    total: number,
+    direction: ScrollDirection,
+    prefetchRows: number
+): number[] {
+    if (cols <= 0 || cellSize <= 0 || total <= 0 || prefetchRows <= 0) return [];
+
+    const totalRows = Math.ceil(total / cols);
+    const firstVisibleRow = Math.max(0, Math.floor(scrollTop / cellSize));
+    const visibleRowCount = Math.max(0, Math.ceil(containerHeight / cellSize));
+
+    let startRow: number;
+    let endRow: number; // exclusive
+    if (direction === 'up') {
+        endRow = firstVisibleRow;
+        startRow = Math.max(0, firstVisibleRow - prefetchRows);
+    } else {
+        // 'down' and 'none' both warm the rows below the visible window.
+        startRow = firstVisibleRow + visibleRowCount;
+        endRow = Math.min(totalRows, startRow + prefetchRows);
+    }
+
+    const indices: number[] = [];
+    for (let row = startRow; row < endRow; row++) {
+        if (row < 0 || row >= totalRows) continue;
+        for (let col = 0; col < cols; col++) {
+            const index = row * cols + col;
+            if (index >= total) break;
+            indices.push(index);
+        }
+    }
+    return indices;
+}
+
 export function formatLoupeInfo(filename: string, width: number, height: number, format: string): string {
     return `${filename} | ${width}x${height} | ${format}`;
 }
