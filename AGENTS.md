@@ -168,6 +168,69 @@ changes, and mention the fallback in the handoff. If bd commands fail with
 schema errors, run `npm run bd -- doctor` and `npm run bd -- migrate --yes` before trying any manual
 SQL repair.
 
+### bd binary version mismatch (important)
+
+Two `bd` binaries can be on PATH with **incompatible Dolt schemas**:
+`/usr/local/bin/bd` (e.g. 1.0.4) and `/opt/homebrew/bin/bd` (e.g. 0.59.0). The
+`scripts/bd.sh` wrapper prefers the Homebrew one, which can fail every write with
+`Error 1054 ... Unknown column 'crystallizes' in 'issues'` against a DB created
+by 1.0.4. If you hit that, force the matching binary explicitly:
+
+```bash
+export BD_BIN=/usr/local/bin/bd   # the binary that owns the .beads Dolt DB
+$BD_BIN create ... / $BD_BIN close ...
+```
+
+`bd create` supports `--type epic|task`, `-p P0..P4`, `--parent <id>`,
+`--acceptance "..."`, `-d/--description`, and `--silent` (prints only the new ID).
+
+bd state lives in the `.beads` Dolt DB (gitignored) and is exported to the tracked
+`.beads/issues.jsonl`. Switching git branches reverts that jsonl, and bd may
+re-sync from it — so a `bd close` done on one branch can appear reverted after a
+checkout. When closing issues across per-issue branches, reconcile bd state on
+`main` at the end (re-run the closes there) so the committed jsonl reflects reality.
+
+## Agent Workflow Gotchas
+
+Hard-won pitfalls when doing TDD + per-issue-branch + merge work in this repo:
+
+- **Run `cargo fmt` inside `src-tauri/`, not the repo root.** There is no root
+  `Cargo.toml`, so `cargo fmt` at the root is a silent no-op. The pre-push `full`
+  preflight runs `cargo fmt --all -- --check`; a formatting drift there *fails the
+  push* even though the pre-commit `quick` tier does not run fmt. Always
+  `cd src-tauri && cargo fmt` before committing Rust.
+- **Run the FULL `cargo test --lib` before merging, not just the changed module.**
+  A scoped run like `cargo test --lib db_core::db::tests` will miss regressions in
+  sibling modules (e.g. a new schema-invariant check breaking
+  `db_core::db::migration_safety_tests`). The pre-push full tier catches it, but
+  only after a slow round-trip — cheaper to run the whole lib suite locally first.
+- **Pre-push `full` runs fmt + clippy + the whole test suite** (`scripts/preflight.sh full`);
+  clippy is `cargo clippy --all-targets` *without* `-D warnings`, so pre-existing
+  warnings don't fail the push, but a new compile/test/fmt failure does. Use
+  `CULL_PREFLIGHT_SKIP_E2E=1 git push` to skip only the manual browser E2E gate.
+- **macOS path-canonicalization in tests:** `tempfile::tempdir()` returns
+  `/var/folders/...` which `std::fs::canonicalize` resolves to `/private/var/...`.
+  Any test that compares a canonicalized path against a tempdir prefix must
+  canonicalize the tempdir too, or `starts_with` fails. Production `dirs::home_dir()`
+  is already canonical, so this bites tests only.
+- **Cross-module test interactions:** changing shared DB/open behavior can break
+  fixtures elsewhere that encoded the *old* behavior (e.g. minimal `user_version`
+  fixtures). Prefer realistic fixtures (full-migrate, then mutate) over hand-rolled
+  partial DBs.
+
+### External audit + codex review
+
+A full external audit lives in `docs/cull-audit-2026-06-03.md` (ChatGPT 5.5 Pro,
+security/UX/a11y/logic/scalability/best-practices). Recommendations are tracked as
+bd epics `imageview-hqf` (P0), `imageview-dtj` (P1), `imageview-9fz` (P2), each
+child with Jobs-To-Be-Done + acceptance criteria.
+
+Note on review tooling: the `codex` CLI hung indefinitely in the headless/sandbox
+environment (no output even for trivial prompts — likely a ChatGPT-account
+auth/network issue). When codex is unavailable, the `feature-dev:code-reviewer`
+agent is an effective substitute review gate; mark such reviews as
+"codex-substitute" in the issue/commit so provenance is clear.
+
 ## Cull Preflight
 
 Use `npm run preflight -- <hook|quick|full|release>` for project readiness checks:
