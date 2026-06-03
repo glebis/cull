@@ -1431,6 +1431,16 @@ impl Database {
         Ok(())
     }
 
+    /// Collection ids an image belongs to. Used by MCP token scope checks so
+    /// collection-scoped tokens authorize per-image tools consistently.
+    pub fn image_collection_ids(&self, image_id: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock();
+        let mut stmt =
+            conn.prepare("SELECT collection_id FROM collection_items WHERE image_id = ?1")?;
+        let rows = stmt.query_map(params![image_id], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
     pub fn list_collection_images(&self, collection_id: &str) -> Result<Vec<ImageWithFile>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(

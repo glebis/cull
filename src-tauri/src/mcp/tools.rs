@@ -348,43 +348,12 @@ impl CullMcp {
         }
     }
 
-    fn check_image_scope(&self, image_path: &str) -> bool {
-        let scope = self.token_scope();
-        tokens::image_in_scope(&scope, image_path, &[])
-    }
-
-    #[allow(dead_code)]
-    fn filter_images_by_scope(
-        &self,
-        images: Vec<serde_json::Value>,
-        paths: &[String],
-    ) -> Vec<serde_json::Value> {
-        let scope = self.token_scope();
-        if scope.is_none() {
-            return images;
-        }
-        images
-            .into_iter()
-            .zip(paths.iter())
-            .filter(|(_, path)| tokens::image_in_scope(&scope, path, &[]))
-            .map(|(img, _)| img)
-            .collect()
-    }
-
     fn check_image_id_scope(&self, image_id: &str) -> Result<bool, String> {
         let scope = self.token_scope();
-        if scope.is_none() {
-            return Ok(true);
-        }
         let state = self.app_handle.state::<AppState>();
-        let id_refs = vec![image_id];
-        match state.db.get_images_by_ids(&id_refs) {
-            Ok(images) => match images.first() {
-                Some(img) => Ok(tokens::image_in_scope(&scope, &img.path, &[])),
-                None => Ok(false),
-            },
-            Err(e) => Err(e.to_string()),
-        }
+        // Shared DB-backed check loads path + collection membership so
+        // collection-scoped tokens authorize per-image tools consistently.
+        tokens::image_id_in_scope(&state.db, &scope, image_id)
     }
 
     fn is_remote(&self) -> bool {
@@ -854,8 +823,12 @@ impl CullMcp {
         match state.db.get_images_by_ids(&id_refs) {
             Ok(images) => match images.into_iter().next() {
                 Some(img) => {
-                    if !self.check_image_scope(&img.path) {
-                        return format!("Error: Image '{}' not found", params.image_id);
+                    match self.check_image_id_scope(&params.image_id) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            return format!("Error: Image '{}' not found", params.image_id)
+                        }
+                        Err(e) => return format!("Error: {}", e),
                     }
                     serde_json::json!({
                         "id": img.image.id,
@@ -2504,11 +2477,15 @@ impl CullMcp {
         match state.db.get_images_by_ids(&id_refs) {
             Ok(images) => {
                 for image in images {
-                    if !self.check_image_scope(&image.path) {
-                        return format!(
-                            "Error: Access denied — image '{}' outside token scope",
-                            image.image.id
-                        );
+                    match self.check_image_id_scope(&image.image.id) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            return format!(
+                                "Error: Access denied — image '{}' outside token scope",
+                                image.image.id
+                            )
+                        }
+                        Err(e) => return format!("Error: {}", e),
                     }
                 }
             }
