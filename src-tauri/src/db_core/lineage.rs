@@ -1,7 +1,7 @@
 use chrono::Utc;
 use regex::Regex;
 use rusqlite::{params, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 use uuid::Uuid;
 
@@ -27,6 +27,11 @@ static COMFYUI_BATCH_RE: LazyLock<Regex> =
 static TRAILING_LETTER_RE: LazyLock<Regex> = LazyLock::new(|| {
     // Match trailing letter variant: icon-v5a, icon-v5-a, thing_3b
     Regex::new(r"(\d)[-_]?([a-d])$").unwrap()
+});
+
+static UUID_RUN_DIR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+        .unwrap()
 });
 
 pub fn extract_stem(filename: &str) -> String {
@@ -63,6 +68,21 @@ pub fn extract_stem(filename: &str) -> String {
     }
 
     stem.to_lowercase()
+}
+
+pub fn extract_run_folder_key(path: &str) -> Option<String> {
+    let parent = std::path::Path::new(path).parent()?;
+    let dir_name = parent.file_name()?.to_str()?;
+    if UUID_RUN_DIR_RE.is_match(dir_name) {
+        Some(dir_name.to_lowercase())
+    } else {
+        None
+    }
+}
+
+fn run_folder_group_name(key: &str) -> String {
+    let short = key.split('-').next().unwrap_or(key);
+    format!("Run {}", short)
 }
 
 // --- Lineage scoring ---
@@ -384,15 +404,58 @@ impl Database {
             })
             .collect();
 
-        // Group by stem
-        let mut stem_groups: HashMap<String, Vec<usize>> = HashMap::new();
-        for (i, stem) in stems.iter().enumerate() {
-            if !stem.is_empty() {
-                stem_groups.entry(stem.clone()).or_default().push(i);
+        let mut created_groups = vec![];
+        let mut assigned_indices: HashSet<usize> = HashSet::new();
+
+        // Codex image generation writes sibling outputs into UUID-like run
+        // directories. That folder is not a parent-child proof, but it is a
+        // strong "generated together" signal for culling variants.
+        let mut run_folder_groups: HashMap<String, Vec<usize>> = HashMap::new();
+        for (i, img) in images.iter().enumerate() {
+            if let Some(key) = extract_run_folder_key(&img.path) {
+                run_folder_groups.entry(key).or_default().push(i);
             }
         }
 
-        let mut created_groups = vec![];
+        for (folder_key, indices) in &run_folder_groups {
+            if indices.len() < 2 {
+                continue;
+            }
+
+            let existing_group: Option<String> = indices.iter().find_map(|&i| {
+                let conn = self.conn.lock();
+                conn.query_row(
+                    "SELECT lineage_group_id FROM images WHERE id = ?1 AND lineage_group_id IS NOT NULL",
+                    params![images[i].image.id],
+                    |row| row.get(0),
+                )
+                .ok()
+            });
+
+            let group_id = if let Some(existing) = existing_group {
+                existing
+            } else {
+                self.create_lineage_group(&run_folder_group_name(folder_key), "run_folder", 95.0)?
+            };
+
+            let mut ordered_indices = indices.clone();
+            ordered_indices.sort_by(|a, b| images[*a].path.cmp(&images[*b].path));
+
+            for (order, idx) in ordered_indices.into_iter().enumerate() {
+                self.assign_to_lineage_group(&images[idx].image.id, &group_id, order as i32)?;
+                assigned_indices.insert(idx);
+            }
+
+            created_groups.push(group_id);
+        }
+
+        // Group by stem
+        let mut stem_groups: HashMap<String, Vec<usize>> = HashMap::new();
+        for (i, stem) in stems.iter().enumerate() {
+            if !assigned_indices.contains(&i) && !stem.is_empty() {
+                stem_groups.entry(stem.clone()).or_default().push(i);
+            }
+        }
 
         for (stem, indices) in &stem_groups {
             if indices.len() < 2 {
@@ -456,6 +519,8 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db_core::models::{Image, ImageFile};
+    use std::path::Path;
 
     #[test]
     fn test_extract_stem_version_suffix() {
@@ -493,6 +558,87 @@ mod tests {
     fn test_extract_stem_preserves_meaningful_names() {
         assert_eq!(extract_stem("hero-banner.png"), "hero-banner");
         assert_eq!(extract_stem("logo.png"), "logo");
+    }
+
+    #[test]
+    fn test_extract_run_folder_key_codex_generated_images() {
+        let run_id = "019e2166-0bb7-79e0-b00a-37ebdb28d4a0";
+        let path = format!(
+            "/Users/example/.codex/generated_images/{}/ig_0c29e1a8045487e3016a048af48cac8191b863fce2bd8960aa.png",
+            run_id
+        );
+        assert_eq!(extract_run_folder_key(&path).as_deref(), Some(run_id));
+        assert_eq!(
+            extract_run_folder_key("/Users/example/.codex/generated_images/not-a-run/ig.png"),
+            None
+        );
+    }
+
+    fn insert_test_image(db: &Database, id: &str, path: &str) {
+        let now = "2026-05-13T10:00:00Z".to_string();
+        db.insert_image(&Image {
+            id: id.to_string(),
+            sha256_hash: format!("hash-{}", id),
+            width: 1024,
+            height: 1024,
+            format: "png".to_string(),
+            file_size: 1024,
+            created_at: now.clone(),
+            imported_at: now.clone(),
+            ai_prompt: None,
+            raw_metadata: None,
+        })
+        .unwrap();
+        db.insert_image_file(&ImageFile {
+            id: format!("file-{}", id),
+            image_id: id.to_string(),
+            path: path.to_string(),
+            last_seen_at: now,
+            missing_at: None,
+            last_seen_size: Some(1024),
+            last_seen_mtime: Some("2026-05-13T10:00:00Z".to_string()),
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn test_detect_lineage_groups_uuid_run_folder() {
+        let db = Database::open(Path::new(":memory:")).unwrap();
+        let run_id = "019e2166-0bb7-79e0-b00a-37ebdb28d4a0";
+        insert_test_image(
+            &db,
+            "img-a",
+            &format!("/tmp/generated_images/{}/ig_b.png", run_id),
+        );
+        insert_test_image(
+            &db,
+            "img-b",
+            &format!("/tmp/generated_images/{}/ig_a.png", run_id),
+        );
+        insert_test_image(
+            &db,
+            "img-c",
+            "/tmp/generated_images/019dd433-3196-7ef1-aac5-fe3eb33e15b9/ig_c.png",
+        );
+
+        let image_ids = vec![
+            "img-a".to_string(),
+            "img-b".to_string(),
+            "img-c".to_string(),
+        ];
+        let touched = db.detect_lineage_for_batch(&image_ids).unwrap();
+        assert_eq!(touched.len(), 1);
+
+        let groups = db.list_lineage_groups().unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "Run 019e2166");
+        assert_eq!(groups[0].detection_method.as_deref(), Some("run_folder"));
+        assert_eq!(groups[0].image_count, 2);
+
+        let images = db.get_lineage_group_images(&groups[0].id).unwrap();
+        assert_eq!(images.len(), 2);
+        assert!(images[0].path.ends_with("ig_a.png"));
+        assert!(images[1].path.ends_with("ig_b.png"));
     }
 
     #[test]
