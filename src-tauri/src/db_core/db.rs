@@ -1342,26 +1342,35 @@ impl Database {
     }
 
     pub fn list_folders(&self) -> Result<Vec<(String, u32)>> {
+        // Group/count/sort in SQLite instead of streaming every image path into
+        // a Rust HashMap. The parent directory is derived with the standard
+        // rtrim dirname trick: rtrim(path, <all non-'/' chars of path>) strips
+        // the trailing basename up to the last '/', and the outer rtrim drops
+        // that trailing '/'. This matches std::path::Path::parent for the
+        // absolute file paths stored at import time.
+        // The CASE matches std::path::Path::parent exactly: a path with no '/'
+        // has no parent (excluded, like `None`); a root-level file ("/x.png")
+        // whose stripped prefix is empty maps to "/".
         let conn = self.conn.lock();
-        let mut stmt = conn
-            .prepare("SELECT f.path, f.image_id FROM image_files f WHERE f.missing_at IS NULL")?;
+        let mut stmt = conn.prepare(
+            "SELECT folder, COUNT(*) AS cnt
+             FROM (
+                 SELECT CASE
+                     WHEN instr(f.path, '/') = 0 THEN NULL
+                     WHEN rtrim(rtrim(f.path, replace(f.path, '/', '')), '/') = '' THEN '/'
+                     ELSE rtrim(rtrim(f.path, replace(f.path, '/', '')), '/')
+                 END AS folder
+                 FROM image_files f
+                 WHERE f.missing_at IS NULL
+             )
+             WHERE folder IS NOT NULL
+             GROUP BY folder
+             ORDER BY folder",
+        )?;
         let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
         })?;
-
-        let mut folder_counts: std::collections::HashMap<String, u32> =
-            std::collections::HashMap::new();
-        for row in rows {
-            let (path, _) = row?;
-            if let Some(parent) = std::path::Path::new(&path).parent() {
-                let folder = parent.to_string_lossy().to_string();
-                *folder_counts.entry(folder).or_insert(0) += 1;
-            }
-        }
-
-        let mut result: Vec<(String, u32)> = folder_counts.into_iter().collect();
-        result.sort_by(|a, b| a.0.cmp(&b.0));
-        Ok(result)
+        rows.collect::<Result<Vec<_>>>()
     }
 
     pub fn list_images_by_folder(
@@ -3962,6 +3971,58 @@ mod tests {
             last_seen_mtime: None,
         };
         db.insert_image_file(&file).unwrap();
+    }
+
+    #[test]
+    fn list_folders_groups_by_parent_directory() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "a", "h-a", "/lib/art/a.png");
+        insert_test_image_at_path(&db, "b", "h-b", "/lib/art/b.png");
+        insert_test_image_at_path(&db, "c", "h-c", "/lib/photos/c.png");
+        insert_test_image_at_path(&db, "d", "h-d", "/lib/photos/sub/d.png");
+
+        let folders = db.list_folders().unwrap();
+        // Counts are per immediate parent directory, sorted by path.
+        assert_eq!(
+            folders,
+            vec![
+                ("/lib/art".to_string(), 2),
+                ("/lib/photos".to_string(), 1),
+                ("/lib/photos/sub".to_string(), 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn list_folders_root_level_file_matches_path_parent() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "r", "h-r", "/root.png");
+        insert_test_image_at_path(&db, "n", "h-n", "/lib/n.png");
+        // Path::parent("/root.png") == "/", Path::parent("/lib/n.png") == "/lib".
+        assert_eq!(
+            db.list_folders().unwrap(),
+            vec![("/".to_string(), 1), ("/lib".to_string(), 1)]
+        );
+    }
+
+    #[test]
+    fn list_folders_excludes_missing_files() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "a", "h-a", "/lib/art/a.png");
+        insert_test_image_at_path(&db, "b", "h-b", "/lib/art/b.png");
+        // Mark one file missing; it must not count toward its folder.
+        db.conn
+            .lock()
+            .execute(
+                "UPDATE image_files SET missing_at = '2026-01-01T00:00:00Z' WHERE image_id = 'b'",
+                [],
+            )
+            .unwrap();
+
+        assert_eq!(
+            db.list_folders().unwrap(),
+            vec![("/lib/art".to_string(), 1)]
+        );
     }
 
     #[test]
