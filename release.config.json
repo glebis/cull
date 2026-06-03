@@ -1,0 +1,23 @@
+{
+  "versionFiles": [
+    { "path": "package.json", "kind": "json", "pointer": "/version" },
+    { "path": "src-tauri/tauri.conf.json", "kind": "json", "pointer": "/version" },
+    { "path": "src-tauri/Cargo.toml", "kind": "toml", "key": "package.version" }
+  ],
+  "lockfiles": ["src-tauri/Cargo.lock"],
+  "gate": "npm run preflight -- release",
+  "extraGate": [
+    "cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden"
+  ],
+  "changelog": { "path": "CHANGELOG.md", "style": "keep-a-changelog", "from": "conventional-commits" },
+  "compatibility": { "path": "docs/COMPATIBILITY.md" },
+  "surfaces": [
+    { "id": "db",      "name": "Database schema", "tier": "stable",  "mode": "BACKWARD_TRANSITIVE" },
+    { "id": "mcp",     "name": "MCP token API",   "tier": "preview", "mode": "unversioned" },
+    { "id": "exports", "name": "Export formats",  "tier": "stable",  "mode": "forward-compatible" }
+  ],
+  "releaseBranch": "main",
+  "worktree": "../cull-main-landing",
+  "tag": { "prefix": "v", "push": true },
+  "issueTracker": { "kind": "bd", "binEnv": "BD_BIN" }
+}

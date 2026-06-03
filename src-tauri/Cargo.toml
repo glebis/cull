@@ -18,6 +18,11 @@ edition = "2021"
 name = "cull_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Exposes test-only inspection hooks (e.g. the schema-invariant check) to
+# integration tests, which compile against the lib without cfg(test).
+test-support = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

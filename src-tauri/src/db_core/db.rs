@@ -183,6 +183,14 @@ impl Database {
         Ok(())
     }
 
+    /// Test-only hook: lets integration tests (which compile against the lib
+    /// without `cfg(test)`) exercise the private schema-invariant check. Enabled
+    /// via the `test-support` Cargo feature. See `tests/compat_golden.rs`.
+    #[cfg(feature = "test-support")]
+    pub fn verify_schema_invariants_for_test(&self) -> Result<()> {
+        self.verify_schema_invariants()
+    }
+
     /// Required tables that must exist after migrations complete. Missing any of
     /// these indicates a partially-migrated/corrupt database despite a high
     /// user_version.

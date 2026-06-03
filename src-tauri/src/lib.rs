@@ -16,6 +16,14 @@ mod services;
 mod tray;
 mod watcher;
 
+/// Test-only surface for integration tests (which see only the public API).
+/// Gated behind the `test-support` Cargo feature so it widens nothing in normal
+/// builds. See `tests/compat_golden.rs`.
+#[cfg(feature = "test-support")]
+pub mod test_support {
+    pub use crate::db_core::db::Database;
+}
+
 use crate::commands::deeplink::{
     emit_open_params, open_params_for_drag_drop_paths, open_params_for_file_paths,
     open_params_for_urls, parse_deep_link,

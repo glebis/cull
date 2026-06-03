@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-06-03T13:26:27.932026",
+  "prompt": "Fine-line ink illustration: two interlocking gears connected by a looping double-headed arrow that curves both forward and backward, sitting above a small document bearing a shield with a checkmark, symbolizing automated two-way compatibility contracts verified by tests. Minimalist editorial line art, warm cream paper background, a single terracotta-orange accent only on the checkmark inside the shield, generous negative space, no text, no lettering",
+  "preset": "ink",
+  "platform": "square",
+  "thinking": "off",
+  "quality": "low",
+  "provider": "openai",
+  "n": 1,
+  "seed": null,
+  "output": "docs/assets/release-policy/opt3-contracts.png",
+  "project": null,
+  "estimated_cost": 0.006
+}
