@@ -158,28 +158,10 @@ pub async fn rescan_sidecars(state: State<'_, AppState>) -> Result<u32, String> 
     for (image_id, file_path) in &images {
         let path = Path::new(file_path);
         if let Some(sidecar_path) = sidecar::find_sidecar(path) {
-            if let Ok(sc) = sidecar::parse_sidecar(&sidecar_path) {
-                let run_id = Uuid::new_v4().to_string();
-                let run = GenerationRun {
-                    id: run_id.clone(),
-                    prompt: sc.prompt,
-                    negative_prompt: sc.negative_prompt,
-                    provider: sc.provider,
-                    model: sc.model,
-                    settings_json: sc.settings_json,
-                    seed: sc.seed,
-                    parent_run_id: None,
-                    source_type: "sidecar".to_string(),
-                    source_path: Some(sidecar_path.to_string_lossy().to_string()),
-                    raw_metadata_json: Some(sc.raw_json),
-                    created_at: sc.created_at,
-                    imported_at: chrono::Utc::now().to_rfc3339(),
-                };
-                if state.db.insert_generation_run(&run).is_ok() {
-                    if state.db.link_image_to_run(image_id, &run_id).is_ok() {
-                        linked += 1;
-                    }
-                }
+            if sidecar::link_sidecar_to_image(&state.db, image_id, path, &sidecar_path, "sidecar")
+                .is_ok()
+            {
+                linked += 1;
             }
         }
     }

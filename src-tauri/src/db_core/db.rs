@@ -3379,7 +3379,10 @@ impl Database {
     pub fn link_image_to_run(&self, image_id: &str, run_id: &str) -> Result<()> {
         let conn = self.conn.lock();
         conn.execute(
-            "UPDATE images SET generation_run_id = ?1 WHERE id = ?2",
+            "UPDATE images
+             SET generation_run_id = ?1,
+                 ai_prompt = COALESCE((SELECT prompt FROM generation_runs WHERE id = ?1), ai_prompt)
+             WHERE id = ?2",
             rusqlite::params![run_id, image_id],
         )?;
         Ok(())

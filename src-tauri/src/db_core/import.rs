@@ -368,26 +368,7 @@ fn run_source_detection(
 
 fn run_sidecar_detection(db: &Database, file_path: &Path, image_id: &str) {
     if let Some(sidecar_path) = sidecar::find_sidecar(file_path) {
-        if let Ok(sc) = sidecar::parse_sidecar(&sidecar_path) {
-            let run_id = Uuid::new_v4().to_string();
-            let run = GenerationRun {
-                id: run_id.clone(),
-                prompt: sc.prompt.clone(),
-                negative_prompt: sc.negative_prompt,
-                provider: sc.provider,
-                model: sc.model,
-                settings_json: sc.settings_json,
-                seed: sc.seed,
-                parent_run_id: None,
-                source_type: "sidecar".to_string(),
-                source_path: Some(sidecar_path.to_string_lossy().to_string()),
-                raw_metadata_json: Some(sc.raw_json),
-                created_at: sc.created_at,
-                imported_at: Utc::now().to_rfc3339(),
-            };
-            let _ = db.insert_generation_run(&run);
-            let _ = db.link_image_to_run(image_id, &run_id);
-        }
+        let _ = sidecar::link_sidecar_to_image(db, image_id, file_path, &sidecar_path, "sidecar");
     }
 }
 
