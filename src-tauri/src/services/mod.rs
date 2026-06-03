@@ -19,6 +19,7 @@ pub mod jobs;
 pub mod library;
 pub mod model_download;
 pub mod model_pipeline;
+pub mod ocr;
 pub mod sessions;
 pub mod tokens;
 pub mod undo;

@@ -118,7 +118,10 @@
             const u18 = await listen<any>('quality-progress', (e) => {
                 upsertJob(e.payload.job_id ?? `evt_quality`, 'quality', 'running', e.payload.current, e.payload.total, e.payload.analyzer ?? null);
             });
-            unlisteners = [u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11, u12, u13, u14, u15, u16, u17, u18];
+            const u19 = await listen<any>('ocr-progress', (e) => {
+                upsertJob(e.payload.job_id ?? `evt_ocr`, 'ocr', 'running', e.payload.current, e.payload.total, e.payload.model);
+            });
+            unlisteners = [u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11, u12, u13, u14, u15, u16, u17, u18, u19];
         } catch {
             // Not in Tauri environment
         }
@@ -240,6 +243,7 @@
             'health-check': 'Library health',
             'raw-backfill': 'RAW previews',
             quality: 'Quality metrics',
+            ocr: 'OCR',
         };
         if (labels[kind]) return labels[kind];
         if (kind.endsWith('-download')) {

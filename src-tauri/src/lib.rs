@@ -508,6 +508,7 @@ pub fn run() {
             commands::vision::analyze_images,
             commands::vision::get_vision_metadata,
             commands::vision::get_vision_count,
+            commands::ocr::start_ocr_batch,
             commands::export::create_export_manifest,
             commands::export::validate_export_manifest,
             commands::export::apply_export_patches,

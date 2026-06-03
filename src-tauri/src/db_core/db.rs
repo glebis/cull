@@ -2637,6 +2637,27 @@ impl Database {
         Ok(())
     }
 
+    pub fn delete_image_metadata_source(&self, image_id: &str, source: &str) -> Result<u32> {
+        let conn = self.conn.lock();
+        let deleted = conn.execute(
+            "DELETE FROM image_metadata WHERE image_id = ?1 AND source = ?2",
+            params![image_id, source],
+        )?;
+        Ok(deleted as u32)
+    }
+
+    pub fn image_has_metadata_source(&self, image_id: &str, source: &str) -> Result<bool> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT EXISTS (
+                SELECT 1 FROM image_metadata
+                WHERE image_id = ?1 AND source = ?2
+             )",
+            params![image_id, source],
+            |row| row.get::<_, bool>(0),
+        )
+    }
+
     pub fn get_vision_metadata(&self, image_id: &str) -> Result<Vec<(String, String, String)>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(

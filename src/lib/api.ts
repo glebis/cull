@@ -336,6 +336,20 @@ export async function resumeJob(jobId: string): Promise<void> {
     return invoke<void>('resume_job', { jobId });
 }
 
+export interface OcrBatchRequest {
+    image_ids: string[];
+    skip_existing: boolean;
+    overwrite: boolean;
+}
+
+export interface OcrBatchStartResponse {
+    job_id: string;
+}
+
+export async function startOcrBatch(request: OcrBatchRequest): Promise<OcrBatchStartResponse> {
+    return invoke<OcrBatchStartResponse>('start_ocr_batch', { request });
+}
+
 export async function rescanSources(): Promise<number> {
     return invoke<number>('rescan_sources');
 }

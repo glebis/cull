@@ -94,7 +94,8 @@ pub fn tool_capability(tool_name: &str) -> &'static str {
         | "generate_embeddings"
         | "analyze_image_quality"
         | "detect_objects"
-        | "analyze_images" => "ai:run",
+        | "analyze_images"
+        | "start_ocr_batch" => "ai:run",
 
         "create_token" | "list_tokens" | "revoke_token" | "rotate_token" | "get_audit_log"
         | "prune_audit_log" => "tokens:manage",
