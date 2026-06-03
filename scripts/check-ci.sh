@@ -7,16 +7,18 @@ target="${1:-all}"
 
 run_frontend() {
   npm ci
+  npm run lint:issues
   npm run check
   npm test
+  npm run build
 }
 
 run_rust() {
   (
     cd src-tauri
     cargo fmt --all -- --check
-    cargo clippy --all-targets
-    cargo test --all-targets
+    cargo clippy --locked --all-targets
+    cargo test --locked --all-targets
   )
 }
 

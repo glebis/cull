@@ -4,14 +4,14 @@
   <meta charset="utf-8" />
   <meta name="AppleTitle" content="com.glebkalinin.cull.help" />
   <meta name="description" content="Task-oriented user guide for Cull, a local-first desktop image viewer for AI-generated image sets." />
-  <meta name="KEYWORDS" content="Cull, user guide, import images, curation, collections, embeddings, export, CLI, privacy" />
+  <meta name="KEYWORDS" content="Cull, user guide, import images, curation, collections, clipboard monitor, static publishing, embeddings, export, MCP, CLI, privacy" />
   <title>Cull User Guide</title>
   <link rel="stylesheet" href="sty/help.css" />
 </head>
 <body>
   <main>
     <h1>Cull User Guide</h1>
-    <p>Cull is a local-first desktop image viewer for reviewing, comparing, curating, searching, and exporting AI-generated image sets. The app stores library metadata in SQLite and does not rewrite original image files during normal viewing or curation.</p>
+    <p>Cull is a local-first desktop image viewer for reviewing, comparing, curating, searching, monitoring, and exporting AI-generated image sets. The app stores library metadata in SQLite and does not rewrite original image files during normal viewing or curation.</p>
 
     <nav aria-label="Contents">
       <h2>Contents</h2>
@@ -21,8 +21,11 @@
         <li><a href="#navigate">Navigate views</a></li>
         <li><a href="#curate">Review and curate</a></li>
         <li><a href="#collections">Use collections</a></li>
+        <li><a href="#clipboard-monitor">Use Clipboard Monitor</a></li>
+        <li><a href="#static-publishing">Use static publishing</a></li>
         <li><a href="#export">Export images</a></li>
         <li><a href="#embeddings">Use embeddings and search</a></li>
+        <li><a href="#agent-mcp">Use agent and MCP workflows</a></li>
         <li><a href="#cli">Use the CLI</a></li>
         <li><a href="#privacy">Understand privacy defaults</a></li>
       </ul>
@@ -99,6 +102,31 @@ npm run tauri dev</code></pre>
       </ul>
     </section>
 
+    <section id="clipboard-monitor">
+      <a name="clipboard-monitor"></a>
+      <h2>Clipboard Monitor</h2>
+      <p>Clipboard Monitor is for reference-gathering sessions where images arrive through the macOS clipboard, for example from a browser, generator, or design tool.</p>
+      <ul>
+        <li>Use the sidebar <strong>Monitor Clipboard</strong> control to start or stop monitoring.</li>
+        <li>Starting a monitor session creates a new collection named like <code>Clipboard 2026.05.30 14:35</code>, focuses the grid on that collection, and stores each changed clipboard image as a real file.</li>
+        <li>Captures use the default <code>Clipboard Captures</code> folder inside Cull's app data folder unless you choose <strong>Move Folder</strong>.</li>
+        <li>The sidebar shows the access status, active capture folder, collection name, and captured image count.</li>
+        <li>Use <strong>Publish</strong> to <strong>Publish clipboard collection</strong> as a static reference set and copy the published URL when available.</li>
+      </ul>
+      <p>Clipboard access is explicit. Stop the monitor when the reference-gathering session is finished.</p>
+    </section>
+
+    <section id="static-publishing">
+      <a name="static-publishing"></a>
+      <h2>Static publishing</h2>
+      <p>Static publishing turns a collection into a local shareable site without changing the original source images.</p>
+      <ul>
+        <li>Use the static publishing controls from Export view for regular collections.</li>
+        <li>Use <strong>Publish</strong> in Clipboard Monitor to publish the current clipboard collection directly.</li>
+        <li>Published sites include a manifest, image assets, and agent instructions so a recipient or agent can inspect the reference set without opening the Cull database.</li>
+      </ul>
+    </section>
+
     <section id="export">
       <a name="export"></a>
       <h2>Export images</h2>
@@ -112,6 +140,17 @@ npm run tauri dev</code></pre>
       <h2>Use embeddings and search</h2>
       <p>Cull supports local CLIP embeddings through ONNX Runtime. Local embeddings run on your machine and do not send images to an external service.</p>
       <p>Optional cloud embedding and generation providers require your own API key. Keys are stored in the OS keychain where supported.</p>
+    </section>
+
+    <section id="agent-mcp">
+      <a name="agent-mcp"></a>
+      <h2>Agent and MCP workflows</h2>
+      <p>Cull exposes an agent-friendly workflow surface through MCP-aligned commands and menu actions.</p>
+      <ul>
+        <li>The tray menu includes window, Clipboard Monitor, MCP status, and quit actions.</li>
+        <li>MCP tools can inspect library state, work with collections, and publish clipboard monitor collections when the server is enabled.</li>
+        <li>The MCP HTTP server is disabled by default; enable it only when you need remote agent access.</li>
+      </ul>
     </section>
 
     <section id="cli">
@@ -132,6 +171,7 @@ cull --json export_images --collection_id &lt;id&gt; --output_dir ~/Desktop/expo
       <ul>
         <li>Image viewing, thumbnails, ratings, collections, and SQLite metadata are local.</li>
         <li>Local CLIP embeddings use ONNX Runtime on your machine.</li>
+        <li>Clipboard Monitor writes captured clipboard images to your selected local capture folder.</li>
         <li>Cloud providers are opt-in and require your own API key.</li>
         <li>The MCP HTTP server is disabled unless explicitly enabled.</li>
       </ul>

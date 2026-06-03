@@ -5,6 +5,7 @@
     import { listLineageGroups, getLineageGroupImages, renameLineageGroup, dissolveLineageGroup, type LineageGroup, type ImageWithFile } from '$lib/api';
     import { resolveLineageImageFocus } from '$lib/lineage-utils';
     import type { LineageLayout } from '$lib/stores';
+    import { safeAssetPreviewPath } from '$lib/view-utils';
     import ContextMenu from './ContextMenu.svelte';
 
     let groups = $state<LineageGroup[]>([]);
@@ -98,7 +99,8 @@
     }
 
     function thumbnailUrl(img: ImageWithFile): string {
-        return convertFileSrc(img.thumbnail_path ?? img.path);
+        const previewPath = safeAssetPreviewPath(img);
+        return previewPath ? convertFileSrc(previewPath) : '';
     }
 
     async function handleRename(groupId: string) {
@@ -164,6 +166,7 @@
                     </div>
                     <div class="strip-images">
                         {#each imgs as img, i (img.image.id)}
+                            {@const previewUrl = thumbnailUrl(img)}
                             <div
                                 class="strip-thumb"
                                 onclick={() => openInLoupe(img)}
@@ -172,11 +175,15 @@
                                 role="button"
                                 tabindex="0"
                             >
-                                <img
-                                    src={thumbnailUrl(img)}
-                                    alt=""
-                                    loading="lazy"
-                                />
+                                {#if previewUrl}
+                                    <img
+                                        src={previewUrl}
+                                        alt=""
+                                        loading="lazy"
+                                    />
+                                {:else}
+                                    <div class="preview-unavailable">Preview unavailable</div>
+                                {/if}
                                 {#if img.selection?.decision === 'accept'}
                                     <div class="badge accept">Accept</div>
                                 {:else if img.selection?.decision === 'reject'}
@@ -214,6 +221,7 @@
                 {@const imgs = groupImages.get(selectedGroupId) ?? []}
                 <div class="comparison-grid" style="--cols: {Math.min(imgs.length, Math.ceil(Math.sqrt(imgs.length)))}">
                     {#each imgs as img (img.image.id)}
+                        {@const previewUrl = thumbnailUrl(img)}
                         <div
                             class="comparison-cell"
                             onclick={() => openInLoupe(img)}
@@ -222,11 +230,15 @@
                             role="button"
                             tabindex="0"
                         >
-                            <img
-                                src={thumbnailUrl(img)}
-                                alt=""
-                                loading="lazy"
-                            />
+                            {#if previewUrl}
+                                <img
+                                    src={previewUrl}
+                                    alt=""
+                                    loading="lazy"
+                                />
+                            {:else}
+                                <div class="preview-unavailable large">Preview unavailable</div>
+                            {/if}
                             {#if img.selection?.decision === 'accept'}
                                 <div class="badge accept">Accept</div>
                             {:else if img.selection?.decision === 'reject'}
@@ -365,6 +377,23 @@
     }
     .strip-thumb:hover img {
         opacity: 0.8;
+    }
+    .preview-unavailable {
+        display: grid;
+        place-items: center;
+        width: 100px;
+        height: 100px;
+        color: var(--text-secondary);
+        background: var(--surface);
+        font-size: 10px;
+        line-height: 1.2;
+        text-align: center;
+        padding: 4px;
+        border-radius: 6px;
+    }
+    .preview-unavailable.large {
+        width: 100%;
+        aspect-ratio: 1;
     }
     .arrow {
         color: var(--text-secondary, #444);

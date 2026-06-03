@@ -69,9 +69,9 @@ Commands that need additional state should take it through an explicit context b
 Default macOS shortcuts:
 
 - `Cmd+K`: universal command palette with commands and destinations.
-- `Cmd+Shift+P`: command-only mode.
+- `Cmd+P`: command-only palette and the native **View > Command Palette...** accelerator. Cull does not currently expose Print, so `Cmd+P` follows Obsidian-style command palette expectations.
+- `Cmd+Shift+P`: alternate command-only shortcut for VS Code-style muscle memory.
 - `/` and `Cmd+F`: image search. These remain search-specific because search has a different grammar and result model.
-- `Cmd+P`: optional Obsidian-style preset only. Do not assign it by default because it conflicts with Print.
 - Existing view shortcuts stay as `Cmd+1` through `Cmd+8`.
 - Existing edit shortcuts stay as `Cmd+Z` and `Cmd+Shift+Z`.
 - Existing destructive shortcuts stay as `Backspace` for Trash and `Cmd+Backspace` for permanent delete until a safer confirmation model replaces them.
@@ -87,11 +87,12 @@ Shortcut handling rules:
 ## Migration List
 
 1. `src/lib/keys.ts`
-   - Add `Cmd+K` and `Cmd+Shift+P` to open the palette.
-   - Let custom hotkeys run through `runCommandForKeyboardEvent`.
+   - Add `Cmd+K`, `Cmd+P`, and `Cmd+Shift+P` to open the palette.
+   - Let custom hotkeys run through `runCommandForKeyboardEvent` without adding those direct hotkey executions to palette recents.
    - Leave navigation, rating, deletion, compare, loupe, and grid-specific movement in place until each command has a registry equivalent and tests.
 
 2. `src/lib/menu.ts` and `src-tauri/src/menu.rs`
+   - Expose **View > Command Palette...** as native ID `command_palette` with `Cmd+P`, opening command-only mode.
    - Map native menu IDs to registry IDs.
    - Replace duplicated view/settings/open behavior with registry execution where possible.
    - Keep file import dialogs as command implementations, not menu-only helpers.
@@ -118,6 +119,18 @@ Shortcut handling rules:
 `imageview-zu0.2` should build the shared registry UI and wire palette open/close behavior. It should not rewrite every command surface in one pass. The safer order is: open palette shortcuts, registry search/pins/recents/hotkey capture, then gradual migration of menu, context menu, sidebar, and AI/batch actions.
 
 ## Current Coverage For `imageview-zu0.2`
+
+Palette behavior:
+
+- `Cmd+P` and **View > Command Palette...** open command-only mode.
+- `Cmd+K` opens commands and destinations.
+- `Cmd+Shift+P` remains an alternate command-only shortcut.
+- Palette rows are fuzzy-searchable by title, subtitle, category, keywords, acronym, and ID.
+- Non-matching rows are hidden while searching.
+- Rows show command categories and shortcut badges.
+- `Enter` runs the selected row.
+- The last five commands executed through the palette are stored as recents and ranked at the top of an empty query.
+- Direct custom hotkey executions do not update palette recents.
 
 Represented in the registry:
 

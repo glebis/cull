@@ -1,6 +1,6 @@
 # System Menu Audit
 
-Status: audited against `src-tauri/src/menu.rs`, `src/lib/menu.ts`, `src/lib/keys.ts`, and `src/lib/components/TabBar.svelte` on 2026-05-22.
+Status: audited against `src-tauri/src/menu.rs`, `src/lib/menu.ts`, `src/lib/keys.ts`, and `src/lib/components/TabBar.svelte` on 2026-06-01.
 
 This document is the release checklist for native menu behavior. Menu labels, shortcuts, frontend handlers, and keyboard shortcuts must stay aligned.
 
@@ -12,7 +12,7 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 | File menu | Pass | Open File and Open Folder are wired to import flows. Close Window uses the native predefined item. |
 | Edit menu | Pass | Undo and Redo are wired to Cull's undo stack. Cut, Copy, Paste, Select All use native predefined items. Deselect All clears image selection and is disabled when nothing is selected. |
 | Image menu | Pass | Current image/selection actions mirror the context menu and are disabled when no image is focused. |
-| View menu | Pass | View labels and shortcuts match the tab bar and keyboard handler. Current view and sidebar state are reflected with checkmarks. |
+| View menu | Pass | Command Palette, view labels, and shortcuts match the keyboard handler. Current view and sidebar state are reflected with checkmarks. |
 | Window menu | Pass | Minimize, Zoom, and Bring All to Front use native predefined items. |
 | Help menu | Pass | Cull User Guide opens the bundled native Apple Help Book in Tips. |
 | Tray menu | Partial | Show Window, Clipboard Monitor, and Quit are wired. Stats and MCP status are display-only placeholders until dynamic tray status refresh is implemented. |
@@ -65,17 +65,18 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 
 | Label | Shortcut | Native ID / Event | Handler | Status |
 |---|---|---|---|---|
+| Command Palette... | `Cmd+P` | `command_palette` | Opens command-only Command Palette with fuzzy search, shortcut badges, Enter execution, and palette recents | Pass |
 | Grid | `Cmd+1` | `view_grid` | Navigates to Grid; checked when active | Pass |
 | Loupe | `Cmd+2` | `view_loupe` | Navigates to Loupe; checked when active | Pass |
 | Compare | `Cmd+3` | `view_compare` | Navigates to Compare; checked when active | Pass |
 | Canvas | `Cmd+4` | `view_canvas` | Navigates to Canvas; checked when active | Pass |
 | Lineage | `Cmd+5` | `view_lineage` | Navigates to Lineage; checked when active | Pass |
 | Embedding Explorer | `Cmd+6` | `view_embeddings` | Navigates to Embedding Explorer; checked when active | Pass |
-| Export | `Cmd+0` | `view_export` | Navigates to Export; checked when active | Pass |
+| Export | `Cmd+7` | `view_export` | Navigates to Export; checked when active | Pass |
 | Toggle Sidebar | `Cmd+B` | `toggle_sidebar` | Toggles sidebar visibility; checked when sidebar is visible | Pass |
 | Zoom In | `Cmd++` | `zoom_in` | Increases grid thumbnail size and Loupe scale | Pass |
 | Zoom Out | `Cmd+-` | `zoom_out` | Decreases grid thumbnail size and Loupe scale | Pass |
-| Actual Size | none | `actual_size` | Resets Loupe scale to 1x | Pass |
+| Actual Size | `Cmd+0` | `actual_size` | Resets Loupe scale to 1x | Pass |
 | Enter Full Screen | native | predefined fullscreen | Tauri native | Pass |
 
 ## Window Menu
@@ -105,6 +106,7 @@ This document is the release checklist for native menu behavior. Menu labels, sh
 ## Release Notes
 
 - README, tab bar, keyboard handler, and native menu now agree that `Cmd+2` is Loupe and `Cmd+3` is Compare.
+- Command Palette is exposed through **View > Command Palette...** and `Cmd+P`, while `Cmd+K` remains the all-items launcher and `Cmd+Shift+P` remains a command-only alternate.
 - Help opens the task-oriented Cull User Guide as a bundled Apple Help Book in Tips instead of the repository README.
 - Undo and redo were previously keyboard-only and are now exposed through the native Edit menu.
 - Image-specific context actions are now also exposed through the native Image menu.

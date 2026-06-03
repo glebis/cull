@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use base64::Engine;
 use bytes::Bytes;
 use chrono::Utc;
 use http_body_util::Full;
@@ -18,6 +19,7 @@ use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::State;
+use tokio::sync::oneshot;
 
 use crate::db_core::canvas_document::{
     CanvasDocument, CanvasExportBackground, CanvasExportBounds, CanvasItem, CanvasItemFit,
@@ -91,6 +93,7 @@ pub struct StaticPublishResult {
     pub manifest_path: String,
     pub instructions_path: String,
     pub qr_svg_path: String,
+    pub qr_svg_data_url: String,
     pub snapshot_png_path: Option<String>,
     pub snapshot_pdf_path: Option<String>,
     pub qr_target_url: String,
@@ -106,6 +109,54 @@ pub struct StaticPublishServerResult {
     pub host: String,
     pub port: u16,
     pub site_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StaticPublishServerStopResult {
+    pub stopped: bool,
+    pub url: Option<String>,
+}
+
+#[derive(Default)]
+pub struct StaticPublishServerState {
+    active: Option<ActiveStaticPublishServer>,
+}
+
+struct ActiveStaticPublishServer {
+    url: String,
+    stop_tx: Option<oneshot::Sender<()>>,
+}
+
+impl StaticPublishServerState {
+    fn replace(&mut self, url: String, stop_tx: oneshot::Sender<()>) {
+        if let Some(mut active) = self.active.take() {
+            if let Some(stop_tx) = active.stop_tx.take() {
+                let _ = stop_tx.send(());
+            }
+        }
+        self.active = Some(ActiveStaticPublishServer {
+            url,
+            stop_tx: Some(stop_tx),
+        });
+    }
+
+    fn stop(&mut self) -> StaticPublishServerStopResult {
+        let Some(mut active) = self.active.take() else {
+            return StaticPublishServerStopResult {
+                stopped: false,
+                url: None,
+            };
+        };
+
+        if let Some(stop_tx) = active.stop_tx.take() {
+            let _ = stop_tx.send(());
+        }
+
+        StaticPublishServerStopResult {
+            stopped: true,
+            url: Some(active.url),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -353,7 +404,7 @@ fn export_static_publish_package_with_canvas_inner(
     };
     let access_phrase = generate_access_phrase();
     let qr_svg_path = site_dir.join("qr.svg");
-    write_qr_svg(&qr_svg_path, &share_url)?;
+    let qr_svg_data_url = write_qr_svg(&qr_svg_path, &share_url)?;
     let site_title = normalize_optional_text(request.site_title.as_deref())
         .or_else(|| normalize_optional_text(Some(&request.canvas_name)))
         .unwrap_or_else(|| "Cull Canvas".to_string());
@@ -432,6 +483,7 @@ fn export_static_publish_package_with_canvas_inner(
         manifest_path: manifest_path.to_string_lossy().to_string(),
         instructions_path: instructions_path.to_string_lossy().to_string(),
         qr_svg_path: qr_svg_path.to_string_lossy().to_string(),
+        qr_svg_data_url,
         snapshot_png_path: snapshot.as_ref().map(|snapshot| snapshot.png_path.clone()),
         snapshot_pdf_path: snapshot.as_ref().map(|snapshot| snapshot.pdf_path.clone()),
         qr_target_url: share_url,
@@ -498,6 +550,39 @@ pub async fn serve_static_publish_package(
     serve_static_publish_package_inner(state.inner(), site_dir, host, port).await
 }
 
+/// Verify a directory is a Cull static-publishing package before serving it.
+/// Requires an index.html and a parseable `data/canvas.json` manifest carrying
+/// the Cull schema marker, so arbitrary local directories cannot be served.
+fn validate_cull_static_package(site_dir: &Path) -> Result<(), String> {
+    if !site_dir.join("index.html").exists() {
+        return Err(format!(
+            "No static package index.html exists at {}",
+            site_dir.display()
+        ));
+    }
+    let manifest_path = site_dir.join("data").join("canvas.json");
+    let raw = std::fs::read_to_string(&manifest_path).map_err(|_| {
+        format!(
+            "Not a Cull static package: missing data/canvas.json at {}",
+            site_dir.display()
+        )
+    })?;
+    let manifest: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
+        format!(
+            "Invalid Cull static package manifest (data/canvas.json): {}",
+            e
+        )
+    })?;
+    let schema = manifest.get("schema").and_then(|v| v.as_str());
+    if schema != Some(SCHEMA_VERSION) {
+        return Err(format!(
+            "Not a Cull static package: data/canvas.json schema marker is {:?}, expected {:?}",
+            schema, SCHEMA_VERSION
+        ));
+    }
+    Ok(())
+}
+
 pub async fn serve_static_publish_package_inner(
     state: &AppState,
     site_dir: String,
@@ -507,12 +592,12 @@ pub async fn serve_static_publish_package_inner(
     ensure_module_enabled(state)?;
 
     let site_dir = PathBuf::from(site_dir);
-    if !site_dir.join("index.html").exists() {
-        return Err(format!(
-            "No static package index.html exists at {}",
-            site_dir.display()
-        ));
-    }
+    // Only serve directories that are genuinely Cull export packages — an
+    // index.html alone is not sufficient, or the command could be coaxed into
+    // serving arbitrary local directories on localhost. The access phrase in the
+    // manifest is host-level UX guidance, not server-side auth, so the gate here
+    // is package identity.
+    validate_cull_static_package(&site_dir)?;
 
     let requested_host = host.unwrap_or_else(|| "127.0.0.1".to_string());
     if requested_host != "127.0.0.1" && requested_host != "localhost" && requested_host != "::1" {
@@ -525,35 +610,59 @@ pub async fn serve_static_publish_package_inner(
     let port = port.unwrap_or(8000);
     let (listener, actual_addr) = bind_static_publish_listener(&host, port).await?;
     let site_root = Arc::new(site_dir.clone());
+    let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
 
     tauri::async_runtime::spawn(async move {
         loop {
-            let Ok((stream, _remote_addr)) = listener.accept().await else {
-                break;
-            };
-            let io = TokioIo::new(stream);
-            let site_root = site_root.clone();
-            tokio::spawn(async move {
-                let service = hyper::service::service_fn(move |req: Request<Incoming>| {
+            tokio::select! {
+                _ = &mut stop_rx => break,
+                accepted = listener.accept() => {
+                    let Ok((stream, _remote_addr)) = accepted else {
+                        break;
+                    };
+                    let io = TokioIo::new(stream);
                     let site_root = site_root.clone();
-                    async move { Ok::<_, Infallible>(serve_static_file(site_root, req).await) }
-                });
-                if let Err(err) = hyper::server::conn::http1::Builder::new()
-                    .serve_connection(io, service)
-                    .await
-                {
-                    crate::safe_eprintln!("Static publishing HTTP connection error: {}", err);
+                    tokio::spawn(async move {
+                        let service = hyper::service::service_fn(move |req: Request<Incoming>| {
+                            let site_root = site_root.clone();
+                            async move { Ok::<_, Infallible>(serve_static_file(site_root, req).await) }
+                        });
+                        if let Err(err) = hyper::server::conn::http1::Builder::new()
+                            .serve_connection(io, service)
+                            .await
+                        {
+                            crate::safe_eprintln!("Static publishing HTTP connection error: {}", err);
+                        }
+                    });
                 }
-            });
+            }
         }
     });
 
-    Ok(StaticPublishServerResult {
+    let result = StaticPublishServerResult {
         url: format!("http://{}:{}/", actual_addr.ip(), actual_addr.port()),
         host: actual_addr.ip().to_string(),
         port: actual_addr.port(),
         site_dir: site_dir.to_string_lossy().to_string(),
-    })
+    };
+    state
+        .static_publish_server
+        .lock()
+        .replace(result.url.clone(), stop_tx);
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn stop_static_publish_server(
+    state: State<'_, AppState>,
+) -> Result<StaticPublishServerStopResult, String> {
+    stop_static_publish_server_inner(state.inner()).await
+}
+
+pub async fn stop_static_publish_server_inner(
+    state: &AppState,
+) -> Result<StaticPublishServerStopResult, String> {
+    Ok(state.static_publish_server.lock().stop())
 }
 
 async fn bind_static_publish_listener(
@@ -1081,7 +1190,7 @@ fn write_json(path: &Path, value: &Value) -> Result<(), String> {
     fs::write(path, payload).map_err(|e| format!("Failed to write {}: {}", path.display(), e))
 }
 
-fn write_qr_svg(path: &Path, target: &str) -> Result<(), String> {
+fn write_qr_svg(path: &Path, target: &str) -> Result<String, String> {
     let code =
         QrCode::new(target.as_bytes()).map_err(|e| format!("Failed to build QR code: {}", e))?;
     let image = code
@@ -1090,7 +1199,9 @@ fn write_qr_svg(path: &Path, target: &str) -> Result<(), String> {
         .dark_color(svg::Color("#08080c"))
         .light_color(svg::Color("#ffffff"))
         .build();
-    fs::write(path, image).map_err(|e| format!("Failed to write QR code: {}", e))
+    fs::write(path, &image).map_err(|e| format!("Failed to write QR code: {}", e))?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(image.as_bytes());
+    Ok(format!("data:image/svg+xml;base64,{}", encoded))
 }
 
 fn write_robots_txt(site_dir: &Path, indexable: bool) -> Result<(), String> {
@@ -1230,83 +1341,175 @@ fn render_index_html(manifest: &Value) -> String {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>__TITLE__</title>
+  <link rel="icon" href="qr.svg" type="image/svg+xml" />
 __DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
   <style>
-    :root { color-scheme: dark; --bg: #08080c; --surface: #0c0c12; --border: #1a1a2e; --text: #e0e0e0; --muted: #7a7fa0; --blue: #7aa2f7; --green: #9ece6a; }
+    :root { color-scheme: dark; --bg: #08080c; --surface: #0c0c12; --border: #1a1a2e; --text: #e0e0e0; --muted: #7a7fa0; --blue: #7aa2f7; --green: #9ece6a; --orange: #e0af68; --paper: #ffffff; --image-bg: #050508; }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     a { color: var(--blue); }
+    a:focus-visible, .card:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
     .skip-link { position: absolute; left: 12px; top: -48px; z-index: 10; padding: 8px 10px; background: var(--green); color: var(--bg); border-radius: 4px; }
     .skip-link:focus { top: 12px; }
-    header { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 14px 18px; background: color-mix(in srgb, var(--bg) 92%, transparent); border-bottom: 1px solid var(--border); backdrop-filter: blur(18px); }
-    h1 { margin: 0; font-size: 15px; font-weight: 700; }
-    h2 { margin: 0; font-size: 13px; }
+    header { position: sticky; top: 0; z-index: 2; background: color-mix(in srgb, var(--bg) 92%, transparent); border-bottom: 1px solid var(--border); backdrop-filter: blur(18px); }
+    .header-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 360px); gap: 18px; align-items: end; width: min(1320px, 100%); margin: 0 auto; padding: 18px; }
+    h1 { margin: 0; font-size: 22px; line-height: 1.2; font-weight: 700; }
+    h2 { margin: 0; font-size: 13px; line-height: 1.3; }
+    .eyebrow { margin: 0 0 4px; color: var(--green); font-size: 11px; font-weight: 700; text-transform: uppercase; }
     .meta { color: var(--muted); font-size: 12px; }
-    .description { margin: 4px 0 0; max-width: 70ch; color: var(--muted); font-size: 12px; }
-    .site-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .description { margin: 6px 0 0; max-width: 74ch; color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .site-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .site-links:empty { display: none; }
-    .site-links a { border: 1px solid var(--border); border-radius: 4px; padding: 3px 7px; text-decoration: none; }
-    .site-links a:focus-visible, .card:focus-visible, .snapshot-links a:focus-visible, .share a:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
-    .share { display: flex; gap: 10px; align-items: center; min-width: 0; }
-    .share img { width: 56px; height: 56px; border-radius: 4px; background: white; }
-    .share a { color: var(--blue); overflow-wrap: anywhere; }
-    main { padding: 18px; }
-    .snapshot { margin-bottom: 18px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); overflow: hidden; }
-    .snapshot-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border); }
-    .snapshot-links { display: flex; gap: 10px; }
-    .snapshot img { display: block; width: 100%; height: auto; background: #ffffff; }
-    .gallery-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 10px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
-    .card { display: block; color: inherit; text-decoration: none; border-radius: 4px; }
+    .site-links a { border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; text-decoration: none; }
+    .share-card { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; align-items: center; padding: 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); min-width: 0; }
+    .share-card img { width: 64px; height: 64px; border-radius: 4px; background: var(--paper); }
+    .share-card strong { display: block; margin-bottom: 3px; font-size: 12px; }
+    .share-card a { display: block; overflow-wrap: anywhere; font-size: 12px; }
+    .review-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 300px); gap: 18px; width: min(1320px, 100%); margin: 0 auto; padding: 18px; align-items: start; }
+    .review-main { display: grid; gap: 18px; min-width: 0; }
+    .review-aside { position: sticky; top: 118px; display: grid; gap: 12px; min-width: 0; }
+    .summary-card, .snapshot { border: 1px solid var(--border); border-radius: 4px; background: var(--surface); overflow: hidden; }
+    .summary-card { padding: 12px; }
+    dl { display: grid; gap: 10px; margin: 12px 0 0; }
+    dl div { display: grid; gap: 2px; }
+    dt { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+    dd { margin: 0; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+    .snapshot-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 12px; border-bottom: 1px solid var(--border); }
+    .snapshot-links { display: flex; flex-wrap: wrap; gap: 10px; }
+    .snapshot img { display: block; width: 100%; height: auto; background: var(--paper); }
+    .gallery-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .card { display: block; color: inherit; text-decoration: none; border-radius: 4px; min-width: 0; }
     figure { margin: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); overflow: hidden; height: 100%; }
-    figure img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: #050508; }
-    figcaption { display: grid; gap: 3px; padding: 8px; min-height: 56px; color: var(--muted); font-size: 11px; }
+    figure img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: var(--image-bg); }
+    figcaption { display: grid; gap: 4px; padding: 9px; min-height: 72px; color: var(--muted); font-size: 11px; line-height: 1.35; }
     figcaption strong { color: var(--text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .prompt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .empty { color: var(--muted); padding: 32px 0; }
-    @media (max-width: 640px) {
-      header { align-items: flex-start; flex-direction: column; }
-      .share img { width: 48px; height: 48px; }
-      main { padding: 12px; }
-      .gallery-head { flex-direction: column; gap: 4px; }
-      .grid { grid-template-columns: 1fr; gap: 8px; }
+    .viewer-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px; padding: 12px; background: color-mix(in srgb, var(--image-bg) 94%, transparent); touch-action: none; }
+    .viewer-backdrop[hidden] { display: none; }
+    .viewer-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+    .viewer-title { min-width: 0; }
+    .viewer-title strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+    .viewer-title span { color: var(--muted); font-size: 12px; }
+    .viewer-actions { display: flex; gap: 8px; align-items: center; }
+    .viewer-button { min-height: 36px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+    .viewer-button:hover { border-color: var(--blue); }
+    .viewer-button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+    .viewer-close { padding: 0 12px; }
+    .viewer-stage { position: relative; display: grid; place-items: center; min-width: 0; min-height: 0; }
+    .viewer-image { display: block; max-width: 100%; max-height: calc(100vh - 132px); width: auto; height: auto; object-fit: contain; background: var(--image-bg); }
+    .viewer-prev, .viewer-next { position: absolute; top: 50%; width: 48px; height: 64px; transform: translateY(-50%); }
+    .viewer-prev { left: 0; }
+    .viewer-next { right: 0; }
+    .viewer-caption { min-height: 20px; color: var(--muted); font-size: 12px; text-align: center; overflow-wrap: anywhere; }
+    body.viewer-open { overflow: hidden; }
+    @media (max-width: 1100px) {
+      .header-grid, .review-layout { grid-template-columns: 1fr; }
+      .review-aside { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 680px) {
+      .header-grid, .review-layout { padding: 12px; }
+      .share-card, .review-aside, .grid { grid-template-columns: 1fr; }
+      .share-card img { width: 56px; height: 56px; }
+      .gallery-head, .snapshot-head { align-items: flex-start; flex-direction: column; }
+      .viewer-backdrop { padding: 10px; }
+      .viewer-bar { grid-template-columns: 1fr; align-items: start; }
+      .viewer-actions { justify-content: space-between; }
+      .viewer-image { max-height: calc(100vh - 156px); }
+      .viewer-prev, .viewer-next { width: 44px; height: 56px; }
     }
   </style>
 </head>
 <body>
-  <a class="skip-link" href="#gallery">Skip to gallery</a>
+  <a class="skip-link" href="#gallery">Skip to images</a>
   <header>
-    <div>
-      <h1 id="title">Cull Canvas</h1>
-      <p class="description" id="description" hidden></p>
-      <div class="meta" id="summary"></div>
-      <nav class="site-links" id="site-links" aria-label="Related links"></nav>
-    </div>
-    <div class="share">
-      <img id="qr" alt="QR code" src="qr.svg" />
-      <a id="share-url" href="#"></a>
+    <div class="header-grid">
+      <div>
+        <p class="eyebrow">Cull review</p>
+        <h1 id="title">Cull Canvas</h1>
+        <p class="description" id="description" hidden></p>
+        <div class="meta" id="summary"></div>
+        <nav class="site-links" id="site-links" aria-label="Related links"></nav>
+      </div>
+      <aside class="share-card" aria-labelledby="share-title">
+        <img id="qr" alt="QR code for share link" src="qr.svg" />
+        <div>
+          <strong id="share-title">Share link</strong>
+          <a id="share-url" href="#"></a>
+        </div>
+      </aside>
     </div>
   </header>
-  <main>
-    <section id="snapshot" class="snapshot" hidden>
-      <div class="snapshot-head">
-        <strong>Canvas snapshot</strong>
-        <div class="snapshot-links">
-          <a id="snapshot-png" href="#">PNG</a>
-          <a id="snapshot-pdf" href="#">PDF</a>
+  <main class="review-layout">
+    <div class="review-main">
+      <section id="snapshot" class="snapshot" aria-labelledby="snapshot-title" hidden>
+        <div class="snapshot-head">
+          <h2 id="snapshot-title">Canvas snapshot</h2>
+          <div class="snapshot-links">
+            <a id="snapshot-png" href="#">PNG</a>
+            <a id="snapshot-pdf" href="#">PDF</a>
+          </div>
         </div>
-      </div>
-      <img id="snapshot-image" alt="Canvas snapshot" />
-    </section>
-    <section id="gallery" aria-labelledby="gallery-title">
-      <div class="gallery-head">
-        <h2 id="gallery-title">Images</h2>
-        <div class="meta" id="gallery-summary" role="status"></div>
-      </div>
-      <div id="grid" class="grid"></div>
-    </section>
-    <p id="empty" class="empty" hidden>No images in this package.</p>
+        <img id="snapshot-image" alt="Canvas snapshot" />
+      </section>
+      <section id="gallery" aria-labelledby="gallery-title">
+        <div class="gallery-head">
+          <h2 id="gallery-title">Images</h2>
+          <div class="meta" id="gallery-summary" role="status" aria-live="polite"></div>
+        </div>
+        <div id="grid" class="grid"></div>
+      </section>
+      <p id="empty" class="empty" hidden>No images in this package.</p>
+    </div>
+    <aside class="review-aside" aria-label="Package details">
+      <section class="summary-card" aria-labelledby="package-title">
+        <h2 id="package-title">Package</h2>
+        <dl>
+          <div>
+            <dt>Images</dt>
+            <dd id="package-count">0</dd>
+          </div>
+          <div>
+            <dt>Published</dt>
+            <dd id="published-at">Loading</dd>
+          </div>
+          <div>
+            <dt>Visibility</dt>
+            <dd id="visibility">Unlisted</dd>
+          </div>
+        </dl>
+      </section>
+      <section class="summary-card" aria-labelledby="source-title">
+        <h2 id="source-title">Source</h2>
+        <dl>
+          <div>
+            <dt>Canvas</dt>
+            <dd id="source-canvas">Cull Canvas</dd>
+          </div>
+        </dl>
+      </section>
+    </aside>
   </main>
+  <div id="image-viewer" class="viewer-backdrop" role="dialog" aria-modal="true" aria-labelledby="viewer-title" aria-describedby="viewer-caption" hidden>
+    <div class="viewer-bar">
+      <div class="viewer-title">
+        <strong id="viewer-title"></strong>
+        <span id="viewer-count" aria-live="polite"></span>
+      </div>
+      <div class="viewer-actions">
+        <a id="viewer-open-original" href="#" target="_blank" rel="noopener noreferrer">Open file</a>
+        <button type="button" class="viewer-close viewer-button" id="viewer-close">Close</button>
+      </div>
+    </div>
+    <div class="viewer-stage">
+      <button type="button" class="viewer-prev viewer-button" id="viewer-prev" aria-label="Previous image">Prev</button>
+      <img class="viewer-image" id="viewer-image" alt="" />
+      <button type="button" class="viewer-next viewer-button" id="viewer-next" aria-label="Next image">Next</button>
+    </div>
+    <div class="viewer-caption" id="viewer-caption"></div>
+  </div>
   <script>
     const grid = document.getElementById('grid');
     const empty = document.getElementById('empty');
@@ -1320,6 +1523,109 @@ __DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
     const snapshotImage = document.getElementById('snapshot-image');
     const snapshotPng = document.getElementById('snapshot-png');
     const snapshotPdf = document.getElementById('snapshot-pdf');
+    const packageCount = document.getElementById('package-count');
+    const publishedAt = document.getElementById('published-at');
+    const visibility = document.getElementById('visibility');
+    const sourceCanvas = document.getElementById('source-canvas');
+    const viewer = document.getElementById('image-viewer');
+    const viewerImage = document.getElementById('viewer-image');
+    const viewerTitle = document.getElementById('viewer-title');
+    const viewerCount = document.getElementById('viewer-count');
+    const viewerCaption = document.getElementById('viewer-caption');
+    const viewerOpenOriginal = document.getElementById('viewer-open-original');
+    const viewerPrev = document.getElementById('viewer-prev');
+    const viewerNext = document.getElementById('viewer-next');
+    const viewerClose = document.getElementById('viewer-close');
+    const viewerItems = [];
+    let viewerIndex = -1;
+    let lastFocusedCard = null;
+    let touchStartX = 0;
+    let touchStartY = 0;
+
+    function updateViewer() {
+      const item = viewerItems[viewerIndex];
+      if (!item) return;
+      viewerImage.src = item.fullSrc;
+      viewerImage.alt = item.name;
+      viewerTitle.textContent = item.name;
+      viewerCount.textContent = `${viewerIndex + 1} / ${viewerItems.length}`;
+      viewerCaption.textContent = item.details;
+      viewerOpenOriginal.href = item.fullSrc;
+      viewerPrev.disabled = viewerItems.length <= 1;
+      viewerNext.disabled = viewerItems.length <= 1;
+    }
+
+    function openViewer(index, card) {
+      if (!viewerItems[index]) return;
+      viewerIndex = index;
+      lastFocusedCard = card;
+      updateViewer();
+      viewer.hidden = false;
+      document.body.classList.add('viewer-open');
+      viewerClose.focus();
+    }
+
+    function closeViewer() {
+      if (viewer.hidden) return;
+      viewer.hidden = true;
+      document.body.classList.remove('viewer-open');
+      viewerImage.removeAttribute('src');
+      lastFocusedCard?.focus();
+    }
+
+    function showViewerImage(index) {
+      if (viewerItems.length === 0) return;
+      viewerIndex = (index + viewerItems.length) % viewerItems.length;
+      updateViewer();
+    }
+
+    function showNextViewerImage() {
+      showViewerImage(viewerIndex + 1);
+    }
+
+    function showPreviousViewerImage() {
+      showViewerImage(viewerIndex - 1);
+    }
+
+    viewerClose.addEventListener('click', closeViewer);
+    viewerPrev.addEventListener('click', showPreviousViewerImage);
+    viewerNext.addEventListener('click', showNextViewerImage);
+    viewer.addEventListener('click', event => {
+      if (event.target === viewer) closeViewer();
+    });
+    viewer.addEventListener('touchstart', event => {
+      const touch = event.changedTouches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+    }, { passive: true });
+    viewer.addEventListener('touchend', event => {
+      const touch = event.changedTouches[0];
+      const dx = touch.clientX - touchStartX;
+      const dy = touch.clientY - touchStartY;
+      if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy)) return;
+      event.preventDefault();
+      if (dx < 0) showNextViewerImage();
+      else showPreviousViewerImage();
+    }, { passive: false });
+    document.addEventListener('keydown', event => {
+      if (viewer.hidden) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeViewer();
+      } else if (event.key === 'ArrowRight' || event.key === 'l' || event.key === 'j') {
+        event.preventDefault();
+        showNextViewerImage();
+      } else if (event.key === 'ArrowLeft' || event.key === 'h' || event.key === 'k') {
+        event.preventDefault();
+        showPreviousViewerImage();
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        showViewerImage(0);
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        showViewerImage(viewerItems.length - 1);
+      }
+    });
 
     fetch('./data/canvas.json')
       .then(response => response.json())
@@ -1333,16 +1639,26 @@ __DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
           description.hidden = false;
           description.textContent = site.description;
         }
-        const generated = new Date(data.generated_at).toLocaleString();
-        summary.textContent = `${images.length} images · Published ${generated}`;
-        gallerySummary.textContent = `${images.length} image${images.length === 1 ? '' : 's'}`;
-        shareUrl.textContent = data.share?.url || window.location.href;
-        shareUrl.href = data.share?.url || window.location.href;
+        const imageLabel = `${images.length} image${images.length === 1 ? '' : 's'}`;
+        const generatedDate = new Date(data.generated_at);
+        const generated = Number.isNaN(generatedDate.getTime())
+          ? 'Unknown'
+          : generatedDate.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', hour12: false });
+        summary.textContent = `${imageLabel} · Published ${generated}`;
+        gallerySummary.textContent = imageLabel;
+        packageCount.textContent = String(images.length);
+        publishedAt.textContent = generated;
+        visibility.textContent = site.indexable ? 'Indexable' : 'Unlisted';
+        sourceCanvas.textContent = data.canvas?.name || data.canvas_name || pageTitle;
+        const shareTarget = data.share?.url || window.location.href;
+        shareUrl.textContent = shareTarget;
+        shareUrl.href = shareTarget;
         for (const link of site.links || []) {
           if (!link.label || !link.url) continue;
           const a = document.createElement('a');
           a.href = link.url;
           a.textContent = link.label;
+          a.target = '_blank';
           a.rel = 'noopener noreferrer';
           siteLinks.append(a);
         }
@@ -1365,17 +1681,21 @@ __DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
           const fig = document.createElement('figure');
           const img = document.createElement('img');
           img.loading = 'lazy';
+          img.decoding = 'async';
           img.src = src;
-          img.alt = item.ai_prompt || item.filename || item.id;
+          const imageName = item.filename || item.id || 'Published image';
+          img.alt = imageName;
+          card.setAttribute('aria-label', `Open ${imageName}`);
           const cap = document.createElement('figcaption');
           const name = document.createElement('strong');
-          name.textContent = item.filename || item.id;
+          name.textContent = imageName;
           const details = document.createElement('span');
           const meta = [];
           if (Number.isFinite(item.width) && Number.isFinite(item.height)) meta.push(`${item.width}x${item.height}`);
-          if (Number.isFinite(item.rating)) meta.push(`${item.rating} stars`);
+          if (Number.isFinite(item.rating)) meta.push(`${item.rating} star${item.rating === 1 ? '' : 's'}`);
           if (item.source_label) meta.push(item.source_label);
           details.textContent = meta.join(' · ') || 'Image';
+          const viewerDetails = meta.join(' · ');
           cap.append(name, details);
           if (item.ai_prompt) {
             const prompt = document.createElement('span');
@@ -1383,6 +1703,16 @@ __DESCRIPTION_META__  <meta name="robots" content="__ROBOTS__" />
             prompt.textContent = item.ai_prompt;
             cap.append(prompt);
           }
+          const viewerItemIndex = viewerItems.length;
+          viewerItems.push({
+            name: imageName,
+            details: viewerDetails || item.ai_prompt || 'Image',
+            fullSrc: href || src,
+          });
+          card.addEventListener('click', event => {
+            event.preventDefault();
+            openViewer(viewerItemIndex, card);
+          });
           fig.append(img, cap);
           card.append(fig);
           grid.append(card);
@@ -1474,6 +1804,68 @@ mod tests {
         assert_eq!(slugify("Current Canvas!"), "current-canvas");
     }
 
+    fn write_pkg(dir: &std::path::Path, index: bool, canvas_json: Option<&str>) {
+        if index {
+            std::fs::write(dir.join("index.html"), "<html></html>").unwrap();
+        }
+        if let Some(json) = canvas_json {
+            std::fs::create_dir_all(dir.join("data")).unwrap();
+            std::fs::write(dir.join("data").join("canvas.json"), json).unwrap();
+        }
+    }
+
+    #[test]
+    fn validate_cull_static_package_accepts_real_package() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_pkg(
+            tmp.path(),
+            true,
+            Some(&format!(r#"{{"schema":"{}","images":[]}}"#, SCHEMA_VERSION)),
+        );
+        assert!(validate_cull_static_package(tmp.path()).is_ok());
+    }
+
+    #[test]
+    fn validate_cull_static_package_rejects_index_only_dir() {
+        // A bare directory with index.html (e.g. an arbitrary website) is not a
+        // Cull package and must not be served.
+        let tmp = tempfile::tempdir().unwrap();
+        write_pkg(tmp.path(), true, None);
+        let err = validate_cull_static_package(tmp.path()).unwrap_err();
+        assert!(err.contains("canvas.json"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_cull_static_package_rejects_invalid_or_foreign_manifest() {
+        // Malformed JSON.
+        let bad = tempfile::tempdir().unwrap();
+        write_pkg(bad.path(), true, Some("{not json"));
+        assert!(validate_cull_static_package(bad.path()).is_err());
+
+        // Valid JSON but not a Cull manifest (no schema marker).
+        let foreign = tempfile::tempdir().unwrap();
+        write_pkg(foreign.path(), true, Some(r#"{"hello":"world"}"#));
+        assert!(validate_cull_static_package(foreign.path()).is_err());
+
+        // Valid JSON with a *different* schema marker (future/foreign format).
+        let wrong_schema = tempfile::tempdir().unwrap();
+        write_pkg(
+            wrong_schema.path(),
+            true,
+            Some(r#"{"schema":"other.format.v9"}"#),
+        );
+        assert!(validate_cull_static_package(wrong_schema.path()).is_err());
+
+        // Missing index.html entirely.
+        let no_index = tempfile::tempdir().unwrap();
+        write_pkg(
+            no_index.path(),
+            false,
+            Some(&format!(r#"{{"schema":"{}"}}"#, SCHEMA_VERSION)),
+        );
+        assert!(validate_cull_static_package(no_index.path()).is_err());
+    }
+
     #[test]
     fn sanitize_ext_removes_unexpected_chars() {
         assert_eq!(sanitize_ext("jpeg"), "jpg");
@@ -1557,6 +1949,17 @@ mod tests {
         assert_eq!(result.image_count, 1);
         assert_eq!(result.skipped_count, 0);
         assert_eq!(result.qr_target_url, "https://example.test/canvas/");
+        assert!(result
+            .qr_svg_data_url
+            .starts_with("data:image/svg+xml;base64,"));
+        let qr_svg = base64::engine::general_purpose::STANDARD
+            .decode(
+                result
+                    .qr_svg_data_url
+                    .trim_start_matches("data:image/svg+xml;base64,"),
+            )
+            .unwrap();
+        assert!(String::from_utf8(qr_svg).unwrap().contains("<svg"));
         assert_eq!(result.access_phrase.split('-').count(), 3);
 
         let site_dir = PathBuf::from(&result.site_dir);
@@ -1880,10 +2283,15 @@ mod tests {
         state.db.set_setting(MODULE_KEY, "true").unwrap();
 
         let site_dir = tmp.path().join("site");
-        fs::create_dir_all(&site_dir).unwrap();
+        fs::create_dir_all(site_dir.join("data")).unwrap();
         fs::write(
             site_dir.join("index.html"),
             "<!doctype html><title>test</title>",
+        )
+        .unwrap();
+        fs::write(
+            site_dir.join("data").join("canvas.json"),
+            format!(r#"{{"schema":"{}","images":[]}}"#, SCHEMA_VERSION),
         )
         .unwrap();
 
@@ -1902,6 +2310,43 @@ mod tests {
         assert_eq!(result.host, "127.0.0.1");
         assert_ne!(result.port, occupied_port);
         assert_eq!(result.url, format!("http://127.0.0.1:{}/", result.port));
+    }
+
+    #[tokio::test]
+    async fn stopping_static_publish_server_clears_active_preview() {
+        let (state, tmp) = test_state();
+        state.db.set_setting(MODULE_KEY, "true").unwrap();
+
+        let site_dir = tmp.path().join("site");
+        fs::create_dir_all(site_dir.join("data")).unwrap();
+        fs::write(
+            site_dir.join("index.html"),
+            "<!doctype html><title>test</title>",
+        )
+        .unwrap();
+        fs::write(
+            site_dir.join("data").join("canvas.json"),
+            format!(r#"{{"schema":"{}","images":[]}}"#, SCHEMA_VERSION),
+        )
+        .unwrap();
+
+        let result = serve_static_publish_package_inner(
+            &state,
+            site_dir.to_string_lossy().to_string(),
+            Some("127.0.0.1".to_string()),
+            Some(0),
+        )
+        .await
+        .unwrap();
+
+        let stopped = stop_static_publish_server_inner(&state).await.unwrap();
+
+        assert!(stopped.stopped);
+        assert_eq!(stopped.url, Some(result.url));
+
+        let stopped_again = stop_static_publish_server_inner(&state).await.unwrap();
+        assert!(!stopped_again.stopped);
+        assert_eq!(stopped_again.url, None);
     }
 
     #[test]
@@ -2097,6 +2542,7 @@ mod tests {
             clipboard_monitor: parking_lot::Mutex::new(
                 services::clipboard_monitor::ClipboardMonitorState::default(),
             ),
+            static_publish_server: parking_lot::Mutex::new(StaticPublishServerState::default()),
         };
         (state, tmp)
     }

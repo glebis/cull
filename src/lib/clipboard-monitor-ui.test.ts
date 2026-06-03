@@ -9,6 +9,8 @@ describe('clipboard monitor sidebar UI contract', () => {
         expect(sidebar).toContain('CLIPBOARD MONITOR');
         expect(sidebar).toContain('startClipboardMonitor');
         expect(sidebar).toContain('stopClipboardMonitor');
+        expect(sidebar).toContain('setClipboardMonitorCaptureExistingOnStart');
+        expect(sidebar).toContain('Capture current image on start');
         expect(sidebar).toContain('publishClipboardCollection');
         expect(sidebar).toContain('navigator.clipboard.writeText');
     });

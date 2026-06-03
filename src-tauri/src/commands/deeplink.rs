@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex, OnceLock,
@@ -20,66 +20,12 @@ pub struct OpenParams {
     pub gap: Option<u32>,
 }
 
-/// Sensitive directories that must never be accessed via deep links.
-const SENSITIVE_DIRS: &[&str] = &[
-    ".ssh",
-    ".gnupg",
-    ".aws",
-    ".config/gcloud",
-    "Library/Keychains",
-];
-
 /// Validate that a single path is safe for deep-link access.
 /// Returns the canonicalized path string on success, or an error message.
+/// Delegates to the shared [`path_policy`] in the strictest (`Deeplink`) mode.
 fn validate_path(raw: &str) -> Result<String, String> {
-    let path = Path::new(raw);
-
-    // Canonicalize resolves symlinks and normalizes ".."
-    let canonical =
-        std::fs::canonicalize(path).map_err(|e| format!("Cannot resolve path '{}': {}", raw, e))?;
-
-    let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
-
-    // Must be under $HOME
-    if !canonical.starts_with(&home) {
-        return Err(format!(
-            "Deep link path '{}' is outside the home directory",
-            canonical.display()
-        ));
-    }
-
-    // Get the portion relative to $HOME for checking sensitive dirs and hidden components
-    let relative = canonical
-        .strip_prefix(&home)
-        .map_err(|_| "Internal error stripping home prefix")?;
-
-    // Check sensitive directories
-    for sensitive in SENSITIVE_DIRS {
-        let sensitive_path = Path::new(sensitive);
-        if relative.starts_with(sensitive_path) {
-            return Err(format!(
-                "Deep link access to '{}' is blocked (sensitive directory)",
-                canonical.display()
-            ));
-        }
-    }
-
-    // Reject hidden files/directories (components starting with '.')
-    for component in relative.components() {
-        if let std::path::Component::Normal(name) = component {
-            if let Some(s) = name.to_str() {
-                if s.starts_with('.') {
-                    return Err(format!(
-                        "Deep link access to '{}' is blocked (hidden path component '{}')",
-                        canonical.display(),
-                        s
-                    ));
-                }
-            }
-        }
-    }
-
-    Ok(canonical.to_string_lossy().into_owned())
+    crate::db_core::path_policy::validate_path(raw, crate::db_core::path_policy::PathMode::Deeplink)
+        .map(|p| p.to_string_lossy().into_owned())
 }
 
 /// Validate all file-system paths in OpenParams received from a deep link.
@@ -157,6 +103,29 @@ pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams>
     };
 
     validate_open_params(params).ok()
+}
+
+pub fn open_params_for_urls(urls: &[String]) -> Vec<OpenParams> {
+    let mut params = Vec::new();
+    let file_paths: Vec<String> = urls
+        .iter()
+        .filter_map(|url| file_path_from_url(url))
+        .collect();
+
+    if let Some(file_params) = open_params_for_file_paths(file_paths) {
+        params.push(file_params);
+    }
+
+    for url in urls {
+        if url.starts_with("cull://") {
+            match parse_deep_link(url) {
+                Ok(parsed) => params.push(parsed),
+                Err(e) => crate::safe_eprintln!("[deep-link] Deep link rejected: {}", e),
+            }
+        }
+    }
+
+    params
 }
 
 pub fn open_params_for_drag_drop_paths(paths: &[PathBuf]) -> Vec<OpenParams> {
@@ -248,6 +217,14 @@ pub async fn open_with_params(
     };
     let validated = validate_open_params(params)?;
     emit_open_params(&app, validated).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn open_deep_link_urls(app: AppHandle, urls: Vec<String>) -> Result<(), String> {
+    for params in open_params_for_urls(&urls) {
+        emit_open_params(&app, params).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Parse a deep link URL into OpenParams.
@@ -478,6 +455,26 @@ mod tests {
         let p = result.unwrap();
         assert_eq!(p.view.as_deref(), Some("grid"));
         assert_eq!(p.size, Some(280));
+    }
+
+    #[test]
+    fn open_params_for_urls_routes_cull_urls_through_rust_parser() {
+        let urls = vec!["cull://grid?size=280".to_string()];
+
+        let params = open_params_for_urls(&urls);
+
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].view.as_deref(), Some("grid"));
+        assert_eq!(params[0].size, Some(280));
+    }
+
+    #[test]
+    fn open_params_for_urls_rejects_invalid_cull_url_paths() {
+        let urls = vec!["cull://open?path=/Users/test/Cull%ZZ.png".to_string()];
+
+        let params = open_params_for_urls(&urls);
+
+        assert!(params.is_empty());
     }
 
     #[test]

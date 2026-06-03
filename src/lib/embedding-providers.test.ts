@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_MODEL_OPTIONS, modelOptionsFromProviderInfo } from './embedding-providers';
 
+const noDownloadProvenance = {
+    expectedSha256: null,
+    expectedSizeBytes: null,
+    spdxLicense: null,
+    sourceRepo: null,
+    modelCardUrl: null,
+};
+
 describe('embedding provider metadata', () => {
     it('maps backend provider metadata into selector options', () => {
         const options = modelOptionsFromProviderInfo([
@@ -17,6 +25,11 @@ describe('embedding provider metadata', () => {
                 available: true,
                 downloadable: true,
                 downloadLabel: 'Download CLIP (~350MB)',
+                expectedSha256: 'c68d3d9a200ddd2a8c8a5510b576d4c94d1ae383bf8b36dd8c084f94e1fb4d63',
+                expectedSizeBytes: 351686194,
+                spdxLicense: 'MIT',
+                sourceRepo: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision',
+                modelCardUrl: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision',
                 apiKeyProvider: null,
             },
             {
@@ -32,6 +45,7 @@ describe('embedding provider metadata', () => {
                 available: false,
                 downloadable: false,
                 downloadLabel: null,
+                ...noDownloadProvenance,
                 apiKeyProvider: 'google',
             },
             {
@@ -47,6 +61,7 @@ describe('embedding provider metadata', () => {
                 available: false,
                 downloadable: false,
                 downloadLabel: null,
+                ...noDownloadProvenance,
                 apiKeyProvider: 'cohere',
             },
             {
@@ -62,6 +77,7 @@ describe('embedding provider metadata', () => {
                 available: false,
                 downloadable: false,
                 downloadLabel: null,
+                ...noDownloadProvenance,
                 apiKeyProvider: 'openai',
             },
             {
@@ -77,6 +93,7 @@ describe('embedding provider metadata', () => {
                 available: false,
                 downloadable: false,
                 downloadLabel: null,
+                ...noDownloadProvenance,
                 apiKeyProvider: null,
             },
             {
@@ -92,6 +109,7 @@ describe('embedding provider metadata', () => {
                 available: false,
                 downloadable: false,
                 downloadLabel: null,
+                ...noDownloadProvenance,
                 apiKeyProvider: null,
             },
         ]);

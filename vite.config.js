@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { configDefaults, defineConfig } from "vitest/config";
 import { sveltekit } from "@sveltejs/kit/vite";
 
 const host = process.env.TAURI_DEV_HOST;
@@ -18,6 +18,9 @@ const tauriMockAliases = [
 export default defineConfig(async () => ({
   plugins: [sveltekit()],
   resolve: e2eMock ? { alias: tauriMockAliases } : undefined,
+  test: {
+    exclude: [...configDefaults.exclude, "**/.worktrees/**"],
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

@@ -113,9 +113,7 @@ Run these before any release build:
 
 ```bash
 npm ci
-npm run check
-npm test
-cd src-tauri && cargo test
+npm run preflight -- release
 ```
 
 Run browser E2E when the frontend changed or before publishing a release candidate:

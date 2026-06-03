@@ -1,6 +1,6 @@
 {
   "name": "cull",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local-first desktop image viewer for AI-generated art workflows.",
   "type": "module",
   "scripts": {
@@ -10,6 +10,14 @@
     "ci": "bash scripts/check-ci.sh",
     "ci:frontend": "bash scripts/check-ci.sh frontend",
     "ci:rust": "bash scripts/check-ci.sh rust",
+    "preflight": "bash scripts/preflight.sh",
+    "land:feature": "bash scripts/land-feature.sh",
+    "hooks:install": "bash scripts/install-hooks.sh",
+    "preflight:hook": "bash scripts/preflight.sh hook",
+    "preflight:quick": "bash scripts/preflight.sh quick",
+    "preflight:full": "bash scripts/preflight.sh full",
+    "preflight:release": "bash scripts/preflight.sh release",
+    "land": "bash scripts/land-session.sh",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "tauri",
@@ -17,7 +25,9 @@
     "test:e2e": "bash tests/e2e/run-e2e.sh",
     "test:perf": "vitest run src/lib/view-utils.test.ts -t \"grid rendering performance budget\"",
     "test:watch": "vitest",
-    "audit:licenses": "node scripts/license-audit.mjs"
+    "audit:licenses": "node scripts/license-audit.mjs",
+    "bd": "bash scripts/bd.sh",
+    "lint:issues": "node scripts/check-beads-acceptance.mjs"
   },
   "license": "Apache-2.0",
   "repository": {

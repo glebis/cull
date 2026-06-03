@@ -1,8 +1,16 @@
 <script lang="ts">
-    import { getAppSetting, setAppSetting, exportStaticPublishPackage, serveStaticPublishPackage } from '$lib/api';
+    import { openPath, openUrl } from '@tauri-apps/plugin-opener';
+    import { getAppSetting, setAppSetting, exportStaticPublishPackage, serveStaticPublishPackage, stopStaticPublishServer } from '$lib/api';
     import type { StaticPublishResult, StaticPublishServerResult } from '$lib/api';
     import { activeCanvas, activeSession, images, selectedIds, showToast } from '$lib/stores';
-    import { buildStaticPublishRequestFromSavedCanvas, countSavedCanvasItems, formatStaticPublishLinks, parseStaticPublishLinks } from '$lib/static-publishing';
+    import {
+        buildStaticPublishRequestFromSavedCanvas,
+        buildStaticPublishShareItems,
+        countSavedCanvasItems,
+        formatStaticPublishLinks,
+        parseStaticPublishLinks,
+    } from '$lib/static-publishing';
+    import type { StaticPublishShareItem } from '$lib/static-publishing';
     import { onMount } from 'svelte';
 
     type PublishScenario = 'local_preview' | 'client_review' | 'agent_handoff' | 'static_host';
@@ -24,7 +32,22 @@
     let lastResult = $state<StaticPublishResult | null>(null);
     let serverResult = $state<StaticPublishServerResult | null>(null);
     let startingServer = $state(false);
+    let stoppingServer = $state(false);
     let parsedLinks = $derived(parseStaticPublishLinks(linksText));
+    let publishItems = $derived(lastResult ? buildStaticPublishShareItems(lastResult, serverResult) : []);
+    let packageFileItems = $derived(
+        publishItems.filter(item => item.id === 'site-folder' || item.id === 'manifest' || item.id === 'agent-notes' || item.id === 'qr-code')
+    );
+    let targetItem = $derived(publishItems.find(item => item.id === 'target-url') ?? null);
+    let previewItem = $derived(publishItems.find(item => item.id === 'preview-url') ?? null);
+    let accessPhraseItem = $derived(publishItems.find(item => item.id === 'access-phrase') ?? null);
+    let qrImageSrc = $derived(lastResult ? lastResult.qr_svg_data_url : '');
+    const scenarioLabels: Record<PublishScenario, string> = {
+        local_preview: 'Local preview',
+        client_review: 'Client review',
+        agent_handoff: 'Agent handoff',
+        static_host: 'Static host',
+    };
 
     const sourceImages = $derived(
         $selectedIds.size > 0
@@ -34,10 +57,39 @@
     const savedCanvasItemCount = $derived(countSavedCanvasItems($activeCanvas));
     const exportSourceCount = $derived($activeCanvas ? savedCanvasItemCount : sourceImages.length);
     const exportSourceLabel = $derived($activeCanvas ? $activeCanvas.name : 'Current view');
+    const sourceSummary = $derived(`${exportSourceCount} image${exportSourceCount === 1 ? '' : 's'}`);
+    const scenarioLabel = $derived(scenarioLabels[scenario]);
+    const enabledVariantCount = $derived([includeThumbnails, includeWeb, includeFull].filter(Boolean).length);
+    const hasAssetVariant = $derived(enabledVariantCount > 0);
+    const variantSummary = $derived(`${enabledVariantCount} asset set${enabledVariantCount === 1 ? '' : 's'}`);
+    const canBuild = $derived(exportSourceCount > 0 && hasAssetVariant);
+    const buildStatus = $derived(
+        exportSourceCount === 0
+            ? 'No images available'
+            : hasAssetVariant
+                ? 'Ready'
+                : 'Select an asset set'
+    );
+    const previewStatusLabel = $derived(
+        startingServer
+            ? 'Starting'
+            : stoppingServer
+                ? 'Stopping'
+                : serverResult
+                    ? 'Running'
+                    : 'Stopped'
+    );
+    const searchVisibilityLabel = $derived(indexable ? 'Allow indexing' : 'Keep unlisted');
 
     function settingIsTrue(value: string | null, fallback: boolean): boolean {
         if (value === null) return fallback;
         return value === 'true';
+    }
+
+    function normalizeScenario(value: string | null): PublishScenario {
+        return value === 'client_review' || value === 'agent_handoff' || value === 'static_host'
+            ? value
+            : 'local_preview';
     }
 
     onMount(async () => {
@@ -79,7 +131,7 @@
         indexable = settingIsTrue(savedIndexable, false);
         serverHost = savedServerHost ?? '127.0.0.1';
         serverPort = savedServerPort ?? '8000';
-        scenario = (savedScenario as PublishScenario | null) ?? 'local_preview';
+        scenario = normalizeScenario(savedScenario);
         shareUrl = savedShareUrl ?? '';
         loading = false;
     });
@@ -98,8 +150,9 @@
     }
 
     async function exportPackage() {
-        if (exportSourceCount === 0) return;
+        if (!canBuild) return;
         exporting = true;
+        if (serverResult) await stopServer(false);
         lastResult = null;
         try {
             const result = await exportStaticPublishPackage(
@@ -137,12 +190,12 @@
             );
             lastResult = result;
             serverResult = null;
-            showToast('Static package exported', {
+            showToast('Package built', {
                 detail: `${result.image_count} images`,
                 type: 'success',
             });
         } catch (e) {
-            showToast(`Static export failed: ${e}`, { type: 'error' });
+            showToast(`Package build failed: ${e}`, { type: 'error' });
         } finally {
             exporting = false;
         }
@@ -151,7 +204,38 @@
     async function copyHandoffPath() {
         if (!lastResult) return;
         await navigator.clipboard.writeText(lastResult.instructions_path);
-        showToast('Claude handoff path copied', { type: 'success', duration: 2500 });
+        showToast('Agent notes path copied', { type: 'success', duration: 2500 });
+    }
+
+    async function copyPublishItem(item: StaticPublishShareItem) {
+        await navigator.clipboard.writeText(item.value);
+        showToast(`${item.label} copied`, { type: 'success', duration: 2500 });
+    }
+
+    async function sharePublishItem(item: StaticPublishShareItem) {
+        if (navigator.share) {
+            try {
+                await navigator.share({
+                    title: item.label,
+                    text: item.value,
+                    url: item.kind === 'url' ? item.value : undefined,
+                });
+                return;
+            } catch (e) {
+                if (e instanceof DOMException && e.name === 'AbortError') return;
+            }
+        }
+        await copyPublishItem(item);
+    }
+
+    async function openPublishItem(item: StaticPublishShareItem) {
+        if (!item.openable) return;
+        try {
+            if (item.kind === 'url') await openUrl(item.value);
+            else await openPath(item.value);
+        } catch (e) {
+            showToast(`Open failed: ${e}`, { type: 'error', duration: 5000 });
+        }
     }
 
     async function startServer() {
@@ -165,182 +249,353 @@
                 Number.isFinite(parsedPort) ? parsedPort : 8000,
             );
             serverResult = result;
-            showToast('Static server started', {
+            showToast('Preview started', {
                 detail: result.url,
                 type: 'success',
                 duration: 5000,
             });
         } catch (e) {
-            showToast(`Static server failed: ${e}`, { type: 'error' });
+            showToast(`Preview failed: ${e}`, { type: 'error' });
         } finally {
             startingServer = false;
         }
     }
+
+    async function stopServer(showNotification = true) {
+        stoppingServer = true;
+        try {
+            const result = await stopStaticPublishServer();
+            serverResult = null;
+            if (showNotification) {
+                showToast(result.stopped ? 'Preview stopped' : 'Preview already stopped', {
+                    detail: result.url ?? undefined,
+                    type: 'success',
+                    duration: 3500,
+                });
+            }
+        } catch (e) {
+            showToast(`Stop preview failed: ${e}`, { type: 'error' });
+        } finally {
+            stoppingServer = false;
+        }
+    }
+
+    async function toggleServer() {
+        if (serverResult) await stopServer();
+        else await startServer();
+    }
 </script>
 
 {#if loading}
-    <p class="loading">Loading...</p>
+    <div class="loading" role="status">Loading publish settings...</div>
 {:else}
-    <div class="section">
-        <div class="section-header">Workflow</div>
-        <div class="setting-row stacked">
-            <label for="static-scenario">Scenario</label>
-            <select
-                id="static-scenario"
-                class="wide-input"
-                bind:value={scenario}
-                onchange={() => saveSetting('static_publishing_scenario', scenario)}
-            >
-                <option value="local_preview">Local preview</option>
-                <option value="client_review">Client review link</option>
-                <option value="agent_handoff">Agent handoff</option>
-                <option value="static_host">Static host package</option>
-            </select>
-        </div>
-        <div class="setting-row stacked">
-            <label for="static-output-dir">Output folder</label>
-            <input
-                id="static-output-dir"
-                class="wide-input"
-                bind:value={outputDir}
-                placeholder="Default: app data / static-publishing / canvas"
-                onblur={() => saveSetting('static_publishing_output_dir', outputDir)}
-            />
-        </div>
-        <div class="setting-row">
-            <span>Source</span>
-            <span class="count">{exportSourceLabel} · {exportSourceCount} image{exportSourceCount === 1 ? '' : 's'}</span>
-        </div>
-        <button class="primary-btn" onclick={exportPackage} disabled={exporting || exportSourceCount === 0}>
-            {exporting ? 'Building...' : 'Build Static Site'}
-        </button>
-    </div>
-
-    <div class="section">
-        <div class="section-header">Site</div>
-        <div class="setting-row stacked">
-            <label for="static-site-title">Title</label>
-            <input
-                id="static-site-title"
-                class="wide-input"
-                bind:value={siteTitle}
-                onblur={() => saveSetting('static_publishing_site_title', siteTitle)}
-            />
-        </div>
-        <div class="setting-row stacked">
-            <label for="static-site-description">Description</label>
-            <textarea
-                id="static-site-description"
-                class="wide-input text-area"
-                rows="3"
-                bind:value={siteDescription}
-                onblur={() => saveSetting('static_publishing_site_description', siteDescription)}
-            ></textarea>
-        </div>
-        <div class="setting-row stacked">
-            <label for="static-share-url">Share URL for QR</label>
-            <input
-                id="static-share-url"
-                class="wide-input"
-                bind:value={shareUrl}
-                placeholder="Cloudflare, Tailscale, or static host URL"
-                onblur={() => saveSetting('static_publishing_share_url', shareUrl)}
-            />
-        </div>
-        <div class="setting-row">
-            <span>Search engines</span>
-            <button class="toggle" class:on={indexable} onclick={() => { indexable = !indexable; saveBoolean('static_publishing_indexable', indexable); }}>
-                {indexable ? 'INDEX' : 'NOINDEX'}
-            </button>
-        </div>
-        <div class="setting-row stacked">
-            <label for="static-links">Links</label>
-            <textarea
-                id="static-links"
-                class="wide-input text-area"
-                rows="4"
-                bind:value={linksText}
-                placeholder="Project brief | https://example.com/brief"
-                onblur={saveLinks}
-            ></textarea>
-            <span class="count">{parsedLinks.length} link{parsedLinks.length === 1 ? '' : 's'} included</span>
-        </div>
-    </div>
-
-    <div class="section">
-        <div class="section-header">Assets</div>
-        <label class="check-row">
-            <input type="checkbox" bind:checked={includeThumbnails} onchange={() => saveBoolean('static_publishing_include_thumb', includeThumbnails)} />
-            <span>Thumb</span>
-            <span class="count">420px JPEG</span>
-        </label>
-        <label class="check-row">
-            <input type="checkbox" bind:checked={includeWeb} onchange={() => saveBoolean('static_publishing_include_web', includeWeb)} />
-            <span>Web</span>
-            <span class="count">1800px JPEG</span>
-        </label>
-        <label class="check-row">
-            <input type="checkbox" bind:checked={includeFull} onchange={() => saveBoolean('static_publishing_include_full', includeFull)} />
-            <span>Full</span>
-            <span class="count">source or RAW preview</span>
-        </label>
-    </div>
-
-    <div class="section">
-        <div class="section-header">Local Preview</div>
-        <div class="settings-grid">
-            <div class="setting-row stacked compact">
-                <label for="static-server-host">Host</label>
-                <input
-                    id="static-server-host"
-                    class="wide-input"
-                    bind:value={serverHost}
-                    placeholder="127.0.0.1"
-                    onblur={() => saveSetting('static_publishing_server_host', serverHost)}
-                />
+    <section class="publish-shell" aria-labelledby="publish-title" aria-busy={exporting}>
+        <header class="publish-header">
+            <div class="title-block">
+                <span class="eyebrow">Publish</span>
+                <h1 id="publish-title">Publish site</h1>
+                <p>{scenarioLabel} · {sourceSummary} · {variantSummary}</p>
             </div>
-            <div class="setting-row stacked compact">
-                <label for="static-server-port">Port</label>
-                <input
-                    id="static-server-port"
-                    class="wide-input"
-                    bind:value={serverPort}
-                    placeholder="8000"
-                    onblur={() => saveSetting('static_publishing_server_port', serverPort)}
-                />
+            <div class="status-strip" aria-live="polite">
+                <span>{buildStatus}</span>
+                <span>{exportSourceLabel}</span>
             </div>
-        </div>
-    </div>
+        </header>
 
-    {#if lastResult}
-        <div class="section result-section">
-            <div class="section-header">
-                Last Package
-                <div class="result-actions">
-                    <button class="secondary-btn" onclick={startServer} disabled={startingServer}>
-                        {startingServer ? 'Starting' : 'Start Server'}
+        <div class="publish-grid">
+            <div class="section publish-panel">
+                <div class="section-header">
+                    <span>Source and package</span>
+                    <span class="count">{sourceSummary}</span>
+                </div>
+                <div class="setting-row stacked">
+                    <label for="static-scenario">Workflow</label>
+                    <select
+                        id="static-scenario"
+                        class="wide-input"
+                        bind:value={scenario}
+                        onchange={() => saveSetting('static_publishing_scenario', scenario)}
+                    >
+                        <option value="local_preview">Local preview</option>
+                        <option value="client_review">Client review</option>
+                        <option value="agent_handoff">Agent handoff</option>
+                        <option value="static_host">Static host</option>
+                    </select>
+                </div>
+                <div class="setting-row stacked">
+                    <label for="static-output-dir">Output folder</label>
+                    <input
+                        id="static-output-dir"
+                        class="wide-input"
+                        bind:value={outputDir}
+                        placeholder="Default app data folder"
+                        autocomplete="off"
+                        onblur={() => saveSetting('static_publishing_output_dir', outputDir)}
+                    />
+                </div>
+                <div class="source-box" role="status" aria-live="polite">
+                    <span>Source</span>
+                    <strong>{exportSourceLabel}</strong>
+                    <span>{sourceSummary}</span>
+                </div>
+                <button class="primary-btn" onclick={exportPackage} disabled={exporting || !canBuild}>
+                    {exporting ? 'Building package...' : 'Build package'}
+                </button>
+            </div>
+
+            <div class="section publish-panel">
+                <div class="section-header">
+                    <span>Site details</span>
+                    <span class="count">{parsedLinks.length} link{parsedLinks.length === 1 ? '' : 's'}</span>
+                </div>
+                <div class="setting-row stacked">
+                    <label for="static-site-title">Site title</label>
+                    <input
+                        id="static-site-title"
+                        class="wide-input"
+                        bind:value={siteTitle}
+                        autocomplete="off"
+                        onblur={() => saveSetting('static_publishing_site_title', siteTitle)}
+                    />
+                </div>
+                <div class="setting-row stacked">
+                    <label for="static-site-description">Intro text</label>
+                    <textarea
+                        id="static-site-description"
+                        class="wide-input text-area"
+                        rows="3"
+                        bind:value={siteDescription}
+                        spellcheck="true"
+                        onblur={() => saveSetting('static_publishing_site_description', siteDescription)}
+                    ></textarea>
+                </div>
+                <div class="setting-row stacked">
+                    <label for="static-share-url">Public/tunnel URL</label>
+                    <input
+                        id="static-share-url"
+                        class="wide-input"
+                        type="url"
+                        bind:value={shareUrl}
+                        placeholder="https://name.ngrok-free.app or https://machine.tailnet.ts.net"
+                        autocomplete="off"
+                        onblur={() => saveSetting('static_publishing_share_url', shareUrl)}
+                    />
+                    <span class="count">Use ngrok, Tailscale Funnel, Cloudflare Tunnel, or a static host URL for public handoff.</span>
+                </div>
+                <div class="setting-row stacked">
+                    <label for="static-links">Related links</label>
+                    <textarea
+                        id="static-links"
+                        class="wide-input text-area links-area"
+                        rows="4"
+                        bind:value={linksText}
+                        placeholder="Project brief | https://example.com/brief"
+                        aria-describedby="static-links-count"
+                        onblur={saveLinks}
+                    ></textarea>
+                    <span id="static-links-count" class="count">{parsedLinks.length} link{parsedLinks.length === 1 ? '' : 's'} included</span>
+                </div>
+            </div>
+
+            <div class="section publish-panel delivery-panel">
+                <div class="section-header">
+                    <span>Delivery</span>
+                    <span class="count">{searchVisibilityLabel}</span>
+                </div>
+                <div class="setting-row">
+                    <span>Search visibility</span>
+                    <button
+                        class="toggle"
+                        class:on={indexable}
+                        aria-pressed={indexable}
+                        onclick={() => { indexable = !indexable; saveBoolean('static_publishing_indexable', indexable); }}
+                    >
+                        {searchVisibilityLabel}
                     </button>
-                    <button class="secondary-btn" onclick={copyHandoffPath}>Copy Handoff</button>
+                </div>
+                <fieldset class="asset-fieldset">
+                    <legend>Asset files</legend>
+                    <label class="check-row">
+                        <input type="checkbox" bind:checked={includeThumbnails} onchange={() => saveBoolean('static_publishing_include_thumb', includeThumbnails)} />
+                        <span>Thumbnail</span>
+                        <span class="count">420 px JPEG</span>
+                    </label>
+                    <label class="check-row">
+                        <input type="checkbox" bind:checked={includeWeb} onchange={() => saveBoolean('static_publishing_include_web', includeWeb)} />
+                        <span>Web image</span>
+                        <span class="count">1800 px JPEG</span>
+                    </label>
+                    <label class="check-row">
+                        <input type="checkbox" bind:checked={includeFull} onchange={() => saveBoolean('static_publishing_include_full', includeFull)} />
+                        <span>Original file</span>
+                        <span class="count">source or RAW preview</span>
+                    </label>
+                </fieldset>
+                <div class="preview-group">
+                    <div class="section-subheader">Local preview</div>
+                    <div class="settings-grid">
+                        <div class="setting-row stacked compact">
+                            <label for="static-server-host">Host</label>
+                            <input
+                                id="static-server-host"
+                                class="wide-input"
+                                bind:value={serverHost}
+                                placeholder="127.0.0.1"
+                                autocomplete="off"
+                                onblur={() => saveSetting('static_publishing_server_host', serverHost)}
+                            />
+                        </div>
+                        <div class="setting-row stacked compact">
+                            <label for="static-server-port">Port</label>
+                            <input
+                                id="static-server-port"
+                                class="wide-input"
+                                bind:value={serverPort}
+                                placeholder="8000"
+                                inputmode="numeric"
+                                autocomplete="off"
+                                onblur={() => saveSetting('static_publishing_server_port', serverPort)}
+                            />
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="path-row"><span>Site</span><code>{lastResult.site_dir}</code></div>
-            <div class="path-row"><span>Manifest</span><code>{lastResult.manifest_path}</code></div>
-            <div class="path-row"><span>Handoff</span><code>{lastResult.instructions_path}</code></div>
-            <div class="path-row"><span>QR</span><code>{lastResult.qr_svg_path}</code></div>
-            <div class="path-row"><span>URL</span><code>{lastResult.qr_target_url}</code></div>
-            <div class="path-row"><span>Phrase</span><code>{lastResult.access_phrase}</code></div>
-            {#if serverResult}
-                <div class="path-row"><span>Server</span><code>{serverResult.url}</code></div>
-            {/if}
-            {#if lastResult.warnings.length > 0}
-                <div class="warnings">
-                    {#each lastResult.warnings as warning}
-                        <span>{warning}</span>
-                    {/each}
-                </div>
-            {/if}
         </div>
-    {/if}
+
+        {#if lastResult}
+            <div class="section result-section" aria-live="polite">
+                <div class="section-header">
+                    <div class="result-heading">
+                        <span>Site publishing</span>
+                        <span class="count">Latest package</span>
+                    </div>
+                    <div class="result-actions">
+                        <button class="secondary-btn" onclick={toggleServer} disabled={startingServer || stoppingServer}>
+                            {startingServer ? 'Starting preview...' : stoppingServer ? 'Stopping preview...' : serverResult ? 'Stop preview' : 'Start preview'}
+                        </button>
+                        <button class="secondary-btn" onclick={copyHandoffPath}>Copy agent notes</button>
+                    </div>
+                </div>
+                <div class="result-body">
+                    <div class="result-zone preview-zone">
+                        <div class="zone-header">
+                            <span>Preview</span>
+                            <span class:running={!!serverResult}>{previewStatusLabel}</span>
+                        </div>
+                        <div class="qr-frame">
+                            <img src={qrImageSrc} alt="QR code for target URL" />
+                        </div>
+                        <div class="handoff-list compact">
+                            {#if targetItem}
+                                <div class="handoff-row">
+                                    <div class="handoff-value">
+                                        <span class="handoff-label">{targetItem.label}</span>
+                                        <a
+                                            class="handoff-path"
+                                            href={targetItem.value}
+                                            title={targetItem.value}
+                                            onclick={(event) => { event.preventDefault(); openPublishItem(targetItem); }}
+                                        >
+                                            {targetItem.value}
+                                        </a>
+                                    </div>
+                                    <div class="item-actions">
+                                        <button class="mini-btn" onclick={() => openPublishItem(targetItem)}>Open</button>
+                                        <button class="mini-btn" onclick={() => copyPublishItem(targetItem)}>Copy</button>
+                                        <button class="mini-btn" onclick={() => sharePublishItem(targetItem)}>Share</button>
+                                    </div>
+                                </div>
+                            {/if}
+                            {#if previewItem}
+                                <div class="handoff-row">
+                                    <div class="handoff-value">
+                                        <span class="handoff-label">{previewItem.label}</span>
+                                        <a
+                                            class="handoff-path"
+                                            href={previewItem.value}
+                                            title={previewItem.value}
+                                            onclick={(event) => { event.preventDefault(); openPublishItem(previewItem); }}
+                                        >
+                                            {previewItem.value}
+                                        </a>
+                                    </div>
+                                    <div class="item-actions">
+                                        <button class="mini-btn" onclick={() => openPublishItem(previewItem)}>Open</button>
+                                        <button class="mini-btn" onclick={() => copyPublishItem(previewItem)}>Copy</button>
+                                        <button class="mini-btn" onclick={() => sharePublishItem(previewItem)}>Share</button>
+                                    </div>
+                                </div>
+                            {/if}
+                            {#if accessPhraseItem}
+                                <div class="handoff-row">
+                                    <div class="handoff-value">
+                                        <span class="handoff-label">{accessPhraseItem.label}</span>
+                                        <code class="handoff-path" title={accessPhraseItem.value}>{accessPhraseItem.value}</code>
+                                    </div>
+                                    <div class="item-actions">
+                                        <button class="mini-btn" onclick={() => copyPublishItem(accessPhraseItem)}>Copy</button>
+                                        <button class="mini-btn" onclick={() => sharePublishItem(accessPhraseItem)}>Share</button>
+                                    </div>
+                                </div>
+                            {/if}
+                        </div>
+                    </div>
+                    <div class="result-zone package-zone">
+                        <div class="zone-header">
+                            <span>Package files</span>
+                            <span>{packageFileItems.length} files</span>
+                        </div>
+                        <div class="handoff-list">
+                            {#each packageFileItems as item}
+                                <div class="handoff-row">
+                                    <div class="handoff-value">
+                                        <span class="handoff-label">{item.label}</span>
+                                        <code class="handoff-path" title={item.value}>{item.value}</code>
+                                    </div>
+                                    <div class="item-actions">
+                                        {#if item.openable}
+                                            <button class="mini-btn" onclick={() => openPublishItem(item)}>Open</button>
+                                        {/if}
+                                        <button class="mini-btn" onclick={() => copyPublishItem(item)}>Copy</button>
+                                        <button class="mini-btn" onclick={() => sharePublishItem(item)}>Share</button>
+                                    </div>
+                                </div>
+                            {/each}
+                        </div>
+                    </div>
+                    <div class="result-zone status-zone">
+                        <div class="zone-header">
+                            <span>Status</span>
+                            <span class:running={!!serverResult}>{previewStatusLabel}</span>
+                        </div>
+                        <div class="status-list">
+                            <div class="status-row">
+                                <span>Images</span>
+                                <strong>{lastResult.image_count}</strong>
+                            </div>
+                            <div class="status-row">
+                                <span>Skipped</span>
+                                <strong>{lastResult.skipped_count}</strong>
+                            </div>
+                            <div class="status-row">
+                                <span>Preview host</span>
+                                <strong title={serverResult ? `${serverResult.host}:${serverResult.port}` : `${serverHost}:${serverPort}`}>
+                                    {serverResult ? `${serverResult.host}:${serverResult.port}` : `${serverHost}:${serverPort}`}
+                                </strong>
+                            </div>
+                        </div>
+                        {#if lastResult.warnings.length > 0}
+                            <div class="warnings" role="status">
+                                {#each lastResult.warnings as warning}
+                                    <span>{warning}</span>
+                                {/each}
+                            </div>
+                        {/if}
+                    </div>
+                </div>
+            </div>
+        {/if}
+    </section>
 {/if}
 
 <style>
@@ -349,29 +604,103 @@
         padding: 20px;
         text-align: center;
     }
-    .section {
-        padding: 16px 20px;
+    .publish-shell {
+        display: grid;
+        gap: 16px;
+        padding: 20px;
+        min-height: 100%;
+        align-content: start;
+    }
+    .publish-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 16px;
+        align-items: end;
+        padding-bottom: 16px;
         border-bottom: 1px solid var(--border);
     }
-    .section:last-child {
-        border-bottom: none;
+    .title-block {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+    }
+    .eyebrow {
+        color: var(--green);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+    h1 {
+        color: var(--text);
+        font-size: 22px;
+        line-height: 1.2;
+        font-weight: 700;
+    }
+    .title-block p {
+        color: var(--text-secondary);
+        font-size: 12px;
+    }
+    .status-strip {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+        min-width: 0;
+    }
+    .status-strip span {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text-secondary);
+        font-size: 11px;
+        padding: 4px 8px;
+        max-width: 260px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .publish-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1px;
+        border: 1px solid var(--border);
+        background: var(--border);
+    }
+    .section {
+        padding: 16px 20px;
+        background: var(--surface);
+    }
+    .publish-panel {
+        display: grid;
+        align-content: start;
+        gap: 12px;
+        min-width: 0;
     }
     .section-header {
         font-size: 11px;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0;
         color: var(--text-secondary);
-        margin-bottom: 12px;
         display: flex;
+        gap: 10px;
         justify-content: space-between;
         align-items: center;
+        min-width: 0;
+    }
+    .section-header > span:first-child {
+        color: var(--text);
+    }
+    .section-subheader {
+        color: var(--text-secondary);
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
     }
     .setting-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 6px 0;
+        gap: 10px;
         font-size: 13px;
         color: var(--text);
     }
@@ -383,15 +712,31 @@
     .setting-row.compact {
         padding: 0;
     }
+    label,
+    legend {
+        color: var(--text);
+        font-size: 12px;
+    }
     .wide-input {
         width: 100%;
         background: var(--bg);
         border: 1px solid var(--border);
         border-radius: var(--radius);
-        padding: 7px 9px;
+        padding: 8px 9px;
         color: var(--text);
         font-family: var(--font);
         font-size: 12px;
+        min-height: 34px;
+    }
+    .wide-input:focus-visible,
+    .toggle:focus-visible,
+    .primary-btn:focus-visible,
+    .secondary-btn:focus-visible,
+    .mini-btn:focus-visible,
+    .handoff-path:focus-visible,
+    .check-row input:focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: 2px;
     }
     .wide-input::placeholder {
         color: var(--text-secondary);
@@ -402,23 +747,59 @@
         resize: vertical;
         line-height: 1.4;
     }
+    .links-area {
+        min-height: 92px;
+    }
+    .source-box {
+        display: grid;
+        gap: 4px;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg);
+        color: var(--text-secondary);
+        font-size: 11px;
+        min-width: 0;
+    }
+    .source-box strong {
+        color: var(--text);
+        font-size: 13px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .asset-fieldset {
+        display: grid;
+        gap: 4px;
+        border: 0;
+        min-width: 0;
+    }
+    .asset-fieldset legend {
+        margin-bottom: 2px;
+    }
     .check-row {
         display: grid;
-        grid-template-columns: auto 1fr auto;
+        grid-template-columns: auto minmax(0, 1fr) auto;
         gap: 8px;
         align-items: center;
-        padding: 6px 0;
+        min-height: 30px;
         color: var(--text);
         font-size: 13px;
     }
     .count {
         color: var(--text-secondary);
         font-size: 11px;
+        overflow-wrap: anywhere;
     }
     .settings-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 8px;
+    }
+    .preview-group {
+        display: grid;
+        gap: 8px;
+        padding-top: 4px;
     }
     .primary-btn,
     .secondary-btn {
@@ -428,8 +809,8 @@
     }
     .primary-btn {
         width: 100%;
-        margin-top: 10px;
-        padding: 8px 12px;
+        min-height: 36px;
+        padding: 9px 12px;
         border: none;
         background: var(--green);
         color: var(--bg);
@@ -444,7 +825,8 @@
         background: none;
         border: 1px solid var(--border);
         color: var(--blue);
-        padding: 2px 10px;
+        min-height: 28px;
+        padding: 4px 10px;
         font-size: 11px;
     }
     .secondary-btn:hover {
@@ -461,39 +843,280 @@
         color: var(--text-secondary);
         font-family: var(--font);
         font-size: 11px;
+        min-height: 28px;
         padding: 4px 8px;
         cursor: pointer;
+        white-space: nowrap;
     }
     .toggle.on {
         border-color: var(--green);
         color: var(--green);
     }
+    .result-heading {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+    }
+    .result-heading > span:first-child {
+        color: var(--text);
+    }
     .result-actions {
         display: flex;
         gap: 6px;
         align-items: center;
+        flex-wrap: wrap;
+        justify-content: flex-end;
     }
-    .path-row {
+    .result-section {
+        border: 1px solid var(--border);
+        padding: 0;
+    }
+    .result-section > .section-header {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+    }
+    .result-body {
         display: grid;
-        grid-template-columns: 70px 1fr;
+        grid-template-columns: minmax(220px, 0.85fr) minmax(360px, 1.45fr) minmax(230px, 0.85fr);
+        gap: 0;
+        min-width: 0;
+    }
+    .result-zone {
+        display: grid;
+        align-content: start;
+        gap: 12px;
+        min-width: 0;
+        padding: 14px 16px;
+    }
+    .package-zone,
+    .status-zone {
+        border-left: 1px solid var(--border);
+    }
+    .zone-header {
+        display: flex;
+        justify-content: space-between;
         gap: 8px;
-        align-items: baseline;
-        padding: 4px 0;
+        align-items: center;
+        min-width: 0;
+        color: var(--text-secondary);
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    .zone-header > span:first-child {
+        color: var(--text);
+    }
+    .zone-header > span:last-child {
+        max-width: 50%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .zone-header .running {
+        color: var(--green);
+    }
+    .qr-frame {
+        width: min(100%, 220px);
+        aspect-ratio: 1;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg);
+        padding: 10px;
+    }
+    .qr-frame img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border-radius: var(--radius);
+        background: var(--text);
+    }
+    .handoff-list {
+        display: grid;
+        border-top: 1px solid var(--border);
+        min-width: 0;
+    }
+    .handoff-list.compact {
+        border-top: 0;
+        gap: 8px;
+    }
+    .handoff-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: center;
+        min-width: 0;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border);
+    }
+    .handoff-list.compact .handoff-row {
+        padding: 0;
+        border-bottom: 0;
+    }
+    .handoff-value {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+    }
+    .handoff-label {
+        color: var(--text-secondary);
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    .handoff-path {
+        display: block;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text);
+        font-family: var(--font);
+        font-size: 12px;
+        line-height: 1.35;
+    }
+    a.handoff-path {
+        text-decoration: underline;
+        text-underline-offset: 2px;
+    }
+    .item-actions {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+    .mini-btn {
+        min-height: 24px;
+        padding: 3px 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        color: var(--blue);
+        font-family: var(--font);
+        font-size: 10px;
+        cursor: pointer;
+    }
+    .mini-btn:hover {
+        border-color: var(--blue);
+    }
+    .status-list {
+        display: grid;
+        gap: 0;
+        border-top: 1px solid var(--border);
+    }
+    .status-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        min-width: 0;
+        padding: 9px 0;
+        border-bottom: 1px solid var(--border);
         color: var(--text-secondary);
         font-size: 11px;
     }
-    .path-row code {
+    .status-row strong {
+        min-width: 0;
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         color: var(--text);
-        overflow-wrap: anywhere;
+        font-size: 12px;
+        font-weight: 600;
     }
     .warnings {
         display: grid;
         gap: 4px;
-        margin-top: 10px;
         color: var(--orange);
         font-size: 11px;
     }
-    .result-section {
-        background: var(--surface);
+    @media (max-width: 1180px) {
+        .publish-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .result-body {
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        }
+        .status-zone {
+            grid-column: 1 / -1;
+            border-left: 0;
+            border-top: 1px solid var(--border);
+        }
+        .delivery-panel {
+            grid-column: 1 / -1;
+        }
+        .delivery-panel {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            align-items: start;
+        }
+        .delivery-panel .section-header {
+            grid-column: 1 / -1;
+        }
+    }
+    @media (max-width: 760px) {
+        .publish-shell {
+            gap: 12px;
+            padding: 8px;
+        }
+        .publish-header,
+        .publish-grid,
+        .delivery-panel,
+        .result-body {
+            grid-template-columns: 1fr;
+        }
+        .publish-header {
+            gap: 10px;
+            padding-bottom: 12px;
+        }
+        .section {
+            padding: 12px;
+        }
+        .section-header,
+        .setting-row {
+            align-items: stretch;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .status-strip {
+            justify-content: flex-start;
+        }
+        .status-strip span {
+            max-width: 100%;
+        }
+        .delivery-panel,
+        .delivery-panel .section-header {
+            grid-column: auto;
+        }
+        .settings-grid {
+            grid-template-columns: 1fr;
+        }
+        .source-box strong {
+            white-space: normal;
+        }
+        .check-row {
+            grid-template-columns: auto minmax(0, 1fr);
+            align-items: start;
+        }
+        .check-row .count {
+            grid-column: 2;
+        }
+        .result-actions {
+            justify-content: flex-start;
+        }
+        .package-zone,
+        .status-zone {
+            grid-column: auto;
+            border-left: 0;
+            border-top: 1px solid var(--border);
+        }
+        .handoff-row {
+            grid-template-columns: 1fr;
+            gap: 6px;
+        }
+        .item-actions {
+            justify-content: flex-start;
+        }
     }
 </style>

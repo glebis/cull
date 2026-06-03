@@ -26,34 +26,20 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: lts/*
+          node-version-file: .node-version
           cache: npm
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@1.89.0
         with:
+          components: rustfmt, clippy
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
-      - name: Install frontend dependencies
-        run: npm ci
+      - name: Frontend checks
+        run: npm run ci:frontend
 
-      - name: Typecheck
-        run: npm run check
-
-      - name: Frontend tests
-        run: npm test
-
-      - name: Rust formatting
-        working-directory: src-tauri
-        run: cargo fmt --all -- --check
-
-      - name: Rust clippy
-        working-directory: src-tauri
-        run: cargo clippy --all-targets
-
-      - name: Rust tests
-        working-directory: src-tauri
-        run: cargo test --all-targets
+      - name: Rust checks
+        run: npm run ci:rust
 
       - name: Verify release secrets
         env:

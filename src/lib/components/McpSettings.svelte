@@ -4,6 +4,7 @@
     import type { McpToken } from '$lib/api';
     import { APP_ICON_VARIANTS, normalizeAppIconVariant, type AppIconVariantId } from '$lib/app-icons';
     import { navigateTo, showToast, staticPublishingEnabled, viewMode } from '$lib/stores';
+    import { CLIPBOARD_PASTE_DATE_FORMAT_SETTING, DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT } from '$lib/clipboard-actions';
     import PrivacyDashboard from './PrivacyDashboard.svelte';
 
     let activeSettingsTab = $state<'general' | 'appearance' | 'privacy'>('general');
@@ -29,6 +30,7 @@
     let moduleRaw = $state(false);
     let moduleStaticPublishing = $state(false);
     let appIconVariant = $state<AppIconVariantId>('primary');
+    let clipboardPasteDateFormat = $state(DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT);
     let cohereEmbeddingModel = $state('embed-v4.0');
     let openaiEmbeddingModel = $state('text-embedding-3-large');
     let ollamaEmbeddingUrl = $state('http://localhost:11434/api/embed');
@@ -58,7 +60,7 @@
 
     onMount(async () => {
         try {
-            const [toks, ctSetting, trashSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting, iconSetting, cohereEmbeddingSetting, openaiEmbeddingSetting, ollamaEmbeddingUrlSetting, ollamaEmbeddingModelSetting] = await Promise.all([
+            const [toks, ctSetting, trashSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting, iconSetting, clipboardPasteDateFormatSetting, cohereEmbeddingSetting, openaiEmbeddingSetting, ollamaEmbeddingUrlSetting, ollamaEmbeddingModelSetting] = await Promise.all([
                 listMcpTokens(),
                 getAppSetting('close_to_tray'),
                 getAppSetting('skip_trash_confirm'),
@@ -68,6 +70,7 @@
                 getAppSetting('module_raw'),
                 getAppSetting('module_static_publishing'),
                 getAppSetting('app_icon_variant'),
+                getAppSetting(CLIPBOARD_PASTE_DATE_FORMAT_SETTING),
                 getAppSetting('cohere_embedding_model'),
                 getAppSetting('openai_embedding_model'),
                 getAppSetting('ollama_embedding_url'),
@@ -83,6 +86,7 @@
             moduleStaticPublishing = staticPublishingSetting === 'true';
             staticPublishingEnabled.set(moduleStaticPublishing);
             appIconVariant = normalizeAppIconVariant(iconSetting);
+            if (clipboardPasteDateFormatSetting) clipboardPasteDateFormat = clipboardPasteDateFormatSetting;
             if (cohereEmbeddingSetting) cohereEmbeddingModel = cohereEmbeddingSetting;
             if (openaiEmbeddingSetting) openaiEmbeddingModel = openaiEmbeddingSetting;
             if (ollamaEmbeddingUrlSetting) ollamaEmbeddingUrl = ollamaEmbeddingUrlSetting;
@@ -133,6 +137,12 @@
     async function toggleAutoPurge() {
         autoPurge = !autoPurge;
         await setAppSetting('auto_purge_missing', autoPurge ? 'true' : 'false');
+    }
+
+    async function saveClipboardPasteDateFormat() {
+        const format = clipboardPasteDateFormat.trim() || DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT;
+        clipboardPasteDateFormat = format;
+        await setAppSetting(CLIPBOARD_PASTE_DATE_FORMAT_SETTING, format);
     }
 
     async function selectAppIconVariant(variant: AppIconVariantId) {
@@ -380,6 +390,19 @@
                     <button class="toggle" class:on={autoPurge} onclick={toggleAutoPurge}>
                         {autoPurge ? 'ON' : 'OFF'}
                     </button>
+                </div>
+                <div class="setting-row">
+                    <span>Paste filename date</span>
+                    <input
+                        type="text"
+                        class="date-format-input"
+                        bind:value={clipboardPasteDateFormat}
+                        onblur={saveClipboardPasteDateFormat}
+                        placeholder={DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT}
+                    />
+                </div>
+                <div class="setting-note">
+                    Used when the destination folder has no numeric filename sequence.
                 </div>
             </div>
 
@@ -783,6 +806,20 @@
         font-size: 12px;
         font-family: inherit;
         color: var(--text);
+    }
+    .date-format-input {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 4px 8px;
+        width: 132px;
+        font-size: 12px;
+        font-family: inherit;
+        color: var(--text);
+    }
+    .date-format-input:focus {
+        border-color: var(--blue);
+        outline: none;
     }
     .add-btn {
         background: none;

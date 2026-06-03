@@ -2,7 +2,7 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { images, selectedIds, focusedIndex, compareActiveSide, compareImageOnly, zenMode } from '$lib/stores';
     import type { ImageWithFile } from '$lib/api';
-    import { isRawFormat } from '$lib/api';
+    import { safeAssetPreviewPath } from '$lib/view-utils';
     import ContextMenu from './ContextMenu.svelte';
 
     // Resolve the two images to compare
@@ -29,8 +29,10 @@
     let leftImage = $derived(pair[0]);
     let rightImage = $derived(pair[1]);
 
-    let leftSrc = $derived(leftImage ? (isRawFormat(leftImage.image.format) ? convertFileSrc(leftImage.thumbnail_path ?? leftImage.path) : convertFileSrc(leftImage.path)) : '');
-    let rightSrc = $derived(rightImage ? (isRawFormat(rightImage.image.format) ? convertFileSrc(rightImage.thumbnail_path ?? rightImage.path) : convertFileSrc(rightImage.path)) : '');
+    let leftPreviewPath = $derived(leftImage ? safeAssetPreviewPath(leftImage) : null);
+    let rightPreviewPath = $derived(rightImage ? safeAssetPreviewPath(rightImage) : null);
+    let leftSrc = $derived(leftPreviewPath ? convertFileSrc(leftPreviewPath) : '');
+    let rightSrc = $derived(rightPreviewPath ? convertFileSrc(rightPreviewPath) : '');
 
     let leftName = $derived(leftImage?.path.split('/').pop() ?? '');
     let rightName = $derived(rightImage?.path.split('/').pop() ?? '');
@@ -68,7 +70,11 @@
                 <div class="label">{leftName}</div>
             {/if}
             <div class="img-wrap">
-                <img src={leftSrc} alt={leftName} draggable="false" />
+                {#if leftSrc}
+                    <img src={leftSrc} alt={leftName} draggable="false" />
+                {:else}
+                    <div class="preview-unavailable">Preview unavailable</div>
+                {/if}
             </div>
             {#if !imageOnly}
                 <div class="meta">
@@ -107,7 +113,11 @@
                 <div class="label">{rightName}</div>
             {/if}
             <div class="img-wrap">
-                <img src={rightSrc} alt={rightName} draggable="false" />
+                {#if rightSrc}
+                    <img src={rightSrc} alt={rightName} draggable="false" />
+                {:else}
+                    <div class="preview-unavailable">Preview unavailable</div>
+                {/if}
             </div>
             {#if !imageOnly}
                 <div class="meta">
@@ -206,6 +216,11 @@
         height: 100%;
         object-fit: contain;
         display: block;
+    }
+    .preview-unavailable {
+        color: var(--text-secondary);
+        font-size: 12px;
+        text-align: center;
     }
     .meta {
         display: flex;

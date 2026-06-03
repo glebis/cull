@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 19;
+const CURRENT_SCHEMA_VERSION: i64 = 21;
 
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, "core_schema"),
@@ -33,6 +33,8 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (17, "image_tags"),
     (18, "perceptual_hashes"),
     (19, "image_color_metrics"),
+    (20, "schema_compatibility_v20"),
+    (21, "client_feedback"),
 ];
 
 #[derive(Clone)]
@@ -40,16 +42,51 @@ pub struct Database {
     pub(crate) conn: Arc<Mutex<Connection>>,
 }
 
+/// Map a row from the standard image+file+selection SELECT (the 16-column
+/// projection used by `list_images` and `list_images_in_scope`) into an
+/// `ImageWithFile`. Shared so the two list queries cannot drift apart.
+fn map_image_with_file_row(row: &rusqlite::Row) -> rusqlite::Result<ImageWithFile> {
+    let star: Option<u8> = row.get(9)?;
+    let color: Option<String> = row.get(10)?;
+    let decision: Option<String> = row.get(11)?;
+    let selection = Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
+    Ok(ImageWithFile {
+        image: Image {
+            id: row.get(0)?,
+            sha256_hash: row.get(1)?,
+            width: row.get(2)?,
+            height: row.get(3)?,
+            format: row.get(4)?,
+            file_size: row.get(5)?,
+            created_at: row.get(6)?,
+            imported_at: row.get(7)?,
+            ai_prompt: row.get(13)?,
+            raw_metadata: row.get(14)?,
+        },
+        path: row.get(8)?,
+        thumbnail_path: None,
+        selection,
+        source_label: row.get(12)?,
+        missing_at: row.get(15)?,
+    })
+}
+
 impl Database {
     pub fn open(db_path: &Path) -> Result<Self> {
         let should_consider_backup = should_consider_migration_backup(db_path);
         let conn = Connection::open(db_path)?;
+        Self::configure_connection(&conn)?;
         let db = Database {
             conn: Arc::new(Mutex::new(conn)),
         };
         db.preflight_migrations(db_path, should_consider_backup)?;
         db.run_migrations()?;
         Ok(db)
+    }
+
+    fn configure_connection(conn: &Connection) -> Result<()> {
+        conn.pragma_update(None, "foreign_keys", true)?;
+        Ok(())
     }
 
     fn preflight_migrations(&self, db_path: &Path, should_consider_backup: bool) -> Result<()> {
@@ -132,6 +169,58 @@ impl Database {
         self.run_migration_step(19, "image_color_metrics", || {
             self.migrate_image_color_metrics()
         })?;
+        // Compatibility marker for databases created by pre-release builds that
+        // advanced PRAGMA user_version to 20 without requiring additional schema.
+        self.run_migration_step(20, "schema_compatibility_v20", || Ok(()))?;
+        self.run_migration_step(21, "client_feedback", || self.migrate_client_feedback())?;
+
+        // A high PRAGMA user_version alone is not proof the schema is complete:
+        // a partially-applied prerelease migration can leave the version high
+        // while tables are missing, and migration_already_applied would then
+        // skip recreating them. Verify the core tables actually exist so such
+        // corruption is detected here rather than surfacing as runtime errors.
+        self.verify_schema_invariants()?;
+        Ok(())
+    }
+
+    /// Test-only hook: lets integration tests (which compile against the lib
+    /// without `cfg(test)`) exercise the private schema-invariant check. Enabled
+    /// via the `test-support` Cargo feature. See `tests/compat_golden.rs`.
+    #[cfg(feature = "test-support")]
+    pub fn verify_schema_invariants_for_test(&self) -> Result<()> {
+        self.verify_schema_invariants()
+    }
+
+    /// Required tables that must exist after migrations complete. Missing any of
+    /// these indicates a partially-migrated/corrupt database despite a high
+    /// user_version.
+    fn verify_schema_invariants(&self) -> Result<()> {
+        const REQUIRED_TABLES: &[&str] = &[
+            "images",
+            "image_files",
+            "selections",
+            "projects",
+            "collection_items",
+            "tags",
+            "image_tags",
+            "generation_runs",
+            "schema_migrations",
+        ];
+        let conn = self.conn.lock();
+        let mut missing = Vec::new();
+        for table in REQUIRED_TABLES {
+            if !table_exists(&conn, table)? {
+                missing.push(*table);
+            }
+        }
+        if !missing.is_empty() {
+            return Err(migration_error(format!(
+                "database failed schema invariant check (user_version={} claims migrations applied) \
+                 but required tables are missing: {}. The database may be partially migrated or corrupt.",
+                user_version(&conn)?,
+                missing.join(", ")
+            )));
+        }
         Ok(())
     }
 
@@ -448,6 +537,82 @@ impl Database {
             CREATE INDEX IF NOT EXISTS image_color_colorfulness_idx ON image_color_metrics(colorfulness);",
         )?;
         Ok(())
+    }
+
+    // Client feedback is intentionally separate from `selections` so client
+    // favorites/comments never overwrite curator ratings or decisions.
+    fn migrate_client_feedback(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS client_feedback (
+                image_id TEXT PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+                favorite INTEGER NOT NULL DEFAULT 0,
+                comment TEXT,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS client_feedback_favorite_idx ON client_feedback(favorite);",
+        )?;
+        Ok(())
+    }
+
+    /// Upsert client feedback for an image. Passing `favorite=false` and an
+    /// empty/None comment leaves a cleared-but-present row, which is harmless.
+    pub fn set_client_feedback(
+        &self,
+        image_id: &str,
+        favorite: bool,
+        comment: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO client_feedback (image_id, favorite, comment, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(image_id) DO UPDATE SET
+                favorite = excluded.favorite,
+                comment = excluded.comment,
+                updated_at = excluded.updated_at",
+            params![image_id, favorite as i64, comment, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_client_feedback(&self, image_id: &str) -> Result<Option<ClientFeedback>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT image_id, favorite, comment, updated_at FROM client_feedback WHERE image_id = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![image_id], |row| {
+            let favorite: i64 = row.get(1)?;
+            Ok(ClientFeedback {
+                image_id: row.get(0)?,
+                favorite: favorite != 0,
+                comment: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        })?;
+
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn list_client_feedback(&self) -> Result<Vec<ClientFeedback>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT image_id, favorite, comment, updated_at FROM client_feedback ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let favorite: i64 = row.get(1)?;
+            Ok(ClientFeedback {
+                image_id: row.get(0)?,
+                favorite: favorite != 0,
+                comment: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        })?;
+        rows.collect()
     }
 
     fn migrate_library_roots(&self) -> Result<()> {
@@ -1115,35 +1280,88 @@ impl Database {
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
              GROUP BY i.id
-             ORDER BY i.imported_at DESC
+             ORDER BY i.imported_at DESC, i.id ASC
              LIMIT ?1 OFFSET ?2",
         )?;
-        let rows = stmt.query_map(params![limit, offset], |row| {
-            let star: Option<u8> = row.get(9)?;
-            let color: Option<String> = row.get(10)?;
-            let decision: Option<String> = row.get(11)?;
-            let selection =
-                Selection::from_nullable_parts(row.get(0)?, None, star, color, decision);
-            Ok(ImageWithFile {
-                image: Image {
-                    id: row.get(0)?,
-                    sha256_hash: row.get(1)?,
-                    width: row.get(2)?,
-                    height: row.get(3)?,
-                    format: row.get(4)?,
-                    file_size: row.get(5)?,
-                    created_at: row.get(6)?,
-                    imported_at: row.get(7)?,
-                    ai_prompt: row.get(13)?,
-                    raw_metadata: row.get(14)?,
-                },
-                path: row.get(8)?,
-                thumbnail_path: None,
-                selection,
-                source_label: row.get(12)?,
-                missing_at: row.get(15)?,
-            })
-        })?;
+        let rows = stmt.query_map(params![limit, offset], map_image_with_file_row)?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
+    /// Scoped, paginated image listing for MCP tokens. Filters at the SQL level
+    /// by the UNION of folder-prefix, collection membership, and tag membership,
+    /// so a scoped token can page through large libraries without the previous
+    /// in-memory `limit * 3` heuristic or 100k cap. With no dimensions the scope
+    /// matches nothing and an empty Vec is returned — callers must NOT use this
+    /// for unscoped (full-admin) tokens. Folder matching uses an indexed path
+    /// prefix for enumeration here; per-image authorization still goes through
+    /// the canonical `tokens::image_in_scope`/`is_path_under` boundary check.
+    pub fn list_images_in_scope(
+        &self,
+        folders: &[String],
+        collections: &[String],
+        tag_norms: &[String],
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<ImageWithFile>> {
+        use rusqlite::types::Value;
+
+        if folders.is_empty() && collections.is_empty() && tag_norms.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut clauses: Vec<String> = Vec::new();
+        let mut args: Vec<Value> = Vec::new();
+
+        for folder in folders {
+            let folder = folder.trim_end_matches('/');
+            // Exact folder OR any descendant. The trailing "/%" keeps sibling
+            // prefixes like /artisan from matching a /art scope.
+            clauses.push("(f.path = ? OR f.path LIKE ? || '/%')".to_string());
+            args.push(Value::Text(folder.to_string()));
+            args.push(Value::Text(folder.to_string()));
+        }
+        if !collections.is_empty() {
+            let placeholders = vec!["?"; collections.len()].join(",");
+            clauses.push(format!(
+                "i.id IN (SELECT image_id FROM collection_items WHERE collection_id IN ({}))",
+                placeholders
+            ));
+            for c in collections {
+                args.push(Value::Text(c.clone()));
+            }
+        }
+        if !tag_norms.is_empty() {
+            let placeholders = vec!["?"; tag_norms.len()].join(",");
+            clauses.push(format!(
+                "i.id IN (SELECT it.image_id FROM image_tags it JOIN tags t ON t.id = it.tag_id \
+                 WHERE t.normalized_name IN ({}))",
+                placeholders
+            ));
+            for t in tag_norms {
+                args.push(Value::Text(t.clone()));
+            }
+        }
+
+        let sql = format!(
+            "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
+                    i.created_at, i.imported_at, f.path,
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
+                    i.raw_metadata, f.missing_at
+             FROM images i
+             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+             LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             WHERE {}
+             GROUP BY i.id
+             ORDER BY i.imported_at DESC, i.id ASC
+             LIMIT ? OFFSET ?",
+            clauses.join(" OR ")
+        );
+        args.push(Value::Integer(limit as i64));
+        args.push(Value::Integer(offset as i64));
+
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(args), map_image_with_file_row)?;
         rows.collect::<Result<Vec<_>>>()
     }
 
@@ -1172,26 +1390,35 @@ impl Database {
     }
 
     pub fn list_folders(&self) -> Result<Vec<(String, u32)>> {
+        // Group/count/sort in SQLite instead of streaming every image path into
+        // a Rust HashMap. The parent directory is derived with the standard
+        // rtrim dirname trick: rtrim(path, <all non-'/' chars of path>) strips
+        // the trailing basename up to the last '/', and the outer rtrim drops
+        // that trailing '/'. This matches std::path::Path::parent for the
+        // absolute file paths stored at import time.
+        // The CASE matches std::path::Path::parent exactly: a path with no '/'
+        // has no parent (excluded, like `None`); a root-level file ("/x.png")
+        // whose stripped prefix is empty maps to "/".
         let conn = self.conn.lock();
-        let mut stmt = conn
-            .prepare("SELECT f.path, f.image_id FROM image_files f WHERE f.missing_at IS NULL")?;
+        let mut stmt = conn.prepare(
+            "SELECT folder, COUNT(*) AS cnt
+             FROM (
+                 SELECT CASE
+                     WHEN instr(f.path, '/') = 0 THEN NULL
+                     WHEN rtrim(rtrim(f.path, replace(f.path, '/', '')), '/') = '' THEN '/'
+                     ELSE rtrim(rtrim(f.path, replace(f.path, '/', '')), '/')
+                 END AS folder
+                 FROM image_files f
+                 WHERE f.missing_at IS NULL
+             )
+             WHERE folder IS NOT NULL
+             GROUP BY folder
+             ORDER BY folder",
+        )?;
         let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
         })?;
-
-        let mut folder_counts: std::collections::HashMap<String, u32> =
-            std::collections::HashMap::new();
-        for row in rows {
-            let (path, _) = row?;
-            if let Some(parent) = std::path::Path::new(&path).parent() {
-                let folder = parent.to_string_lossy().to_string();
-                *folder_counts.entry(folder).or_insert(0) += 1;
-            }
-        }
-
-        let mut result: Vec<(String, u32)> = folder_counts.into_iter().collect();
-        result.sort_by(|a, b| a.0.cmp(&b.0));
-        Ok(result)
+        rows.collect::<Result<Vec<_>>>()
     }
 
     pub fn list_images_by_folder(
@@ -1341,6 +1568,16 @@ impl Database {
             )?;
         }
         Ok(())
+    }
+
+    /// Collection ids an image belongs to. Used by MCP token scope checks so
+    /// collection-scoped tokens authorize per-image tools consistently.
+    pub fn image_collection_ids(&self, image_id: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock();
+        let mut stmt =
+            conn.prepare("SELECT collection_id FROM collection_items WHERE image_id = ?1")?;
+        let rows = stmt.query_map(params![image_id], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>>>()
     }
 
     pub fn list_collection_images(&self, collection_id: &str) -> Result<Vec<ImageWithFile>> {
@@ -2343,20 +2580,25 @@ impl Database {
     }
 
     pub fn delete_images_by_folder(&self, folder: &str) -> Result<u32> {
+        validate_delete_folder_path(folder)?;
+
         let conn = self.conn.lock();
-        let pattern = format!("{}/%", folder);
+        let prefix = format!("{}/", folder.trim_end_matches('/'));
+        let prefix_len = prefix.chars().count() as i64;
 
         // Get image IDs that ONLY exist in this folder (no other paths)
         let mut stmt = conn.prepare(
             "SELECT DISTINCT f.image_id FROM image_files f
-             WHERE f.path LIKE ?1 AND f.missing_at IS NULL
+             WHERE substr(f.path, 1, ?2) COLLATE BINARY = ?1 COLLATE BINARY
+             AND f.missing_at IS NULL
              AND f.image_id NOT IN (
                  SELECT image_id FROM image_files
-                 WHERE path NOT LIKE ?1 AND missing_at IS NULL
+                 WHERE substr(path, 1, ?2) COLLATE BINARY != ?1 COLLATE BINARY
+                 AND missing_at IS NULL
              )",
         )?;
         let image_ids: Vec<String> = stmt
-            .query_map(params![pattern], |row| row.get(0))?
+            .query_map(params![&prefix, prefix_len], |row| row.get(0))?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -2369,8 +2611,9 @@ impl Database {
 
         // Also delete file records from this folder for images that still exist elsewhere
         conn.execute(
-            "DELETE FROM image_files WHERE path LIKE ?1",
-            params![pattern],
+            "DELETE FROM image_files
+             WHERE substr(path, 1, ?2) COLLATE BINARY = ?1 COLLATE BINARY",
+            params![&prefix, prefix_len],
         )?;
 
         Ok(count)
@@ -3401,6 +3644,35 @@ fn migration_error(message: String) -> SqlError {
     SqlError::SqliteFailure(ffi::Error::new(ffi::SQLITE_ERROR), Some(message))
 }
 
+fn validate_delete_folder_path(folder: &str) -> Result<()> {
+    if folder.is_empty() {
+        return Err(SqlError::InvalidParameterName(
+            "folder path must not be empty".to_string(),
+        ));
+    }
+
+    let path = Path::new(folder);
+    if !path.is_absolute() {
+        return Err(SqlError::InvalidParameterName(
+            "folder path must be absolute".to_string(),
+        ));
+    }
+
+    let has_non_root_component = path.components().any(|component| {
+        !matches!(
+            component,
+            std::path::Component::RootDir | std::path::Component::Prefix(_)
+        )
+    });
+    if !has_non_root_component {
+        return Err(SqlError::InvalidParameterName(
+            "folder path must not be filesystem root".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 fn decode_embedding_bytes(bytes: &[u8]) -> Vec<f32> {
     bytes
         .chunks_exact(4)
@@ -3501,8 +3773,10 @@ mod migration_safety_tests {
         let db_path = tmp.path().join("cull.db");
         let db = Database::open(&db_path).unwrap();
 
+        // Use a version far beyond any real migration so this synthetic failure
+        // never collides with an actually-applied step.
         let err = db
-            .run_migration_step(20, "failing_test_step", || {
+            .run_migration_step(9999, "failing_test_step", || {
                 let conn = db.conn.lock();
                 conn.execute_batch("CREATE TABLE migration_failure_probe (id INTEGER);")?;
                 Err(migration_error("synthetic migration failure".to_string()))
@@ -3523,7 +3797,7 @@ mod migration_safety_tests {
 
         let (status, error): (String, String) = conn
             .query_row(
-                "SELECT status, error FROM schema_migration_steps WHERE version = 20",
+                "SELECT status, error FROM schema_migration_steps WHERE version = 9999",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -3564,6 +3838,47 @@ mod migration_safety_tests {
     }
 
     #[test]
+    fn test_open_accepts_schema_version_20_database() {
+        // A realistic v20 database: fully migrated (all core tables present) but
+        // predating migration 21. Open must run migration 21 and bring it current.
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("version_20.db");
+        {
+            let _ = Database::open(&db_path).unwrap(); // full migrate, all tables
+        }
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch("DROP TABLE IF EXISTS client_feedback; PRAGMA user_version = 20;")
+                .unwrap();
+        }
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock();
+        assert!(table_exists(&conn, "client_feedback").unwrap());
+        assert!(table_exists(&conn, "images").unwrap());
+        let user_version = user_version(&conn).unwrap();
+        assert_eq!(user_version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn test_open_accepts_schema_version_21_database() {
+        // A realistic v21 database: already fully migrated. Re-open must accept it
+        // unchanged (and pass schema-invariant verification).
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("version_21.db");
+        {
+            let _ = Database::open(&db_path).unwrap(); // migrate to current (21)
+        }
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock();
+        assert!(table_exists(&conn, "client_feedback").unwrap());
+        assert!(table_exists(&conn, "images").unwrap());
+        let user_version = user_version(&conn).unwrap();
+        assert_eq!(user_version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
     fn test_open_rejects_unknown_future_schema_version() {
         let tmp = tempfile::tempdir().unwrap();
         let db_path = tmp.path().join("future.db");
@@ -3588,6 +3903,73 @@ mod migration_safety_tests {
 }
 
 #[cfg(test)]
+mod client_feedback_tests {
+    use super::*;
+
+    fn seed_image(db: &Database, id: &str) {
+        db.insert_image(&Image {
+            id: id.to_string(),
+            sha256_hash: format!("hash-{}", id),
+            width: 100,
+            height: 100,
+            format: "png".to_string(),
+            file_size: 1024,
+            created_at: "2026-05-07T00:00:00Z".to_string(),
+            imported_at: "2026-05-07T00:00:00Z".to_string(),
+            ai_prompt: None,
+            raw_metadata: None,
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn set_get_and_list_client_feedback_roundtrip() {
+        let db = Database::open(Path::new(":memory:")).unwrap();
+        seed_image(&db, "img-1");
+        seed_image(&db, "img-2");
+
+        assert!(db.get_client_feedback("img-1").unwrap().is_none());
+
+        db.set_client_feedback("img-1", true, Some("Love this one"))
+            .unwrap();
+        let feedback = db.get_client_feedback("img-1").unwrap().unwrap();
+        assert!(feedback.favorite);
+        assert_eq!(feedback.comment.as_deref(), Some("Love this one"));
+
+        // Upsert updates in place rather than duplicating.
+        db.set_client_feedback("img-1", false, None).unwrap();
+        let feedback = db.get_client_feedback("img-1").unwrap().unwrap();
+        assert!(!feedback.favorite);
+        assert!(feedback.comment.is_none());
+
+        db.set_client_feedback("img-2", true, Some("maybe"))
+            .unwrap();
+        assert_eq!(db.list_client_feedback().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn client_feedback_does_not_touch_selections() {
+        let db = Database::open(Path::new(":memory:")).unwrap();
+        seed_image(&db, "img-1");
+        db.set_rating("img-1", 4).unwrap();
+        db.set_client_feedback("img-1", true, Some("client pick"))
+            .unwrap();
+
+        let stored_rating: Option<i64> = {
+            let conn = db.conn.lock();
+            conn.query_row(
+                "SELECT star_rating FROM selections WHERE image_id = ?1 AND project_id = '__global__'",
+                params!["img-1"],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(stored_rating, Some(4));
+        assert!(db.get_client_feedback("img-1").unwrap().unwrap().favorite);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -3597,6 +3979,10 @@ mod tests {
     }
 
     fn insert_test_image(db: &Database, id: &str, hash: &str) {
+        insert_test_image_at_path(db, id, hash, &format!("/tmp/{}.png", id));
+    }
+
+    fn insert_test_image_at_path(db: &Database, id: &str, hash: &str, path: &str) {
         let img = Image {
             id: id.to_string(),
             sha256_hash: hash.to_string(),
@@ -3613,13 +3999,359 @@ mod tests {
         let file = ImageFile {
             id: format!("f-{}", id),
             image_id: id.to_string(),
-            path: format!("/tmp/{}.png", id),
+            path: path.to_string(),
             last_seen_at: "2026-05-07T00:00:00Z".to_string(),
             missing_at: None,
             last_seen_size: None,
             last_seen_mtime: None,
         };
         db.insert_image_file(&file).unwrap();
+    }
+
+    #[test]
+    fn verify_schema_invariants_passes_for_fresh_db() {
+        let db = test_db();
+        assert!(db.verify_schema_invariants().is_ok());
+    }
+
+    #[test]
+    fn verify_schema_invariants_detects_missing_required_table() {
+        let db = test_db();
+        // Simulate a partially-migrated DB whose user_version claims completion
+        // but is missing a required table. user_version is unchanged (still high).
+        db.conn
+            .lock()
+            .execute_batch("DROP TABLE image_tags")
+            .unwrap();
+        let err = db.verify_schema_invariants().unwrap_err();
+        assert!(
+            err.to_string().contains("image_tags"),
+            "error should name the missing table: {err}"
+        );
+    }
+
+    #[test]
+    fn list_folders_groups_by_parent_directory() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "a", "h-a", "/lib/art/a.png");
+        insert_test_image_at_path(&db, "b", "h-b", "/lib/art/b.png");
+        insert_test_image_at_path(&db, "c", "h-c", "/lib/photos/c.png");
+        insert_test_image_at_path(&db, "d", "h-d", "/lib/photos/sub/d.png");
+
+        let folders = db.list_folders().unwrap();
+        // Counts are per immediate parent directory, sorted by path.
+        assert_eq!(
+            folders,
+            vec![
+                ("/lib/art".to_string(), 2),
+                ("/lib/photos".to_string(), 1),
+                ("/lib/photos/sub".to_string(), 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn list_folders_root_level_file_matches_path_parent() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "r", "h-r", "/root.png");
+        insert_test_image_at_path(&db, "n", "h-n", "/lib/n.png");
+        // Path::parent("/root.png") == "/", Path::parent("/lib/n.png") == "/lib".
+        assert_eq!(
+            db.list_folders().unwrap(),
+            vec![("/".to_string(), 1), ("/lib".to_string(), 1)]
+        );
+    }
+
+    #[test]
+    fn list_folders_excludes_missing_files() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "a", "h-a", "/lib/art/a.png");
+        insert_test_image_at_path(&db, "b", "h-b", "/lib/art/b.png");
+        // Mark one file missing; it must not count toward its folder.
+        db.conn
+            .lock()
+            .execute(
+                "UPDATE image_files SET missing_at = '2026-01-01T00:00:00Z' WHERE image_id = 'b'",
+                [],
+            )
+            .unwrap();
+
+        assert_eq!(
+            db.list_folders().unwrap(),
+            vec![("/lib/art".to_string(), 1)]
+        );
+    }
+
+    #[test]
+    fn list_images_in_scope_collection_paginates_completely() {
+        let db = test_db();
+        let col = db.create_collection("C1").unwrap();
+        // 5 in the scoped collection, 3 outside it.
+        for i in 0..5 {
+            insert_test_image(&db, &format!("in{i}"), &format!("h-in{i}"));
+        }
+        for i in 0..3 {
+            insert_test_image(&db, &format!("out{i}"), &format!("h-out{i}"));
+        }
+        let in_ids: Vec<&str> = ["in0", "in1", "in2", "in3", "in4"].to_vec();
+        db.add_to_collection(&col, &in_ids).unwrap();
+
+        let cols = vec![col.clone()];
+        // Page through with a small limit; the union of all pages must be exactly
+        // the 5 scoped images, with no truncation or out-of-scope leakage.
+        let mut seen = std::collections::BTreeSet::new();
+        for offset in (0..6).step_by(2) {
+            let page = db.list_images_in_scope(&[], &cols, &[], 2, offset).unwrap();
+            assert!(page.len() <= 2);
+            for img in page {
+                assert!(in_ids.contains(&img.image.id.as_str()));
+                seen.insert(img.image.id);
+            }
+        }
+        assert_eq!(seen.len(), 5, "all scoped images returned across pages");
+    }
+
+    #[test]
+    fn list_images_in_scope_folder_prefix_is_exact() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "a", "h-a", "/art/a.png");
+        insert_test_image_at_path(&db, "b", "h-b", "/artisan/b.png");
+        insert_test_image_at_path(&db, "c", "h-c", "/art/sub/c.png");
+
+        let folders = vec!["/art".to_string()];
+        let ids: std::collections::BTreeSet<String> = db
+            .list_images_in_scope(&folders, &[], &[], 100, 0)
+            .unwrap()
+            .into_iter()
+            .map(|i| i.image.id)
+            .collect();
+        // /art and /art/sub match; the sibling prefix /artisan must NOT.
+        assert!(ids.contains("a"));
+        assert!(ids.contains("c"));
+        assert!(!ids.contains("b"));
+    }
+
+    #[test]
+    fn list_images_in_scope_union_of_dimensions() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "byFolder", "h1", "/art/x.png");
+        insert_test_image_at_path(&db, "byColl", "h2", "/other/y.png");
+        insert_test_image_at_path(&db, "byTag", "h3", "/other/z.png");
+        insert_test_image_at_path(&db, "none", "h4", "/other/n.png");
+        let col = db.create_collection("C1").unwrap();
+        db.add_to_collection(&col, &["byColl"]).unwrap();
+        db.add_image_tag("byTag", "public", "user", "manual", None)
+            .unwrap();
+
+        let ids: std::collections::BTreeSet<String> = db
+            .list_images_in_scope(
+                &["/art".to_string()],
+                &[col],
+                &["public".to_string()],
+                100,
+                0,
+            )
+            .unwrap()
+            .into_iter()
+            .map(|i| i.image.id)
+            .collect();
+        assert!(ids.contains("byFolder"));
+        assert!(ids.contains("byColl"));
+        assert!(ids.contains("byTag"));
+        assert!(!ids.contains("none"));
+        assert_eq!(ids.len(), 3);
+    }
+
+    #[test]
+    fn list_images_in_scope_empty_dimensions_returns_nothing() {
+        let db = test_db();
+        insert_test_image(&db, "a", "h-a");
+        // No folders/collections/tags -> matches nothing (must NOT return all rows).
+        assert!(db
+            .list_images_in_scope(&[], &[], &[], 100, 0)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_rejects_empty_folder() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "img-1", "hash-delete-empty", "/tmp/a/img-1.png");
+
+        let result = db.delete_images_by_folder("");
+
+        assert!(result.is_err(), "empty folder path should be rejected");
+        assert_eq!(db.list_images(100, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_rejects_root_folder() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "img-1", "hash-delete-root", "/tmp/a/img-1.png");
+
+        let result = db.delete_images_by_folder("/");
+
+        assert!(result.is_err(), "root folder path should be rejected");
+        assert_eq!(db.list_images(100, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_rejects_relative_folder() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "img-1", "hash-delete-relative", "/tmp/a/img-1.png");
+
+        let result = db.delete_images_by_folder("tmp/a");
+
+        assert!(result.is_err(), "relative folder path should be rejected");
+        assert_eq!(db.list_images(100, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_treats_percent_as_literal_path_character() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "inside", "hash-delete-percent", "/tmp/a%b/inside.png");
+        insert_test_image_at_path(&db, "outside", "hash-keep-percent", "/tmp/axb/outside.png");
+
+        let deleted = db.delete_images_by_folder("/tmp/a%b").unwrap();
+
+        assert_eq!(deleted, 1);
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].image.id, "outside");
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_treats_underscore_as_literal_path_character() {
+        let db = test_db();
+        insert_test_image_at_path(
+            &db,
+            "inside",
+            "hash-delete-underscore",
+            "/tmp/a_b/inside.png",
+        );
+        insert_test_image_at_path(
+            &db,
+            "outside",
+            "hash-keep-underscore",
+            "/tmp/axb/outside.png",
+        );
+
+        let deleted = db.delete_images_by_folder("/tmp/a_b").unwrap();
+
+        assert_eq!(deleted, 1);
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].image.id, "outside");
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_keeps_adjacent_prefix_folder() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "inside", "hash-delete-inside", "/tmp/a/inside.png");
+        insert_test_image_at_path(
+            &db,
+            "adjacent",
+            "hash-delete-adjacent",
+            "/tmp/abc/adjacent.png",
+        );
+
+        let deleted = db.delete_images_by_folder("/tmp/a").unwrap();
+
+        assert_eq!(deleted, 1);
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].image.id, "adjacent");
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_keeps_case_distinct_folder() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "lower", "hash-delete-lower", "/tmp/a/lower.png");
+        insert_test_image_at_path(&db, "upper", "hash-delete-upper", "/tmp/A/upper.png");
+
+        let deleted = db.delete_images_by_folder("/tmp/a").unwrap();
+
+        assert_eq!(deleted, 1);
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].image.id, "upper");
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_handles_non_ascii_folder_names() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "inside", "hash-delete-nonascii", "/tmp/ä/inside.png");
+        insert_test_image_at_path(
+            &db,
+            "adjacent",
+            "hash-keep-nonascii",
+            "/tmp/äx/adjacent.png",
+        );
+
+        let deleted = db.delete_images_by_folder("/tmp/ä").unwrap();
+
+        assert_eq!(deleted, 1);
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].image.id, "adjacent");
+    }
+
+    #[test]
+    fn test_configure_connection_enables_foreign_keys() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+
+        Database::configure_connection(&conn).unwrap();
+
+        let enabled: i64 = conn
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        assert_eq!(enabled, 1);
+    }
+
+    #[test]
+    fn test_reopen_enables_foreign_key_cascades() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("runtime.db");
+
+        {
+            let db = Database::open(&db_path).unwrap();
+            insert_test_image(&db, "img-1", "hash-1");
+            db.set_rating("img-1", 4).unwrap();
+            let collection_id = db.create_collection("Cascade Check").unwrap();
+            db.add_to_collection(&collection_id, &["img-1"]).unwrap();
+        }
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock();
+        conn.execute("DELETE FROM images WHERE id = ?1", params!["img-1"])
+            .unwrap();
+
+        let image_files: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM image_files WHERE image_id = ?1",
+                params!["img-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let selections: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM selections WHERE image_id = ?1",
+                params!["img-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let collection_items: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM collection_items WHERE image_id = ?1",
+                params!["img-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(image_files, 0);
+        assert_eq!(selections, 0);
+        assert_eq!(collection_items, 0);
     }
 
     #[test]

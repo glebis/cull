@@ -16,9 +16,17 @@ mod services;
 mod tray;
 mod watcher;
 
+/// Test-only surface for integration tests (which see only the public API).
+/// Gated behind the `test-support` Cargo feature so it widens nothing in normal
+/// builds. See `tests/compat_golden.rs`.
+#[cfg(feature = "test-support")]
+pub mod test_support {
+    pub use crate::db_core::db::Database;
+}
+
 use crate::commands::deeplink::{
-    emit_open_params, file_path_from_url, open_params_for_drag_drop_paths,
-    open_params_for_file_paths, parse_deep_link,
+    emit_open_params, open_params_for_drag_drop_paths, open_params_for_file_paths,
+    open_params_for_urls, parse_deep_link,
 };
 use crate::db_core::db::Database;
 use crate::db_core::detection::DetectionEngine;
@@ -41,6 +49,7 @@ pub struct AppState {
     pub action_manager: services::undo::ActionManager,
     pub file_watcher: Mutex<watcher::FileWatcher>,
     pub clipboard_monitor: Mutex<services::clipboard_monitor::ClipboardMonitorState>,
+    pub static_publish_server: Mutex<commands::static_publishing::StaticPublishServerState>,
 }
 
 fn install_panic_hook(app: AppHandle) {
@@ -100,6 +109,14 @@ where
             );
         }
     });
+}
+
+pub(crate) fn reveal_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
 }
 
 fn run_stdio_bridge() {
@@ -182,9 +199,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             crate::safe_eprintln!("[single-instance] Second instance args: {:?}", args);
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.set_focus();
-            }
+            reveal_main_window(app);
             let mut file_paths = Vec::new();
             for arg in &args {
                 if arg.starts_with("cull://") {
@@ -231,13 +246,6 @@ pub fn run() {
                 }
             };
 
-            if let Ok(roots) = db.list_library_roots() {
-                let asset_scope = app.asset_protocol_scope();
-                for root in roots {
-                    let _ = asset_scope.allow_directory(root, true);
-                }
-            }
-
             let model_dir = app_data_dir.join("models");
             let embedding_engine = Mutex::new(EmbeddingEngine::new(&model_dir));
             let detection_engine = Mutex::new(DetectionEngine::new_yolo(&model_dir));
@@ -257,6 +265,9 @@ pub fn run() {
                 file_watcher: Mutex::new(watcher::FileWatcher::new()),
                 clipboard_monitor: Mutex::new(
                     services::clipboard_monitor::ClipboardMonitorState::default(),
+                ),
+                static_publish_server: Mutex::new(
+                    commands::static_publishing::StaticPublishServerState::default(),
                 ),
             });
 
@@ -375,22 +386,8 @@ pub fn run() {
                         event.payload()
                     );
                     if let Ok(urls) = serde_json::from_str::<Vec<String>>(event.payload()) {
-                        let file_paths: Vec<String> = urls
-                            .iter()
-                            .filter_map(|url| file_path_from_url(url))
-                            .collect();
-                        if let Some(params) = open_params_for_file_paths(file_paths) {
+                        for params in open_params_for_urls(&urls) {
                             let _ = emit_open_params(&handle, params);
-                        }
-
-                        for url in urls {
-                            crate::safe_eprintln!("[deep-link] Processing URL: {}", url);
-                            if url.starts_with("cull://") {
-                                match parse_deep_link(&url) {
-                                    Ok(params) => { let _ = emit_open_params(&handle, params); }
-                                    Err(e) => crate::safe_eprintln!("[deep-link] Deep link rejected: {}", e),
-                                }
-                            }
                         }
                     }
                 });
@@ -406,6 +403,7 @@ pub fn run() {
             commands::import::regenerate_single_thumbnail,
             commands::import::rescan_sources,
             commands::deeplink::drain_pending_open_params,
+            commands::deeplink::open_deep_link_urls,
             commands::jobs::get_job,
             commands::jobs::list_jobs,
             commands::jobs::cancel_job,
@@ -415,6 +413,7 @@ pub fn run() {
             commands::clipboard_monitor::start_clipboard_monitor,
             commands::clipboard_monitor::stop_clipboard_monitor,
             commands::clipboard_monitor::set_clipboard_monitor_capture_dir,
+            commands::clipboard_monitor::set_clipboard_monitor_capture_existing_on_start,
             commands::clipboard_monitor::move_clipboard_capture_folder,
             commands::clipboard_monitor::publish_clipboard_collection,
             commands::library::list_images,
@@ -533,6 +532,7 @@ pub fn run() {
             commands::mcp::rotate_mcp_token,
             commands::static_publishing::export_static_publish_package,
             commands::static_publishing::serve_static_publish_package,
+            commands::static_publishing::stop_static_publish_server,
             commands::transform::crop_image,
             commands::transform::rotate_image,
             commands::dictation::start_dictation,
@@ -555,6 +555,8 @@ pub fn run() {
             commands::sessions::list_canvases,
             commands::sessions::update_canvas_layout,
             commands::sessions::delete_canvas,
+            commands::files::copy_image_to_clipboard,
+            commands::files::paste_image_from_clipboard,
             commands::files::move_image,
             commands::files::rename_image,
             commands::files::create_subfolder,
@@ -598,9 +600,15 @@ pub fn run() {
                 }
             }
 
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = &event {
+                reveal_main_window(app);
+            }
+
             // Handle files opened via Finder "Open With"
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = &event {
+                reveal_main_window(app);
                 let file_paths: Vec<String> = urls
                     .iter()
                     .filter_map(|url| {

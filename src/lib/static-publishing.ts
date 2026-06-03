@@ -1,4 +1,4 @@
-import type { Canvas, StaticPublishLink, StaticPublishRequest } from './api';
+import type { Canvas, StaticPublishLink, StaticPublishRequest, StaticPublishResult, StaticPublishServerResult } from './api';
 import { parseCanvasDocumentLayout, serializeCanvasDocumentLayout } from './canvas-document';
 
 export interface SavedCanvasPublishOptions {
@@ -76,4 +76,52 @@ export function formatStaticPublishLinks(links: StaticPublishLink[]): string {
         .filter(link => link.label.trim() && link.url.trim())
         .map(link => `${link.label.trim()} | ${link.url.trim()}`)
         .join('\n');
+}
+
+export interface StaticPublishShareItem {
+    id: string;
+    label: string;
+    value: string;
+    kind: 'path' | 'url' | 'secret';
+    openable: boolean;
+    copyable: boolean;
+    shareable: boolean;
+}
+
+export function buildStaticPublishShareItems(
+    result: StaticPublishResult,
+    serverResult: StaticPublishServerResult | null,
+): StaticPublishShareItem[] {
+    const items: StaticPublishShareItem[] = [
+        shareItem('site-folder', 'Site folder', result.site_dir, 'path', true),
+        shareItem('manifest', 'Manifest', result.manifest_path, 'path', true),
+        shareItem('agent-notes', 'Agent notes', result.instructions_path, 'path', true),
+        shareItem('qr-code', 'QR code', result.qr_svg_path, 'path', true),
+        shareItem('target-url', 'Target URL', result.qr_target_url, 'url', true),
+        shareItem('access-phrase', 'Access phrase', result.access_phrase, 'secret', false),
+    ];
+
+    if (serverResult) {
+        items.push(shareItem('preview-url', 'Preview URL', serverResult.url, 'url', true));
+    }
+
+    return items;
+}
+
+function shareItem(
+    id: string,
+    label: string,
+    value: string,
+    kind: StaticPublishShareItem['kind'],
+    openable: boolean,
+): StaticPublishShareItem {
+    return {
+        id,
+        label,
+        value,
+        kind,
+        openable,
+        copyable: true,
+        shareable: true,
+    };
 }

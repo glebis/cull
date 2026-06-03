@@ -1,0 +1,23 @@
+name: bug
+description: |
+  ## Problem
+  What is broken, and who is affected?
+
+  ## Reproduction
+  1.
+  2.
+  3.
+
+  ## Acceptance Criteria
+  - [ ] The bug is reproduced by an automated test or documented manual reproduction.
+  - [ ] The expected behavior is restored without regressing existing workflows.
+  - [ ] User-visible errors or recovery steps are updated if behavior changes.
+
+type: bug
+priority: 1
+labels:
+  - bug
+acceptance_criteria: |
+  - [ ] The bug is reproduced by an automated test or documented manual reproduction.
+  - [ ] The expected behavior is restored without regressing existing workflows.
+  - [ ] User-visible errors or recovery steps are updated if behavior changes.

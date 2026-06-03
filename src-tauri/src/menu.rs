@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use std::path::PathBuf;
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu};
+use tauri::menu::{
+    CheckMenuItem, Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu, HELP_SUBMENU_ID,
+};
 use tauri::{AppHandle, Emitter, Manager, Wry};
 
 const CULL_HELP_BOOK_ID: &str = "com.glebkalinin.cull.help";
@@ -49,8 +51,8 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     )?)?;
     file_menu.append(&MenuItem::with_id(
         app,
-        "open_folder",
-        "Open Folder...",
+        "import_folder",
+        "Import Folder...",
         true,
         Some::<&str>("CmdOrCtrl+Shift+O"),
     )?)?;
@@ -146,6 +148,14 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 
     // View menu
     let view_menu = Submenu::new(app, "View", true)?;
+    view_menu.append(&MenuItem::with_id(
+        app,
+        "command_palette",
+        "Command Palette...",
+        true,
+        Some::<&str>("CmdOrCtrl+P"),
+    )?)?;
+    view_menu.append(&PredefinedMenuItem::separator(app)?)?;
     view_menu.append(&CheckMenuItem::with_id(
         app,
         "view_grid",
@@ -246,7 +256,7 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     menu.append(&window_menu)?;
 
     // Help menu
-    let help_menu = Submenu::new(app, "Help", true)?;
+    let help_menu = Submenu::with_id(app, HELP_SUBMENU_ID, "Help", true)?;
     help_menu.append(&MenuItem::with_id(
         app,
         "help",
@@ -447,11 +457,12 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
     let id = event.id().0.as_str();
     match id {
         "help" => show_cull_help(app),
-        "about" | "open_file" | "open_folder" | "settings" | "undo" | "redo" | "deselect_all"
-        | "image_share" | "image_open_default" | "image_open_with" | "image_reveal"
-        | "image_rename" | "image_move_to" | "image_trash" | "view_grid" | "view_compare"
-        | "view_loupe" | "view_canvas" | "view_lineage" | "view_embeddings" | "view_publish"
-        | "view_export" | "toggle_sidebar" | "zoom_in" | "zoom_out" | "actual_size" => {
+        "about" | "open_file" | "import_folder" | "open_folder" | "settings" | "undo" | "redo"
+        | "deselect_all" | "command_palette" | "image_share" | "image_open_default"
+        | "image_open_with" | "image_reveal" | "image_rename" | "image_move_to" | "image_trash"
+        | "view_grid" | "view_compare" | "view_loupe" | "view_canvas" | "view_lineage"
+        | "view_embeddings" | "view_publish" | "view_export" | "toggle_sidebar" | "zoom_in"
+        | "zoom_out" | "actual_size" => {
             let _ = app.emit("menu-action", id);
         }
         _ => {}

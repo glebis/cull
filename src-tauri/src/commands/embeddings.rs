@@ -4,13 +4,32 @@ use serde::Serialize;
 use std::path::Path;
 use tauri::{AppHandle, Emitter, State};
 
+/// Google Generative Language "list models" endpoint used to validate a key.
+/// The key travels in the `x-goog-api-key` header, never as a query parameter,
+/// so it cannot leak through request/proxy logs, crash strings, or traces.
+const GOOGLE_MODELS_VALIDATION_URL: &str =
+    "https://generativelanguage.googleapis.com/v1beta/models";
+
+/// Build the Google key-validation request with the API key in the
+/// `x-goog-api-key` header. Centralised so the auth transport is unit-testable
+/// and can never drift back to a `key=` query parameter.
+fn google_validation_request(client: &reqwest::Client, key: &str) -> reqwest::RequestBuilder {
+    client
+        .get(GOOGLE_MODELS_VALIDATION_URL)
+        .header("x-goog-api-key", key)
+}
+
 /// Redact API keys from error messages to prevent leaking secrets in UI toasts and logs.
 /// Replaces the value of any `key=...` query parameter with `REDACTED`.
 fn redact_api_key(error_msg: &str) -> String {
     use regex::Regex;
-    // Match `key=<value>` where value runs until whitespace, `&`, `"`, `'`, or end of string
-    let re = Regex::new(r#"(?i)\bkey=[^\s&"']+"#).expect("redact regex must compile");
-    re.replace_all(error_msg, "key=REDACTED").into_owned()
+    use std::sync::OnceLock;
+    // Match `key=<value>` where value runs until whitespace, `&`, `"`, `'`, or end of string.
+    // Compiled once: this runs on error paths but recompiling per call is wasteful.
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r#"(?i)\bkey=[^\s&"']+"#).expect("redact regex must compile"))
+        .replace_all(error_msg, "key=REDACTED")
+        .into_owned()
 }
 
 use crate::db_core::embeddings::{
@@ -40,6 +59,11 @@ pub struct EmbeddingProviderInfo {
     pub available: bool,
     pub downloadable: bool,
     pub download_label: Option<String>,
+    pub expected_sha256: Option<String>,
+    pub expected_size_bytes: Option<u64>,
+    pub spdx_license: Option<String>,
+    pub source_repo: Option<String>,
+    pub model_card_url: Option<String>,
     pub api_key_provider: Option<String>,
 }
 
@@ -47,6 +71,11 @@ pub struct EmbeddingProviderInfo {
 pub struct EmbeddingModelDownloadInfo {
     pub model_id: String,
     pub url: String,
+    pub expected_sha256: String,
+    pub expected_size_bytes: u64,
+    pub spdx_license: String,
+    pub source_repo: String,
+    pub model_card_url: String,
     pub model_path: String,
     pub part_path: String,
     pub curl_command: String,
@@ -69,6 +98,7 @@ fn embedding_provider_infos(
     embedding_provider_specs()
         .iter()
         .map(|spec| {
+            let model_spec = embedding_model_spec(spec.model_id);
             let (scope, available, status) = match spec.runtime {
                 "local-onnx" => {
                     let available = engine
@@ -118,6 +148,11 @@ fn embedding_provider_infos(
                 available,
                 downloadable: spec.downloadable,
                 download_label: spec.download_label.map(str::to_string),
+                expected_sha256: model_spec.map(|model| model.expected_sha256.to_string()),
+                expected_size_bytes: model_spec.map(|model| model.expected_size_bytes),
+                spdx_license: model_spec.map(|model| model.spdx_license.to_string()),
+                source_repo: model_spec.map(|model| model.source_repo.to_string()),
+                model_card_url: model_spec.map(|model| model.model_card_url.to_string()),
                 api_key_provider: spec.api_key_provider.map(str::to_string),
             }
         })
@@ -204,14 +239,20 @@ fn embedding_model_download_info_for_path(
     let quoted_part_path = shell_quote(&part_path);
     let quoted_model_path = shell_quote(&model_path);
     let quoted_url = shell_quote(spec.url);
+    let quoted_sha_check = shell_quote(&format!("{}  {}", spec.expected_sha256, part_path));
 
     Ok(EmbeddingModelDownloadInfo {
         model_id: spec.model_id.to_string(),
         url: spec.url.to_string(),
+        expected_sha256: spec.expected_sha256.to_string(),
+        expected_size_bytes: spec.expected_size_bytes,
+        spdx_license: spec.spdx_license.to_string(),
+        source_repo: spec.source_repo.to_string(),
+        model_card_url: spec.model_card_url.to_string(),
         model_path: model_path.clone(),
         part_path: part_path.clone(),
         curl_command: format!(
-            "mkdir -p {} && curl -L -C - -o {} {} && mv {} {}",
+            "mkdir -p {} && curl -L -C - -o {} {} && test \"$(wc -c < {} | tr -d '[:space:]')\" = '{}' && printf '%s\\n' {} | shasum -a 256 -c - && mv {} {}",
             shell_quote(
                 Path::new(&model_path)
                     .parent()
@@ -221,6 +262,9 @@ fn embedding_model_download_info_for_path(
             ),
             quoted_part_path,
             quoted_url,
+            quoted_part_path,
+            spec.expected_size_bytes,
+            quoted_sha_check,
             shell_quote(&part_path),
             quoted_model_path
         ),
@@ -494,6 +538,20 @@ mod tests {
         assert!(info
             .curl_command
             .contains("'/tmp/cull-models/clip-vit-b32-vision.onnx'"));
+        assert_eq!(
+            info.expected_sha256,
+            crate::db_core::embeddings::CLIP_MODEL_SPEC.expected_sha256
+        );
+        assert_eq!(
+            info.expected_size_bytes,
+            crate::db_core::embeddings::CLIP_MODEL_SPEC.expected_size_bytes
+        );
+        assert_eq!(info.spdx_license, "MIT");
+        assert_eq!(
+            info.source_repo,
+            "https://huggingface.co/Qdrant/clip-ViT-B-32-vision"
+        );
+        assert_eq!(info.model_card_url, info.source_repo);
     }
 
     #[test]
@@ -507,7 +565,7 @@ mod tests {
         assert_eq!(info.model_id, "dinov2-vits14");
         assert_eq!(
             info.url,
-            "https://huggingface.co/sefaburak/dinov2-small-onnx/resolve/main/dinov2_vits14.onnx"
+            "https://huggingface.co/sefaburak/dinov2-small-onnx/resolve/7a5e61628117b5a8bd6f5e2b2385b76da1b4582e/dinov2_vits14.onnx"
         );
         assert_eq!(info.model_path, "/tmp/cull-models/dinov2-vits14.onnx");
         assert_eq!(info.part_path, "/tmp/cull-models/dinov2-vits14.onnx.part");
@@ -528,11 +586,26 @@ mod tests {
         assert_eq!(missing[0].scope, "local");
         assert_eq!(missing[0].status, "model");
         assert!(!missing[0].available);
+        assert_eq!(
+            missing[0].expected_sha256.as_deref(),
+            Some(crate::db_core::embeddings::CLIP_MODEL_SPEC.expected_sha256)
+        );
+        assert_eq!(
+            missing[0].expected_size_bytes,
+            Some(crate::db_core::embeddings::CLIP_MODEL_SPEC.expected_size_bytes)
+        );
+        assert_eq!(missing[0].spdx_license.as_deref(), Some("MIT"));
+        assert_eq!(
+            missing[0].source_repo.as_deref(),
+            Some("https://huggingface.co/Qdrant/clip-ViT-B-32-vision")
+        );
         assert_eq!(missing[1].id, "dinov2");
         assert_eq!(missing[1].status, "model");
+        assert_eq!(missing[1].spdx_license.as_deref(), Some("Apache-2.0"));
         assert_eq!(missing[2].id, "gemini");
         assert_eq!(missing[2].scope, "cloud");
         assert_eq!(missing[2].status, "key");
+        assert_eq!(missing[2].expected_sha256, None);
         assert_eq!(missing[2].api_key_provider.as_deref(), Some("google"));
         assert_eq!(missing[3].id, "cohere");
         assert_eq!(missing[3].status, "key");
@@ -595,6 +668,45 @@ mod tests {
     }
 
     #[test]
+    fn google_models_url_carries_no_api_key_query_param() {
+        // The Google key-validation request must send the key via the
+        // x-goog-api-key header, never as a query param that can leak in logs.
+        assert!(
+            !GOOGLE_MODELS_VALIDATION_URL.contains("key="),
+            "Google models validation URL must not contain a key= query param: {}",
+            GOOGLE_MODELS_VALIDATION_URL
+        );
+    }
+
+    #[test]
+    fn google_validation_request_sends_key_in_header_not_url() {
+        let sentinel = "AIzaSySentinelKeyShouldNeverAppear";
+        let req = google_validation_request(&reqwest::Client::new(), sentinel)
+            .build()
+            .expect("request must build");
+
+        // Key travels in the header...
+        assert_eq!(
+            req.headers()
+                .get("x-goog-api-key")
+                .map(|v| v.to_str().unwrap()),
+            Some(sentinel)
+        );
+        // ...and never in the URL.
+        assert_eq!(req.url().query(), None);
+        let url = req.url().as_str();
+        assert!(!url.contains("key="), "URL leaked a key= param: {}", url);
+        assert!(!url.contains(sentinel), "URL leaked the API key: {}", url);
+    }
+
+    #[test]
+    fn redact_api_key_is_a_backstop_for_legacy_key_urls() {
+        // Defensive: even if a key= URL surfaces in an error elsewhere, redaction strips it.
+        let leaked = "error: https://x/v1beta/models?key=AIzaSySentinelKeyShouldNeverAppear";
+        assert!(!redact_api_key(leaked).contains("AIzaSySentinelKeyShouldNeverAppear"));
+    }
+
+    #[test]
     fn ollama_model_available_accepts_latest_tag_alias() {
         let models = vec![
             "embeddinggemma:latest".to_string(),
@@ -649,10 +761,12 @@ async fn download_embedding_model_for(
         .jobs
         .control_for(&job_id)
         .ok_or_else(|| format!("Download job '{}' not found", job_id))?;
-    let outcome = crate::services::model_download::download_model_file_controlled(
+    let verification = spec.download_verification();
+    let outcome = crate::services::model_download::download_model_file_verified_controlled(
         &client,
         spec.url,
         &model_path,
+        Some(&verification),
         &control,
         |progress| {
             state.jobs.update_progress(
@@ -760,12 +874,7 @@ pub async fn validate_api_key(provider: String, key: String) -> Result<bool, Str
     let client = reqwest::Client::new();
     match provider.as_str() {
         "google" => {
-            let url = format!(
-                "https://generativelanguage.googleapis.com/v1beta/models?key={}",
-                key
-            );
-            let resp = client
-                .get(&url)
+            let resp = google_validation_request(&client, &key)
                 .send()
                 .await
                 .map_err(|e| redact_api_key(&format!("{}", e)))?;

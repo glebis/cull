@@ -163,6 +163,7 @@ describe('Tauri command contract', () => {
         expect(commandPermissions.get('get_clipboard_monitor_status')).toEqual(['app-read']);
         expect(commandPermissions.get('start_clipboard_monitor')).toEqual(['app-file-access']);
         expect(commandPermissions.get('stop_clipboard_monitor')).toEqual(['app-file-access']);
+        expect(commandPermissions.get('set_clipboard_monitor_capture_existing_on_start')).toEqual(['app-file-access']);
         expect(commandPermissions.get('set_clipboard_monitor_capture_dir')).toEqual(['app-file-access']);
         expect(commandPermissions.get('move_clipboard_capture_folder')).toEqual(['app-file-access']);
         expect(commandPermissions.get('publish_clipboard_collection')).toEqual(['app-export-publishing']);
@@ -184,5 +185,29 @@ describe('Tauri command contract', () => {
         for (const capability of appCapabilities) {
             expect(capability.windows).toEqual(['main', 'window-*']);
         }
+    });
+
+    it('allows the native Tauri header drag command used by data-tauri-drag-region', () => {
+        const defaultCapability = capabilityFiles().find((capability) => capability.identifier === 'default');
+        const permissions = defaultCapability?.permissions.map((permission) =>
+            typeof permission === 'string' ? permission : permission.identifier
+        );
+
+        expect(permissions).toContain('core:window:allow-start-dragging');
+    });
+
+    it('allows opening generated local files from share results', () => {
+        const defaultCapability = capabilityFiles().find((capability) => capability.identifier === 'default');
+        const openPathPermission = defaultCapability?.permissions.find((permission) =>
+            typeof permission !== 'string' && permission.identifier === 'opener:allow-open-path'
+        );
+
+        expect(openPathPermission).toEqual({
+            identifier: 'opener:allow-open-path',
+            allow: [
+                { path: '$HOME/**/*' },
+                { path: '$APPDATA/**/*' },
+            ],
+        });
     });
 });

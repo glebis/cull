@@ -40,6 +40,7 @@ vi.mock('./api', () => ({
     getImagesByIds: vi.fn(),
     getImageByPath: vi.fn(),
     drainPendingOpenParams: vi.fn(),
+    openDeepLinkUrls: vi.fn(),
 }));
 
 vi.mock('./image-loading', () => ({
@@ -62,7 +63,7 @@ vi.mock('@tauri-apps/plugin-deep-link', () => ({
 
 import { handleParams, initDeepLink } from './deeplink';
 import { thumbnailSize, focusedIndex, focusedImageOverride, images, gridGap, loupeScale, activeFolder, navigateTo } from './stores';
-import { importFolder, importFiles, getBatchImages, listFolders, getImagesByIds, getImageByPath, drainPendingOpenParams } from './api';
+import { importFolder, importFiles, getBatchImages, listFolders, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls } from './api';
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { listen } from '@tauri-apps/api/event';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
@@ -262,45 +263,50 @@ describe('initDeepLink', () => {
         expect(vi.mocked(listen).mock.calls[2][0]).toBe('navigate-collection');
     });
 
-    it('registers onOpenUrl handler', async () => {
+    it('does not register raw frontend deep-link event handlers', async () => {
         vi.mocked(listen).mockResolvedValue(vi.fn() as never);
         vi.mocked(onOpenUrl).mockResolvedValue(undefined as never);
         vi.mocked(getCurrent).mockResolvedValue([]);
 
         await initDeepLink();
 
-        expect(onOpenUrl).toHaveBeenCalledTimes(1);
+        expect(onOpenUrl).not.toHaveBeenCalled();
+        expect(getCurrent).toHaveBeenCalled();
     });
 
-    it('processes launch URLs from getCurrent', async () => {
+    it('sends raw launch URLs from getCurrent to Rust validation', async () => {
         vi.mocked(listen).mockResolvedValue(vi.fn() as never);
         vi.mocked(onOpenUrl).mockResolvedValue(undefined as never);
         vi.mocked(getCurrent).mockResolvedValue(['cull://loupe?size=200']);
 
         await initDeepLink();
 
-        expect(navigateTo).toHaveBeenCalledWith('loupe');
-        expect(thumbnailSize.set).toHaveBeenCalledWith(200);
+        expect(openDeepLinkUrls).toHaveBeenCalledWith(['cull://loupe?size=200']);
+        expect(navigateTo).not.toHaveBeenCalled();
+        expect(thumbnailSize.set).not.toHaveBeenCalled();
     });
 
-    it('handles onOpenUrl failure gracefully', async () => {
+    it('handles startup URL retrieval failure gracefully', async () => {
         vi.mocked(listen).mockResolvedValue(vi.fn() as never);
-        vi.mocked(onOpenUrl).mockRejectedValue(new Error('not available'));
-        vi.mocked(getCurrent).mockResolvedValue([]);
-
-        const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        await initDeepLink();
-        expect(consoleSpy).toHaveBeenCalled();
-        consoleSpy.mockRestore();
-    });
-
-    it('handles getCurrent failure gracefully', async () => {
-        vi.mocked(listen).mockResolvedValue(vi.fn() as never);
-        vi.mocked(onOpenUrl).mockResolvedValue(undefined as never);
         vi.mocked(getCurrent).mockRejectedValue(new Error('not available'));
 
         const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         await initDeepLink();
+
+        expect(consoleSpy).toHaveBeenCalled();
+        expect(openDeepLinkUrls).not.toHaveBeenCalled();
+        consoleSpy.mockRestore();
+    });
+
+    it('handles Rust startup URL validation failure gracefully', async () => {
+        vi.mocked(listen).mockResolvedValue(vi.fn() as never);
+        vi.mocked(getCurrent).mockResolvedValue(['cull://open?path=/bad%ZZ']);
+        vi.mocked(openDeepLinkUrls).mockRejectedValue(new Error('rejected') as never);
+
+        const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await initDeepLink();
+
+        expect(openDeepLinkUrls).toHaveBeenCalledWith(['cull://open?path=/bad%ZZ']);
         expect(consoleSpy).toHaveBeenCalled();
         consoleSpy.mockRestore();
     });

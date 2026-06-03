@@ -11,6 +11,7 @@ pub mod import;
 pub mod lineage;
 pub mod models;
 pub mod nl_parser;
+pub mod path_policy;
 pub mod perceptual_hash;
 pub mod quality;
 pub mod remote_embeddings;

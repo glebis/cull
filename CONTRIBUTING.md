@@ -33,11 +33,24 @@ tool and the human review performed in the PR description.
 
 ## Code Style
 
-Run `npm run ci` before pushing to run the same checks as GitHub Actions.
+Run the Cull preflight wrapper before pushing:
 
-**Rust:** `npm run ci:rust` runs `cargo fmt --all -- --check`, `cargo clippy --all-targets`, and `cargo test --all-targets`.
+```bash
+npm run preflight -- quick    # Svelte check + Vitest
+npm run preflight -- full     # quick + Rust fmt, clippy, and tests
+npm run preflight -- release  # full + license audit and production build
+```
 
-**Svelte/TypeScript:** `npm run ci:frontend` runs `npm ci`, `npm run check`, and `npm test`.
+Use `full` for normal pull requests and `release` before publishing or changing
+license/model download policy. Do not use `bd preflight --check` for Cull
+readiness; this bd version's embedded preflight is a generic Go/Nix checklist
+and is not configurable for Cull.
+
+**Rust:** `npm run ci:rust` runs `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets`, and `cargo test --locked --all-targets`. Clippy warnings are reported but not denied until `imageview-2w6.11` cleans up the existing warning backlog.
+
+**Svelte/TypeScript:** `npm run ci:frontend` runs `npm ci`, `npm run check`, `npm test`, and `npm run build`.
+
+**Browser E2E:** `npm run test:e2e` is a manual pre-push gate for covered UI/browser changes, including UI navigation, command palette/search flows, drag/drop affordances, preview display, and Tauri mock behavior. It is not part of `npm run ci` or GitHub CI yet; see [Browser E2E Testing Policy](docs/e2e-testing-policy.md).
 
 ## Issue Tracking
 

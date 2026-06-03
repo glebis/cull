@@ -1,6 +1,6 @@
-use bytes::Bytes;
-use http_body_util::Full;
-use hyper::body::Incoming;
+use bytes::{Bytes, BytesMut};
+use http_body_util::{BodyExt, Full};
+use hyper::body::{Body as HttpBody, Incoming};
 use hyper_util::rt::TokioIo;
 use rmcp::transport::streamable_http_server::{
     session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
@@ -10,7 +10,13 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::Manager;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
+
+const MCP_HTTP_MAX_BODY_BYTES: u64 = 1024 * 1024;
+const MCP_HTTP_VALID_REQUEST_LIMIT: u32 = 120;
+const MCP_HTTP_VALID_REQUEST_WINDOW: Duration = Duration::from_secs(60);
+const MCP_HTTP_MAX_CONCURRENT_REQUESTS: usize = 16;
+const MCP_HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 use super::auth::AuthContext;
 use super::tools::CullMcp;
@@ -57,13 +63,184 @@ impl RateLimiter {
     }
 
     fn record_success(&mut self, ip: &IpAddr) {
-        self.failures.remove(ip);
+        if let Some((count, _)) = self.failures.get_mut(ip) {
+            if *count > 1 {
+                *count -= 1;
+            } else {
+                self.failures.remove(ip);
+            }
+        }
     }
 
     fn cleanup(&mut self) {
         let cutoff = self.lockout_duration;
         self.failures
             .retain(|_, (_, first)| first.elapsed() < cutoff);
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum BodySizeDecision {
+    Accept,
+    RejectTooLarge,
+}
+
+fn classify_request_body_size(content_length: Option<u64>, max_bytes: u64) -> BodySizeDecision {
+    match content_length {
+        Some(length) if length > max_bytes => BodySizeDecision::RejectTooLarge,
+        _ => BodySizeDecision::Accept,
+    }
+}
+
+fn request_content_length(headers: &http::HeaderMap) -> Option<u64> {
+    headers
+        .get(http::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RequestBodyError {
+    TooLarge,
+    ReadFailed,
+    TimedOut,
+}
+
+async fn read_limited_request_body(
+    req: hyper::Request<Incoming>,
+    max_bytes: u64,
+    timeout: Duration,
+) -> Result<hyper::Request<Full<Bytes>>, RequestBodyError> {
+    if classify_request_body_size(request_content_length(req.headers()), max_bytes)
+        == BodySizeDecision::RejectTooLarge
+    {
+        return Err(RequestBodyError::TooLarge);
+    }
+
+    let (parts, body) = req.into_parts();
+    let bytes = collect_limited_body_with_timeout(body, max_bytes, timeout).await?;
+    Ok(hyper::Request::from_parts(parts, Full::new(bytes)))
+}
+
+async fn collect_limited_body_with_timeout<B>(
+    body: B,
+    max_bytes: u64,
+    timeout: Duration,
+) -> Result<Bytes, RequestBodyError>
+where
+    B: HttpBody<Data = Bytes> + Unpin,
+{
+    tokio::time::timeout(timeout, collect_limited_body(body, max_bytes))
+        .await
+        .map_err(|_| RequestBodyError::TimedOut)?
+}
+
+async fn collect_limited_body<B>(mut body: B, max_bytes: u64) -> Result<Bytes, RequestBodyError>
+where
+    B: HttpBody<Data = Bytes> + Unpin,
+{
+    let mut bytes = BytesMut::new();
+    while let Some(frame) = body.frame().await {
+        let frame = frame.map_err(|_| RequestBodyError::ReadFailed)?;
+        if let Ok(chunk) = frame.into_data() {
+            if bytes.len() as u64 + chunk.len() as u64 > max_bytes {
+                return Err(RequestBodyError::TooLarge);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+    }
+
+    Ok(bytes.freeze())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ValidRequestDecision {
+    Allowed,
+    RateLimited { status: u16, retry_after: Duration },
+}
+
+struct ValidRequestLimiter {
+    by_ip: HashMap<IpAddr, (u32, Instant)>,
+    by_token: HashMap<String, (u32, Instant)>,
+    max_requests: u32,
+    window: Duration,
+}
+
+impl ValidRequestLimiter {
+    fn new(max_requests: u32, window: Duration) -> Self {
+        Self {
+            by_ip: HashMap::new(),
+            by_token: HashMap::new(),
+            max_requests,
+            window,
+        }
+    }
+
+    fn record_request(&mut self, ip: IpAddr, token_id: &str) -> ValidRequestDecision {
+        let now = Instant::now();
+        self.cleanup(now);
+
+        if self.bucket_is_limited(self.by_ip.get(&ip), now)
+            || self.bucket_is_limited(self.by_token.get(token_id), now)
+        {
+            return ValidRequestDecision::RateLimited {
+                status: 429,
+                retry_after: self.window,
+            };
+        }
+
+        Self::increment_bucket(&mut self.by_ip, ip, now, self.window);
+        Self::increment_bucket(&mut self.by_token, token_id.to_string(), now, self.window);
+        ValidRequestDecision::Allowed
+    }
+
+    fn bucket_is_limited(&self, bucket: Option<&(u32, Instant)>, now: Instant) -> bool {
+        matches!(bucket, Some((count, start)) if now.duration_since(*start) < self.window && *count >= self.max_requests)
+    }
+
+    fn increment_bucket<K: std::cmp::Eq + std::hash::Hash>(
+        buckets: &mut HashMap<K, (u32, Instant)>,
+        key: K,
+        now: Instant,
+        window: Duration,
+    ) {
+        let entry = buckets.entry(key).or_insert((0, now));
+        if now.duration_since(entry.1) >= window {
+            *entry = (0, now);
+        }
+        entry.0 += 1;
+    }
+
+    fn cleanup(&mut self, now: Instant) {
+        let window = self.window;
+        self.by_ip
+            .retain(|_, (_, start)| now.duration_since(*start) < window);
+        self.by_token
+            .retain(|_, (_, start)| now.duration_since(*start) < window);
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ConcurrencyDecision {
+    RateLimited { status: u16 },
+}
+
+struct RequestConcurrencyLimiter {
+    semaphore: Arc<Semaphore>,
+}
+
+impl RequestConcurrencyLimiter {
+    fn new(max_concurrent: usize) -> Self {
+        Self {
+            semaphore: Arc::new(Semaphore::new(max_concurrent)),
+        }
+    }
+
+    fn try_acquire(&self) -> Result<OwnedSemaphorePermit, ConcurrencyDecision> {
+        self.semaphore
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| ConcurrencyDecision::RateLimited { status: 429 })
     }
 }
 
@@ -100,6 +277,13 @@ async fn run_http_server(
         10,
         Duration::from_secs(15 * 60),
     )));
+    let valid_request_limiter = Arc::new(Mutex::new(ValidRequestLimiter::new(
+        MCP_HTTP_VALID_REQUEST_LIMIT,
+        MCP_HTTP_VALID_REQUEST_WINDOW,
+    )));
+    let concurrency_limiter = Arc::new(RequestConcurrencyLimiter::new(
+        MCP_HTTP_MAX_CONCURRENT_REQUESTS,
+    ));
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     crate::safe_eprintln!("MCP HTTP server listening on {}", addr);
@@ -109,11 +293,15 @@ async fn run_http_server(
         let io = TokioIo::new(stream);
         let auth_handle = app_handle.clone();
         let limiter = rate_limiter.clone();
+        let valid_limiter = valid_request_limiter.clone();
+        let concurrency_limiter = concurrency_limiter.clone();
 
         tokio::spawn(async move {
             let service = hyper::service::service_fn(move |req: hyper::Request<Incoming>| {
                 let auth_handle = auth_handle.clone();
                 let limiter = limiter.clone();
+                let valid_limiter = valid_limiter.clone();
+                let concurrency_limiter = concurrency_limiter.clone();
                 let remote_ip = remote_addr.ip();
                 async move {
                     // Check rate limit
@@ -200,12 +388,80 @@ async fn run_http_server(
 
                     limiter.lock().await.record_success(&remote_ip);
 
+                    match valid_limiter
+                        .lock()
+                        .await
+                        .record_request(remote_ip, token.id.as_str())
+                    {
+                        ValidRequestDecision::Allowed => {}
+                        ValidRequestDecision::RateLimited { retry_after, .. } => {
+                            return Ok(hyper::Response::builder()
+                                .status(429)
+                                .header("Retry-After", retry_after.as_secs().to_string())
+                                .body(Full::new(Bytes::from(
+                                    "Too Many Requests: valid-token request limit exceeded",
+                                )))
+                                .unwrap());
+                        }
+                    }
+
                     crate::safe_eprintln!(
                         "MCP HTTP: authenticated as '{}' (role: {}) from {}",
                         token.name,
                         token.role,
                         remote_addr
                     );
+
+                    if classify_request_body_size(
+                        request_content_length(req.headers()),
+                        MCP_HTTP_MAX_BODY_BYTES,
+                    ) == BodySizeDecision::RejectTooLarge
+                    {
+                        return Ok(hyper::Response::builder()
+                            .status(413)
+                            .body(Full::new(Bytes::from("Payload Too Large")))
+                            .unwrap());
+                    }
+
+                    let concurrency_permit = match concurrency_limiter.try_acquire() {
+                        Ok(permit) => permit,
+                        Err(ConcurrencyDecision::RateLimited { .. }) => {
+                            return Ok(hyper::Response::builder()
+                                .status(429)
+                                .body(Full::new(Bytes::from(
+                                    "Too Many Requests: MCP HTTP concurrency limit exceeded",
+                                )))
+                                .unwrap());
+                        }
+                    };
+
+                    let req = match read_limited_request_body(
+                        req,
+                        MCP_HTTP_MAX_BODY_BYTES,
+                        MCP_HTTP_REQUEST_TIMEOUT,
+                    )
+                    .await
+                    {
+                        Ok(req) => req,
+                        Err(RequestBodyError::TooLarge) => {
+                            return Ok(hyper::Response::builder()
+                                .status(413)
+                                .body(Full::new(Bytes::from("Payload Too Large")))
+                                .unwrap());
+                        }
+                        Err(RequestBodyError::ReadFailed) => {
+                            return Ok(hyper::Response::builder()
+                                .status(400)
+                                .body(Full::new(Bytes::from("Bad Request")))
+                                .unwrap());
+                        }
+                        Err(RequestBodyError::TimedOut) => {
+                            return Ok(hyper::Response::builder()
+                                .status(408)
+                                .body(Full::new(Bytes::from("Request Timeout")))
+                                .unwrap());
+                        }
+                    };
 
                     // Create per-request MCP service with the validated token's auth context
                     let auth = AuthContext::Authenticated(token);
@@ -220,17 +476,29 @@ async fn run_http_server(
                         config,
                     );
 
-                    let resp = match tower_service::Service::call(&mut mcp_service, req).await {
-                        Ok(r) => r,
-                        Err(_) => {
+                    let resp = match tokio::time::timeout(
+                        MCP_HTTP_REQUEST_TIMEOUT,
+                        tower_service::Service::call(&mut mcp_service, req),
+                    )
+                    .await
+                    {
+                        Ok(Ok(r)) => r,
+                        Ok(Err(_)) => {
                             return Ok(hyper::Response::builder()
                                 .status(500)
                                 .body(Full::new(Bytes::from("Internal Server Error")))
                                 .unwrap());
                         }
+                        Err(_) => {
+                            return Ok(hyper::Response::builder()
+                                .status(504)
+                                .body(Full::new(Bytes::from("Gateway Timeout")))
+                                .unwrap());
+                        }
                     };
 
-                    use http_body_util::BodyExt;
+                    drop(concurrency_permit);
+
                     let (parts, body) = resp.into_parts();
                     let body_bytes = body
                         .collect()
@@ -277,7 +545,6 @@ fn resolve_bind_policy(host: &str, port: u16, allow_remote: bool) -> Result<Bind
         remote_warning,
     })
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,7 +607,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rate_limiter_clears_on_success() {
+    fn test_rate_limiter_decays_on_success_without_clearing_history() {
         let mut rl = RateLimiter::new(10, Duration::from_secs(900));
         let ip = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
         for _ in 0..9 {
@@ -348,11 +615,17 @@ mod tests {
         }
         rl.record_success(&ip);
         assert!(!rl.is_locked_out(&ip));
-        // Re-failing should start from 0
-        for _ in 0..9 {
-            rl.record_failure(ip);
-        }
+
+        let (count, _) = rl
+            .failures
+            .get(&ip)
+            .expect("success should decay, not delete failure history");
+        assert_eq!(*count, 8);
+
+        rl.record_failure(ip);
         assert!(!rl.is_locked_out(&ip));
+        rl.record_failure(ip);
+        assert!(rl.is_locked_out(&ip));
     }
 
     #[test]
@@ -375,5 +648,96 @@ mod tests {
         std::thread::sleep(Duration::from_millis(10));
         rl.cleanup();
         assert!(rl.failures.is_empty());
+    }
+
+    #[test]
+    fn test_body_size_rejects_oversized_content_length_before_service_processing() {
+        assert_eq!(
+            classify_request_body_size(Some(1025), 1024),
+            BodySizeDecision::RejectTooLarge
+        );
+        assert_eq!(
+            classify_request_body_size(Some(1024), 1024),
+            BodySizeDecision::Accept
+        );
+    }
+
+    #[tokio::test]
+    async fn test_streaming_body_rejects_bytes_past_limit_without_content_length() {
+        let result = collect_limited_body(Full::new(Bytes::from_static(b"12345")), 4).await;
+
+        assert_eq!(result.unwrap_err(), RequestBodyError::TooLarge);
+    }
+
+    #[tokio::test]
+    async fn test_body_read_times_out_instead_of_holding_concurrency_permit() {
+        let body = http_body_util::StreamBody::new(futures_util::stream::pending::<
+            Result<hyper::body::Frame<Bytes>, std::convert::Infallible>,
+        >());
+
+        let result = collect_limited_body_with_timeout(body, 1024, Duration::from_millis(1)).await;
+
+        assert_eq!(result.unwrap_err(), RequestBodyError::TimedOut);
+    }
+
+    #[test]
+    fn test_valid_request_limiter_returns_429_after_token_limit() {
+        let mut limiter = ValidRequestLimiter::new(2, Duration::from_secs(60));
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 8));
+        let token_id = "mcp_tok_1";
+
+        assert_eq!(
+            limiter.record_request(ip, token_id),
+            ValidRequestDecision::Allowed
+        );
+        assert_eq!(
+            limiter.record_request(ip, token_id),
+            ValidRequestDecision::Allowed
+        );
+        assert_eq!(
+            limiter.record_request(ip, token_id),
+            ValidRequestDecision::RateLimited {
+                status: 429,
+                retry_after: Duration::from_secs(60),
+            }
+        );
+    }
+
+    #[test]
+    fn test_valid_request_limiter_returns_429_after_ip_limit() {
+        let mut limiter = ValidRequestLimiter::new(2, Duration::from_secs(60));
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+
+        assert_eq!(
+            limiter.record_request(ip, "token_a"),
+            ValidRequestDecision::Allowed
+        );
+        assert_eq!(
+            limiter.record_request(ip, "token_b"),
+            ValidRequestDecision::Allowed
+        );
+        assert_eq!(
+            limiter.record_request(ip, "token_c"),
+            ValidRequestDecision::RateLimited {
+                status: 429,
+                retry_after: Duration::from_secs(60),
+            }
+        );
+    }
+
+    #[test]
+    fn test_concurrency_limiter_rejects_when_global_cap_is_exhausted() {
+        let limiter = RequestConcurrencyLimiter::new(1);
+        let permit = limiter
+            .try_acquire()
+            .expect("first request gets the permit");
+
+        assert_eq!(
+            limiter.try_acquire().unwrap_err(),
+            ConcurrencyDecision::RateLimited { status: 429 }
+        );
+
+        drop(permit);
+        assert!(limiter.try_acquire().is_ok());
     }
 }

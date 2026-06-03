@@ -74,7 +74,7 @@ Tokyo Night dark theme. All components MUST use these tokens, never hardcode col
 
 ## E2E Testing with agent-browser
 
-Tests run against `localhost:1420` in Chrome Beta via CDP. E2E tests use `tauri-mock.ts` directly (not via api.ts) for browser-only testing.
+Tests run against `localhost:1420` in Chrome Beta via CDP. E2E tests use `tauri-mock.ts` directly (not via api.ts) for browser-only testing. The browser smoke suite is classified as a manual pre-push gate for covered UI/browser changes; see `docs/e2e-testing-policy.md` for the required file areas and non-CI status.
 
 ### Prerequisites
 ```bash
@@ -139,24 +139,173 @@ type FilterNode =
 
 ## bd Issue Tracking
 
-This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
+This project uses **bd** (beads) for issue tracking. Run `npm run bd -- onboard`
+to get started; the wrapper in `scripts/bd.sh` resolves multiple `bd` binaries
+on PATH deterministically. Run `npm run bd -- prime` for current workflow
+context, and run `npm run hooks:install` to install bd hooks plus Cull's tiered
+hook chain.
 
 ## Quick Reference
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
-bd close <id>         # Complete work
-bd vc status          # Check beads DB version-control state
-bd vc commit -m "..." # Commit beads DB changes when bd sync is unavailable
+npm run bd -- ready              # Find available work
+npm run bd -- show <id>          # View issue details
+npm run bd -- update <id> --status in_progress  # Claim work
+npm run bd -- close <id>         # Complete work
+npm run bd -- vc status          # Check beads DB version-control state
+npm run bd -- vc commit -m "..." # Commit beads DB changes when bd sync is unavailable
+npm run hooks:install # Install bd hooks plus Cull pre-commit/pre-push checks
+npm run preflight:hook    # Fast commit-time checks
+npm run preflight:quick   # Frontend check and tests
+npm run preflight:full    # Full pre-push checks
+npm run preflight:release # Full + license audit + production build
+npm run land              # Verify, sync/rebase/push, and print final status
 ```
 
-Note: some installed `bd` versions do not expose `bd sync`. If `bd sync` is
-unavailable, use `bd vc status` and `bd vc commit -m "..."` for beads DB
+Note: some installed `bd` versions do not expose `bd sync`. If `npm run bd -- sync` is
+unavailable, use `npm run bd -- vc status` and `npm run bd -- vc commit -m "..."` for beads DB
 changes, and mention the fallback in the handoff. If bd commands fail with
-schema errors, run `bd doctor` and `bd migrate --yes` before trying any manual
+schema errors, run `npm run bd -- doctor` and `npm run bd -- migrate --yes` before trying any manual
 SQL repair.
+
+### bd binary version mismatch (important)
+
+Two `bd` binaries can be on PATH with **incompatible Dolt schemas**:
+`/usr/local/bin/bd` (e.g. 1.0.4) and `/opt/homebrew/bin/bd` (e.g. 0.59.0). The
+`scripts/bd.sh` wrapper prefers the Homebrew one, which can fail every write with
+`Error 1054 ... Unknown column 'crystallizes' in 'issues'` against a DB created
+by 1.0.4. If you hit that, force the matching binary explicitly:
+
+```bash
+export BD_BIN=/usr/local/bin/bd   # the binary that owns the .beads Dolt DB
+$BD_BIN create ... / $BD_BIN close ...
+```
+
+`bd create` supports `--type epic|task`, `-p P0..P4`, `--parent <id>`,
+`--acceptance "..."`, `-d/--description`, and `--silent` (prints only the new ID).
+
+bd state lives in the `.beads` Dolt DB (gitignored) and is exported to the tracked
+`.beads/issues.jsonl`. Switching git branches reverts that jsonl, and bd may
+re-sync from it — so a `bd close` done on one branch can appear reverted after a
+checkout. When closing issues across per-issue branches, reconcile bd state on
+`main` at the end (re-run the closes there) so the committed jsonl reflects reality.
+
+## Agent Workflow Gotchas
+
+Hard-won pitfalls when doing TDD + per-issue-branch + merge work in this repo:
+
+- **Run `cargo fmt` inside `src-tauri/`, not the repo root.** There is no root
+  `Cargo.toml`, so `cargo fmt` at the root is a silent no-op. The pre-push `full`
+  preflight runs `cargo fmt --all -- --check`; a formatting drift there *fails the
+  push* even though the pre-commit `quick` tier does not run fmt. Always
+  `cd src-tauri && cargo fmt` before committing Rust.
+- **Run the FULL `cargo test --lib` before merging, not just the changed module.**
+  A scoped run like `cargo test --lib db_core::db::tests` will miss regressions in
+  sibling modules (e.g. a new schema-invariant check breaking
+  `db_core::db::migration_safety_tests`). The pre-push full tier catches it, but
+  only after a slow round-trip — cheaper to run the whole lib suite locally first.
+- **Pre-push `full` runs fmt + clippy + the whole test suite** (`scripts/preflight.sh full`);
+  clippy is `cargo clippy --all-targets` *without* `-D warnings`, so pre-existing
+  warnings don't fail the push, but a new compile/test/fmt failure does. Use
+  `CULL_PREFLIGHT_SKIP_E2E=1 git push` to skip only the manual browser E2E gate.
+- **macOS path-canonicalization in tests:** `tempfile::tempdir()` returns
+  `/var/folders/...` which `std::fs::canonicalize` resolves to `/private/var/...`.
+  Any test that compares a canonicalized path against a tempdir prefix must
+  canonicalize the tempdir too, or `starts_with` fails. Production `dirs::home_dir()`
+  is already canonical, so this bites tests only.
+- **Cross-module test interactions:** changing shared DB/open behavior can break
+  fixtures elsewhere that encoded the *old* behavior (e.g. minimal `user_version`
+  fixtures). Prefer realistic fixtures (full-migrate, then mutate) over hand-rolled
+  partial DBs.
+
+### External audit + codex review
+
+A full external audit lives in `docs/cull-audit-2026-06-03.md` (ChatGPT 5.5 Pro,
+security/UX/a11y/logic/scalability/best-practices). Recommendations are tracked as
+bd epics `imageview-hqf` (P0), `imageview-dtj` (P1), `imageview-9fz` (P2), each
+child with Jobs-To-Be-Done + acceptance criteria.
+
+Note on review tooling: the `codex` CLI hung indefinitely in the headless/sandbox
+environment (no output even for trivial prompts — likely a ChatGPT-account
+auth/network issue). When codex is unavailable, the `feature-dev:code-reviewer`
+agent is an effective substitute review gate; mark such reviews as
+"codex-substitute" in the issue/commit so provenance is clear.
+
+## Cull Preflight
+
+Use `npm run preflight -- <hook|quick|full|release>` for project readiness checks:
+
+```bash
+npm run preflight -- hook     # shell syntax; no app tauri-mock imports
+npm run preflight -- quick    # hook + npm run check; npm test
+npm run preflight -- full     # quick + cargo fmt/clippy/tests
+npm run preflight -- release  # full + npm run audit:licenses; npm run build
+```
+
+Do not use `bd preflight --check` for Cull readiness. In the installed bd
+version, embedded bd preflight cannot be configured for this repo and runs a
+generic Go/Nix checklist (`go test`, `golangci-lint`, `gofmt`, `go.sum`,
+`default.nix`) that does not apply to Cull.
+
+## Feature Landing Flow
+
+Use the feature landing flow when a feature branch is complete and the user asks
+to merge, build, land it on `main`, or make it part of the latest main builds.
+Do not use it for WIP branches, dirty worktrees, PR-only review, or signed
+release packaging.
+
+```bash
+npm run land:feature -- <feature-branch>
+```
+
+The flow merges the feature branch into `main`, runs `npm run check`,
+`npm test`, and `npm run build`, falls back from unavailable `npm run bd -- sync` to
+`npm run bd -- vc status`, pushes `main`, and watches main CI. Signed app artifacts are a
+separate tag/manual Release workflow step.
+
+Hook behavior is documented in `docs/dev-workflow-hooks.md`. The hook installer
+uses bd chaining and Cull-managed markers so existing user hook content outside
+managed sections is preserved.
+
+### Hook Behavior
+
+- Pre-commit runs `scripts/preflight.sh quick` by default.
+- Pre-push runs `scripts/preflight.sh full` by default.
+- Use `CULL_PRE_COMMIT_TIER=<tier>` or `CULL_PRE_PUSH_TIER=<tier>` only for
+  deliberate overrides.
+- Use `CULL_HOOK_SKIP_CHECKS=1` sparingly, and mention it in handoff when used.
+- Use `CULL_PREFLIGHT_DRY_RUN=1` to print planned preflight commands without
+  executing them.
+- Use `CULL_PREFLIGHT_SKIP_E2E=1` to skip browser E2E inside the release tier.
+
+## Branch And Merge Safety
+
+- Inspect `git log main..<branch>` and `git diff --stat main...<branch>` before
+  merging any branch.
+- If a branch contains unrelated work, do not direct-merge it. Use a temporary
+  worktree from `origin/main` and cherry-pick only the scoped commits.
+- Never resolve conflicts by discarding user changes. If unrelated dirty work is
+  present, preserve it on a separate branch/worktree and keep the merge scoped.
+- Delete remote branches after successful merge, but preserve local dirty work
+  under a clearly named branch rather than forcing deletion.
+
+## Landing A Session
+
+Use `npm run land` after changes are committed. It requires a clean worktree,
+runs the full preflight tier unless `--skip-checks` is used, reports bd
+version-control state, falls back when `bd sync` is unavailable, pulls with
+rebase, pushes, and prints final git/bd status.
+
+Useful variants:
+
+```bash
+npm run land -- --release
+npm run land -- --skip-checks
+npm run land -- --dry-run
+npm run land -- --no-push
+```
+
+The landing script does not delete, reset, or clean user files.
 
 ## Landing the Plane (Session Completion)
 
@@ -169,10 +318,7 @@ SQL repair.
 3. **Update issue status** - Close finished work, update in-progress items
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
-   git pull --rebase
-   bd sync  # If unavailable: bd vc status && bd vc commit -m "..."
-   git push
-   git status  # MUST show "up to date with origin"
+   npm run land
    ```
 5. **Clean up** - Clear stashes, prune remote branches
 6. **Verify** - All changes committed AND pushed

@@ -227,7 +227,7 @@ start_clipboard_monitor()
   -> create dir if missing
   -> create collection named "Clipboard YYYY.MM.DD HH:mm"
   -> store settings_json on collection
-  -> allow capture dir in asset protocol scope
+  -> keep capture dir out of asset protocol scope
   -> emit navigate collection event with view grid
   -> spawn guarded polling task
 
@@ -238,6 +238,7 @@ poll tick
   -> build readable filename
   -> atomic write to capture dir
   -> import_file(db, path, app_data_dir)
+  -> UI uses app-owned thumbnail/generated assets; if no safe preview exists, show preview unavailable
   -> if imported image id exists, add_to_collection(collection_id, [id])
   -> create import batch with source "clipboard"
   -> set the imported image's batch id
@@ -269,7 +270,7 @@ Flow:
 5. Verify file size and hash after copy.
 6. Update `image_files.path` for moved records.
 7. Update `clipboard_monitor_capture_dir`.
-8. Allow destination in asset protocol scope.
+8. Do not add destination to asset protocol scope; previews must come from app-owned generated/thumbnail assets.
 9. Emit `images:changed`.
 10. Resume monitor if it was running.
 11. Leave old files in place by default for the first version, then show a cleanup option later. This avoids accidental data loss.

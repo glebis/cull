@@ -133,11 +133,13 @@
 ## Command Palette
 
 ### S19 — Command palette
-1. `⌘K` opens palette with all items (views, commands, collections)
-2. `⌘+Shift+P` opens with commands only
-3. Type to filter; `↑/↓` to navigate; `Enter` to execute
-4. `Escape` closes
-5. Recently used items appear first
+1. `⌘P` or **View > Command Palette...** opens palette with commands only
+2. `⌘K` opens palette with all items (views, commands, folders, collections)
+3. `⌘+Shift+P` opens with commands only
+4. Type to fuzzy-filter; non-matching rows are hidden
+5. `↑/↓` navigates; `Enter` executes the selected command
+6. `Escape` closes
+7. The last 5 commands launched through the palette appear first on an empty query
 
 ### S20 — Custom hotkeys
 1. Open palette → right-click a command → "Set Hotkey"

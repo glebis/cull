@@ -669,7 +669,8 @@ pub async fn start_clipboard_monitor(
 
     let session = create_monitor_session(&state.db, &state.app_data_dir, capture_dir.as_deref())?;
     let capture_path = std::path::PathBuf::from(&session.capture_dir);
-    let _ = app.asset_protocol_scope().allow_directory(&capture_path, true);
+    // Capture directories are not added to asset protocol scope. The UI should
+    // render app-owned thumbnails/generated previews, or an unavailable state.
 
     {
         let mut monitor = state.clipboard_monitor.lock();
@@ -1293,7 +1294,7 @@ pub async fn move_clipboard_capture_folder(
             .unwrap_or_else(|| crate::services::clipboard_monitor::default_capture_dir(&state.app_data_dir).to_string_lossy().to_string())
     };
     crate::services::clipboard_monitor::move_capture_folder(&state.db, &old_dir, &new_dir)?;
-    let _ = app.asset_protocol_scope().allow_directory(&new_dir, true);
+    // Moved capture directories remain outside asset protocol scope.
     let _ = app.emit("images:changed", ());
     let mut monitor = state.clipboard_monitor.lock();
     monitor.capture_dir = Some(new_dir);

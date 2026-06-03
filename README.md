@@ -20,7 +20,7 @@ Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 
 ## Documentation
 
-- [User Guide](docs/USER_GUIDE.md) — installation, import, viewing, curation, collections, embeddings, export, CLI, and privacy basics
+- [User Guide](docs/USER_GUIDE.md) — installation, import, viewing, curation, collections, Clipboard Monitor, static publishing, embeddings, agent workflows, CLI, and privacy basics
 - [System Menu Audit](docs/SYSTEM_MENU_AUDIT.md) — complete native menu inventory and implementation status
 - [Privacy & Data Flow](docs/PRIVACY.md) — local-first behavior, opt-in cloud features, and data destinations
 - [Contributing](CONTRIBUTING.md) — setup, checks, and pull request process
@@ -40,6 +40,7 @@ Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 | Embedding Explorer (UMAP 2D scatter + k-means clustering) | Done |
 | Zen mode (fullscreen, hides all chrome) | Done |
 | Vim-style keyboard navigation (hjkl, arrows, Home/End, PgUp/PgDn) | Done |
+| Command Palette with fuzzy command search, shortcut badges, and top-five recents | Done |
 | Star ratings (1-5), accept/reject/undecide curation | Done |
 | Color labels (schema ready, UI pending) | Partial |
 | SQLite library with SHA-256 dedup | Done |
@@ -190,7 +191,21 @@ Search, contact-sheet, and export deep-link verbs are roadmap items.
 | `Cmd+4` | Canvas |
 | `Cmd+5` | Lineage |
 | `Cmd+6` | Embedding Explorer |
-| `Cmd+0` | Export |
+| `Cmd+7` | Export |
+
+### Command Palette
+
+| Key | Action |
+|-----|--------|
+| `Cmd+P` | Open Command Palette in command-only mode |
+| `Cmd+K` | Open Command Palette with commands and destinations |
+| `Cmd+Shift+P` | Open Command Palette in command-only mode |
+| Type to search | Fuzzy-filter commands; non-matches are hidden |
+| `ArrowUp` / `ArrowDown` | Move selected result |
+| `Enter` | Run selected command |
+| `Escape` | Close palette |
+
+Command rows show their category and shortcut. The five most recent commands launched from the palette appear at the top before the normal command list.
 
 ### Curation
 
@@ -210,7 +225,7 @@ npm install
 npm run tauri dev
 ```
 
-Prerequisites: Rust 1.78+, Node.js 20+
+Prerequisites: Rust 1.89.0 and Node.js 20.20.2. The repository pins these versions in `rust-toolchain.toml`, `.node-version`, and `.nvmrc`; see [docs/toolchain.md](docs/toolchain.md) for setup details, the `bd` wrapper script, and dependency update automation.
 
 ## Distribution
 
