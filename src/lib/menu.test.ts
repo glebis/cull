@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     loadAllImages: vi.fn(),
     loadImagesForCurrentScope: vi.fn(),
     loadImagesUntil: vi.fn(),
+    openUrl: vi.fn(),
     updateMenuState: vi.fn(),
 }));
 
@@ -21,6 +22,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 }));
 
 vi.mock('@tauri-apps/plugin-opener', () => ({
+    openUrl: mocks.openUrl,
     openPath: vi.fn(),
     revealItemInDir: vi.fn(),
 }));
@@ -184,5 +186,23 @@ describe('native menu bridge', () => {
         expect(mocks.importFolder).toHaveBeenCalledWith('/photos/new-import');
         expect(get(stores.activeFolder)).toBe('/photos/new-import');
         expect(get(stores.viewMode)).toBe('grid');
+    });
+
+    it('opens the GitHub wiki when the native Help menu action fires', async () => {
+        let handler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, next) => {
+            handler = next as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+
+        const { initMenu } = await import('./menu');
+
+        void initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        await flushMicrotasks();
+
+        handler?.({ payload: 'github_wiki' });
+        await flushMicrotasks();
+
+        expect(mocks.openUrl).toHaveBeenCalledWith('https://github.com/glebis/cull/wiki');
     });
 });

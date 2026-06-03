@@ -35,6 +35,15 @@ describe('Help menu contract', () => {
         expect(menuSource).toContain('Submenu::with_id(app, HELP_SUBMENU_ID, "Help", true)');
     });
 
+    it('adds the project wiki as a native Help menu link', () => {
+        const menuSource = readProjectFile('src-tauri/src/menu.rs');
+        const frontendMenuSource = readProjectFile('src/lib/menu.ts');
+
+        expect(menuSource).toContain('"github_wiki"');
+        expect(menuSource).toContain('"GitHub Wiki"');
+        expect(frontendMenuSource).toContain('https://github.com/glebis/cull/wiki');
+    });
+
     it('registers a native macOS Help Book in the app plist', () => {
         const plist = readProjectFile('src-tauri/Info.plist');
 

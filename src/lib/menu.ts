@@ -1,6 +1,6 @@
 import { listen } from '@tauri-apps/api/event';
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
-import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
+import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { get } from 'svelte/store';
 import {
     importFolder,
@@ -58,6 +58,7 @@ export interface MenuInitOptions {
 const DEFAULT_LISTEN_TIMEOUT_MS = 5000;
 const DEFAULT_RETRY_DELAY_MS = 1000;
 const DEFAULT_STATE_UPDATE_TIMEOUT_MS = 5000;
+const GITHUB_WIKI_URL = 'https://github.com/glebis/cull/wiki';
 
 const IMAGE_FILTERS = [
     {
@@ -333,6 +334,14 @@ async function handleImageTrash() {
     }
 }
 
+async function handleGitHubWiki() {
+    try {
+        await openUrl(GITHUB_WIKI_URL);
+    } catch (e) {
+        showToast('Could not open GitHub Wiki', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
 function handleMenuAction(action: string) {
     switch (action) {
         case 'about':
@@ -433,6 +442,9 @@ function handleMenuAction(action: string) {
             break;
         case 'settings':
             settingsOpen.set(true);
+            break;
+        case 'github_wiki':
+            handleGitHubWiki();
             break;
     }
 }

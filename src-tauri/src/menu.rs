@@ -264,6 +264,13 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         true,
         None::<&str>,
     )?)?;
+    help_menu.append(&MenuItem::with_id(
+        app,
+        "github_wiki",
+        "GitHub Wiki",
+        true,
+        None::<&str>,
+    )?)?;
     menu.append(&help_menu)?;
 
     Ok(menu)
@@ -462,7 +469,7 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
         | "image_open_with" | "image_reveal" | "image_rename" | "image_move_to" | "image_trash"
         | "view_grid" | "view_compare" | "view_loupe" | "view_canvas" | "view_lineage"
         | "view_embeddings" | "view_publish" | "view_export" | "toggle_sidebar" | "zoom_in"
-        | "zoom_out" | "actual_size" => {
+        | "zoom_out" | "actual_size" | "github_wiki" => {
             let _ = app.emit("menu-action", id);
         }
         _ => {}
