@@ -16,6 +16,11 @@
 //! every old fixture so each version stays tested forever.
 //!   cargo test --features test-support --test compat_golden -- --ignored regenerate_db_fixture
 
+// Requires the `test-support` feature (for the gated `test_support::Database`
+// re-export). Without it this file compiles to nothing, so a plain
+// `cargo test --all-targets` does not fail to build.
+#![cfg(feature = "test-support")]
+
 use std::path::{Path, PathBuf};
 
 fn fixture_path() -> PathBuf {
