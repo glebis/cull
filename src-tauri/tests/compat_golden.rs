@@ -57,5 +57,9 @@ fn regenerate_db_fixture() {
     // Opening a fresh path runs the full migration chain at the current schema.
     let db = cull_lib::test_support::Database::open(&out).expect("open fresh db");
     drop(db);
-    assert!(out.exists(), "fixture should have been written to {}", out.display());
+    assert!(
+        out.exists(),
+        "fixture should have been written to {}",
+        out.display()
+    );
 }
