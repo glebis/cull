@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cull — Compatibility &amp; Release Policy: Three Formulations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap" rel="stylesheet">
+<style>
+@font-face{
+  font-family:"Monaspace Argon";
+  src:url("https://cdn.jsdelivr.net/gh/githubnext/monaspace@v1.000/fonts/webfonts/MonaspaceArgon-Regular.woff2") format("woff2");
+  font-weight:400;font-display:swap;
+}
+@font-face{
+  font-family:"Monaspace Argon";
+  src:url("https://cdn.jsdelivr.net/gh/githubnext/monaspace@v1.000/fonts/webfonts/MonaspaceArgon-Medium.woff2") format("woff2");
+  font-weight:500;font-display:swap;
+}
+:root{
+  --bg:#FBF8F1; --panel:#f4efe4; --ink:#211d18; --soft:#6b6258; --rule:#d9d0bf;
+  --accent:#c45a28; --green:#2a7a5a; --amber:#c89000; --red:#a02a2a; --blue:#2a4f86;
+  --serif:"EB Garamond",Georgia,serif; --mono:"Monaspace Argon",ui-monospace,monospace;
+  --measure:38rem;
+}
+*{box-sizing:border-box}
+html{font-size:18px;-webkit-font-smoothing:antialiased}
+body{
+  margin:0;background:var(--bg);color:var(--ink);font-family:var(--serif);
+  line-height:1.5;padding:0 1.25rem;
+}
+.wrap{max-width:min(70rem,94vw);margin:0 auto;padding:4.5rem 0 6rem}
+.mono{font-family:var(--mono);font-feature-settings:"liga" 1,"calt" 1}
+
+/* Masthead */
+.masthead{border-bottom:2px solid var(--ink);padding-bottom:1.2rem;margin-bottom:2.4rem}
+.kicker{font-family:var(--mono);font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);margin:0 0 .9rem}
+h1{font-size:clamp(2.1rem,4.6vw,3.4rem);font-weight:600;line-height:1.04;margin:0 0 .6rem;letter-spacing:-.01em}
+.dek{font-size:1.22rem;color:var(--soft);font-style:italic;max-width:46rem;margin:0}
+.tags{margin-top:1.1rem;display:flex;flex-wrap:wrap;gap:.45rem}
+.tag{font-family:var(--mono);font-size:.68rem;color:var(--soft);border:1px solid var(--rule);border-radius:2px;padding:.18rem .5rem;background:var(--panel)}
+
+/* Lede + axes strip */
+.lede{max-width:var(--measure);font-size:1.12rem;margin:0 0 2.2rem}
+.lede b{font-weight:600}
+.axes{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin:2.4rem 0 3rem}
+.axis{border-top:3px solid var(--ink);padding-top:.7rem}
+.axis h4{margin:0 0 .25rem;font-size:1.02rem;font-weight:600}
+.axis .st{font-family:var(--mono);font-size:.72rem;letter-spacing:.04em}
+.axis p{margin:.4rem 0 0;font-size:.92rem;color:var(--soft)}
+.ok{color:var(--green)} .warn{color:var(--amber)} .bad{color:var(--red)}
+
+/* Section scaffolding */
+h2{font-size:1.9rem;font-weight:600;margin:3.4rem 0 .2rem;letter-spacing:-.01em;display:flex;align-items:baseline;gap:.6rem}
+h2 .num{font-family:var(--mono);font-size:1rem;color:var(--accent);font-weight:500}
+.state-line{font-style:italic;color:var(--soft);font-size:1.08rem;margin:.1rem 0 1.4rem;max-width:46rem}
+.rule{border:0;border-top:1px solid var(--rule);margin:0}
+
+/* Option card */
+.opt{display:grid;grid-template-columns:300px 1fr;gap:2rem;align-items:start;margin:1.6rem 0 0}
+.opt figure{margin:0}
+.opt img{width:100%;border:1px solid var(--rule);border-radius:6px;background:#fff;display:block}
+.opt figcaption{font-family:var(--mono);font-size:.7rem;color:var(--soft);margin-top:.5rem;line-height:1.4}
+.opt .body p{margin:.1rem 0 .8rem;max-width:42rem}
+.opt .body p:first-child{margin-top:0}
+.lead-in{font-weight:600;color:var(--accent)}
+.modeled{font-family:var(--mono);font-size:.74rem;color:var(--soft);border-left:2px solid var(--accent);padding:.3rem 0 .3rem .7rem;margin:.2rem 0 1rem;background:linear-gradient(90deg,var(--panel),transparent)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:.15rem .9rem;font-size:.95rem;margin:.4rem 0 .2rem}
+.kv dt{font-family:var(--mono);font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;color:var(--soft);padding-top:.18rem}
+.kv dd{margin:0}
+
+/* maturity dots small-multiple */
+.dots{display:inline-flex;gap:.28rem;vertical-align:middle;margin-left:.1rem}
+.dot{width:.62rem;height:.62rem;border-radius:50%;border:1.4px solid var(--ink);display:inline-block}
+.dot.fill{background:var(--ink)} .dot.acc{background:var(--accent);border-color:var(--accent)}
+
+/* Comparison table */
+.table-wrapper{overflow-x:auto;margin:1.4rem 0 1rem}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+caption{caption-side:bottom;text-align:left;font-style:italic;color:var(--soft);font-size:.88rem;margin-top:.6rem}
+th,td{text-align:left;padding:.55rem .7rem;border-bottom:1px solid var(--rule);vertical-align:top}
+thead th{border-bottom:1.5px solid var(--ink);font-weight:600;font-size:.84rem}
+tbody th{font-family:var(--mono);font-size:.74rem;font-weight:500;letter-spacing:.03em;text-transform:uppercase;color:var(--soft);white-space:nowrap}
+td .mono{font-size:.84rem}
+tr td:first-child{font-variant-numeric:tabular-nums}
+
+/* Flyout */
+.flyout{background:var(--panel);border:1px solid var(--rule);border-left:3px solid var(--accent);border-radius:4px;padding:1.1rem 1.3rem;margin:1.6rem 0;max-width:48rem}
+.flyout .mk{font-family:var(--mono);color:var(--accent);font-weight:500;font-size:.78rem;letter-spacing:.08em;text-transform:uppercase}
+.flyout p{margin:.4rem 0 0}
+.flyout b{font-weight:600}
+
+.foot{margin-top:4rem;border-top:1px solid var(--rule);padding-top:1.1rem;font-family:var(--mono);font-size:.72rem;color:var(--soft);line-height:1.7}
+.sep{font-family:var(--mono);color:var(--rule);text-align:center;letter-spacing:.4em;margin:2.6rem 0}
+
+@media(max-width:760px){
+  .axes{grid-template-columns:1fr}
+  .opt{grid-template-columns:1fr;gap:1rem}
+  .opt figure{max-width:320px}
+  .hide-m{display:none}
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+
+  <header class="masthead">
+    <p class="kicker">Cull · Engineering Note · 2026-06-03</p>
+    <h1>Three ways to promise compatibility</h1>
+    <p class="dek">How a solo, agent-driven desktop app can formulate a release &amp; stability policy — from a one-line pledge to a fully contract-gated machine. Pick the smallest one that tells the truth.</p>
+    <div class="tags">
+      <span class="tag">SemVer 2.0.0</span>
+      <span class="tag">Go 1 compat</span>
+      <span class="tag">Kubernetes deprecation</span>
+      <span class="tag">Schema-Registry modes</span>
+      <span class="tag">Pact / contract tests</span>
+      <span class="tag">MCP protocolVersion</span>
+    </div>
+  </header>
+
+  <p class="lede">A version number only means something once you’ve <b>declared what your public API is</b> — that is the part SemVer leaves to you. For Cull, the public surface is three things users and integrators build on. Each formulation below is a different ceremony for guarding those three. They are not mutually exclusive; the recommendation at the end composes them.</p>
+
+  <p class="state-line">Cull’s public API is three surfaces — and they are not equally ready.</p>
+  <section class="axes">
+    <div class="axis">
+      <h4>Database schema</h4>
+      <div class="st ok">✅ mechanism mature</div>
+      <p><span class="mono">user_version 21</span>, migration chain + pre-migration backup + post-migrate invariant check. Missing: golden round-trip fixtures.</p>
+    </div>
+    <div class="axis">
+      <h4>MCP token API</h4>
+      <div class="st bad">✕ not promisable</div>
+      <p>Roles &amp; scopes hardened, but <b>no version handshake</b> and no deprecation policy. The only surface third parties build against — the real 1.0 blocker.</p>
+    </div>
+    <div class="axis">
+      <h4>Export formats</h4>
+      <div class="st warn">◐ pattern proven</div>
+      <p>Static-publish package is versioned (<span class="mono">cull.static_publishing.v1</span>) &amp; validated. Generalise marker + golden test to PDF / presets / sidecar.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- OPTION 1 -->
+  <h2><span class="num">01</span> The Promise</h2>
+  <p class="state-line">One prose pledge, ship when ready. The least ceremony that can still be true.</p>
+  <div class="opt">
+    <figure>
+      <img src="assets/release-policy/opt1-promise.png" alt="A wax-sealed scroll unrolling into one long unbroken line across a quiet landscape">
+      <figcaption>One seal, one unbroken line — a single durable guarantee carried forward release after release.</figcaption>
+    </figure>
+    <div class="body">
+      <p><span class="lead-in">What it is.</span> A single page — <span class="mono">COMPATIBILITY.md</span> — that says, in plain prose: “Any library, token, or export written by version <em>X</em> keeps working in every later <em>X.y.z</em>. Breaking that requires a major bump.” You ship to <span class="mono">main</span> continuously; you cut a stable release by pushing a <span class="mono">v*</span> tag when a batch is worth distributing.</p>
+      <p><span class="lead-in">Why it fits a solo dev.</span> Near-zero overhead and it scales with trust, not process. The guarantee lives in your head and one document, enforced by discipline and the existing full-preflight gate — not by machinery you have to maintain alone.</p>
+      <p class="modeled">Modeled on: the <b>Go 1 Compatibility Promise</b> (go.dev/doc/go1compat) + <b>SemVer 2.0.0</b>. Prose guarantee, additive-only within a major.</p>
+      <dl class="kv">
+        <dt>Overhead</dt><dd>Lowest — one markdown file.</dd>
+        <dt>Maturity</dt><dd><span class="dots"><span class="dot acc"></span></span> single stable line (no tiers)</dd>
+        <dt>Guarantees</dt><dd>Backward compatibility within a major; honest, but unverified by tooling.</dd>
+        <dt>Risk</dt><dd>A promise you can quietly break — nothing fails the build if you do.</dd>
+        <dt>Graduate when</dt><dd>External integrators appear, or you break it once by accident.</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="sep mono">:::</div>
+
+  <!-- OPTION 2 -->
+  <h2><span class="num">02</span> Tiers &amp; Gates</h2>
+  <p class="state-line">Each surface earns a maturity level; promotion to “stable” passes a written gate.</p>
+  <div class="opt">
+    <figure>
+      <img src="assets/release-policy/opt2-tiers.png" alt="A staircase rising through three archway gates of increasing solidity, the final gate flying a flag">
+      <figcaption>Three gates — experimental, preview, stable. Only the crowned gate carries a compatibility promise.</figcaption>
+    </figure>
+    <div class="body">
+      <p><span class="lead-in">What it is.</span> Every surface (and even individual MCP tools) is labelled <span class="mono">experimental → preview → stable</span>. Only <span class="mono">stable</span> carries the promise; <span class="mono">preview</span> can change with notice; <span class="mono">experimental</span> can change freely. Promotion to <span class="mono">stable</span> passes an explicit Release-Readiness checklist, and removing anything stable runs through a deprecation window.</p>
+      <p><span class="lead-in">Why it fits.</span> It lets you ship a 1.0 of the <em>app</em> while honestly keeping the MCP API at <span class="mono">preview</span> — decoupling stability per surface instead of freezing everything at once. This is the formulation that unblocks 1.0 without lying about the integration layer.</p>
+      <p class="modeled">Modeled on: <b>Kubernetes</b> alpha/beta/GA + deprecation policy, Google SRE <b>Production-Readiness Review</b>, HTTP <b>Deprecation/Sunset</b> headers (RFC 9745 / 8594).</p>
+      <dl class="kv">
+        <dt>Overhead</dt><dd>Medium — labels, a gate checklist, deprecation tracking.</dd>
+        <dt>Maturity</dt><dd><span class="dots"><span class="dot"></span><span class="dot fill"></span><span class="dot acc"></span></span> per-surface tiers</dd>
+        <dt>Guarantees</dt><dd>Differentiated &amp; honest: strong on stable, explicit “may change” elsewhere.</dd>
+        <dt>Risk</dt><dd>Process can outweigh a one-person team if applied everywhere.</dd>
+        <dt>Graduate when</dt><dd>You have outside users on at least one surface (MCP).</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="sep mono">:::</div>
+
+  <!-- OPTION 3 -->
+  <h2><span class="num">03</span> Contracts &amp; Modes</h2>
+  <p class="state-line">Each surface declares a named compatibility mode; CI golden tests fail the build if you break it.</p>
+  <div class="opt">
+    <figure>
+      <img src="assets/release-policy/opt3-contracts.png" alt="Two interlocking gears joined by a looping double-headed arrow above a document bearing a checkmark shield">
+      <figcaption>Backward and forward, machine-checked — the promise is whatever the contract tests still pass.</figcaption>
+    </figure>
+    <div class="body">
+      <p><span class="lead-in">What it is.</span> Borrow the schema-registry vocabulary: declare a mode per surface — DB as <span class="mono">BACKWARD_TRANSITIVE</span> (new code reads every old DB), exports as forward-compatible “ignore unknown fields,” MCP as a versioned contract. Then make it real with <b>golden round-trip tests</b> and <b>consumer-driven contract tests</b> in CI. The promise isn’t prose — it’s “the contract suite is green.”</p>
+      <p><span class="lead-in">Why it fits an agentic workflow.</span> Agents already produce many small, individually-verified commits; a contract suite is the gate that lets them merge fast <em>and</em> safely. The promise can’t silently rot, because breaking it turns CI red — exactly the kind of enforcement that survives without a human reviewer.</p>
+      <p class="modeled">Modeled on: <b>Confluent Schema-Registry</b> compatibility modes (Avro/Protobuf), <b>Pact</b> consumer-driven contracts, golden/snapshot testing.</p>
+      <dl class="kv">
+        <dt>Overhead</dt><dd>Higher up front (fixtures + tests), near-zero ongoing.</dd>
+        <dt>Maturity</dt><dd><span class="dots"><span class="dot acc"></span><span class="dot acc"></span></span> enforced, not asserted</dd>
+        <dt>Guarantees</dt><dd>Strongest — mechanically verified backward/forward compatibility.</dd>
+        <dt>Risk</dt><dd>Test maintenance; over-specifying a surface that’s still moving.</dd>
+        <dt>Graduate when</dt><dd>You adopt it incrementally — start with DB + export golden tests.</dd>
+      </dl>
+    </div>
+  </div>
+
+  <hr class="rule" style="margin-top:3rem">
+
+  <!-- COMPARISON -->
+  <h2><span class="num">04</span> Side by side</h2>
+  <p class="state-line">The axis is ceremony vs. enforcement — not better vs. worse.</p>
+  <div class="table-wrapper">
+  <table>
+    <thead>
+      <tr><th>Dimension</th><th>01 · The Promise</th><th>02 · Tiers &amp; Gates</th><th>03 · Contracts &amp; Modes</th></tr>
+    </thead>
+    <tbody>
+      <tr><th>Enforcement</th><td>Discipline</td><td>Checklist + review</td><td>CI fails the build</td></tr>
+      <tr><th>Overhead</th><td>Lowest</td><td>Medium</td><td>Front-loaded</td></tr>
+      <tr><th>Best while</th><td>Pure solo</td><td>External users / a teammate</td><td>Agent-driven, any size</td></tr>
+      <tr><th>Version math</th><td>SemVer 0.x → 1.0</td><td>Per-surface tiers + SemVer</td><td>SemVer + named modes</td></tr>
+      <tr><th>Deprecation</th><td class="hide-m">Ad-hoc note</td><td>Formal window</td><td>Encoded in tests</td></tr>
+      <tr><th>1.0 readiness gate</th><td>“It feels stable”</td><td>RRR checklist passes</td><td>Contract suite green</td></tr>
+      <tr><th>Reference</th><td class="mono">go1compat</td><td class="mono">k8s deprecation</td><td class="mono">schema-registry / pact</td></tr>
+    </tbody>
+    <caption>Three formulations of the same underlying SemVer contract, ordered by how much the machine (vs. you) does the guarding.</caption>
+  </table>
+  </div>
+
+  <!-- PER AXIS -->
+  <h2><span class="num">05</span> How each handles Cull’s three surfaces</h2>
+  <p class="state-line">The MCP row is where the options visibly diverge — and where Cull is weakest today.</p>
+  <div class="table-wrapper">
+  <table>
+    <thead>
+      <tr><th>Surface</th><th>01 · Promise</th><th>02 · Tiers &amp; Gates</th><th>03 · Contracts &amp; Modes</th></tr>
+    </thead>
+    <tbody>
+      <tr><th>DB schema</th>
+        <td>“Old DBs always open.”</td>
+        <td>Stable; migrations additive-only.</td>
+        <td><span class="mono">BACKWARD_TRANSITIVE</span> + golden DB fixtures per version.</td></tr>
+      <tr><th>MCP token API</th>
+        <td>“1.0 tokens keep working.”</td>
+        <td>Keep at <span class="mono">preview</span> until a version handshake exists.</td>
+        <td>Adopt MCP <span class="mono">protocolVersion</span> + Pact-style negative tests per tool.</td></tr>
+      <tr><th>Export formats</th>
+        <td>“v1 packages stay readable.”</td>
+        <td>Stable; new fields optional + announced.</td>
+        <td>JSON-Schema per marker + must-ignore-unknown + golden serve test.</td></tr>
+    </tbody>
+    <caption>Same three surfaces, three escalating degrees of rigor. Note all three agree MCP is not yet a stable promise.</caption>
+  </table>
+  </div>
+
+  <!-- RECOMMENDATION -->
+  <h2><span class="num">06</span> Recommendation — compose, don’t choose</h2>
+  <p class="state-line">Start at the cheapest formulation and let evidence pull you up the ladder.</p>
+  <div class="flyout">
+    <span class="mk">✦ The pragmatic path</span>
+    <p><b>Write Option 1’s promise today</b> — one <span class="mono">COMPATIBILITY.md</span> modeled on Go 1, declaring the three surfaces and the support window. <b>Back the two ready surfaces with Option 3’s golden tests</b> (DB round-trip + export serve) so the promise can’t silently rot. <b>Fence MCP with Option 2’s tiers</b>: ship a 1.0 of the app/DB/exports while MCP stays <span class="mono">preview</span> behind its own <span class="mono">protocolVersion</span> — then graduate it to stable once the handshake and a deprecation window exist.</p>
+    <p>That sequence is exactly how Go, SQLite, and Kubernetes each grew up — a prose promise first, mechanical enforcement next, formal tiers where outsiders depend on you — just scaled to one person and one agent.</p>
+  </div>
+
+  <footer class="foot">
+    Cull — compatibility &amp; release policy options · generated 2026-06-03<br>
+    Surfaces &amp; status drawn from the repository (db.rs user_version 21, services/tokens.rs, commands/static_publishing.rs).<br>
+    Standards referenced: SemVer 2.0.0 · Go 1 Compatibility Promise · Kubernetes API deprecation policy · Google SRE Production-Readiness Review · Confluent Schema-Registry compatibility modes · Pact consumer-driven contracts · RFC 9745 / RFC 8594 · MCP protocolVersion.<br>
+    Illustrations: GPT Image 2 (monoline ink), draft quality.
+  </footer>
+
+</main>
+</body>
+</html>

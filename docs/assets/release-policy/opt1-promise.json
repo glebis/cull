@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-06-03T13:25:02.115001",
+  "prompt": "A single continuous fine-line ink illustration: a wax-sealed letter unrolling into one long unbroken horizontal line that extends to the right, symbolizing one durable promise kept over time. Minimalist editorial line art, warm cream paper background, a single terracotta-orange accent only on the round wax seal, generous negative space, no text, no lettering",
+  "preset": "ink",
+  "platform": "square",
+  "thinking": "off",
+  "quality": "low",
+  "provider": "openai",
+  "n": 1,
+  "seed": null,
+  "output": "docs/assets/release-policy/opt1-promise.png",
+  "project": null,
+  "estimated_cost": 0.006
+}

@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-06-03T13:25:44.827107",
+  "prompt": "Fine-line ink illustration: a rising staircase passing through three successive archway gates of increasing solidity and height, the third and final gate crowned with a small flag, symbolizing maturity tiers (experimental, preview, stable) and release gates. Minimalist editorial line art, warm cream paper background, a single terracotta-orange accent only on the crowning flag of the final gate, lots of negative space, no text, no lettering",
+  "preset": "ink",
+  "platform": "square",
+  "thinking": "off",
+  "quality": "low",
+  "provider": "openai",
+  "n": 1,
+  "seed": null,
+  "output": "docs/assets/release-policy/opt2-tiers.png",
+  "project": null,
+  "estimated_cost": 0.006
+}
