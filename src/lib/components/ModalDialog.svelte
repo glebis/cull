@@ -95,9 +95,10 @@
     }
 
     function handleKeydown(event: KeyboardEvent) {
+        event.stopPropagation();
+
         if (closeOnEscape && event.key === 'Escape') {
             event.preventDefault();
-            event.stopPropagation();
             onclose();
             return;
         }
@@ -126,6 +127,11 @@
         next.focus();
     }
 
+    function handleOverlayClick(event: MouseEvent) {
+        event.stopPropagation();
+        onclose();
+    }
+
     onMount(() => {
         opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         if (inertBackground) claimModalShellInert();
@@ -148,7 +154,7 @@
     role="presentation"
     tabindex="-1"
     onkeydown={handleKeydown}
-    onclick={onclose}
+    onclick={handleOverlayClick}
 >
     <div
         bind:this={panelElement}
