@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.1] - 2026-06-04
+
+### Changed
+
+- Rotated the Tauri updater signing key before the first public signed release.
+
+### Fixed
+
+- Configured the macOS release workflow to require a Developer ID Application identity for direct-download notarized builds.
+
 ## [0.2.0] - 2026-06-03
 
 ### Added
