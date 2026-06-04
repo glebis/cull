@@ -16,8 +16,7 @@ describe('command palette UI contract', () => {
         expect(componentSource).toContain('aria-activedescendant={selectedItem ? commandOptionId(selectedItem.id) : undefined}');
         expect(componentSource).toContain('id={COMMAND_PALETTE_RESULTS_ID}');
         expect(componentSource).toContain('id={commandOptionId(item.id)}');
-    });
-
+});
     it('keeps global palette shortcuts in the app keyboard pipeline', () => {
         expect(keySource).toContain("e.key.toLowerCase() === 'p' && e.metaKey && !e.shiftKey");
         expect(keySource).toContain("openCommandPalette('commands')");
@@ -41,4 +40,29 @@ describe('command palette UI contract', () => {
         expect(style).not.toMatch(/rgba?\(/);
         expect(style).not.toMatch(/hsla?\(/);
     });
-});
+
+    it('uses the shared modal wrapper for the command palette overlay', () => {
+        expect(componentSource).toContain('import ModalDialog');
+        expect(componentSource).toContain('<ModalDialog');
+        expect(componentSource).toContain('titleId={COMMAND_PALETTE_TITLE_ID}');
+        expect(componentSource).toContain('descriptionId={COMMAND_PALETTE_DESCRIPTION_ID}');
+        expect(componentSource).toContain('overlayClass="command-palette-overlay"');
+        expect(componentSource).toContain('initialFocus={() => inputEl}');
+        expect(componentSource).toContain('onclose={closePalette}');
+    });
+
+    it('hosts hotkey capture in a nested modal dialog', () => {
+        expect(componentSource).toContain('titleId="set-hotkey-title"');
+        expect(componentSource).toContain('descriptionId="set-hotkey-description"');
+        expect(componentSource).toContain('overlayClass="hotkey-modal-overlay"');
+        expect(componentSource).toContain('panelClass="hotkey-card"');
+        expect(componentSource).toContain('onclose={closeHotkeyCapture}');
+        expect(componentSource).toContain('data-modal-initial-focus');
+        expect(componentSource).toContain('function closeHotkeyCapture()');
+    });
+
+    it('explicitly handles Escape in palette context so backdrop close is not over-applied', () => {
+        expect(componentSource).toContain('event.stopPropagation();');
+        expect(componentSource).toContain('if (event.key === \'Escape\')');
+    });
+}); 

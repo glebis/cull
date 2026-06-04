@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { tick } from 'svelte';
+    import ModalDialog from '$lib/components/ModalDialog.svelte';
 
     interface Props {
         visible: boolean;
@@ -12,80 +12,62 @@
 
     let dontAsk = $state(false);
     let scope = $state<'session' | 'always'>('session');
-    let dialogElement = $state<HTMLDivElement | null>(null);
-
     $effect(() => {
         if (visible) {
             dontAsk = false;
             scope = 'session';
-            void tick().then(() => dialogElement?.focus());
         }
     });
 
     function confirm() {
         onconfirm(dontAsk ? scope : 'none');
     }
-
-    function handleKeydown(e: KeyboardEvent) {
-        if (e.key === 'Escape') oncancel();
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            confirm();
-        }
-    }
 </script>
 
 {#if visible}
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="dialog-overlay" onclick={oncancel} onkeydown={handleKeydown}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-        class="dialog"
-        bind:this={dialogElement}
-        onclick={(e) => e.stopPropagation()}
-        onkeydown={handleKeydown}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="trash-confirm-title"
-        tabindex="-1"
-    >
-        <div class="dialog-header">
-            <h3 id="trash-confirm-title">Move to Trash</h3>
-            <button class="close-btn" onclick={oncancel} aria-label="Close trash confirmation">&times;</button>
-        </div>
-
-        <div class="dialog-body">
-            <p class="confirm-text">Move <strong class="file-name" title={fileName}>{fileName}</strong> to Trash?</p>
-
-            <label class="checkbox-row">
-                <input type="checkbox" bind:checked={dontAsk} />
-                <span>Don't ask again</span>
-            </label>
-
-            {#if dontAsk}
-                <div class="scope-options">
-                    <label class="radio-row">
-                        <input type="radio" bind:group={scope} value="session" />
-                        <span>This session (until app restart)</span>
-                    </label>
-                    <label class="radio-row">
-                        <input type="radio" bind:group={scope} value="always" />
-                        <span>Always</span>
-                    </label>
-                </div>
-            {/if}
-        </div>
-
-        <div class="dialog-footer">
-            <button class="btn secondary" onclick={oncancel}>Cancel</button>
-            <button class="btn primary" onclick={confirm}>Move to Trash</button>
-        </div>
+<ModalDialog
+    titleId="trash-confirm-title"
+    descriptionId="trash-confirm-description"
+    overlayClass="dialog-overlay"
+    panelClass="dialog"
+    onclose={oncancel}
+>
+    <div class="dialog-header">
+        <h3 id="trash-confirm-title">Move to Trash</h3>
+        <button class="close-btn" onclick={oncancel} aria-label="Close trash confirmation">&times;</button>
     </div>
-</div>
+
+    <div class="dialog-body">
+        <p id="trash-confirm-description" class="confirm-text">Move <strong class="file-name" title={fileName}>{fileName}</strong> to Trash?</p>
+
+        <label class="checkbox-row">
+            <input type="checkbox" bind:checked={dontAsk} />
+            <span>Don't ask again</span>
+        </label>
+
+        {#if dontAsk}
+            <div class="scope-options">
+                <label class="radio-row">
+                    <input type="radio" bind:group={scope} value="session" />
+                    <span>This session (until app restart)</span>
+                </label>
+                <label class="radio-row">
+                    <input type="radio" bind:group={scope} value="always" />
+                    <span>Always</span>
+                </label>
+            </div>
+        {/if}
+    </div>
+
+    <div class="dialog-footer">
+        <button class="btn secondary" data-modal-initial-focus onclick={oncancel}>Cancel</button>
+        <button class="btn primary" onclick={confirm}>Move to Trash</button>
+    </div>
+</ModalDialog>
 {/if}
 
 <style>
-    .dialog-overlay {
+    :global(.dialog-overlay) {
         position: fixed;
         inset: 0;
         background: color-mix(in srgb, var(--bg) 80%, transparent);
@@ -94,7 +76,7 @@
         justify-content: center;
         z-index: 1000;
     }
-    .dialog {
+    :global(.dialog) {
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: calc(var(--radius) * 2);

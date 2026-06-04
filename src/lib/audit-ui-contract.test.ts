@@ -7,6 +7,7 @@ function source(path: string): string {
 }
 
 const compare = source('src/lib/components/Compare.svelte');
+const commandPalette = source('src/lib/components/CommandPalette.svelte');
 const trashDialog = source('src/lib/components/TrashConfirmDialog.svelte');
 const settings = source('src/lib/components/McpSettings.svelte');
 const staticPublishing = source('src/lib/components/StaticPublishingSettings.svelte');
@@ -29,15 +30,27 @@ describe('impeccable audit UI contracts', () => {
     });
 
     it('uses complete modal semantics for trash confirmation and settings', () => {
-        expect(trashDialog).toContain('role="dialog"');
-        expect(trashDialog).toContain('aria-modal="true"');
-        expect(trashDialog).toContain('aria-labelledby="trash-confirm-title"');
+        expect(trashDialog).toContain('import ModalDialog');
+        expect(trashDialog).toContain('<ModalDialog');
+        expect(trashDialog).toContain('titleId="trash-confirm-title"');
         expect(trashDialog).toContain('aria-label="Close trash confirmation"');
+        expect(trashDialog).toContain('data-modal-initial-focus');
+        expect(trashDialog).toContain('id="trash-confirm-title"');
 
         expect(settings).toContain('role="dialog"');
         expect(settings).toContain('aria-modal="true"');
         expect(settings).toContain('aria-labelledby="settings-title"');
         expect(settings).toContain('aria-label="Close settings"');
+    });
+
+    it('uses shared modal semantics for the command palette', () => {
+        expect(commandPalette).toContain('import ModalDialog');
+        expect(commandPalette).toContain('onclose={closePalette}');
+        expect(commandPalette).toContain('titleId={COMMAND_PALETTE_TITLE_ID}');
+        expect(commandPalette).toContain('titleId="set-hotkey-title"');
+        expect(commandPalette).toContain('onclose={closeHotkeyCapture}');
+        expect(commandPalette).toContain('overlayClass="command-palette-overlay"');
+        expect(commandPalette).toContain('overlayClass="hotkey-modal-overlay"');
     });
 
     it('exposes toggle state through accessible button state', () => {

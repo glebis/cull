@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { tick } from 'svelte';
     import {
         activeCollection,
         activeFolder,
@@ -39,10 +38,10 @@
         WORKFLOW_CREATE_COMMAND_ID,
         type CommandPaletteItem,
     } from '$lib/command-palette';
+    import ModalDialog from './ModalDialog.svelte';
 
     let query = $state('');
     let inputEl: HTMLInputElement | undefined = $state();
-    let hotkeyCaptureEl: HTMLButtonElement | undefined = $state();
     let items = $state<CommandPaletteItem[]>([]);
     let selectedIndex = $state(0);
     let pinnedIds = $state<string[]>([]);
@@ -54,6 +53,8 @@
     let capturedShortcut = $state('');
 
     const COMMAND_PALETTE_RESULTS_ID = 'command-palette-results';
+    const COMMAND_PALETTE_TITLE_ID = 'command-palette-title';
+    const COMMAND_PALETTE_DESCRIPTION_ID = 'command-palette-description';
 
     let visibleItems = $derived(sortCommandPaletteItems(items, query, {
         mode: $commandPaletteMode,
@@ -137,6 +138,7 @@
         }
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             if (contextMenu) {
                 contextMenu = null;
                 return;
@@ -148,10 +150,6 @@
             event.preventDefault();
             openContextMenuForSelected();
         }
-    }
-
-    function handleOverlayPointerDown(event: PointerEvent) {
-        if (event.target === event.currentTarget) closePalette();
     }
 
     function openContextMenu(event: MouseEvent, item: CommandPaletteItem, index: number) {
@@ -242,6 +240,11 @@
         contextMenu = null;
     }
 
+    function closeHotkeyCapture() {
+        hotkeyTargetId = null;
+        capturedShortcut = '';
+    }
+
     function clearHotkey(item: CommandPaletteItem) {
         hotkeys = setCommandHotkey(item.id, null);
         contextMenu = null;
@@ -251,8 +254,7 @@
         event.preventDefault();
         event.stopPropagation();
         if (event.key === 'Escape') {
-            hotkeyTargetId = null;
-            capturedShortcut = '';
+            closeHotkeyCapture();
             return;
         }
         if (event.key === 'Backspace' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
@@ -268,8 +270,7 @@
         if (!canAssignCommandHotkey(capturedShortcut, hotkeyTarget.id, items, hotkeys)) return;
         const customShortcut = capturedShortcut === hotkeyTarget.defaultShortcut ? null : capturedShortcut || null;
         hotkeys = setCommandHotkey(hotkeyTarget.id, customShortcut);
-        hotkeyTargetId = null;
-        capturedShortcut = '';
+        closeHotkeyCapture();
     }
 
     async function copyCommandId(item: CommandPaletteItem) {
@@ -301,7 +302,6 @@
             // list — never by reading the `items` $state, which would make this
             // effect re-run on every item change and clear the query mid-type.
             pinnedIds = pruneStalePins(live.map(item => item.id));
-            tick().then(() => inputEl?.focus());
         }
     });
 
@@ -324,189 +324,187 @@
             selectedIndex = Math.max(0, visibleItems.length - 1);
         }
     });
-
-    $effect(() => {
-        if (hotkeyTarget) {
-            tick().then(() => hotkeyCaptureEl?.focus());
-        }
-    });
 </script>
 
 {#if $commandPaletteOpen}
-    <div
-        class="palette-overlay"
-        role="presentation"
-        onpointerdown={handleOverlayPointerDown}
+    <ModalDialog
+        titleId={COMMAND_PALETTE_TITLE_ID}
+        descriptionId={COMMAND_PALETTE_DESCRIPTION_ID}
+        onclose={closePalette}
+        overlayClass="command-palette-overlay"
+        panelClass="palette-panel"
+        initialFocus={() => inputEl}
     >
-        <div class="palette-panel" role="dialog" aria-modal="true" aria-label="Command palette">
-            <div class="palette-header">
-                <div class="palette-title-group">
-                    <span class="palette-title">Command Palette</span>
-                    <span class="palette-subtitle">{$commandPaletteMode === 'commands' ? 'Commands' : 'Commands and destinations'}</span>
-                </div>
-                <div class="palette-segment" role="tablist" aria-label="Command palette mode">
-                    <button
-                        type="button"
-                        class:active={$commandPaletteMode === 'all'}
-                        onclick={() => setMode('all')}
-                    >
-                        All
-                    </button>
-                    <button
-                        type="button"
-                        class:active={$commandPaletteMode === 'commands'}
-                        onclick={() => setMode('commands')}
-                    >
-                        Commands
-                    </button>
-                </div>
+        <div class="palette-header">
+            <div class="palette-title-group">
+                <span id={COMMAND_PALETTE_TITLE_ID} class="palette-title">Command Palette</span>
+                <span id={COMMAND_PALETTE_DESCRIPTION_ID} class="palette-subtitle">
+                    {$commandPaletteMode === 'commands' ? 'Commands' : 'Commands and destinations'}
+                </span>
             </div>
-
-            <input
-                bind:this={inputEl}
-                class="palette-input"
-                bind:value={query}
-                placeholder={$commandPaletteMode === 'commands' ? 'Run a command' : 'Run a command or jump to a scope'}
-                role="combobox"
-                aria-label="Command palette query"
-                aria-autocomplete="list"
-                aria-expanded={visibleItems.length > 0}
-                aria-haspopup="listbox"
-                aria-controls={COMMAND_PALETTE_RESULTS_ID}
-                aria-activedescendant={selectedItem ? commandOptionId(selectedItem.id) : undefined}
-                onkeydown={handleInputKeydown}
-            />
-
-            <div
-                id={COMMAND_PALETTE_RESULTS_ID}
-                class="palette-results"
-                role="listbox"
-                aria-label="Command palette results"
-            >
-                {#if visibleItems.length === 0}
-                    <div class="empty-result">No matches</div>
-                {:else}
-                    {#each visibleItems as item, index (item.id)}
-                        <button
-                            id={commandOptionId(item.id)}
-                            type="button"
-                            class="palette-row"
-                            class:selected={index === selectedIndex}
-                            class:disabled={item.disabled}
-                            role="option"
-                            aria-selected={index === selectedIndex}
-                            disabled={item.disabled}
-                            onmouseenter={() => selectedIndex = index}
-                            onclick={() => executeItem(item)}
-                            oncontextmenu={(event) => openContextMenu(event, item, index)}
-                        >
-                            <span class="row-mark">{isPinned(item) ? '*' : ''}</span>
-                            <span class="row-main">
-                                <span class="row-title">{item.title}</span>
-                                {#if item.subtitle}
-                                    <span class="row-subtitle">{item.subtitle}</span>
-                                {/if}
-                            </span>
-                            <span class="row-meta">
-                                <span class="row-category">{item.category}</span>
-                                {#if itemShortcut(item)}
-                                    <kbd>{itemShortcut(item)}</kbd>
-                                {/if}
-                            </span>
-                            <span
-                                class="row-menu"
-                                title="Result actions"
-                            >
-                                ...
-                            </span>
-                        </button>
-                    {/each}
-                {/if}
-            </div>
-
-            {#if contextMenu && contextItem}
-                <div
-                    class="palette-context-menu"
-                    style={`left: ${contextMenu.x}px; top: ${contextMenu.y}px;`}
-                    role="menu"
-                    tabindex="-1"
-                    onpointerdown={(event) => event.stopPropagation()}
+            <div class="palette-segment" role="tablist" aria-label="Command palette mode">
+                <button
+                    type="button"
+                    class:active={$commandPaletteMode === 'all'}
+                    onclick={() => setMode('all')}
                 >
-                    <button type="button" role="menuitem" onclick={() => executeItem(contextItem)} disabled={contextItem.disabled}>
-                        Run
-                    </button>
-                    <button type="button" role="menuitem" onclick={() => togglePinned(contextItem)}>
-                        {isPinned(contextItem) ? 'Unfavorite' : 'Favorite'}
-                    </button>
-                    <button type="button" role="menuitem" onclick={() => startHotkeyCapture(contextItem)}>
-                        Set Hotkey...
-                    </button>
-                    {#if hotkeys[contextItem.id]}
-                        <button type="button" role="menuitem" onclick={() => clearHotkey(contextItem)}>
-                            Clear Hotkey
-                        </button>
-                    {/if}
-                    <button type="button" role="menuitem" onclick={() => addAlias(contextItem)}>
-                        Add Alias...
-                    </button>
-                    {#if recentIds.includes(contextItem.id)}
-                        <button type="button" role="menuitem" onclick={() => clearRecent(contextItem)}>
-                            Remove from Recents
-                        </button>
-                    {/if}
-                    {#if isWorkflowItem(contextItem)}
-                        <button type="button" role="menuitem" onclick={() => renameWorkflowItem(contextItem)}>
-                            Rename Workflow...
-                        </button>
-                        <button type="button" role="menuitem" class="danger" onclick={() => deleteWorkflowItem(contextItem)}>
-                            Delete Workflow
-                        </button>
-                    {/if}
-                    <button type="button" role="menuitem" onclick={() => copyCommandId(contextItem)}>
-                        Copy Command ID
-                    </button>
-                    <button type="button" role="menuitem" onclick={openInSettings}>
-                        Open in Settings
-                    </button>
-                </div>
-            {/if}
+                    All
+                </button>
+                <button
+                    type="button"
+                    class:active={$commandPaletteMode === 'commands'}
+                    onclick={() => setMode('commands')}
+                >
+                    Commands
+                </button>
+            </div>
+        </div>
 
-            {#if hotkeyTarget}
-                <div class="hotkey-panel" role="dialog" aria-modal="true" aria-label="Set command hotkey">
-                    <div class="hotkey-card">
-                        <div class="hotkey-title">Set Hotkey</div>
-                        <div class="hotkey-command">{hotkeyTarget.title}</div>
-                        <button
-                            type="button"
-                            bind:this={hotkeyCaptureEl}
-                            class="hotkey-capture"
-                            onkeydown={handleHotkeyKeydown}
+        <input
+            bind:this={inputEl}
+            class="palette-input"
+            bind:value={query}
+            placeholder={$commandPaletteMode === 'commands' ? 'Run a command' : 'Run a command or jump to a scope'}
+            role="combobox"
+            aria-label="Command palette query"
+            aria-autocomplete="list"
+            aria-expanded={visibleItems.length > 0}
+            aria-haspopup="listbox"
+            aria-controls={COMMAND_PALETTE_RESULTS_ID}
+            aria-activedescendant={selectedItem ? commandOptionId(selectedItem.id) : undefined}
+            onkeydown={handleInputKeydown}
+        />
+
+        <div
+            id={COMMAND_PALETTE_RESULTS_ID}
+            class="palette-results"
+            role="listbox"
+            aria-label="Command palette results"
+        >
+            {#if visibleItems.length === 0}
+                <div class="empty-result">No matches</div>
+            {:else}
+                {#each visibleItems as item, index (item.id)}
+                    <button
+                        id={commandOptionId(item.id)}
+                        type="button"
+                        class="palette-row"
+                        class:selected={index === selectedIndex}
+                        class:disabled={item.disabled}
+                        role="option"
+                        aria-selected={index === selectedIndex}
+                        disabled={item.disabled}
+                        onmouseenter={() => selectedIndex = index}
+                        onclick={() => executeItem(item)}
+                        oncontextmenu={(event) => openContextMenu(event, item, index)}
+                    >
+                        <span class="row-mark">{isPinned(item) ? '*' : ''}</span>
+                        <span class="row-main">
+                            <span class="row-title">{item.title}</span>
+                            {#if item.subtitle}
+                                <span class="row-subtitle">{item.subtitle}</span>
+                            {/if}
+                        </span>
+                        <span class="row-meta">
+                            <span class="row-category">{item.category}</span>
+                            {#if itemShortcut(item)}
+                                <kbd>{itemShortcut(item)}</kbd>
+                            {/if}
+                        </span>
+                        <span
+                            class="row-menu"
+                            title="Result actions"
                         >
-                            {capturedShortcut || 'Press shortcut'}
-                        </button>
-                        {#if shortcutConflict}
-                            <div class="hotkey-warning">Already in use: {shortcutConflict}</div>
-                        {/if}
-                        <div class="hotkey-actions">
-                            <button type="button" onclick={() => {
-                                hotkeyTargetId = null;
-                                capturedShortcut = '';
-                            }}>
-                                Cancel
-                            </button>
-                            <button type="button" class="primary" onclick={saveHotkey} disabled={!canSaveHotkey}>
-                                Save
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                            ...
+                        </span>
+                    </button>
+                {/each}
             {/if}
         </div>
-    </div>
+
+        {#if contextMenu && contextItem}
+            <div
+                class="palette-context-menu"
+                style={`left: ${contextMenu.x}px; top: ${contextMenu.y}px;`}
+                role="menu"
+                tabindex="-1"
+                onpointerdown={(event) => event.stopPropagation()}
+            >
+                <button type="button" role="menuitem" onclick={() => executeItem(contextItem)} disabled={contextItem.disabled}>
+                    Run
+                </button>
+                <button type="button" role="menuitem" onclick={() => togglePinned(contextItem)}>
+                    {isPinned(contextItem) ? 'Unfavorite' : 'Favorite'}
+                </button>
+                <button type="button" role="menuitem" onclick={() => startHotkeyCapture(contextItem)}>
+                    Set Hotkey...
+                </button>
+                {#if hotkeys[contextItem.id]}
+                    <button type="button" role="menuitem" onclick={() => clearHotkey(contextItem)}>
+                        Clear Hotkey
+                    </button>
+                {/if}
+                <button type="button" role="menuitem" onclick={() => addAlias(contextItem)}>
+                    Add Alias...
+                </button>
+                {#if recentIds.includes(contextItem.id)}
+                    <button type="button" role="menuitem" onclick={() => clearRecent(contextItem)}>
+                        Remove from Recents
+                    </button>
+                {/if}
+                {#if isWorkflowItem(contextItem)}
+                    <button type="button" role="menuitem" onclick={() => renameWorkflowItem(contextItem)}>
+                        Rename Workflow...
+                    </button>
+                    <button type="button" role="menuitem" class="danger" onclick={() => deleteWorkflowItem(contextItem)}>
+                        Delete Workflow
+                    </button>
+                {/if}
+                <button type="button" role="menuitem" onclick={() => copyCommandId(contextItem)}>
+                    Copy Command ID
+                </button>
+                <button type="button" role="menuitem" onclick={openInSettings}>
+                    Open in Settings
+                </button>
+            </div>
+        {/if}
+
+        {#if hotkeyTarget}
+            <ModalDialog
+                titleId="set-hotkey-title"
+                descriptionId="set-hotkey-description"
+                onclose={closeHotkeyCapture}
+                overlayClass="hotkey-modal-overlay"
+                panelClass="hotkey-card"
+            >
+                <div class="hotkey-title" id="set-hotkey-title">Set Hotkey</div>
+                <div class="hotkey-command" id="set-hotkey-description">{hotkeyTarget.title}</div>
+                <button
+                    type="button"
+                    class="hotkey-capture"
+                    data-modal-initial-focus
+                    onkeydown={handleHotkeyKeydown}
+                >
+                    {capturedShortcut || 'Press shortcut'}
+                </button>
+                {#if shortcutConflict}
+                    <div class="hotkey-warning">Already in use: {shortcutConflict}</div>
+                {/if}
+                <div class="hotkey-actions">
+                    <button type="button" onclick={closeHotkeyCapture}>
+                        Cancel
+                    </button>
+                    <button type="button" class="primary" onclick={saveHotkey} disabled={!canSaveHotkey}>
+                        Save
+                    </button>
+                </div>
+            </ModalDialog>
+        {/if}
+    </ModalDialog>
 {/if}
 
 <style>
-    .palette-overlay {
+    :global(.command-palette-overlay) {
         position: fixed;
         inset: 0;
         z-index: 1200;
@@ -518,7 +516,7 @@
         backdrop-filter: blur(8px);
     }
 
-    .palette-panel {
+    :global(.palette-panel) {
         position: relative;
         width: min(760px, calc(100vw - 32px));
         max-height: min(720px, calc(100vh - 80px));
@@ -756,7 +754,7 @@
         cursor: not-allowed;
     }
 
-    .hotkey-panel {
+    :global(.hotkey-modal-overlay) {
         position: fixed;
         inset: 0;
         z-index: 1230;
@@ -766,7 +764,7 @@
         background: color-mix(in srgb, var(--bg) 58%, transparent);
     }
 
-    .hotkey-card {
+    :global(.hotkey-card) {
         width: min(360px, calc(100vw - 32px));
         padding: 16px;
         border: 1px solid var(--border);
@@ -840,12 +838,12 @@
     }
 
     @media (max-width: 640px) {
-        .palette-overlay {
+        :global(.command-palette-overlay) {
             padding-top: 16px;
             align-items: flex-start;
         }
 
-        .palette-panel {
+        :global(.palette-panel) {
             width: calc(100vw - 16px);
             max-height: calc(100vh - 32px);
         }
