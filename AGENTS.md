@@ -145,6 +145,21 @@ on PATH deterministically. Run `npm run bd -- prime` for current workflow
 context, and run `npm run hooks:install` to install bd hooks plus Cull's tiered
 hook chain.
 
+## Reference Paths
+
+- Skills repo: `~/ai_projects/Codex-skills/` (GitHub: `glebis/Codex-skills`)
+- Main Obsidian vault: `~/Brains/brain/`
+- Linear CLI: `~/.Codex/skills/linear/scripts/linear`
+
+Load on demand references:
+- Email filtering rules → `~/.Codex/refs/email-rules.md`
+- PDF / presentations → `~/.Codex/refs/pdf-presentations.md`
+- Skills repo → `~/.Codex/refs/skills-repo.md`
+- Telegram plugin → `~/.Codex/refs/telegram.md`
+- X/Twitter scraping → `meta/Codex-ref-twitter.md`
+- Beads local reference notes → `.beads/README.md`
+- Beads tracked issue export → `.beads/issues.jsonl`
+
 ## Quick Reference
 
 ```bash
