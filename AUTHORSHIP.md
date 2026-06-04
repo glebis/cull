@@ -1,6 +1,6 @@
 # Authorship
 
-*Last updated: 2026-05-12*
+*Last updated: 2026-06-04*
 
 ## Human Author
 
@@ -36,6 +36,15 @@ Development session logs (Claude Code and Codex transcripts) are retained locall
 
 Architecture and design copyright (c) 2025-present Gleb Kalinin.
 Implementation was assisted by Claude (Anthropic) and Codex (OpenAI) under human direction, review, and integration. Provider output terms are not treated as a substitute for source provenance, license compatibility review, or human authorship documentation.
+
+## AI Provider Output Terms
+
+Cull's release posture does not rely on provider terms alone, but the project records the relevant output-rights claims for transparency:
+
+- OpenAI states that, as between the user and OpenAI and to the extent permitted by law, users `"own the Output"`: https://openai.com/policies/row-terms-of-use/
+- Anthropic states that its Commercial Terms let customers `"retain ownership rights"` over generated outputs: https://www.anthropic.com/news/expanded-legal-protections-api-improvements
+
+These terms support commercial use of assisted implementation output, but they do not eliminate the need for human authorship, provenance review, dependency-license review, or checks for copied public code.
 
 ## Cloud API Providers
 

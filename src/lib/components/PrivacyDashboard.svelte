@@ -19,6 +19,8 @@
         off: 'var(--text-secondary)',
     };
 
+    const PROVIDER_TERMS_NOTICE = 'Verify current provider terms before regulated or sensitive use.';
+
     const PROVIDER_COMPLIANCE: Record<string, {
         company: string;
         certifications: string[];
@@ -31,17 +33,17 @@
             company: 'Google LLC, Mountain View CA',
             certifications: ['SOC 1/2/3', 'ISO 27001', 'ISO 27017', 'ISO 27018'],
             gdpr: 'DPA available via Google Cloud terms',
-            training: 'Paid tier: No. Free tier: Yes — images used for training',
+            training: 'Tier and account dependent; verify Google AI or Google Cloud terms before use',
             tos: 'https://ai.google.dev/gemini-api/terms',
-            retention: '≤30 days for debugging',
+            retention: 'Tier and account dependent; verify current provider terms',
         },
         openai: {
             company: 'OpenAI Inc, San Francisco CA',
             certifications: ['SOC 2 Type II'],
-            gdpr: 'DPA available. EU data residency option.',
-            training: 'No (since March 2023)',
+            gdpr: 'DPA and residency options depend on account, product, and current terms',
+            training: 'API data controls are account and product dependent; verify current policy',
             tos: 'https://openai.com/policies/terms-of-use/',
-            retention: '30 days. Zero Data Retention available.',
+            retention: 'Retention controls are account and product dependent; verify current policy',
         },
         cohere: {
             company: 'Cohere, Toronto CA / San Francisco CA',
@@ -57,7 +59,7 @@
             gdpr: 'Claims compliance. No public DPA.',
             training: 'Proxy — depends on downstream provider',
             tos: 'https://openrouter.ai/terms',
-            retention: 'ZDR routing available',
+            retention: 'Routing and retention depend on downstream provider and selected route',
         },
         ollama: {
             company: 'Local inference (your machine)',
@@ -118,6 +120,7 @@
 
 <div class="privacy-dashboard">
     <h3 class="section-header">Privacy & Data</h3>
+    <p class="privacy-note">{PROVIDER_TERMS_NOTICE}</p>
 
     {#if loading}
         <p class="loading">Loading...</p>

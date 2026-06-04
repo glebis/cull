@@ -1,13 +1,14 @@
 # Open Source Transition Audit
 
-Date: 2026-05-28
+Date: 2026-06-04
 
 Cull is now released under the Apache License 2.0. This note records the
 transition checklist and the evidence used for the current release decision.
 
 ## License Metadata
 
-- `LICENSE.md`: Apache License 2.0 text.
+- `LICENSE`: conventional Apache License 2.0 text for GitHub and distribution tooling.
+- `LICENSE.md`: Markdown copy of the Apache License 2.0 text for existing links.
 - `NOTICE`: project notice, AI-assistance note, and third-party model boundary.
 - `package.json`: `Apache-2.0`.
 - `package-lock.json`: root package `Apache-2.0`.
@@ -31,13 +32,13 @@ Run:
 npm run audit:licenses
 ```
 
-Last result on 2026-05-28: passed.
+Last result on 2026-06-04: passed.
 
 Summary from the last passing run:
 
-- npm packages: 163 packages; licenses were MIT, Apache-2.0, MIT/Apache-2.0
-  variants, ISC, BSD-3-Clause, and OFL-1.1.
-- Cargo packages: 681 packages; no GPL, AGPL, or LGPL-only dependency was
+- npm packages: 144 packages; licenses were MIT, Apache-2.0, MIT/Apache-2.0
+  variants, ISC, BSD-3-Clause, MPL-2.0, 0BSD, and OFL-1.1.
+- Cargo packages: 677 packages; no GPL, AGPL, or LGPL-only dependency was
   detected. Two `r-efi` versions expose `MIT OR Apache-2.0 OR
   LGPL-2.1-or-later`; Cull can use the MIT or Apache-2.0 option.
 - Source GPL scan: 0 matches in application code, scripts, tests, and package
@@ -46,6 +47,26 @@ Summary from the last passing run:
 
 The audit script treats missing dependency license metadata, GPL-family-only
 licenses, and hardcoded incompatible model download URLs as failures.
+
+## Supply Chain And SBOM Audit
+
+Release supply-chain commands:
+
+```bash
+npm run audit:supply-chain
+npm run audit:sbom
+```
+
+`scripts/supply-chain-audit.sh` runs RustSec advisory and policy tooling when
+available:
+
+- `cargo-deny` for RustSec advisories, license policy, bans, and source checks.
+- `cargo-audit` for an additional RustSec advisory pass.
+- `cargo-cyclonedx` and `@cyclonedx/cyclonedx-npm` for CycloneDX SBOM generation
+  under `dist/sbom/`.
+
+If a required tool is missing, the script fails with an explicit install hint
+instead of silently treating the audit as passed.
 
 ## AI-Generated Code And Provenance
 
@@ -62,6 +83,20 @@ unlicensed, source-available, non-commercial, GPL, AGPL, LGPL, or otherwise
 incompatible copied code. AI-assisted contributions must be reviewed and must
 not include generated output that matches public code unless the upstream
 license is compatible and notices are preserved.
+
+Provider output terms are recorded as supporting evidence, not as a substitute
+for copyrightability or source-provenance review:
+
+- OpenAI states that, as between the user and OpenAI and to the extent permitted
+  by law, users `"own the Output"`:
+  https://openai.com/policies/row-terms-of-use/
+- Anthropic states that its Commercial Terms let customers `"retain ownership rights"`
+  over generated outputs:
+  https://www.anthropic.com/news/expanded-legal-protections-api-improvements
+
+The release position remains that Cull is a human-authored project with
+AI-assisted implementation under documented human architecture, selection,
+arrangement, review, and integration.
 
 ## Model Weights
 
@@ -106,6 +141,12 @@ Current release boundaries:
 - Fonts must remain under OFL or similarly permissive terms before bundling.
 - Future model, artwork, or font additions must record source, license,
   attribution requirements, and allowed uses before release.
+
+Tracked opaque fixture note:
+
+- `src-tauri/tests/fixtures/db/v21.db` is a synthetic migration fixture. Current
+  inspection shows it contains no image, path, token, audit-log, or user-content rows;
+  it keeps only schema/migration/default-project state needed by tests.
 
 ## Remaining Release Discipline
 

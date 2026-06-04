@@ -2,6 +2,21 @@
 
 Status: working notes for brand and site assets.
 
+## Asset Attribution Inventory
+
+This inventory covers bundled public assets currently intended to stay in the
+repository. Future additions must record source, author, license, and allowed
+use before release.
+
+| Asset class | Paths | Source / author | License / permission | Release status |
+| --- | --- | --- | --- | --- |
+| Cull app icons | `app-icon.png`, `design/icons/tahoe/`, `src-tauri/icons/`, `static/icon-variants/`, `site/public/images/favicon-*`, `site/public/images/icon-*` | Project-owned Cull brand assets generated and curated by Gleb Kalinin | Included with Cull under Apache-2.0 unless a file-specific notice says otherwise | Allowed |
+| Product screenshots and generated mockups | `docs/slides/`, `docs/prototypes/command-palette-states/`, `docs/cull-hero-light-*.png`, `docs/privacy-dashboard-mockup.png`, `site/public/images/imageview-*` | Project-owned screenshots/mockups generated from Cull UI and project design work | Included with repository documentation; do not imply third-party artwork rights beyond visible UI content | Allowed |
+| DMG background | `src-tauri/dmg/cull-dmg-background.png` | Project-owned release packaging artwork | Included with Cull under Apache-2.0 unless replaced by file-specific notice | Allowed |
+| JetBrains Mono | `static/fonts/JetBrainsMono-*.woff2` | JetBrains Mono project | SIL Open Font License 1.1 | Allowed, retain font license attribution |
+| EB Garamond | `static/fonts/EBGaramond-*.woff2` | EB Garamond project | SIL Open Font License 1.1 | Allowed, retain font license attribution |
+| Placeholder framework logos | `static/svelte.svg`, `static/tauri.svg`, `static/vite.svg` | Upstream project logos from the starter/tooling ecosystem | Trademark/logo rights remain with upstream projects; use only for development placeholders or accurate technology references | Replace before marketing-heavy release if not needed |
+
 ## App Icons
 
 Icon source and generated files live in:
@@ -34,7 +49,7 @@ Font licensing must be checked before production use.
 Current preferred directions:
 
 - EB Garamond or similar open-license editorial serif for large quotes.
-- A refined monospace for system language, terminal sections, captions, and UI references.
+- JetBrains Mono or another open-license monospace for system language, terminal sections, captions, and UI references.
 
 Before shipping a site or app bundle, confirm:
 

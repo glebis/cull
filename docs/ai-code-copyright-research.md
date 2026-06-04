@@ -60,7 +60,7 @@ Neither the US nor the EU recognizes pure effort as a basis for copyright. The E
 
 ## 7. Implications Per Licensing Scenario
 
-- **Open source (AGPL)**: Copyright claim covers the architecture/design layer. Anyone can copy purely AI-generated syntax, but the creative arrangement is yours.
+- **Open source (Apache-2.0)**: Copyright claim covers the architecture/design layer. Anyone can copy purely AI-generated syntax, but the creative arrangement is yours.
 - **Closed/paid**: Stronger copyright matters more. Document creative contribution aggressively.
 - **App Store**: Apple doesn't prohibit AI-generated apps. A competitor copying your code could argue AI-generated portions are uncopyrightable — your architecture docs are defense.
 

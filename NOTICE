@@ -12,5 +12,7 @@ licenses. The source tree does not intentionally vendor GPL, AGPL, or LGPL code.
 Run `npm run audit:licenses` before release to refresh the dependency and source
 license audit.
 
+Bundled fonts and visual assets are documented in docs/ASSETS.md.
+
 Optional model weights are not part of the Apache-2.0 license grant unless they
 are explicitly distributed in this repository with compatible license terms.
