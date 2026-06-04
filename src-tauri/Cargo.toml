@@ -65,7 +65,7 @@ bytes = "1"
 anyhow = "1"
 tokio-util = { version = "0.7", features = ["codec"] }
 clap = { version = "4", features = ["derive"] }
-rand = "0.8"
+rand = "0.10"
 subtle = "2"
 hex = "0.4"
 dirs = "5"
