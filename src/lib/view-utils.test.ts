@@ -3,6 +3,7 @@ import {
     getFilename,
     getThumbnailBorderClass,
     buildRangeSelectionIds,
+    buildThumbnailAriaLabel,
     computeGridClickSelection,
     computeGridLayout,
     computeVisibleItems,
@@ -43,6 +44,30 @@ describe('getFilename', () => {
 
     it('returns custom fallback for trailing slash', () => {
         expect(getFilename('/some/dir/', 'unknown')).toBe('unknown');
+    });
+});
+
+describe('buildThumbnailAriaLabel', () => {
+    it('includes all announced fields', () => {
+        expect(buildThumbnailAriaLabel({
+            filename: 'image-1.png',
+            rating: 4,
+            decision: 'accept',
+            sourceTag: 'MJ',
+            selected: true,
+            missing: false,
+        })).toBe('image-1.png, rating 4, decision accept, source MJ, selected, present');
+    });
+
+    it('includes default states when fields are absent or falsey', () => {
+        expect(buildThumbnailAriaLabel({
+            filename: '',
+            rating: 0,
+            decision: '',
+            sourceTag: null,
+            selected: false,
+            missing: true,
+        })).toBe('image, rating 0, decision undecided, source unknown, not selected, missing');
     });
 });
 

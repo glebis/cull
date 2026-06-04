@@ -82,6 +82,10 @@ def focused_label(page: Page) -> str:
     return label
 
 
+def focused_filename(page: Page) -> str:
+    return focused_label(page).split(',', 1)[0].strip()
+
+
 def thumb_label(page: Page, index: int) -> str:
     locator = page.locator(".thumb").nth(index)
     expect(locator).to_be_visible()
@@ -91,11 +95,19 @@ def thumb_label(page: Page, index: int) -> str:
     return label
 
 
+def thumb_filename(page: Page, index: int) -> str:
+    return thumb_label(page, index).split(',', 1)[0].strip()
+
+
 def last_thumb_label(page: Page) -> str:
     count = page.locator(".thumb").count()
     if count == 0:
         raise AssertionError("no thumbnails in grid")
     return thumb_label(page, count - 1)
+
+
+def assert_thumb_focus_has_filename(page: Page, filename: str) -> None:
+    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", re.compile(rf"^{re.escape(filename)}(?:,|$)"))
 
 
 def statusbar_text(page: Page) -> str:
@@ -339,20 +351,20 @@ def test_export_shift_period_cycles_to_image_only(page: Page) -> None:
 def test_grid_navigation(page: Page) -> None:
     press(page, "Meta+1")
     wait_mode(page, "grid")
-    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", "image-0.png")
+    assert_thumb_focus_has_filename(page, "image-0.png")
 
     press(page, "ArrowRight")
-    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", "image-1.png")
+    assert_thumb_focus_has_filename(page, "image-1.png")
 
     expected_last = last_thumb_label(page)
     press(page, "End")
     expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", expected_last)
 
     press(page, "Home")
-    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", "image-0.png")
+    assert_thumb_focus_has_filename(page, "image-0.png")
 
     press(page, "PageDown")
-    assert focused_label(page) != "image-0.png"
+    assert focused_filename(page) != "image-0.png"
 
     press(page, "Enter")
     wait_mode(page, "loupe")
@@ -552,24 +564,23 @@ def test_grid_hjkl_navigation(page: Page) -> None:
     press(page, "Meta+1")
     wait_mode(page, "grid")
     press(page, "Home")
-    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", "image-0.png")
+    assert_thumb_focus_has_filename(page, "image-0.png")
 
     # l moves right (same as ArrowRight)
     dispatch_key(page, "l")
-    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", "image-1.png")
+    assert_thumb_focus_has_filename(page, "image-1.png")
 
     # h moves left (same as ArrowLeft)
     dispatch_key(page, "h")
-    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", "image-0.png")
+    assert_thumb_focus_has_filename(page, "image-0.png")
 
     # j moves down (one row)
     dispatch_key(page, "j")
-    label_after_j = focused_label(page)
-    assert label_after_j != "image-0.png", "j should move focus down"
+    assert focused_filename(page) != "image-0.png", "j should move focus down"
 
     # k moves back up
     dispatch_key(page, "k")
-    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", "image-0.png")
+    assert_thumb_focus_has_filename(page, "image-0.png")
 
 
 def test_grid_home_end(page: Page) -> None:
@@ -582,7 +593,28 @@ def test_grid_home_end(page: Page) -> None:
     expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", expected_last)
 
     press(page, "Home")
-    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", "image-0.png")
+    assert_thumb_focus_has_filename(page, "image-0.png")
+
+
+def test_thumbnail_state_aria_labels(page: Page) -> None:
+    press(page, "Meta+1")
+    wait_mode(page, "grid")
+    press(page, "Home")
+
+    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", re.compile(r"rating 0"))
+    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", re.compile(r"decision undecided"))
+    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", re.compile(r"source "))
+    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", re.compile(r"not selected"))
+    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", re.compile(r"present"))
+
+    press(page, "1")
+    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", re.compile(r"rating 1"))
+
+    press(page, "a")
+    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", re.compile(r"decision accept"))
+
+    press(page, "Space")
+    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", re.compile(r"selected"))
 
 
 def test_star_ratings(page: Page) -> None:
@@ -1122,6 +1154,7 @@ def main() -> int:
         smoke.step("S02a grid h/j/k/l navigation", lambda: test_grid_hjkl_navigation(page))
         smoke.step("S02b grid Home/End", lambda: test_grid_home_end(page))
         smoke.step("S02c grid double-click opens loupe", lambda: test_grid_dblclick_opens_loupe(page))
+        smoke.step("S02d thumbnail a11y labels", lambda: test_thumbnail_state_aria_labels(page))
         smoke.step("S09a star ratings", lambda: test_star_ratings(page))
         smoke.step("S09b ratings in loupe", lambda: test_ratings_in_loupe(page))
         smoke.step("S10a accept/reject/undecided", lambda: test_accept_reject_undecided(page))

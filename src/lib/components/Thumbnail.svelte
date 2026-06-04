@@ -3,7 +3,7 @@
     import type { ImageWithFile } from '$lib/api';
     import { regenerateSingleThumbnail } from '$lib/api';
     import { recordImageLoadFailure } from '$lib/diagnostics';
-    import { safeAssetPreviewPath } from '$lib/view-utils';
+    import { buildThumbnailAriaLabel, safeAssetPreviewPath } from '$lib/view-utils';
     import ContextMenu from './ContextMenu.svelte';
 
     interface Props {
@@ -35,6 +35,16 @@
     let rating = $derived(item.selection?.star_rating ?? 0);
     let decision = $derived(item.selection?.decision ?? 'undecided');
     let filename = $derived(item.path.split('/').pop() ?? 'image');
+    let a11yLabel = $derived(
+        buildThumbnailAriaLabel({
+            filename,
+            rating,
+            decision,
+            sourceTag,
+            selected,
+            missing: !!item.missing_at,
+        })
+    );
 
     const SOURCE_LABELS: Record<string, string> = {
         gpt_image_2: 'GPT',
@@ -105,12 +115,19 @@
     style="width: {size}px; height: {size}px;"
     role="gridcell"
     tabindex={focused ? 0 : -1}
-    aria-label={filename}
+    aria-label={a11yLabel}
     aria-selected={selected}
     {onclick}
     {ondblclick}
     oncontextmenu={handleContextMenu}
-    onkeydown={(e) => { if (e.key === 'Enter') onclick(e); }}
+    onkeydown={(e) => {
+        if (e.key === ' ') {
+            e.preventDefault();
+            onclick(e);
+            return;
+        }
+        if (e.key === 'Enter') onclick(e);
+    }}
 >
     {#if imgError}
         <div class="fallback-text">{filename}</div>

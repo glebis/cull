@@ -2,6 +2,25 @@ export function getFilename(path: string, fallback: string = 'image'): string {
     return path.split('/').pop() || fallback;
 }
 
+export interface ThumbnailAriaLabelInput {
+    filename: string;
+    rating: number;
+    decision: string;
+    sourceTag: string | null;
+    selected: boolean;
+    missing: boolean;
+}
+
+export function buildThumbnailAriaLabel(input: ThumbnailAriaLabelInput): string {
+    const filename = input.filename || 'image';
+    const safeRating = Number.isFinite(input.rating) ? Math.max(0, Math.round(input.rating)) : 0;
+    const decision = input.decision || 'undecided';
+    const sourceTag = input.sourceTag || 'unknown';
+    const selected = input.selected ? 'selected' : 'not selected';
+    const fileStatus = input.missing ? 'missing' : 'present';
+    return `${filename}, rating ${safeRating}, decision ${decision}, source ${sourceTag}, ${selected}, ${fileStatus}`;
+}
+
 export function getThumbnailBorderClass(focused: boolean, selected: boolean): string {
     if (focused) return 'focused';
     if (selected) return 'selected';
