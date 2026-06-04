@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, tick } from 'svelte';
+    import { onMount, tick, type Snippet } from 'svelte';
     import { handleModalKeydown, handleModalOverlayClick } from '$lib/modal-dialog-events';
     import { claimModalShellInert, releaseModalShellInert } from '$lib/modal-layer';
 
@@ -22,6 +22,7 @@
         overlayClass?: string;
         panelClass?: string;
         ariaLabel?: string;
+        children?: Snippet;
     }
 
     let {
@@ -36,6 +37,7 @@
         overlayClass = '',
         panelClass = '',
         ariaLabel,
+        children,
     }: Props = $props();
 
     const FOCUSABLE_SELECTOR = [
@@ -144,8 +146,9 @@
         aria-describedby={descriptionId}
         tabindex="-1"
         onclick={(event: MouseEvent) => event.stopPropagation()}
+        onkeydown={handleKeydown}
     >
-        <slot />
+        {@render children?.()}
     </div>
 </div>
 

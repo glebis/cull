@@ -27,6 +27,8 @@ describe('modal dialog accessibility contract', () => {
         expect(modalDialog).toContain("import { handleModalKeydown, handleModalOverlayClick } from '$lib/modal-dialog-events';");
         expect(modalDialog).toContain('handleModalKeydown(event, {');
         expect(modalDialog).toContain('handleModalOverlayClick(event, onclose);');
+        expect(modalDialog).toContain('onkeydown={handleKeydown}');
+        expect(modalDialog).toContain('{@render children?.()}');
     });
 
     it('stops Escape propagation and closes only through the modal close callback', () => {
