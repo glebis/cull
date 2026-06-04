@@ -47,7 +47,7 @@ describe('command palette UI contract', () => {
         expect(componentSource).toContain('titleId={COMMAND_PALETTE_TITLE_ID}');
         expect(componentSource).toContain('descriptionId={COMMAND_PALETTE_DESCRIPTION_ID}');
         expect(componentSource).toContain('overlayClass="command-palette-overlay"');
-        expect(componentSource).toContain('initialFocus={() => inputEl}');
+        expect(componentSource).toContain('initialFocus={() => inputEl ?? null}');
         expect(componentSource).toContain('onclose={closePalette}');
     });
 
