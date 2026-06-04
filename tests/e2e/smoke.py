@@ -132,6 +132,23 @@ def set_search_value(page: Page, value: str) -> None:
     )
 
 
+def set_input_value(page: Page, selector: str, value: str) -> None:
+    """Set a Svelte-bound input via the native setter + input event.
+
+    Svelte's bind:value does not observe DOM-level `.value` assignments, so
+    Playwright's fill() does not update the bound state. This mirrors
+    set_search_value but for an arbitrary selector (e.g. the command palette).
+    """
+    page.locator(selector).evaluate(
+        """(el, value) => {
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+            setter.call(el, value);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        }""",
+        value,
+    )
+
+
 def dispatch_key(page: Page, key: str, *, meta: bool = False, shift: bool = False) -> None:
     page.evaluate(
         """({ key, meta, shift }) => {
@@ -407,14 +424,15 @@ def test_search_and_command_palette(page: Page) -> None:
 
     press(page, "Meta+K")
     expect(page.locator(".palette-panel")).to_be_visible()
-    page.locator(".palette-input").fill("loupe")
-    press(page, "Enter")
+    set_input_value(page, ".palette-input", "loupe")
+    expect(page.locator(".palette-row").first).to_contain_text("Loupe View")
+    page.locator(".palette-input").press("Enter")
     wait_mode(page, "loupe")
 
     press(page, "Meta+Shift+P")
     expect(page.locator(".palette-panel")).to_be_visible()
     expect(page.locator(".palette-subtitle")).to_contain_text("Commands")
-    press(page, "Escape")
+    page.locator(".palette-input").press("Escape")
     expect(page.locator(".palette-panel")).to_have_count(0)
 
 
@@ -772,8 +790,8 @@ def test_command_palette_open_close(page: Page) -> None:
     press(page, "Meta+K")
     expect(page.locator(".palette-panel")).to_be_visible()
 
-    # Escape closes
-    press(page, "Escape")
+    # Escape (dispatched to the focused palette input) closes the palette.
+    page.locator(".palette-input").press("Escape")
     expect(page.locator(".palette-panel")).to_have_count(0)
 
     # Cmd+Shift+P opens commands-only
@@ -781,7 +799,7 @@ def test_command_palette_open_close(page: Page) -> None:
     expect(page.locator(".palette-panel")).to_be_visible()
     expect(page.locator(".palette-subtitle")).to_contain_text("Commands")
 
-    press(page, "Escape")
+    page.locator(".palette-input").press("Escape")
     expect(page.locator(".palette-panel")).to_have_count(0)
 
 
@@ -805,6 +823,76 @@ def test_command_palette_navigate_and_execute(page: Page) -> None:
     # Return to grid for remaining tests
     press(page, "Meta+1")
     wait_mode(page, "grid")
+
+
+def test_command_palette_arrows_and_favorite(page: Page) -> None:
+    """S19 (zu0.8) — Arrow keys move selection; row context menu favorites a result."""
+    press(page, "Meta+1")
+    wait_mode(page, "grid")
+
+    press(page, "Meta+K")
+    expect(page.locator(".palette-panel")).to_be_visible()
+    palette_input = page.locator(".palette-input")
+    palette_input.wait_for(state="visible")
+
+    # First row is selected by default; ArrowDown moves selection to the second.
+    # Dispatch to the focused input element so the palette's keydown handler runs.
+    expect(page.locator(".palette-row.selected").first).to_be_visible()
+    first_selected = page.locator(".palette-row.selected").first.get_attribute("id")
+    palette_input.press("ArrowDown")
+    page.wait_for_timeout(150)
+    second_selected = page.locator(".palette-row.selected").first.get_attribute("id")
+    assert first_selected != second_selected, "ArrowDown did not move palette selection"
+
+    # Right-click the first row to open the result context menu and Favorite it.
+    page.locator(".palette-row").first.click(button="right")
+    expect(page.locator(".palette-context-menu")).to_be_visible()
+    expect(page.locator(".palette-context-menu")).to_contain_text("Favorite")
+    page.locator(".palette-context-menu button", has_text="Favorite").first.click()
+
+    # A favorited row now carries the pin mark.
+    expect(page.locator(".palette-row .row-mark", has_text="*").first).to_be_visible()
+
+    palette_input.press("Escape")
+    expect(page.locator(".palette-panel")).to_have_count(0)
+
+
+def test_keyboard_shortcuts_panel(page: Page) -> None:
+    """zu0.7/zu0.8 — palette opens the searchable keyboard-shortcuts panel."""
+    press(page, "Meta+1")
+    wait_mode(page, "grid")
+
+    press(page, "Meta+K")
+    expect(page.locator(".palette-panel")).to_be_visible()
+    # Filter to the shortcuts command via the native setter (Svelte bind:value).
+    set_input_value(page, ".palette-input", "keyboard shortcuts")
+    expect(page.locator(".palette-row").first).to_contain_text("Keyboard Shortcuts")
+    page.locator(".palette-input").press("Enter")
+
+    expect(page.locator(".shortcuts-panel")).to_be_visible()
+    expect(page.locator(".shortcuts-row").first).to_be_visible()
+
+    page.locator(".shortcuts-close").click()
+    expect(page.locator(".shortcuts-panel")).to_have_count(0)
+
+
+def test_palette_does_not_hijack_text_input(page: Page) -> None:
+    """zu0.8 — typing in a normal text input is not captured by palette shortcuts."""
+    press(page, "Meta+1")
+    wait_mode(page, "grid")
+
+    # Open the natural-language search bar and type text including 'k'.
+    press(page, "/")
+    expect(page.locator(".command-input")).to_be_visible()
+    page.locator(".command-input").fill("dark")
+    page.wait_for_timeout(150)
+
+    # The palette must not have opened, and the input keeps the typed value.
+    expect(page.locator(".palette-panel")).to_have_count(0)
+    assert page.locator(".command-input").input_value() == "dark"
+
+    page.locator(".command-input").press("Escape")
+    expect(page.locator(".command-input")).to_have_count(0)
 
 
 def test_context_menu(page: Page) -> None:
@@ -1046,6 +1134,9 @@ def main() -> int:
         smoke.step("S29a zen mode", lambda: test_zen_mode(page))
         smoke.step("S19a command palette open/close", lambda: test_command_palette_open_close(page))
         smoke.step("S19b command palette navigate and execute", lambda: test_command_palette_navigate_and_execute(page))
+        smoke.step("S19c command palette arrows and favorite", lambda: test_command_palette_arrows_and_favorite(page))
+        smoke.step("S19d keyboard shortcuts panel", lambda: test_keyboard_shortcuts_panel(page))
+        smoke.step("S19e palette does not hijack text input", lambda: test_palette_does_not_hijack_text_input(page))
         smoke.step("S27 context menu", lambda: test_context_menu(page))
         smoke.step("S16a search bar open/close", lambda: test_search_bar_open_close(page))
         smoke.step("S16b search NL query", lambda: test_search_nl_query(page))

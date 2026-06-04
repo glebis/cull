@@ -81,6 +81,7 @@ import {
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { folderDisplayName } from './move-menu-utils';
 import { openCommandPalette } from './command-palette';
+import { checkForUpdates } from './update-manager';
 
 type UnlistenFn = () => void;
 
@@ -730,6 +731,9 @@ function handleMenuAction(action: string) {
             break;
         case 'settings':
             settingsOpen.set(true);
+            break;
+        case 'check_update':
+            void checkForUpdates('manual');
             break;
         case 'github_wiki':
             handleGitHubWiki();

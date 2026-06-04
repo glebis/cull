@@ -199,6 +199,9 @@ export const activeFolder = writable<string | null>(null);
 export const minSizeFilter = writable<number>(0);
 export const showMissing = writable<boolean>(false);
 export const activeDetectedClass = writable<string | null>(null);
+// Detected object classes with image counts, populated by the AI panel. Exposed
+// globally so the command palette can offer them as navigation destinations.
+export const detectedClasses = writable<[string, number][]>([]);
 
 // Custom dialogs
 export interface TextInputDialogOptions {
@@ -417,6 +420,14 @@ export const searchOpen = writable<boolean>(false);
 export type CommandPaletteMode = 'all' | 'commands';
 export const commandPaletteOpen = writable<boolean>(false);
 export const commandPaletteMode = writable<CommandPaletteMode>('all');
+// Searchable keyboard-shortcuts reference / customization panel.
+export const shortcutsOpen = writable<boolean>(false);
+// Collection/scope export-to-folder dialog.
+export const exportFolderOpen = writable<boolean>(false);
+// Contact sheet export dialog.
+export const contactSheetOpen = writable<boolean>(false);
+// Best-of-group ranking dialog.
+export const groupRankingOpen = writable<boolean>(false);
 
 export const focusedImage = derived(
     [images, focusedIndex, focusedImageOverride],

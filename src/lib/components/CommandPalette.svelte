@@ -10,18 +10,23 @@
         focusedImage,
         folders,
         images,
+        requestTextInput,
         selectedIds,
+        shortcutsOpen,
         smartCollections,
         viewMode,
         type CommandPaletteMode,
     } from '$lib/stores';
+    import { renameWorkflow, deleteWorkflow } from '$lib/workflows';
     import {
         canAssignCommandHotkey,
         getCommandPaletteItems,
         getShortcutConflict,
+        readCommandFrequencies,
         readCommandHotkeys,
         readPinnedCommandIds,
         readRecentCommandIds,
+        pruneStalePins,
         recordCommandUse,
         removeRecentCommand,
         runCommandPaletteItem,
@@ -29,7 +34,9 @@
         setCommandPinned,
         shortcutForItem,
         shortcutFromKeyboardEvent,
+        setCommandAlias,
         sortCommandPaletteItems,
+        WORKFLOW_CREATE_COMMAND_ID,
         type CommandPaletteItem,
     } from '$lib/command-palette';
 
@@ -40,6 +47,7 @@
     let selectedIndex = $state(0);
     let pinnedIds = $state<string[]>([]);
     let recentIds = $state<string[]>([]);
+    let frequencies = $state<Record<string, number>>({});
     let hotkeys = $state<Record<string, string>>({});
     let contextMenu = $state<{ itemId: string; x: number; y: number } | null>(null);
     let hotkeyTargetId = $state<string | null>(null);
@@ -51,6 +59,7 @@
         mode: $commandPaletteMode,
         pinnedIds,
         recentIds,
+        frequencies,
         hotkeys,
     }));
     let selectedItem = $derived(visibleItems[selectedIndex] ?? null);
@@ -69,11 +78,17 @@
     function refreshPreferences() {
         pinnedIds = readPinnedCommandIds();
         recentIds = readRecentCommandIds();
+        frequencies = readCommandFrequencies();
         hotkeys = readCommandHotkeys();
     }
 
-    function refreshItems() {
-        items = getCommandPaletteItems($commandPaletteMode);
+    function refreshItems(): CommandPaletteItem[] {
+        // Return the freshly computed list so callers can use it WITHOUT reading
+        // the `items` $state — reading that state inside an $effect would make the
+        // effect depend on it and re-run (resetting query) whenever items change.
+        const computed = getCommandPaletteItems($commandPaletteMode);
+        items = computed;
+        return computed;
     }
 
     function setMode(mode: CommandPaletteMode) {
@@ -94,6 +109,7 @@
         contextMenu = null;
         await runCommandPaletteItem(item);
         recentIds = recordCommandUse(item.id);
+        frequencies = readCommandFrequencies();
         closePalette();
     }
 
@@ -176,6 +192,50 @@
         contextMenu = null;
     }
 
+    function isWorkflowItem(item: CommandPaletteItem) {
+        return item.id.startsWith('workflow.') && item.id !== WORKFLOW_CREATE_COMMAND_ID;
+    }
+
+    async function addAlias(item: CommandPaletteItem) {
+        contextMenu = null;
+        const alias = await requestTextInput({
+            title: 'Add Alias',
+            label: 'Search alias',
+            description: `Extra search terms for "${item.title}". Leave empty to clear.`,
+            placeholder: 'e.g. gallery wall',
+            confirmLabel: 'Save',
+        });
+        if (alias === null) return;
+        setCommandAlias(item.id, alias.trim() || null);
+        refreshItems();
+    }
+
+    function openInSettings() {
+        contextMenu = null;
+        closePalette();
+        shortcutsOpen.set(true);
+    }
+
+    async function renameWorkflowItem(item: CommandPaletteItem) {
+        contextMenu = null;
+        const name = await requestTextInput({
+            title: 'Rename Workflow',
+            label: 'Workflow name',
+            placeholder: item.title,
+            confirmLabel: 'Rename',
+        });
+        if (!name?.trim()) return;
+        renameWorkflow(item.id, name.trim());
+        refreshItems();
+    }
+
+    function deleteWorkflowItem(item: CommandPaletteItem) {
+        contextMenu = null;
+        pinnedIds = setCommandPinned(item.id, false);
+        deleteWorkflow(item.id);
+        refreshItems();
+    }
+
     function startHotkeyCapture(item: CommandPaletteItem) {
         hotkeyTargetId = item.id;
         capturedShortcut = hotkeys[item.id] ?? item.defaultShortcut ?? '';
@@ -235,7 +295,12 @@
             query = '';
             selectedIndex = 0;
             refreshPreferences();
-            refreshItems();
+            const live = refreshItems();
+            // Drop pins for destinations that no longer exist (deleted
+            // collections, folders, etc.). Done once per open against the local
+            // list — never by reading the `items` $state, which would make this
+            // effect re-run on every item change and clear the query mid-type.
+            pinnedIds = pruneStalePins(live.map(item => item.id));
             tick().then(() => inputEl?.focus());
         }
     });
@@ -371,7 +436,7 @@
                         Run
                     </button>
                     <button type="button" role="menuitem" onclick={() => togglePinned(contextItem)}>
-                        {isPinned(contextItem) ? 'Unpin Result' : 'Pin Result'}
+                        {isPinned(contextItem) ? 'Unfavorite' : 'Favorite'}
                     </button>
                     <button type="button" role="menuitem" onclick={() => startHotkeyCapture(contextItem)}>
                         Set Hotkey...
@@ -381,13 +446,27 @@
                             Clear Hotkey
                         </button>
                     {/if}
+                    <button type="button" role="menuitem" onclick={() => addAlias(contextItem)}>
+                        Add Alias...
+                    </button>
                     {#if recentIds.includes(contextItem.id)}
                         <button type="button" role="menuitem" onclick={() => clearRecent(contextItem)}>
                             Remove from Recents
                         </button>
                     {/if}
+                    {#if isWorkflowItem(contextItem)}
+                        <button type="button" role="menuitem" onclick={() => renameWorkflowItem(contextItem)}>
+                            Rename Workflow...
+                        </button>
+                        <button type="button" role="menuitem" class="danger" onclick={() => deleteWorkflowItem(contextItem)}>
+                            Delete Workflow
+                        </button>
+                    {/if}
                     <button type="button" role="menuitem" onclick={() => copyCommandId(contextItem)}>
                         Copy Command ID
+                    </button>
+                    <button type="button" role="menuitem" onclick={openInSettings}>
+                        Open in Settings
                     </button>
                 </div>
             {/if}

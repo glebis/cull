@@ -536,6 +536,69 @@ export async function deleteCollectionApi(collectionId: string): Promise<void> {
     return invoke('delete_collection', { collectionId });
 }
 
+export interface ExportImagesParams {
+    image_ids?: string[] | null;
+    collection_id?: string | null;
+    folder_path?: string | null;
+    output_dir: string;
+    format?: string | null;
+    flatten?: boolean | null;
+    naming?: string | null;
+}
+
+export interface ExportedImage {
+    image_id: string;
+    source_path: string;
+    output_path: string;
+    format: string;
+    bytes_written: number;
+}
+
+export interface ExportImagesResult {
+    exported: number;
+    skipped: number;
+    errors: string[];
+    output_dir: string;
+    files: ExportedImage[];
+}
+
+// Export images to a destination folder with optional format conversion and a
+// filename naming template. Provide exactly one selector.
+export async function exportImagesToFolder(params: ExportImagesParams): Promise<ExportImagesResult> {
+    return invoke('export_images_to_folder', { params });
+}
+
+// Write a base64-encoded PNG (e.g. a canvas-rendered contact sheet) to an
+// absolute path chosen via the native save dialog.
+export async function savePngToPath(outputPath: string, base64Data: string): Promise<string> {
+    return invoke('save_png_to_path', { outputPath, base64Data });
+}
+
+// Write UTF-8 text (e.g. a delivery CSV) to an absolute path.
+export async function saveTextToPath(outputPath: string, contents: string): Promise<string> {
+    return invoke('save_text_to_path', { outputPath, contents });
+}
+
+export interface ClientFeedback {
+    image_id: string;
+    favorite: boolean;
+    comment: string | null;
+    updated_at: string;
+}
+
+// Client feedback is stored separately from curator selections.
+export async function setClientFeedback(imageId: string, favorite: boolean, comment: string | null): Promise<void> {
+    return invoke('set_client_feedback', { imageId, favorite, comment: comment ?? null });
+}
+
+export async function getClientFeedback(imageId: string): Promise<ClientFeedback | null> {
+    return invoke('get_client_feedback', { imageId });
+}
+
+export async function listClientFeedback(): Promise<ClientFeedback[]> {
+    return invoke('list_client_feedback');
+}
+
 export interface ClipboardMonitorStatus {
     running: boolean;
     supported: boolean;

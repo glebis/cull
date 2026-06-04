@@ -564,7 +564,7 @@
     }
 
     .search-hint:hover {
-        background: rgba(255,255,255,0.04);
+        background: color-mix(in srgb, var(--text) 4%, transparent);
     }
 
     .hint-slash {
@@ -611,7 +611,7 @@
     .pill-count {
         font-size: 11px;
         color: var(--text-secondary);
-        background: rgba(255,255,255,0.06);
+        background: color-mix(in srgb, var(--text) 6%, transparent);
         padding: 1px 6px;
         border-radius: 999px;
         flex-shrink: 0;
@@ -655,7 +655,7 @@
         gap: 12px;
         min-height: 48px;
         padding: 0 16px;
-        background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)), var(--surface);
+        background: var(--surface);
         border: 1px solid var(--border);
         border-radius: 8px;
         transition: border-color 120ms ease, box-shadow 120ms ease;
@@ -663,7 +663,7 @@
 
     .command-bar:focus-within {
         border-color: var(--blue);
-        box-shadow: 0 0 0 1px var(--blue), 0 0 0 4px rgba(122, 162, 247, 0.12);
+        box-shadow: 0 0 0 1px var(--blue), 0 0 0 4px color-mix(in srgb, var(--blue) 12%, transparent);
     }
 
     .command-icon {
@@ -684,7 +684,7 @@
         color: var(--text);
         font-family: var(--font);
         font-size: 14px;
-        letter-spacing: -0.01em;
+        letter-spacing: 0;
     }
 
     .command-input::placeholder {
@@ -693,13 +693,13 @@
     }
 
     .locale-btn {
-        height: 22px;
+        min-height: 32px;
         padding: 0 6px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        background: rgba(122,162,247,0.08);
-        border: 1px solid rgba(122,162,247,0.2);
+        background: color-mix(in srgb, var(--blue) 8%, transparent);
+        border: 1px solid color-mix(in srgb, var(--blue) 20%, transparent);
         border-radius: 4px;
         color: var(--text-secondary);
         cursor: pointer;
@@ -711,18 +711,18 @@
     }
 
     .locale-btn:hover {
-        background: rgba(122,162,247,0.15);
+        background: color-mix(in srgb, var(--blue) 15%, transparent);
         color: var(--blue);
     }
 
     .mic-btn {
-        width: 28px;
-        height: 28px;
+        width: 32px;
+        height: 32px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        background: rgba(122,162,247,0.1);
-        border: 1px solid rgba(122,162,247,0.25);
+        background: color-mix(in srgb, var(--blue) 10%, transparent);
+        border: 1px solid color-mix(in srgb, var(--blue) 25%, transparent);
         border-radius: 50%;
         color: var(--blue);
         cursor: pointer;
@@ -732,7 +732,7 @@
     }
 
     .mic-btn:hover {
-        background: rgba(122,162,247,0.2);
+        background: color-mix(in srgb, var(--blue) 20%, transparent);
     }
 
     .mic-btn.listening {
@@ -741,14 +741,14 @@
     }
 
     @keyframes mic-pulse {
-        0%, 100% { box-shadow: 0 0 0 0 rgba(122,162,247,0.4); }
-        50% { box-shadow: 0 0 0 8px rgba(122,162,247,0); }
+        0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--blue) 40%, transparent); }
+        50% { box-shadow: 0 0 0 8px transparent; }
     }
 
     .esc-badge {
         font-size: 10px;
         color: var(--text-secondary);
-        background: rgba(255,255,255,0.06);
+        background: color-mix(in srgb, var(--text) 6%, transparent);
         border: 1px solid var(--border);
         border-radius: 4px;
         padding: 2px 5px;
@@ -758,8 +758,8 @@
     }
 
     .clear-btn {
-        width: 28px;
-        height: 28px;
+        width: 32px;
+        height: 32px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -775,13 +775,13 @@
 
     .clear-btn:hover {
         color: var(--red);
-        border-color: rgba(247, 118, 142, 0.4);
-        background: rgba(247, 118, 142, 0.08);
+        border-color: color-mix(in srgb, var(--red) 40%, transparent);
+        background: color-mix(in srgb, var(--red) 8%, transparent);
     }
 
     .close-btn {
-        width: 28px;
-        height: 28px;
+        width: 32px;
+        height: 32px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -797,8 +797,8 @@
 
     .close-btn:hover {
         color: var(--red);
-        border-color: rgba(247, 118, 142, 0.4);
-        background: rgba(247, 118, 142, 0.08);
+        border-color: color-mix(in srgb, var(--red) 40%, transparent);
+        background: color-mix(in srgb, var(--red) 8%, transparent);
     }
 
     .search-presets-panel {
@@ -885,7 +885,7 @@
 
     .parsed-rules {
         padding: 16px;
-        background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0.008)), var(--surface);
+        background: var(--surface);
         border: 1px solid var(--border);
         border-top: none;
         border-radius: 0 0 8px 8px;
@@ -923,7 +923,7 @@
         padding: 0 16px;
         border-radius: 6px;
         border: 1px solid var(--blue);
-        background: linear-gradient(180deg, rgba(122,162,247,0.2), rgba(122,162,247,0.1));
+        background: color-mix(in srgb, var(--blue) 14%, transparent);
         color: var(--blue);
         cursor: pointer;
         font-size: 13px;
@@ -937,8 +937,8 @@
     }
 
     .apply-btn:not(:disabled):hover {
-        background: linear-gradient(180deg, rgba(122,162,247,0.3), rgba(122,162,247,0.15));
-        color: #8fb3ff;
+        background: color-mix(in srgb, var(--blue) 22%, transparent);
+        color: var(--blue);
     }
 
     .apply-btn:not(:disabled):active {
@@ -950,7 +950,7 @@
         padding: 0 16px;
         border-radius: 6px;
         border: 1px solid var(--green);
-        background: linear-gradient(180deg, rgba(158,206,106,0.2), rgba(158,206,106,0.1));
+        background: color-mix(in srgb, var(--green) 14%, transparent);
         color: var(--green);
         cursor: pointer;
         font-size: 13px;
@@ -959,7 +959,7 @@
     }
 
     .save-btn:hover {
-        background: linear-gradient(180deg, rgba(158,206,106,0.3), rgba(158,206,106,0.15));
+        background: color-mix(in srgb, var(--green) 22%, transparent);
     }
 
     .save-btn:active {
@@ -971,8 +971,8 @@
         align-items: center;
         gap: 10px;
         padding: 10px 14px;
-        background: linear-gradient(180deg, rgba(158,206,106,0.06), rgba(158,206,106,0.02)), var(--surface);
-        border: 1px solid rgba(158,206,106,0.3);
+        background: color-mix(in srgb, var(--green) 4%, var(--surface));
+        border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
         border-top: none;
         border-radius: 0 0 8px 8px;
     }
@@ -998,11 +998,11 @@
     }
 
     .save-confirm-btn {
-        height: 28px;
+        height: 32px;
         padding: 0 14px;
         border-radius: 6px;
         border: 1px solid var(--green);
-        background: linear-gradient(180deg, rgba(158,206,106,0.2), rgba(158,206,106,0.1));
+        background: color-mix(in srgb, var(--green) 14%, transparent);
         color: var(--green);
         cursor: pointer;
         font-size: 12px;
@@ -1011,7 +1011,7 @@
     }
 
     .save-confirm-btn:hover {
-        background: linear-gradient(180deg, rgba(158,206,106,0.3), rgba(158,206,106,0.15));
+        background: color-mix(in srgb, var(--green) 22%, transparent);
     }
 
     .save-cancel-btn {
@@ -1027,7 +1027,7 @@
     }
 
     .save-cancel-btn:hover {
-        border-color: rgba(255,255,255,0.12);
+        border-color: color-mix(in srgb, var(--text) 12%, transparent);
         color: var(--text);
     }
 
@@ -1041,8 +1041,8 @@
         align-items: center;
         gap: 10px;
         padding: 12px 16px;
-        background: linear-gradient(180deg, rgba(158,206,106,0.1), rgba(158,206,106,0.04)), var(--surface);
-        border: 1px solid rgba(158,206,106,0.3);
+        background: color-mix(in srgb, var(--green) 7%, var(--surface));
+        border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
         border-radius: 8px;
         color: var(--green);
         font-size: 13px;

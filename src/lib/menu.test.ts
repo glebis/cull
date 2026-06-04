@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     openUrl: vi.fn(),
     updateMenuState: vi.fn(),
     getPreviewDisplayWebStreamStatus: vi.fn(),
+    checkForUpdates: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -54,6 +55,10 @@ vi.mock('./image-loading', () => ({
     loadAllImages: mocks.loadAllImages,
     loadImagesForCurrentScope: mocks.loadImagesForCurrentScope,
     loadImagesUntil: mocks.loadImagesUntil,
+}));
+
+vi.mock('./update-manager', () => ({
+    checkForUpdates: mocks.checkForUpdates,
 }));
 
 function makeImage(id: string) {
@@ -220,6 +225,24 @@ describe('native menu bridge', () => {
         await flushMicrotasks();
 
         expect(mocks.openUrl).toHaveBeenCalledWith('https://github.com/glebis/cull/wiki');
+    });
+
+    it('runs a manual update check when the native Cull menu action fires', async () => {
+        let handler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, next) => {
+            handler = next as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+
+        const { initMenu } = await import('./menu');
+
+        void initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        await flushMicrotasks();
+
+        handler?.({ payload: 'check_update' });
+        await flushMicrotasks();
+
+        expect(mocks.checkForUpdates).toHaveBeenCalledWith('manual');
     });
 
     it('toggles the Loupe histogram from the native View menu and syncs checked state', async () => {

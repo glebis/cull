@@ -1,10 +1,11 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
-    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, findSimilarImages, trashImages, moveImage, renameImage, listFolders, getImagesByIds, shareImages, openImagesWithApplication, listOpenWithApplications } from '$lib/api';
+    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, trashImages, moveImage, renameImage, listFolders, shareImages, openImagesWithApplication, listOpenWithApplications } from '$lib/api';
+    import { loadSimilarImages } from '$lib/similarity';
     import type { ImageWithFile, OpenWithApplication } from '$lib/api';
     import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast, requestTextInput } from '$lib/stores';
-    import { clearImageScope, invalidateImageCache, loadImagesForCurrentScope, resetImagePaging } from '$lib/image-loading';
+    import { invalidateImageCache, loadImagesForCurrentScope } from '$lib/image-loading';
     import { clampFloatingPosition } from '$lib/floating-position';
     import { filterMoveFolders, folderDisplayName, folderParentPath } from '$lib/move-menu-utils';
     import { withDecision, withRating, type ImageDecision } from '$lib/selection-updates';
@@ -222,17 +223,7 @@
     async function handleFindSimilar() {
         onclose();
         try {
-            const results = await findSimilarImages(image.image.id, 20);
-            const similarIds = results.map(([id]) => id);
-            const idOrder = new Map(similarIds.map((id, index) => [id, index]));
-            const similar = (await getImagesByIds(similarIds))
-                .sort((a, b) => (idOrder.get(a.image.id) ?? 0) - (idOrder.get(b.image.id) ?? 0));
-            if (similar.length > 0) {
-                clearImageScope();
-                resetImagePaging();
-                images.set(similar);
-                focusedIndex.set(0);
-            }
+            await loadSimilarImages(image.image.id, 20);
         } catch {
             await navigator.clipboard.writeText(image.image.id);
         }

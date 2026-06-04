@@ -11,12 +11,18 @@ import {
     collections,
     commandPaletteMode,
     commandPaletteOpen,
+    contactSheetOpen,
+    detectedClasses,
+    exportFolderOpen,
+    groupRankingOpen,
     focusedIndex,
     images,
     requestCollectionTarget,
     requestTextInput,
     searchOpen,
     selectedIds,
+    sessions,
+    shortcutsOpen,
     sessionCanvases,
     settingsOpen,
     showDetectionBoxes,
@@ -36,8 +42,12 @@ import {
     type ViewMode,
 } from './stores';
 import { invalidateImageCache, loadAllImages, loadImagesForCurrentScope } from './image-loading';
-import { addToCollection, createCollection, listCollections, redo, setDecision, setRating, undo } from './api';
+import { addToCollection, createCollection, getClientFeedback, listCanvases, listClientFeedback, listCollections, redo, saveTextToPath, setClientFeedback, setDecision, setRating, undo, validateSessionFolder, type Canvas, type Session } from './api';
 import { withDecision, withRating, type ImageDecision } from './selection-updates';
+import { createWorkflow, readWorkflows, runWorkflow, type CommandWorkflow } from './workflows';
+import { buildDeliveryCsv, type DeliveryRow } from './delivery-csv';
+import { loadSimilarImages } from './similarity';
+import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 
 export type CommandPaletteItemKind = 'command' | 'destination';
 
@@ -58,6 +68,7 @@ export interface CommandPaletteSortOptions {
     mode?: CommandPaletteMode;
     pinnedIds?: string[];
     recentIds?: string[];
+    frequencies?: Record<string, number>;
     hotkeys?: Record<string, string>;
 }
 
@@ -76,7 +87,9 @@ export const COMMAND_PALETTE_SHORTCUT_POLICY = {
 
 export const COMMAND_PINS_STORAGE_KEY = 'cull.commandPalette.pins';
 export const COMMAND_RECENTS_STORAGE_KEY = 'cull.commandPalette.recents';
+export const COMMAND_FREQUENCY_STORAGE_KEY = 'cull.commandPalette.frequency';
 export const COMMAND_HOTKEYS_STORAGE_KEY = 'cull.commandPalette.hotkeys';
+export const COMMAND_ALIASES_STORAGE_KEY = 'cull.commandPalette.aliases';
 
 const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
     'Cmd+K': 'Open command palette',
@@ -148,6 +161,17 @@ export function setCommandPinned(id: string, pinned: boolean): string[] {
     return next;
 }
 
+// Drop pinned IDs that no longer correspond to a live palette item (e.g. a
+// collection or folder that was deleted), so stale pins do not accumulate.
+// Built-in command IDs are always considered valid even if not currently
+// visible due to context predicates.
+export function pruneStalePins(liveIds: Iterable<string>): string[] {
+    const live = new Set(liveIds);
+    const pruned = readPinnedCommandIds().filter(id => live.has(id) || !id.startsWith('scope.'));
+    writeJson(COMMAND_PINS_STORAGE_KEY, pruned);
+    return pruned;
+}
+
 export function readRecentCommandIds(): string[] {
     return uniqueList(readJson<string[]>(COMMAND_RECENTS_STORAGE_KEY, []));
 }
@@ -155,7 +179,14 @@ export function readRecentCommandIds(): string[] {
 export function recordCommandUse(id: string): string[] {
     const next = uniqueList([id, ...readRecentCommandIds()]).slice(0, 5);
     writeJson(COMMAND_RECENTS_STORAGE_KEY, next);
+    const freq = readCommandFrequencies();
+    freq[id] = (freq[id] ?? 0) + 1;
+    writeJson(COMMAND_FREQUENCY_STORAGE_KEY, freq);
     return next;
+}
+
+export function readCommandFrequencies(): Record<string, number> {
+    return readJson<Record<string, number>>(COMMAND_FREQUENCY_STORAGE_KEY, {});
 }
 
 export function removeRecentCommand(id: string): string[] {
@@ -166,6 +197,34 @@ export function removeRecentCommand(id: string): string[] {
 
 export function readCommandHotkeys(): Record<string, string> {
     return readJson<Record<string, string>>(COMMAND_HOTKEYS_STORAGE_KEY, {});
+}
+
+export function readCommandAliases(): Record<string, string> {
+    return readJson<Record<string, string>>(COMMAND_ALIASES_STORAGE_KEY, {});
+}
+
+// Set or clear a user alias — extra search terms that make a command easier to
+// find by the words the user actually thinks in.
+export function setCommandAlias(id: string, alias: string | null): Record<string, string> {
+    const aliases = { ...readCommandAliases() };
+    const trimmed = alias?.trim();
+    if (trimmed) aliases[id] = trimmed;
+    else delete aliases[id];
+    writeJson(COMMAND_ALIASES_STORAGE_KEY, aliases);
+    return aliases;
+}
+
+// Fold stored aliases into each item's keywords so the existing fuzzy scorer
+// matches them with no scoring-path changes.
+export function applyCommandAliases(
+    items: CommandPaletteItem[],
+    aliases: Record<string, string>,
+): CommandPaletteItem[] {
+    return items.map(item => {
+        const alias = aliases[item.id];
+        if (!alias) return item;
+        return { ...item, keywords: [...(item.keywords ?? []), alias] };
+    });
 }
 
 export function setCommandHotkey(id: string, shortcut: string | null): Record<string, string> {
@@ -182,6 +241,46 @@ export function setCommandHotkey(id: string, shortcut: string | null): Record<st
 
 export function shortcutForItem(item: CommandPaletteItem, hotkeys: Record<string, string>): string | undefined {
     return hotkeys[item.id] ?? item.defaultShortcut;
+}
+
+// Clear every custom hotkey assignment, reverting all commands to their defaults.
+export function resetCommandHotkeys(): Record<string, string> {
+    writeJson(COMMAND_HOTKEYS_STORAGE_KEY, {});
+    return {};
+}
+
+export interface CommandShortcutRow {
+    id: string;
+    title: string;
+    category: string;
+    shortcut?: string;
+    isCustom: boolean;
+    conflict: boolean;
+}
+
+// Flatten the registry into an inspectable list of shortcut rows for the
+// keyboard-shortcuts settings surface. Flags any binding that collides with
+// another command's effective binding.
+export function listCommandShortcuts(
+    items: CommandPaletteItem[],
+    hotkeys: Record<string, string>,
+): CommandShortcutRow[] {
+    const counts = new Map<string, number>();
+    for (const item of items) {
+        const shortcut = shortcutForItem(item, hotkeys);
+        if (shortcut) counts.set(shortcut, (counts.get(shortcut) ?? 0) + 1);
+    }
+    return items.map(item => {
+        const shortcut = shortcutForItem(item, hotkeys);
+        return {
+            id: item.id,
+            title: item.title,
+            category: item.category,
+            shortcut,
+            isCustom: Boolean(hotkeys[item.id]),
+            conflict: Boolean(shortcut && (counts.get(shortcut) ?? 0) > 1),
+        };
+    });
 }
 
 function clearNavigationScope() {
@@ -222,6 +321,41 @@ async function openSmartCollection(id: string) {
     activeCollection.set(null);
     activeDetectedClass.set(null);
     await loadImagesForCurrentScope();
+}
+
+async function openDetectedClass(className: string) {
+    clearNavigationScope();
+    activeSmartCollection.set(null);
+    activeFolder.set(null);
+    activeCollection.set(null);
+    activeDetectedClass.set(className);
+    await loadImagesForCurrentScope();
+}
+
+async function openSession(session: Session) {
+    // Mirrors SessionSwitcher.selectSession: validate the folder, load its
+    // canvases, then switch the active session and reload images for the scope.
+    activeCanvas.set(null);
+    try {
+        const valid = await validateSessionFolder(session.id);
+        if (!valid) {
+            showToast('Session folder missing — files may be unavailable', { type: 'warning' });
+        }
+        sessionCanvases.set(await listCanvases(session.id));
+    } catch {
+        sessionCanvases.set([]);
+    }
+    activeSmartCollection.set(null);
+    activeFolder.set(null);
+    activeCollection.set(null);
+    activeDetectedClass.set(null);
+    activeSession.set(session);
+    await loadImagesForCurrentScope();
+}
+
+function openCanvas(canvas: Canvas) {
+    activeCanvas.set(canvas);
+    navigateTo('canvas');
 }
 
 async function setFocusedRating(rating: number) {
@@ -333,6 +467,131 @@ async function addFocusedImageToCollectTarget() {
     statusHint.set('Added to collection. Space for next, B to exit');
 }
 
+export const WORKFLOW_CREATE_COMMAND_ID = 'workflow.create-from-recents';
+
+async function executeWorkflow(workflow: CommandWorkflow) {
+    const result = await runWorkflow(workflow, {
+        resolveItem: id => getCommandPaletteItems('all').find(item => item.id === id),
+        confirm: item =>
+            typeof window !== 'undefined' && typeof window.confirm === 'function'
+                ? window.confirm(`Run destructive step "${item.title}"?`)
+                : true,
+    });
+
+    if (result.cancelled) {
+        statusHint.set(`Workflow "${workflow.name}" cancelled`);
+        setTimeout(() => statusHint.set(null), 2000);
+        return;
+    }
+    if (!result.ok) {
+        showToast(result.error ?? 'Workflow failed', { type: 'error', duration: 6000 });
+        return;
+    }
+    showToast(`Workflow "${workflow.name}" complete`, { type: 'success', duration: 3000 });
+    window.dispatchEvent(new CustomEvent('reload-images'));
+}
+
+async function createWorkflowFromRecents() {
+    // Recent IDs are stored most-recent-first; a workflow should replay them in
+    // the order they were used, so reverse to chronological and drop meta steps.
+    const steps = readRecentCommandIds()
+        .filter(id => id !== WORKFLOW_CREATE_COMMAND_ID && !id.startsWith('workflow.'))
+        .reverse();
+    if (steps.length === 0) {
+        statusHint.set('Run some commands first to capture a workflow');
+        setTimeout(() => statusHint.set(null), 2500);
+        return;
+    }
+
+    const name = await requestTextInput({
+        title: 'Save Workflow from Recent Commands',
+        label: 'Workflow name',
+        description: `${steps.length} recent command${steps.length === 1 ? '' : 's'} will be saved as a runnable sequence.`,
+        placeholder: 'Workflow name',
+        confirmLabel: 'Save',
+    });
+    if (!name?.trim()) return;
+
+    createWorkflow(name.trim(), steps);
+    statusHint.set(`Saved workflow "${name.trim()}"`);
+    setTimeout(() => statusHint.set(null), 2500);
+}
+
+async function toggleFocusedClientFavorite() {
+    const image = get(images)[get(focusedIndex)];
+    if (!image) return;
+    const existing = await getClientFeedback(image.image.id);
+    const nextFavorite = !(existing?.favorite ?? false);
+    await setClientFeedback(image.image.id, nextFavorite, existing?.comment ?? null);
+    statusHint.set(nextFavorite ? 'Client favorite added' : 'Client favorite removed');
+    setTimeout(() => statusHint.set(null), 2000);
+}
+
+async function addFocusedClientComment() {
+    const image = get(images)[get(focusedIndex)];
+    if (!image) return;
+    const existing = await getClientFeedback(image.image.id);
+    const comment = await requestTextInput({
+        title: 'Client Comment',
+        label: 'Comment',
+        description: 'Stored separately from your curator rating and decision.',
+        placeholder: 'Client feedback…',
+        confirmLabel: 'Save',
+    });
+    if (comment === null) return;
+    await setClientFeedback(image.image.id, existing?.favorite ?? false, comment.trim() || null);
+    statusHint.set('Client comment saved');
+    setTimeout(() => statusHint.set(null), 2000);
+}
+
+async function exportDeliveryCsv() {
+    const items = get(images);
+    if (items.length === 0) {
+        statusHint.set('No images to export');
+        setTimeout(() => statusHint.set(null), 2000);
+        return;
+    }
+    const target = await saveDialog({
+        title: 'Save delivery list',
+        defaultPath: 'delivery-list.csv',
+        filters: [{ name: 'CSV', extensions: ['csv'] }],
+    });
+    if (!target) return;
+
+    const feedback = await listClientFeedback();
+    const byId = new Map(feedback.map(f => [f.image_id, f]));
+    const rows: DeliveryRow[] = items.map(item => {
+        const fb = byId.get(item.image.id);
+        return {
+            filename: item.path.split('/').filter(Boolean).pop() ?? item.image.id,
+            path: item.path,
+            rating: item.selection?.star_rating ?? 0,
+            decision: item.selection?.decision ?? 'undecided',
+            clientFavorite: fb?.favorite ?? false,
+            clientComment: fb?.comment ?? '',
+        };
+    });
+
+    try {
+        const written = await saveTextToPath(target, buildDeliveryCsv(rows));
+        showToast(`Delivery list saved (${rows.length} rows)`, { detail: written, type: 'success', duration: 6000 });
+    } catch (e) {
+        showToast('Delivery export failed', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
+function workflowItems(): CommandPaletteItem[] {
+    return readWorkflows().map((workflow): CommandPaletteItem => ({
+        id: workflow.id,
+        title: workflow.name,
+        subtitle: `Workflow · ${workflow.steps.length} step${workflow.steps.length === 1 ? '' : 's'}`,
+        category: 'Workflow',
+        kind: 'command',
+        keywords: ['workflow', 'automation', 'sequence', 'run'],
+        run: () => executeWorkflow(workflow),
+    }));
+}
+
 function commandItems(): CommandPaletteItem[] {
     const hasImage = Boolean(get(images)[get(focusedIndex)]);
     const selectedCount = get(selectedIds).size;
@@ -359,6 +618,24 @@ function commandItems(): CommandPaletteItem[] {
             kind: 'command',
             keywords: ['preferences', 'configuration', 'mcp'],
             run: () => settingsOpen.set(true),
+        },
+        {
+            id: WORKFLOW_CREATE_COMMAND_ID,
+            title: 'Save Workflow from Recent Commands',
+            subtitle: 'Capture your recent command sequence as a runnable workflow',
+            category: 'Workflow',
+            kind: 'command',
+            keywords: ['workflow', 'automation', 'sequence', 'macro', 'save'],
+            run: createWorkflowFromRecents,
+        },
+        {
+            id: 'app.keyboard-shortcuts',
+            title: 'View Keyboard Shortcuts',
+            subtitle: 'Browse, customize, and reset command shortcuts',
+            category: 'App',
+            kind: 'command',
+            keywords: ['hotkeys', 'keybindings', 'shortcuts', 'help', 'customize'],
+            run: () => shortcutsOpen.set(true),
         },
         {
             id: 'app.reload-images',
@@ -466,6 +743,53 @@ function commandItems(): CommandPaletteItem[] {
             run: () => selectedIds.set(new Set()),
         },
         {
+            id: 'collection.export-to-folder',
+            title: 'Export to Folder…',
+            subtitle: 'Export the current scope with format conversion and naming template',
+            category: 'Collections',
+            kind: 'command',
+            keywords: ['export', 'save', 'folder', 'convert', 'deliver', 'output'],
+            run: () => exportFolderOpen.set(true),
+        },
+        {
+            id: 'collection.export-delivery-csv',
+            title: 'Export Delivery List (CSV)…',
+            subtitle: 'CSV of the current scope with curator + client feedback columns',
+            category: 'Collections',
+            kind: 'command',
+            keywords: ['csv', 'delivery', 'list', 'client', 'export', 'proof', 'final'],
+            run: exportDeliveryCsv,
+        },
+        {
+            id: 'client.toggle-favorite',
+            title: 'Toggle Client Favorite',
+            subtitle: hasImage ? focusedImageTitle() : 'Focus an image first',
+            category: 'Client',
+            kind: 'command',
+            keywords: ['client', 'favorite', 'feedback', 'proof'],
+            disabled: !hasImage,
+            run: toggleFocusedClientFavorite,
+        },
+        {
+            id: 'client.add-comment',
+            title: 'Add Client Comment…',
+            subtitle: hasImage ? focusedImageTitle() : 'Focus an image first',
+            category: 'Client',
+            kind: 'command',
+            keywords: ['client', 'comment', 'feedback', 'note'],
+            disabled: !hasImage,
+            run: addFocusedClientComment,
+        },
+        {
+            id: 'collection.export-contact-sheet',
+            title: 'Export Contact Sheet…',
+            subtitle: 'Render a configurable grid of the current images as a PNG',
+            category: 'Collections',
+            kind: 'command',
+            keywords: ['contact sheet', 'montage', 'grid', 'proof', 'thumbnails', 'export'],
+            run: () => contactSheetOpen.set(true),
+        },
+        {
             id: 'collection.create-from-selection',
             title: 'Create Collection from Selection',
             subtitle: selectedCount === 0 ? 'Select images first' : `${selectedCount} selected`,
@@ -551,6 +875,35 @@ function commandItems(): CommandPaletteItem[] {
             run: () => setFocusedDecision(decision),
         })),
         {
+            id: 'curation.find-similar',
+            title: 'Find Similar to Focused Image',
+            subtitle: hasImage ? focusedImageTitle() : 'Focus an image first',
+            category: 'AI',
+            kind: 'command',
+            keywords: ['similar', 'semantic', 'embedding', 'clip', 'look alike', 'duplicate'],
+            disabled: !hasImage,
+            run: async () => {
+                const image = get(images)[get(focusedIndex)];
+                if (!image) return;
+                try {
+                    const count = await loadSimilarImages(image.image.id, 30);
+                    statusHint.set(count > 0 ? `Showing ${count} similar images` : 'No similar images found');
+                } catch (e) {
+                    showToast('Similarity search failed', { detail: String(e), type: 'error', duration: 6000 });
+                }
+                setTimeout(() => statusHint.set(null), 2500);
+            },
+        },
+        {
+            id: 'curation.best-of-group',
+            title: 'Best of Group Ranking…',
+            subtitle: 'Suggested winner per similarity group with score components',
+            category: 'AI',
+            kind: 'command',
+            keywords: ['best', 'group', 'rank', 'winner', 'similar', 'duplicate', 'pick'],
+            run: () => groupRankingOpen.set(true),
+        },
+        {
             id: 'detection.toggle-boxes',
             title: 'Toggle Detection Boxes',
             subtitle: get(showDetectionBoxes) ? 'Hide detection overlays' : 'Show detection overlays',
@@ -575,6 +928,9 @@ function destinationItems(): CommandPaletteItem[] {
     const activeCollectionId = get(activeCollection);
     const activeFolderPath = get(activeFolder);
     const activeSmartId = get(activeSmartCollection)?.id ?? null;
+    const activeSessionId = get(activeSession)?.id ?? null;
+    const activeCanvasId = get(activeCanvas)?.id ?? null;
+    const activeClass = get(activeDetectedClass);
 
     return [
         {
@@ -586,6 +942,33 @@ function destinationItems(): CommandPaletteItem[] {
             keywords: ['library', 'root'],
             run: openAllImages,
         },
+        ...get(sessions).map((session): CommandPaletteItem => ({
+            id: `scope.session.${session.id}`,
+            title: session.name,
+            subtitle: session.id === activeSessionId ? 'Current session' : `${session.image_count} images`,
+            category: 'Session',
+            kind: 'destination',
+            keywords: ['session', session.id, session.description ?? ''],
+            run: () => openSession(session),
+        })),
+        ...get(sessionCanvases).map((canvas): CommandPaletteItem => ({
+            id: `scope.canvas.${canvas.id}`,
+            title: canvas.name,
+            subtitle: canvas.id === activeCanvasId ? 'Current canvas' : `Canvas · ${canvas.canvas_type}`,
+            category: 'Canvas',
+            kind: 'destination',
+            keywords: ['canvas', canvas.id, canvas.canvas_type],
+            run: () => openCanvas(canvas),
+        })),
+        ...get(detectedClasses).map(([className, count]): CommandPaletteItem => ({
+            id: `scope.detected.${className}`,
+            title: className,
+            subtitle: className === activeClass ? 'Current detection filter' : `${count} images`,
+            category: 'Detection',
+            kind: 'destination',
+            keywords: ['detected', 'object', 'class', className],
+            run: () => openDetectedClass(className),
+        })),
         ...get(smartCollections)
             .filter(item => Boolean(item.filter_json))
             .map((item): CommandPaletteItem => ({
@@ -619,9 +1002,9 @@ function destinationItems(): CommandPaletteItem[] {
 }
 
 export function getCommandPaletteItems(mode: CommandPaletteMode = get(commandPaletteMode)): CommandPaletteItem[] {
-    const commands = commandItems();
-    if (mode === 'commands') return commands;
-    return [...commands, ...destinationItems()];
+    const commands = [...workflowItems(), ...commandItems()];
+    const all = mode === 'commands' ? commands : [...commands, ...destinationItems()];
+    return applyCommandAliases(all, readCommandAliases());
 }
 
 export function isCommandPaletteItemVisible(item: CommandPaletteItem): boolean {
@@ -683,6 +1066,7 @@ export function sortCommandPaletteItems(
 ): CommandPaletteItem[] {
     const pinned = new Set(options.pinnedIds ?? []);
     const recent = (options.recentIds ?? []).slice(0, 5);
+    const frequencies = options.frequencies ?? {};
     const hotkeys = options.hotkeys ?? {};
     const mode = options.mode ?? 'all';
     const hasQuery = normalize(query).length > 0;
@@ -695,6 +1079,7 @@ export function sortCommandPaletteItems(
             score: scoreCommandPaletteItem(query, item),
             pinnedRank: pinned.has(item.id) ? 1 : 0,
             recentRank: recent.includes(item.id) ? recent.length - recent.indexOf(item.id) : 0,
+            frequentRank: frequencies[item.id] ?? 0,
             hasShortcut: shortcutForItem(item, hotkeys) ? 1 : 0,
         }))
         .filter(entry => entry.score > 0)
@@ -703,6 +1088,7 @@ export function sortCommandPaletteItems(
             b.pinnedRank - a.pinnedRank ||
             b.score - a.score ||
             (hasQuery ? b.recentRank - a.recentRank : 0) ||
+            b.frequentRank - a.frequentRank ||
             b.hasShortcut - a.hasShortcut ||
             a.item.title.localeCompare(b.item.title)
         )

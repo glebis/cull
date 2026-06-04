@@ -896,6 +896,12 @@ export async function open(..._args: any[]): Promise<string | string[] | null> {
   return null;
 }
 
+// Native save dialog (@tauri-apps/plugin-dialog). Returns null so E2E export
+// flows treat it as a cancelled dialog rather than crashing.
+export async function save(..._args: any[]): Promise<string | null> {
+  return null;
+}
+
 export async function openPath(..._args: any[]): Promise<void> {
   return undefined;
 }

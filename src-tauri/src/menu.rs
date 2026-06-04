@@ -27,6 +27,13 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     app_menu.append(&PredefinedMenuItem::separator(app)?)?;
     app_menu.append(&MenuItem::with_id(
         app,
+        "check_update",
+        "Check for Update...",
+        true,
+        None::<&str>,
+    )?)?;
+    app_menu.append(&MenuItem::with_id(
+        app,
         "settings",
         "Settings...",
         true,
@@ -1000,6 +1007,7 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
     match id {
         "help" => show_cull_help(app),
         "about"
+        | "check_update"
         | "open_file"
         | "import_folder"
         | "open_folder"

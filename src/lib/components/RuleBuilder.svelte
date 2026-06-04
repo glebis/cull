@@ -54,8 +54,8 @@
         number:  'var(--orange)',
         enum:    'var(--purple)',
         string:  'var(--green)',
-        boolean: 'var(--teal, #1abc9c)',
-        date:    'var(--yellow, #e0af68)',
+        boolean: 'var(--blue)',
+        date:    'var(--orange)',
     };
 
     // rating gets blue regardless of type
@@ -341,8 +341,8 @@
     }
 
     .group-op-toggle:hover {
-        border-color: rgba(122, 162, 247, 0.5);
-        background: rgba(122, 162, 247, 0.08);
+        border-color: color-mix(in srgb, var(--blue) 50%, transparent);
+        background: color-mix(in srgb, var(--blue) 8%, transparent);
     }
 
     /* ── Chip (display mode) ─────────────────────────────────────────────── */
@@ -384,8 +384,8 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 16px;
-        height: 16px;
+        width: 24px;
+        height: 24px;
         border-radius: 50%;
         border: none;
         background: transparent;
@@ -400,7 +400,7 @@
 
     .chip-remove:hover {
         color: var(--red);
-        background: rgba(247, 118, 142, 0.15);
+        background: color-mix(in srgb, var(--red) 15%, transparent);
     }
 
     /* ── Edit container ──────────────────────────────────────────────────── */
@@ -470,14 +470,14 @@
 
     .edit-confirm:hover {
         color: var(--green);
-        border-color: rgba(158, 206, 106, 0.5);
-        background: rgba(158, 206, 106, 0.1);
+        border-color: color-mix(in srgb, var(--green) 50%, transparent);
+        background: color-mix(in srgb, var(--green) 10%, transparent);
     }
 
     .edit-cancel:hover {
         color: var(--red);
-        border-color: rgba(247, 118, 142, 0.5);
-        background: rgba(247, 118, 142, 0.1);
+        border-color: color-mix(in srgb, var(--red) 50%, transparent);
+        background: color-mix(in srgb, var(--red) 10%, transparent);
     }
 
     /* ── NOT badge ───────────────────────────────────────────────────────── */
@@ -486,8 +486,8 @@
         align-items: center;
         padding: 1px 6px;
         border-radius: 999px;
-        border: 1px solid rgba(224, 175, 104, 0.35);
-        background: rgba(224, 175, 104, 0.1);
+        border: 1px solid color-mix(in srgb, var(--orange) 35%, transparent);
+        background: color-mix(in srgb, var(--orange) 10%, transparent);
         color: var(--orange);
         font-size: 10px;
         font-weight: 700;
@@ -511,7 +511,7 @@
 
     .add-rule:hover {
         color: var(--text);
-        border-color: rgba(255, 255, 255, 0.2);
-        background: rgba(255, 255, 255, 0.04);
+        border-color: color-mix(in srgb, var(--text) 20%, transparent);
+        background: color-mix(in srgb, var(--text) 4%, transparent);
     }
 </style>

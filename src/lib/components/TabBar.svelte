@@ -220,8 +220,8 @@
     input[type="range"]::-webkit-slider-thumb {
         -webkit-appearance: none;
         appearance: none;
-        width: 10px;
-        height: 10px;
+        width: 16px;
+        height: 16px;
         border-radius: 50%;
         background: var(--blue);
         cursor: pointer;
