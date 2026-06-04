@@ -66,7 +66,11 @@ pub async fn open_preview_display(app: AppHandle) -> Result<String, String> {
 
 fn ensure_preview_display_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     if let Some(window) = app.get_webview_window(PREVIEW_DISPLAY_LABEL) {
-        apply_preview_display_always_on_top(app, &window, saved_preview_display_always_on_top(app)?)?;
+        apply_preview_display_always_on_top(
+            app,
+            &window,
+            saved_preview_display_always_on_top(app)?,
+        )?;
         return Ok(window);
     }
 

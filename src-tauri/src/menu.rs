@@ -1075,10 +1075,7 @@ mod tests {
         let id = window_menu_item_id("preview-display");
 
         assert_eq!(id, "window_focus:preview-display");
-        assert_eq!(
-            window_label_from_menu_item_id(&id),
-            Some("preview-display")
-        );
+        assert_eq!(window_label_from_menu_item_id(&id), Some("preview-display"));
         assert_eq!(window_label_from_menu_item_id("view_grid"), None);
     }
 
@@ -1119,7 +1116,10 @@ mod tests {
         sort_window_menu_entries(&mut entries);
 
         assert_eq!(
-            entries.iter().map(|entry| entry.label.as_str()).collect::<Vec<_>>(),
+            entries
+                .iter()
+                .map(|entry| entry.label.as_str())
+                .collect::<Vec<_>>(),
             vec!["main", "preview-display", "window-2", "window-3"]
         );
     }
