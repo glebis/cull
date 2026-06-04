@@ -183,19 +183,34 @@ export interface MenuStatePayload {
     hasFocusedImage: boolean;
     selectedCount: number;
     staticPublishingEnabled: boolean;
+    showLoupeHistogram: boolean;
     previewDisplayFrozen: boolean;
     previewDisplayBlanked: boolean;
+    previewDisplayAlwaysOnTop: boolean;
     previewDisplayMode: PreviewDisplayMode;
+    previewDisplayOverlay: PreviewOverlayConfig;
     previewDisplayWebStreamActive: boolean;
 }
 
 export type PreviewDisplayMode = 'image_only' | 'client_review' | 'metadata_review';
+export type PreviewRailSide = 'left' | 'right';
+export type PreviewRailWidth = 'narrow' | 'medium' | 'wide';
+export type PreviewRailTextSize = 'small' | 'medium' | 'large';
 
 export interface PreviewOverlayConfig {
     showFilename: boolean;
     showRating: boolean;
     showDecision: boolean;
     showMetadataRail: boolean;
+    showDimensions: boolean;
+    showFormat: boolean;
+    showSource: boolean;
+    showPrompt: boolean;
+    showTags: boolean;
+    showHistogram: boolean;
+    railSide: PreviewRailSide;
+    railWidth: PreviewRailWidth;
+    railTextSize: PreviewRailTextSize;
 }
 
 export interface PreviewState {
@@ -228,8 +243,22 @@ export interface PreviewWebStreamStatus {
     remote_access: boolean;
 }
 
+export interface ImageHistogram {
+    image_id: string;
+    source: 'original' | 'thumbnail';
+    pixel_count: number;
+    red: number[];
+    green: number[];
+    blue: number[];
+    luma: number[];
+}
+
 export async function openPreviewDisplay(): Promise<string> {
     return invoke<string>('open_preview_display');
+}
+
+export async function setPreviewDisplayAlwaysOnTop(alwaysOnTop: boolean): Promise<boolean> {
+    return invoke<boolean>('set_preview_display_always_on_top', { alwaysOnTop });
 }
 
 export async function listPreviewDisplayMonitors(): Promise<PreviewDisplayMonitor[]> {
@@ -250,6 +279,10 @@ export async function stopPreviewDisplayWebStream(): Promise<PreviewWebStreamSta
 
 export async function getPreviewDisplayWebStreamStatus(): Promise<PreviewWebStreamStatus> {
     return invoke<PreviewWebStreamStatus>('get_preview_display_web_stream_status');
+}
+
+export async function getImageHistogram(imageId: string): Promise<ImageHistogram | null> {
+    return invoke<ImageHistogram | null>('get_image_histogram', { imageId });
 }
 
 export async function getPreviewState(): Promise<PreviewState> {

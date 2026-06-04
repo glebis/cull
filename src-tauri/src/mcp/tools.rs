@@ -196,10 +196,6 @@ fn normalize_decision(decision: &str) -> Option<&'static str> {
     }
 }
 
-fn is_valid_decision(decision: &str) -> bool {
-    normalize_decision(decision).is_some()
-}
-
 fn required_module_for_tool(tool_name: &str) -> Option<&'static str> {
     match tool_name {
         "export_static_publish_package"
@@ -3042,7 +3038,7 @@ mod tests {
             "none",
         ] {
             assert!(
-                super::is_valid_decision(value),
+                super::normalize_decision(value).is_some(),
                 "Decision '{}' should be valid",
                 value
             );
@@ -3051,9 +3047,9 @@ mod tests {
 
     #[test]
     fn test_decision_invalid_values() {
-        assert!(!super::is_valid_decision("maybe"));
-        assert!(!super::is_valid_decision(""));
-        assert!(!super::is_valid_decision("SELECTED"));
+        assert!(super::normalize_decision("maybe").is_none());
+        assert!(super::normalize_decision("").is_none());
+        assert!(super::normalize_decision("SELECTED").is_none());
     }
 
     #[test]

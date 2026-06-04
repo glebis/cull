@@ -34,14 +34,17 @@
     import { initMenu } from '$lib/menu';
     import { isPreviewDisplayRoute, nextPreviewFocusPayload, previewSyncImageId } from '$lib/preview-display';
     import {
+        PREVIEW_DISPLAY_ALWAYS_ON_TOP_SETTING,
         PREVIEW_DISPLAY_MODE_SETTING,
         PREVIEW_DISPLAY_OVERLAY_SETTING,
         parsePreviewDisplayMode,
         parsePreviewDisplayOverlay,
+        previewDisplayAlwaysOnTop,
         previewDisplayBlanked,
         previewDisplayFrozen,
         previewDisplayMode,
         previewDisplayOverlay,
+        setPreviewDisplayAlwaysOnTop,
         setPreviewDisplayMode,
         setPreviewDisplayOverlay,
     } from '$lib/preview-display-store';
@@ -139,6 +142,7 @@
         setPreviewDisplayMode(mode);
         const overlay = parsePreviewDisplayOverlay(await getAppSetting(PREVIEW_DISPLAY_OVERLAY_SETTING));
         if (overlay) setPreviewDisplayOverlay(overlay);
+        setPreviewDisplayAlwaysOnTop((await getAppSetting(PREVIEW_DISPLAY_ALWAYS_ON_TOP_SETTING)) === 'true');
     }
 
     async function syncFocusedImageToPreviewDisplay(image: ImageWithFile | null) {
@@ -150,6 +154,7 @@
             overlay: $previewDisplayOverlay,
             frozen: $previewDisplayFrozen,
             blanked: $previewDisplayBlanked,
+            alwaysOnTop: $previewDisplayAlwaysOnTop,
         });
         if (syncKey === lastPreviewSyncKey) return;
         lastPreviewSyncKey = syncKey;
@@ -171,11 +176,13 @@
         const image = $focusedImage;
         const frozen = $previewDisplayFrozen;
         const blanked = $previewDisplayBlanked;
+        const alwaysOnTop = $previewDisplayAlwaysOnTop;
         const mode = $previewDisplayMode;
         const overlay = $previewDisplayOverlay;
         if (previewDisplayWindow) return;
         void frozen;
         void blanked;
+        void alwaysOnTop;
         void mode;
         void overlay;
         syncFocusedImageToPreviewDisplay(image).catch((e) => {

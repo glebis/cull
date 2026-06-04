@@ -11,6 +11,8 @@ describe('Preview Display web stream security contract', () => {
         expect(source).toContain('function escapeHtml');
         expect(source).toContain('escapeHtml(item.filename)');
         expect(source).toContain('escapeHtml(item.decision)');
-        expect(source).toContain('escapeHtml(item.source_label)');
+        expect(source).toContain('escapeHtml(source)');
+        expect(source).toContain('escapeHtml(item.prompt)');
+        expect(source).toContain("escapeHtml(item.tags.join(', '))");
     });
 });

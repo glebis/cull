@@ -3,9 +3,9 @@
     import { onMount } from 'svelte';
     import ContextMenu from './ContextMenu.svelte';
     import PromptResubmitDialog from './PromptResubmitDialog.svelte';
-    import { images, focusedIndex, focusedImage, statusHint, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
-    import { getDetections, getVisionMetadata, cropImage, getImagesByIds, getGenerationRun, isRawFormat } from '$lib/api';
-    import type { Detection, GenerationRun } from '$lib/api';
+    import { images, focusedIndex, focusedImage, statusHint, showLoupeHistogram, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
+    import { getDetections, getVisionMetadata, cropImage, getImagesByIds, getGenerationRun, getImageHistogram, isRawFormat } from '$lib/api';
+    import type { Detection, GenerationRun, ImageHistogram } from '$lib/api';
     import { focusImagePath } from '$lib/transform-results';
     import {
         clientToImagePoint,
@@ -17,6 +17,7 @@
     } from '$lib/view-utils';
     import type { CropPoint, CropRect, CropResizeHandle } from '$lib/view-utils';
     import { recordImageLoadFailure } from '$lib/diagnostics';
+    import { histogramExposureWarnings, histogramPolyline } from '$lib/histogram-utils';
 
     let dragging = $state(false);
     let dragStartX = $state(0);
@@ -56,6 +57,8 @@
     let sourceDisplay = $derived(image?.source_label ? SOURCE_DISPLAY[image.source_label] ?? image.source_label : null);
 
     let generationRun = $state<GenerationRun | null>(null);
+    let histogram = $state<ImageHistogram | null>(null);
+    let histogramRequestSeq = 0;
 
     let prompt = $derived(generationRun?.prompt ?? image?.image.ai_prompt ?? null);
     let genModel = $derived(generationRun?.model ?? null);
@@ -64,6 +67,21 @@
     let promptExpanded = $state(false);
     let resubmitVisible = $state(false);
     let promptTruncated = $derived(prompt && prompt.length > 80 ? prompt.slice(0, 80) + '…' : prompt);
+    let histogramWarnings = $derived(histogram ? histogramExposureWarnings(histogram) : {
+        clippedShadows: false,
+        clippedHighlights: false,
+    });
+    let histogramLumaPoints = $derived(histogram ? histogramPolyline(histogram.luma, 48) : '');
+    let histogramRedPoints = $derived(histogram ? histogramPolyline(histogram.red, 48) : '');
+    let histogramGreenPoints = $derived(histogram ? histogramPolyline(histogram.green, 48) : '');
+    let histogramBluePoints = $derived(histogram ? histogramPolyline(histogram.blue, 48) : '');
+    let histogramSourceLabel = $derived(
+        histogram?.source === 'thumbnail'
+            ? 'Source: thumbnail preview'
+            : histogram?.source === 'original'
+                ? 'Source: original image'
+                : ''
+    );
 
     let detections = $state<Detection[]>([]);
     let nsfwDetections = $state<Detection[]>([]);
@@ -125,7 +143,14 @@
 
     $effect(() => {
         const id = image?.image.id;
-        if (!id) { detections = []; nsfwDetections = []; detectionsLoaded = false; return; }
+        if (!id) {
+            detections = [];
+            nsfwDetections = [];
+            detectionsLoaded = false;
+            visionMeta = [];
+            generationRun = null;
+            return;
+        }
         detectionsLoaded = false;
         getDetections(id).then(dets => {
             detections = dets.filter(d => !d.class_name.includes('EXPOSED') && !d.class_name.includes('COVERED') && !d.class_name.includes('FACE_') && !d.class_name.includes('BELLY') && !d.class_name.includes('FEET') && !d.class_name.includes('ARMPITS') && !d.class_name.includes('ANUS') && !d.class_name.includes('BUTTOCKS') && !d.class_name.includes('BREAST') && !d.class_name.includes('GENITALIA'));
@@ -134,6 +159,20 @@
         }).catch(() => { detections = []; nsfwDetections = []; detectionsLoaded = true; });
         getVisionMetadata(id).then(m => { visionMeta = m; }).catch(() => { visionMeta = []; });
         getGenerationRun(id).then(r => { generationRun = r; }).catch(() => { generationRun = null; });
+    });
+
+    $effect(() => {
+        const id = image?.image.id;
+        const visible = $showLoupeHistogram;
+        const seq = ++histogramRequestSeq;
+        histogram = null;
+        if (!id || !visible) return;
+
+        getImageHistogram(id).then(h => {
+            if (histogramRequestSeq === seq && image?.image.id === id && $showLoupeHistogram) histogram = h;
+        }).catch(() => {
+            if (histogramRequestSeq === seq && image?.image.id === id) histogram = null;
+        });
     });
 
     let shouldBlur = $derived(
@@ -565,6 +604,30 @@
         <div class="mini-selected">SEL</div>
     {/if}
 
+    {#if !hideOverlays && $showLoupeHistogram && histogram}
+        <div class="loupe-histogram" aria-label="Histogram: luma and RGB tonal distribution">
+            <div class="histogram-heading">
+                <span class="histogram-title">Histogram</span>
+                <span class="histogram-subtitle">Luma + RGB tonal distribution</span>
+            </div>
+            <svg class="loupe-histogram-svg" viewBox="0 0 255 48" preserveAspectRatio="none">
+                <polyline class="histogram-line luma" points={histogramLumaPoints} />
+                <polyline class="histogram-line red" points={histogramRedPoints} />
+                <polyline class="histogram-line green" points={histogramGreenPoints} />
+                <polyline class="histogram-line blue" points={histogramBluePoints} />
+            </svg>
+            <div class="histogram-flags">
+                <span class="histogram-source">{histogramSourceLabel}</span>
+                {#if histogramWarnings.clippedShadows}
+                    <span class="histogram-warning">Clipped shadows</span>
+                {/if}
+                {#if histogramWarnings.clippedHighlights}
+                    <span class="histogram-warning">Clipped highlights</span>
+                {/if}
+            </div>
+        </div>
+    {/if}
+
     {#if toastDecision}
         {#key toastKey}
         <div class="status-toast" class:toast-accept={toastDecision === 'accept'} class:toast-reject={toastDecision === 'reject'}>
@@ -909,6 +972,76 @@
     .mini-status.mini-reject {
         border-color: var(--red);
         color: var(--red);
+    }
+    .loupe-histogram {
+        position: absolute;
+        top: 56px;
+        right: 18px;
+        z-index: 18;
+        width: min(280px, calc(100vw - 36px));
+        padding: 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: color-mix(in srgb, var(--surface) 88%, transparent);
+        backdrop-filter: blur(14px);
+        pointer-events: none;
+    }
+    .histogram-heading {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin-bottom: 6px;
+    }
+    .histogram-title {
+        color: var(--text);
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.2;
+        text-transform: uppercase;
+    }
+    .histogram-subtitle {
+        color: var(--text-secondary);
+        font-size: 10px;
+        line-height: 1.2;
+    }
+    .loupe-histogram-svg {
+        display: block;
+        width: 100%;
+        height: 54px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+    }
+    .histogram-line {
+        fill: none;
+        stroke-width: 1.5;
+        vector-effect: non-scaling-stroke;
+    }
+    .histogram-line.luma {
+        stroke: var(--text-secondary);
+    }
+    .histogram-line.red {
+        stroke: var(--red);
+    }
+    .histogram-line.green {
+        stroke: var(--green);
+    }
+    .histogram-line.blue {
+        stroke: var(--blue);
+    }
+    .histogram-flags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 6px;
+        font-size: 10px;
+        line-height: 1.3;
+    }
+    .histogram-source {
+        color: var(--text-secondary);
+    }
+    .histogram-warning {
+        color: var(--orange);
+        text-transform: uppercase;
     }
     /* Decision toast (transient) */
     .status-toast {

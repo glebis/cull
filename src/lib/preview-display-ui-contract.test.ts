@@ -25,6 +25,9 @@ describe('Preview Display UI contract', () => {
         expect(component).toContain("listen<PreviewState>('preview:state-changed'");
         expect(component).toContain('getPreviewState');
         expect(component).toContain('getImagesByIds');
+        expect(component).toContain('listImageTags');
+        expect(component).toContain('getGenerationRun');
+        expect(component).toContain('getImageHistogram');
         expect(component).toContain('convertFileSrc');
         expect(component).toContain('previewDisplayImageSourcePath');
         expect(component).not.toContain('trashImages');
@@ -36,10 +39,55 @@ describe('Preview Display UI contract', () => {
 
     it('syncs main-window focus changes into PreviewState through the shared API', () => {
         const page = source('src/routes/+page.svelte');
+        const grid = source('src/lib/components/Grid.svelte');
+        const keys = source('src/lib/keys.ts');
 
         expect(page).toContain('syncFocusedImageToPreviewDisplay');
         expect(page).toContain('nextPreviewFocusPayload');
         expect(page).toContain('updatePreviewState');
         expect(page).toContain('$focusedImage');
+        expect(grid).toContain('focusedIndex.set(index)');
+        expect(keys).toContain('moveLoupeFocus');
+        expect(keys).toContain('focusedIndex.update');
+    });
+
+    it('renders bounded info rail fields without overlapping the image', () => {
+        const component = source('src/lib/components/PreviewDisplay.svelte');
+
+        expect(component).toContain("data-side={previewState?.overlay.railSide");
+        expect(component).toContain("data-width={previewState?.overlay.railWidth");
+        expect(component).toContain("data-text={previewState?.overlay.railTextSize");
+        expect(component).toContain('prompt-preview');
+        expect(component).toContain('tag-list');
+        expect(component).toContain('histogram-panel');
+        expect(component).toContain('line-clamp');
+        expect(component).toContain('max-height');
+    });
+
+    it('keeps the Preview Display header draggable like a macOS window titlebar', () => {
+        const component = source('src/lib/components/PreviewDisplay.svelte');
+
+        expect(component).toContain("import { getCurrentWindow } from '@tauri-apps/api/window'");
+        expect(component).toContain('class="preview-header"');
+        expect(component).toContain('class:hidden={!headerVisible}');
+        expect(component).toContain('data-tauri-drag-region="deep"');
+        expect(component).toContain('aria-label="Preview Display window header"');
+        expect(component).toContain('onpointerdown={handleHeaderPointerDown}');
+        expect(component).toContain('getCurrentWindow().startDragging()');
+        expect(component).toContain('setTimeout(() => {');
+        expect(component).toContain('}, 1500)');
+        expect(component).toContain('position: absolute');
+        expect(component).toContain('padding-left: var(--macos-window-controls-width)');
+        expect(component).toContain('class="preview-stage"');
+    });
+
+    it('shows blanking text for only the first three seconds after blanking', () => {
+        const component = source('src/lib/components/PreviewDisplay.svelte');
+
+        expect(component).toContain('showBlankMessageTemporarily');
+        expect(component).toContain('blankMessageVisible = true');
+        expect(component).toContain('}, 3000)');
+        expect(component).toContain('Preview is Blanked');
+        expect(component).not.toContain('Preview blanked</div>');
     });
 });

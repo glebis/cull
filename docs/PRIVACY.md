@@ -20,7 +20,7 @@ Cull is local-first. All core features (viewing, rating, collections, CLIP searc
 | OpenRouter generation | OpenRouter servers (US) | Prompt + optional image + API key | Yes |
 | MCP server (local) | Unix socket (localhost) | Metadata, paths | No |
 | MCP server (HTTP) | Network-exposed | Metadata, paths, thumbnails | If enabled |
-| Preview Display web stream | Local network URL | Current preview image + selected display metadata | If started |
+| Preview Display web stream | Localhost URL by default; local network URL only through the LAN menu item | Current preview image + selected display metadata, tags, prompt/source fields, and histogram if enabled | If started |
 | SQLite database | Local file | Nothing | No |
 
 ## Provider Compliance Details
@@ -107,9 +107,9 @@ Cull is local-first. All core features (viewing, rating, collections, CLIP searc
 
 ## Local-Network Preview Display
 
-Preview Display's native Tauri window is local to the Mac display environment. The optional **Preview Display Web Stream** is different: it starts a local HTTP server and creates a tokenized URL for an iPad or browser on the same network.
+Preview Display's native Tauri window is local to the Mac display environment. The optional **Preview Display Web Stream** is different: it starts a local HTTP server. The default web stream binds to localhost; **Preview Display LAN Web Stream** explicitly creates a tokenized URL for an iPad or browser on the same network.
 
-Treat that URL as a secret. Anyone who can reach the Mac on the local network and has the full tokenized URL can view the streamed preview image and the enabled display metadata until the stream is stopped.
+Treat that URL as a secret. Anyone who can reach the Mac on the local network and has the full tokenized LAN URL can view the streamed preview image and the enabled display metadata until the stream is stopped. Clipboard-history tools may retain copied URLs.
 
 ## For Developers / Self-hosters
 

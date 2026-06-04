@@ -165,6 +165,7 @@ export const statusHint = writable<string | null>(null);
 
 export const sidebarVisible = writable<boolean>(true);
 export const staticPublishingEnabled = writable<boolean>(false);
+export const showLoupeHistogram = writable<boolean>(false);
 
 export const GRID_PRESETS = [
     { name: 'compact', size: 80, gap: 2 },

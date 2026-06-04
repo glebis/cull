@@ -115,6 +115,15 @@ let previewState = {
     showRating: false,
     showDecision: false,
     showMetadataRail: false,
+    showDimensions: false,
+    showFormat: false,
+    showSource: false,
+    showPrompt: false,
+    showTags: false,
+    showHistogram: false,
+    railSide: 'right',
+    railWidth: 'medium',
+    railTextSize: 'medium',
   },
   frozen: false,
   blanked: false,
@@ -305,6 +314,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     url: 'http://127.0.0.1:8000/',
   }),
   open_preview_display: () => 'preview-display',
+  set_preview_display_always_on_top: (_: any, args: any) => args.alwaysOnTop === true,
   list_preview_display_monitors: () => [
     {
       id: 'built-in-retina-display-0x0-3024x1964',
@@ -333,7 +343,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     previewState = {
       image_id: args.imageId ?? null,
       display_mode: args.displayMode ?? previewState.display_mode,
-      overlay: args.overlay ?? previewState.overlay,
+      overlay: args.overlay ? { ...previewState.overlay, ...args.overlay } : previewState.overlay,
       frozen: args.frozen ?? previewState.frozen,
       blanked: args.blanked ?? previewState.blanked,
       version: previewState.version + 1,
@@ -510,6 +520,15 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   rotate_image: (_: any, args: { imageId: string }) => `/mock/library/${args.imageId}_rotated.png`,
   crop_image: (_: any, args: { imageId: string }) => `/mock/library/${args.imageId}_crop.png`,
   get_generation_run: () => null,
+  get_image_histogram: (_: any, args: { imageId: string }) => ({
+    image_id: args.imageId,
+    source: 'thumbnail',
+    pixel_count: 1024,
+    red: Array.from({ length: 256 }, (_, index) => index),
+    green: Array.from({ length: 256 }, (_, index) => 255 - index),
+    blue: Array.from({ length: 256 }, (_, index) => (index % 32) * 8),
+    luma: Array.from({ length: 256 }, (_, index) => (index < 128 ? index : 255 - index)),
+  }),
   record_asset_load_event: (_: any, args: { event: any }) => ({
     id: 'asset-event-1',
     ...args.event,

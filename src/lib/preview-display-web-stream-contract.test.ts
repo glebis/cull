@@ -30,11 +30,15 @@ describe('Preview Display web stream contract', () => {
         const frontendMenu = source('src/lib/menu.ts');
 
         expect(menu).toContain('"preview_display_start_web_stream"');
+        expect(menu).toContain('"preview_display_start_lan_web_stream"');
         expect(menu).toContain('"preview_display_copy_web_stream_url"');
         expect(menu).toContain('"preview_display_stop_web_stream"');
         expect(frontendMenu).toContain("case 'preview_display_start_web_stream'");
+        expect(frontendMenu).toContain("case 'preview_display_start_lan_web_stream'");
         expect(frontendMenu).toContain("case 'preview_display_copy_web_stream_url'");
         expect(frontendMenu).toContain("case 'preview_display_stop_web_stream'");
+        expect(frontendMenu).toContain("handlePreviewDisplayStartWebStream('127.0.0.1')");
+        expect(frontendMenu).toContain("handlePreviewDisplayStartWebStream('0.0.0.0')");
     });
 
     it('surfaces active web stream state in menu state and status bar', () => {

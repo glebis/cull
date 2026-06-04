@@ -10,7 +10,11 @@ fn preview_display_window_uses_semantic_identity_and_route() {
     assert_eq!(PREVIEW_DISPLAY_TITLE, "Cull Preview Display");
     assert_eq!(spec.label, PREVIEW_DISPLAY_LABEL);
     assert_eq!(spec.title, PREVIEW_DISPLAY_TITLE);
-    assert_eq!(spec.url, "index.html?previewDisplay=1");
+    assert_eq!(spec.url, "?previewDisplay=1");
+    assert!(
+        !spec.url.starts_with("index.html?"),
+        "SvelteKit dev serves /index.html?previewDisplay=1 as a 404 route"
+    );
 }
 
 #[test]

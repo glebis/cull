@@ -28,8 +28,11 @@ describe('Preview Display native window contract', () => {
         const api = source('src/lib/api.ts');
 
         expect(lib).toContain('commands::preview::open_preview_display');
+        expect(lib).toContain('commands::preview::set_preview_display_always_on_top');
         expect(permissions).toContain('"open_preview_display"');
+        expect(permissions).toContain('"set_preview_display_always_on_top"');
         expect(api).toContain("invoke<string>('open_preview_display')");
+        expect(api).toContain("invoke<boolean>('set_preview_display_always_on_top'");
     });
 
     it('scopes the preview-display window to read-only and UI capabilities', () => {

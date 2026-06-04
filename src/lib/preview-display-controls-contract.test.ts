@@ -9,6 +9,14 @@ function source(path: string): string {
 }
 
 describe('Preview Display control contract', () => {
+    function viewMenuSource(): string {
+        const menu = source('src-tauri/src/menu.rs');
+        const start = menu.indexOf('// View menu');
+        const end = menu.indexOf('menu.append(&view_menu)?;', start);
+
+        return menu.slice(start, end);
+    }
+
     it('adds View menu actions for freeze, blank, and presets', () => {
         const menu = source('src-tauri/src/menu.rs');
 
@@ -24,6 +32,36 @@ describe('Preview Display control contract', () => {
         expect(menu).toContain('preview_display_frozen');
         expect(menu).toContain('preview_display_blanked');
         expect(menu).toContain('preview_display_mode');
+    });
+
+    it('adds View menu field toggles and bounded info rail controls', () => {
+        const menu = source('src-tauri/src/menu.rs');
+        const frontendMenu = source('src/lib/menu.ts');
+
+        for (const id of [
+            'preview_display_field_filename',
+            'preview_display_field_rating',
+            'preview_display_field_decision',
+            'preview_display_field_dimensions',
+            'preview_display_field_format',
+            'preview_display_field_source',
+            'preview_display_field_prompt',
+            'preview_display_field_tags',
+            'preview_display_field_histogram',
+            'preview_display_rail_left',
+            'preview_display_rail_right',
+            'preview_display_rail_width_narrow',
+            'preview_display_rail_width_medium',
+            'preview_display_rail_width_wide',
+            'preview_display_text_small',
+            'preview_display_text_medium',
+            'preview_display_text_large',
+        ]) {
+            expect(menu).toContain(`"${id}"`);
+            expect(frontendMenu).toContain(`case '${id}'`);
+        }
+
+        expect(menu).toContain('preview_display_overlay');
     });
 
     it('handles menu actions in the main window and persists preset settings', () => {
@@ -45,5 +83,13 @@ describe('Preview Display control contract', () => {
         expect(page).toContain('previewDisplayFrozen');
         expect(page).toContain('previewDisplayBlanked');
         expect(page).toContain('previewSyncImageId');
+    });
+
+    it('keeps Preview Display controls nested instead of crowding the top-level View menu', () => {
+        const viewMenu = viewMenuSource();
+
+        expect(viewMenu).toContain('Submenu::new(app, "Preview Display", true)?');
+        expect(viewMenu).toContain('view_menu.append(&preview_display_menu)?');
+        expect(viewMenu).not.toMatch(/view_menu\.append\(&(?:Check)?MenuItem::with_id\(\s*app,\s*"preview_display_/);
     });
 });

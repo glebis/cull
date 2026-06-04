@@ -16,6 +16,7 @@ import {
     listFolders,
     updateMenuState,
     openPreviewDisplay,
+    setPreviewDisplayAlwaysOnTop as setPreviewDisplayAlwaysOnTopNative,
     listPreviewDisplayMonitors,
     placePreviewDisplay,
     startPreviewDisplayWebStream,
@@ -34,6 +35,7 @@ import {
     focusedImage,
     sidebarVisible,
     thumbnailSize,
+    showLoupeHistogram,
     activeFolder,
     activeCollection,
     activeSmartCollection,
@@ -55,17 +57,27 @@ import {
 import {
     PREVIEW_DISPLAY_MODE_SETTING,
     PREVIEW_DISPLAY_OVERLAY_SETTING,
+    previewDisplayAlwaysOnTop,
     previewDisplayBlanked,
     previewDisplayFrozen,
     previewDisplayMode,
     previewDisplayOverlay,
     previewDisplayWebStreamStatus,
     setPreviewDisplayBlanked,
+    setPreviewDisplayAlwaysOnTop,
     setPreviewDisplayFrozen,
     setPreviewDisplayMode,
+    setPreviewDisplayOverlay,
     setPreviewDisplayWebStreamStatus,
 } from './preview-display-store';
-import { overlayForPreviewDisplayMode } from './preview-display';
+import {
+    overlayForPreviewDisplayMode,
+    withPreviewDisplayField,
+    withPreviewDisplayRailSide,
+    withPreviewDisplayRailTextSize,
+    withPreviewDisplayRailWidth,
+    type PreviewDisplayField,
+} from './preview-display';
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { folderDisplayName } from './move-menu-utils';
 import { openCommandPalette } from './command-palette';
@@ -377,6 +389,22 @@ function handlePreviewDisplayBlank() {
     showToast(next ? 'Preview Display blanked' : 'Preview Display visible', { type: 'info', duration: 3000 });
 }
 
+async function handlePreviewDisplayAlwaysOnTop() {
+    const previous = get(previewDisplayAlwaysOnTop);
+    const next = !previous;
+    setPreviewDisplayAlwaysOnTop(next);
+    try {
+        await setPreviewDisplayAlwaysOnTopNative(next);
+        showToast(next ? 'Preview Display stays on top' : 'Preview Display normal stacking', {
+            type: 'info',
+            duration: 3000,
+        });
+    } catch (e) {
+        setPreviewDisplayAlwaysOnTop(previous);
+        showToast('Preview Display stacking failed', { detail: String(e), type: 'error', duration: 8000 });
+    }
+}
+
 async function handlePreviewDisplayPreset(mode: PreviewDisplayMode) {
     const overlay = overlayForPreviewDisplayMode(mode);
     setPreviewDisplayMode(mode);
@@ -386,6 +414,20 @@ async function handlePreviewDisplayPreset(mode: PreviewDisplayMode) {
     } catch (e) {
         showToast('Preview Display preset not saved', { detail: String(e), type: 'warning', duration: 6000 });
     }
+}
+
+async function persistPreviewDisplayOverlay(overlay = get(previewDisplayOverlay)) {
+    setPreviewDisplayOverlay(overlay);
+    try {
+        await setAppSetting(PREVIEW_DISPLAY_OVERLAY_SETTING, JSON.stringify(overlay));
+    } catch (e) {
+        showToast('Preview Display settings not saved', { detail: String(e), type: 'warning', duration: 6000 });
+    }
+}
+
+function handlePreviewDisplayField(field: PreviewDisplayField) {
+    const overlay = get(previewDisplayOverlay);
+    persistPreviewDisplayOverlay(withPreviewDisplayField(overlay, field, !overlay[field]));
 }
 
 function displayLabel(monitor: { name: string | null; width: number; height: number; primary: boolean }, index: number): string {
@@ -469,9 +511,9 @@ function showPreviewDisplayWebStreamToast(status: PreviewWebStreamStatus) {
     });
 }
 
-async function handlePreviewDisplayStartWebStream() {
+async function handlePreviewDisplayStartWebStream(host: '127.0.0.1' | '0.0.0.0' = '127.0.0.1') {
     try {
-        const status = await startPreviewDisplayWebStream('0.0.0.0', null);
+        const status = await startPreviewDisplayWebStream(host, null);
         setPreviewDisplayWebStreamStatus(status);
         await copyPreviewDisplayWebStreamUrl(status);
         showPreviewDisplayWebStreamToast(status);
@@ -573,6 +615,9 @@ function handleMenuAction(action: string) {
         case 'toggle_sidebar':
             sidebarVisible.update((v) => !v);
             break;
+        case 'view_loupe_histogram':
+            showLoupeHistogram.update((visible) => !visible);
+            break;
         case 'view_preview_display':
             openPreviewDisplay().catch((e) => {
                 showToast('Preview Display failed', { detail: String(e), type: 'error', duration: 8000 });
@@ -584,8 +629,14 @@ function handleMenuAction(action: string) {
         case 'preview_display_fullscreen':
             handlePreviewDisplayFullscreen();
             break;
+        case 'preview_display_always_on_top':
+            handlePreviewDisplayAlwaysOnTop();
+            break;
         case 'preview_display_start_web_stream':
-            handlePreviewDisplayStartWebStream();
+            handlePreviewDisplayStartWebStream('127.0.0.1');
+            break;
+        case 'preview_display_start_lan_web_stream':
+            handlePreviewDisplayStartWebStream('0.0.0.0');
             break;
         case 'preview_display_copy_web_stream_url':
             copyPreviewDisplayWebStreamUrl();
@@ -607,6 +658,57 @@ function handleMenuAction(action: string) {
             break;
         case 'preview_display_preset_metadata_review':
             handlePreviewDisplayPreset('metadata_review');
+            break;
+        case 'preview_display_field_filename':
+            handlePreviewDisplayField('showFilename');
+            break;
+        case 'preview_display_field_rating':
+            handlePreviewDisplayField('showRating');
+            break;
+        case 'preview_display_field_decision':
+            handlePreviewDisplayField('showDecision');
+            break;
+        case 'preview_display_field_dimensions':
+            handlePreviewDisplayField('showDimensions');
+            break;
+        case 'preview_display_field_format':
+            handlePreviewDisplayField('showFormat');
+            break;
+        case 'preview_display_field_source':
+            handlePreviewDisplayField('showSource');
+            break;
+        case 'preview_display_field_prompt':
+            handlePreviewDisplayField('showPrompt');
+            break;
+        case 'preview_display_field_tags':
+            handlePreviewDisplayField('showTags');
+            break;
+        case 'preview_display_field_histogram':
+            handlePreviewDisplayField('showHistogram');
+            break;
+        case 'preview_display_rail_left':
+            persistPreviewDisplayOverlay(withPreviewDisplayRailSide(get(previewDisplayOverlay), 'left'));
+            break;
+        case 'preview_display_rail_right':
+            persistPreviewDisplayOverlay(withPreviewDisplayRailSide(get(previewDisplayOverlay), 'right'));
+            break;
+        case 'preview_display_rail_width_narrow':
+            persistPreviewDisplayOverlay(withPreviewDisplayRailWidth(get(previewDisplayOverlay), 'narrow'));
+            break;
+        case 'preview_display_rail_width_medium':
+            persistPreviewDisplayOverlay(withPreviewDisplayRailWidth(get(previewDisplayOverlay), 'medium'));
+            break;
+        case 'preview_display_rail_width_wide':
+            persistPreviewDisplayOverlay(withPreviewDisplayRailWidth(get(previewDisplayOverlay), 'wide'));
+            break;
+        case 'preview_display_text_small':
+            persistPreviewDisplayOverlay(withPreviewDisplayRailTextSize(get(previewDisplayOverlay), 'small'));
+            break;
+        case 'preview_display_text_medium':
+            persistPreviewDisplayOverlay(withPreviewDisplayRailTextSize(get(previewDisplayOverlay), 'medium'));
+            break;
+        case 'preview_display_text_large':
+            persistPreviewDisplayOverlay(withPreviewDisplayRailTextSize(get(previewDisplayOverlay), 'large'));
             break;
         case 'zoom_in':
             thumbnailSize.update((s) => Math.min(s + 40, 600));
@@ -698,9 +800,12 @@ function currentMenuStatePayload() {
         hasFocusedImage: get(focusedImage) !== null,
         selectedCount: get(selectedIds).size,
         staticPublishingEnabled: get(staticPublishingEnabled),
+        showLoupeHistogram: get(showLoupeHistogram),
         previewDisplayFrozen: get(previewDisplayFrozen),
         previewDisplayBlanked: get(previewDisplayBlanked),
+        previewDisplayAlwaysOnTop: get(previewDisplayAlwaysOnTop),
         previewDisplayMode: get(previewDisplayMode),
+        previewDisplayOverlay: get(previewDisplayOverlay),
         previewDisplayWebStreamActive: get(previewDisplayWebStreamStatus).active,
     };
 }
@@ -755,8 +860,10 @@ function startMenuStateSubscriptions() {
     focusedImage.subscribe(queueMenuStateUpdate);
     selectedIds.subscribe(queueMenuStateUpdate);
     staticPublishingEnabled.subscribe(queueMenuStateUpdate);
+    showLoupeHistogram.subscribe(queueMenuStateUpdate);
     previewDisplayFrozen.subscribe(queueMenuStateUpdate);
     previewDisplayBlanked.subscribe(queueMenuStateUpdate);
+    previewDisplayAlwaysOnTop.subscribe(queueMenuStateUpdate);
     previewDisplayMode.subscribe(queueMenuStateUpdate);
     previewDisplayOverlay.subscribe(queueMenuStateUpdate);
     previewDisplayWebStreamStatus.subscribe(queueMenuStateUpdate);

@@ -1,3 +1,4 @@
+use crate::preview::histogram::{load_image_histogram, ImageHistogram};
 use crate::preview::state::{PreviewDisplayMode, PreviewOverlayConfig, PreviewState};
 use crate::preview::web_stream::{PreviewWebStreamStatus, PREVIEW_WEB_STREAM_CHANGED_EVENT};
 use crate::preview::window::{
@@ -14,6 +15,7 @@ use tauri::{
 const PREVIEW_STATE_CHANGED_EVENT: &str = "preview:state-changed";
 const PREVIEW_DISPLAY_MONITOR_SETTING: &str = "preview_display_monitor_id";
 const PREVIEW_DISPLAY_FULLSCREEN_SETTING: &str = "preview_display_fullscreen";
+const PREVIEW_DISPLAY_ALWAYS_ON_TOP_SETTING: &str = "preview_display_always_on_top";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PreviewDisplayMonitor {
@@ -57,15 +59,23 @@ pub async fn open_preview_display(app: AppHandle) -> Result<String, String> {
     let _ = window.show();
     let _ = window.set_focus();
     apply_saved_preview_display_placement(&app)?;
+    apply_saved_preview_display_always_on_top(&app)?;
+    let _ = crate::menu::refresh_window_menu(&app);
     Ok(PREVIEW_DISPLAY_LABEL.to_string())
 }
 
 fn ensure_preview_display_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     if let Some(window) = app.get_webview_window(PREVIEW_DISPLAY_LABEL) {
+        apply_preview_display_always_on_top(
+            app,
+            &window,
+            saved_preview_display_always_on_top(app)?,
+        )?;
         return Ok(window);
     }
 
     let spec = preview_display_window_spec();
+    let always_on_top = saved_preview_display_always_on_top(app)?;
     let url = tauri::WebviewUrl::App(spec.url.into());
     let window = WebviewWindowBuilder::new(app, spec.label, url)
         .title(spec.title)
@@ -73,6 +83,7 @@ fn ensure_preview_display_window(app: &AppHandle) -> Result<WebviewWindow, Strin
         .min_inner_size(spec.min_width, spec.min_height)
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true)
+        .always_on_top(always_on_top)
         .build()
         .map_err(|e| format!("Failed to create Preview Display window: {}", e))?;
 
@@ -93,6 +104,26 @@ fn ensure_preview_display_window(app: &AppHandle) -> Result<WebviewWindow, Strin
     );
 
     Ok(window)
+}
+
+#[tauri::command]
+pub async fn set_preview_display_always_on_top(
+    app: AppHandle,
+    always_on_top: bool,
+) -> Result<bool, String> {
+    app.state::<AppState>()
+        .db
+        .set_setting(
+            PREVIEW_DISPLAY_ALWAYS_ON_TOP_SETTING,
+            if always_on_top { "true" } else { "false" },
+        )
+        .map_err(|e| e.to_string())?;
+
+    if let Some(window) = app.get_webview_window(PREVIEW_DISPLAY_LABEL) {
+        apply_preview_display_always_on_top(&app, &window, always_on_top)?;
+    }
+    let _ = crate::menu::refresh_window_menu(&app);
+    Ok(always_on_top)
 }
 
 #[tauri::command]
@@ -159,6 +190,34 @@ fn apply_saved_preview_display_placement(app: &AppHandle) -> Result<(), String> 
         place_preview_display_window(app, &window, monitor_id.as_deref(), fullscreen)?;
     }
     Ok(())
+}
+
+fn saved_preview_display_always_on_top(app: &AppHandle) -> Result<bool, String> {
+    Ok(app
+        .state::<AppState>()
+        .db
+        .get_setting(PREVIEW_DISPLAY_ALWAYS_ON_TOP_SETTING)
+        .map_err(|e| e.to_string())?
+        .map(|value| value == "true")
+        .unwrap_or(false))
+}
+
+fn apply_saved_preview_display_always_on_top(app: &AppHandle) -> Result<(), String> {
+    let always_on_top = saved_preview_display_always_on_top(app)?;
+    if let Some(window) = app.get_webview_window(PREVIEW_DISPLAY_LABEL) {
+        apply_preview_display_always_on_top(app, &window, always_on_top)?;
+    }
+    Ok(())
+}
+
+fn apply_preview_display_always_on_top(
+    _app: &AppHandle,
+    window: &WebviewWindow,
+    always_on_top: bool,
+) -> Result<(), String> {
+    window
+        .set_always_on_top(always_on_top)
+        .map_err(|e| format!("Failed to update Preview Display Always on Top: {}", e))
 }
 
 fn place_preview_display_window(
@@ -292,6 +351,21 @@ pub async fn get_preview_display_web_stream_status(
     state: State<'_, AppState>,
 ) -> Result<PreviewWebStreamStatus, String> {
     Ok(state.preview_web_stream.status())
+}
+
+#[tauri::command]
+pub async fn get_image_histogram(
+    state: State<'_, AppState>,
+    image_id: String,
+) -> Result<Option<ImageHistogram>, String> {
+    let images = state
+        .db
+        .get_images_by_ids(&[image_id.as_str()])
+        .map_err(|e| e.to_string())?;
+    let Some(image) = images.first() else {
+        return Ok(None);
+    };
+    load_image_histogram(image, &state.app_data_dir).map(Some)
 }
 
 fn emit_preview_web_stream_status(
