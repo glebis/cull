@@ -1,6 +1,6 @@
 use crate::db_core::models::{McpToken, TokenScope};
 use crate::services::{ServiceContext, ServiceError};
-use rand::Rng;
+use rand::RngExt;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
@@ -112,10 +112,10 @@ pub fn tool_capability(tool_name: &str) -> &'static str {
 }
 
 fn generate_token_id() -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let chars: String = (0..12)
         .map(|_| {
-            let idx = rng.gen_range(0..36u8);
+            let idx = rng.random_range(0..36u8);
             if idx < 10 {
                 (b'0' + idx) as char
             } else {
@@ -127,8 +127,8 @@ fn generate_token_id() -> String {
 }
 
 fn generate_secret() -> String {
-    let mut rng = rand::thread_rng();
-    let bytes: Vec<u8> = (0..SECRET_BYTES).map(|_| rng.gen()).collect();
+    let mut rng = rand::rng();
+    let bytes: Vec<u8> = (0..SECRET_BYTES).map(|_| rng.random()).collect();
     hex::encode(bytes)
 }
 

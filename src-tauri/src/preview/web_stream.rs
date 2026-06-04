@@ -12,8 +12,7 @@ use hyper::body::Incoming;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use parking_lot::Mutex;
-use rand::rngs::OsRng;
-use rand::RngCore;
+use rand::RngExt;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -36,7 +35,7 @@ pub struct PreviewWebStreamToken(String);
 impl PreviewWebStreamToken {
     pub fn generate() -> Self {
         let mut bytes = [0u8; 32];
-        OsRng.fill_bytes(&mut bytes);
+        rand::rng().fill(&mut bytes);
         Self(hex::encode(bytes))
     }
 
