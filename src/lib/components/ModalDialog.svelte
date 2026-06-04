@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
+    import { handleModalKeydown, handleModalOverlayClick } from '$lib/modal-dialog-events';
     import { claimModalShellInert, releaseModalShellInert } from '$lib/modal-layer';
 
     type InitialFocusTarget =
@@ -95,41 +96,18 @@
     }
 
     function handleKeydown(event: KeyboardEvent) {
-        event.stopPropagation();
-
-        if (closeOnEscape && event.key === 'Escape') {
-            event.preventDefault();
-            onclose();
-            return;
-        }
-
-        if (!trapFocus || event.key !== 'Tab' || !panelElement) return;
-
-        const focusables = findFocusableWithin(panelElement);
-        if (!focusables.length) {
-            event.preventDefault();
-            panelElement.focus();
-            return;
-        }
-
-        const active = document.activeElement;
-        const currentIndex = active instanceof HTMLElement ? focusables.indexOf(active) : -1;
-        event.preventDefault();
-        event.stopPropagation();
-
-        if (event.shiftKey) {
-            const previous = currentIndex <= 0 ? focusables[focusables.length - 1] : focusables[currentIndex - 1];
-            previous.focus();
-            return;
-        }
-
-        const next = currentIndex === focusables.length - 1 || currentIndex < 0 ? focusables[0] : focusables[currentIndex + 1];
-        next.focus();
+        handleModalKeydown(event, {
+            closeOnEscape,
+            trapFocus,
+            panelElement,
+            findFocusableWithin,
+            activeElement: document.activeElement,
+            onclose,
+        });
     }
 
     function handleOverlayClick(event: MouseEvent) {
-        event.stopPropagation();
-        onclose();
+        handleModalOverlayClick(event, onclose);
     }
 
     onMount(() => {
