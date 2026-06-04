@@ -2543,6 +2543,8 @@ mod tests {
                 services::clipboard_monitor::ClipboardMonitorState::default(),
             ),
             static_publish_server: parking_lot::Mutex::new(StaticPublishServerState::default()),
+            preview_state: crate::preview::state::PreviewStateStore::default(),
+            preview_web_stream: crate::preview::web_stream::PreviewWebStreamController::default(),
         };
         (state, tmp)
     }

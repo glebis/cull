@@ -246,6 +246,8 @@ mod tests {
             static_publish_server: parking_lot::Mutex::new(
                 crate::commands::static_publishing::StaticPublishServerState::default(),
             ),
+            preview_state: crate::preview::state::PreviewStateStore::default(),
+            preview_web_stream: crate::preview::web_stream::PreviewWebStreamController::default(),
         }
     }
 
