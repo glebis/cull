@@ -15,7 +15,7 @@ use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use qrcode::render::svg;
 use qrcode::QrCode;
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::State;
@@ -1261,7 +1261,7 @@ fn generate_access_phrase() -> String {
         "pearl", "pixel", "prairie", "quartz", "river", "saffron", "silver", "sketch", "solar",
         "spruce", "studio", "sumac", "tempo", "tundra", "violet", "willow", "winter", "zenith",
     ];
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     (0..3)
         .filter_map(|_| WORDS.choose(&mut rng).copied())
         .collect::<Vec<_>>()

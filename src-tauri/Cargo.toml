@@ -40,7 +40,7 @@ uuid = { version = "1", features = ["v4"] }
 tauri-plugin-dialog = "2.7.1"
 tauri-plugin-deep-link = "2.4.9"
 ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
-ndarray = "0.15"
+ndarray = "0.17"
 reqwest = { version = "0.12", features = ["stream", "json"] }
 futures-util = "0.3"
 base64 = "0.22"
@@ -65,7 +65,7 @@ bytes = "1"
 anyhow = "1"
 tokio-util = { version = "0.7", features = ["codec"] }
 clap = { version = "4", features = ["derive"] }
-rand = "0.8"
+rand = "0.10"
 subtle = "2"
 hex = "0.4"
 dirs = "5"
