@@ -333,7 +333,7 @@
         onclose={closePalette}
         overlayClass="command-palette-overlay"
         panelClass="palette-panel"
-        initialFocus={() => inputEl}
+        initialFocus={() => inputEl ?? null}
     >
         <div class="palette-header">
             <div class="palette-title-group">

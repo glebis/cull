@@ -35,17 +35,6 @@
     let rating = $derived(item.selection?.star_rating ?? 0);
     let decision = $derived(item.selection?.decision ?? 'undecided');
     let filename = $derived(item.path.split('/').pop() ?? 'image');
-    let a11yLabel = $derived(
-        buildThumbnailAriaLabel({
-            filename,
-            rating,
-            decision,
-            sourceTag,
-            selected,
-            missing: !!item.missing_at,
-        })
-    );
-
     const SOURCE_LABELS: Record<string, string> = {
         gpt_image_2: 'GPT',
         dalle_3: 'DALL-E',
@@ -57,6 +46,16 @@
         nanobanana: 'NB',
     };
     let sourceTag = $derived(item.source_label ? SOURCE_LABELS[item.source_label] ?? item.source_label : null);
+    let a11yLabel = $derived(
+        buildThumbnailAriaLabel({
+            filename,
+            rating,
+            decision,
+            sourceTag,
+            selected,
+            missing: !!item.missing_at,
+        })
+    );
     let imgError = $state(false);
     let regenerating = $state(false);
 
