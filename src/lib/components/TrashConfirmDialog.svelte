@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { tick } from 'svelte';
+
     interface Props {
         visible: boolean;
         fileName: string;
@@ -10,11 +12,13 @@
 
     let dontAsk = $state(false);
     let scope = $state<'session' | 'always'>('session');
+    let dialogElement = $state<HTMLDivElement | null>(null);
 
     $effect(() => {
         if (visible) {
             dontAsk = false;
             scope = 'session';
+            void tick().then(() => dialogElement?.focus());
         }
     });
 
@@ -35,10 +39,19 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="dialog-overlay" onclick={oncancel} onkeydown={handleKeydown}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="dialog" onclick={(e) => e.stopPropagation()} onkeydown={handleKeydown}>
+    <div
+        class="dialog"
+        bind:this={dialogElement}
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={handleKeydown}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="trash-confirm-title"
+        tabindex="-1"
+    >
         <div class="dialog-header">
-            <h3>Move to Trash</h3>
-            <button class="close-btn" onclick={oncancel}>&times;</button>
+            <h3 id="trash-confirm-title">Move to Trash</h3>
+            <button class="close-btn" onclick={oncancel} aria-label="Close trash confirmation">&times;</button>
         </div>
 
         <div class="dialog-body">

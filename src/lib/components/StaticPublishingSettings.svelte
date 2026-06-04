@@ -79,7 +79,7 @@
                     ? 'Running'
                     : 'Stopped'
     );
-    const searchVisibilityLabel = $derived(indexable ? 'Allow indexing' : 'Keep unlisted');
+    const searchVisibilityLabel = $derived(indexable ? 'Allow search indexing' : 'Keep unlisted');
 
     function settingIsTrue(value: string | null, fallback: boolean): boolean {
         if (value === null) return fallback;
@@ -471,7 +471,7 @@
                     </div>
                     <div class="result-actions">
                         <button class="secondary-btn" onclick={toggleServer} disabled={startingServer || stoppingServer}>
-                            {startingServer ? 'Starting preview...' : stoppingServer ? 'Stopping preview...' : serverResult ? 'Stop preview' : 'Start preview'}
+                            {startingServer ? 'Starting local preview...' : stoppingServer ? 'Stopping local preview...' : serverResult ? 'Stop Local Preview' : 'Start Local Preview'}
                         </button>
                         <button class="secondary-btn" onclick={copyHandoffPath}>Copy agent notes</button>
                     </div>

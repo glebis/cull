@@ -239,6 +239,18 @@ pub async fn apply_export_patches(
     Ok(patch::apply_patches(manifest, patches))
 }
 
+/// Export images (from a collection, folder, or explicit IDs) to a destination
+/// folder with optional format conversion and a filename naming template.
+/// Wraps the shared `services::export::export_images` orchestrator so the GUI
+/// and MCP share one code path.
+#[tauri::command]
+pub async fn export_images_to_folder(
+    state: State<'_, AppState>,
+    params: crate::services::export::ExportImagesParams,
+) -> Result<crate::services::export::ExportImagesResult, String> {
+    crate::services::export::export_images(&state.db, &state.app_data_dir, params)
+}
+
 #[tauri::command]
 pub async fn list_export_presets() -> Result<Vec<PresetInfo>, String> {
     let infos: Vec<PresetInfo> = presets::PRESETS
@@ -363,6 +375,42 @@ pub async fn save_export_image(
 
     std::fs::write(&path, &bytes).map_err(|e| format!("Failed to write image: {}", e))?;
 
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Write a base64-encoded PNG (e.g. a canvas-rendered contact sheet) to a
+/// user-chosen absolute path. The path comes from the native save dialog, so
+/// the frontend never assembles it from untrusted input.
+#[tauri::command]
+pub async fn save_png_to_path(output_path: String, base64_data: String) -> Result<String, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&base64_data)
+        .map_err(|e| format!("Failed to decode base64: {}", e))?;
+
+    let mut path = PathBuf::from(&output_path);
+    if path.extension().is_none() {
+        path.set_extension("png");
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory '{}': {}", parent.display(), e))?;
+    }
+    std::fs::write(&path, &bytes)
+        .map_err(|e| format!("Failed to write '{}': {}", path.display(), e))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Write UTF-8 text (e.g. a delivery CSV) to a user-chosen absolute path from
+/// the native save dialog.
+#[tauri::command]
+pub async fn save_text_to_path(output_path: String, contents: String) -> Result<String, String> {
+    let path = PathBuf::from(&output_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory '{}': {}", parent.display(), e))?;
+    }
+    std::fs::write(&path, contents.as_bytes())
+        .map_err(|e| format!("Failed to write '{}': {}", path.display(), e))?;
     Ok(path.to_string_lossy().to_string())
 }
 
