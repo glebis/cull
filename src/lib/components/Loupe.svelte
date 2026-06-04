@@ -474,7 +474,18 @@
     class:zoomed={$loupeScale > 1}
 >
     {#if image}
-        <div class="image-frame">
+        <div
+            class="image-frame"
+            data-agent-image-id={image.image.id}
+            data-agent-filename={filename}
+            data-agent-path={image.path}
+            data-agent-thumbnail-path={image.thumbnail_path ?? ''}
+            data-agent-rating={rating || ''}
+            data-agent-decision={decision}
+            data-agent-selected={isSelected}
+            data-agent-focused="true"
+            data-agent-view-role="loupe-image"
+        >
             {#if src}
                 <img
                     bind:this={imgEl}

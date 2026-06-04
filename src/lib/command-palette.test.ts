@@ -232,6 +232,20 @@ describe('command palette helpers', () => {
         expect(findDuplicateCommandHotkeys(items, {})).toEqual([]);
     });
 
+    it('registers the agent snapshot command with a dedicated default shortcut', () => {
+        resetCommandContext();
+        const items = getCommandPaletteItems('commands');
+        const command = items.find(i => i.id === 'agent.capture-view-snapshot');
+
+        expect(command).toMatchObject({
+            title: 'Capture Agent Snapshot',
+            category: 'Agent',
+            defaultShortcut: 'Cmd+Shift+C',
+        });
+        expect(getShortcutConflict('Cmd+Shift+C', 'view.grid', items, {})).toBe('Capture Agent Snapshot');
+        expect(findDuplicateCommandHotkeys(items, {})).toEqual([]);
+    });
+
     it('shows Publish View before Export View only when Static Publishing is enabled', () => {
         resetCommandContext();
         expect(getCommandPaletteItems('commands').map(i => i.id)).not.toContain('view.publish');

@@ -668,6 +668,33 @@ function commandItems(): CommandPaletteItem[] {
             run: () => zenMode.update(value => !value),
         },
         {
+            id: 'agent.capture-view-snapshot',
+            title: 'Capture Agent Snapshot',
+            subtitle: 'Save the current view for agent analysis',
+            category: 'Agent',
+            kind: 'command',
+            keywords: ['mcp', 'screen', 'screenshot', 'vision', 'multimodal', 'select'],
+            defaultShortcut: 'Cmd+Shift+C',
+            run: () => {
+                window.dispatchEvent(new CustomEvent('capture-agent-view-snapshot', {
+                    detail: { clipboard: false },
+                }));
+            },
+        },
+        {
+            id: 'agent.capture-view-snapshot-to-clipboard',
+            title: 'Capture Agent Snapshot to Clipboard',
+            subtitle: 'Save the current view and copy the annotated image',
+            category: 'Agent',
+            kind: 'command',
+            keywords: ['mcp', 'screen', 'screenshot', 'vision', 'clipboard', 'copy'],
+            run: () => {
+                window.dispatchEvent(new CustomEvent('capture-agent-view-snapshot', {
+                    detail: { clipboard: true },
+                }));
+            },
+        },
+        {
             id: 'view.back',
             title: 'Back to Previous View',
             subtitle: 'Return to the last view mode',

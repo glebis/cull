@@ -95,6 +95,10 @@ mod tests {
         "show_image",
         "navigate_to_folder",
         "show_collection",
+        "capture_current_view_snapshot",
+        "get_last_view_snapshot",
+        "select_snapshot_labels",
+        "select_images_in_view",
         "import_folder",
         "import_files",
         "download_embedding_model",
@@ -158,7 +162,15 @@ mod tests {
         "export_static_publish_package",
         "export_static_publish_canvas",
     ];
-    const DISPLAY_TOOLS: &[&str] = &["show_image", "navigate_to_folder", "show_collection"];
+    const DISPLAY_TOOLS: &[&str] = &[
+        "show_image",
+        "navigate_to_folder",
+        "show_collection",
+        "capture_current_view_snapshot",
+        "get_last_view_snapshot",
+        "select_snapshot_labels",
+        "select_images_in_view",
+    ];
     const AI_TOOLS: &[&str] = &[
         "download_embedding_model",
         "generate_embeddings",

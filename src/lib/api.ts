@@ -177,6 +177,24 @@ export interface PastedImageResult {
     image_id: string | null;
 }
 
+export interface AgentSnapshotPackage {
+    snapshot_id: string;
+    package_dir: string;
+    raw_png_path: string;
+    annotated_png_path: string;
+    manifest_json_path: string;
+    manifest: unknown;
+}
+
+export interface CompleteAgentViewSnapshotRequest {
+    request_id?: string;
+    snapshot_id: string;
+    manifest: unknown;
+    raw_png_base64: string;
+    annotated_png_base64: string;
+    clipboard: boolean;
+}
+
 export interface MenuStatePayload {
     viewMode: string;
     sidebarVisible: boolean;
@@ -1365,6 +1383,24 @@ export async function openImagesWithApplication(imageIds: string[], appPath: str
 
 export async function listOpenWithApplications(imageId: string): Promise<OpenWithApplication[]> {
     return invoke<OpenWithApplication[]>('list_open_with_applications', { imageId });
+}
+
+export async function captureAgentWindowSnapshot(): Promise<string> {
+    return invoke<string>('capture_agent_window_snapshot');
+}
+
+export async function completeAgentViewSnapshot(
+    request: CompleteAgentViewSnapshotRequest,
+): Promise<AgentSnapshotPackage> {
+    return invoke<AgentSnapshotPackage>('complete_agent_view_snapshot', { request });
+}
+
+export async function getLastAgentViewSnapshot(snapshotId: string | null = null): Promise<AgentSnapshotPackage | null> {
+    return invoke<AgentSnapshotPackage | null>('get_last_agent_view_snapshot', { snapshotId });
+}
+
+export async function requestAgentViewSnapshot(clipboard = false): Promise<AgentSnapshotPackage> {
+    return invoke<AgentSnapshotPackage>('request_agent_view_snapshot', { clipboard });
 }
 
 export async function updateMenuState(state: MenuStatePayload): Promise<void> {

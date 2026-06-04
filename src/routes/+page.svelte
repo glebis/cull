@@ -32,8 +32,8 @@
     import GenerationResultsStrip from '$lib/components/GenerationResultsStrip.svelte';
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled } from '$lib/stores';
-    import { trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, type ImageWithFile, type PreviewState } from '$lib/api';
+    import { totalCount, images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel } from '$lib/stores';
+    import { trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
     import { isPreviewDisplayRoute, nextPreviewFocusPayload, previewSyncImageId } from '$lib/preview-display';
@@ -54,6 +54,7 @@
     } from '$lib/preview-display-store';
     import { saveAppState, restoreAppStateBeforeImages, applyRestoredViewState, type PersistedState } from '$lib/persistence';
     import { loadImagesForCurrentScope, type ImageLoadOptions } from '$lib/image-loading';
+    import { buildAgentSnapshotManifest, collectVisibleImageTargets, drawAnnotatedSnapshot, type AgentSnapshotScope } from '$lib/agent-view-snapshot';
     import { listen } from '@tauri-apps/api/event';
     import { onMount } from 'svelte';
 
@@ -176,6 +177,129 @@
         handleKeydown(event);
     }
 
+    type AgentSnapshotCaptureOptions = {
+        requestId?: string;
+        snapshotId?: string;
+        clipboard?: boolean;
+        captureReason?: string;
+    };
+
+    type AgentSnapshotSelectionPayload = {
+        image_ids?: string[];
+        imageIds?: string[];
+        mode?: 'replace' | 'add' | 'toggle';
+        focus_first?: boolean;
+        focusFirst?: boolean;
+    };
+
+    function createAgentSnapshotId(): string {
+        const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 17);
+        const random = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID().replace(/-/g, '').slice(0, 8)
+            : Math.random().toString(36).slice(2, 10);
+        return `snap_${stamp}_${random}`;
+    }
+
+    function currentAgentSnapshotScope(): AgentSnapshotScope {
+        if ($activeCanvas) {
+            return { kind: 'canvas', id: $activeCanvas.id, label: $activeCanvas.name, path: null };
+        }
+        if ($activeSession) {
+            return { kind: 'session', id: $activeSession.id, label: $activeSession.name, path: $activeSession.folder_path };
+        }
+        if ($activeSmartCollection) {
+            return { kind: 'smart_collection', id: $activeSmartCollection.id, label: $activeSmartCollection.name, path: null };
+        }
+        if ($activeCollection) {
+            const collection = $collections.find(([id]) => id === $activeCollection);
+            return { kind: 'collection', id: $activeCollection, label: collection?.[1] ?? $activeCollection, path: null };
+        }
+        if ($activeFolder) {
+            return {
+                kind: 'folder',
+                id: null,
+                label: $activeFolder.split('/').filter(Boolean).pop() ?? $activeFolder,
+                path: $activeFolder,
+            };
+        }
+        if ($activeDetectedClass) {
+            return { kind: 'detected_class', id: null, label: $activeDetectedClass, path: null };
+        }
+        return { kind: 'all', id: null, label: 'All Images', path: null };
+    }
+
+    async function captureAgentViewSnapshot(options: AgentSnapshotCaptureOptions = {}) {
+        const snapshotId = options.snapshotId ?? createAgentSnapshotId();
+        const clipboard = options.clipboard ?? false;
+        try {
+            const rawPngBase64 = await captureAgentWindowSnapshot();
+            const visibleImages = collectVisibleImageTargets({
+                viewMode: $viewMode,
+                selectedIds: $selectedIds,
+                focusedImageId: $focusedImage?.image.id ?? null,
+            });
+            const annotatedPngBase64 = await drawAnnotatedSnapshot(rawPngBase64, visibleImages);
+            const packageHint = `Agent Snapshots/${snapshotId}`;
+            const manifest = buildAgentSnapshotManifest({
+                snapshotId,
+                createdAt: new Date().toISOString(),
+                viewMode: $viewMode,
+                captureReason: options.captureReason ?? 'shortcut',
+                destination: { kind: clipboard ? 'clipboard' : 'local', detail: packageHint },
+                files: {
+                    raw_png: `${packageHint}/raw.png`,
+                    annotated_png: `${packageHint}/annotated.png`,
+                    manifest_json: `${packageHint}/manifest.json`,
+                },
+                window: {
+                    label: $windowLabel,
+                    title: document.title || 'Cull',
+                    width_css: window.innerWidth,
+                    height_css: window.innerHeight,
+                    device_pixel_ratio: window.devicePixelRatio || 1,
+                },
+                scope: currentAgentSnapshotScope(),
+                visibleImages,
+            });
+            const written = await completeAgentViewSnapshot({
+                request_id: options.requestId,
+                snapshot_id: snapshotId,
+                manifest,
+                raw_png_base64: rawPngBase64,
+                annotated_png_base64: annotatedPngBase64,
+                clipboard,
+            });
+            showToast(clipboard ? 'Agent snapshot saved and copied' : 'Agent snapshot saved', {
+                detail: String(written.package_dir),
+                type: 'success',
+                duration: 6000,
+            });
+        } catch (e) {
+            showToast('Agent snapshot failed', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    function applyAgentViewSnapshotSelection(payload: AgentSnapshotSelectionPayload) {
+        const ids = payload.image_ids ?? payload.imageIds ?? [];
+        const mode = payload.mode ?? 'replace';
+        const next = new Set(mode === 'replace' ? [] : $selectedIds);
+        for (const imageId of ids) {
+            if (mode === 'toggle') {
+                if (next.has(imageId)) next.delete(imageId);
+                else next.add(imageId);
+            } else {
+                next.add(imageId);
+            }
+        }
+        selectedIds.set(next);
+
+        const focusFirst = payload.focus_first ?? payload.focusFirst ?? true;
+        if (focusFirst && ids.length > 0) {
+            const idx = $images.findIndex(item => item.image.id === ids[0]);
+            if (idx >= 0) focusedIndex.set(idx);
+        }
+    }
+
     $effect(() => {
         const image = $focusedImage;
         const frozen = $previewDisplayFrozen;
@@ -243,9 +367,33 @@
         window.addEventListener('delete-focused-image', handlePermanentDelete);
         const handleReloadImages = () => loadImages({ force: true, invalidateCache: true }).catch(e => console.error('Failed to reload:', e));
         window.addEventListener('reload-images', handleReloadImages);
+        const handleAgentSnapshotCommand = (event: Event) => {
+            const detail = event instanceof CustomEvent ? event.detail : {};
+            captureAgentViewSnapshot({ clipboard: Boolean(detail?.clipboard) })
+                .catch(e => console.error('Failed to capture agent snapshot:', e));
+        };
+        window.addEventListener('capture-agent-view-snapshot', handleAgentSnapshotCommand);
 
         const watcherUnlisten = listen<void>('images:changed', () => {
             loadImages({ force: true, invalidateCache: true }).catch(e => console.error('Failed to reload after fs change:', e));
+        });
+
+        const agentSnapshotRequestUnlisten = listen<{
+            request_id: string;
+            snapshot_id: string;
+            clipboard: boolean;
+            capture_reason: string;
+        }>('agent-view-snapshot:request', (event) => {
+            captureAgentViewSnapshot({
+                requestId: event.payload.request_id,
+                snapshotId: event.payload.snapshot_id,
+                clipboard: event.payload.clipboard,
+                captureReason: event.payload.capture_reason,
+            }).catch(e => console.error('Failed to complete requested agent snapshot:', e));
+        });
+
+        const agentSnapshotSelectionUnlisten = listen<AgentSnapshotSelectionPayload>('agent-view-snapshot:select-images', (event) => {
+            applyAgentViewSnapshotSelection(event.payload);
         });
 
         const panicUnlisten = listen<{thread: string, location: string | null, message: string}>('rust-panic', (event) => {
@@ -291,12 +439,15 @@
             unsubMissing();
             dragUnlisten.then(fn => fn());
             watcherUnlisten.then(fn => fn());
+            agentSnapshotRequestUnlisten.then(fn => fn());
+            agentSnapshotSelectionUnlisten.then(fn => fn());
             panicUnlisten.then(fn => fn());
             taskFailUnlisten.then(fn => fn());
             cloudUnlisten.then(fn => fn());
             window.removeEventListener('trash-focused-image', handleTrash);
             window.removeEventListener('delete-focused-image', handlePermanentDelete);
             window.removeEventListener('reload-images', handleReloadImages);
+            window.removeEventListener('capture-agent-view-snapshot', handleAgentSnapshotCommand);
             clearInterval(saveTimer);
             window.removeEventListener('beforeunload', handleBeforeUnload);
             saveAppState();

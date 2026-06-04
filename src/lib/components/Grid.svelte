@@ -203,6 +203,15 @@
                 <div
                     class="grid-cell"
                     style="position: absolute; left: {vi.x}px; top: {vi.y}px; width: {size}px; height: {size}px;"
+                    data-agent-image-id={vi.item.image.id}
+                    data-agent-filename={vi.item.path.split('/').filter(Boolean).pop() ?? vi.item.image.id}
+                    data-agent-path={vi.item.path}
+                    data-agent-thumbnail-path={vi.item.thumbnail_path ?? ''}
+                    data-agent-rating={vi.item.selection?.star_rating ?? ''}
+                    data-agent-decision={vi.item.selection?.decision ?? 'undecided'}
+                    data-agent-selected={$selectedIds.has(vi.item.image.id)}
+                    data-agent-focused={$focusedIndex === vi.index}
+                    data-agent-view-role="grid-cell"
                 >
                     <Thumbnail
                         item={vi.item}

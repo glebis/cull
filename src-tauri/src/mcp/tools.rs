@@ -196,6 +196,18 @@ fn normalize_decision(decision: &str) -> Option<&'static str> {
     }
 }
 
+fn normalize_snapshot_selection_mode(mode: Option<&str>) -> Result<&'static str, String> {
+    match mode.unwrap_or("replace") {
+        "replace" => Ok("replace"),
+        "add" => Ok("add"),
+        "toggle" => Ok("toggle"),
+        other => Err(format!(
+            "Invalid selection mode '{}'. Use 'replace', 'add', or 'toggle'.",
+            other
+        )),
+    }
+}
+
 fn required_module_for_tool(tool_name: &str) -> Option<&'static str> {
     match tool_name {
         "export_static_publish_package"
@@ -335,6 +347,61 @@ impl CullMcp {
             auth,
             tool_router: Self::tool_router(),
         }
+    }
+
+    fn require_local_agent_snapshot_tool(&self, tool_name: &str) -> Result<(), String> {
+        if matches!(&self.auth, AuthContext::Local) {
+            Ok(())
+        } else {
+            Err(format!(
+                "{} is local-only in v1; use the local stdio MCP bridge from the Cull desktop session",
+                tool_name
+            ))
+        }
+    }
+
+    fn validate_snapshot_image_ids_exist(
+        &self,
+        state: &AppState,
+        image_ids: &[String],
+    ) -> Result<(), String> {
+        if image_ids.is_empty() {
+            return Ok(());
+        }
+        let refs: Vec<&str> = image_ids.iter().map(String::as_str).collect();
+        let found = state
+            .db
+            .get_images_by_ids(&refs)
+            .map_err(|e| e.to_string())?;
+        let found_ids: std::collections::BTreeSet<&str> =
+            found.iter().map(|image| image.image.id.as_str()).collect();
+        for image_id in image_ids {
+            if !found_ids.contains(image_id.as_str()) {
+                return Err(format!(
+                    "Snapshot image '{}' is no longer in the library",
+                    image_id
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn emit_agent_snapshot_selection(
+        &self,
+        image_ids: Vec<String>,
+        mode: &str,
+        focus_first: bool,
+    ) -> Result<(), String> {
+        self.app_handle
+            .emit(
+                "agent-view-snapshot:select-images",
+                serde_json::json!({
+                    "image_ids": image_ids,
+                    "mode": mode,
+                    "focus_first": focus_first,
+                }),
+            )
+            .map_err(|e| format!("Failed to select images in the app: {}", e))
     }
 
     fn token_scope(&self) -> Option<TokenScope> {
@@ -645,6 +712,40 @@ pub struct ShowImageParams {
 pub struct NavigateToFolderParams {
     #[schemars(description = "Folder path to navigate to in grid view")]
     pub folder_path: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CaptureCurrentViewSnapshotParams {
+    #[schemars(description = "When true, also copy the annotated PNG to the local clipboard")]
+    pub clipboard: Option<bool>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct GetLastViewSnapshotParams {
+    #[schemars(description = "Optional snapshot ID. Defaults to the latest captured snapshot")]
+    pub snapshot_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SelectSnapshotLabelsParams {
+    #[schemars(description = "Optional snapshot ID. Defaults to the latest captured snapshot")]
+    pub snapshot_id: Option<String>,
+    #[schemars(description = "Visible labels to select, e.g. ['1','4','7']")]
+    pub labels: Vec<String>,
+    #[schemars(description = "Selection mode: replace, add, or toggle. Defaults to replace")]
+    pub mode: Option<String>,
+    #[schemars(description = "Whether to focus the first selected image. Defaults to true")]
+    pub focus_first: Option<bool>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SelectImagesInViewParams {
+    #[schemars(description = "Image IDs to select in the currently visible app view")]
+    pub image_ids: Vec<String>,
+    #[schemars(description = "Selection mode: replace, add, or toggle. Defaults to replace")]
+    pub mode: Option<String>,
+    #[schemars(description = "Whether to focus the first selected image. Defaults to true")]
+    pub focus_first: Option<bool>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -1353,6 +1454,195 @@ impl CullMcp {
             }
             Err(e) => format!("Error: {}", e),
         }
+    }
+
+    #[tool(
+        description = "Capture the currently visible Cull view as raw.png, annotated.png, and manifest.json for multimodal analysis. Local stdio only in v1."
+    )]
+    async fn capture_current_view_snapshot(
+        &self,
+        Parameters(params): Parameters<CaptureCurrentViewSnapshotParams>,
+    ) -> String {
+        if let Err(e) = self.require_local_agent_snapshot_tool("capture_current_view_snapshot") {
+            return format!("Error: {}", e);
+        }
+
+        let state = self.app_handle.state::<AppState>();
+        let request_id = format!("req_{}", uuid::Uuid::new_v4().simple());
+        let snapshot_id = format!("snap_{}", uuid::Uuid::new_v4().simple());
+        let (sender, receiver) = tokio::sync::oneshot::channel::<
+            crate::services::agent_snapshots::AgentSnapshotPackage,
+        >();
+        state
+            .agent_snapshot_requests
+            .lock()
+            .insert(request_id.clone(), sender);
+        let payload = serde_json::json!({
+            "request_id": request_id.clone(),
+            "snapshot_id": snapshot_id,
+            "clipboard": params.clipboard.unwrap_or(false),
+            "capture_reason": "mcp",
+        });
+
+        if let Err(e) = self.app_handle.emit("agent-view-snapshot:request", payload) {
+            state.agent_snapshot_requests.lock().remove(&request_id);
+            return format!("Error: Failed to request frontend snapshot: {}", e);
+        }
+
+        match tokio::time::timeout(std::time::Duration::from_secs(15), receiver).await {
+            Ok(Ok(package)) => {
+                crate::services::agent_snapshots::snapshot_response_value(&package, false)
+                    .to_string()
+            }
+            Ok(Err(_)) => "Error: Agent snapshot request was cancelled".to_string(),
+            Err(_) => {
+                state.agent_snapshot_requests.lock().remove(&request_id);
+                "Error: Timed out waiting for the visible app to capture an agent snapshot"
+                    .to_string()
+            }
+        }
+    }
+
+    #[tool(
+        description = "Return the latest agent view snapshot manifest and local file paths. Local stdio only in v1."
+    )]
+    fn get_last_view_snapshot(
+        &self,
+        Parameters(params): Parameters<GetLastViewSnapshotParams>,
+    ) -> String {
+        if let Err(e) = self.require_local_agent_snapshot_tool("get_last_view_snapshot") {
+            return format!("Error: {}", e);
+        }
+
+        let state = self.app_handle.state::<AppState>();
+        let registry = state.agent_snapshots.lock();
+        let package = match params.snapshot_id.as_deref() {
+            Some(snapshot_id) => registry.get_snapshot(snapshot_id),
+            None => registry.latest_snapshot(),
+        };
+        match package {
+            Some(package) => {
+                crate::services::agent_snapshots::snapshot_response_value(package, false)
+                    .to_string()
+            }
+            None => "null".to_string(),
+        }
+    }
+
+    #[tool(
+        description = "Select visible images by the numbered labels from an agent view snapshot. Local stdio only in v1."
+    )]
+    fn select_snapshot_labels(
+        &self,
+        Parameters(params): Parameters<SelectSnapshotLabelsParams>,
+    ) -> String {
+        if let Err(e) = self.require_local_agent_snapshot_tool("select_snapshot_labels") {
+            return format!("Error: {}", e);
+        }
+        let mode = match normalize_snapshot_selection_mode(params.mode.as_deref()) {
+            Ok(mode) => mode,
+            Err(e) => return format!("Error: {}", e),
+        };
+        let state = self.app_handle.state::<AppState>();
+        let package = {
+            let registry = state.agent_snapshots.lock();
+            match params.snapshot_id.as_deref() {
+                Some(snapshot_id) => registry.get_snapshot(snapshot_id).cloned(),
+                None => registry.latest_snapshot().cloned(),
+            }
+        };
+        let Some(package) = package else {
+            return "Error: No captured agent snapshot is available".to_string();
+        };
+
+        let image_ids = match crate::services::agent_snapshots::image_ids_for_snapshot_labels(
+            &package.manifest,
+            &params.labels,
+        ) {
+            Ok(ids) => ids,
+            Err(e) => return format!("Error: {}", e),
+        };
+        if let Err(e) = self.validate_snapshot_image_ids_exist(&state, &image_ids) {
+            return format!("Error: {}", e);
+        }
+        if let Err(e) = self.emit_agent_snapshot_selection(
+            image_ids.clone(),
+            mode,
+            params.focus_first.unwrap_or(true),
+        ) {
+            return format!("Error: {}", e);
+        }
+        serde_json::json!({
+            "status": "ok",
+            "snapshot_id": package.snapshot_id,
+            "selected": image_ids.len(),
+            "image_ids": image_ids,
+            "mode": mode,
+        })
+        .to_string()
+    }
+
+    #[tool(
+        description = "Select image IDs that are visible in the latest agent view snapshot. Local stdio only in v1."
+    )]
+    fn select_images_in_view(
+        &self,
+        Parameters(params): Parameters<SelectImagesInViewParams>,
+    ) -> String {
+        if let Err(e) = self.require_local_agent_snapshot_tool("select_images_in_view") {
+            return format!("Error: {}", e);
+        }
+        let mode = match normalize_snapshot_selection_mode(params.mode.as_deref()) {
+            Ok(mode) => mode,
+            Err(e) => return format!("Error: {}", e),
+        };
+        let state = self.app_handle.state::<AppState>();
+        let package = { state.agent_snapshots.lock().latest_snapshot().cloned() };
+        let Some(package) = package else {
+            return "Error: No captured agent snapshot is available".to_string();
+        };
+        let visible_ids: std::collections::BTreeSet<String> = package
+            .manifest
+            .get("visible_images")
+            .and_then(serde_json::Value::as_array)
+            .map(|images| {
+                images
+                    .iter()
+                    .filter_map(|image| {
+                        image
+                            .get("image_id")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_string)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for image_id in &params.image_ids {
+            if !visible_ids.contains(image_id) {
+                return format!(
+                    "Error: Image '{}' is not visible in the latest agent snapshot",
+                    image_id
+                );
+            }
+        }
+        if let Err(e) = self.validate_snapshot_image_ids_exist(&state, &params.image_ids) {
+            return format!("Error: {}", e);
+        }
+        if let Err(e) = self.emit_agent_snapshot_selection(
+            params.image_ids.clone(),
+            mode,
+            params.focus_first.unwrap_or(true),
+        ) {
+            return format!("Error: {}", e);
+        }
+        serde_json::json!({
+            "status": "ok",
+            "snapshot_id": package.snapshot_id,
+            "selected": params.image_ids.len(),
+            "image_ids": params.image_ids,
+            "mode": mode,
+        })
+        .to_string()
     }
 
     #[tool(description = "Get Clipboard Monitor status and active collection ID")]
@@ -3505,6 +3795,23 @@ mod tests {
             super::required_module_for_tool("publish_clipboard_collection"),
             Some("module_static_publishing")
         );
+    }
+
+    #[test]
+    fn test_agent_snapshot_selection_mode_validation() {
+        assert_eq!(
+            super::normalize_snapshot_selection_mode(None).unwrap(),
+            "replace"
+        );
+        assert_eq!(
+            super::normalize_snapshot_selection_mode(Some("add")).unwrap(),
+            "add"
+        );
+        assert_eq!(
+            super::normalize_snapshot_selection_mode(Some("toggle")).unwrap(),
+            "toggle"
+        );
+        assert!(super::normalize_snapshot_selection_mode(Some("append")).is_err());
     }
 
     // --- Auth + scope integration ---

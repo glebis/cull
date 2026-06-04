@@ -248,6 +248,10 @@ mod tests {
             ),
             preview_state: crate::preview::state::PreviewStateStore::default(),
             preview_web_stream: crate::preview::web_stream::PreviewWebStreamController::default(),
+            agent_snapshots: parking_lot::Mutex::new(
+                services::agent_snapshots::AgentSnapshotRegistry::default(),
+            ),
+            agent_snapshot_requests: parking_lot::Mutex::new(std::collections::HashMap::new()),
         }
     }
 

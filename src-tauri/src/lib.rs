@@ -56,6 +56,13 @@ pub struct AppState {
     pub static_publish_server: Mutex<commands::static_publishing::StaticPublishServerState>,
     pub preview_state: PreviewStateStore,
     pub preview_web_stream: PreviewWebStreamController,
+    pub agent_snapshots: Mutex<services::agent_snapshots::AgentSnapshotRegistry>,
+    pub agent_snapshot_requests: Mutex<
+        std::collections::HashMap<
+            String,
+            tokio::sync::oneshot::Sender<services::agent_snapshots::AgentSnapshotPackage>,
+        >,
+    >,
 }
 
 fn install_panic_hook(app: AppHandle) {
@@ -277,6 +284,8 @@ pub fn run() {
                 ),
                 preview_state: PreviewStateStore::default(),
                 preview_web_stream: PreviewWebStreamController::default(),
+                agent_snapshots: Mutex::new(services::agent_snapshots::AgentSnapshotRegistry::default()),
+                agent_snapshot_requests: Mutex::new(std::collections::HashMap::new()),
             });
 
             // Load persisted job history from DB
@@ -581,6 +590,10 @@ pub fn run() {
             commands::files::share_images,
             commands::files::open_images_with_application,
             commands::files::list_open_with_applications,
+            commands::agent_snapshots::capture_agent_window_snapshot,
+            commands::agent_snapshots::complete_agent_view_snapshot,
+            commands::agent_snapshots::get_last_agent_view_snapshot,
+            commands::agent_snapshots::request_agent_view_snapshot,
             menu::update_menu_state,
             commands::raw::backfill_raw_previews,
             commands::privacy::get_data_flow_status,

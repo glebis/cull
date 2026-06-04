@@ -3,8 +3,11 @@ identifier = "app-ui"
 description = "Allows UI shell commands for window management, menu state, deep-link routing, and dictation controls."
 commands.allow = [
   "apply_app_icon_variant",
+  "capture_agent_window_snapshot",
+  "complete_agent_view_snapshot",
   "create_window",
   "drain_pending_open_params",
+  "get_last_agent_view_snapshot",
   "get_preview_state",
   "get_preview_display_web_stream_status",
   "list_preview_display_monitors",
@@ -14,6 +17,7 @@ commands.allow = [
   "open_with_params",
   "place_preview_display",
   "rename_window",
+  "request_agent_view_snapshot",
   "send_to_window",
   "set_preview_display_always_on_top",
   "start_preview_display_web_stream",

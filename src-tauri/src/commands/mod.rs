@@ -1,3 +1,4 @@
+pub mod agent_snapshots;
 pub mod clipboard_monitor;
 pub mod collections;
 pub mod color;

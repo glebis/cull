@@ -538,6 +538,15 @@
                 aria-label={item.image.path.split('/').pop()}
                 tabindex="0"
                 onkeydown={(e) => handleItemKeydown(e, item)}
+                data-agent-image-id={item.imageId}
+                data-agent-filename={item.image.path.split('/').filter(Boolean).pop() ?? item.imageId}
+                data-agent-path={item.image.path}
+                data-agent-thumbnail-path={item.image.thumbnail_path ?? ''}
+                data-agent-rating={rating || ''}
+                data-agent-decision={decision}
+                data-agent-selected={$selectedIds.has(item.imageId)}
+                data-agent-focused={$focusedImage?.image.id === item.imageId}
+                data-agent-view-role="canvas-item"
             >
                 <div class="image-stage">
                     {#if previewPath}

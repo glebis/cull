@@ -37,6 +37,7 @@
     let leftName = $derived(leftImage?.path.split('/').pop() ?? '');
     let rightName = $derived(rightImage?.path.split('/').pop() ?? '');
     let imageOnly = $derived($zenMode && $compareImageOnly);
+    let focusedImageId = $derived($images[$focusedIndex]?.image.id ?? null);
 
     function ratingStars(img: ImageWithFile | null): number {
         return img?.selection?.star_rating ?? 0;
@@ -77,6 +78,15 @@
         aria-label={comparePanelLabel('Left', leftImage)}
         aria-pressed={$compareActiveSide === 0}
         onkeydown={(e) => handlePanelKeydown(e, 0)}
+        data-agent-image-id={leftImage?.image.id ?? ''}
+        data-agent-filename={leftName}
+        data-agent-path={leftImage?.path ?? ''}
+        data-agent-thumbnail-path={leftImage?.thumbnail_path ?? ''}
+        data-agent-rating={leftImage?.selection?.star_rating ?? ''}
+        data-agent-decision={leftImage?.selection?.decision ?? 'undecided'}
+        data-agent-selected={leftImage ? $selectedIds.has(leftImage.image.id) : false}
+        data-agent-focused={leftImage?.image.id === focusedImageId}
+        data-agent-view-role="compare-left"
     >
         {#if leftImage}
             {#if !imageOnly}
@@ -122,6 +132,15 @@
         aria-label={comparePanelLabel('Right', rightImage)}
         aria-pressed={$compareActiveSide === 1}
         onkeydown={(e) => handlePanelKeydown(e, 1)}
+        data-agent-image-id={rightImage?.image.id ?? ''}
+        data-agent-filename={rightName}
+        data-agent-path={rightImage?.path ?? ''}
+        data-agent-thumbnail-path={rightImage?.thumbnail_path ?? ''}
+        data-agent-rating={rightImage?.selection?.star_rating ?? ''}
+        data-agent-decision={rightImage?.selection?.decision ?? 'undecided'}
+        data-agent-selected={rightImage ? $selectedIds.has(rightImage.image.id) : false}
+        data-agent-focused={rightImage?.image.id === focusedImageId}
+        data-agent-view-role="compare-right"
     >
         {#if rightImage}
             {#if !imageOnly}

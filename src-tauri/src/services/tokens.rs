@@ -86,9 +86,14 @@ pub fn tool_capability(tool_name: &str) -> &'static str {
         | "export_static_publish_canvas"
         | "publish_clipboard_collection" => "export:read",
 
-        "show_image" | "navigate_to_folder" | "show_collection" | "show_clipboard_collection" => {
-            "display:navigate"
-        }
+        "show_image"
+        | "navigate_to_folder"
+        | "show_collection"
+        | "show_clipboard_collection"
+        | "capture_current_view_snapshot"
+        | "get_last_view_snapshot"
+        | "select_snapshot_labels"
+        | "select_images_in_view" => "display:navigate",
 
         "download_embedding_model"
         | "generate_embeddings"
@@ -835,6 +840,19 @@ mod tests {
             "settings:manage"
         );
         assert_eq!(tool_capability("show_image"), "display:navigate");
+        assert_eq!(
+            tool_capability("capture_current_view_snapshot"),
+            "display:navigate"
+        );
+        assert_eq!(
+            tool_capability("get_last_view_snapshot"),
+            "display:navigate"
+        );
+        assert_eq!(
+            tool_capability("select_snapshot_labels"),
+            "display:navigate"
+        );
+        assert_eq!(tool_capability("select_images_in_view"), "display:navigate");
         assert_eq!(tool_capability("download_embedding_model"), "ai:run");
         assert_eq!(tool_capability("generate_embeddings"), "ai:run");
         assert_eq!(tool_capability("analyze_image_quality"), "ai:run");
