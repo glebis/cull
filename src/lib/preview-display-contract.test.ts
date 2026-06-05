@@ -43,6 +43,7 @@ describe('Preview Display native window contract', () => {
         expect(capability.windows).toEqual(['preview-display']);
         expect(capability.permissions).toEqual([
             'core:default',
+            'core:window:allow-start-dragging',
             'opener:default',
             'app-read',
             'app-ui',

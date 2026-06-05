@@ -5,6 +5,7 @@
   "windows": ["preview-display"],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
     "opener:default",
     "app-read",
     "app-ui"

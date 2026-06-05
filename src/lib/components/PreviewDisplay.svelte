@@ -1,7 +1,6 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { listen } from '@tauri-apps/api/event';
-    import { getCurrentWindow } from '@tauri-apps/api/window';
     import { onMount } from 'svelte';
     import {
         getGenerationRun,
@@ -90,14 +89,6 @@
     function handleHeaderPointerLeave() {
         pointerOverHeader = false;
         scheduleHeaderHide();
-    }
-
-    function handleHeaderPointerDown(event: PointerEvent) {
-        if (!event.isPrimary || event.button !== 0) return;
-        event.preventDefault();
-        void getCurrentWindow().startDragging().catch((e) => {
-            console.debug('Failed to start Preview Display window drag:', e);
-        });
     }
 
     function clearBlankMessageTimer() {
@@ -223,7 +214,6 @@
         aria-label="Preview Display window header"
         onpointerenter={handleHeaderPointerEnter}
         onpointerleave={handleHeaderPointerLeave}
-        onpointerdown={handleHeaderPointerDown}
     >
         <span class="preview-title" data-tauri-drag-region="deep">Preview Display</span>
     </header>

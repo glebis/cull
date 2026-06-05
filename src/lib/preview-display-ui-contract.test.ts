@@ -67,13 +67,11 @@ describe('Preview Display UI contract', () => {
     it('keeps the Preview Display header draggable like a macOS window titlebar', () => {
         const component = source('src/lib/components/PreviewDisplay.svelte');
 
-        expect(component).toContain("import { getCurrentWindow } from '@tauri-apps/api/window'");
         expect(component).toContain('class="preview-header"');
         expect(component).toContain('class:hidden={!headerVisible}');
         expect(component).toContain('data-tauri-drag-region="deep"');
+        expect(component).toContain('<span class="preview-title" data-tauri-drag-region="deep">Preview Display</span>');
         expect(component).toContain('aria-label="Preview Display window header"');
-        expect(component).toContain('onpointerdown={handleHeaderPointerDown}');
-        expect(component).toContain('getCurrentWindow().startDragging()');
         expect(component).toContain('setTimeout(() => {');
         expect(component).toContain('}, 1500)');
         expect(component).toContain('position: absolute');
