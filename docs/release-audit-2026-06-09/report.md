@@ -6,6 +6,29 @@
 
 ---
 
+## 0. Must-resolve before flip (the hard-blocking list)
+
+Exactly one finding hard-blocks the release definition (public repo + installable
+DMG + soft launch); everything else is pre-launch or post-launch:
+
+1. **HYG-001** — GitHub Actions billing failure: CI and the signed Release
+   pipeline have never produced an artifact. Until resolved, no signed DMG can
+   exist. (Runtime-verified via `gh`; note this proof depends on live GitHub
+   state, not the repo snapshot.)
+
+Pre-launch gates promoted from the completeness notes (must be closed or
+explicitly waived in the decision sheet before the repo flips public):
+
+- **Content-sensitivity pass over `docs/cull-audit-2026-06-03.md`** — excluded
+  from this audit's inputs by the fresh-eyes rule, so its publishability is
+  unassessed (see HYG-004).
+- **PERF-07 partial measurement** — thumbnail p95 and resident-memory
+  thresholds are "expected PASS by architecture", never measured; measure or
+  mark waived.
+- **Identity-panel verification asymmetry** — the judge spot-verified only
+  Advocate B's citations; Advocates A and C's claims were not independently
+  re-verified against the repo. The identity decision row inherits this caveat.
+
 ## 1. Verified Findings by Severity
 
 Severity tiers: **release-blocker** (release definition unreachable until fixed) → **pre-launch** (fix before flipping the repo public / shipping the DMG) → **post-launch** (file and fix after the soft launch). Each finding lists its evidence and a refutation note recording whether the finding was challenged and survived.
