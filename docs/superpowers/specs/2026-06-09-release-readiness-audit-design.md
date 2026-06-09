@@ -1,7 +1,7 @@
 # Release Readiness Audit — Design
 
 **Date:** 2026-06-09
-**Status:** Draft for review
+**Status:** Codex-reviewed (APPROVE WITH CHANGES, incorporated) — awaiting user approval
 **Owner:** Gleb Kalinin
 
 ## Goal
@@ -56,6 +56,11 @@ Per item: `{ id, name, surface: "ui" | "mcp" | "both", entry_points: [files],
 approx_loc, test_coverage: "tested" | "partial" | "none", dependencies,
 coupling_to_core: "low" | "medium" | "high", notes }`.
 
+**Inventory completeness gate:** before any Phase 1 lens consumes the
+inventory, the completeness critic cross-checks it against routes, the
+command-palette registry, keyboard-shortcut map, and the MCP tool list; the
+lenses start only once gaps are filled.
+
 ### Phase 1 — Parallel audit lenses
 
 Five auditors run concurrently. Each is explicitly forbidden from reading
@@ -71,18 +76,33 @@ Five auditors run concurrently. Each is explicitly forbidden from reading
    Tauri capabilities/CSP config, all outbound network calls (model
    downloads), audit-log coverage.
 3. **Release hygiene** — license metadata alignment across `LICENSE.md`,
-   `NOTICE` (currently has uncommitted changes), `package.json`,
-   `src-tauri/Cargo.toml`, README, About dialog; `npm run audit:licenses`
-   result; repo-going-public cleanup (`.beads`, personal references, docs
-   leakage); signing/notarization/DMG packaging; README + onboarding docs
-   adequacy for a stranger.
+   `NOTICE`, `package.json`, `src-tauri/Cargo.toml`, README, About dialog
+   (include uncommitted drift in any of these files); `npm run
+   audit:licenses` result; supply-chain: `npm audit`, `cargo audit`,
+   lockfiles present and committed; repo-going-public cleanup (`.beads`,
+   personal references, docs leakage); `SECURITY.md` + release-notes
+   presence; macOS trust chain on the built artifact — `codesign --verify
+   --deep --strict`, `spctl --assess --type execute`, `xcrun stapler
+   validate`; upgrade path — a `cull.db` from a previous app version opens
+   and migrates cleanly (leverage existing `migration_safety_tests`);
+   README + onboarding docs adequacy for a stranger.
 4. **UX — stranger's first 10 minutes** — empty states, first-run import
    flow, error states, keyboard discoverability, visual consistency against
    the Tokyo Night token system, terminology coherence. Method: drive the
    real UI via agent-browser against `localhost:1420` where possible
    (per `AGENTS.md` E2E conventions), code-trace where not.
 5. **Performance & scale** — thumbnail pipeline, embedding job throughput,
-   query patterns at 10k+ images, startup time, memory behavior in loupe.
+   query patterns, startup time, memory behavior in loupe. Pass/fail
+   thresholds at a 10k-image library (findings must state measured vs.
+   threshold):
+   - cold start to interactive grid < 3 s
+   - grid scroll: thumbnail load p95 < 200 ms, no unbounded memory growth
+   - smart-collection / NL query p95 < 500 ms
+   - CLIP find-similar < 2 s
+   - loupe open < 1 s full-res (cached thumbnail < 300 ms)
+   - resident memory after browsing the full library < 1.5 GB
+
+   A 100k corpus is explicitly out of scope for this release (deferred).
 
 **Finding schema:** `{ id, lens, title, severity: "release-blocker" |
 "pre-launch" | "post-launch", evidence: [file:line refs or repro steps],
@@ -144,8 +164,13 @@ Must produce:
 - **Security model**: what plugins can touch; how permissions are surfaced to
   the user; consistency with the existing MCP token/audit-log posture.
 - **Honest sizing** in hours for: runtime, registry fetch + install UX, and
-  extracting one proof plugin. If the total cannot fit the non-blocking
-  track, say so and propose the smallest shippable subset.
+  extracting one proof plugin.
+- **Kill criteria (hard):** if runtime + registry + proof plugin sizes above
+  8 hours, Phase 4 must propose the smallest shippable subset instead; if
+  even a registry-fetch-plus-manual-install subset sizes above 4 hours,
+  Track C ships as a design doc only (`docs/plugins-design.md`) and the
+  runtime moves to v1.1. The plan must never let Track C borrow time from
+  Track A.
 
 ### Phase 5 — Synthesis
 
@@ -153,9 +178,14 @@ Outputs to `docs/release-audit-2026-06-09/`:
 
 - `report.md` — verified findings by severity, identity argument summary,
   triage table, plugin spec.
-- `decision-sheet.md` — one page: each taste call (identity, every non-KEEP
-  triage verdict, plugin scope) as a checkbox with the audit's
-  recommendation pre-marked, for the user to approve or override.
+- `decision-sheet.md` — machine-parseable markdown table, one row per taste
+  call (identity, every non-KEEP triage verdict, plugin scope). Columns:
+  `item_id` (unique), `type` (`identity` | `triage` | `plugin-scope`),
+  `audit_recommendation`, `user_decision` (pre-filled with the
+  recommendation; the user edits this column), `override_reason` (required
+  when decision ≠ recommendation), `evidence_ids` (required unless the
+  source finding is marked not-runtime-verified). Stage 2 consumes only
+  this table.
 
 A completeness critic reviews the report before it is presented: any lens
 that silently narrowed scope, any blocker without verification, any inventory
@@ -163,8 +193,32 @@ item missing a triage verdict.
 
 ## Decision gate
 
-The user edits `decision-sheet.md` (≈15 minutes). Stage 2 consumes only the
-decided sheet. Nothing in Stage 2 runs before this.
+The user edits the `user_decision` column of `decision-sheet.md`
+(≈15 minutes). Stage 2 consumes only the decided sheet. Nothing in Stage 2
+runs before this.
+
+**Override rework rule:** if the user overrides the identity verdict, only
+Phase 3 (feature triage) re-runs against the chosen identity — the
+inventory, audit findings, and plugin mechanism analysis stand. Individual
+triage overrides require no re-run; Stage 2 takes them as-is.
+
+## Time budgets
+
+Wall-clock budgets so drift is visible (agents run in parallel within a
+phase):
+
+| Phase | Budget |
+|---|---|
+| Stage 1 total | ≤ half a day |
+| Phase 0 inventory + completeness gate | 45 min |
+| Phase 1 lenses + blocker verification | 90 min |
+| Phases 2–4 (identity, triage, plugin spec) | 90 min |
+| Phase 5 synthesis | 30 min |
+| Decision gate (user) | 15–30 min |
+| Stage 2 plan synthesis | 45 min |
+
+That leaves ≥ 1.5 days of the 2-day budget for executing Track A and B
+issues, which is the point of the exercise.
 
 ## Stage 2 — `release-plan-synthesis` workflow
 
@@ -180,9 +234,12 @@ conventions), sequenced into three tracks:
 - **Track C — plugin runtime + registry + one proof plugin**: explicitly
   marked *slips without blocking release*; if Day 2 runs hot it becomes v1.1.
 
-Plan-level gates: `npm run preflight:release` green; DMG install test on a
+Plan-level gates: `npm run preflight:release` green; `npm audit` and
+`cargo audit` reviewed (no unaddressed high/critical advisories);
+`codesign --verify --deep --strict`, `spctl --assess --type execute`, and
+`xcrun stapler validate` pass on the shipped DMG; DMG install test on a
 clean machine (or fresh user account); soft-launch checklist (download link,
-two-line pitch, feedback channel).
+two-line pitch, feedback channel = GitHub issues + direct chat).
 
 ## Risks
 
@@ -206,6 +263,23 @@ two-line pitch, feedback channel).
 - Executing fixes — this design covers the audit and the plan; execution is
   governed by the resulting bd issues.
 
+## Deferred by budget (reviewed and consciously rejected for this release)
+
+Raised in the codex review; deferred with rationale so later "was this
+considered?" questions have an answer:
+
+- **Reproducible builds / artifact provenance** — post-launch; signing +
+  notarization + checksum on the release asset is the v1 integrity story.
+- **Crash reporting / telemetry infrastructure** — conflicts with Cull's
+  local-first posture; soft-launch feedback channel is GitHub issues +
+  direct chat.
+- **Full accessibility (WCAG) audit** — keyboard-only end-to-end flow IS in
+  scope via the UX lens; contrast/screen-reader hardening is post-launch.
+- **CODEOWNERS / branch protection** — ceremony for a solo-maintainer repo
+  with no external contributors yet; revisit at first outside PR.
+- **100k-image performance benchmark** — cannot be built and run inside the
+  budget; 10k thresholds above are the release bar.
+
 ## Review
 
 - Reviewed by codex (or `feature-dev:code-reviewer` as codex-substitute if
@@ -214,4 +288,18 @@ two-line pitch, feedback channel).
 
 ### Review log
 
-- _Pending._
+- **2026-06-09 — codex (read-only sandbox), round 1: REWORK.** Seven
+  required changes: macOS trust-chain verification, repo governance,
+  supply-chain audits, hard performance thresholds, data-migration checks,
+  plugin-track kill criteria, machine-parseable decision sheet. Plus
+  ambiguity findings: NOTICE foreknowledge vs. fresh-eyes, missing per-phase
+  budgets, no inventory completeness gate, undefined override-rework rule.
+- **2026-06-09 — codex, round 2 (negotiated): APPROVE WITH CHANGES.**
+  Accepted the triaged subset (full: trust chain, supply chain, kill
+  criteria, decision-sheet schema; reduced: governance → SECURITY.md +
+  release notes, thresholds → 10k only, migration → upgrade-path check).
+  Rejections (reproducible builds, telemetry, full WCAG, CODEOWNERS,
+  100k benchmark) recorded in "Deferred by budget". Codex's three closing
+  conditions — deferred-by-budget section, locked 10k numbers, `item_id`
+  uniqueness + `evidence_ids` optional only when not runtime-verified —
+  are all incorporated above.
