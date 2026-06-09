@@ -329,7 +329,7 @@
 
     .density {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 4px;
       margin-bottom: 12px;
     }
@@ -804,14 +804,16 @@
         <button class="section-toggle" type="button">
           <span class="section-label">
             <span class="section-title">Outputs</span>
-            <span class="section-summary" id="summary-outputs">Originals, web, sheet, CSV</span>
+            <span class="section-summary" id="summary-outputs">Originals, web, social, PDF, CSV</span>
           </span>
           <span class="pill blue">key</span>
         </button>
         <div class="section-body">
           <label class="check-row"><input type="checkbox" id="out-originals" checked /> <span>Original delivery package with sidecars</span></label>
-          <label class="check-row"><input type="checkbox" id="out-web" checked /> <span>Web JPEG/WebP derivatives</span></label>
-          <label class="check-row"><input type="checkbox" id="out-contact" checked /> <span>Contact sheet PDF + PNG</span></label>
+          <label class="check-row"><input type="checkbox" id="out-web" checked /> <span>Responsive web JPEG/WebP derivatives</span></label>
+          <label class="check-row"><input type="checkbox" id="out-social" checked /> <span>Social crops for Instagram, Facebook, LinkedIn</span></label>
+          <label class="check-row"><input type="checkbox" id="out-pdf" checked /> <span>Portfolio PDF with cover, captions, and ratings</span></label>
+          <label class="check-row"><input type="checkbox" id="out-contact" checked /> <span>Contact sheet PNG for review grids</span></label>
           <label class="check-row"><input type="checkbox" id="out-csv" checked /> <span>Delivery CSV with curator/client columns</span></label>
         </div>
       </section>
@@ -916,6 +918,20 @@
             </button>
             <div class="section-body">
               <div class="field-grid">
+                <label class="field full">
+                  <span>Target format</span>
+                  <select id="target">
+                    <option value="web-responsive">Web responsive - 1600 long edge</option>
+                    <option value="instagram-feed">Instagram feed - 1080 x 1350</option>
+                    <option value="instagram-square">Instagram square - 1080 x 1080</option>
+                    <option value="stories-reels">Stories / Reels - 1080 x 1920</option>
+                    <option value="facebook-feed">Facebook feed - 1080 x 1350</option>
+                    <option value="facebook-link">Facebook link preview - 1200 x 630</option>
+                    <option value="linkedin-landscape">LinkedIn landscape - 1200 x 628</option>
+                    <option value="linkedin-square">LinkedIn square - 1200 x 1200</option>
+                    <option value="portfolio-pdf">Portfolio PDF page - A4 2480 x 3508</option>
+                  </select>
+                </label>
                 <label class="field">
                   <span>Format</span>
                   <select id="format">
@@ -1044,44 +1060,125 @@
       {
         id: "client-pack",
         name: "Client delivery",
-        meta: "Originals + web derivatives + delivery CSV",
+        meta: "Originals + web/social + PDF + delivery CSV",
         intent: "Client delivery",
+        target: "web-responsive",
         format: "JPEG",
         resize: "long edge",
         pixels: "2048",
-        outputs: ["out-originals", "out-web", "out-contact", "out-csv"]
+        outputs: ["out-originals", "out-web", "out-social", "out-pdf", "out-contact", "out-csv"]
       },
       {
         id: "web-set",
-        name: "Web set",
-        meta: "Small JPEG/WebP copies for upload",
-        intent: "Web set",
-        format: "WebP",
-        resize: "long edge",
-        pixels: "1600",
-        outputs: ["out-web", "out-csv"]
+        name: "Web + social set",
+        meta: "Responsive web plus Instagram, Facebook, LinkedIn crops",
+        intent: "Web / social",
+        target: "instagram-feed",
+        format: "JPEG",
+        resize: "width x height",
+        pixels: "1080 x 1350",
+        outputs: ["out-web", "out-social", "out-csv"]
+      },
+      {
+        id: "portfolio-pdf",
+        name: "Portfolio PDF",
+        meta: "Curated PDF portfolio with captions and ratings",
+        intent: "Portfolio PDF",
+        target: "portfolio-pdf",
+        format: "JPEG",
+        resize: "width x height",
+        pixels: "2480 x 3508",
+        outputs: ["out-pdf", "out-web", "out-csv"]
       },
       {
         id: "proof-sheet",
         name: "Contact sheet",
-        meta: "Review grid with captions and ratings",
+        meta: "Review grid image with captions and ratings",
         intent: "Contact sheet",
+        target: "web-responsive",
         format: "JPEG",
         resize: "long edge",
         pixels: "1200",
-        outputs: ["out-contact", "out-csv"]
+        outputs: ["out-contact", "out-pdf", "out-csv"]
       },
       {
         id: "archive-copy",
         name: "Archive copy",
         meta: "Original files, JSON sidecars, checksums",
         intent: "Archive",
+        target: "web-responsive",
         format: "Original",
         resize: "original size",
         pixels: "original",
         outputs: ["out-originals"]
       }
     ];
+
+    const targets = {
+      "web-responsive": {
+        label: "Web responsive",
+        detail: "1600 px long edge for general website upload",
+        format: "WebP",
+        resize: "long edge",
+        pixels: "1600"
+      },
+      "instagram-feed": {
+        label: "Instagram feed",
+        detail: "4:5 portrait, 1080 x 1350",
+        format: "JPEG",
+        resize: "width x height",
+        pixels: "1080 x 1350"
+      },
+      "instagram-square": {
+        label: "Instagram square",
+        detail: "1:1 square, 1080 x 1080",
+        format: "JPEG",
+        resize: "width x height",
+        pixels: "1080 x 1080"
+      },
+      "stories-reels": {
+        label: "Stories / Reels",
+        detail: "9:16 vertical, 1080 x 1920",
+        format: "JPEG",
+        resize: "width x height",
+        pixels: "1080 x 1920"
+      },
+      "facebook-feed": {
+        label: "Facebook feed",
+        detail: "4:5 portrait, 1080 x 1350",
+        format: "JPEG",
+        resize: "width x height",
+        pixels: "1080 x 1350"
+      },
+      "facebook-link": {
+        label: "Facebook link preview",
+        detail: "1.91:1 landscape, 1200 x 630",
+        format: "JPEG",
+        resize: "width x height",
+        pixels: "1200 x 630"
+      },
+      "linkedin-landscape": {
+        label: "LinkedIn landscape",
+        detail: "1.91:1 sponsored/content image, 1200 x 628",
+        format: "PNG",
+        resize: "width x height",
+        pixels: "1200 x 628"
+      },
+      "linkedin-square": {
+        label: "LinkedIn square",
+        detail: "1:1 square, 1200 x 1200",
+        format: "PNG",
+        resize: "width x height",
+        pixels: "1200 x 1200"
+      },
+      "portfolio-pdf": {
+        label: "Portfolio PDF page",
+        detail: "A4 print-ready page, 2480 x 3508",
+        format: "JPEG",
+        resize: "width x height",
+        pixels: "2480 x 3508"
+      }
+    };
 
     const images = [
       {
@@ -1170,6 +1267,18 @@
       return presets.find(preset => preset.id === state.presetId) || presets[0];
     }
 
+    function activeTarget() {
+      return targets[value("target")] || targets["web-responsive"];
+    }
+
+    function applyTarget(targetId) {
+      const target = targets[targetId] || targets["web-responsive"];
+      el("target").value = targetId;
+      el("format").value = target.format;
+      el("resize").value = target.resize;
+      el("pixels").value = target.pixels;
+    }
+
     function renderDensity() {
       el("density-label").textContent = state.density;
       el("density-controls").innerHTML = Object.keys(densities).map(name => `
@@ -1202,9 +1311,10 @@
     function applyPreset(presetId) {
       state.presetId = presetId;
       const preset = activePreset();
-      ["out-originals", "out-web", "out-contact", "out-csv"].forEach(id => {
+      ["out-originals", "out-web", "out-social", "out-pdf", "out-contact", "out-csv"].forEach(id => {
         el(id).checked = preset.outputs.includes(id);
       });
+      el("target").value = preset.target;
       el("format").value = preset.format;
       el("resize").value = preset.resize;
       el("pixels").value = preset.pixels;
@@ -1261,11 +1371,12 @@
 
     function renderPreview() {
       const preset = activePreset();
+      const target = activeTarget();
       const img = images[state.imageIndex];
       const ready = images.filter(image => image.status === "ready").length;
       el("scope-pill").textContent = value("scope") === "Whole library" ? "12,840 images" : value("scope") === "Active collection" ? "87 images" : "42 images";
       el("preview-title").textContent = `${preset.name} preview`;
-      el("preview-size").textContent = value("format") === "Original" ? "original files" : `${value("pixels")} ${value("format")}`;
+      el("preview-size").textContent = value("format") === "Original" ? "original files" : `${target.label} - ${value("format")}`;
       el("preview-headline").textContent = img.headline || "Add headline";
       el("preview-body").textContent = img.body || "Per-image body copy appears here.";
       el("preview-meta").textContent = `${value("format")} - ${value("pixels")}`;
@@ -1275,10 +1386,12 @@
     function renderFacts() {
       const outputs = selectedOutputs();
       const metadata = selectedMetadata();
+      const target = activeTarget();
       el("package-facts").innerHTML = [
         ["Intent", activePreset().name],
         ["Scope", `${value("scope")} - ${value("filter")}`],
         ["Files", outputs.join(", ") || "No outputs selected"],
+        ["Target", `${target.label}: ${target.detail}`],
         ["Settings", `${value("format")} - ${value("quality")} quality - ${value("resize")} ${value("pixels")}`],
         ["Metadata", metadata.join(", ") || "minimal metadata"]
       ].map(([label, detail]) => `
@@ -1293,7 +1406,9 @@
       const outputs = [];
       if (checked("out-originals")) outputs.push("originals");
       if (checked("out-web")) outputs.push("web derivatives");
-      if (checked("out-contact")) outputs.push("contact sheet");
+      if (checked("out-social")) outputs.push("social crops");
+      if (checked("out-pdf")) outputs.push("portfolio PDF");
+      if (checked("out-contact")) outputs.push("contact sheet PNG");
       if (checked("out-csv")) outputs.push("delivery CSV");
       return outputs;
     }
@@ -1312,7 +1427,7 @@
       el("summary-outputs").textContent = selectedOutputs().join(", ") || "No outputs selected";
       el("summary-metadata").textContent = selectedMetadata().join(", ") || "minimal metadata";
       el("summary-advanced").textContent = `${value("naming")} - ${value("collision")}`;
-      el("summary-derivatives").textContent = `${value("format")}, ${value("quality")} quality, ${value("pixels")}`;
+      el("summary-derivatives").textContent = `${activeTarget().label}, ${value("format")}, ${value("pixels")}`;
       el("summary-text").textContent = `${images.filter(image => image.status === "ready").length} of ${images.length} images ready`;
     }
 
@@ -1384,6 +1499,7 @@
         `Default to ${state.density} density; collapse nonessential sections and expose advanced controls only when requested.`,
         `Use ${value("scope").toLowerCase()} filtered by ${value("filter")} and ordered by ${value("order")}.`,
         `Outputs: ${selectedOutputs().join(", ")}.`,
+        `Target format: ${activeTarget().label} (${activeTarget().detail}).`,
         `Derivative settings: ${value("format")}, ${value("quality")} quality, ${value("resize")} ${value("pixels")}.`,
         `Metadata policy: ${selectedMetadata().join(", ") || "minimal metadata"}.`,
         `Queue stays visible but secondary, with Pause and Clear controls.`
@@ -1411,11 +1527,16 @@
       });
     });
 
+    el("target").addEventListener("input", () => {
+      applyTarget(value("target"));
+      updateAll();
+    });
+
     ["scope", "filter", "order", "format", "quality", "resize", "pixels", "naming", "collision", "after"].forEach(id => {
       el(id).addEventListener("input", updateAll);
     });
 
-    ["out-originals", "out-web", "out-contact", "out-csv", "meta-generation", "meta-curation", "meta-xmp", "meta-paths"].forEach(id => {
+    ["out-originals", "out-web", "out-social", "out-pdf", "out-contact", "out-csv", "meta-generation", "meta-curation", "meta-xmp", "meta-paths"].forEach(id => {
       el(id).addEventListener("change", updateAll);
     });
 
@@ -1432,7 +1553,7 @@
         id: `job-${String(Date.now()).slice(-5)}`,
         name: activePreset().name,
         status: state.queue.some(job => job.status === "running") ? "queued" : "running",
-        detail: `${value("format")} - ${value("pixels")} - ${value("scope").toLowerCase()}`,
+        detail: `${activeTarget().label} - ${value("format")} - ${value("scope").toLowerCase()}`,
         progress: state.queue.some(job => job.status === "running") ? 0 : 8
       });
       updateAll();
