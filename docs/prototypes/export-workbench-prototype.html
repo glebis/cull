@@ -542,6 +542,24 @@
       gap: 8px;
     }
 
+    .queue-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .queue-actions button.stop {
+      color: var(--orange);
+      border-color: rgba(224, 175, 104, 0.45);
+    }
+
+    .queue-actions button.clear {
+      color: var(--red);
+      border-color: rgba(247, 118, 142, 0.45);
+    }
+
+    .queue-job,
     .output-row {
       padding: 9px;
       display: grid;
@@ -549,6 +567,21 @@
       gap: 8px;
       align-items: center;
       margin-bottom: 6px;
+    }
+
+    .queue-job {
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      border-radius: var(--radius);
+    }
+
+    .queue-empty {
+      border: 1px dashed var(--border);
+      color: var(--text-secondary);
+      background: var(--bg);
+      border-radius: var(--radius);
+      padding: 12px;
+      line-height: 1.45;
     }
 
     .output-title {
@@ -633,7 +666,7 @@
       <div class="top-actions">
         <span class="pill blue" id="scope-pill">42 images</span>
         <button class="icon" title="Reveal output">↗</button>
-        <button class="primary" id="run-export">Export</button>
+        <button class="primary" id="run-export" title="Export (Cmd+Enter)">Export</button>
       </div>
     </header>
 
@@ -852,6 +885,18 @@
 
       <section class="section">
         <div class="section-header">
+          <span>Export Queue</span>
+          <span class="count" id="queue-count">0 jobs</span>
+        </div>
+        <div class="queue-actions">
+          <button class="stop" id="stop-queue">Stop</button>
+          <button class="clear" id="clear-queue">Clear</button>
+        </div>
+        <div id="queue-list"></div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
           <span>Collision Handling</span>
           <span class="count">P1</span>
         </div>
@@ -963,7 +1008,23 @@
 
     const state = {
       presetId: "client-pack",
-      imageIndex: 0
+      imageIndex: 0,
+      queue: [
+        {
+          id: "job-001",
+          name: "Client delivery pack",
+          status: "running",
+          detail: "Web derivatives · contact sheet · CSV",
+          progress: 46
+        },
+        {
+          id: "job-002",
+          name: "Archive copy",
+          status: "queued",
+          detail: "Originals · JSON sidecars · checksum manifest",
+          progress: 0
+        }
+      ]
     };
 
     function el(id) {
@@ -1096,6 +1157,29 @@
       el("estimate").textContent = `${estimateFiles} files · ${estimateMb} MB`;
     }
 
+    function queueTone(status) {
+      if (status === "running") return "green";
+      if (status === "stopped") return "orange";
+      if (status === "failed") return "red";
+      return "blue";
+    }
+
+    function renderQueue() {
+      el("queue-count").textContent = `${state.queue.length} job${state.queue.length === 1 ? "" : "s"}`;
+      el("queue-list").innerHTML = state.queue.length === 0
+        ? `<div class="queue-empty">Queue is empty. Export or press Cmd+Enter in Export mode to enqueue the current package.</div>`
+        : state.queue.map((job, idx) => `
+          <div class="queue-job">
+            <div>
+              <div class="output-title">${idx + 1}. ${job.name}</div>
+              <div class="muted">${job.detail}</div>
+              <div class="meter"><span style="width: ${job.progress}%"></span></div>
+            </div>
+            <span class="pill ${queueTone(job.status)}">${job.status}</span>
+          </div>
+        `).join("");
+    }
+
     function updatePrompt() {
       const preset = presets.find(p => p.id === state.presetId);
       const parts = [
@@ -1116,6 +1200,7 @@
       if (checked("meta-xmp")) metadata.push("XMP sidecars");
       if (checked("meta-paths")) metadata.push("redacted source paths");
       parts.push(`Metadata policy: ${metadata.join(", ") || "minimal metadata only"}.`);
+      parts.push("Include an export queue panel with running/queued/stopped states plus Stop and Clear controls. Cmd+Enter in Export mode should enqueue or launch the current export.");
       parts.push(`Collision handling: ${value("collision")}; after export: ${value("after")}.`);
       el("prompt-output").textContent = parts.join("\n");
     }
@@ -1126,6 +1211,7 @@
       renderImages();
       renderPreview();
       renderOutputs();
+      renderQueue();
       updatePrompt();
     }
 
@@ -1160,8 +1246,28 @@
     });
 
     el("run-export").addEventListener("click", () => {
-      el("run-export").textContent = "Queued";
-      setTimeout(() => { el("run-export").textContent = "Export"; }, 1200);
+      const preset = presets.find(p => p.id === state.presetId);
+      state.queue.unshift({
+        id: `job-${String(Date.now()).slice(-5)}`,
+        name: preset.name,
+        status: state.queue.some(job => job.status === "running") ? "queued" : "running",
+        detail: `${value("format")} · ${value("pixels")} · ${value("scope").toLowerCase()}`,
+        progress: state.queue.some(job => job.status === "running") ? 0 : 8
+      });
+      updateAll();
+    });
+
+    el("stop-queue").addEventListener("click", () => {
+      state.queue = state.queue.map(job => job.status === "running"
+        ? { ...job, status: "stopped" }
+        : job
+      );
+      updateAll();
+    });
+
+    el("clear-queue").addEventListener("click", () => {
+      state.queue = [];
+      updateAll();
     });
 
     applyPreset();

@@ -74,7 +74,7 @@
     }
 
     async function exportSlides() {
-        if (!manifest || !activeTarget) return;
+        if (exporting || !manifest || !activeTarget) return;
         exporting = true;
         exportProgress = { current: 0, total: manifest.slides.length + (activeTarget.mime === 'application/pdf' ? 1 : 0), label: 'Preparing export' };
 
@@ -128,6 +128,10 @@
         }
     }
 
+    function handleExportLaunch() {
+        void exportSlides();
+    }
+
     $effect(() => {
         loadPresets();
     });
@@ -136,6 +140,11 @@
         if (selectedImages.length > 0) {
             buildManifest();
         }
+    });
+
+    $effect(() => {
+        window.addEventListener('cull-export-launch', handleExportLaunch);
+        return () => window.removeEventListener('cull-export-launch', handleExportLaunch);
     });
 </script>
 

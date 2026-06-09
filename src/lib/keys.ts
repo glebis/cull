@@ -310,6 +310,14 @@ export function handleKeydown(e: KeyboardEvent) {
         return;
     }
 
+    const mode = get(viewMode);
+
+    if (mode === 'export' && e.key === 'Enter' && e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('cull-export-launch'));
+        return;
+    }
+
     if (isEditableTarget(e.target)) return;
 
     const tag = (e.target as HTMLElement)?.tagName;
@@ -344,8 +352,6 @@ export function handleKeydown(e: KeyboardEvent) {
         searchOpen.set(true);
         return;
     }
-
-    const mode = get(viewMode);
 
     const commandItem = commandForKeyboardEvent(e);
     if (commandItem) {
