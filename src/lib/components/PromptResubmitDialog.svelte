@@ -1,5 +1,6 @@
 <script lang="ts">
     import { resubmitPrompt, estimateGenerationCost, type CostEstimate } from '$lib/api';
+    import { createStaleGuard } from '$lib/stale-guard';
 
     interface Props {
         visible: boolean;
@@ -47,11 +48,13 @@
         }
     });
 
+    const costEstimateGuard = createStaleGuard();
     $effect(() => {
         if (visible) {
+            const seq = costEstimateGuard.next();
             estimateGenerationCost(provider, model, size, quality, n)
-                .then(c => costEstimate = c)
-                .catch(() => costEstimate = null);
+                .then(c => { if (costEstimateGuard.isCurrent(seq)) costEstimate = c; })
+                .catch(() => { if (costEstimateGuard.isCurrent(seq)) costEstimate = null; });
         }
     });
 
