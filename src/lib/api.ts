@@ -1,4 +1,4 @@
-// Copyright (c) 2025-present Gleb Kalinin. Architecture and design by author.
+// Copyright (c) 2026-present Gleb Kalinin. Architecture and design by author.
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
 import { invoke } from '@tauri-apps/api/core';

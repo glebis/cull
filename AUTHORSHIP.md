@@ -34,7 +34,7 @@ Development session logs (Claude Code and Codex transcripts) are retained locall
 
 ## Copyright Notice
 
-Architecture and design copyright (c) 2025-present Gleb Kalinin.
+Architecture and design copyright (c) 2026-present Gleb Kalinin.
 Implementation was assisted by Claude (Anthropic) and Codex (OpenAI) under human direction, review, and integration. Provider output terms are not treated as a substitute for source provenance, license compatibility review, or human authorship documentation.
 
 ## AI Provider Output Terms

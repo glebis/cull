@@ -1,8 +1,18 @@
 import { describe, expect, test } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 
 function read(path: string): string {
   return readFileSync(path, 'utf8');
+}
+
+function sourceFiles(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).flatMap((entry) => {
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) return sourceFiles(path);
+    return /\.(ts|svelte|rs)$/.test(entry) ? [path] : [];
+  });
 }
 
 describe('open-source release legal and privacy contract', () => {
@@ -66,6 +76,26 @@ describe('open-source release legal and privacy contract', () => {
     expect(strategy).toContain("Historical planning artifact only. Cull's current license is Apache-2.0.");
     expect(aiCopyright).toContain('Open source (Apache-2.0)');
     expect(aiCopyright).not.toContain(oldCopyleftLabel);
+  });
+
+  test('copyright year agrees across NOTICE, About dialog, and source headers (HYG-002)', () => {
+    const notice = read('NOTICE');
+    const about = read('src/lib/components/AboutDialog.svelte');
+    const authorship = read('AUTHORSHIP.md');
+
+    const noticeYear = notice.match(/Copyright (\d{4})-present Gleb Kalinin/)?.[1];
+    const aboutYear = about.match(/\(c\) (\d{4})-present Gleb Kalinin/)?.[1];
+    const authorshipYear = authorship.match(/\(c\) (\d{4})-present Gleb Kalinin/)?.[1];
+
+    // First commit is 2026-05-07, so the copyright term starts at 2026.
+    expect(noticeYear).toBe('2026');
+    expect(aboutYear).toBe(noticeYear);
+    expect(authorshipYear).toBe(noticeYear);
+
+    const staleCopyright = ['2025', 'present'].join('-');
+    for (const file of [...sourceFiles('src'), ...sourceFiles('src-tauri/src')]) {
+      expect(read(file), `${file} carries a stale copyright year`).not.toContain(staleCopyright);
+    }
   });
 
   test('the dead SessionTimeline component stays cut from the release (CQ-5)', () => {

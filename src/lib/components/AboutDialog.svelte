@@ -122,7 +122,7 @@
                 </div>
                 <div>
                     <span class="meta-label">Copyright</span>
-                    <span class="meta-value">(c) 2025-present Gleb Kalinin</span>
+                    <span class="meta-value">(c) 2026-present Gleb Kalinin</span>
                 </div>
             </div>
 
