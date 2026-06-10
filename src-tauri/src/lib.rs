@@ -560,6 +560,7 @@ pub fn run() {
             commands::mcp::list_mcp_tokens,
             commands::mcp::revoke_mcp_token,
             commands::mcp::rotate_mcp_token,
+            commands::mcp::get_mcp_audit_log,
             commands::static_publishing::export_static_publish_package,
             commands::static_publishing::serve_static_publish_package,
             commands::static_publishing::stop_static_publish_server,

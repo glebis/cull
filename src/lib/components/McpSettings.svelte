@@ -5,6 +5,7 @@
     import { APP_ICON_VARIANTS, normalizeAppIconVariant, type AppIconVariantId } from '$lib/app-icons';
     import { clientToolsEnabled, navigateTo, pluginsEnabled, showToast, staticPublishingEnabled, viewMode, voiceDictationEnabled } from '$lib/stores';
     import { CLIPBOARD_PASTE_DATE_FORMAT_SETTING, DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT } from '$lib/clipboard-actions';
+    import { relativeExpiry, expiryState } from '$lib/token-expiry';
     import PrivacyDashboard from './PrivacyDashboard.svelte';
     import PluginsSettings from './PluginsSettings.svelte';
 
@@ -23,6 +24,8 @@
     let showCreateForm = $state(false);
     let newName = $state('');
     let newRole = $state('admin');
+    // Expiry window in days; '90' is the SEC-004 default, '' = no expiry.
+    let newExpiryDays = $state('90');
 
     let revealedSecret = $state<string | null>(null);
     let revealedTokenName = $state('');
@@ -285,13 +288,18 @@
     async function handleCreate() {
         if (!newName.trim()) return;
         try {
-            const [token, secret] = await createMcpToken(newName.trim(), newRole);
+            const days = parseInt(newExpiryDays, 10);
+            const expiresAt = Number.isFinite(days) && days > 0
+                ? new Date(Date.now() + days * 86_400_000).toISOString()
+                : undefined;
+            const [token, secret] = await createMcpToken(newName.trim(), newRole, undefined, expiresAt);
             tokens = [...tokens, token];
             revealedSecret = secret;
             revealedTokenName = token.name;
             showCreateForm = false;
             newName = '';
             newRole = 'admin';
+            newExpiryDays = '90';
         } catch (e) {
             console.error('Failed to create token:', e);
         }
@@ -330,16 +338,6 @@
     function dismissSecret() {
         revealedSecret = null;
         revealedTokenName = '';
-    }
-
-    function isExpired(iso: string | null): boolean {
-        return !!iso && new Date(iso).getTime() < Date.now();
-    }
-
-    function formatExpiry(iso: string | null): string {
-        if (!iso) return 'no expiry';
-        if (isExpired(iso)) return 'expired — rotate to renew';
-        return `expires ${new Date(iso).toLocaleDateString()}`;
     }
 
     function formatAge(iso: string | null): string {
@@ -656,6 +654,16 @@
                                 <option value={r.value}>{r.label} — {r.desc}</option>
                             {/each}
                         </select>
+                        <label class="expiry-field">
+                            <span class="expiry-label">Expires after</span>
+                            <select class="expiry-select" bind:value={newExpiryDays}>
+                                <option value="7">7 days</option>
+                                <option value="30">30 days</option>
+                                <option value="90">90 days (recommended)</option>
+                                <option value="365">1 year</option>
+                                <option value="">No expiry</option>
+                            </select>
+                        </label>
                         <button class="create-btn" onclick={handleCreate} disabled={!newName.trim()}>
                             Create Token
                         </button>
@@ -672,10 +680,19 @@
                                     <span class="token-name">{token.name}</span>
                                     <span class="token-role role-{token.role}">{token.role}</span>
                                     <span class="token-used">{formatAge(token.last_used_at)}</span>
-                                    <span class="token-expiry" class:expired={isExpired(token.expires_at)}>{formatExpiry(token.expires_at)}</span>
+                                    {#key token.expires_at}
+                                        <span
+                                            class="token-expiry {expiryState(token.expires_at)}"
+                                            title="Rotate to renew the expiry window"
+                                        >{relativeExpiry(token.expires_at)}</span>
+                                    {/key}
                                 </div>
                                 <div class="token-actions">
-                                    <button class="action-btn" onclick={() => handleRotate(token.id)}>Rotate</button>
+                                    {#if expiryState(token.expires_at) !== 'ok'}
+                                        <button class="action-btn rotate-renew" onclick={() => handleRotate(token.id)}>Rotate to renew</button>
+                                    {:else}
+                                        <button class="action-btn" onclick={() => handleRotate(token.id)}>Rotate</button>
+                                    {/if}
                                     <button class="action-btn danger" onclick={() => handleRevoke(token.id)}>Revoke</button>
                                 </div>
                             </div>
@@ -1023,9 +1040,43 @@
         font-size: 11px;
         color: var(--text-secondary);
     }
+    .token-expiry.warn {
+        color: var(--orange);
+    }
     .token-expiry.expired {
         color: var(--red);
     }
+    .action-btn.rotate-renew {
+        border-color: var(--orange);
+        color: var(--orange);
+    }
+    .action-btn.rotate-renew:hover {
+        border-color: var(--orange);
+        background: color-mix(in srgb, var(--orange) 12%, transparent);
+        color: var(--orange);
+    }
+    .expiry-field {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--text-secondary);
+    }
+    .expiry-label {
+        white-space: nowrap;
+    }
+    .expiry-select {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 6px 10px;
+        font-size: 13px;
+        font-family: inherit;
+        color: var(--text);
+        flex: 1;
+    }
+    .expiry-select option { background: var(--bg); }
     .token-actions {
         display: flex;
         gap: 4px;

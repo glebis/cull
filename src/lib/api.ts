@@ -1214,6 +1214,19 @@ export async function rotateMcpToken(tokenId: string): Promise<string> {
     return invoke('rotate_mcp_token', { tokenId });
 }
 
+export interface McpAuditEntry {
+    id: number;
+    token_id: string | null;
+    tool_name: string;
+    params_json: string | null;
+    result_status: string;
+    timestamp: string;
+}
+
+export async function getMcpAuditLog(limit: number): Promise<McpAuditEntry[]> {
+    return invoke('get_mcp_audit_log', { limit });
+}
+
 export async function cropImage(imageId: string, x: number, y: number, width: number, height: number): Promise<string> {
     return invoke<string>('crop_image', { imageId, x, y, width, height });
 }

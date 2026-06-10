@@ -2,15 +2,22 @@
 <!-- Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md. -->
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { getDataFlowStatus, getApiAuditLog, exportAuditLog } from '$lib/api';
-    import type { DataFlowEntry, AuditLogEntry } from '$lib/api';
+    import { getDataFlowStatus, getApiAuditLog, exportAuditLog, getMcpAuditLog } from '$lib/api';
+    import type { DataFlowEntry, AuditLogEntry, McpAuditEntry } from '$lib/api';
 
     let flowStatus = $state<DataFlowEntry[]>([]);
     let auditLog = $state<AuditLogEntry[]>([]);
+    let mcpAudit = $state<McpAuditEntry[]>([]);
     let expandedEntry = $state<string | null>(null);
     let historyOpen = $state(true);
+    let agentLogOpen = $state(true);
     let potentialOpen = $state(false);
     let loading = $state(true);
+
+    // Count of failed-auth attempts surfaced from the agent access log.
+    const authFailedCount = $derived(
+        mcpAudit.filter(e => e.tool_name === '_auth_failed').length,
+    );
 
     const STATUS_COLORS: Record<string, string> = {
         local: 'var(--green)',
@@ -73,12 +80,14 @@
 
     onMount(async () => {
         try {
-            const [status, log] = await Promise.all([
+            const [status, log, mcp] = await Promise.all([
                 getDataFlowStatus(),
                 getApiAuditLog(20),
+                getMcpAuditLog(30),
             ]);
             flowStatus = status;
             auditLog = log;
+            mcpAudit = mcp;
         } catch (e) {
             console.error('Privacy dashboard load error:', e);
         }
@@ -100,6 +109,10 @@
     function formatDate(ts: string): string {
         const d = new Date(ts);
         return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+
+    function toolLabel(name: string): string {
+        return name === '_auth_failed' ? 'auth failed' : name;
     }
 
     async function handleExport() {
@@ -249,6 +262,32 @@
             {/if}
         </div>
 
+        <div class="agent-log-section">
+            <button class="collapse-toggle" onclick={() => agentLogOpen = !agentLogOpen}>
+                <span class="arrow">{agentLogOpen ? '▼' : '▶'}</span>
+                Agent Access Log ({mcpAudit.length})
+                {#if authFailedCount > 0}
+                    <span class="auth-failed-badge">{authFailedCount} failed auth</span>
+                {/if}
+            </button>
+
+            {#if agentLogOpen}
+                <div class="audit-list">
+                    {#if mcpAudit.length === 0}
+                        <p class="empty-state">No agent or token activity recorded yet.</p>
+                    {:else}
+                        {#each mcpAudit as entry}
+                            <div class="agent-row" class:failed={entry.result_status !== 'ok'}>
+                                <span class="audit-time">{formatDate(entry.timestamp)} {formatTime(entry.timestamp)}</span>
+                                <span class="agent-tool" class:auth-failed={entry.tool_name === '_auth_failed'}>{toolLabel(entry.tool_name)}</span>
+                                <span class="agent-status" class:ok={entry.result_status === 'ok'}>{entry.result_status}</span>
+                            </div>
+                        {/each}
+                    {/if}
+                </div>
+            {/if}
+        </div>
+
         <div class="footer-sections">
             <button class="collapse-toggle" onclick={() => potentialOpen = !potentialOpen}>
                 <span class="arrow">{potentialOpen ? '▼' : '▶'}</span>
@@ -331,4 +370,25 @@
     .potential-item strong { color: var(--text); }
     .loading { color: var(--text-secondary); font-size: 12px; }
     .footer-sections { margin-top: 8px; }
+
+    .agent-log-section { margin-top: 4px; }
+    .auth-failed-badge {
+        margin-left: auto;
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 3px;
+        color: var(--red);
+        background: color-mix(in srgb, var(--red) 15%, transparent);
+    }
+    .agent-row {
+        display: flex; align-items: center; gap: 12px;
+        font-size: 12px; padding: 6px 0; border-bottom: 1px solid var(--border);
+        color: var(--text);
+    }
+    .agent-row.failed { color: var(--red); }
+    .agent-tool { min-width: 140px; font-weight: 500; }
+    .agent-tool.auth-failed { color: var(--red); }
+    .agent-status { color: var(--text-secondary); font-size: 11px; text-transform: capitalize; }
+    .agent-status.ok { color: var(--green); }
+    .agent-row.failed .agent-status { color: var(--red); }
 </style>

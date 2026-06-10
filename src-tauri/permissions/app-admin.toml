@@ -7,6 +7,7 @@ commands.allow = [
   "export_audit_log",
   "get_api_audit_log",
   "get_app_setting",
+  "get_mcp_audit_log",
   "get_asset_load_events",
   "fetch_plugin_registry",
   "get_job",

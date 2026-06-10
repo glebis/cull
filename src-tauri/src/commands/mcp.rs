@@ -1,4 +1,4 @@
-use crate::db_core::models::{McpToken, TokenScope};
+use crate::db_core::models::{AuditEntry, McpToken, TokenScope};
 use crate::services::{tokens, ServiceContext};
 use crate::AppState;
 use tauri::State;
@@ -99,6 +99,19 @@ pub async fn rotate_mcp_token(
 ) -> Result<String, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
     rotate_token_audited(&ctx, &token_id)
+}
+
+/// Recent MCP/token audit-log rows for the privacy dashboard. Includes
+/// `_auth_failed` rows written by the HTTP server so failed-auth attempts are
+/// visible to the user, not just stored.
+#[tauri::command]
+pub async fn get_mcp_audit_log(
+    state: State<'_, AppState>,
+    limit: u32,
+) -> Result<Vec<AuditEntry>, String> {
+    let ctx = ServiceContext::from_app_state(&state, None);
+    let clamped = limit.clamp(1, 200);
+    tokens::get_recent_audit(&ctx, clamped).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -222,5 +235,30 @@ mod tests {
         let entries = tokens::get_recent_audit(&ctx, 10).unwrap();
         assert_eq!(entries[0].tool_name, "revoke_token");
         assert_eq!(entries[0].result_status, "error");
+    }
+
+    #[test]
+    fn audit_log_surfaces_auth_failed_rows_for_the_dashboard() {
+        let f = Fixture::new();
+        let ctx = f.ctx();
+
+        // Simulate the HTTP server's failed-auth trace.
+        tokens::log_audit(
+            &ctx,
+            None,
+            "_auth_failed",
+            Some(r#"{"reason":"bad token"}"#),
+            "unauthorized",
+        )
+        .unwrap();
+        create_token_audited(&ctx, "After", "viewer", None, None).unwrap();
+
+        // Newest-first, capped — the same query get_mcp_audit_log serves.
+        let entries = tokens::get_recent_audit(&ctx, 200).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].tool_name, "create_token");
+        assert!(entries
+            .iter()
+            .any(|e| e.tool_name == "_auth_failed" && e.result_status == "unauthorized"));
     }
 }
