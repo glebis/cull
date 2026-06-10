@@ -163,6 +163,26 @@ export function grantPromptModel(manifest: PluginManifest): GrantPromptModel {
     };
 }
 
+// --- Bundled first-party plugins -------------------------------------------
+
+export interface BundledPlugin {
+    manifest: PluginManifest;
+    activate: (host: PluginHost) => void | Promise<void>;
+}
+
+/** Activate first-party bundled plugins. They ship in the signed app, so no
+ * blob:, checksum, consent, or module_plugins gate — they are trusted code. */
+export async function activateBundledPlugins(
+    plugins: BundledPlugin[],
+    _opts: { pluginsFlagEnabled: boolean } = { pluginsFlagEnabled: false },
+): Promise<void> {
+    for (const plugin of plugins) {
+        const host = createPluginHost(plugin.manifest.id);
+        await plugin.activate(host);
+        activePluginIds.update(ids => new Set(ids).add(plugin.manifest.id));
+    }
+}
+
 // --- Loading ---------------------------------------------------------------
 
 export interface PluginLoaderDeps {
