@@ -210,7 +210,9 @@ fn normalize_snapshot_selection_mode(mode: Option<&str>) -> Result<&'static str,
     }
 }
 
-fn required_module_for_tool(tool_name: &str) -> Option<&'static str> {
+/// Module setting key a tool is gated behind. `pub(crate)` because the plugin
+/// runtime derives its `module:<key>` grant requirement from the same table.
+pub(crate) fn required_module_for_tool(tool_name: &str) -> Option<&'static str> {
     match tool_name {
         "export_static_publish_package"
         | "export_static_publish_canvas"

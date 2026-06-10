@@ -192,6 +192,19 @@ pub fn export_static_publish_package_inner(
     state: &AppState,
     request: StaticPublishRequest,
 ) -> Result<StaticPublishResult, String> {
+    ensure_module_enabled(state)?;
+    export_static_publish_package_with_canvas_inner(state, request, None)
+}
+
+/// Export without the `module_static_publishing` setting gate. ONLY for the
+/// plugin runtime (`plugins::invoke`), which substitutes the gate with the
+/// plugin's consented `module:static-publishing` grant — plugin presence is
+/// the gate (Track C3). Every other caller goes through
+/// [`export_static_publish_package_inner`].
+pub(crate) fn export_static_publish_package_module_granted(
+    state: &AppState,
+    request: StaticPublishRequest,
+) -> Result<StaticPublishResult, String> {
     export_static_publish_package_with_canvas_inner(state, request, None)
 }
 
@@ -300,7 +313,9 @@ fn export_static_publish_package_with_canvas_inner(
     request: StaticPublishRequest,
     source_canvas: Option<&Canvas>,
 ) -> Result<StaticPublishResult, String> {
-    ensure_module_enabled(state)?;
+    // Module gating happens in the public entry points
+    // (export_static_publish_package_inner / export_static_publish_canvas_inner);
+    // the plugin runtime enters via export_static_publish_package_module_granted.
     if request.items.is_empty() {
         return Err("No canvas items were provided".to_string());
     }

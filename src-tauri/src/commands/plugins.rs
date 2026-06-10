@@ -160,8 +160,7 @@ pub async fn plugin_invoke(
     if !plugins_enabled(&state) {
         return Err("Plugin runtime is disabled (module_plugins is off)".to_string());
     }
-    let ctx = ServiceContext::from_app_state(&state, None);
-    invoke::plugin_invoke_inner(&ctx, &plugin_id, &tool, args)
+    invoke::plugin_invoke_inner(&state, &plugin_id, &tool, args)
 }
 
 /// Read, validate, and hash-verify all installed plugin bundles. Returns an

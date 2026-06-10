@@ -1,0 +1,11 @@
+{
+  "id": "cull-publish",
+  "name": "Publish View (Static Site)",
+  "version": "1.0.0",
+  "description": "Build a read-only static site package from a collection. Extracted from the core publish view (Track C3 proof plugin).",
+  "entry": "dist/plugin.js",
+  "permissions": ["library:read", "export:read", "module:static-publishing"],
+  "minAppVersion": "0.2.1",
+  "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "repo": "https://github.com/glebis/cull-plugins/tree/main/cull-publish"
+}
