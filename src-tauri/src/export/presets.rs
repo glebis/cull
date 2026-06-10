@@ -12,6 +12,15 @@ pub struct PlatformPreset {
 
 pub const PRESETS: &[PlatformPreset] = &[
     PlatformPreset {
+        id: "web_responsive",
+        platform: "web",
+        format: "responsive",
+        width: 1600,
+        height: 1000,
+        mime: "image/jpeg",
+        quality: Some(0.90),
+    },
+    PlatformPreset {
         id: "ig_post",
         platform: "instagram",
         format: "post",
@@ -26,6 +35,15 @@ pub const PRESETS: &[PlatformPreset] = &[
         format: "story",
         width: 1080,
         height: 1920,
+        mime: "image/png",
+        quality: None,
+    },
+    PlatformPreset {
+        id: "ig_square",
+        platform: "instagram",
+        format: "square",
+        width: 1080,
+        height: 1080,
         mime: "image/png",
         quality: None,
     },
@@ -45,6 +63,24 @@ pub const PRESETS: &[PlatformPreset] = &[
         width: 1080,
         height: 1350,
         mime: "application/pdf",
+        quality: None,
+    },
+    PlatformPreset {
+        id: "li_post",
+        platform: "linkedin",
+        format: "post",
+        width: 1200,
+        height: 628,
+        mime: "image/jpeg",
+        quality: Some(0.90),
+    },
+    PlatformPreset {
+        id: "li_square",
+        platform: "linkedin",
+        format: "square",
+        width: 1200,
+        height: 1200,
+        mime: "image/png",
         quality: None,
     },
     PlatformPreset {
@@ -111,6 +147,24 @@ pub const PRESETS: &[PlatformPreset] = &[
         quality: None,
     },
     PlatformPreset {
+        id: "fb_feed",
+        platform: "facebook",
+        format: "feed",
+        width: 1080,
+        height: 1350,
+        mime: "image/jpeg",
+        quality: Some(0.90),
+    },
+    PlatformPreset {
+        id: "fb_link",
+        platform: "facebook",
+        format: "link_preview",
+        width: 1200,
+        height: 630,
+        mime: "image/jpeg",
+        quality: Some(0.90),
+    },
+    PlatformPreset {
         id: "fb_post",
         platform: "facebook",
         format: "post",
@@ -126,6 +180,15 @@ pub const PRESETS: &[PlatformPreset] = &[
         width: 1080,
         height: 1920,
         mime: "image/png",
+        quality: None,
+    },
+    PlatformPreset {
+        id: "portfolio_pdf",
+        platform: "pdf",
+        format: "portfolio",
+        width: 2480,
+        height: 3508,
+        mime: "application/pdf",
         quality: None,
     },
 ];
@@ -150,5 +213,30 @@ impl PlatformPreset {
             mime: self.mime.to_string(),
             quality: self.quality,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn final_export_master_presets_include_linkedin_and_portfolio_pdf_targets() {
+        let linkedin_landscape = get_preset("li_post").expect("linkedin landscape preset");
+        assert_eq!(linkedin_landscape.platform, "linkedin");
+        assert_eq!(linkedin_landscape.width, 1200);
+        assert_eq!(linkedin_landscape.height, 628);
+
+        let linkedin_square = get_preset("li_square").expect("linkedin square preset");
+        assert_eq!(linkedin_square.platform, "linkedin");
+        assert_eq!(linkedin_square.width, 1200);
+        assert_eq!(linkedin_square.height, 1200);
+
+        let portfolio_pdf = get_preset("portfolio_pdf").expect("portfolio pdf preset");
+        assert_eq!(portfolio_pdf.platform, "pdf");
+        assert_eq!(portfolio_pdf.format, "portfolio");
+        assert_eq!(portfolio_pdf.mime, "application/pdf");
+        assert_eq!(portfolio_pdf.width, 2480);
+        assert_eq!(portfolio_pdf.height, 3508);
     }
 }

@@ -228,18 +228,30 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   },
 
   list_export_presets: () => [
-    { id: 'ig_carousel', platform: 'Instagram', format: 'Carousel', width: 1080, height: 1080, mime: 'image/png' },
+    { id: 'web_responsive', platform: 'Web', format: 'Responsive', width: 1600, height: 1000, mime: 'image/jpeg' },
+    { id: 'ig_post', platform: 'Instagram', format: 'Post', width: 1080, height: 1350, mime: 'image/png' },
+    { id: 'ig_square', platform: 'Instagram', format: 'Square', width: 1080, height: 1080, mime: 'image/png' },
+    { id: 'ig_carousel', platform: 'Instagram', format: 'Carousel', width: 1080, height: 1350, mime: 'image/png' },
     { id: 'ig_story', platform: 'Instagram', format: 'Story', width: 1080, height: 1920, mime: 'image/png' },
-    { id: 'twitter_post', platform: 'Twitter', format: 'Post', width: 1200, height: 675, mime: 'image/png' },
-    { id: 'a4_pdf', platform: 'Print', format: 'A4 PDF', width: 2480, height: 3508, mime: 'application/pdf' },
+    { id: 'fb_feed', platform: 'Facebook', format: 'Feed', width: 1080, height: 1350, mime: 'image/jpeg' },
+    { id: 'fb_link', platform: 'Facebook', format: 'Link Preview', width: 1200, height: 630, mime: 'image/jpeg' },
+    { id: 'li_post', platform: 'LinkedIn', format: 'Post', width: 1200, height: 628, mime: 'image/jpeg' },
+    { id: 'li_square', platform: 'LinkedIn', format: 'Square', width: 1200, height: 1200, mime: 'image/png' },
+    { id: 'portfolio_pdf', platform: 'PDF', format: 'Portfolio', width: 2480, height: 3508, mime: 'application/pdf' },
   ],
 
   create_export_manifest: (_: any, args: { imageIds: string[]; targetPresets: string[]; template?: string }) => {
     const presetMap: Record<string, any> = {
-      ig_carousel: { id: 'ig_carousel', platform: 'Instagram', format: 'Carousel', width: 1080, height: 1080, mime: 'image/png' },
+      web_responsive: { id: 'web_responsive', platform: 'Web', format: 'Responsive', width: 1600, height: 1000, mime: 'image/jpeg' },
+      ig_post: { id: 'ig_post', platform: 'Instagram', format: 'Post', width: 1080, height: 1350, mime: 'image/png' },
+      ig_square: { id: 'ig_square', platform: 'Instagram', format: 'Square', width: 1080, height: 1080, mime: 'image/png' },
+      ig_carousel: { id: 'ig_carousel', platform: 'Instagram', format: 'Carousel', width: 1080, height: 1350, mime: 'image/png' },
       ig_story: { id: 'ig_story', platform: 'Instagram', format: 'Story', width: 1080, height: 1920, mime: 'image/png' },
-      twitter_post: { id: 'twitter_post', platform: 'Twitter', format: 'Post', width: 1200, height: 675, mime: 'image/png' },
-      a4_pdf: { id: 'a4_pdf', platform: 'Print', format: 'A4 PDF', width: 2480, height: 3508, mime: 'application/pdf' },
+      fb_feed: { id: 'fb_feed', platform: 'Facebook', format: 'Feed', width: 1080, height: 1350, mime: 'image/jpeg' },
+      fb_link: { id: 'fb_link', platform: 'Facebook', format: 'Link Preview', width: 1200, height: 630, mime: 'image/jpeg' },
+      li_post: { id: 'li_post', platform: 'LinkedIn', format: 'Post', width: 1200, height: 628, mime: 'image/jpeg' },
+      li_square: { id: 'li_square', platform: 'LinkedIn', format: 'Square', width: 1200, height: 1200, mime: 'image/png' },
+      portfolio_pdf: { id: 'portfolio_pdf', platform: 'PDF', format: 'Portfolio', width: 2480, height: 3508, mime: 'application/pdf' },
     };
     const presetId = args.targetPresets[0] ?? 'ig_carousel';
     const target = presetMap[presetId] ?? presetMap.ig_carousel;
