@@ -29,6 +29,21 @@ struct BindPolicy {
     remote_warning: Option<String>,
 }
 
+/// Leave a queryable trace for failed HTTP auth attempts. Logged as a
+/// synthetic '_auth_failed' tool row so the privacy dashboard and
+/// `get_audit_log` surface it; `prune_audit_log` retention applies. The
+/// presented credential is never logged.
+fn log_auth_failure(ctx: &ServiceContext, remote_ip: IpAddr, reason: &str) {
+    let params = serde_json::json!({
+        "remote_ip": remote_ip.to_string(),
+        "reason": reason,
+    })
+    .to_string();
+    if let Err(e) = tokens::log_audit(ctx, None, "_auth_failed", Some(&params), "unauthorized") {
+        crate::safe_eprintln!("MCP HTTP: failed to write auth-failure audit row: {}", e);
+    }
+}
+
 struct RateLimiter {
     failures: HashMap<IpAddr, (u32, Instant)>,
     max_failures: u32,
@@ -349,10 +364,14 @@ async fn run_http_server(
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
 
+                    let state = auth_handle.state::<AppState>();
+                    let ctx = ServiceContext::from_app_state(&state, None);
+
                     let bearer = match auth_header {
                         Some(ref h) if h.starts_with("Bearer ") => &h[7..],
                         _ => {
                             limiter.lock().await.record_failure(remote_ip);
+                            log_auth_failure(&ctx, remote_ip, "missing_bearer");
                             return Ok(hyper::Response::builder()
                                 .status(401)
                                 .header("WWW-Authenticate", "Bearer")
@@ -363,12 +382,11 @@ async fn run_http_server(
                         }
                     };
 
-                    let state = auth_handle.state::<AppState>();
-                    let ctx = ServiceContext::from_app_state(&state, None);
                     let token = match tokens::validate_token(&ctx, bearer) {
                         Ok(Some(t)) => t,
                         Ok(None) => {
                             limiter.lock().await.record_failure(remote_ip);
+                            log_auth_failure(&ctx, remote_ip, "invalid_token");
                             return Ok(hyper::Response::builder()
                                 .status(401)
                                 .header("WWW-Authenticate", "Bearer error=\"invalid_token\"")
@@ -549,6 +567,69 @@ fn resolve_bind_policy(host: &str, port: u16, allow_remote: bool) -> Result<Bind
 mod tests {
     use super::*;
     use std::net::Ipv4Addr;
+
+    #[test]
+    fn token_audit_bad_token_request_writes_auth_failed_audit_row() {
+        use crate::db_core::secrets::MemoryStore;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db_core::db::Database::open(std::path::Path::new(":memory:")).unwrap();
+        let secrets = MemoryStore::new();
+        let app_data_dir = tmp.path().to_path_buf();
+        let model_dir = tmp.path().join("models");
+        let embedding_engine =
+            parking_lot::Mutex::new(crate::db_core::embeddings::EmbeddingEngine::new(&model_dir));
+        let detection_engine = parking_lot::Mutex::new(
+            crate::db_core::detection::DetectionEngine::new_yolo(&model_dir),
+        );
+        let safety_engine = parking_lot::Mutex::new(
+            crate::db_core::detection::DetectionEngine::new_nudenet(&model_dir),
+        );
+        let ctx = ServiceContext {
+            db: &db,
+            app_data_dir: &app_data_dir,
+            embedding_engine: &embedding_engine,
+            detection_engine: &detection_engine,
+            safety_engine: &safety_engine,
+            secrets: &secrets,
+            app_handle: None,
+        };
+
+        // Same sequence as the HTTP handler: a bad bearer fails validation,
+        // and the 401 path must leave a queryable '_auth_failed' trace.
+        assert!(tokens::validate_token(&ctx, "not_a_real_secret")
+            .unwrap()
+            .is_none());
+        let remote_ip: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        log_auth_failure(&ctx, remote_ip, "invalid_token");
+
+        let entries = tokens::get_recent_audit(&ctx, 10).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].tool_name, "_auth_failed");
+        assert_eq!(entries[0].result_status, "unauthorized");
+        assert!(entries[0].token_id.is_none());
+        let params = entries[0].params_json.as_deref().unwrap();
+        assert!(params.contains("invalid_token"));
+        // The presented secret must never be logged.
+        assert!(!params.contains("not_a_real_secret"));
+
+        // Retention applies to the new rows: an old '_auth_failed' row is pruned,
+        // the fresh one is kept.
+        {
+            let conn = ctx.db.conn.lock();
+            conn.execute(
+                "INSERT INTO mcp_audit_log (token_id, tool_name, params_json, result_status, timestamp)
+                 VALUES (NULL, '_auth_failed', NULL, 'unauthorized', '2020-01-01T00:00:00+00:00')",
+                [],
+            )
+            .unwrap();
+        }
+        let pruned = tokens::prune_audit_log(&ctx, 30).unwrap();
+        assert_eq!(pruned, 1);
+        let remaining = tokens::get_recent_audit(&ctx, 10).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].tool_name, "_auth_failed");
+    }
 
     #[test]
     fn test_bearer_extraction() {

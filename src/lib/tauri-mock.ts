@@ -839,7 +839,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   delete_canvas: () => undefined,
   list_mcp_tokens: () => [],
   create_mcp_token: () => [
-    { id: 'token-1', name: 'Smoke', role: 'viewer', scope_json: null, created_at: '2026-05-01T12:00:00Z', last_used_at: null, revoked_at: null },
+    { id: 'token-1', name: 'Smoke', role: 'viewer', scope_json: null, created_at: '2026-05-01T12:00:00Z', expires_at: '2026-07-30T12:00:00Z', last_used_at: null, revoked_at: null },
     'cull_test_secret',
   ],
   revoke_mcp_token: () => undefined,

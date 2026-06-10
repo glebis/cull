@@ -826,6 +826,10 @@ pub struct CreateTokenParams {
     pub role: String,
     #[schemars(description = "Optional scope restriction")]
     pub scope: Option<crate::db_core::models::TokenScope>,
+    #[schemars(
+        description = "Optional RFC 3339 expiry timestamp. Defaults to 90 days from creation."
+    )]
+    pub expires_at: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -2446,12 +2450,18 @@ impl CullMcp {
         let state = self.app_handle.state::<AppState>();
         let ctx =
             crate::services::ServiceContext::from_app_state(&state, Some(self.app_handle.clone()));
-        match crate::services::tokens::create_token(&ctx, &params.name, &params.role, params.scope)
-        {
+        match crate::services::tokens::create_token(
+            &ctx,
+            &params.name,
+            &params.role,
+            params.scope,
+            params.expires_at,
+        ) {
             Ok((token, secret)) => serde_json::json!({
                 "token_id": token.id,
                 "name": token.name,
                 "role": token.role,
+                "expires_at": token.expires_at,
                 "secret": secret,
                 "warning": "Store the secret securely — it cannot be retrieved again"
             })
@@ -2472,7 +2482,8 @@ impl CullMcp {
                     .map(|t| {
                         serde_json::json!({
                             "id": t.id, "name": t.name, "role": t.role,
-                            "created_at": t.created_at, "last_used_at": t.last_used_at,
+                            "created_at": t.created_at, "expires_at": t.expires_at,
+                            "last_used_at": t.last_used_at,
                         })
                     })
                     .collect();

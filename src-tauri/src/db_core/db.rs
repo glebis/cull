@@ -3830,6 +3830,51 @@ mod migration_safety_tests {
         assert!(error.contains("synthetic migration failure"));
     }
 
+    fn mcp_tokens_has_expires_at(conn: &Connection) -> bool {
+        let mut stmt = conn.prepare("PRAGMA table_info(mcp_tokens)").unwrap();
+        let columns: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        columns.iter().any(|c| c == "expires_at")
+    }
+
+    #[test]
+    fn test_mcp_tokens_table_supports_expiry_on_fresh_and_legacy_databases() {
+        // Fresh database: mcp_tokens must carry the expires_at column used for
+        // token expiry enforcement.
+        let tmp = tempfile::tempdir().unwrap();
+        let fresh_path = tmp.path().join("fresh.db");
+        {
+            let db = Database::open(&fresh_path).unwrap();
+            let conn = db.conn.lock();
+            assert!(mcp_tokens_has_expires_at(&conn));
+        }
+
+        // Legacy database migrated forward: same invariant after run_migrations,
+        // and pre-existing rows keep NULL expiry (no expiry) untouched.
+        let legacy_path = tmp.path().join("legacy.db");
+        create_legacy_db(&legacy_path);
+        let db = Database::open(&legacy_path).unwrap();
+        let conn = db.conn.lock();
+        assert!(mcp_tokens_has_expires_at(&conn));
+        conn.execute(
+            "INSERT INTO mcp_tokens (id, name, secret_hash, role, created_at)
+             VALUES ('tok_legacy', 'Legacy', 'hash', 'viewer', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let expires_at: Option<String> = conn
+            .query_row(
+                "SELECT expires_at FROM mcp_tokens WHERE id = 'tok_legacy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(expires_at.is_none());
+    }
+
     #[test]
     fn test_open_creates_backup_before_migrating_existing_database() {
         let tmp = tempfile::tempdir().unwrap();

@@ -13,6 +13,11 @@ const VALID_ROLES: &[&str] = &[ROLE_VIEWER, ROLE_CURATOR, ROLE_OPERATOR, ROLE_AD
 const TOKEN_PREFIX: &str = "tok_";
 const SECRET_BYTES: usize = 32;
 
+/// New tokens expire after this many days unless the caller supplies an
+/// explicit `expires_at`. Pre-existing tokens (created before expiry support)
+/// keep `NULL` = no expiry so working setups are not broken.
+pub const DEFAULT_TOKEN_EXPIRY_DAYS: i64 = 90;
+
 pub fn capabilities_for_role(role: &str) -> Vec<&'static str> {
     match role {
         ROLE_VIEWER => vec!["library:read", "library:search"],
@@ -168,11 +173,16 @@ fn get_or_create_pepper(ctx: &ServiceContext) -> Result<String, ServiceError> {
     }
 }
 
+fn default_expiry() -> String {
+    (chrono::Utc::now() + chrono::Duration::days(DEFAULT_TOKEN_EXPIRY_DAYS)).to_rfc3339()
+}
+
 pub fn create_token(
     ctx: &ServiceContext,
     name: &str,
     role: &str,
     scope: Option<TokenScope>,
+    expires_at: Option<String>,
 ) -> Result<(McpToken, String), ServiceError> {
     if !VALID_ROLES.contains(&role) {
         return Err(ServiceError::InvalidInput(format!(
@@ -180,6 +190,19 @@ pub fn create_token(
             role
         )));
     }
+
+    let expires_at = match expires_at {
+        Some(raw) => {
+            if chrono::DateTime::parse_from_rfc3339(&raw).is_err() {
+                return Err(ServiceError::InvalidInput(format!(
+                    "Invalid expires_at (must be RFC 3339): {}",
+                    raw
+                )));
+            }
+            Some(raw)
+        }
+        None => Some(default_expiry()),
+    };
 
     let id = generate_token_id();
     let secret = generate_secret();
@@ -190,8 +213,8 @@ pub fn create_token(
 
     let conn = ctx.db.conn.lock();
     conn.execute(
-        "INSERT INTO mcp_tokens (id, name, secret_hash, role, scope_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![id, name, secret_hash, role, scope_json, now],
+        "INSERT INTO mcp_tokens (id, name, secret_hash, role, scope_json, created_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![id, name, secret_hash, role, scope_json, now, expires_at],
     )?;
 
     let token = McpToken {
@@ -200,7 +223,7 @@ pub fn create_token(
         role: role.to_string(),
         scope_json,
         created_at: now,
-        expires_at: None,
+        expires_at,
         last_used_at: None,
         revoked: false,
     };
@@ -311,10 +334,14 @@ pub fn rotate_token(ctx: &ServiceContext, token_id: &str) -> Result<String, Serv
     let new_secret = generate_secret();
     let new_hash = hash_secret(&pepper, &new_secret);
 
+    // Rotation issues a brand-new credential, so it also gets a fresh expiry
+    // window. This is how an expired token is regenerated from the UI.
+    let new_expiry = default_expiry();
+
     let conn = ctx.db.conn.lock();
     let updated = conn.execute(
-        "UPDATE mcp_tokens SET secret_hash = ?1 WHERE id = ?2 AND revoked = 0",
-        rusqlite::params![new_hash, token_id],
+        "UPDATE mcp_tokens SET secret_hash = ?1, expires_at = ?2 WHERE id = ?3 AND revoked = 0",
+        rusqlite::params![new_hash, new_expiry, token_id],
     )?;
     if updated == 0 {
         return Err(ServiceError::NotFound(format!("Token '{}'", token_id)));
@@ -899,7 +926,7 @@ mod tests {
         let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
-        let (token, secret) = create_token(&ctx, "Test Token", ROLE_VIEWER, None).unwrap();
+        let (token, secret) = create_token(&ctx, "Test Token", ROLE_VIEWER, None, None).unwrap();
         assert!(token.id.starts_with("tok_"));
         assert_eq!(token.name, "Test Token");
         assert_eq!(token.role, ROLE_VIEWER);
@@ -914,6 +941,95 @@ mod tests {
     }
 
     #[test]
+    fn token_audit_create_token_defaults_to_90_day_expiry() {
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
+        let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
+
+        let before = chrono::Utc::now();
+        let (token, _) = create_token(&ctx, "Default Expiry", ROLE_VIEWER, None, None).unwrap();
+        let after = chrono::Utc::now();
+
+        let expires_at = token
+            .expires_at
+            .as_deref()
+            .expect("new tokens must get a default expiry");
+        let parsed = chrono::DateTime::parse_from_rfc3339(expires_at).unwrap();
+        assert!(parsed >= before + chrono::Duration::days(DEFAULT_TOKEN_EXPIRY_DAYS));
+        assert!(parsed <= after + chrono::Duration::days(DEFAULT_TOKEN_EXPIRY_DAYS));
+
+        // Persisted, not just returned in-memory.
+        let tokens = list_tokens(&ctx).unwrap();
+        assert_eq!(tokens[0].expires_at.as_deref(), Some(expires_at));
+    }
+
+    #[test]
+    fn token_audit_create_token_with_expires_at_persists_expiry() {
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
+        let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
+
+        let expiry = "2030-01-02T03:04:05+00:00";
+        let (token, _) = create_token(
+            &ctx,
+            "Expiring",
+            ROLE_VIEWER,
+            None,
+            Some(expiry.to_string()),
+        )
+        .unwrap();
+        assert_eq!(token.expires_at.as_deref(), Some(expiry));
+
+        let tokens = list_tokens(&ctx).unwrap();
+        assert_eq!(tokens[0].expires_at.as_deref(), Some(expiry));
+    }
+
+    #[test]
+    fn token_audit_create_token_rejects_unparseable_expires_at() {
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
+        let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
+
+        let result = create_token(
+            &ctx,
+            "Bad Expiry",
+            ROLE_VIEWER,
+            None,
+            Some("next tuesday".to_string()),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("expires_at"));
+    }
+
+    #[test]
+    fn token_audit_validate_token_rejects_expired_token() {
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
+        let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
+
+        let past = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
+        let (_, secret) = create_token(&ctx, "Expired", ROLE_ADMIN, None, Some(past)).unwrap();
+
+        assert!(validate_token(&ctx, &secret).unwrap().is_none());
+    }
+
+    #[test]
+    fn token_audit_rotate_token_refreshes_expiry_window() {
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
+        let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
+
+        let past = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
+        let (token, old_secret) =
+            create_token(&ctx, "Regenerate", ROLE_CURATOR, None, Some(past)).unwrap();
+        assert!(validate_token(&ctx, &old_secret).unwrap().is_none());
+
+        // Rotation issues a fresh credential, so it gets a fresh expiry window.
+        let new_secret = rotate_token(&ctx, &token.id).unwrap();
+        let validated = validate_token(&ctx, &new_secret)
+            .unwrap()
+            .expect("rotated token must be valid again with a fresh expiry window");
+        let expires_at = validated.expires_at.expect("rotated token keeps an expiry");
+        let parsed = chrono::DateTime::parse_from_rfc3339(&expires_at).unwrap();
+        assert!(parsed > chrono::Utc::now());
+    }
+
+    #[test]
     fn test_create_token_with_scope() {
         let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
@@ -924,7 +1040,7 @@ mod tests {
             tags: Some(vec!["public".to_string()]),
         };
 
-        let (token, _) = create_token(&ctx, "Scoped", ROLE_CURATOR, Some(scope)).unwrap();
+        let (token, _) = create_token(&ctx, "Scoped", ROLE_CURATOR, Some(scope), None).unwrap();
         assert!(token.scope_json.is_some());
         let parsed: TokenScope = serde_json::from_str(token.scope_json.as_ref().unwrap()).unwrap();
         assert_eq!(parsed.collections.unwrap(), vec!["col_abc"]);
@@ -937,7 +1053,7 @@ mod tests {
         let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
-        let result = create_token(&ctx, "Bad", "superadmin", None);
+        let result = create_token(&ctx, "Bad", "superadmin", None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid role"));
     }
@@ -947,7 +1063,7 @@ mod tests {
         let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
-        let (token, secret) = create_token(&ctx, "Auth Test", ROLE_ADMIN, None).unwrap();
+        let (token, secret) = create_token(&ctx, "Auth Test", ROLE_ADMIN, None, None).unwrap();
 
         let validated = validate_token(&ctx, &secret).unwrap();
         assert!(validated.is_some());
@@ -962,7 +1078,7 @@ mod tests {
         let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
-        let _ = create_token(&ctx, "Token", ROLE_VIEWER, None).unwrap();
+        let _ = create_token(&ctx, "Token", ROLE_VIEWER, None, None).unwrap();
 
         let result = validate_token(&ctx, "totally_wrong_secret_value").unwrap();
         assert!(result.is_none());
@@ -973,7 +1089,7 @@ mod tests {
         let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
-        let (token, secret) = create_token(&ctx, "To Revoke", ROLE_CURATOR, None).unwrap();
+        let (token, secret) = create_token(&ctx, "To Revoke", ROLE_CURATOR, None, None).unwrap();
 
         revoke_token(&ctx, &token.id).unwrap();
 
@@ -998,7 +1114,8 @@ mod tests {
         let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
-        let (token, old_secret) = create_token(&ctx, "Rotatable", ROLE_OPERATOR, None).unwrap();
+        let (token, old_secret) =
+            create_token(&ctx, "Rotatable", ROLE_OPERATOR, None, None).unwrap();
 
         let new_secret = rotate_token(&ctx, &token.id).unwrap();
         assert_ne!(old_secret, new_secret);
@@ -1017,9 +1134,9 @@ mod tests {
         let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
-        create_token(&ctx, "Token A", ROLE_VIEWER, None).unwrap();
-        create_token(&ctx, "Token B", ROLE_CURATOR, None).unwrap();
-        create_token(&ctx, "Token C", ROLE_ADMIN, None).unwrap();
+        create_token(&ctx, "Token A", ROLE_VIEWER, None, None).unwrap();
+        create_token(&ctx, "Token B", ROLE_CURATOR, None, None).unwrap();
+        create_token(&ctx, "Token C", ROLE_ADMIN, None, None).unwrap();
 
         let tokens = list_tokens(&ctx).unwrap();
         assert_eq!(tokens.len(), 3);
@@ -1096,7 +1213,7 @@ mod tests {
 
         assert!(secrets.get("mcp_pepper").unwrap().is_none());
 
-        create_token(&ctx, "First", ROLE_VIEWER, None).unwrap();
+        create_token(&ctx, "First", ROLE_VIEWER, None, None).unwrap();
 
         let pepper = secrets.get("mcp_pepper").unwrap();
         assert!(pepper.is_some());
@@ -1338,10 +1455,10 @@ mod tests {
         let (db, secrets, dir, ee, de, se, _tmp) = test_context();
         let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
 
-        let (_, secret1) = create_token(&ctx, "T1", ROLE_VIEWER, None).unwrap();
+        let (_, secret1) = create_token(&ctx, "T1", ROLE_VIEWER, None, None).unwrap();
         let pepper1 = secrets.get("mcp_pepper").unwrap().unwrap();
 
-        let (_, _secret2) = create_token(&ctx, "T2", ROLE_VIEWER, None).unwrap();
+        let (_, _secret2) = create_token(&ctx, "T2", ROLE_VIEWER, None, None).unwrap();
         let pepper2 = secrets.get("mcp_pepper").unwrap().unwrap();
 
         assert_eq!(pepper1, pepper2);

@@ -1198,8 +1198,8 @@ export interface TokenScope {
     tags?: string[];
 }
 
-export async function createMcpToken(name: string, role: string, scope?: TokenScope): Promise<[McpToken, string]> {
-    return invoke('create_mcp_token', { name, role, scope: scope || null });
+export async function createMcpToken(name: string, role: string, scope?: TokenScope, expiresAt?: string): Promise<[McpToken, string]> {
+    return invoke('create_mcp_token', { name, role, scope: scope || null, expiresAt: expiresAt || null });
 }
 
 export async function listMcpTokens(): Promise<McpToken[]> {

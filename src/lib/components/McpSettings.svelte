@@ -298,6 +298,8 @@
             const token = tokens.find(t => t.id === id);
             revealedSecret = newSecret;
             revealedTokenName = token?.name ?? id;
+            // Rotation grants a fresh expiry window; refresh the displayed list.
+            tokens = await listMcpTokens();
         } catch (e) {
             console.error('Failed to rotate token:', e);
         }
@@ -314,6 +316,16 @@
     function dismissSecret() {
         revealedSecret = null;
         revealedTokenName = '';
+    }
+
+    function isExpired(iso: string | null): boolean {
+        return !!iso && new Date(iso).getTime() < Date.now();
+    }
+
+    function formatExpiry(iso: string | null): string {
+        if (!iso) return 'no expiry';
+        if (isExpired(iso)) return 'expired — rotate to renew';
+        return `expires ${new Date(iso).toLocaleDateString()}`;
     }
 
     function formatAge(iso: string | null): string {
@@ -630,6 +642,7 @@
                                     <span class="token-name">{token.name}</span>
                                     <span class="token-role role-{token.role}">{token.role}</span>
                                     <span class="token-used">{formatAge(token.last_used_at)}</span>
+                                    <span class="token-expiry" class:expired={isExpired(token.expires_at)}>{formatExpiry(token.expires_at)}</span>
                                 </div>
                                 <div class="token-actions">
                                     <button class="action-btn" onclick={() => handleRotate(token.id)}>Rotate</button>
@@ -975,6 +988,13 @@
     .token-used {
         font-size: 11px;
         color: var(--text-secondary);
+    }
+    .token-expiry {
+        font-size: 11px;
+        color: var(--text-secondary);
+    }
+    .token-expiry.expired {
+        color: var(--red);
     }
     .token-actions {
         display: flex;
