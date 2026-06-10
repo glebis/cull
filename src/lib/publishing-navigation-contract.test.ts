@@ -22,28 +22,25 @@ describe('static publishing navigation contract', () => {
         expect(frontendMenu).toContain('staticPublishingEnabled');
     });
 
-    it('gates the publish view and its palette command on plugin presence, not the raw module setting', () => {
+    it('renders publish as a plugin-only tab driven by the tab registry, not the core component', () => {
         const page = readProjectFile('src/routes/+page.svelte');
         const palette = readProjectFile('src/lib/command-palette.ts');
         const menu = readProjectFile('src/lib/menu.ts');
 
-        // The publish view mounts when the cull-publish plugin is present
-        // (plugin surface) and falls back to the core component on the raw
-        // module setting otherwise — decided by resolvePublishSurface
-        // (behavioral coverage: src/lib/plugins/publish-surface.test.ts).
-        expect(page).toContain('resolvePublishSurface');
-        expect(page).toContain("publishSurface === 'plugin'");
+        // Publish is now a bundled plugin tab. The page renders any plugin tab
+        // generically via PluginViewHost and has no core publish branch.
+        expect(page).not.toContain('resolvePublishSurface');
+        expect(page).not.toContain('StaticPublishingSettings');
         expect(page).toContain('<PluginViewHost');
-        expect(page).toContain('<StaticPublishingSettings');
-        expect(page).not.toContain("$viewMode === 'publish' && $staticPublishingEnabled");
+        expect(page).toContain("t.source === 'plugin'");
+        expect(page).toContain('BUNDLED_PLUGINS');
 
-        // The palette derives its view commands from the tab registry (single
-        // source of truth) rather than gating on the raw module setting. The
-        // native menu still routes through currentPublishSurface until the
-        // publish migration (Tasks 7-9) relocates it.
+        // Palette and native menu both derive publish availability from the
+        // tab registry (single source of truth), not the raw module setting.
         expect(palette).toContain("from './plugins/tab-registry'");
         expect(palette).not.toContain('get(staticPublishingEnabled)');
-        expect(menu).toContain("currentPublishSurface() !== 'hidden'");
+        expect(menu).not.toContain('currentPublishSurface');
+        expect(menu).toContain('publishTabAvailable');
     });
 
     it('keeps the publishing workflow out of Settings content', () => {
@@ -55,14 +52,14 @@ describe('static publishing navigation contract', () => {
     });
 
     it('uses publishing language for the generated site result panel', () => {
-        const publishView = readProjectFile('src/lib/components/StaticPublishingSettings.svelte');
+        const publishView = readProjectFile('src/lib/plugins/cull-publish/PublishView.svelte');
 
         expect(publishView).toContain('Latest package');
         expect(publishView).not.toContain('Last Export');
     });
 
     it('keeps the Publish view organized as an accessible two-to-three column workflow', () => {
-        const publishView = readProjectFile('src/lib/components/StaticPublishingSettings.svelte');
+        const publishView = readProjectFile('src/lib/plugins/cull-publish/PublishView.svelte');
 
         expect(publishView).toContain('class="publish-grid"');
         expect(publishView).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
@@ -76,7 +73,7 @@ describe('static publishing navigation contract', () => {
     });
 
     it('shows publish handoff items as openable, copyable, shareable rows with an in-app QR image', () => {
-        const publishView = readProjectFile('src/lib/components/StaticPublishingSettings.svelte');
+        const publishView = readProjectFile('src/lib/plugins/cull-publish/PublishView.svelte');
         const api = readProjectFile('src/lib/api.ts');
 
         expect(publishView).toContain('Site publishing');

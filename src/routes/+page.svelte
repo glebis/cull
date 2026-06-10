@@ -18,7 +18,6 @@
     import ContactSheetDialog from '$lib/components/ContactSheetDialog.svelte';
     import GroupRankingDialog from '$lib/components/GroupRankingDialog.svelte';
     import Export from '$lib/components/Export.svelte';
-    import StaticPublishingSettings from '$lib/components/StaticPublishingSettings.svelte';
     import PluginViewHost from '$lib/components/PluginViewHost.svelte';
     import Toast from '$lib/components/Toast.svelte';
     import ImportBanner from '$lib/components/ImportBanner.svelte';
@@ -33,12 +32,13 @@
     import GenerationResultsStrip from '$lib/components/GenerationResultsStrip.svelte';
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, activePluginIds, selectedIds, activeCanvas, activeSession, collections, windowLabel } from '$lib/stores';
+    import { totalCount, images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel } from '$lib/stores';
     import { trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
-    import { loadInstalledPlugins } from '$lib/plugins/loader';
-    import { CULL_PUBLISH_PLUGIN_ID, resolvePublishSurface } from '$lib/plugins/publish-surface';
+    import { loadInstalledPlugins, activateBundledPlugins } from '$lib/plugins/loader';
+    import { registerCoreTabs, tabRegistry } from '$lib/plugins/tab-registry';
+    import { BUNDLED_PLUGINS } from '$lib/plugins/bundled';
     import { isPreviewDisplayRoute, nextPreviewFocusPayload, previewSyncImageId } from '$lib/preview-display';
     import {
         PREVIEW_DISPLAY_ALWAYS_ON_TOP_SETTING,
@@ -71,13 +71,6 @@
 
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
     let noSidebar = $derived(immersive || !$sidebarVisible);
-    // Track C3 defer/fallback: the cull-publish plugin owns the publish view
-    // when present; otherwise core renders it exactly as before (module-gated).
-    let publishSurface = $derived(resolvePublishSurface({
-        pluginsEnabled: $pluginsEnabled,
-        cullPublishActive: $activePluginIds.has(CULL_PUBLISH_PLUGIN_ID),
-        staticPublishingEnabled: $staticPublishingEnabled,
-    }));
 
     async function loadImages(options: ImageLoadOptions = {}) {
         await loadImagesForCurrentScope(options);
@@ -332,6 +325,12 @@
         if (previewDisplayWindow) return;
 
         const init = async () => {
+            // Register core tabs and activate first-party bundled plugins
+            // (e.g. cull-publish) BEFORE any view renders, so their tabs are in
+            // the registry-driven Ctrl+Tab cycle and command palette. Bundled
+            // plugins activate regardless of the module_plugins flag.
+            registerCoreTabs();
+            await activateBundledPlugins(BUNDLED_PLUGINS, { pluginsFlagEnabled: false });
             await restorePreviewDisplaySettings();
             const restored = restoreAppStateBeforeImages();
             await restoreSmartCollectionScope(restored);
@@ -504,16 +503,9 @@
             <Loupe />
         {:else if $viewMode === 'embeddings'}
             <EmbeddingExplorer />
-        {:else if $viewMode === 'publish' && publishSurface !== 'hidden'}
-            <div class="publish-view">
-                {#if publishSurface === 'plugin'}
-                    <PluginViewHost
-                        pluginId={CULL_PUBLISH_PLUGIN_ID}
-                        note="Publish is managed by the cull-publish plugin"
-                    />
-                {:else}
-                    <StaticPublishingSettings />
-                {/if}
+        {:else if $tabRegistry.find(t => t.id === $viewMode && t.source === 'plugin')}
+            <div class="plugin-view">
+                <PluginViewHost pluginId={$viewMode} />
             </div>
         {:else if $viewMode === 'export'}
             <Export />
@@ -614,7 +606,7 @@
         font-size: 12px;
         opacity: 0.5;
     }
-    .publish-view {
+    .plugin-view {
         grid-area: main;
         overflow-y: auto;
         background: var(--bg);

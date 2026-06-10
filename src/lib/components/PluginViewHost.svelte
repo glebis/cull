@@ -1,19 +1,20 @@
 <script lang="ts">
-    // Renders the root element a plugin registered via host.mountView().
-    // Used by the publish view when the cull-publish plugin owns the surface
-    // (Track C3): core defers, the note says who manages the view.
-    import { getRegisteredPluginViews } from '$lib/plugins/loader';
+    // Renders a plugin tab's view by invoking the tab registry entry's
+    // mountView(container) callback. The plugin mounts its own Svelte view into
+    // the host-provided container (see cull-publish/index.ts).
+    import { get } from 'svelte/store';
+    import { tabRegistry } from '$lib/plugins/tab-registry';
 
     let { pluginId, note = '' }: { pluginId: string; note?: string } = $props();
-
     let container = $state<HTMLElement | null>(null);
     let mounted = $state(false);
 
     $effect(() => {
         if (!container) return;
-        const view = getRegisteredPluginViews().get(pluginId);
-        if (view) {
-            container.replaceChildren(view);
+        const entry = get(tabRegistry).find(t => t.id === pluginId && t.source === 'plugin');
+        if (entry?.mountView) {
+            container.replaceChildren();
+            entry.mountView(container);   // plugin mounts its Svelte view into the container
             mounted = true;
         } else {
             container.replaceChildren();

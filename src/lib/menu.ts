@@ -72,7 +72,13 @@ import {
     setPreviewDisplayOverlay,
     setPreviewDisplayWebStreamStatus,
 } from './preview-display-store';
-import { currentPublishSurface } from './plugins/publish-surface';
+import { tabRegistry } from './plugins/tab-registry';
+
+/** Publish is plugin-only now: it is reachable iff the bundled cull-publish
+ * plugin has registered its tab in the tab registry. */
+function publishTabAvailable(): boolean {
+    return get(tabRegistry).some(t => t.id === 'publish');
+}
 import {
     overlayForPreviewDisplayMode,
     withPreviewDisplayField,
@@ -608,9 +614,9 @@ function handleMenuAction(action: string) {
             navigateTo('embeddings');
             break;
         case 'view_publish':
-            // Plugin presence or the module setting can make Publish available
-            // (Track C3 defer/fallback).
-            if (currentPublishSurface() !== 'hidden') navigateTo('publish' as ViewMode);
+            // Publish is plugin-only: reachable iff the bundled cull-publish
+            // plugin registered its tab.
+            if (publishTabAvailable()) navigateTo('publish' as ViewMode);
             break;
         case 'view_export':
             navigateTo('export' as ViewMode);
@@ -808,7 +814,7 @@ function currentMenuStatePayload() {
         sidebarVisible: get(sidebarVisible),
         hasFocusedImage: get(focusedImage) !== null,
         selectedCount: get(selectedIds).size,
-        staticPublishingEnabled: currentPublishSurface() !== 'hidden',
+        staticPublishingEnabled: publishTabAvailable(),
         showLoupeHistogram: get(showLoupeHistogram),
         previewDisplayFrozen: get(previewDisplayFrozen),
         previewDisplayBlanked: get(previewDisplayBlanked),

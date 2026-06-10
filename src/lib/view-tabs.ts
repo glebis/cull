@@ -5,7 +5,10 @@ export interface ViewTab {
     label: string;
     key?: string;
     icon: ViewTabIconId;
-    requiresStaticPublishing?: boolean;
+    /** When true, this tab only appears if a plugin has registered its id
+     * (e.g. publish is owned by the bundled cull-publish plugin). Avoids the
+     * gate-drift the tab registry exists to prevent. */
+    requiresRegisteredTab?: boolean;
 }
 
 export type ViewTabIconId =
@@ -25,10 +28,10 @@ export const VIEW_TABS: ViewTab[] = [
     { id: 'canvas', label: 'Canvas', key: '⌘4', icon: 'canvas-board' },
     { id: 'lineage', label: 'Lineage', key: '⌘5', icon: 'lineage-branch' },
     { id: 'embeddings', label: 'Embeddings', key: '⌘6', icon: 'embedding-map' },
-    { id: 'publish', label: 'Publish', icon: 'publish-launch', requiresStaticPublishing: true },
+    { id: 'publish', label: 'Publish', icon: 'publish-launch', requiresRegisteredTab: true },
     { id: 'export', label: 'Export', key: '⌘7', icon: 'export-package' },
 ];
 
-export function visibleViewTabs(staticPublishingEnabled: boolean): ViewTab[] {
-    return VIEW_TABS.filter(tab => !tab.requiresStaticPublishing || staticPublishingEnabled);
+export function visibleViewTabs(registeredTabIds: Set<string>): ViewTab[] {
+    return VIEW_TABS.filter(tab => !tab.requiresRegisteredTab || registeredTabIds.has(tab.id));
 }

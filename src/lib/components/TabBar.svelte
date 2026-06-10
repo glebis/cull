@@ -1,12 +1,14 @@
 <script lang="ts">
     import { openPreviewDisplay } from '$lib/api';
-    import { viewMode, thumbnailSize, navigateTo, showToast, staticPublishingEnabled } from '$lib/stores';
+    import { viewMode, thumbnailSize, navigateTo, showToast } from '$lib/stores';
     import type { ViewMode } from '$lib/stores';
     import { maybeShowShortcutReminder, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from '$lib/shortcut-reminders';
     import { visibleViewTabs } from '$lib/view-tabs';
+    import { tabRegistry } from '$lib/plugins/tab-registry';
     import ViewTabIcon from './ViewTabIcon.svelte';
 
-    let tabs = $derived(visibleViewTabs($staticPublishingEnabled));
+    let registeredTabIds = $derived(new Set($tabRegistry.map(t => t.id)));
+    let tabs = $derived(visibleViewTabs(registeredTabIds));
 
     let size = $state(160);
     thumbnailSize.subscribe(v => size = v);
