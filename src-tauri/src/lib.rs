@@ -4,6 +4,8 @@
 mod cli;
 mod cloud;
 mod commands;
+#[cfg(test)]
+mod config_contract;
 mod db_core;
 mod dictation;
 pub mod exchange;
