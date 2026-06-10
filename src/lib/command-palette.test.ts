@@ -183,8 +183,10 @@ describe('command palette helpers', () => {
         expect(getShortcutConflict('Cmd+F', 'view.grid', items, {})).toBe('Search Images');
         expect(getShortcutConflict('Cmd+F', 'app.search', items, {})).toBeNull();
         expect(getShortcutConflict('Cmd+P', 'view.grid', items, {})).toBe('Open command palette');
-        expect(getShortcutConflict('Tab', 'view.grid', items, {})).toBe('Cycle to next view');
-        expect(getShortcutConflict('Shift+Tab', 'view.grid', items, {})).toBe('Cycle to previous view');
+        expect(getShortcutConflict('Ctrl+Tab', 'view.grid', items, {})).toBe('Cycle to next view');
+        expect(getShortcutConflict('Ctrl+Shift+Tab', 'view.grid', items, {})).toBe('Cycle to previous view');
+        // Bare Tab is no longer reserved — it belongs to native focus traversal.
+        expect(getShortcutConflict('Tab', 'view.grid', items, {})).toBeNull();
         expect(getShortcutConflict('Cmd+L', 'view.grid', items, { 'view.loupe': 'Cmd+L' })).toBe('Loupe View');
         expect(getShortcutConflict('Cmd+L', 'view.grid', items, {})).toBeNull();
     });

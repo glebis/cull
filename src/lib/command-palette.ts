@@ -110,8 +110,8 @@ const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
     'Cmd+7': 'Export view',
     'Cmd+0': 'Actual Size',
     'Cmd+8': 'Speed Review view',
-    'Tab': 'Cycle to next view',
-    'Shift+Tab': 'Cycle to previous view',
+    'Ctrl+Tab': 'Cycle to next view',
+    'Ctrl+Shift+Tab': 'Cycle to previous view',
     'Backspace': 'Move focused image to Trash',
     'Cmd+Backspace': 'Delete focused image permanently',
 };

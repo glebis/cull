@@ -23,7 +23,7 @@
         if (!changed) return;
         maybeShowShortcutReminder(VIEW_CYCLE_SHORTCUT_REMINDER_ID, () => {
             showToast('Shortcut available', {
-                detail: 'Tab cycles views. Shift+Tab goes back.',
+                detail: 'Ctrl+Tab cycles views. Ctrl+Shift+Tab goes back.',
                 type: 'info',
                 duration: 5000,
             });

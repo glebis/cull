@@ -335,7 +335,9 @@ export function handleKeydown(e: KeyboardEvent) {
         return;
     }
 
-    if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    // Bare Tab is reserved for native focus traversal — never consume it.
+    // View cycling lives on Ctrl+Tab / Ctrl+Shift+Tab (plus Cmd+1-7).
+    if (e.key === 'Tab' && e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         cycleViewMode(e.shiftKey ? -1 : 1);
         return;
