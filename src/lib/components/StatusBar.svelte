@@ -92,6 +92,8 @@
         <span class="hint">b:batch</span>
         <span class="hint">f:fullscreen</span>
         <span class="hint">+/-:size</span>
+        <span class="hint">?:help</span>
+        <span class="hint">Cmd+P:commands</span>
     </div>
 </div>
 

@@ -110,6 +110,7 @@ const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
     'Cmd+7': 'Export view',
     'Cmd+0': 'Actual Size',
     'Cmd+8': 'Speed Review view',
+    '?': 'Open keyboard shortcuts help',
     'Ctrl+Tab': 'Cycle to next view',
     'Ctrl+Shift+Tab': 'Cycle to previous view',
     'Backspace': 'Move focused image to Trash',

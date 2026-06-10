@@ -5,7 +5,7 @@ import {
     sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode, compareImageOnly, exportImageOnly,
     collections, collectMode, collectModeTarget, activeCollection,
     showDetectionBoxes, showDetectionInspector, nsfwMode,
-    navigateTo, navigateBack, searchOpen, focusedImage, activeSession,
+    navigateTo, navigateBack, searchOpen, shortcutsOpen, focusedImage, activeSession,
     requestTextInput, requestCollectionTarget, selectionAnchorIndex, resetLoupeTransform,
     staticPublishingEnabled, activeFolder,
 } from './stores';
@@ -340,6 +340,13 @@ export function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Tab' && e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         cycleViewMode(e.shiftKey ? -1 : 1);
+        return;
+    }
+
+    // '?' (Shift+/) opens the keyboard-shortcuts help
+    if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        shortcutsOpen.set(true);
         return;
     }
 
