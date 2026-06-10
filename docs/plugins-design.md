@@ -4,13 +4,20 @@
 > `docs/release-audit-2026-06-09/report.md` (section 4, "Plugin Spec"). This
 > document mirrors that spec and records implementation status.
 >
-> **Status (Track C1, bd imageview-dkz.23):**
+> **Status (Track C1 bd imageview-dkz.23, Track C2 bd imageview-dkz.24):**
 > - runtime bootstrap — **working** (`cargo test --lib plugins::`,
 >   `npx vitest run src/lib/plugins`)
-> - registry fetch + checksum verify — **not-started** (Track C2; load-time
->   checksum re-hash IS implemented and tested)
-> - plugin install — **not-started** (Track C2)
-> - proof plugin — **not-started** (Track C2)
+> - registry fetch + checksum verify — **working** (`cargo test --lib
+>   plugins::registry` — unknown `schema` rejected, malformed entries
+>   skipped with warnings; `cargo test --lib registry_install` —
+>   `registry_install_rejects_sha256_mismatch` proves a mismatch writes
+>   nothing and grants nothing)
+> - plugin install — **working** (`cargo test --lib plugins::install` —
+>   temp-dir staging + atomic rename, installed result loadable by the C1
+>   loader, grant rows recorded, install/remove audit-logged as
+>   `plugin:<id>`; consent UI pinned by
+>   `npx vitest run src/lib/plugins/install-consent.test.ts`)
+> - proof plugin — **not-started** (Track C3)
 
 ## 0. What the candidate actually is (evidence)
 
@@ -81,7 +88,7 @@ One `manifest.json` per plugin (parsing/validation:
 - `checksum` covers the `entry` bundle bytes; verified at install **and** at
   every load (Rust side and webview side).
 
-## 3. Registry v1 (Track C2)
+## 3. Registry v1 (Track C2 — implemented)
 
 A single schema-versioned `registry.json` (`cull.plugins.registry.v1`) in a
 public `glebis/cull-plugins` GitHub repo, fetched over HTTPS in Rust
@@ -90,6 +97,32 @@ immutable bytes. Install flow: fetch registry → user consents to the listed
 permissions → fetch bundle → SHA-256 verify → write to
 `$APPDATA/plugins/<id>/` → record grant rows. Migration path: v1.5 adds a
 detached signature over the registry; v2 serves the same schema from an API.
+
+Implementation (Track C2):
+
+- **Parsing/validation:** `src-tauri/src/plugins/registry.rs` — unknown
+  `schema` rejects the document; malformed entries are skipped with
+  warnings (one bad entry cannot brick the registry); entries reuse the
+  manifest validation (`validate_manifest`). Registry URL default
+  `https://raw.githubusercontent.com/glebis/cull-plugins/main/registry.json`,
+  overridable via the `plugin_registry_url` app setting (a `file://`
+  fixture works for local testing). Tests never touch the network.
+- **Install/uninstall:** `src-tauri/src/plugins/install.rs` — SHA-256
+  verified BEFORE any write; staging dir + atomic rename, so a mismatch
+  or crash leaves no partial install and no grant rows; reinstall
+  replaces (the upgrade path); uninstall removes
+  `$APPDATA/plugins/<id>` AND revokes every grant row. `plugin.install`
+  and `plugin.remove` flow through `log_audit` with actor `plugin:<id>`.
+- **Commands (all `module_plugins`-gated):** `fetch_plugin_registry`,
+  `install_plugin`, `uninstall_plugin`, `list_installed_plugin_info`
+  (`src-tauri/src/commands/plugins.rs`).
+- **Settings → Plugins:** `src/lib/components/PluginsSettings.svelte`,
+  rendered by `McpSettings.svelte` only when the `Plugins (Beta)` module
+  toggle is on. The install consent dialog renders every manifest
+  permission (via `grantPromptModel`) before the install command can be
+  invoked; installed plugins show their granted capabilities. No
+  update-check flow; uninstall is a simple confirm (per the committed
+  scope cuts).
 
 ## 4. Security model — consistent with the MCP token/audit posture
 
@@ -104,8 +137,9 @@ detached signature over the registry; v2 serves the same schema from an API.
   `src/lib/plugins/loader.ts`) *before* download; nothing auto-installs.
 - **Audit:** every `plugin_invoke` call (allowed, denied, unsupported) is
   written through the existing `log_audit` path with actor `plugin:<id>`,
-  inheriting param redaction and `prune_audit_log` retention. Install/remove
-  events are audited in Track C2.
+  inheriting param redaction and `prune_audit_log` retention. Install and
+  uninstall are audited the same way (`plugin.install` / `plugin.remove`,
+  `src-tauri/src/plugins/install.rs`).
 - **Default off:** the whole runtime is behind the `module_plugins` app
   setting (default OFF). When off, the Rust commands refuse/return empty, no
   plugin code loads, and no plugin surface (palette commands, views) is
