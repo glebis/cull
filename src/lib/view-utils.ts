@@ -123,7 +123,6 @@ export interface LoupeImagePathCandidate {
 }
 
 const CULL_APP_DIR_SEGMENT = '/com.glebkalinin.cull/';
-const CODEX_GENERATED_IMAGES_SEGMENT = '/.codex/generated_images/';
 
 function normalizeAssetPath(path: string): string {
     return path.replace(/\\/g, '/');
@@ -134,8 +133,7 @@ export function isAssetProtocolSafePath(path: string | null | undefined): path i
     const normalized = normalizeAssetPath(path);
     return (
         normalized.includes(`${CULL_APP_DIR_SEGMENT}thumbnails/`) ||
-        normalized.includes(`${CULL_APP_DIR_SEGMENT}generated/`) ||
-        normalized.includes(CODEX_GENERATED_IMAGES_SEGMENT)
+        normalized.includes(`${CULL_APP_DIR_SEGMENT}generated/`)
     );
 }
 

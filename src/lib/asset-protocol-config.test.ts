@@ -24,8 +24,12 @@ describe('Tauri asset protocol config', () => {
         expect(allow).toEqual([
             '$APPDATA/thumbnails/**/*',
             '$APPDATA/generated/**/*',
-            '$HOME/.codex/generated_images/**/*',
         ]);
+        // Never ship developer-personal paths (e.g. ~/.codex) in the scope.
+        for (const entry of allow) {
+            expect(entry).not.toMatch(/\.codex/);
+            expect(entry.startsWith('$HOME')).toBe(false);
+        }
     });
 
     it('does not expand the asset protocol scope at runtime for imported originals', () => {

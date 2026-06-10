@@ -45,10 +45,9 @@ Cull is a local-first Tauri 2 desktop app. It never phones home. All data stays 
 
 ### Asset Protocol
 
-- Tauri's `asset:` protocol is scoped to three directories only:
+- Tauri's `asset:` protocol is scoped to two app-owned directories only:
   - `$APPDATA/thumbnails/**`
   - `$APPDATA/generated/**`
-  - `$HOME/.codex/generated_images/**`
 - Cull does not add imported library roots, imported original files, or user-selected clipboard capture folders to that scope at runtime.
 - All other filesystem paths are inaccessible via the asset protocol.
 

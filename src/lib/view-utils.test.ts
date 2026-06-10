@@ -245,7 +245,8 @@ describe('safeAssetPreviewPath', () => {
 
     it('allows static app-owned generated paths', () => {
         expect(isAssetProtocolSafePath('/Users/test/Library/Application Support/com.glebkalinin.cull/generated/img.png')).toBe(true);
-        expect(isAssetProtocolSafePath('/Users/test/.codex/generated_images/img.png')).toBe(true);
+        // Developer-personal output dirs are no longer in the shipped scope.
+        expect(isAssetProtocolSafePath('/Users/test/.codex/generated_images/img.png')).toBe(false);
     });
 
     it('rejects user-selected clipboard capture directories', () => {

@@ -29,4 +29,28 @@ mod tests {
             "connect-src must contain only Tauri IPC sources; provider calls are backend-only"
         );
     }
+
+    #[test]
+    fn asset_protocol_scope_contains_no_personal_paths() {
+        let conf = config();
+        let allow = conf["app"]["security"]["assetProtocol"]["scope"]["allow"]
+            .as_array()
+            .expect("assetProtocol scope allow must be an array");
+
+        let entries: Vec<&str> = allow
+            .iter()
+            .map(|v| v.as_str().expect("scope entries must be strings"))
+            .collect();
+        assert_eq!(
+            entries,
+            vec!["$APPDATA/thumbnails/**/*", "$APPDATA/generated/**/*"],
+            "asset-protocol scope must contain exactly the app-owned $APPDATA dirs"
+        );
+        for entry in &entries {
+            assert!(
+                !entry.contains(".codex") && !entry.starts_with("$HOME"),
+                "asset-protocol scope must not ship developer-personal paths: {entry}"
+            );
+        }
+    }
 }
