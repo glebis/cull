@@ -152,6 +152,7 @@
     {/each}
 {/if}
 
+{#if modulePlugins}
 {#if filteredInstalledRows.length > 0}
     <div class="plugin-group-label">Installed</div>
     {#each filteredInstalledRows as installed (installed.manifest.id)}
@@ -214,6 +215,7 @@
             {/if}
         </div>
     {/each}
+{/if}
 {/if}
 
 {#if consent}

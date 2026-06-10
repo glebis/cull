@@ -3,8 +3,9 @@
 // Repo pattern: source-contract + decision-logic tests (no component mount
 // infra), following client-tools-toggle-contract.test.ts. The load-bearing
 // claim: the install dialog surfaces EVERY manifest permission string before
-// any download/install command can be invoked, and the whole Plugins section
-// is unreachable unless module_plugins is enabled.
+// any download/install command can be invoked, and the Registry/Installed
+// groups (where install happens) are gated behind the module_plugins toggle —
+// the Plugins tab itself is always reachable, but third-party install is not.
 
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -106,5 +107,14 @@ describe('Settings -> Plugins section (source contract)', () => {
         expect(content).toContain('<PluginsSettings');
         expect(content).not.toContain('toggleModulePlugins');
         expect(content).not.toContain('{#if modulePlugins}');
+    });
+
+    it('gates the Registry/Installed groups behind module_plugins', () => {
+        // Install only happens inside the gated block; Core renders before it.
+        const plugins = settings();
+        const gate = plugins.indexOf('{#if modulePlugins}');
+        expect(gate).toBeGreaterThan(-1);
+        // requestInstall (third-party install entry point) is inside the gate.
+        expect(plugins.indexOf('requestInstall(plugin)')).toBeGreaterThan(gate);
     });
 });

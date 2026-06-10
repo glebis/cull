@@ -8,6 +8,7 @@ const items = [
 
 describe('filterPlugins', () => {
     it('returns all on empty query', () => { expect(filterPlugins(items, '')).toHaveLength(2); });
+    it('returns all on whitespace-only query', () => { expect(filterPlugins(items, '   ')).toHaveLength(2); });
     it('matches name case-insensitively', () => { expect(filterPlugins(items, 'publish').map(i => i.id)).toEqual(['cull-publish']); });
     it('matches description', () => { expect(filterPlugins(items, 'foo things').map(i => i.id)).toEqual(['foo']); });
     it('matches a permission', () => { expect(filterPlugins(items, 'export:read').map(i => i.id)).toEqual(['cull-publish']); });
