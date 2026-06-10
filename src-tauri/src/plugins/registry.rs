@@ -106,9 +106,13 @@ fn parse_registry_entry(entry: &serde_json::Value) -> Result<RegistryPlugin, Plu
     let raw: RawRegistryEntry = serde_json::from_value(entry.clone())
         .map_err(|e| PluginError::InvalidManifest(e.to_string()))?;
 
-    if !raw.download.starts_with("https://") {
+    // https for real registries; file:// is the local-fixture escape hatch
+    // (same one `plugin_registry_url` has), used by the committed fixture in
+    // tests/fixtures/plugin-registry and manual local testing. Checksums are
+    // verified at install either way. Plain http stays rejected.
+    if !raw.download.starts_with("https://") && !raw.download.starts_with("file://") {
         return Err(PluginError::InvalidManifest(format!(
-            "download URL '{}' must be https",
+            "download URL '{}' must be https (or a file:// fixture)",
             raw.download
         )));
     }
@@ -234,6 +238,25 @@ mod tests {
         assert!(parsed.warnings[0].contains("bad-permission"));
         assert!(parsed.warnings[1].contains("missing-checksum"));
         assert!(parsed.warnings[2].contains("http-download"));
+    }
+
+    #[test]
+    fn registry_accepts_file_download_for_local_fixtures() {
+        // The same escape hatch the registry URL has: a file:// download lets
+        // the committed fixture registry (tests/fixtures/plugin-registry)
+        // drive the end-to-end install test without any network. http:// is
+        // still rejected (covered above).
+        let mut v: serde_json::Value = serde_json::from_str(&valid_registry_json()).unwrap();
+        v["plugins"][0]["download"] =
+            serde_json::json!("file://plugins/cull-publish/dist/plugin.js");
+
+        let parsed = parse_registry(&v.to_string()).expect("file:// fixture must parse");
+        assert_eq!(parsed.plugins.len(), 1);
+        assert!(parsed.warnings.is_empty());
+        assert_eq!(
+            parsed.plugins[0].download,
+            "file://plugins/cull-publish/dist/plugin.js"
+        );
     }
 
     #[test]
