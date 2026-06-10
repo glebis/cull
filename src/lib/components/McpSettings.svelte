@@ -3,7 +3,7 @@
     import { listMcpTokens, createMcpToken, revokeMcpToken, rotateMcpToken, getAppSetting, setAppSetting, applyAppIconVariant, hasApiKey, setApiKey, deleteApiKey, validateApiKey, backfillRawPreviews } from '$lib/api';
     import type { McpToken } from '$lib/api';
     import { APP_ICON_VARIANTS, normalizeAppIconVariant, type AppIconVariantId } from '$lib/app-icons';
-    import { navigateTo, showToast, staticPublishingEnabled, viewMode } from '$lib/stores';
+    import { clientToolsEnabled, navigateTo, showToast, staticPublishingEnabled, viewMode, voiceDictationEnabled } from '$lib/stores';
     import { CLIPBOARD_PASTE_DATE_FORMAT_SETTING, DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT } from '$lib/clipboard-actions';
     import PrivacyDashboard from './PrivacyDashboard.svelte';
 
@@ -30,6 +30,8 @@
     let autoPurge = $state(true);
     let moduleRaw = $state(false);
     let moduleStaticPublishing = $state(false);
+    let moduleClientTools = $state(false);
+    let moduleVoiceDictation = $state(false);
     let appIconVariant = $state<AppIconVariantId>('primary');
     let clipboardPasteDateFormat = $state(DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT);
     let cohereEmbeddingModel = $state('embed-v4.0');
@@ -63,7 +65,7 @@
     onMount(async () => {
         void tick().then(() => panelElement?.focus());
         try {
-            const [toks, ctSetting, trashSetting, autoUpdateSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting, iconSetting, clipboardPasteDateFormatSetting, cohereEmbeddingSetting, openaiEmbeddingSetting, ollamaEmbeddingUrlSetting, ollamaEmbeddingModelSetting] = await Promise.all([
+            const [toks, ctSetting, trashSetting, autoUpdateSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting, clientToolsSetting, voiceDictationSetting, iconSetting, clipboardPasteDateFormatSetting, cohereEmbeddingSetting, openaiEmbeddingSetting, ollamaEmbeddingUrlSetting, ollamaEmbeddingModelSetting] = await Promise.all([
                 listMcpTokens(),
                 getAppSetting('close_to_tray'),
                 getAppSetting('skip_trash_confirm'),
@@ -73,6 +75,8 @@
                 getAppSetting('auto_purge_missing'),
                 getAppSetting('module_raw'),
                 getAppSetting('module_static_publishing'),
+                getAppSetting('module_client_tools'),
+                getAppSetting('module_voice_dictation'),
                 getAppSetting('app_icon_variant'),
                 getAppSetting(CLIPBOARD_PASTE_DATE_FORMAT_SETTING),
                 getAppSetting('cohere_embedding_model'),
@@ -90,6 +94,10 @@
             moduleRaw = rawSetting === 'true';
             moduleStaticPublishing = staticPublishingSetting === 'true';
             staticPublishingEnabled.set(moduleStaticPublishing);
+            moduleClientTools = clientToolsSetting === 'true';
+            clientToolsEnabled.set(moduleClientTools);
+            moduleVoiceDictation = voiceDictationSetting === 'true';
+            voiceDictationEnabled.set(moduleVoiceDictation);
             appIconVariant = normalizeAppIconVariant(iconSetting);
             if (clipboardPasteDateFormatSetting) clipboardPasteDateFormat = clipboardPasteDateFormatSetting;
             if (cohereEmbeddingSetting) cohereEmbeddingModel = cohereEmbeddingSetting;
@@ -190,6 +198,24 @@
         showToast(
             moduleStaticPublishing ? 'Static Publishing enabled' : 'Static Publishing disabled',
             { type: moduleStaticPublishing ? 'success' : 'info', duration: 3000 },
+        );
+    }
+
+    async function toggleModuleClientTools() {
+        await setAppSetting('module_client_tools', moduleClientTools ? 'true' : 'false');
+        clientToolsEnabled.set(moduleClientTools);
+        showToast(
+            moduleClientTools ? 'Client Tools enabled' : 'Client Tools disabled',
+            { type: moduleClientTools ? 'success' : 'info', duration: 3000 },
+        );
+    }
+
+    async function toggleModuleVoiceDictation() {
+        await setAppSetting('module_voice_dictation', moduleVoiceDictation ? 'true' : 'false');
+        voiceDictationEnabled.set(moduleVoiceDictation);
+        showToast(
+            moduleVoiceDictation ? 'Voice Dictation enabled' : 'Voice Dictation disabled',
+            { type: moduleVoiceDictation ? 'success' : 'info', duration: 3000 },
         );
     }
 
@@ -450,6 +476,24 @@
                     </label>
                     <span class="text-secondary" style="font-size: 0.85em; margin-top: 4px;">
                         Canvas packages, static gallery assets, Claude Code handoffs, and scheduled publish settings
+                    </span>
+                </div>
+                <div class="section-item">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" bind:checked={moduleClientTools} onchange={toggleModuleClientTools} />
+                        Client Tools
+                    </label>
+                    <span class="text-secondary" style="font-size: 0.85em; margin-top: 4px;">
+                        Client delivery list export (CSV) in the command palette
+                    </span>
+                </div>
+                <div class="section-item">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" bind:checked={moduleVoiceDictation} onchange={toggleModuleVoiceDictation} />
+                        Voice Dictation
+                    </label>
+                    <span class="text-secondary" style="font-size: 0.85em; margin-top: 4px;">
+                        Microphone dictation controls in the search bar
                     </span>
                 </div>
             </div>

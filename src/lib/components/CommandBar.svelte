@@ -2,7 +2,7 @@
     import { parseNlQuery, countSmartCollection, createSmartCollection, listSmartCollections } from '$lib/api';
     import { invoke } from '@tauri-apps/api/core';
     import { listen } from '@tauri-apps/api/event';
-    import { smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, searchOpen, viewMode, navigateTo, navigateBack } from '$lib/stores';
+    import { smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, searchOpen, viewMode, navigateTo, navigateBack, voiceDictationEnabled } from '$lib/stores';
     import type { FilterNode } from '$lib/api';
     import { buildSearchPresetLists, type SearchPreset, type SearchPresetKind } from '$lib/search-presets';
     import RuleBuilder from './RuleBuilder.svelte';
@@ -442,23 +442,25 @@
                 role="searchbox"
                 aria-label="Search images"
             />
-            <button
-                class="locale-btn"
-                onclick={toggleLocale}
-                aria-label="Switch dictation language"
-                title={dictationLocale === 'en-US' ? 'English' : 'Russian'}
-            >
-                {dictationLocale === 'en-US' ? 'EN' : 'RU'}
-            </button>
-            <button
-                class="mic-btn"
-                class:listening={isListening}
-                onclick={toggleVoice}
-                aria-label="Toggle voice input"
-                aria-pressed={isListening}
-            >
-                {isListening ? '⏸' : '🎤'}
-            </button>
+            {#if $voiceDictationEnabled}
+                <button
+                    class="locale-btn"
+                    onclick={toggleLocale}
+                    aria-label="Switch dictation language"
+                    title={dictationLocale === 'en-US' ? 'English' : 'Russian'}
+                >
+                    {dictationLocale === 'en-US' ? 'EN' : 'RU'}
+                </button>
+                <button
+                    class="mic-btn"
+                    class:listening={isListening}
+                    onclick={toggleVoice}
+                    aria-label="Toggle voice input"
+                    aria-pressed={isListening}
+                >
+                    {isListening ? '⏸' : '🎤'}
+                </button>
+            {/if}
             <span class="esc-badge">esc</span>
             {#if query}
                 <button class="clear-btn" onclick={handleClear}>×</button>

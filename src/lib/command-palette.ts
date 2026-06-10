@@ -34,6 +34,7 @@ import {
     statusHint,
     resetLoupeTransform,
     staticPublishingEnabled,
+    clientToolsEnabled,
     viewMode,
     zenMode,
     navigateBack,
@@ -778,15 +779,15 @@ function commandItems(): CommandPaletteItem[] {
             keywords: ['export', 'save', 'folder', 'convert', 'deliver', 'output'],
             run: () => exportFolderOpen.set(true),
         },
-        {
+        ...(get(clientToolsEnabled) ? [{
             id: 'collection.export-delivery-csv',
             title: 'Export Delivery List (CSV)…',
             subtitle: 'CSV of the current scope with curator + client feedback columns',
             category: 'Collections',
-            kind: 'command',
+            kind: 'command' as const,
             keywords: ['csv', 'delivery', 'list', 'client', 'export', 'proof', 'final'],
             run: exportDeliveryCsv,
-        },
+        }] : []),
         {
             id: 'client.toggle-favorite',
             title: 'Toggle Client Favorite',
