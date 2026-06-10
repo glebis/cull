@@ -356,7 +356,10 @@
                 console.error('Library health check failed:', e);
             }
         };
-        init().catch(e => console.error('Failed to initialize app:', e));
+        init().catch(e => {
+            console.error('Failed to initialize app:', e);
+            showToast('App initialization failed', { detail: String(e), type: 'error', duration: 10000 });
+        });
         initMenu().catch(e => console.error('Failed to init menu:', e));
 
         const dragUnlisten = listen<boolean>('drag-hover', (event) => {

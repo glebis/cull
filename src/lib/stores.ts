@@ -110,12 +110,18 @@ export interface ImageLoadState {
     loading: boolean;
     loadingMore: boolean;
     hasMore: boolean;
+    /** Message of the last failed load; null when the last load succeeded. */
+    error: string | null;
+    /** True once at least one load has completed successfully. */
+    loaded: boolean;
 }
 
 export const imageLoadState = writable<ImageLoadState>({
     loading: false,
     loadingMore: false,
     hasMore: false,
+    error: null,
+    loaded: false,
 });
 
 // Navigation history stack

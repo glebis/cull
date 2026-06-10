@@ -35,18 +35,21 @@
             folders.set(f);
         } catch (e) {
             console.error('Failed to load folders:', e);
+            showToast('Failed to load folders', { detail: String(e), type: 'error', duration: 8000 });
         }
         try {
             const c = await listCollections();
             collections.set(c);
         } catch (e) {
             console.error('Failed to load collections:', e);
+            showToast('Failed to load collections', { detail: String(e), type: 'error', duration: 8000 });
         }
         try {
             const sc = await listSmartCollections();
             smartCollections.set(sc);
         } catch (e) {
             console.error('Failed to load smart collections:', e);
+            showToast('Failed to load smart collections', { detail: String(e), type: 'error', duration: 8000 });
         }
         try {
             clipboardStatus = await getClipboardMonitorStatus();

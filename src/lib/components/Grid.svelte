@@ -2,7 +2,8 @@
     import { onDestroy } from 'svelte';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState } from '$lib/stores';
-    import { IMAGE_PAGE_SIZE, loadMoreImagesForCurrentScope } from '$lib/image-loading';
+    import { IMAGE_PAGE_SIZE, loadImagesForCurrentScope, loadMoreImagesForCurrentScope } from '$lib/image-loading';
+    import { resolveLibraryViewState } from '$lib/library-view-state';
     import {
         computeGridClickSelection,
         computeGridLayout,
@@ -171,6 +172,18 @@
         });
     });
 
+    let libraryViewState = $derived(resolveLibraryViewState({
+        loading: $imageLoadState.loading,
+        error: $imageLoadState.error,
+        loaded: $imageLoadState.loaded,
+        imageCount: $images.length,
+    }));
+
+    function retryLoad() {
+        loadImagesForCurrentScope({ force: true, invalidateCache: true })
+            .catch(e => console.error('Retry library load failed:', e));
+    }
+
     let prevFocusedIndex = $state<number | null>(null);
     $effect(() => {
         const idx = $focusedIndex;
@@ -191,7 +204,18 @@
     role="grid"
     aria-label={"Image grid, " + $images.length + " images"}
 >
-    {#if $images.length === 0}
+    {#if libraryViewState === 'error'}
+        <div class="load-error" role="alert" data-testid="library-error-banner">
+            <div class="error-icon">&#9888;</div>
+            <div class="error-text">Library failed to load</div>
+            <div class="error-detail">{$imageLoadState.error}</div>
+            <button class="retry-btn" onclick={retryLoad}>Retry</button>
+        </div>
+    {:else if libraryViewState === 'loading'}
+        <div class="empty" aria-live="polite">
+            <div class="empty-text">Loading library&hellip;</div>
+        </div>
+    {:else if libraryViewState === 'empty'}
         <div class="empty">
             <div class="empty-icon">&#9776;</div>
             <div class="empty-text">No images loaded</div>
@@ -249,6 +273,47 @@
         justify-content: center;
         height: 100%;
         gap: 8px;
+    }
+    .load-error {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        gap: var(--spacing);
+        padding: calc(var(--spacing) * 2);
+        text-align: center;
+    }
+    .error-icon {
+        font-size: 48px;
+        color: var(--red);
+    }
+    .error-text {
+        font-size: 16px;
+        color: var(--red);
+    }
+    .error-detail {
+        max-width: 480px;
+        font-size: 12px;
+        color: var(--text-secondary);
+        padding: var(--spacing);
+        background: color-mix(in srgb, var(--red) 10%, transparent);
+        border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+        border-radius: var(--radius);
+        word-break: break-word;
+    }
+    .retry-btn {
+        padding: var(--spacing) calc(var(--spacing) * 2);
+        background: var(--surface);
+        border: 1px solid var(--red);
+        border-radius: var(--radius);
+        color: var(--red);
+        font-family: var(--font);
+        font-size: 13px;
+        cursor: pointer;
+    }
+    .retry-btn:hover {
+        background: color-mix(in srgb, var(--red) 15%, var(--surface));
     }
     .empty-icon {
         font-size: 48px;

@@ -22,6 +22,7 @@ import {
     listImagesFiltered,
     type ImageWithFile,
 } from './api';
+import { formatLibraryLoadError } from './library-view-state';
 
 export const IMAGE_PAGE_SIZE = 200;
 const MAX_SCOPE_CACHE_ENTRIES = 5;
@@ -59,6 +60,8 @@ let nextOffset = 0;
 let hasMore = false;
 let loading = false;
 let loadingMore = false;
+let loadError: string | null = null;
+let loadedOnce = false;
 let requestSeq = 0;
 const scopeCache = new Map<string, CachedScopeState>();
 
@@ -137,7 +140,7 @@ async function fetchPage(scope: ImageScope, offset: number, limit: number): Prom
 }
 
 function setLoadState() {
-    imageLoadState.set({ loading, loadingMore, hasMore });
+    imageLoadState.set({ loading, loadingMore, hasMore, error: loadError, loaded: loadedOnce });
 }
 
 function rememberScopeState(key = activeScopeKey) {
@@ -176,6 +179,7 @@ export function resetImagePaging() {
     hasMore = false;
     loading = false;
     loadingMore = false;
+    loadError = null;
     requestSeq++;
     setLoadState();
 }
@@ -218,6 +222,7 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
     hasMore = false;
     loading = true;
     loadingMore = false;
+    loadError = null;
     setLoadState();
 
     const cached = !force ? scopeCache.get(key) : undefined;
@@ -228,6 +233,7 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
         if (resetFocus) focusedIndex.set(cached.focusedIndex);
         gridScrollTop.set(cached.scrollTop);
         loading = false;
+        loadedOnce = true;
         setLoadState();
         return;
     }
@@ -252,11 +258,17 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
         images.set(loaded);
         nextOffset = offset;
         hasMore = lastRawCount === IMAGE_PAGE_SIZE;
+        loadedOnce = true;
         if (resetFocus) {
             focusedIndex.set(0);
             gridScrollTop.set(0);
         }
         rememberScopeState(key);
+    } catch (e) {
+        if (seq === requestSeq && key === activeScopeKey) {
+            loadError = formatLibraryLoadError(e);
+            console.error('Failed to load images:', e);
+        }
     } finally {
         if (seq === requestSeq && key === activeScopeKey) {
             loading = false;
