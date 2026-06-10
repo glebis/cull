@@ -22,9 +22,39 @@ explicitly waived in the decision sheet before the repo flips public):
 - **Content-sensitivity pass over `docs/cull-audit-2026-06-03.md`** — excluded
   from this audit's inputs by the fresh-eyes rule, so its publishability is
   unassessed (see HYG-004).
-- **PERF-07 partial measurement** — thumbnail p95 and resident-memory
-  thresholds are "expected PASS by architecture", never measured. Tracked as
-  bd `imageview-dkz.31` (Track A, Day 2); gate closes when numbers land here.
+- **PERF-07 partial measurement** — **CLOSED 2026-06-10** (bd `imageview-dkz.31`),
+  both formerly-unmeasured thresholds now measured:
+  - *Thumbnail load p95 < 200ms:* **PASS at 10k** for the synchronous view
+    pipeline. New vitest scenario (`npm run test:perf`, view-utils.test.ts
+    "10k-library per-thumbnail load-path") drives the real Grid/Thumbnail
+    pipeline (scroll direction → overscan → visible window → per-tile
+    base+variant path resolution → a11y label → prefetch warming) across a
+    synthesized 10k-image library, all 10,000 items rendered. Measured over 3
+    runs: per-thumbnail p50 0.0006–0.0014ms / p95 0.0011–0.0041ms; per
+    scroll-batch (whole visible window) p50 0.30–0.67ms / p95 0.54–1.95ms —
+    worst observed p95 is ~100x under budget even at whole-batch granularity.
+    Caveat: the harness cannot observe the webview's asset fetch + JPEG decode
+    of the pre-generated thumbnail files; that cost is per-file and independent
+    of library size, and real-app browsing (below) showed no thumbnail stalls.
+    The assertion stays in the suite as a regression guard.
+  - *Resident memory < 1.5GB after browsing the full library:* **PASS,
+    measured at 2,687 images** (real library size found via
+    `get_library_stats`: 2,687 images / 180 folders / 19 collections — NOT
+    10k; no 10k measurement is claimed). MCP-driven browse of the running
+    production app (~35 grid views via navigate_to_folder/show_collection,
+    including the 1,335-image folder, plus collection views): baseline GUI RSS
+    27.6MB (phys_footprint 108MB) → peak 1.17GB RSS mid-browse → 0.80GB
+    resident immediately after browsing (GUI 628MB + WebContent webview
+    176MB) → 0.67GB at +60s → 0.17GB at +4min. Worst resident reading 1.17GB
+    < 1.5GB. Honest caveats for 10k: (a) extrapolation — resident peak scales
+    with browse rate/views, not library size alone; macOS compression kept
+    residency falling while footprint plateaued, so a linear 10k-views bound
+    is not meaningful, but the threshold is only *measured* at 2,687; (b)
+    `phys_footprint` (dirty incl. compressed) grew 108MB → 1.8GB peak and
+    settled at 1.66GB (≈1.5GB dirty MALLOC_LARGE+SMALL in the Rust process)
+    without returning to baseline — resident memory passes, but the
+    footprint-retention pattern is worth a post-launch leak look (file with
+    CQ-4).
 - **Identity-panel verification asymmetry** — the judge spot-verified only
   Advocate B's citations; Advocates A and C's claims were not independently
   re-verified against the repo. **WAIVED 2026-06-10:** the user overrode the
@@ -378,7 +408,8 @@ SEC-005 is filed post-launch overall, but its proposed fix explicitly carves out
 - **Lens:** performance · **Effort:** S · **Runtime-verified:** yes
 - **Evidence:** Live cull.db measurements (2,887 images, 4,218 files, 18MB): list_images page 29ms; deep OFFSET 2600: 6ms; smart-collection 6-LEFT-JOIN rating filter 1ms; 13-way LIKE search 15ms; list_folders 57ms. Smart-collection/NL p95 < 500ms: PASS (worst 57ms, ≤~200ms extrapolated at 10k). CLIP find-similar < 2s: PASS (3ms @ 279 vectors, ~0.1-0.3s extrapolated at 10k; live MCP find_similar instant; batched hydration, no N+1). Thumbnail p95 < 200ms: expected PASS, not browser-measured. Resident memory < 1.5GB: expected PASS, not measured. Caveats: f.path LIKE with bound parameter cannot use image_files_path_idx (full scan per folder page — first index-fix if libraries grow); raw_metadata shipped on every list row.
 - **Proposed fix:** No action for the 10k bar. Post-launch: drop raw_metadata from list payloads; make folder scoping index-friendly.
-- **Refutation notes:** This is the positive-verification record. Two sub-claims are extrapolated/expected rather than measured (thumbnail p95, RSS) — flagged in Completeness.
+- **Refutation notes:** This is the positive-verification record. Two sub-claims were originally extrapolated/expected rather than measured (thumbnail p95, RSS) — flagged in Completeness.
+- **Measurement update (2026-06-10, bd imageview-dkz.31):** both remaining thresholds measured — thumbnail load-path p95 at a synthetic 10k library is 0.0011–0.0041ms per thumbnail / 0.54–1.95ms per scroll batch (vitest, regression-guarded); resident memory after an MCP-driven full-library browse of the running app measured at 2,687 images (real library size): worst 1.17GB transient, 0.80GB right after browsing, settling to 0.17GB — under the 1.5GB bar at measured size (not a 10k claim). Full numbers and caveats in §0.
 
 #### PERF-08 — Dead dependency: virtua is declared but never imported
 - **Lens:** performance · **Effort:** S · **Runtime-verified:** yes (grep, zero imports)
@@ -688,7 +719,7 @@ Per the decision-sheet rules, evidence_ids may be empty only for rows whose sour
 ### 5.2 Lenses that narrowed scope
 
 - **Release-hygiene (fresh-eyes rule):** docs/cull-audit-2026-06-03.md was deliberately NOT read; HYG-004 asserts only its tracked presence, not its content sensitivity. A content pass is still owed before the repo flips public.
-- **Performance:** two of the four 10k thresholds in PERF-07 are "expected PASS" by architecture, not measured — thumbnail load p95 (no browser-level measurement) and resident memory (webview RSS not attributable from ps). PERF-01's hours-scale throughput and PERF-02's "takes hours" are estimates, not benchmarks. PERF-03's breach risk applies only to the deep-restore case; the fresh-start case measured PASS. The deferred 100k target was explicitly out of scope.
+- **Performance:** two of the four 10k thresholds in PERF-07 were "expected PASS" by architecture at audit time — thumbnail load p95 (no browser-level measurement) and resident memory (webview RSS not attributable from ps). **Update 2026-06-10:** both measured (bd imageview-dkz.31; webview WebContent attribution solved behaviorally by RSS delta during a driven browse) — see §0 for numbers; resident memory is measured at the real 2,687-image library, not at 10k. PERF-01's hours-scale throughput and PERF-02's "takes hours" are estimates, not benchmarks. PERF-03's breach risk applies only to the deep-restore case; the fresh-start case measured PASS. The deferred 100k target was explicitly out of scope.
 - **Security:** all SEC findings are static-analysis/config-review; no live exploitation, no fuzzing, and the MCP HTTP auth path was not probed at runtime. SEC-005's history scan covered credential patterns (AIza/sk-/ghp_/PRIVATE KEY) — other secret formats were not exhaustively patterned.
 - **UX:** parts of the runtime verification ran in a browser tab against :1420 (dev server) rather than the packaged app — UX-02's "all invokes failing" condition and UX-11's document.title are dev-context observations; UX-10 used mock detection data. UX-05 was not tested with an actual screen reader.
 - **Code-quality:** no scope narrowing beyond §5.1 — six of the seven CQ findings are code-traced/grep-verified rather than runtime-reproduced (CQ-2's trash-failure path was not failure-injected, CQ-6's race is timing-dependent and not reproduced, CQ-4's leak growth was not measured); only CQ-1 was reproduced at runtime.

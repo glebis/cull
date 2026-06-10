@@ -432,6 +432,132 @@ describe('grid rendering performance budget', () => {
         expect(checksum).toBeGreaterThan(0);
         expect(elapsedMs).toBeLessThan(250);
     });
+
+    // PERF-07 (bd imageview-dkz.31): thumbnail load-path p95 < 200ms at 10k images.
+    //
+    // Measures the real frontend thumbnail-load pipeline exactly as Grid.svelte +
+    // Thumbnail.svelte execute it per scroll event: scroll-direction hysteresis →
+    // asymmetric overscan → visible-window computation → per-tile path resolution
+    // (base + dpr-sized variant via safeAssetPreviewPath/pickThumbnailVariant) →
+    // a11y label construction → prefetch-index warming path resolution. The webview's
+    // asset fetch + JPEG decode of the pre-generated thumbnail files is outside what
+    // a vitest harness can observe and is NOT included; this measures (and guards)
+    // the entire synchronous JS cost on the load path. Numbers are printed so the
+    // release-audit report can record p50/p95 against the 200ms threshold.
+    it('keeps the 10k-library per-thumbnail load-path p95 under the 200ms budget (PERF-07)', () => {
+        const totalImages = 10_000;
+        const appDir = '/Users/cull/Library/Application Support/com.glebkalinin.cull';
+        const sources = ['midjourney', 'stable_diffusion', 'gpt_image_2', null, 'comfyui'];
+        const decisions = ['keep', 'reject', 'undecided'];
+
+        // Synthesize 10k ImageWithFile-shaped records matching what the grid binds to.
+        const items = Array.from({ length: totalImages }, (_, i) => ({
+            image: { id: `img-${i.toString(16).padStart(8, '0')}` },
+            path: `/Users/cull/Pictures/ai/batch-${i % 37}/generation_${i}_${(i * 2654435761) % 4096}.png`,
+            thumbnail_path: `${appDir}/thumbnails/${((i * 2654435761) >>> 0).toString(16)}_${i}.jpg`,
+            selection: i % 3 === 0
+                ? { star_rating: i % 6, decision: decisions[i % decisions.length] }
+                : null,
+            source_label: sources[i % sources.length],
+            missing_at: i % 1009 === 0 ? '2026-06-01T00:00:00Z' : null,
+        }));
+
+        // Realistic browse setup: 1600x900 viewport, default 160px thumbs, retina.
+        const browseWidth = 1600;
+        const browseHeight = 900;
+        const browseThumb = 160;
+        const browseGap = 4;
+        const dpr = 2;
+        const layout = computeGridLayout(browseWidth, browseThumb, browseGap, totalImages);
+        const preloadRows = Math.max(2, Math.ceil(200 / Math.max(layout.cols, 1)));
+
+        const perItemMs: number[] = [];
+        const perBatchMs: number[] = [];
+        const seen = new Set<number>();
+        let direction: ReturnType<typeof computeScrollDirection> = 'none';
+        let prevScrollTop = 0;
+        let checksum = 0;
+
+        // Page through the entire 10k library viewport-by-viewport (full-library browse).
+        for (let scrollTop = 0; scrollTop <= layout.totalHeight; scrollTop += browseHeight) {
+            const started = globalThis.performance.now();
+
+            // Grid.svelte onScroll pipeline.
+            direction = computeScrollDirection(prevScrollTop, scrollTop, direction);
+            prevScrollTop = scrollTop;
+            const overscan = computeOverscan(direction, preloadRows);
+            const visible = computeVisibleItems(
+                scrollTop,
+                browseHeight,
+                layout.cols,
+                layout.cellSize,
+                totalImages,
+                { overscanRowsBefore: overscan.before, overscanRowsAfter: overscan.after }
+            );
+
+            // Thumbnail.svelte per-tile work for every mounted tile.
+            for (const { index } of visible) {
+                const item = items[index];
+                seen.add(index);
+                const basePath = safeAssetPreviewPath(item);
+                const variantPath = safeAssetPreviewPath(item, { displayPx: browseThumb, dpr });
+                const label = buildThumbnailAriaLabel({
+                    filename: item.path.split('/').pop() ?? 'image',
+                    rating: item.selection?.star_rating ?? 0,
+                    decision: item.selection?.decision ?? 'undecided',
+                    sourceTag: item.source_label,
+                    selected: index % 11 === 0,
+                    missing: !!item.missing_at,
+                });
+                checksum += (basePath?.length ?? 0) + (variantPath?.length ?? 0) + label.length;
+            }
+
+            // Grid.svelte warmPrefetch: decode-warm the next screen's paths.
+            const prefetchIndices = computePrefetchIndices(
+                scrollTop,
+                browseHeight,
+                layout.cols,
+                layout.cellSize,
+                totalImages,
+                direction,
+                Math.max(2, preloadRows)
+            );
+            for (const index of prefetchIndices) {
+                const warmPath = safeAssetPreviewPath(items[index], { displayPx: browseThumb, dpr });
+                checksum += warmPath?.length ?? 0;
+            }
+
+            const elapsed = globalThis.performance.now() - started;
+            perBatchMs.push(elapsed);
+            if (visible.length > 0) perItemMs.push(elapsed / visible.length);
+        }
+
+        const percentile = (samples: number[], p: number): number => {
+            const sorted = [...samples].sort((a, b) => a - b);
+            const rank = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
+            return sorted[Math.max(0, rank)];
+        };
+
+        const itemP50 = percentile(perItemMs, 50);
+        const itemP95 = percentile(perItemMs, 95);
+        const batchP50 = percentile(perBatchMs, 50);
+        const batchP95 = percentile(perBatchMs, 95);
+
+        // Recorded in docs/release-audit-2026-06-09/report.md §0 (PERF-07 gate).
+        console.info(
+            `[PERF-07] 10k thumbnail load-path: per-item p50=${itemP50.toFixed(4)}ms ` +
+            `p95=${itemP95.toFixed(4)}ms; per-scroll-batch p50=${batchP50.toFixed(3)}ms ` +
+            `p95=${batchP95.toFixed(3)}ms (${perBatchMs.length} batches, ${seen.size} items rendered)`
+        );
+
+        expect(checksum).toBeGreaterThan(0);
+        // The full-library browse must actually visit every one of the 10k records.
+        expect(seen.size).toBe(totalImages);
+        // PERF-07 threshold: thumbnail load p95 < 200ms. Guard it per thumbnail AND
+        // per whole scroll batch (the stricter, user-perceived unit).
+        expect(itemP95).toBeLessThan(200);
+        expect(batchP95).toBeLessThan(200);
+    });
 });
 
 describe('formatLoupeInfo', () => {
