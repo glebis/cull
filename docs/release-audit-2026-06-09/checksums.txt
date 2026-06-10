@@ -1,0 +1,1 @@
+41e8b0192e883797ac336cb89707d496cc3414dc0da98993d7ff3f70fa53ca37  src-tauri/target/release/bundle/dmg/Cull_0.2.1_aarch64.dmg
