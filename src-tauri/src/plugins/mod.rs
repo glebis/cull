@@ -13,4 +13,5 @@ pub mod install;
 pub mod invoke;
 pub mod loader;
 pub mod manifest;
+mod proof;
 pub mod registry;
