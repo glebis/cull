@@ -51,6 +51,6 @@ export function expiryState(iso: string | null, now: number = Date.now()): Expir
     if (Number.isNaN(target)) return 'ok';
 
     if (target <= now) return 'expired';
-    if (daysBetween(now, target) < WARN_THRESHOLD_DAYS) return 'warn';
+    if (daysBetween(now, target) <= WARN_THRESHOLD_DAYS) return 'warn';
     return 'ok';
 }

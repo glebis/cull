@@ -44,6 +44,14 @@ describe('expiryState', () => {
         expect(expiryState(new Date(NOW + 5 * day).toISOString(), NOW)).toBe('warn');
     });
 
+    it('warns at exactly the warn threshold boundary (within 7 days)', () => {
+        expect(expiryState(new Date(NOW + 7 * day).toISOString(), NOW)).toBe('warn');
+    });
+
+    it('is ok just beyond the warn threshold (8 days out)', () => {
+        expect(expiryState(new Date(NOW + 8 * day).toISOString(), NOW)).toBe('ok');
+    });
+
     it('reports expired when the timestamp is in the past', () => {
         expect(expiryState(new Date(NOW - day).toISOString(), NOW)).toBe('expired');
     });
