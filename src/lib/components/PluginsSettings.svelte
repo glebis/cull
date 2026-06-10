@@ -1,10 +1,21 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { fetchPluginRegistry, installPlugin, uninstallPlugin, listInstalledPluginInfo } from '$lib/api';
+    import { fetchPluginRegistry, installPlugin, uninstallPlugin, listInstalledPluginInfo, getAppSetting, setAppSetting } from '$lib/api';
     import type { InstalledPluginInfo, RegistryPluginInfo } from '$lib/api';
     import { grantPromptModel } from '$lib/plugins/loader';
     import type { GrantPromptModel } from '$lib/plugins/host';
-    import { showToast } from '$lib/stores';
+    import { pluginsEnabled, showToast } from '$lib/stores';
+
+    let modulePlugins = $state(false);
+
+    async function toggleModulePlugins() {
+        await setAppSetting('module_plugins', modulePlugins ? 'true' : 'false');
+        pluginsEnabled.set(modulePlugins);
+        showToast(
+            modulePlugins ? 'Plugins enabled — restart to load installed plugins' : 'Plugins disabled',
+            { type: modulePlugins ? 'success' : 'info', duration: 4000 },
+        );
+    }
 
     let registryPlugins = $state<RegistryPluginInfo[]>([]);
     let installedPlugins = $state<InstalledPluginInfo[]>([]);
@@ -27,6 +38,7 @@
     }
 
     onMount(async () => {
+        modulePlugins = (await getAppSetting('module_plugins')) === 'true';
         await refreshInstalled();
         try {
             registryPlugins = await fetchPluginRegistry();
@@ -76,6 +88,16 @@
         busy = false;
     }
 </script>
+
+<div class="plugin-toggle-row">
+    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+        <input type="checkbox" bind:checked={modulePlugins} onchange={toggleModulePlugins} />
+        Plugins (Beta)
+    </label>
+    <span class="plugin-muted">
+        Install checksum-verified plugins from the Cull registry; each plugin's permissions are shown before install
+    </span>
+</div>
 
 {#if installedPlugins.length > 0}
     <div class="plugin-group-label">Installed</div>
@@ -158,6 +180,13 @@
 {/if}
 
 <style>
+    .plugin-toggle-row {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding-bottom: var(--spacing);
+        border-bottom: 1px solid var(--border);
+    }
     .plugin-group-label {
         color: var(--text-secondary);
         font-size: 0.8em;

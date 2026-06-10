@@ -3,13 +3,13 @@
     import { listMcpTokens, createMcpToken, revokeMcpToken, rotateMcpToken, getAppSetting, setAppSetting, applyAppIconVariant, hasApiKey, setApiKey, deleteApiKey, validateApiKey, backfillRawPreviews } from '$lib/api';
     import type { McpToken } from '$lib/api';
     import { APP_ICON_VARIANTS, normalizeAppIconVariant, type AppIconVariantId } from '$lib/app-icons';
-    import { clientToolsEnabled, navigateTo, pluginsEnabled, showToast, staticPublishingEnabled, viewMode, voiceDictationEnabled } from '$lib/stores';
+    import { clientToolsEnabled, navigateTo, showToast, staticPublishingEnabled, viewMode, voiceDictationEnabled } from '$lib/stores';
     import { CLIPBOARD_PASTE_DATE_FORMAT_SETTING, DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT } from '$lib/clipboard-actions';
     import { relativeExpiry, expiryState } from '$lib/token-expiry';
     import PrivacyDashboard from './PrivacyDashboard.svelte';
     import PluginsSettings from './PluginsSettings.svelte';
 
-    let activeSettingsTab = $state<'general' | 'appearance' | 'privacy'>('general');
+    let activeSettingsTab = $state<'general' | 'appearance' | 'privacy' | 'plugins'>('general');
 
     let { onclose }: { onclose: () => void } = $props();
 
@@ -36,7 +36,6 @@
     let moduleStaticPublishing = $state(false);
     let moduleClientTools = $state(false);
     let moduleVoiceDictation = $state(false);
-    let modulePlugins = $state(false);
     let appIconVariant = $state<AppIconVariantId>('primary');
     let clipboardPasteDateFormat = $state(DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT);
     let cohereEmbeddingModel = $state('embed-v4.0');
@@ -70,7 +69,7 @@
     onMount(async () => {
         void tick().then(() => panelElement?.focus());
         try {
-            const [toks, ctSetting, trashSetting, autoUpdateSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting, clientToolsSetting, voiceDictationSetting, pluginsSetting, iconSetting, clipboardPasteDateFormatSetting, cohereEmbeddingSetting, openaiEmbeddingSetting, ollamaEmbeddingUrlSetting, ollamaEmbeddingModelSetting] = await Promise.all([
+            const [toks, ctSetting, trashSetting, autoUpdateSetting, httpSetting, portSetting, purgeSetting, rawSetting, staticPublishingSetting, clientToolsSetting, voiceDictationSetting, iconSetting, clipboardPasteDateFormatSetting, cohereEmbeddingSetting, openaiEmbeddingSetting, ollamaEmbeddingUrlSetting, ollamaEmbeddingModelSetting] = await Promise.all([
                 listMcpTokens(),
                 getAppSetting('close_to_tray'),
                 getAppSetting('skip_trash_confirm'),
@@ -82,7 +81,6 @@
                 getAppSetting('module_static_publishing'),
                 getAppSetting('module_client_tools'),
                 getAppSetting('module_voice_dictation'),
-                getAppSetting('module_plugins'),
                 getAppSetting('app_icon_variant'),
                 getAppSetting(CLIPBOARD_PASTE_DATE_FORMAT_SETTING),
                 getAppSetting('cohere_embedding_model'),
@@ -104,8 +102,6 @@
             clientToolsEnabled.set(moduleClientTools);
             moduleVoiceDictation = voiceDictationSetting === 'true';
             voiceDictationEnabled.set(moduleVoiceDictation);
-            modulePlugins = pluginsSetting === 'true';
-            pluginsEnabled.set(modulePlugins);
             appIconVariant = normalizeAppIconVariant(iconSetting);
             if (clipboardPasteDateFormatSetting) clipboardPasteDateFormat = clipboardPasteDateFormatSetting;
             if (cohereEmbeddingSetting) cohereEmbeddingModel = cohereEmbeddingSetting;
@@ -224,15 +220,6 @@
         showToast(
             moduleVoiceDictation ? 'Voice Dictation enabled' : 'Voice Dictation disabled',
             { type: moduleVoiceDictation ? 'success' : 'info', duration: 3000 },
-        );
-    }
-
-    async function toggleModulePlugins() {
-        await setAppSetting('module_plugins', modulePlugins ? 'true' : 'false');
-        pluginsEnabled.set(modulePlugins);
-        showToast(
-            modulePlugins ? 'Plugins enabled — restart to load installed plugins' : 'Plugins disabled',
-            { type: modulePlugins ? 'success' : 'info', duration: 4000 },
         );
     }
 
@@ -386,6 +373,7 @@
             <button class="settings-tab" class:active={activeSettingsTab === 'general'} onclick={() => activeSettingsTab = 'general'}>General</button>
             <button class="settings-tab" class:active={activeSettingsTab === 'appearance'} onclick={() => activeSettingsTab = 'appearance'}>Appearance</button>
             <button class="settings-tab" class:active={activeSettingsTab === 'privacy'} onclick={() => activeSettingsTab = 'privacy'}>Privacy & Data</button>
+            <button class="settings-tab" class:active={activeSettingsTab === 'plugins'} onclick={() => activeSettingsTab = 'plugins'}>Plugins</button>
         </div>
 
         {#if activeSettingsTab === 'privacy'}
@@ -416,6 +404,8 @@
                     {/each}
                 </div>
             </div>
+        {:else if activeSettingsTab === 'plugins'}
+            <PluginsSettings />
         {:else if loading}
             <p class="loading">Loading...</p>
         {:else}
@@ -520,23 +510,7 @@
                         Microphone dictation controls in the search bar
                     </span>
                 </div>
-                <div class="section-item">
-                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                        <input type="checkbox" bind:checked={modulePlugins} onchange={toggleModulePlugins} />
-                        Plugins (Beta)
-                    </label>
-                    <span class="text-secondary" style="font-size: 0.85em; margin-top: 4px;">
-                        Install checksum-verified plugins from the Cull registry; each plugin's permissions are shown before install
-                    </span>
-                </div>
             </div>
-
-            {#if modulePlugins}
-                <div class="section">
-                    <div class="section-header">Plugins</div>
-                    <PluginsSettings />
-                </div>
-            {/if}
 
             <div class="section">
                 <div class="section-header">API Keys</div>
