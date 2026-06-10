@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "app-admin"
-description = "Allows administrative app commands for settings, MCP tokens, jobs, privacy exports, and diagnostics."
+description = "Allows administrative app commands for settings, MCP tokens, jobs, privacy exports, diagnostics, and the plugin runtime bridge."
 commands.allow = [
   "cancel_job",
   "create_mcp_token",
@@ -10,8 +10,10 @@ commands.allow = [
   "get_asset_load_events",
   "get_job",
   "list_jobs",
+  "load_installed_plugins",
   "list_mcp_tokens",
   "pause_job",
+  "plugin_invoke",
   "record_asset_load_event",
   "resume_job",
   "revoke_mcp_token",

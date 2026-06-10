@@ -12,7 +12,9 @@ describe('Tauri asset protocol config', () => {
         expect(csp['img-src']).toContain('asset:');
         expect(csp['connect-src']).not.toContain('http://localhost:*');
         expect(csp['connect-src']).not.toContain('http://127.0.0.1:*');
-        expect(Object.prototype.hasOwnProperty.call(csp, 'script-src')).toBe(false);
+        // The plugin runtime (bd imageview-dkz.23) widens script-src by exactly
+        // blob: for hash-verified plugin imports — nothing else.
+        expect(csp['script-src']).toBe("'self' blob:");
     });
 
     it('limits static asset protocol scope to app-owned/generated image folders', () => {

@@ -32,10 +32,11 @@
     import GenerationResultsStrip from '$lib/components/GenerationResultsStrip.svelte';
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel } from '$lib/stores';
+    import { totalCount, images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel } from '$lib/stores';
     import { trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
+    import { loadInstalledPlugins } from '$lib/plugins/loader';
     import { isPreviewDisplayRoute, nextPreviewFocusPayload, previewSyncImageId } from '$lib/preview-display';
     import {
         PREVIEW_DISPLAY_ALWAYS_ON_TOP_SETTING,
@@ -336,6 +337,13 @@
             staticPublishingEnabled.set((await getAppSetting('module_static_publishing')) === 'true');
             clientToolsEnabled.set((await getAppSetting('module_client_tools')) === 'true');
             voiceDictationEnabled.set((await getAppSetting('module_voice_dictation')) === 'true');
+            // Plugin runtime: default OFF. When off, no plugin code loads and
+            // no plugin surface (palette commands, views) is reachable.
+            const pluginsRuntimeEnabled = (await getAppSetting('module_plugins')) === 'true';
+            pluginsEnabled.set(pluginsRuntimeEnabled);
+            if (pluginsRuntimeEnabled) {
+                loadInstalledPlugins().catch((e) => console.error('[plugins] load failed:', e));
+            }
 
             try {
                 const health = await checkLibraryHealth();

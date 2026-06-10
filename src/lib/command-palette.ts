@@ -48,6 +48,7 @@ import { withDecision, withRating, type ImageDecision } from './selection-update
 import { createWorkflow, readWorkflows, runWorkflow, type CommandWorkflow } from './workflows';
 import { buildDeliveryCsv, type DeliveryRow } from './delivery-csv';
 import { loadSimilarImages } from './similarity';
+import { getPluginPaletteCommands } from './plugins/loader';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 
 export type CommandPaletteItemKind = 'command' | 'destination';
@@ -1031,7 +1032,9 @@ function destinationItems(): CommandPaletteItem[] {
 }
 
 export function getCommandPaletteItems(mode: CommandPaletteMode = get(commandPaletteMode)): CommandPaletteItem[] {
-    const commands = [...workflowItems(), ...commandItems()];
+    // Plugin-contributed commands: the registry itself returns [] unless the
+    // module_plugins flag is on, so no plugin surface leaks here ungated.
+    const commands = [...workflowItems(), ...commandItems(), ...getPluginPaletteCommands()];
     const all = mode === 'commands' ? commands : [...commands, ...destinationItems()];
     return applyCommandAliases(all, readCommandAliases());
 }

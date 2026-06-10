@@ -173,6 +173,7 @@ export const sidebarVisible = writable<boolean>(true);
 export const staticPublishingEnabled = writable<boolean>(false);
 export const clientToolsEnabled = writable<boolean>(false);
 export const voiceDictationEnabled = writable<boolean>(false);
+export const pluginsEnabled = writable<boolean>(false);
 export const showLoupeHistogram = writable<boolean>(false);
 
 export const GRID_PRESETS = [
