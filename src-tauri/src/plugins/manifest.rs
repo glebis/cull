@@ -41,6 +41,23 @@ pub struct PluginManifest {
     pub repo: String,
 }
 
+/// MCP capabilities that are valid for tokens but must NEVER be granted to a
+/// plugin manifest: they let a plugin manage tokens, mutate app settings, or
+/// write into the library. Checked inside [`is_known_permission`].
+pub(crate) const DENIED_PLUGIN_PERMISSIONS: &[&str] =
+    &["tokens:manage", "settings:manage", "import:write"];
+
+/// A plugin id is safe iff it is a single, non-empty path component made up
+/// only of ASCII alphanumerics, `-`, or `_`. This blocks path traversal
+/// (`../evil`), separators (`a/b`, `a\b`), absolute paths (`/abs`), empty
+/// ids, and NUL bytes before the id is ever joined into a filesystem path.
+pub fn is_safe_plugin_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 /// Parse and structurally validate a plugin manifest. Does NOT check
 /// `min_app_version` against the running app — see [`check_min_app_version`].
 pub fn parse_manifest(json: &str) -> Result<PluginManifest, PluginError> {
@@ -69,6 +86,13 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), PluginError> {
         }
     }
 
+    if !is_safe_plugin_id(&manifest.id) {
+        return Err(PluginError::InvalidManifest(format!(
+            "id '{}' must be a single path segment of alphanumerics, '-', or '_'",
+            manifest.id.escape_debug()
+        )));
+    }
+
     for permission in &manifest.permissions {
         if !is_known_permission(permission) {
             return Err(PluginError::InvalidManifest(format!(
@@ -93,6 +117,11 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), PluginError> {
 /// MCP capability set (sourced from `tokens::capabilities_for_role`, not a
 /// forked list) or a `module:<key>` permission with a non-empty key.
 pub fn is_known_permission(permission: &str) -> bool {
+    // Explicit deny-list: these capabilities are valid for MCP tokens but must
+    // never appear in a plugin manifest.
+    if DENIED_PLUGIN_PERMISSIONS.contains(&permission) {
+        return false;
+    }
     if let Some(module_key) = permission.strip_prefix("module:") {
         return !module_key.trim().is_empty();
     }
@@ -258,11 +287,16 @@ mod tests {
 
     #[test]
     fn plugin_manifest_permissions_use_mcp_capability_vocabulary() {
-        // Every capability from the token vocabulary is accepted; the list is
-        // sourced from tokens::capabilities_for_role, not forked here.
+        // Every non-privileged capability from the token vocabulary is
+        // accepted; the list is sourced from tokens::capabilities_for_role,
+        // not forked here. Privileged caps are deny-listed (see
+        // is_known_permission_denies_privileged_caps).
         for cap in
             crate::services::tokens::capabilities_for_role(crate::services::tokens::ROLE_ADMIN)
         {
+            if DENIED_PLUGIN_PERMISSIONS.contains(&cap) {
+                continue;
+            }
             assert!(
                 is_known_permission(cap),
                 "MCP capability '{}' must be a valid plugin permission",
@@ -330,6 +364,49 @@ mod tests {
 
         // Component-wise, not lexicographic: 0.10.0 >= 0.2.1.
         assert!(check_min_app_version(&m, "0.10.0").is_ok());
+    }
+
+    #[test]
+    fn validate_manifest_rejects_id_with_path_separators() {
+        for bad_id in ["../evil", "../../x", "a/b", "a\\b", "/abs", "", "evil\0id"] {
+            let mut v: serde_json::Value = serde_json::from_str(&valid_manifest_json()).unwrap();
+            v["id"] = serde_json::Value::String(bad_id.to_string());
+            let result = parse_manifest(&v.to_string());
+            assert!(
+                matches!(result, Err(PluginError::InvalidManifest(_))),
+                "id '{}' must be rejected, got {:?}",
+                bad_id.escape_debug(),
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn validate_manifest_accepts_safe_id() {
+        for good_id in ["cull-publish", "my_plugin", "Plugin1"] {
+            let mut v: serde_json::Value = serde_json::from_str(&valid_manifest_json()).unwrap();
+            v["id"] = serde_json::Value::String(good_id.to_string());
+            assert!(
+                parse_manifest(&v.to_string()).is_ok(),
+                "id '{good_id}' must be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn is_known_permission_denies_privileged_caps() {
+        for denied in ["tokens:manage", "settings:manage", "import:write"] {
+            assert!(
+                !is_known_permission(denied),
+                "privileged capability '{denied}' must never be a plugin permission"
+            );
+        }
+        for allowed in ["library:read", "export:read", "module:static-publishing"] {
+            assert!(
+                is_known_permission(allowed),
+                "capability '{allowed}' must remain a valid plugin permission"
+            );
+        }
     }
 
     #[test]

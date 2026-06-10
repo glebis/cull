@@ -11,7 +11,9 @@
 //! Install and uninstall are audit-logged with actor `plugin:<id>`, like
 //! every `plugin_invoke` call.
 
-use super::manifest::{check_min_app_version, validate_manifest, PluginError, PluginManifest};
+use super::manifest::{
+    check_min_app_version, is_safe_plugin_id, validate_manifest, PluginError, PluginManifest,
+};
 use crate::services::{tokens, ServiceContext};
 use std::path::Path;
 
@@ -134,6 +136,14 @@ pub fn uninstall_plugin(
     plugins_dir: &Path,
     plugin_id: &str,
 ) -> Result<(), PluginError> {
+    // The plugin_id arrives from the frontend command arg — validate before
+    // any path join or removal so a traversal id can never touch the FS.
+    if !is_safe_plugin_id(plugin_id) {
+        return Err(PluginError::InvalidManifest(format!(
+            "plugin id '{}' must be a single safe path segment",
+            plugin_id.escape_debug()
+        )));
+    }
     let result = (|| -> Result<(), PluginError> {
         let target = plugins_dir.join(plugin_id);
         if target.exists() {
@@ -355,6 +365,33 @@ mod tests {
             f.db.granted_plugin_capabilities("cull-publish").unwrap(),
             vec!["library:read"]
         );
+    }
+
+    #[test]
+    fn uninstall_rejects_unsafe_plugin_id() {
+        let f = Fixture::new();
+        let ctx = f.ctx();
+        // Install a legit plugin so there is something on disk to (not) remove.
+        let manifest = manifest_for(BUNDLE.as_bytes());
+        install_plugin_from_bytes(
+            &ctx,
+            &f.plugins_dir(),
+            &manifest,
+            BUNDLE.as_bytes(),
+            "0.2.1",
+        )
+        .unwrap();
+        let before = dir_entries(&f.plugins_dir());
+
+        let err = uninstall_plugin(&ctx, &f.plugins_dir(), "../../x").unwrap_err();
+        assert!(
+            matches!(err, PluginError::InvalidManifest(_)),
+            "unsafe plugin_id must be rejected, got {err:?}"
+        );
+
+        // Nothing was removed: the legit install is untouched.
+        assert_eq!(dir_entries(&f.plugins_dir()), before);
+        assert!(f.plugins_dir().join("cull-publish").exists());
     }
 
     #[test]

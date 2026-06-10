@@ -37,15 +37,40 @@ fn registry_url(state: &AppState) -> String {
         .unwrap_or_else(|| registry::DEFAULT_REGISTRY_URL.to_string())
 }
 
-/// Fetch bytes for a registry or bundle URL. HTTPS only, with a `file://`
-/// escape hatch for local registry fixtures (tests never hit this path —
-/// they exercise the pure parse/install functions directly).
+/// The shipping-binary scheme policy: only `https://` is ever fetchable in a
+/// release build. This is cfg-independent so it can be unit-tested to assert
+/// the production behavior (e.g. `file://` is rejected) even from a test
+/// build. A `settings:manage` holder must not be able to read arbitrary local
+/// files via the registry/bundle download path.
+fn scheme_allowed_in_release(url: &str) -> bool {
+    url.starts_with("https://")
+}
+
+/// Whether a download URL scheme is allowed for the current build. Equals the
+/// release policy, plus a `cfg(test)`-only `file://` escape hatch for local
+/// registry fixtures so the hatch can never reach a shipping binary.
+fn is_allowed_download_scheme(url: &str) -> bool {
+    if scheme_allowed_in_release(url) {
+        return true;
+    }
+    #[cfg(test)]
+    if url.starts_with("file://") {
+        return true;
+    }
+    false
+}
+
+/// Fetch bytes for a registry or bundle URL. HTTPS only in shipping builds,
+/// with a `cfg(test)`-only `file://` escape hatch for local registry
+/// fixtures. The pure parse/install functions and the proof test exercise
+/// install from bytes directly and never reach this path.
 async fn fetch_url_bytes(url: &str) -> Result<Vec<u8>, String> {
+    if !is_allowed_download_scheme(url) {
+        return Err(format!("unsupported scheme for URL '{url}'"));
+    }
+    #[cfg(test)]
     if let Some(path) = url.strip_prefix("file://") {
         return std::fs::read(path).map_err(|e| format!("cannot read '{url}': {e}"));
-    }
-    if !url.starts_with("https://") {
-        return Err(format!("refusing to fetch non-https URL '{url}'"));
     }
     let response = reqwest::get(url)
         .await
@@ -176,4 +201,33 @@ pub async fn load_installed_plugins(
     }
     let dir = loader::plugins_dir(&state.app_data_dir);
     Ok(loader::load_installed_plugins(&dir, &app_version(&app)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fetch_rejects_file_scheme_in_release() {
+        // The shipping policy rejects file:// (and any non-https scheme) so a
+        // settings:manage holder cannot read arbitrary local files via the
+        // download path.
+        assert!(!scheme_allowed_in_release("file:///etc/passwd"));
+        assert!(!scheme_allowed_in_release("http://example.com/x"));
+        assert!(!scheme_allowed_in_release("ftp://example.com/x"));
+        // https:// stays allowed.
+        assert!(scheme_allowed_in_release(
+            "https://example.com/registry.json"
+        ));
+    }
+
+    #[test]
+    fn test_build_keeps_file_fixture_hatch() {
+        // The cfg(test) escape hatch is available for local fixtures, but only
+        // in test builds — scheme_allowed_in_release proves it is absent from
+        // shipping.
+        assert!(is_allowed_download_scheme("file:///tmp/fixture.json"));
+        assert!(is_allowed_download_scheme("https://example.com/x"));
+        assert!(!is_allowed_download_scheme("http://example.com/x"));
+    }
 }
