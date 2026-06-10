@@ -51,13 +51,58 @@ pub struct ExportImagesResult {
     pub files: Vec<ExportedImage>,
 }
 
+/// Confine an export output directory the same way static publishing's
+/// `resolve_export_root` does: reject `..` components, canonicalize, and
+/// require the destination to live under $HOME or the system temp directory.
+fn confine_output_dir(path: &Path) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
+    confine_output_dir_with_roots(path, &home, &std::env::temp_dir())
+}
+
+fn confine_output_dir_with_roots(path: &Path, home: &Path, temp: &Path) -> Result<(), String> {
+    // Reject path traversal
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err("Export path must not contain '..' components".to_string());
+    }
+
+    // Ensure path is under home directory or system temp directory
+    let canonical = if path.exists() {
+        path.canonicalize()
+            .map_err(|e| format!("Invalid export path: {}", e))?
+    } else if let Some(parent) = path.parent().filter(|p| p.exists()) {
+        let canonical_parent = parent
+            .canonicalize()
+            .map_err(|e| format!("Invalid export path parent: {}", e))?;
+        canonical_parent.join(path.file_name().unwrap_or_default())
+    } else {
+        path.to_path_buf()
+    };
+    let home_canonical = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
+    let temp_canonical = temp.canonicalize().unwrap_or_else(|_| temp.to_path_buf());
+    if !canonical.starts_with(home)
+        && !canonical.starts_with(&home_canonical)
+        && !canonical.starts_with(&temp_canonical)
+    {
+        return Err(format!(
+            "Export path must be under the home directory ({})",
+            home.display()
+        ));
+    }
+
+    Ok(())
+}
+
 pub fn export_images(
     db: &Database,
     _app_data_dir: &Path,
     params: ExportImagesParams,
 ) -> Result<ExportImagesResult, String> {
-    let images = resolve_export_images(db, &params)?;
     let output_dir = PathBuf::from(&params.output_dir);
+    confine_output_dir(&output_dir)?;
+    let images = resolve_export_images(db, &params)?;
     fs::create_dir_all(&output_dir).map_err(|e| {
         format!(
             "Failed to create output dir '{}': {}",
@@ -381,6 +426,99 @@ mod tests {
             assert!(validate_export_format(fmt).is_ok());
         }
         assert!(validate_export_format("gif").is_err());
+    }
+
+    /// Canonicalized tempdir, so prefix comparisons match canonicalized paths
+    /// (on macOS /var/... resolves to /private/var/...). Production
+    /// `dirs::home_dir()` is already canonical.
+    fn canonical_tempdir() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let canon = std::fs::canonicalize(tmp.path()).unwrap();
+        (tmp, canon)
+    }
+
+    #[test]
+    fn export_rejects_output_dir_outside_home() {
+        let db = Database::open(Path::new(":memory:")).unwrap();
+        for target in [
+            format!("/etc/cull-test-export-{}", std::process::id()),
+            format!("/Library/cull-test-export-{}", std::process::id()),
+        ] {
+            let params = ExportImagesParams {
+                image_ids: Some(vec!["missing-image".to_string()]),
+                collection_id: None,
+                folder_path: None,
+                output_dir: target.clone(),
+                format: None,
+                flatten: None,
+                naming: None,
+            };
+            let err = export_images(&db, Path::new("/tmp"), params).unwrap_err();
+            assert!(err.contains("home directory"), "{err}");
+            assert!(
+                !Path::new(&target).exists(),
+                "rejected export must not create '{}'",
+                target
+            );
+        }
+    }
+
+    #[test]
+    fn export_rejects_parent_traversal_in_output_dir() {
+        let db = Database::open(Path::new(":memory:")).unwrap();
+        let home = dirs::home_dir().unwrap();
+        let target = home.join("Pictures/../../../etc/cull-test-traversal");
+        let params = ExportImagesParams {
+            image_ids: Some(vec!["missing-image".to_string()]),
+            collection_id: None,
+            folder_path: None,
+            output_dir: target.to_string_lossy().to_string(),
+            format: None,
+            flatten: None,
+            naming: None,
+        };
+        let err = export_images(&db, Path::new("/tmp"), params).unwrap_err();
+        assert!(err.contains(".."), "{err}");
+        assert!(!Path::new("/etc/cull-test-traversal").exists());
+    }
+
+    #[test]
+    fn export_accepts_home_and_temp_dirs() {
+        // Unit-level: paths under an injected home root are accepted.
+        let (_home_guard, home) = canonical_tempdir();
+        let (_temp_guard, temp) = canonical_tempdir();
+        let under_home = home.join("exports/run-1");
+        assert!(confine_output_dir_with_roots(&under_home, &home, &temp).is_ok());
+        let under_temp = temp.join("exports/run-2");
+        assert!(confine_output_dir_with_roots(&under_temp, &home, &temp).is_ok());
+
+        // End-to-end: a real temp-dir export still works (no images matched,
+        // so this only exercises confinement + directory creation).
+        let db = Database::open(Path::new(":memory:")).unwrap();
+        let (_out_guard, out_root) = canonical_tempdir();
+        let out_dir = out_root.join("cull-export");
+        let params = ExportImagesParams {
+            image_ids: Some(vec!["missing-image".to_string()]),
+            collection_id: None,
+            folder_path: None,
+            output_dir: out_dir.to_string_lossy().to_string(),
+            format: None,
+            flatten: None,
+            naming: None,
+        };
+        let result = export_images(&db, Path::new("/tmp"), params).unwrap();
+        assert_eq!(result.exported, 0);
+        assert!(out_dir.exists());
+    }
+
+    #[test]
+    fn confinement_rejects_paths_outside_home_and_temp() {
+        let (_home_guard, home) = canonical_tempdir();
+        let (_temp_guard, temp) = canonical_tempdir();
+        let (_other_guard, other) = canonical_tempdir();
+        let outside = other.join("exports");
+        let err = confine_output_dir_with_roots(&outside, &home, &temp).unwrap_err();
+        assert!(err.contains("home directory"), "{err}");
     }
 }
 
