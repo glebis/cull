@@ -48,7 +48,7 @@ import { createWorkflow, readWorkflows, runWorkflow, type CommandWorkflow } from
 import { buildDeliveryCsv, type DeliveryRow } from './delivery-csv';
 import { loadSimilarImages } from './similarity';
 import { getPluginPaletteCommands } from './plugins/loader';
-import { currentPublishSurface } from './plugins/publish-surface';
+import { tabRegistry } from './plugins/tab-registry';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 
 export type CommandPaletteItemKind = 'command' | 'destination';
@@ -118,17 +118,25 @@ export const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
     'Cmd+Backspace': 'Delete focused image permanently',
 };
 
-const VIEW_COMMANDS: Array<{ mode: ViewMode; title: string; subtitle: string; shortcut?: string; requiresStaticPublishing?: boolean }> = [
-    { mode: 'grid', title: 'Grid View', subtitle: 'Browse thumbnails', shortcut: 'Cmd+1' },
-    { mode: 'loupe', title: 'Loupe View', subtitle: 'Inspect the focused image', shortcut: 'Cmd+2' },
-    { mode: 'compare', title: 'Compare View', subtitle: 'Compare selected or adjacent images', shortcut: 'Cmd+3' },
-    { mode: 'canvas', title: 'Canvas View', subtitle: 'Arrange selected images spatially', shortcut: 'Cmd+4' },
-    { mode: 'lineage', title: 'Lineage View', subtitle: 'Review related generations', shortcut: 'Cmd+5' },
-    { mode: 'embeddings', title: 'Embeddings View', subtitle: 'Explore visual clusters', shortcut: 'Cmd+6' },
-    { mode: 'publish', title: 'Publish View', subtitle: 'Build a static site package', requiresStaticPublishing: true },
-    { mode: 'export', title: 'Export View', subtitle: 'Prepare images for publishing', shortcut: 'Cmd+7' },
-    { mode: 'tinder', title: 'Speed Review', subtitle: 'Fast accept or reject triage', shortcut: 'Cmd+8' },
-];
+// View commands are derived from the tab registry (the single source of truth
+// for top-level tabs). Cmd+digit shortcuts are an app-level concern that stays
+// here, keyed by core tab id; plugin tabs have no built-in digit shortcut.
+const CORE_VIEW_SHORTCUTS: Partial<Record<string, string>> = {
+    grid: 'Cmd+1', loupe: 'Cmd+2', compare: 'Cmd+3', canvas: 'Cmd+4',
+    lineage: 'Cmd+5', embeddings: 'Cmd+6', export: 'Cmd+7', tinder: 'Cmd+8',
+};
+
+function buildViewCommands(): Array<{ mode: ViewMode; title: string; subtitle: string; shortcut?: string }> {
+    return get(tabRegistry).map(t => ({
+        mode: t.id,
+        title: t.label,
+        subtitle: t.subtitle ?? '',
+        shortcut: CORE_VIEW_SHORTCUTS[t.id],
+    }));
+}
+
+/** Test seam. */
+export function viewCommandsForTest() { return buildViewCommands(); }
 
 function storageAvailable(): boolean {
     return typeof localStorage !== 'undefined';
@@ -718,10 +726,7 @@ function commandItems(): CommandPaletteItem[] {
             defaultShortcut: 'Cmd+0',
             run: () => resetLoupeTransform(),
         },
-        ...VIEW_COMMANDS
-            // Publish is available when either the cull-publish plugin or the
-            // module-gated core view can render it (Track C3 defer/fallback).
-            .filter(({ requiresStaticPublishing }) => !requiresStaticPublishing || currentPublishSurface() !== 'hidden')
+        ...buildViewCommands()
             .map(({ mode, title, subtitle, shortcut }): CommandPaletteItem => ({
                 id: `view.${mode}`,
                 title,

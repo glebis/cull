@@ -36,8 +36,8 @@ import {
     sessions,
     sessionCanvases,
     smartCollections,
-    staticPublishingEnabled,
 } from './stores';
+import { clearPluginTabs, registerCoreTabs, registerPluginTab } from './plugins/tab-registry';
 
 function keyEvent(key: string, modifiers: Partial<KeyboardEvent> = {}): KeyboardEvent {
     return {
@@ -79,7 +79,8 @@ describe('command palette helpers', () => {
         collections.set([]);
         collectMode.set(false);
         collectModeTarget.set(null);
-        staticPublishingEnabled.set(false);
+        clearPluginTabs();
+        registerCoreTabs();
     }
 
     it('scores title, category, keyword, and acronym matches', () => {
@@ -248,15 +249,16 @@ describe('command palette helpers', () => {
         expect(findDuplicateCommandHotkeys(items, {})).toEqual([]);
     });
 
-    it('shows Publish View before Export View only when Static Publishing is enabled', () => {
+    it('shows Publish View as a command only when a plugin registers the publish tab', () => {
         resetCommandContext();
         expect(getCommandPaletteItems('commands').map(i => i.id)).not.toContain('view.publish');
 
-        staticPublishingEnabled.set(true);
-        const ids = getCommandPaletteItems('commands').map(i => i.id);
+        registerPluginTab({ id: 'publish', label: 'Publish View', subtitle: 'Build a static site package', mountView: () => {} });
+        const items = getCommandPaletteItems('commands');
+        const ids = items.map(i => i.id);
 
         expect(ids).toContain('view.publish');
-        expect(ids.indexOf('view.publish')).toBe(ids.indexOf('view.export') - 1);
+        expect(items.find(i => i.id === 'view.publish')?.title).toBe('Publish View');
     });
 
     it('includes collection workflow commands', () => {

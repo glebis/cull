@@ -37,8 +37,11 @@ describe('static publishing navigation contract', () => {
         expect(page).toContain('<StaticPublishingSettings');
         expect(page).not.toContain("$viewMode === 'publish' && $staticPublishingEnabled");
 
-        // Palette command and native menu route through the same decision.
-        expect(palette).toContain("currentPublishSurface() !== 'hidden'");
+        // The palette derives its view commands from the tab registry (single
+        // source of truth) rather than gating on the raw module setting. The
+        // native menu still routes through currentPublishSurface until the
+        // publish migration (Tasks 7-9) relocates it.
+        expect(palette).toContain("from './plugins/tab-registry'");
         expect(palette).not.toContain('get(staticPublishingEnabled)');
         expect(menu).toContain("currentPublishSurface() !== 'hidden'");
     });
