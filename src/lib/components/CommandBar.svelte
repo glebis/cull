@@ -427,7 +427,7 @@
         <span class="pill-icon">🔍</span>
         <span class="pill-query">{query || 'Filter active'}</span>
         <span class="pill-count">{matchCount}</span>
-        <button class="pill-close" onclick={(e) => { e.stopPropagation(); handleClose(); }}>×</button>
+        <button class="pill-close" onclick={(e) => { e.stopPropagation(); handleClose(); }} aria-label="Remove filter" title="Remove filter">×</button>
     </div>
 {:else if $searchOpen}
     <div class="command-bar-wrapper" bind:this={barEl}>
@@ -463,9 +463,9 @@
             {/if}
             <span class="esc-badge">esc</span>
             {#if query}
-                <button class="clear-btn" onclick={handleClear}>×</button>
+                <button class="clear-btn" onclick={handleClear} aria-label="Clear query" title="Clear query">⌫</button>
             {/if}
-            <button class="close-btn" onclick={handleClose}>×</button>
+            <button class="close-btn" onclick={handleClose} aria-label="Close search" title="Close search">×</button>
         </div>
 
         {#if !query.trim() && !showRules && !saving && (savedSearchPresets.length > 0 || autoSearchPresets.length > 0 || isLoadingSearchPresets)}

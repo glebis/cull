@@ -6,27 +6,27 @@
     }
 </script>
 
-{#if $toasts.length > 0}
-    <div class="toast-container">
-        {#each $toasts as toast (toast.id)}
-            <div class="toast toast-{toast.type}">
-                <div class="toast-message">{toast.message}</div>
-                {#if toast.detail}
-                    <div class="toast-detail">{toast.detail}</div>
-                {/if}
-                {#if toast.actions && toast.actions.length > 0}
-                    <div class="toast-actions">
-                        {#each toast.actions as action}
-                            <button class="toast-action-btn" onclick={() => { action.onclick(); dismiss(toast.id); }}>
-                                {action.label}
-                            </button>
-                        {/each}
-                    </div>
-                {/if}
-            </div>
-        {/each}
-    </div>
-{/if}
+<!-- Always-rendered polite live region so screen readers announce toasts;
+     error toasts escalate to role="alert" (implicitly assertive). -->
+<div class="toast-container" role="status" aria-live="polite">
+    {#each $toasts as toast (toast.id)}
+        <div class="toast toast-{toast.type}" role={toast.type === 'error' ? 'alert' : undefined}>
+            <div class="toast-message">{toast.message}</div>
+            {#if toast.detail}
+                <div class="toast-detail">{toast.detail}</div>
+            {/if}
+            {#if toast.actions && toast.actions.length > 0}
+                <div class="toast-actions">
+                    {#each toast.actions as action}
+                        <button class="toast-action-btn" onclick={() => { action.onclick(); dismiss(toast.id); }}>
+                            {action.label}
+                        </button>
+                    {/each}
+                </div>
+            {/if}
+        </div>
+    {/each}
+</div>
 
 <style>
     .toast-container {
