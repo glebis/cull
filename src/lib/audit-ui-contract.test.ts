@@ -89,7 +89,10 @@ describe('impeccable audit UI contracts', () => {
 
     it('clarifies destructive, privacy-sensitive, and publishing copy', () => {
         expect(sidebar).toContain('Remove folder from library');
-        expect(sidebar).toContain('Install model manually');
+        // Model setup must not imply an in-app auto-download (bd imageview-dkz.19
+        // replaced the 'Install model manually' dead-end with a setup-guide link).
+        expect(sidebar).toContain('Setup guide');
+        expect(sidebar).not.toMatch(/Download model/i);
         expect(sidebar).toContain('Analyze uncatalogued images');
         expect(sidebar).toContain('Publish clipboard collection');
         expect(settings).toContain('Remote access settings');

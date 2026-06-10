@@ -1,7 +1,9 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
     import { convertFileSrc } from '@tauri-apps/api/core';
-    import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState } from '$lib/stores';
+    import { open } from '@tauri-apps/plugin-dialog';
+    import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState, showToast, totalCount, folders } from '$lib/stores';
+    import { importFolder as apiImportFolder, getImageCount, listFolders } from '$lib/api';
     import { IMAGE_PAGE_SIZE, loadImagesForCurrentScope, loadMoreImagesForCurrentScope } from '$lib/image-loading';
     import { resolveLibraryViewState } from '$lib/library-view-state';
     import {
@@ -184,6 +186,32 @@
             .catch(e => console.error('Retry library load failed:', e));
     }
 
+    // First-run onboarding: the empty state IS the onboarding, so it gets a
+    // working Import Folder action instead of only pointing at the sidebar.
+    let importingFromEmptyState = $state(false);
+    async function importFolderFromEmptyState() {
+        if (importingFromEmptyState) return;
+        const selected = await open({ directory: true, multiple: false });
+        if (!selected) return;
+        importingFromEmptyState = true;
+        try {
+            const result = await apiImportFolder(selected as string);
+            const folderName = (selected as string).split('/').filter(Boolean).pop() ?? selected;
+            let detail = `+${result.imported} imported, ${result.skipped} skipped`;
+            if (result.errors.length > 0) detail += `, ${result.errors.length} errors`;
+            showToast(`Imported "${folderName}"`, { detail, type: 'success', duration: 8000 });
+            totalCount.set(await getImageCount());
+            try {
+                folders.set(await listFolders());
+            } catch (_) {}
+            await loadImagesForCurrentScope({ force: true, invalidateCache: true });
+        } catch (e) {
+            showToast('Import failed', { detail: String(e), type: 'error', duration: 10000 });
+        } finally {
+            importingFromEmptyState = false;
+        }
+    }
+
     let prevFocusedIndex = $state<number | null>(null);
     $effect(() => {
         const idx = $focusedIndex;
@@ -218,8 +246,16 @@
     {:else if libraryViewState === 'empty'}
         <div class="empty">
             <div class="empty-icon">&#9776;</div>
-            <div class="empty-text">No images loaded</div>
-            <div class="empty-hint">Use the sidebar to import a folder</div>
+            <div class="empty-text">Your library is empty</div>
+            <button
+                class="empty-import-btn"
+                onclick={importFolderFromEmptyState}
+                disabled={importingFromEmptyState}
+            >
+                {importingFromEmptyState ? 'Importing…' : '+ Import Folder'}
+            </button>
+            <div class="empty-hint">or drag &amp; drop a folder of images anywhere in this window</div>
+            <div class="empty-hint">Agents can import for you too — connect via the Cull MCP server</div>
         </div>
     {:else}
         <div class="grid-scroll" style="height: {totalHeight}px; position: relative;">
@@ -318,6 +354,28 @@
     .empty-icon {
         font-size: 48px;
         color: var(--border);
+    }
+    .empty-import-btn {
+        padding: var(--spacing) calc(var(--spacing) * 2);
+        background: color-mix(in srgb, var(--blue) 14%, transparent);
+        border: 1px solid var(--blue);
+        border-radius: var(--radius);
+        color: var(--blue);
+        font-family: var(--font);
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 120ms, transform 80ms;
+    }
+    .empty-import-btn:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--blue) 22%, transparent);
+    }
+    .empty-import-btn:active:not(:disabled) {
+        transform: translateY(1px);
+    }
+    .empty-import-btn:disabled {
+        opacity: 0.5;
+        cursor: default;
     }
     .empty-text {
         font-size: 16px;

@@ -6,6 +6,8 @@
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, SmartCollection } from '$lib/api';
     import { applyClipboardMonitorCollection } from '$lib/clipboard-monitor';
+    import { MODEL_SETUP_GUIDE_URL, resolveAiSectionExpanded } from '$lib/onboarding';
+    import { openUrl } from '@tauri-apps/plugin-opener';
     import { onMount } from 'svelte';
     import { get } from 'svelte/store';
 
@@ -337,8 +339,11 @@
         }
     }
 
-    // AI Models state
-    let aiExpanded = $state(true);
+    // AI Models state. Collapsed by default until the library has images
+    // so first-run users see content sections, not model jargon; a manual
+    // toggle always wins.
+    let aiToggled = $state<boolean | null>(null);
+    let aiExpanded = $derived(resolveAiSectionExpanded(aiToggled, $totalCount));
     let yoloReady = $state(false);
     let nudenetReady = $state(false);
     let yoloProcessed = $state(0);
@@ -350,6 +355,10 @@
     let ollamaReady = $derived(ollamaModels.length > 0);
     let visionProcessed = $state(0);
     let analyzingBatch = $state(false);
+
+    function openModelSetupGuide() {
+        openUrl(MODEL_SETUP_GUIDE_URL).catch(e => console.error('Failed to open setup guide:', e));
+    }
 
     async function loadAiState() {
         try {
@@ -539,7 +548,7 @@
     </div>
 
     <div class="section">
-        <button class="folders-toggle" onclick={() => aiExpanded = !aiExpanded}>
+        <button class="folders-toggle" onclick={() => aiToggled = !aiExpanded}>
             <span class="toggle-arrow">{aiExpanded ? '▾' : '▸'}</span>
             <span class="folders-toggle-label">AI MODELS</span>
         </button>
@@ -547,11 +556,11 @@
         {#if aiExpanded}
             <div class="ai-models-content">
                 <div class="model-row">
-                    <span class="model-name">YOLO</span>
+                    <span class="model-name">Object detection (YOLO)</span>
                     {#if yoloReady}
                         <span class="model-status ready">ready</span>
                     {:else}
-                        <span class="model-status missing">manual install</span>
+                        <span class="model-status missing">optional</span>
                     {/if}
                 </div>
 
@@ -562,29 +571,29 @@
                             <option value="small">small 22MB</option>
                             <option value="medium">medium 50MB</option>
                         </select>
-                        <span class="model-note">Install model manually</span>
+                        <button class="model-help-link" onclick={openModelSetupGuide}>Setup guide ↗</button>
                     </div>
                 {/if}
 
                 <div class="model-row">
-                    <span class="model-name">NudeNet</span>
+                    <span class="model-name">Content filter (NudeNet)</span>
                     {#if nudenetReady}
                         <span class="model-status ready">ready</span>
                     {:else}
-                        <span class="model-status missing">manual install</span>
+                        <span class="model-status missing">optional</span>
                     {/if}
                 </div>
 
                 {#if !nudenetReady}
-                    <div class="model-note">Install model manually</div>
+                    <button class="model-help-link" onclick={openModelSetupGuide}>Setup guide ↗</button>
                 {/if}
 
                 <div class="model-row">
-                    <span class="model-name">Ollama</span>
+                    <span class="model-name">Image descriptions (Ollama)</span>
                     {#if ollamaReady}
                         <span class="model-status ready">{ollamaModels.length} models</span>
                     {:else}
-                        <span class="model-status missing">offline</span>
+                        <span class="model-status missing">optional — not connected</span>
                     {/if}
                 </div>
 
@@ -1077,10 +1086,19 @@
         gap: 4px;
         margin: 2px 0 4px;
     }
-    .model-note {
-        color: var(--text-secondary);
+    .model-help-link {
+        background: none;
+        border: none;
+        color: var(--blue);
+        cursor: pointer;
+        font-family: var(--font);
         font-size: 10px;
         padding: 2px 0;
+        text-align: left;
+        text-decoration: underline;
+    }
+    .model-help-link:hover {
+        opacity: 0.8;
     }
     .variant-select {
         flex: 1;
