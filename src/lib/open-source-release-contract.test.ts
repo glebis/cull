@@ -253,3 +253,15 @@ describe('repo-going-public content pass (HYG-004/SEC-005)', () => {
     expect(agents).not.toContain('Codex-ref-twitter');
   });
 });
+
+describe('publish is plugin-only', () => {
+  test('core no longer ships StaticPublishingSettings or publish-surface', () => {
+    expect(existsSync('src/lib/components/StaticPublishingSettings.svelte')).toBe(false);
+    expect(existsSync('src/lib/plugins/publish-surface.ts')).toBe(false);
+  });
+
+  test('the bundled cull-publish plugin exists', () => {
+    expect(existsSync('src/lib/plugins/cull-publish/index.ts')).toBe(true);
+    expect(existsSync('src/lib/plugins/cull-publish/PublishView.svelte')).toBe(true);
+  });
+});
