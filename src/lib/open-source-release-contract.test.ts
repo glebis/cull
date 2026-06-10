@@ -67,4 +67,10 @@ describe('open-source release legal and privacy contract', () => {
     expect(aiCopyright).toContain('Open source (Apache-2.0)');
     expect(aiCopyright).not.toContain(oldCopyleftLabel);
   });
+
+  test('the dead SessionTimeline component stays cut from the release (CQ-5)', () => {
+    expect(existsSync('src/lib/components/SessionTimeline.svelte')).toBe(false);
+    const api = read('src/lib/api.ts');
+    expect(api).not.toContain('listSessionEvents');
+  });
 });

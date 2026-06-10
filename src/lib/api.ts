@@ -1318,9 +1318,6 @@ export async function createSession(name: string): Promise<Session> {
 export async function listSessions(): Promise<Session[]> {
     return invoke<Session[]>('list_sessions');
 }
-export async function listSessionEvents(sessionId?: string | null, limit = 50): Promise<SessionEvent[]> {
-    return invoke<SessionEvent[]>('list_session_events', { sessionId: sessionId ?? null, limit });
-}
 export async function getActivityContext(sessionId?: string | null): Promise<ActivityContext> {
     return invoke<ActivityContext>('get_activity_context', { sessionId: sessionId ?? null });
 }
