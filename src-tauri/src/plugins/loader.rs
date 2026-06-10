@@ -110,6 +110,30 @@ pub fn load_installed_plugins(plugins_dir: &Path, app_version: &str) -> Vec<Load
     loaded
 }
 
+/// Manifests of every installed plugin (no bundle read, no hash check) —
+/// for listing in Settings. Invalid manifests are skipped.
+pub fn list_installed_manifests(plugins_dir: &Path) -> Vec<PluginManifest> {
+    let Ok(entries) = std::fs::read_dir(plugins_dir) else {
+        return Vec::new();
+    };
+    let mut manifests = Vec::new();
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let Ok(json) = std::fs::read_to_string(entry.path().join("manifest.json")) else {
+            continue;
+        };
+        if let Ok(manifest) = parse_manifest(&json) {
+            if manifest.id == entry.file_name().to_string_lossy() {
+                manifests.push(manifest);
+            }
+        }
+    }
+    manifests.sort_by(|a, b| a.id.cmp(&b.id));
+    manifests
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,6 +267,31 @@ mod tests {
         let loaded = load_installed_plugins(tmp.path(), "0.2.1");
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].manifest.id, "good-plugin");
+    }
+
+    #[test]
+    fn plugin_list_installed_manifests_skips_broken_and_sorts() {
+        let tmp = tempfile::tempdir().unwrap();
+        install_plugin(
+            tmp.path(),
+            "zeta-plugin",
+            BUNDLE,
+            &sha256_hex(BUNDLE.as_bytes()),
+        );
+        install_plugin(
+            tmp.path(),
+            "alpha-plugin",
+            BUNDLE,
+            &sha256_hex(BUNDLE.as_bytes()),
+        );
+        // A dir without a manifest is skipped, not fatal.
+        std::fs::create_dir_all(tmp.path().join("broken")).unwrap();
+
+        let manifests = list_installed_manifests(tmp.path());
+        assert_eq!(
+            manifests.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            vec!["alpha-plugin", "zeta-plugin"]
+        );
     }
 
     #[test]
