@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 pub enum PluginError {
     #[error("invalid plugin manifest: {0}")]
     InvalidManifest(String),
+    #[error("invalid plugin registry: {0}")]
+    InvalidRegistry(String),
     #[error("plugin '{0}' requires app version >= {1} (current: {2})")]
     AppVersionTooOld(String, String, String),
     #[error("checksum mismatch for plugin '{0}': installed bundle does not match manifest")]
@@ -44,7 +46,14 @@ pub struct PluginManifest {
 pub fn parse_manifest(json: &str) -> Result<PluginManifest, PluginError> {
     let manifest: PluginManifest =
         serde_json::from_str(json).map_err(|e| PluginError::InvalidManifest(e.to_string()))?;
+    validate_manifest(&manifest)?;
+    Ok(manifest)
+}
 
+/// Structural validation shared by installed manifests and registry entries:
+/// required fields non-empty, permissions in the known vocabulary, checksum
+/// format, semver `minAppVersion`.
+pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), PluginError> {
     for (field, value) in [
         ("id", &manifest.id),
         ("name", &manifest.name),
@@ -77,7 +86,7 @@ pub fn parse_manifest(json: &str) -> Result<PluginManifest, PluginError> {
         )));
     }
 
-    Ok(manifest)
+    Ok(())
 }
 
 /// True when `permission` is part of the known capability vocabulary: the

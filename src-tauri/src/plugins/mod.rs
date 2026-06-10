@@ -12,3 +12,4 @@
 pub mod invoke;
 pub mod loader;
 pub mod manifest;
+pub mod registry;
