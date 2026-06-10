@@ -1,9 +1,16 @@
 import { describe, expect, test } from 'vitest';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 function read(path: string): string {
   return readFileSync(path, 'utf8');
+}
+
+function trackedFiles(...paths: string[]): string[] {
+  return execFileSync('git', ['ls-files', '-z', '--', ...paths], { encoding: 'utf8' })
+    .split('\0')
+    .filter(Boolean);
 }
 
 function sourceFiles(dir: string): string[] {
@@ -81,11 +88,17 @@ describe('open-source release legal and privacy contract', () => {
   });
 
   test('historical licensing artifacts cannot be mistaken for current licensing', () => {
-    const strategy = read('docs/oss-strategy-explorer.html');
     const aiCopyright = read('docs/ai-code-copyright-research.md');
     const oldCopyleftLabel = `Open source (A${'G'}PL)`;
 
-    expect(strategy).toContain("Historical planning artifact only. Cull's current license is Apache-2.0.");
+    // The strategy explorer is an untracked internal artifact; if a local copy
+    // exists it must still carry the historical-artifact disclaimer.
+    const strategyPath = 'docs/internal/oss-strategy-explorer.html';
+    if (existsSync(strategyPath)) {
+      expect(read(strategyPath)).toContain(
+        "Historical planning artifact only. Cull's current license is Apache-2.0."
+      );
+    }
     expect(aiCopyright).toContain('Open source (Apache-2.0)');
     expect(aiCopyright).not.toContain(oldCopyleftLabel);
   });
@@ -136,5 +149,64 @@ describe('open-source release legal and privacy contract', () => {
     expect(existsSync('src/lib/components/SessionTimeline.svelte')).toBe(false);
     const api = read('src/lib/api.ts');
     expect(api).not.toContain('listSessionEvents');
+  });
+});
+
+describe('repo-going-public content pass (HYG-004/SEC-005)', () => {
+  const TEXT_FILE = /\.(md|json|html|ts|js|svelte|rs|ya?ml|toml|sh|txt|css|svg)$/;
+  // Assembled so this test file never contains the literal it forbids.
+  const PERSONAL_PATH = ['/Users', 'glebkalinin'].join('/');
+
+  test('internal working artifacts are not tracked and docs/internal/ is gitignored', () => {
+    const internalOnly = [
+      'docs/cull-audit-2026-06-03.md',
+      'docs/2026-05-10-vision-brainstorm-raw.md',
+      'docs/dev-workflow-audit-2026-06-02.md',
+      'docs/tooling-research-2026-06-03.md',
+      'docs/settings-mockup-draft.json',
+      'docs/settings-mockup-v2.json',
+      'docs/oss-strategy-explorer.html'
+    ];
+
+    const tracked = new Set(trackedFiles('docs/'));
+    for (const file of internalOnly) {
+      expect(tracked.has(file), `${file} must not ship in the public repo`).toBe(false);
+    }
+    expect([...tracked].some((f) => f.startsWith('docs/internal/'))).toBe(false);
+    expect(read('.gitignore')).toContain('docs/internal/');
+  });
+
+  test('.beads interaction traces are not tracked; only the issue export ships', () => {
+    const tracked = trackedFiles('.beads/');
+    expect(tracked).not.toContain('.beads/interactions.jsonl');
+    // The public tracker mirror stays tracked deliberately.
+    expect(tracked).toContain('.beads/issues.jsonl');
+  });
+
+  test('no personal absolute paths in tracked docs or AGENTS.md', () => {
+    for (const file of trackedFiles('docs/', 'AGENTS.md')) {
+      if (!TEXT_FILE.test(file)) continue;
+      expect(read(file), `${file} leaks a personal absolute path`).not.toContain(PERSONAL_PATH);
+    }
+  });
+
+  test('no personal absolute paths in source or shipped Tauri config', () => {
+    for (const file of trackedFiles(
+      'src/',
+      'src-tauri/src/',
+      'src-tauri/tauri.conf.json',
+      'src-tauri/capabilities/'
+    )) {
+      if (!TEXT_FILE.test(file)) continue;
+      expect(read(file), `${file} leaks a personal absolute path`).not.toContain(PERSONAL_PATH);
+    }
+  });
+
+  test('AGENTS.md carries no personal-machine reference paths', () => {
+    const agents = read('AGENTS.md');
+    expect(agents).not.toContain('~/Brains/brain');
+    expect(agents).not.toContain('.Codex/refs');
+    expect(agents).not.toContain('Codex-skills');
+    expect(agents).not.toContain('Codex-ref-twitter');
   });
 });

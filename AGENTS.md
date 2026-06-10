@@ -147,16 +147,6 @@ hook chain.
 
 ## Reference Paths
 
-- Skills repo: `~/ai_projects/Codex-skills/` (GitHub: `glebis/Codex-skills`)
-- Main Obsidian vault: `~/Brains/brain/`
-- Linear CLI: `~/.Codex/skills/linear/scripts/linear`
-
-Load on demand references:
-- Email filtering rules → `~/.Codex/refs/email-rules.md`
-- PDF / presentations → `~/.Codex/refs/pdf-presentations.md`
-- Skills repo → `~/.Codex/refs/skills-repo.md`
-- Telegram plugin → `~/.Codex/refs/telegram.md`
-- X/Twitter scraping → `meta/Codex-ref-twitter.md`
 - Beads local reference notes → `.beads/README.md`
 - Beads tracked issue export → `.beads/issues.jsonl`
 
@@ -235,10 +225,12 @@ Hard-won pitfalls when doing TDD + per-issue-branch + merge work in this repo:
 
 ### External audit + codex review
 
-A full external audit lives in `docs/cull-audit-2026-06-03.md` (ChatGPT 5.5 Pro,
-security/UX/a11y/logic/scalability/best-practices). Recommendations are tracked as
-bd epics `imageview-hqf` (P0), `imageview-dtj` (P1), `imageview-9fz` (P2), each
-child with Jobs-To-Be-Done + acceptance criteria.
+A full external audit (ChatGPT 5.5 Pro, security/UX/a11y/logic/scalability/
+best-practices) was run on 2026-06-03; the raw audit doc is archived locally in
+the gitignored `docs/internal/`. Its recommendations are fully tracked as bd
+epics `imageview-hqf` (P0), `imageview-dtj` (P1), `imageview-9fz` (P2), each
+child with Jobs-To-Be-Done + acceptance criteria — the public issue export in
+`.beads/issues.jsonl` is the canonical record.
 
 Note on review tooling: the `codex` CLI hung indefinitely in the headless/sandbox
 environment (no output even for trivial prompts — likely a ChatGPT-account

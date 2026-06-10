@@ -39,6 +39,12 @@ declare module 'node:child_process' {
     options: ExecFileOptions,
     callback: (error: Error | null, stdout: string, stderr: string) => void,
   ): void;
+
+  export function execFileSync(
+    file: string,
+    args: string[],
+    options: { encoding: 'utf8' },
+  ): string;
 }
 
 declare module 'node:http' {

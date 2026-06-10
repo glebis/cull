@@ -1,5 +1,5 @@
 # Vision Brainstorm — Processed
-**Raw source:** [2026-05-10-vision-brainstorm-raw.md](2026-05-10-vision-brainstorm-raw.md)
+**Raw source:** internal working notes (archived locally in the gitignored `docs/internal/`)
 **Date:** 2026-05-10
 
 ---

@@ -494,13 +494,13 @@ git commit -m "docs(release): SKILL.md orchestration, README, reference docs, te
 
 - [ ] **Step 2: Validate it loads**
 
-Run: `cd /Users/glebkalinin/ai_projects/cull && python3 ~/ai_projects/claude-skills/skills/release/scripts/release.py plan patch`
+Run: `cd "$CULL_REPO" && python3 ~/ai_projects/claude-skills/skills/release/scripts/release.py plan patch`
 Expected: JSON plan, `new_version` = current patch+1, no error.
 
 - [ ] **Step 3: Commit (CULL, on a branch)**
 
 ```bash
-cd /Users/glebkalinin/ai_projects/cull && git add release.config.json && \
+cd "$CULL_REPO" && git add release.config.json && \
 git commit -m "chore(release): add release.config.json for the release skill"
 ```
 
@@ -547,7 +547,7 @@ git commit -m "docs: add CONTRACTS tutorial + RELEASING runbook"
 
 Run:
 ```bash
-cd /Users/glebkalinin/ai_projects/cull/src-tauri
+cd "$CULL_REPO"/src-tauri
 mkdir -p tests/fixtures/db
 cat > /tmp/gen_fixture.rs <<'EOF'
 // one-off: open a fresh DB at current schema, copy it to the fixture path
@@ -638,7 +638,7 @@ Expected: plan to `0.2.0`, tag `v0.2.0`, the 3 version files listed.
 
 - [ ] **Step 3: Run the gate once manually (no mutation)**
 
-Run: `cd /Users/glebkalinin/ai_projects/cull-main-landing && CULL_PREFLIGHT_SKIP_E2E=1 npm run preflight -- release` then `cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden`
+Run: `cd "$CULL_LANDING_WORKTREE" && CULL_PREFLIGHT_SKIP_E2E=1 npm run preflight -- release` then `cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden`
 Expected: both exit 0. (If disk-constrained, `cargo clean` the main worktree target first — see AGENTS.md.)
 
 - [ ] **Step 4: Commit any workflow fix (CULL)** — only if `release.yml` was edited.

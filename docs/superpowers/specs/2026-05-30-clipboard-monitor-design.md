@@ -66,7 +66,7 @@ Do not persist "monitor is running" as an automatic app-start behavior in the fi
 ```json
 {
   "source": "clipboard_monitor",
-  "capture_dir": "/Users/glebkalinin/Pictures/Cull Clipboard Captures",
+  "capture_dir": "~/Pictures/Cull Clipboard Captures",
   "started_at": "2026-05-30T12:35:00Z"
 }
 ```

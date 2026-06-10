@@ -129,7 +129,7 @@ Severity tiers: **release-blocker** (release definition unreachable until fixed)
 - **Evidence:**
   - .beads/issues.jsonl (238 lines) and .beads/interactions.jsonl (112 lines) are git-tracked despite .gitignore:40 '.beads/'; they contain the full internal issue history including security-issue descriptions and owner email glebis@gmail.com on every record
   - docs/cull-audit-2026-06-03.md — a full external security/UX audit — is tracked and will ship with the public repo (presence noted only; not read per fresh-eyes rule)
-  - docs/superpowers/plans/2026-06-03-release-skill.md:497,503,550,641 and docs/superpowers/specs/2026-05-30-clipboard-monitor-design.md:69 contain absolute personal paths (/Users/glebkalinin/...)
+  - docs/superpowers/plans/2026-06-03-release-skill.md:497,503,550,641 and docs/superpowers/specs/2026-05-30-clipboard-monitor-design.md:69 contain absolute personal paths ($HOME/...)
   - AGENTS.md:148-159 ships personal machine references (Obsidian vault ~/Brains/brain/, ~/.Codex/refs/* email/telegram rule files)
   - docs/ also carries internal working artifacts a stranger gains nothing from: 2026-05-10-vision-brainstorm-raw.md, dev-workflow-audit-2026-06-02.md, tooling-research-2026-06-03.md, settings-mockup-*.json, oss-strategy-explorer.html
 - **Proposed fix:** Make an explicit ship/trim decision before flipping the repo public: accept the bd jsonl files as transparency (scrubbing closed security-issue detail + per-record email) or stop tracking them; archive or path-rewrite personal-path-bearing plans/specs and internal audit docs; trim AGENTS.md personal references.
@@ -274,7 +274,7 @@ Severity tiers: **release-blocker** (release definition unreachable until fixed)
 - **Refutation notes:** Not reproduced live (would need a bulk write into a watched folder during triage); the event chain is fully traced. Particularly identity-relevant: the chosen identity's accretion story (generation tools writing into watched folders) is exactly the trigger. Stands.
 
 #### SEC-005 (pre-launch carve-out) — note
-SEC-005 is filed post-launch overall, but its proposed fix explicitly carves out an S-sized pre-launch action: replace the hardcoded /Users/glebkalinin paths in the two tracked docs before the repo goes public. The history-rewrite question is decided NO (would invalidate clones/tags for username-level disclosure only). See §1.3.
+SEC-005 is filed post-launch overall, but its proposed fix explicitly carves out an S-sized pre-launch action: replace the hardcoded personal home-directory paths (scrubbed to $HOME in this report) in the two tracked docs before the repo goes public. The history-rewrite question is decided NO (would invalidate clones/tags for username-level disclosure only). See §1.3.
 
 ### 1.3 Post-Launch
 
