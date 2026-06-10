@@ -23,11 +23,14 @@ explicitly waived in the decision sheet before the repo flips public):
   from this audit's inputs by the fresh-eyes rule, so its publishability is
   unassessed (see HYG-004).
 - **PERF-07 partial measurement** — thumbnail p95 and resident-memory
-  thresholds are "expected PASS by architecture", never measured; measure or
-  mark waived.
+  thresholds are "expected PASS by architecture", never measured. Tracked as
+  bd `imageview-dkz.31` (Track A, Day 2); gate closes when numbers land here.
 - **Identity-panel verification asymmetry** — the judge spot-verified only
   Advocate B's citations; Advocates A and C's claims were not independently
-  re-verified against the repo. The identity decision row inherits this caveat.
+  re-verified against the repo. **WAIVED 2026-06-10:** the user overrode the
+  identity to "agent-native image tool" as a taste call at the decision gate
+  (decision-sheet row `identity`); the chosen identity no longer rests on the
+  advocate evidence, so re-verification would not change any decision.
 
 ## 1. Verified Findings by Severity
 
