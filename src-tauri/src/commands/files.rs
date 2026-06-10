@@ -296,6 +296,10 @@ fn read_image_from_clipboard() -> Result<Option<ClipboardImagePayload>, String> 
     let pasteboard = NSPasteboard::generalPasteboard();
 
     if let Some(path) = read_file_url_from_pasteboard(&pasteboard) {
+        // Intentional exception to the module_raw default-on policy (bd
+        // imageview-dkz.12): this pasteboard helper has no DB/settings access,
+        // and clipboard-pasted RAW file URLs stay excluded regardless of the
+        // setting. Folder import and the watcher honor is_module_raw_enabled.
         let module_raw = false;
         if crate::extensions::is_image_path(&path, module_raw) && path.exists() {
             let bytes = std::fs::read(&path)
