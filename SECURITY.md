@@ -51,6 +51,13 @@ Cull is a local-first Tauri 2 desktop app. It never phones home. All data stays 
 - Cull does not add imported library roots, imported original files, or user-selected clipboard capture folders to that scope at runtime.
 - All other filesystem paths are inaccessible via the asset protocol.
 
+### Plugins
+
+- The plugin runtime is **off by default** (`module_plugins` setting). When off, no plugin code loads and no plugin UI is reachable.
+- Plugins declare `permissions` drawn from the same capability vocabulary as MCP tokens; the only privileged path is the `plugin_invoke` command, enforced in Rust (never webview-side) and audit-logged with actor `plugin:<id>`.
+- Plugin bundles are checksum-verified at install time (Track C2) and re-hashed at every load — in Rust and again in the webview — before a `blob:` dynamic import. The CSP widens `script-src` by exactly `blob:` for this path and nothing else.
+- Honest limitation: plugins run in the main webview without an iframe/realm sandbox (Obsidian/VS Code trust model). Checksums establish integrity, not confinement; the Rust permission gate confines privileged operations. See `docs/plugins-design.md`.
+
 ## Supported Versions
 
 | Version | Supported |
