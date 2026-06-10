@@ -31,6 +31,7 @@ Prefer building from source? See [Quick Start](#quick-start) below.
 ## Documentation
 
 - [User Guide](docs/USER_GUIDE.md) — installation, import, viewing, curation, collections, Clipboard Monitor, static publishing, embeddings, export, agent workflows, CLI, and privacy basics
+- [The Agent Surface](docs/agents.md) — headless CLI usage, connecting an agent over MCP, scoped tokens, and the agent-snapshot demo loop
 - [Preview Display](docs/preview-display.md) — external monitor, Sidecar, and tokenized local web preview behavior
 - [System Menu Audit](docs/SYSTEM_MENU_AUDIT.md) — complete native menu inventory and implementation status
 - [Privacy & Data Flow](docs/PRIVACY.md) — local-first behavior, opt-in cloud features, and data destinations

@@ -202,6 +202,49 @@ describe('repo-going-public content pass (HYG-004/SEC-005)', () => {
     }
   });
 
+  test('the agent-surface doc names the real CLI flags and MCP tools and is linked from README (dkz.22)', () => {
+    expect(existsSync('docs/agents.md')).toBe(true);
+    const doc = read('docs/agents.md');
+    const readme = read('README.md');
+    const cli = read('src-tauri/src/cli/mod.rs');
+    const headlessTools = read('src-tauri/src/cli/tools/mod.rs');
+    const mcpTools = read('src-tauri/src/mcp/tools.rs');
+
+    // README links the doc so a stranger can find it.
+    expect(readme).toContain('docs/agents.md');
+
+    // CLI flags the doc relies on must exist in the clap parser, so docs can't
+    // drift from the real argument surface.
+    for (const flag of ['mcp_stdio', 'mcp_http', 'mcp_http_allow_remote']) {
+      expect(cli).toContain(flag);
+    }
+    for (const flag of ['--mcp-stdio', '--mcp-http', 'call_tool', '--json']) {
+      expect(doc).toContain(flag);
+    }
+
+    // Headless-CLI tools cited in the doc must be in the real SUPPORTED_TOOLS slice.
+    for (const tool of ['get_library_stats', 'import_folder', 'export_images']) {
+      expect(headlessTools).toContain(`"${tool}"`);
+      expect(doc).toContain(tool);
+    }
+
+    // MCP tool names in the demo loop must match the registered #[tool] fns.
+    for (const tool of [
+      'create_token',
+      'capture_current_view_snapshot',
+      'get_last_view_snapshot',
+      'select_images_in_view',
+      'get_audit_log',
+    ]) {
+      expect(mcpTools).toMatch(new RegExp(`(?:async )?fn ${tool}\\(`));
+      expect(doc).toContain(tool);
+    }
+
+    // The doc must be honest that snapshot/selection tools are local stdio only
+    // and that the headless CLI is a slice, not the full MCP surface.
+    expect(doc.toLowerCase()).toContain('local stdio');
+  });
+
   test('AGENTS.md carries no personal-machine reference paths', () => {
     const agents = read('AGENTS.md');
     expect(agents).not.toContain('~/Brains/brain');
