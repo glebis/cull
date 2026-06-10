@@ -14,4 +14,14 @@ describe('plugins settings tab', () => {
     it('the module_plugins toggle lives in PluginsSettings, not McpSettings General', () => {
         expect(plugins).toMatch(/module_plugins/);
     });
+
+    it('lists Core bundled plugins with a Core badge and no install/uninstall', () => {
+        expect(plugins).toMatch(/BUNDLED_PLUGINS/);
+        expect(plugins).toMatch(/Core/);               // badge label
+    });
+    it('has a registry Refresh button and a search input', () => {
+        expect(plugins).toMatch(/Refresh/);
+        expect(plugins).toMatch(/fetchPluginRegistry/);
+        expect(plugins).toMatch(/filterPlugins/);
+    });
 });

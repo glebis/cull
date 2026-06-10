@@ -92,17 +92,19 @@ describe('Settings -> Plugins section (source contract)', () => {
         expect(content).toMatch(/installed\.granted|\{granted\}|granted\.join/);
     });
 
-    it('is reachable only when module_plugins is enabled (Modules pattern in McpSettings)', () => {
+    it('owns the module_plugins toggle inside the Plugins tab (moved out of McpSettings General)', () => {
+        const plugins = settings();
+        // The toggle and its persistence now live in PluginsSettings.
+        expect(plugins).toContain("getAppSetting('module_plugins')");
+        expect(plugins).toContain("setAppSetting('module_plugins'");
+        // The store the rest of the app gates on stays in sync from here.
+        expect(plugins).toContain('pluginsEnabled.set(modulePlugins)');
+
+        // McpSettings mounts the tab and no longer carries the toggle/state.
         const content = mcpSettings();
-        expect(content).toContain("getAppSetting('module_plugins')");
-        expect(content).toContain("setAppSetting('module_plugins'");
-        expect(content).toContain("pluginsSetting === 'true'");
-        // The Plugins section only renders behind the module flag.
-        const gate = content.indexOf('{#if modulePlugins}');
-        const section = content.indexOf('<PluginsSettings');
-        expect(gate).toBeGreaterThan(-1);
-        expect(section).toBeGreaterThan(gate);
-        // The store the rest of the app gates on stays in sync.
-        expect(content).toContain('pluginsEnabled.set(modulePlugins)');
+        expect(content).toContain("activeSettingsTab === 'plugins'");
+        expect(content).toContain('<PluginsSettings');
+        expect(content).not.toContain('toggleModulePlugins');
+        expect(content).not.toContain('{#if modulePlugins}');
     });
 });

@@ -4,6 +4,8 @@
     import type { InstalledPluginInfo, RegistryPluginInfo } from '$lib/api';
     import { grantPromptModel } from '$lib/plugins/loader';
     import type { GrantPromptModel } from '$lib/plugins/host';
+    import { BUNDLED_PLUGINS } from '$lib/plugins/bundled';
+    import { filterPlugins } from '$lib/plugins/plugin-search';
     import { pluginsEnabled, showToast } from '$lib/stores';
 
     let modulePlugins = $state(false);
@@ -21,13 +23,29 @@
     let installedPlugins = $state<InstalledPluginInfo[]>([]);
     let registryError = $state<string | null>(null);
     let loadingRegistry = $state(true);
+    let registryLoading = $state(false);
     let busy = $state(false);
+    let query = $state('');
 
     // Install consent: set when Install is clicked, surfaced as a dialog
     // listing every manifest permission BEFORE anything is downloaded.
     let consent = $state<GrantPromptModel | null>(null);
 
     let installedIds = $derived(new Set(installedPlugins.map(p => p.manifest.id)));
+    // Ids shown in the Core group; suppress duplicate registry entries for them.
+    let bundledIds = new Set(BUNDLED_PLUGINS.map(p => p.manifest.id));
+
+    let coreManifests = $derived(filterPlugins(BUNDLED_PLUGINS.map(p => p.manifest), query));
+    let filteredInstalled = $derived(filterPlugins(installedPlugins.map(p => p.manifest), query));
+    let filteredInstalledRows = $derived(
+        installedPlugins.filter(p => filteredInstalled.some(m => m.id === p.manifest.id)),
+    );
+    let filteredRegistryRows = $derived(
+        filterPlugins(
+            registryPlugins.map(p => p.manifest).filter(m => !bundledIds.has(m.id)),
+            query,
+        ).map(m => registryPlugins.find(p => p.manifest.id === m.id)!),
+    );
 
     async function refreshInstalled() {
         try {
@@ -37,16 +55,22 @@
         }
     }
 
-    onMount(async () => {
-        modulePlugins = (await getAppSetting('module_plugins')) === 'true';
-        await refreshInstalled();
+    async function refreshRegistry() {
+        registryLoading = true;
         try {
             registryPlugins = await fetchPluginRegistry();
             registryError = null;
         } catch (e) {
             registryError = String(e);
         }
+        registryLoading = false;
         loadingRegistry = false;
+    }
+
+    onMount(async () => {
+        modulePlugins = (await getAppSetting('module_plugins')) === 'true';
+        await refreshInstalled();
+        await refreshRegistry();
     });
 
     function requestInstall(plugin: RegistryPluginInfo) {
@@ -99,9 +123,38 @@
     </span>
 </div>
 
-{#if installedPlugins.length > 0}
+<input
+    class="plugin-search"
+    type="search"
+    placeholder="Search plugins…"
+    bind:value={query}
+    aria-label="Search plugins"
+/>
+
+{#if coreManifests.length > 0}
+    <div class="plugin-group-label">Core</div>
+    {#each coreManifests as core (core.id)}
+        <div class="plugin-row">
+            <div class="plugin-info">
+                <div class="plugin-title">
+                    <span class="plugin-name">{core.name}</span>
+                    <span class="plugin-version">v{core.version}</span>
+                </div>
+                <div class="plugin-description">{core.description}</div>
+                <div class="plugin-permissions">
+                    {#each core.permissions as capability}
+                        <span class="permission-tag">{capability}</span>
+                    {/each}
+                </div>
+            </div>
+            <span class="core-badge" title="Built-in plugin — always available">⬡ Core</span>
+        </div>
+    {/each}
+{/if}
+
+{#if filteredInstalledRows.length > 0}
     <div class="plugin-group-label">Installed</div>
-    {#each installedPlugins as installed (installed.manifest.id)}
+    {#each filteredInstalledRows as installed (installed.manifest.id)}
         <div class="plugin-row">
             <div class="plugin-info">
                 <div class="plugin-title">
@@ -125,15 +178,20 @@
     {/each}
 {/if}
 
-<div class="plugin-group-label">Registry</div>
+<div class="plugin-group-header">
+    <div class="plugin-group-label">Registry</div>
+    <button class="action-btn" onclick={refreshRegistry} disabled={registryLoading}>
+        {registryLoading ? 'Refreshing…' : 'Refresh'}
+    </button>
+</div>
 {#if loadingRegistry}
     <p class="plugin-muted">Loading registry…</p>
 {:else if registryError}
     <p class="plugin-error">Could not fetch the plugin registry: {registryError}</p>
-{:else if registryPlugins.length === 0}
+{:else if filteredRegistryRows.length === 0}
     <p class="plugin-muted">No plugins in the registry yet.</p>
 {:else}
-    {#each registryPlugins as plugin (plugin.manifest.id)}
+    {#each filteredRegistryRows as plugin (plugin.manifest.id)}
         <div class="plugin-row">
             <div class="plugin-info">
                 <div class="plugin-title">
@@ -187,12 +245,40 @@
         padding-bottom: var(--spacing);
         border-bottom: 1px solid var(--border);
     }
+    .plugin-search {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: var(--spacing);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text);
+        padding: 6px 8px;
+        font: inherit;
+        font-size: 0.85em;
+    }
+    .plugin-search:focus { outline: none; border-color: var(--blue); }
     .plugin-group-label {
         color: var(--text-secondary);
         font-size: 0.8em;
         text-transform: uppercase;
         letter-spacing: 0.06em;
         margin: calc(var(--spacing) * 1.5) 0 var(--spacing);
+    }
+    .plugin-group-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--spacing);
+    }
+    .core-badge {
+        color: var(--purple);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1px 6px;
+        font-size: 0.75em;
+        white-space: nowrap;
     }
     .plugin-row {
         display: flex;
