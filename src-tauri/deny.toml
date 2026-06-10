@@ -1,0 +1,62 @@
+# Cull supply-chain policy for cargo-deny (`npm run audit:supply-chain`).
+# The license allowlist mirrors the inventory enforced by scripts/license-audit.mjs
+# and the posture documented in docs/OPEN_SOURCE_AUDIT.md: permissive licenses
+# compatible with Apache-2.0 distribution. Copyleft beyond MPL-2.0 stays denied.
+
+[graph]
+# Cull ships macOS bundles only. Restricting the dependency graph to the release
+# targets keeps the Linux-only gtk3/glib stack (pulled in transitively by Tauri)
+# out of license/advisory scope; cargo-audit still scans the full Cargo.lock and
+# reports those as warnings (see [advisories] ignore rationale below).
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+# Note: the Linux-only gtk3/glib advisories (e.g. RUSTSEC-2024-0429 and the
+# related ~17 cargo-audit unmaintained warnings) are excluded from cargo-deny
+# scope by the [graph] targets restriction above; cargo-audit still reports
+# them against the full Cargo.lock as accepted, non-fatal warnings.
+ignore = [
+    # Unmaintained unic-* crates: transitive build-time deps of tauri-codegen
+    # (tauri-utils). No runtime exposure; accepted until Tauri replaces them.
+    "RUSTSEC-2025-0075", # unic-char-range
+    "RUSTSEC-2025-0080", # unic-common
+    "RUSTSEC-2025-0081", # unic-char-property
+    "RUSTSEC-2025-0098", # unic-ucd-version
+    "RUSTSEC-2025-0100", # unic-ucd-ident
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "OFL-1.1",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

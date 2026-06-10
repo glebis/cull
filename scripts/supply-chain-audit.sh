@@ -23,7 +23,10 @@ run_rust_audits() {
   fi
 
   if require_tool cargo-audit 'cargo install cargo-audit --locked'; then
-    cargo audit --manifest-path "$ROOT/src-tauri/Cargo.toml"
+    # cargo-audit scans the lockfile (it has no --manifest-path flag). The
+    # Linux-only gtk3-stack unmaintained warnings are expected and non-fatal;
+    # the accepted ignores are recorded in src-tauri/deny.toml.
+    cargo audit --file "$ROOT/src-tauri/Cargo.lock"
   fi
 }
 

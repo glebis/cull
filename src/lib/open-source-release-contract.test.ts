@@ -68,6 +68,18 @@ describe('open-source release legal and privacy contract', () => {
     expect(audit).toContain('contains no image, path, token, audit-log, or user-content rows');
   });
 
+  test('supply-chain audit is executable and enforced in CI (HYG-003)', () => {
+    const ci = read('.github/workflows/ci.yml');
+
+    expect(existsSync('src-tauri/deny.toml')).toBe(true);
+    const denyToml = read('src-tauri/deny.toml');
+    expect(denyToml).toContain('[licenses]');
+    expect(denyToml).toContain('"Apache-2.0"');
+    expect(denyToml).toContain('[advisories]');
+
+    expect(ci).toContain('scripts/supply-chain-audit.sh');
+  });
+
   test('historical licensing artifacts cannot be mistaken for current licensing', () => {
     const strategy = read('docs/oss-strategy-explorer.html');
     const aiCopyright = read('docs/ai-code-copyright-research.md');

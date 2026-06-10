@@ -34,3 +34,20 @@ jobs:
 
       - name: Rust checks
         run: bash scripts/check-ci.sh rust
+
+  supply-chain:
+    name: Supply-chain audit
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@1.100.0
+
+      - name: Install cargo-deny and cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny,cargo-audit
+
+      - name: Supply-chain audit
+        run: bash scripts/supply-chain-audit.sh check
