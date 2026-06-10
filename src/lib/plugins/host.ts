@@ -31,6 +31,9 @@ export interface PluginPaletteCommand {
     title: string;
     subtitle?: string;
     keywords?: string[];
+    /** Optional default hotkey, applied ONLY if currently unbound (host-side).
+     * Never overrides a user or built-in binding; never a raw keydown grab. */
+    suggestedHotkey?: string;
     run: () => void | Promise<void>;
 }
 
@@ -39,6 +42,9 @@ export interface PluginHost {
      * when it is shown (no plugin view surface ships in runtime v1). */
     mountView(el: HTMLElement): void;
     registerPaletteCommands(commands: PluginPaletteCommand[]): void;
+    /** Register a top-level tab/view-mode. The tab joins the Ctrl+Tab cycle
+     * and gets a command-palette entry; its mountView fills the view body. */
+    registerTab(tab: { id: string; label: string; subtitle?: string; mountView: (el: HTMLElement) => void }): void;
     /** The only privileged path: routes through the Rust plugin_invoke
      * command, which checks the plugin's granted capabilities. */
     invoke(tool: string, args?: Record<string, unknown>): Promise<unknown>;

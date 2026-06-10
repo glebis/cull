@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { get } from 'svelte/store';
 import { getAppSetting } from '../api';
 import { activePluginIds, pluginsEnabled } from '../stores';
+import { registerPluginTab } from './tab-registry';
 import type {
     GrantPromptModel,
     LoadedPlugin,
@@ -98,6 +99,9 @@ export function createPluginHost(pluginId: string): PluginHost {
             for (const command of commands) {
                 paletteCommands.push({ ...command, pluginId });
             }
+        },
+        registerTab(tab) {
+            registerPluginTab(tab);
         },
         invoke(tool: string, args?: Record<string, unknown>) {
             return invoke('plugin_invoke', { pluginId, tool, args: args ?? null });
