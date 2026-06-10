@@ -33,7 +33,6 @@ import {
     folders,
     statusHint,
     resetLoupeTransform,
-    staticPublishingEnabled,
     clientToolsEnabled,
     viewMode,
     zenMode,
@@ -49,6 +48,7 @@ import { createWorkflow, readWorkflows, runWorkflow, type CommandWorkflow } from
 import { buildDeliveryCsv, type DeliveryRow } from './delivery-csv';
 import { loadSimilarImages } from './similarity';
 import { getPluginPaletteCommands } from './plugins/loader';
+import { currentPublishSurface } from './plugins/publish-surface';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 
 export type CommandPaletteItemKind = 'command' | 'destination';
@@ -719,7 +719,9 @@ function commandItems(): CommandPaletteItem[] {
             run: () => resetLoupeTransform(),
         },
         ...VIEW_COMMANDS
-            .filter(({ requiresStaticPublishing }) => !requiresStaticPublishing || get(staticPublishingEnabled))
+            // Publish is available when either the cull-publish plugin or the
+            // module-gated core view can render it (Track C3 defer/fallback).
+            .filter(({ requiresStaticPublishing }) => !requiresStaticPublishing || currentPublishSurface() !== 'hidden')
             .map(({ mode, title, subtitle, shortcut }): CommandPaletteItem => ({
                 id: `view.${mode}`,
                 title,

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
-import { pluginsEnabled } from '../stores';
+import { activePluginIds, pluginsEnabled } from '../stores';
 import {
     clearPluginRegistrations,
     createPluginHost,
@@ -82,6 +82,22 @@ describe('plugin loader decision logic', () => {
         expect(typeof host.mountView).toBe('function');
         expect(typeof host.registerPaletteCommands).toBe('function');
         expect(typeof host.invoke).toBe('function');
+    });
+
+    it('tracks activated plugin ids in the activePluginIds store', async () => {
+        const plugin = loadedPlugin({ checksum: `sha256:${ABC_SHA256}` }, 'abc');
+        const importModule = vi.fn(async () => ({ default: { activate: vi.fn() } }));
+
+        await loadInstalledPlugins({
+            getFlag: async () => 'true',
+            fetchInstalled: async () => [plugin],
+            importModule,
+        });
+        expect(get(activePluginIds).has('cull-publish')).toBe(true);
+
+        // clearPluginRegistrations resets presence (e.g. between tests).
+        clearPluginRegistrations();
+        expect(get(activePluginIds).size).toBe(0);
     });
 
     it('frontend re-hash: a checksum mismatch never reaches import()', async () => {

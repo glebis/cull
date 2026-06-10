@@ -22,6 +22,27 @@ describe('static publishing navigation contract', () => {
         expect(frontendMenu).toContain('staticPublishingEnabled');
     });
 
+    it('gates the publish view and its palette command on plugin presence, not the raw module setting', () => {
+        const page = readProjectFile('src/routes/+page.svelte');
+        const palette = readProjectFile('src/lib/command-palette.ts');
+        const menu = readProjectFile('src/lib/menu.ts');
+
+        // The publish view mounts when the cull-publish plugin is present
+        // (plugin surface) and falls back to the core component on the raw
+        // module setting otherwise — decided by resolvePublishSurface
+        // (behavioral coverage: src/lib/plugins/publish-surface.test.ts).
+        expect(page).toContain('resolvePublishSurface');
+        expect(page).toContain("publishSurface === 'plugin'");
+        expect(page).toContain('<PluginViewHost');
+        expect(page).toContain('<StaticPublishingSettings');
+        expect(page).not.toContain("$viewMode === 'publish' && $staticPublishingEnabled");
+
+        // Palette command and native menu route through the same decision.
+        expect(palette).toContain("currentPublishSurface() !== 'hidden'");
+        expect(palette).not.toContain('get(staticPublishingEnabled)');
+        expect(menu).toContain("currentPublishSurface() !== 'hidden'");
+    });
+
     it('keeps the publishing workflow out of Settings content', () => {
         const settings = readProjectFile('src/lib/components/McpSettings.svelte');
 

@@ -174,6 +174,9 @@ export const staticPublishingEnabled = writable<boolean>(false);
 export const clientToolsEnabled = writable<boolean>(false);
 export const voiceDictationEnabled = writable<boolean>(false);
 export const pluginsEnabled = writable<boolean>(false);
+/** Ids of plugins that loaded and activated this session (set by the plugin
+ * loader). Drives plugin-presence gates like the publish surface. */
+export const activePluginIds = writable<ReadonlySet<string>>(new Set());
 export const showLoupeHistogram = writable<boolean>(false);
 
 export const GRID_PRESETS = [

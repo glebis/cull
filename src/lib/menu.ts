@@ -47,6 +47,8 @@ import {
     resetLoupeTransform,
     settingsOpen,
     staticPublishingEnabled,
+    pluginsEnabled,
+    activePluginIds,
     aboutOpen,
     navigateTo,
     showToast,
@@ -70,6 +72,7 @@ import {
     setPreviewDisplayOverlay,
     setPreviewDisplayWebStreamStatus,
 } from './preview-display-store';
+import { currentPublishSurface } from './plugins/publish-surface';
 import {
     overlayForPreviewDisplayMode,
     withPreviewDisplayField,
@@ -605,7 +608,9 @@ function handleMenuAction(action: string) {
             navigateTo('embeddings');
             break;
         case 'view_publish':
-            if (get(staticPublishingEnabled)) navigateTo('publish' as ViewMode);
+            // Plugin presence or the module setting can make Publish available
+            // (Track C3 defer/fallback).
+            if (currentPublishSurface() !== 'hidden') navigateTo('publish' as ViewMode);
             break;
         case 'view_export':
             navigateTo('export' as ViewMode);
@@ -803,7 +808,7 @@ function currentMenuStatePayload() {
         sidebarVisible: get(sidebarVisible),
         hasFocusedImage: get(focusedImage) !== null,
         selectedCount: get(selectedIds).size,
-        staticPublishingEnabled: get(staticPublishingEnabled),
+        staticPublishingEnabled: currentPublishSurface() !== 'hidden',
         showLoupeHistogram: get(showLoupeHistogram),
         previewDisplayFrozen: get(previewDisplayFrozen),
         previewDisplayBlanked: get(previewDisplayBlanked),
@@ -864,6 +869,8 @@ function startMenuStateSubscriptions() {
     focusedImage.subscribe(queueMenuStateUpdate);
     selectedIds.subscribe(queueMenuStateUpdate);
     staticPublishingEnabled.subscribe(queueMenuStateUpdate);
+    pluginsEnabled.subscribe(queueMenuStateUpdate);
+    activePluginIds.subscribe(queueMenuStateUpdate);
     showLoupeHistogram.subscribe(queueMenuStateUpdate);
     previewDisplayFrozen.subscribe(queueMenuStateUpdate);
     previewDisplayBlanked.subscribe(queueMenuStateUpdate);

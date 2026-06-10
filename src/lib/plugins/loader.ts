@@ -9,7 +9,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { get } from 'svelte/store';
 import { getAppSetting } from '../api';
-import { pluginsEnabled } from '../stores';
+import { activePluginIds, pluginsEnabled } from '../stores';
 import type {
     GrantPromptModel,
     LoadedPlugin,
@@ -58,6 +58,7 @@ const pluginViews = new Map<string, HTMLElement>();
 export function clearPluginRegistrations(): void {
     paletteCommands.length = 0;
     pluginViews.clear();
+    activePluginIds.set(new Set());
 }
 
 export function getRegisteredPluginViews(): Map<string, HTMLElement> {
@@ -154,6 +155,7 @@ export interface PluginLoaderDeps {
 export async function loadInstalledPlugins(deps: PluginLoaderDeps = {}): Promise<LoadedPlugin[]> {
     const getFlag = deps.getFlag ?? (() => getAppSetting('module_plugins'));
     if (!shouldLoadPlugins(await getFlag())) {
+        activePluginIds.set(new Set());
         return [];
     }
     const importModule = deps.importModule ?? importPluginModule;
@@ -180,5 +182,8 @@ export async function loadInstalledPlugins(deps: PluginLoaderDeps = {}): Promise
             console.error(`[plugins] failed to activate '${manifest.id}':`, e);
         }
     }
+    // Plugin presence drives feature gates (e.g. the publish surface), so
+    // record exactly what activated.
+    activePluginIds.set(new Set(activated.map(plugin => plugin.manifest.id)));
     return activated;
 }
