@@ -91,7 +91,7 @@
             httpEnabled = httpSetting === 'true';
             if (portSetting) httpPort = portSetting;
             autoPurge = purgeSetting === 'true';
-            moduleRaw = rawSetting === 'true';
+            moduleRaw = rawSetting !== 'false';
             moduleStaticPublishing = staticPublishingSetting === 'true';
             staticPublishingEnabled.set(moduleStaticPublishing);
             moduleClientTools = clientToolsSetting === 'true';

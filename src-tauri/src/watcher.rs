@@ -58,7 +58,8 @@ impl FileWatcher {
             watcher: None,
             intent_registry: Arc::new(DashMap::new()),
             sync_queue: Arc::new(DashMap::new()),
-            module_raw: Arc::new(AtomicBool::new(false)),
+            // RAW support defaults to enabled; lib.rs syncs the persisted setting at startup.
+            module_raw: Arc::new(AtomicBool::new(true)),
         }
     }
 

@@ -23,12 +23,7 @@ pub struct ImportResult {
 }
 
 fn supported_entries(db: &Database, folder_path: &str) -> Vec<PathBuf> {
-    let module_raw = db
-        .get_setting("module_raw")
-        .ok()
-        .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false);
+    let module_raw = crate::db_core::import::is_module_raw_enabled(db);
     let extensions = crate::extensions::supported_extensions(module_raw);
 
     walkdir::WalkDir::new(folder_path)

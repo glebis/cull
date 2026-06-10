@@ -93,6 +93,19 @@ fn decode_with_platform(_path: &Path, ext: &str) -> Result<image::DynamicImage, 
 mod tests {
     use super::*;
 
+    #[test]
+    fn raw_decode_failure_returns_error_not_panic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("broken.cr2");
+        std::fs::write(&path, b"not a real raw file").unwrap();
+
+        // With module_raw on by default, corrupt RAW input must surface as Err.
+        let result = decode_image(&path, true);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("RAW decode failed"));
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn decodes_svg_with_macos_imageio_fallback() {

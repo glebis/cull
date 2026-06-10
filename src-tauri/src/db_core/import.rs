@@ -12,12 +12,13 @@ use super::sidecar;
 use super::source_detection::{detect_source, read_png_text_chunks};
 use super::thumbnails;
 
-fn is_module_raw_enabled(db: &Database) -> bool {
+/// RAW support is enabled by default in v1; only an explicit "false" disables it.
+pub fn is_module_raw_enabled(db: &Database) -> bool {
     db.get_setting("module_raw")
         .ok()
         .flatten()
         .map(|v| v == "true")
-        .unwrap_or(false)
+        .unwrap_or(true)
 }
 
 #[derive(Debug)]
@@ -410,6 +411,20 @@ fn run_color_metrics(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn raw_module_default_is_enabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+
+        // module_raw defaults to enabled when the setting is absent (v1 un-gate),
+        // and an explicit user override to "false" still disables it.
+        assert!(is_module_raw_enabled(&db));
+        db.set_setting("module_raw", "false").unwrap();
+        assert!(!is_module_raw_enabled(&db));
+        db.set_setting("module_raw", "true").unwrap();
+        assert!(is_module_raw_enabled(&db));
+    }
 
     #[test]
     fn hash_file_matches_in_memory_hash() {
