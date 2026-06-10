@@ -1,7 +1,13 @@
 <script lang="ts">
     import { openPath, openUrl } from '@tauri-apps/plugin-opener';
-    import { getAppSetting, setAppSetting, exportStaticPublishPackage, serveStaticPublishPackage, stopStaticPublishServer } from '$lib/api';
-    import type { StaticPublishResult, StaticPublishServerResult } from '$lib/api';
+    // Backend calls split by bridge support:
+    //   export_static_publish_package -> host.invoke (in the plugin_invoke dispatch whitelist)
+    //   getAppSetting / setAppSetting / serveStaticPublishPackage / stopStaticPublishServer
+    //     are NOT in the v1 dispatch whitelist (src-tauri/src/plugins/invoke.rs); since
+    //     cull-publish is a first-party bundled plugin it imports them directly from $lib/api.
+    import { getAppSetting, setAppSetting, serveStaticPublishPackage, stopStaticPublishServer } from '$lib/api';
+    import type { StaticPublishResult, StaticPublishServerResult, StaticPublishRequest } from '$lib/api';
+    import type { PluginHost } from '../host';
     import { activeCanvas, activeSession, images, selectedIds, showToast } from '$lib/stores';
     import {
         buildStaticPublishRequestFromSavedCanvas,
@@ -12,6 +18,8 @@
     } from '$lib/static-publishing';
     import type { StaticPublishShareItem } from '$lib/static-publishing';
     import { onMount } from 'svelte';
+
+    let { host }: { host: PluginHost } = $props();
 
     type PublishScenario = 'local_preview' | 'client_review' | 'agent_handoff' | 'static_host';
 
@@ -155,39 +163,44 @@
         if (serverResult) await stopServer(false);
         lastResult = null;
         try {
-            const result = await exportStaticPublishPackage(
-                $activeCanvas
-                    ? buildStaticPublishRequestFromSavedCanvas({
-                        canvas: $activeCanvas,
-                        canvasName: siteTitle,
-                        outputDir,
-                        shareUrl,
-                        siteTitle,
-                        siteDescription,
-                        indexable,
-                        links: parsedLinks,
-                        includeThumbnails,
-                        includeWeb,
-                        includeFull,
-                    })
-                    : {
-                        canvas_name: siteTitle.trim() || 'Current Canvas',
-                        items: sourceImages.map(img => ({ image_id: img.image.id })),
-                        layout_json: JSON.stringify({
-                            type: 'current_view_snapshot',
-                            image_ids: sourceImages.map(img => img.image.id),
-                        }),
-                        output_dir: outputDir.trim() || null,
-                        share_url: shareUrl.trim() || null,
-                        site_title: siteTitle.trim() || null,
-                        site_description: siteDescription.trim() || null,
-                        indexable,
-                        links: parsedLinks,
-                        include_thumbnails: includeThumbnails,
-                        include_web: includeWeb,
-                        include_full: includeFull,
-                    }
-            );
+            const request: StaticPublishRequest = $activeCanvas
+                ? buildStaticPublishRequestFromSavedCanvas({
+                    canvas: $activeCanvas,
+                    canvasName: siteTitle,
+                    outputDir,
+                    shareUrl,
+                    siteTitle,
+                    siteDescription,
+                    indexable,
+                    links: parsedLinks,
+                    includeThumbnails,
+                    includeWeb,
+                    includeFull,
+                })
+                : {
+                    canvas_name: siteTitle.trim() || 'Current Canvas',
+                    items: sourceImages.map(img => ({ image_id: img.image.id })),
+                    layout_json: JSON.stringify({
+                        type: 'current_view_snapshot',
+                        image_ids: sourceImages.map(img => img.image.id),
+                    }),
+                    output_dir: outputDir.trim() || null,
+                    share_url: shareUrl.trim() || null,
+                    site_title: siteTitle.trim() || null,
+                    site_description: siteDescription.trim() || null,
+                    indexable,
+                    links: parsedLinks,
+                    include_thumbnails: includeThumbnails,
+                    include_web: includeWeb,
+                    include_full: includeFull,
+                };
+            // Privileged backend call routes through the host bridge (plugin_invoke).
+            // The Rust dispatch deserializes the args object directly into a
+            // StaticPublishRequest, so the request is passed as the args (not wrapped).
+            const result = await host.invoke(
+                'export_static_publish_package',
+                request as unknown as Record<string, unknown>,
+            ) as StaticPublishResult;
             lastResult = result;
             serverResult = null;
             showToast('Package built', {
