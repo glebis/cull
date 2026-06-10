@@ -172,6 +172,10 @@ export interface BundledPlugin {
 
 /** Activate first-party bundled plugins. They ship in the signed app, so no
  * blob:, checksum, consent, or module_plugins gate — they are trusted code. */
+// First-party bundled plugin ids, tracked so that reloading third-party
+// plugins (which fully replaces activePluginIds) never drops them.
+const bundledPluginIds = new Set<string>();
+
 export async function activateBundledPlugins(
     plugins: BundledPlugin[],
     _opts: { pluginsFlagEnabled: boolean } = { pluginsFlagEnabled: false },
@@ -179,6 +183,7 @@ export async function activateBundledPlugins(
     for (const plugin of plugins) {
         const host = createPluginHost(plugin.manifest.id);
         await plugin.activate(host);
+        bundledPluginIds.add(plugin.manifest.id);
         activePluginIds.update(ids => new Set(ids).add(plugin.manifest.id));
     }
 }
@@ -199,7 +204,7 @@ export interface PluginLoaderDeps {
 export async function loadInstalledPlugins(deps: PluginLoaderDeps = {}): Promise<LoadedPlugin[]> {
     const getFlag = deps.getFlag ?? (() => getAppSetting('module_plugins'));
     if (!shouldLoadPlugins(await getFlag())) {
-        activePluginIds.set(new Set());
+        activePluginIds.set(new Set(bundledPluginIds));
         return [];
     }
     const importModule = deps.importModule ?? importPluginModule;
@@ -227,7 +232,8 @@ export async function loadInstalledPlugins(deps: PluginLoaderDeps = {}): Promise
         }
     }
     // Plugin presence drives feature gates (e.g. the publish surface), so
-    // record exactly what activated.
-    activePluginIds.set(new Set(activated.map(plugin => plugin.manifest.id)));
+    // record exactly what activated — plus the bundled first-party ids, which
+    // are activated separately and must survive a third-party reload.
+    activePluginIds.set(new Set([...bundledPluginIds, ...activated.map(plugin => plugin.manifest.id)]));
     return activated;
 }
