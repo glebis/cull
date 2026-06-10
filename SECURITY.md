@@ -55,4 +55,5 @@ Cull is a local-first Tauri 2 desktop app. It never phones home. All data stays 
 
 | Version | Supported |
 |---------|-----------|
-| 0.1.x   | Yes       |
+| 0.2.x   | Yes       |
+| < 0.2   | No        |

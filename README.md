@@ -18,6 +18,16 @@ Terminal-inspired image viewer for batch review, comparison, curation, iteration
 
 Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 
+## Download & Install
+
+No developer tools required:
+
+1. Download the latest `.dmg` for your Mac (Apple Silicon or Intel) from [GitHub Releases](https://github.com/glebis/cull/releases).
+2. Open the DMG and drag **Cull** into **Applications**.
+3. First launch: current builds are not yet signed/notarized (signed release pipeline is in progress), so macOS Gatekeeper will warn. Right-click the app → **Open** → **Open**, or allow it under **System Settings → Privacy & Security**.
+
+Prefer building from source? See [Quick Start](#quick-start) below.
+
 ## Documentation
 
 - [User Guide](docs/USER_GUIDE.md) — installation, import, viewing, curation, collections, Clipboard Monitor, static publishing, embeddings, export, agent workflows, CLI, and privacy basics
@@ -27,7 +37,9 @@ Tauri 2 + Rust + Svelte 5 + SQLite + ONNX Runtime
 - [Contributing](CONTRIBUTING.md) — setup, checks, and pull request process
 - [Distribution](docs/cross-platform-distribution.md) — release builds and platform planning
 
-## Current Status (v0.1.0)
+## Current Status
+
+The shipping version is whatever the [latest GitHub Release](https://github.com/glebis/cull/releases/latest) says; this table tracks feature completeness, not version numbers.
 
 ### Implemented
 

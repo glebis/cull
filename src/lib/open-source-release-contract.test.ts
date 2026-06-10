@@ -110,6 +110,28 @@ describe('open-source release legal and privacy contract', () => {
     }
   });
 
+  test('README and SECURITY describe the shipping app, not v0.1.0 (HYG-006)', () => {
+    const readme = read('README.md');
+    const security = read('SECURITY.md');
+    const packageVersion = JSON.parse(read('package.json')).version as string;
+
+    // Status heading must not pin a stale version; if it pins one, it must match package.json.
+    const statusHeading = readme.match(/^## Current Status.*$/m)?.[0] ?? '';
+    expect(statusHeading).not.toBe('');
+    const pinnedVersion = statusHeading.match(/v(\d+\.\d+\.\d+)/)?.[1];
+    if (pinnedVersion) expect(pinnedVersion).toBe(packageVersion);
+
+    // Non-developers get a Download/Install path pointing at GitHub Releases.
+    expect(readme).toMatch(/^## (Download|Install)/m);
+    expect(readme).toContain('https://github.com/glebis/cull/releases');
+    expect(readme.toLowerCase()).toContain('applications');
+
+    // Security policy covers the shipping 0.2.x line.
+    const major = packageVersion.split('.').slice(0, 2).join('.');
+    expect(security).toContain(`${major}.x`);
+    expect(security).not.toMatch(/\|\s*0\.1\.x\s*\|\s*Yes/);
+  });
+
   test('the dead SessionTimeline component stays cut from the release (CQ-5)', () => {
     expect(existsSync('src/lib/components/SessionTimeline.svelte')).toBe(false);
     const api = read('src/lib/api.ts');
