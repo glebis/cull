@@ -264,4 +264,9 @@ describe('publish is plugin-only', () => {
     expect(existsSync('src/lib/plugins/cull-publish/index.ts')).toBe(true);
     expect(existsSync('src/lib/plugins/cull-publish/PublishView.svelte')).toBe(true);
   });
+
+  test('the cull-publish manifest description has no internal/dev references', () => {
+    const src = readFileSync('src/lib/plugins/cull-publish/manifest.ts', 'utf8');
+    expect(src).not.toMatch(/Track\s*C3|C3 proof|Extracted from/i);
+  });
 });
