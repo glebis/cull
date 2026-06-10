@@ -1,4 +1,5 @@
 import type { Options } from 'html-to-image/lib/types';
+import type { AssetResponse } from './export-types';
 
 export function buildHtmlToImageOptions(width: number, height: number): Options {
     return {
@@ -12,6 +13,13 @@ export function buildHtmlToImageOptions(width: number, height: number): Options 
             transformOrigin: 'top left',
         },
     };
+}
+
+export function imageSourceForExportAsset(
+    asset: AssetResponse,
+    convertFileSrc: (path: string) => string
+): string {
+    return asset.data_url || convertFileSrc(asset.path);
 }
 
 function resourceLabel(src: string): string {

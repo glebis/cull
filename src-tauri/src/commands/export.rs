@@ -82,6 +82,30 @@ pub struct AssetResponse {
     pub mime: String,
     pub width: u32,
     pub height: u32,
+    pub data_url: String,
+}
+
+fn asset_data_url(path: &Path, mime: &str) -> Result<String, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| format!("Failed to read export asset '{}': {}", path.display(), e))?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(format!("data:{};base64,{}", mime, encoded))
+}
+
+fn asset_response(
+    path: PathBuf,
+    mime: String,
+    width: u32,
+    height: u32,
+) -> Result<AssetResponse, String> {
+    let data_url = asset_data_url(&path, &mime)?;
+    Ok(AssetResponse {
+        path: path.to_string_lossy().to_string(),
+        mime,
+        width,
+        height,
+        data_url,
+    })
 }
 
 #[tauri::command]
@@ -308,19 +332,19 @@ pub async fn get_export_asset(
             if crate::extensions::is_raw_extension(ext) {
                 let thumb_path =
                     crate::db_core::thumbnails::thumbnail_path(&state.app_data_dir, &img.image.id);
-                Ok(AssetResponse {
-                    path: thumb_path.to_string_lossy().to_string(),
-                    mime: "image/jpeg".to_string(),
-                    width: 800.min(img.image.width),
-                    height: 800.min(img.image.height),
-                })
+                asset_response(
+                    thumb_path,
+                    "image/jpeg".to_string(),
+                    800.min(img.image.width),
+                    800.min(img.image.height),
+                )
             } else {
-                Ok(AssetResponse {
-                    path: img.path.clone(),
-                    mime: format!("image/{}", img.image.format),
-                    width: img.image.width,
-                    height: img.image.height,
-                })
+                asset_response(
+                    PathBuf::from(&img.path),
+                    format!("image/{}", img.image.format),
+                    img.image.width,
+                    img.image.height,
+                )
             }
         }
         "thumbnail" => {
@@ -329,23 +353,23 @@ pub async fn get_export_asset(
                 &img.image.id,
                 256,
             );
-            Ok(AssetResponse {
-                path: thumb_path.to_string_lossy().to_string(),
-                mime: "image/jpeg".to_string(),
-                width: 256.min(img.image.width),
-                height: 256.min(img.image.height),
-            })
+            asset_response(
+                thumb_path,
+                "image/jpeg".to_string(),
+                256.min(img.image.width),
+                256.min(img.image.height),
+            )
         }
         _ => {
             // "preview" default — 800px thumbnail
             let thumb_path =
                 crate::db_core::thumbnails::thumbnail_path(&state.app_data_dir, &img.image.id);
-            Ok(AssetResponse {
-                path: thumb_path.to_string_lossy().to_string(),
-                mime: "image/jpeg".to_string(),
-                width: 800.min(img.image.width),
-                height: 800.min(img.image.height),
-            })
+            asset_response(
+                thumb_path,
+                "image/jpeg".to_string(),
+                800.min(img.image.width),
+                800.min(img.image.height),
+            )
         }
     }
 }
@@ -483,5 +507,16 @@ mod tests {
             &["/tmp/renderer.png".to_string()],
         );
         assert!(absolute.is_err());
+    }
+
+    #[test]
+    fn asset_data_url_encodes_file_with_declared_mime() {
+        let app_data = tempfile::tempdir().unwrap();
+        let image_path = app_data.path().join("preview.jpg");
+        std::fs::write(&image_path, b"jpeg bytes").unwrap();
+
+        let data_url = asset_data_url(&image_path, "image/jpeg").unwrap();
+
+        assert_eq!(data_url, "data:image/jpeg;base64,anBlZyBieXRlcw==");
     }
 }

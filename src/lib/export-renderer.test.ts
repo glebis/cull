@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     buildHtmlToImageOptions,
     formatExportError,
+    imageSourceForExportAsset,
 } from './export-renderer';
 
 describe('export renderer helpers', () => {
@@ -43,5 +44,34 @@ describe('export renderer helpers', () => {
                 transformOrigin: 'top left',
             },
         });
+    });
+
+    it('uses backend-provided data URLs for export slide images', () => {
+        expect(
+            imageSourceForExportAsset(
+                {
+                    path: '/tmp/source-preview.jpg',
+                    mime: 'image/jpeg',
+                    width: 800,
+                    height: 600,
+                    data_url: 'data:image/jpeg;base64,abc123',
+                },
+                path => `tauri://localhost/${path}`
+            )
+        ).toBe('data:image/jpeg;base64,abc123');
+    });
+
+    it('falls back to converted file URLs for older asset responses', () => {
+        expect(
+            imageSourceForExportAsset(
+                {
+                    path: '/tmp/source-preview.jpg',
+                    mime: 'image/jpeg',
+                    width: 800,
+                    height: 600,
+                },
+                path => `tauri://localhost/${path}`
+            )
+        ).toBe('tauri://localhost//tmp/source-preview.jpg');
     });
 });

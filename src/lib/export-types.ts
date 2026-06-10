@@ -139,4 +139,5 @@ export interface AssetResponse {
     mime: string;
     width: number;
     height: number;
+    data_url?: string;
 }

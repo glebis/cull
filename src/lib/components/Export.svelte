@@ -26,7 +26,7 @@
     } from '$lib/export-master';
     import { convertFileSrc, invoke } from '@tauri-apps/api/core';
     import { toPng } from 'html-to-image';
-    import { buildHtmlToImageOptions, formatExportError } from '$lib/export-renderer';
+    import { buildHtmlToImageOptions, formatExportError, imageSourceForExportAsset } from '$lib/export-renderer';
     import ExportSlideBleed from './ExportSlideBleed.svelte';
     import ExportSlideEditorial from './ExportSlideEditorial.svelte';
     import ExportSlideTerminal from './ExportSlideTerminal.svelte';
@@ -229,7 +229,7 @@
         for (const asset of nextManifest.assets) {
             if (asset.kind === 'source') {
                 const resp = await getExportAsset(asset.uri, 'preview');
-                nextSrcs[asset.id] = convertFileSrc(resp.path);
+                nextSrcs[asset.id] = imageSourceForExportAsset(resp, convertFileSrc);
             }
         }
 
