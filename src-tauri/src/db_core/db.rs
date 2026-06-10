@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 21;
+const CURRENT_SCHEMA_VERSION: i64 = 22;
 
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, "core_schema"),
@@ -35,6 +35,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (19, "image_color_metrics"),
     (20, "schema_compatibility_v20"),
     (21, "client_feedback"),
+    (22, "plugin_grants"),
 ];
 
 #[derive(Clone)]
@@ -173,6 +174,7 @@ impl Database {
         // advanced PRAGMA user_version to 20 without requiring additional schema.
         self.run_migration_step(20, "schema_compatibility_v20", || Ok(()))?;
         self.run_migration_step(21, "client_feedback", || self.migrate_client_feedback())?;
+        self.run_migration_step(22, "plugin_grants", || self.migrate_plugin_grants())?;
 
         // A high PRAGMA user_version alone is not proof the schema is complete:
         // a partially-applied prerelease migration can leave the version high
@@ -553,6 +555,51 @@ impl Database {
             CREATE INDEX IF NOT EXISTS client_feedback_favorite_idx ON client_feedback(favorite);",
         )?;
         Ok(())
+    }
+
+    // Per-plugin capability grants for the plugin runtime. A plugin is a
+    // locally-installed actor with a capability set — exactly what an MCP
+    // token is — so grants store the same capability vocabulary.
+    fn migrate_plugin_grants(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS plugin_grants (
+                plugin_id TEXT NOT NULL,
+                capability TEXT NOT NULL,
+                granted_at TEXT NOT NULL,
+                PRIMARY KEY (plugin_id, capability)
+            );",
+        )?;
+        Ok(())
+    }
+
+    /// Replace the full grant set for a plugin (install-time consent writes
+    /// the manifest permissions; re-install replaces them).
+    pub fn set_plugin_grants(&self, plugin_id: &str, capabilities: &[String]) -> Result<()> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let now = chrono::Utc::now().to_rfc3339();
+        tx.execute(
+            "DELETE FROM plugin_grants WHERE plugin_id = ?1",
+            params![plugin_id],
+        )?;
+        for capability in capabilities {
+            tx.execute(
+                "INSERT OR REPLACE INTO plugin_grants (plugin_id, capability, granted_at)
+                 VALUES (?1, ?2, ?3)",
+                params![plugin_id, capability, now],
+            )?;
+        }
+        tx.commit()
+    }
+
+    pub fn granted_plugin_capabilities(&self, plugin_id: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT capability FROM plugin_grants WHERE plugin_id = ?1 ORDER BY capability",
+        )?;
+        let rows = stmt.query_map(params![plugin_id], |row| row.get(0))?;
+        rows.collect()
     }
 
     /// Upsert client feedback for an image. Passing `favorite=false` and an
@@ -3828,6 +3875,60 @@ mod migration_safety_tests {
             .unwrap();
         assert_eq!(status, "failed");
         assert!(error.contains("synthetic migration failure"));
+    }
+
+    #[test]
+    fn test_plugin_grants_table_created_on_fresh_and_legacy_databases() {
+        // Fresh database: the plugin runtime's grants table must exist.
+        let tmp = tempfile::tempdir().unwrap();
+        let fresh_path = tmp.path().join("fresh.db");
+        {
+            let db = Database::open(&fresh_path).unwrap();
+            let conn = db.conn.lock();
+            assert!(table_exists(&conn, "plugin_grants").unwrap());
+        }
+
+        // Legacy database migrated forward gets the table too.
+        let legacy_path = tmp.path().join("legacy.db");
+        create_legacy_db(&legacy_path);
+        let db = Database::open(&legacy_path).unwrap();
+        let conn = db.conn.lock();
+        assert!(table_exists(&conn, "plugin_grants").unwrap());
+    }
+
+    #[test]
+    fn test_plugin_grants_round_trip_and_replace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open(&tmp.path().join("cull.db")).unwrap();
+
+        // No grants recorded -> empty capability set.
+        assert!(db
+            .granted_plugin_capabilities("cull-publish")
+            .unwrap()
+            .is_empty());
+
+        db.set_plugin_grants(
+            "cull-publish",
+            &["library:read".to_string(), "export:read".to_string()],
+        )
+        .unwrap();
+        let mut caps = db.granted_plugin_capabilities("cull-publish").unwrap();
+        caps.sort();
+        assert_eq!(caps, vec!["export:read", "library:read"]);
+
+        // Grants are per plugin id.
+        assert!(db
+            .granted_plugin_capabilities("other-plugin")
+            .unwrap()
+            .is_empty());
+
+        // Re-granting replaces the previous set (no stale rows).
+        db.set_plugin_grants("cull-publish", &["library:read".to_string()])
+            .unwrap();
+        assert_eq!(
+            db.granted_plugin_capabilities("cull-publish").unwrap(),
+            vec!["library:read"]
+        );
     }
 
     fn mcp_tokens_has_expires_at(conn: &Connection) -> bool {

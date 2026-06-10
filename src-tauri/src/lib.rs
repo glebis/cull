@@ -550,6 +550,8 @@ pub fn run() {
             commands::lineage::scan_lineage,
             commands::lineage::get_generation_run,
             commands::lineage::rescan_sidecars,
+            commands::plugins::plugin_invoke,
+            commands::plugins::load_installed_plugins,
             commands::mcp::create_mcp_token,
             commands::mcp::list_mcp_tokens,
             commands::mcp::revoke_mcp_token,

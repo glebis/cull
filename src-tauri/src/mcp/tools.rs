@@ -27,6 +27,8 @@ fn can_expose_private_metadata(auth: &AuthContext) -> bool {
     match auth {
         AuthContext::Local => true,
         AuthContext::Authenticated(token) => token.role == tokens::ROLE_ADMIN,
+        // Plugins never see private metadata regardless of grants.
+        AuthContext::Plugin { .. } => false,
     }
 }
 
@@ -408,6 +410,8 @@ impl CullMcp {
         match &self.auth {
             AuthContext::Local => None,
             AuthContext::Authenticated(token) => tokens::parse_scope(&token.scope_json),
+            // Plugin grants are capability-only in v1; no folder/collection scope.
+            AuthContext::Plugin { .. } => None,
         }
     }
 
@@ -438,6 +442,7 @@ impl CullMcp {
         let token_id = match &self.auth {
             AuthContext::Local => None,
             AuthContext::Authenticated(t) => Some(t.id.as_str()),
+            AuthContext::Plugin { actor, .. } => Some(actor.as_str()),
         };
         let _ = crate::services::tokens::log_audit(&ctx, token_id, tool_name, params_json, status);
     }

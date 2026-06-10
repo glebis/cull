@@ -7,13 +7,31 @@ use crate::services::tokens;
 pub enum AuthContext {
     Local,
     Authenticated(crate::db_core::models::McpToken),
+    /// A locally-installed plugin acting through the `plugin_invoke` bridge.
+    /// `actor` is the audit marker (`plugin:<id>`); `capabilities` are the
+    /// persisted per-plugin grants, drawn from the same capability vocabulary
+    /// tokens use.
+    Plugin {
+        actor: String,
+        capabilities: Vec<String>,
+    },
 }
 
 impl AuthContext {
+    pub fn for_plugin(plugin_id: &str, capabilities: Vec<String>) -> Self {
+        AuthContext::Plugin {
+            actor: format!("plugin:{plugin_id}"),
+            capabilities,
+        }
+    }
+
     pub fn has_capability(&self, capability: &str) -> bool {
         match self {
             AuthContext::Local => true,
             AuthContext::Authenticated(token) => tokens::has_capability(&token.role, capability),
+            AuthContext::Plugin { capabilities, .. } => {
+                capabilities.iter().any(|c| c == capability)
+            }
         }
     }
 
@@ -22,6 +40,7 @@ impl AuthContext {
         match self {
             AuthContext::Local => None,
             AuthContext::Authenticated(t) => Some(&t.id),
+            AuthContext::Plugin { actor, .. } => Some(actor),
         }
     }
 }

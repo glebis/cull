@@ -9,6 +9,6 @@
 //! is the `plugin_invoke` Tauri command, enforced in Rust via the same
 //! `require_capability` code path MCP tokens use. See `docs/plugins-design.md`.
 
+pub mod invoke;
+pub mod loader;
 pub mod manifest;
-
-pub use manifest::{parse_manifest, PluginError, PluginManifest};
