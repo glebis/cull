@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { viewMode } from './stores';
+import { clearPluginTabs, registerCoreTabs } from './plugins/tab-registry';
 
 vi.mock('./api', () => ({
     addToCollection: vi.fn(),
@@ -62,6 +63,8 @@ describe('Tab does not hijack native keyboard focus order (UX-01)', () => {
         vi.stubGlobal('HTMLSelectElement', TestHTMLSelectElement);
         vi.stubGlobal('document', { querySelector: vi.fn(() => null), fullscreenElement: null });
         vi.stubGlobal('window', new EventTarget());
+        clearPluginTabs();
+        registerCoreTabs();
         viewMode.set('grid');
     });
 

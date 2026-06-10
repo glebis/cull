@@ -7,8 +7,9 @@ import {
     showDetectionBoxes, showDetectionInspector, nsfwMode,
     navigateTo, navigateBack, searchOpen, shortcutsOpen, focusedImage, activeSession,
     requestTextInput, requestCollectionTarget, selectionAnchorIndex, resetLoupeTransform,
-    staticPublishingEnabled, activeFolder,
+    activeFolder,
 } from './stores';
+import { tabCycleOrder } from './plugins/tab-registry';
 import { computeCompareSwap, nextComparePresentationState } from './compare-utils';
 import { nextExportPresentationState } from './presentation-utils';
 import type { NsfwMode } from './stores';
@@ -25,16 +26,12 @@ import { pasteDestinationForContext } from './clipboard-actions';
 let waitingForStar = false;
 
 function viewModeCycle(): ViewMode[] {
-    return [
-        'grid',
-        'loupe',
-        'compare',
-        'canvas',
-        'lineage',
-        'embeddings',
-        ...(get(staticPublishingEnabled) ? ['publish' as ViewMode] : []),
-        'export',
-    ];
+    return tabCycleOrder();
+}
+
+/** Test seam: exposes the derived cycle without dispatching key events. */
+export function viewModeCycleForTest(): ViewMode[] {
+    return viewModeCycle();
 }
 
 const VIEW_MODE_KEYS: Record<string, ViewMode> = {
