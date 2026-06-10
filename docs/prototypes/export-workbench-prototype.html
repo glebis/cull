@@ -557,6 +557,26 @@
       padding: 10px;
     }
 
+    .template-preview {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      padding: 9px;
+      color: var(--text-secondary);
+      min-height: 62px;
+    }
+
+    .template-preview strong {
+      color: var(--text);
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .template-code {
+      min-height: 132px;
+      font-size: 11px;
+    }
+
     .thumb-list {
       display: grid;
       gap: 6px;
@@ -962,6 +982,55 @@
             </div>
           </section>
 
+          <section class="section" data-section="pdf-template">
+            <button class="section-toggle" type="button">
+              <span class="section-label">
+                <span class="section-title">PDF template</span>
+                <span class="section-summary" id="summary-pdf-template">Artistic portfolio, standard text</span>
+              </span>
+              <span class="pill orange">PDF</span>
+            </button>
+            <div class="section-body">
+              <div class="field-grid">
+                <label class="field full">
+                  <span>HTML template preset</span>
+                  <select id="pdf-template">
+                    <option value="artistic">Artistic portfolio</option>
+                    <option value="photo">Photo portfolio</option>
+                    <option value="lookbook">Minimal lookbook</option>
+                    <option value="contact">Contact-sheet booklet</option>
+                    <option value="custom">Custom HTML</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Text amount</span>
+                  <select id="pdf-text-amount">
+                    <option value="minimal">minimal captions</option>
+                    <option value="standard">standard notes</option>
+                    <option value="extended">extended statements</option>
+                  </select>
+                </label>
+                <label class="field full">
+                  <span>Page rhythm</span>
+                  <select id="pdf-layout">
+                    <option>one image per page</option>
+                    <option>gallery grid</option>
+                    <option>sequence spreads</option>
+                    <option>cover + chapters</option>
+                  </select>
+                </label>
+                <div class="field full">
+                  <span>Template intent</span>
+                  <div class="template-preview" id="pdf-template-preview"></div>
+                </div>
+                <label class="field full">
+                  <span>HTML / CSS scaffold</span>
+                  <textarea class="template-code" id="pdf-html-template"></textarea>
+                </label>
+              </div>
+            </div>
+          </section>
+
           <section class="section" data-section="text">
             <button class="section-toggle" type="button">
               <span class="section-label">
@@ -1032,24 +1101,24 @@
     const densities = {
       Basic: {
         open: ["scope"],
-        hidden: ["metadata", "advanced", "text", "derivatives"],
+        hidden: ["metadata", "advanced", "text", "derivatives", "pdf-template"],
         showWorkbench: false,
         drawer: false
       },
       Standard: {
-        open: ["scope", "outputs", "derivatives"],
+        open: ["scope", "outputs", "derivatives", "pdf-template"],
         hidden: [],
         showWorkbench: true,
         drawer: false
       },
       Detailed: {
-        open: ["scope", "outputs", "derivatives", "text", "metadata"],
+        open: ["scope", "outputs", "derivatives", "pdf-template", "text", "metadata"],
         hidden: [],
         showWorkbench: true,
         drawer: false
       },
       Expert: {
-        open: ["scope", "outputs", "derivatives", "text", "metadata", "advanced"],
+        open: ["scope", "outputs", "derivatives", "pdf-template", "text", "metadata", "advanced"],
         hidden: [],
         showWorkbench: true,
         drawer: true
@@ -1066,6 +1135,9 @@
         format: "JPEG",
         resize: "long edge",
         pixels: "2048",
+        pdfTemplate: "photo",
+        pdfText: "standard",
+        pdfLayout: "cover + chapters",
         outputs: ["out-originals", "out-web", "out-social", "out-pdf", "out-contact", "out-csv"]
       },
       {
@@ -1077,6 +1149,9 @@
         format: "JPEG",
         resize: "width x height",
         pixels: "1080 x 1350",
+        pdfTemplate: "custom",
+        pdfText: "minimal",
+        pdfLayout: "gallery grid",
         outputs: ["out-web", "out-social", "out-csv"]
       },
       {
@@ -1088,6 +1163,9 @@
         format: "JPEG",
         resize: "width x height",
         pixels: "2480 x 3508",
+        pdfTemplate: "artistic",
+        pdfText: "standard",
+        pdfLayout: "one image per page",
         outputs: ["out-pdf", "out-web", "out-csv"]
       },
       {
@@ -1099,6 +1177,9 @@
         format: "JPEG",
         resize: "long edge",
         pixels: "1200",
+        pdfTemplate: "contact",
+        pdfText: "minimal",
+        pdfLayout: "gallery grid",
         outputs: ["out-contact", "out-pdf", "out-csv"]
       },
       {
@@ -1110,9 +1191,95 @@
         format: "Original",
         resize: "original size",
         pixels: "original",
+        pdfTemplate: "custom",
+        pdfText: "minimal",
+        pdfLayout: "gallery grid",
         outputs: ["out-originals"]
       }
     ];
+
+    const pdfTemplates = {
+      artistic: {
+        label: "Artistic portfolio",
+        tone: "Editorial, spacious pages with large art, short statements, and restrained metadata.",
+        textAmount: "standard",
+        layout: "one image per page",
+        html: `<section class="cover">
+  <h1>{{collection_title}}</h1>
+  <p>{{artist_statement}}</p>
+</section>
+{{#images}}
+  <article class="plate artistic">
+    <img src="{{image_src}}" alt="{{alt_text}}">
+    <h2>{{headline}}</h2>
+    <p>{{body}}</p>
+    <small>{{caption}} · {{rating}} star</small>
+  </article>
+{{/images}}`
+      },
+      photo: {
+        label: "Photo portfolio",
+        tone: "Clean photo-book layout with consistent captions, contact details, and stronger proofing context.",
+        textAmount: "standard",
+        layout: "cover + chapters",
+        html: `<section class="cover photo">
+  <h1>{{client_or_project}}</h1>
+  <p>{{date}} · {{image_count}} selected images</p>
+</section>
+{{#images}}
+  <figure class="photo-page">
+    <img src="{{image_src}}" alt="{{alt_text}}">
+    <figcaption>{{caption}} · {{filename}} · {{rating}} star</figcaption>
+  </figure>
+{{/images}}`
+      },
+      lookbook: {
+        label: "Minimal lookbook",
+        tone: "Very light text, large margins, and image-first sequencing for a quiet review document.",
+        textAmount: "minimal",
+        layout: "sequence spreads",
+        html: `<section class="lookbook">
+  {{#images}}
+    <figure>
+      <img src="{{image_src}}" alt="{{alt_text}}">
+      <figcaption>{{headline}}</figcaption>
+    </figure>
+  {{/images}}
+</section>`
+      },
+      contact: {
+        label: "Contact-sheet booklet",
+        tone: "Dense review grid with filenames, ratings, captions, and curation status per image.",
+        textAmount: "minimal",
+        layout: "gallery grid",
+        html: `<section class="contact-sheet">
+  <h1>{{collection_title}}</h1>
+  <div class="grid">
+    {{#images}}
+      <figure>
+        <img src="{{thumbnail_src}}" alt="{{alt_text}}">
+        <figcaption>{{filename}} · {{rating}} star · {{caption}}</figcaption>
+      </figure>
+    {{/images}}
+  </div>
+</section>`
+      },
+      custom: {
+        label: "Custom HTML",
+        tone: "Editable template for hand-built PDF layouts, brand systems, or publication-specific HTML.",
+        textAmount: "standard",
+        layout: "one image per page",
+        html: `<main class="custom-pdf">
+  {{#images}}
+    <article>
+      <img src="{{image_src}}" alt="{{alt_text}}">
+      <h2>{{headline}}</h2>
+      <p>{{body}}</p>
+    </article>
+  {{/images}}
+</main>`
+      }
+    };
 
     const targets = {
       "web-responsive": {
@@ -1271,12 +1438,33 @@
       return targets[value("target")] || targets["web-responsive"];
     }
 
+    function activePdfTemplate() {
+      return pdfTemplates[value("pdf-template")] || pdfTemplates.artistic;
+    }
+
+    function hasPdfOutput() {
+      return checked("out-pdf");
+    }
+
+    function pdfTemplateSummary() {
+      const template = activePdfTemplate();
+      return `${template.label}, ${value("pdf-text-amount")}, ${value("pdf-layout")}`;
+    }
+
     function applyTarget(targetId) {
       const target = targets[targetId] || targets["web-responsive"];
       el("target").value = targetId;
       el("format").value = target.format;
       el("resize").value = target.resize;
       el("pixels").value = target.pixels;
+    }
+
+    function applyPdfTemplate(templateId) {
+      const template = pdfTemplates[templateId] || pdfTemplates.artistic;
+      el("pdf-template").value = templateId;
+      el("pdf-text-amount").value = template.textAmount;
+      el("pdf-layout").value = template.layout;
+      el("pdf-html-template").value = template.html;
     }
 
     function renderDensity() {
@@ -1318,6 +1506,9 @@
       el("format").value = preset.format;
       el("resize").value = preset.resize;
       el("pixels").value = preset.pixels;
+      applyPdfTemplate(preset.pdfTemplate || "artistic");
+      el("pdf-text-amount").value = preset.pdfText || activePdfTemplate().textAmount;
+      el("pdf-layout").value = preset.pdfLayout || activePdfTemplate().layout;
     }
 
     function renderMaster() {
@@ -1362,7 +1553,9 @@
       const density = densities[state.density];
       document.querySelectorAll(".section").forEach(section => {
         const name = section.dataset.section;
-        section.classList.toggle("is-hidden", density.hidden.includes(name));
+        const hideForDensity = density.hidden.includes(name);
+        const hideForOutput = name === "pdf-template" && !hasPdfOutput();
+        section.classList.toggle("is-hidden", hideForDensity || hideForOutput);
         section.classList.toggle("is-open", density.open.includes(name));
       });
       el("workbench").classList.toggle("is-hidden", !density.showWorkbench);
@@ -1387,19 +1580,31 @@
       const outputs = selectedOutputs();
       const metadata = selectedMetadata();
       const target = activeTarget();
-      el("package-facts").innerHTML = [
+      const facts = [
         ["Intent", activePreset().name],
         ["Scope", `${value("scope")} - ${value("filter")}`],
         ["Files", outputs.join(", ") || "No outputs selected"],
         ["Target", `${target.label}: ${target.detail}`],
         ["Settings", `${value("format")} - ${value("quality")} quality - ${value("resize")} ${value("pixels")}`],
         ["Metadata", metadata.join(", ") || "minimal metadata"]
-      ].map(([label, detail]) => `
+      ];
+      if (hasPdfOutput()) {
+        facts.splice(5, 0, ["PDF template", pdfTemplateSummary()]);
+      }
+      el("package-facts").innerHTML = facts.map(([label, detail]) => `
         <div class="fact">
           <strong>${label}</strong>
           <span class="muted">${detail}</span>
         </div>
       `).join("");
+    }
+
+    function renderPdfTemplate() {
+      const template = activePdfTemplate();
+      el("pdf-template-preview").innerHTML = `
+        <strong>${template.label}</strong>
+        <span>${template.tone}</span>
+      `;
     }
 
     function selectedOutputs() {
@@ -1428,6 +1633,7 @@
       el("summary-metadata").textContent = selectedMetadata().join(", ") || "minimal metadata";
       el("summary-advanced").textContent = `${value("naming")} - ${value("collision")}`;
       el("summary-derivatives").textContent = `${activeTarget().label}, ${value("format")}, ${value("pixels")}`;
+      el("summary-pdf-template").textContent = hasPdfOutput() ? pdfTemplateSummary() : "PDF output disabled";
       el("summary-text").textContent = `${images.filter(image => image.status === "ready").length} of ${images.length} images ready`;
     }
 
@@ -1501,9 +1707,10 @@
         `Outputs: ${selectedOutputs().join(", ")}.`,
         `Target format: ${activeTarget().label} (${activeTarget().detail}).`,
         `Derivative settings: ${value("format")}, ${value("quality")} quality, ${value("resize")} ${value("pixels")}.`,
+        hasPdfOutput() ? `PDF template: ${pdfTemplateSummary()} using editable HTML scaffold:\n${value("pdf-html-template")}` : null,
         `Metadata policy: ${selectedMetadata().join(", ") || "minimal metadata"}.`,
         `Queue stays visible but secondary, with Pause and Clear controls.`
-      ];
+      ].filter(Boolean);
       el("prompt-output").textContent = parts.join("\n");
     }
 
@@ -1515,6 +1722,7 @@
       applyDensity();
       renderPreview();
       renderFacts();
+      renderPdfTemplate();
       renderSummaries();
       renderImages();
       renderQueue();
@@ -1530,6 +1738,15 @@
     el("target").addEventListener("input", () => {
       applyTarget(value("target"));
       updateAll();
+    });
+
+    el("pdf-template").addEventListener("input", () => {
+      applyPdfTemplate(value("pdf-template"));
+      updateAll();
+    });
+
+    ["pdf-text-amount", "pdf-layout", "pdf-html-template"].forEach(id => {
+      el(id).addEventListener("input", updateAll);
     });
 
     ["scope", "filter", "order", "format", "quality", "resize", "pixels", "naming", "collision", "after"].forEach(id => {
@@ -1553,7 +1770,9 @@
         id: `job-${String(Date.now()).slice(-5)}`,
         name: activePreset().name,
         status: state.queue.some(job => job.status === "running") ? "queued" : "running",
-        detail: `${activeTarget().label} - ${value("format")} - ${value("scope").toLowerCase()}`,
+        detail: hasPdfOutput()
+          ? `${activeTarget().label} - ${activePdfTemplate().label} - ${value("scope").toLowerCase()}`
+          : `${activeTarget().label} - ${value("format")} - ${value("scope").toLowerCase()}`,
         progress: state.queue.some(job => job.status === "running") ? 0 : 8
       });
       updateAll();
