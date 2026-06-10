@@ -26,6 +26,7 @@
     } from '$lib/export-master';
     import { convertFileSrc, invoke } from '@tauri-apps/api/core';
     import { toPng } from 'html-to-image';
+    import { buildHtmlToImageOptions, formatExportError } from '$lib/export-renderer';
     import ExportSlideBleed from './ExportSlideBleed.svelte';
     import ExportSlideEditorial from './ExportSlideEditorial.svelte';
     import ExportSlideTerminal from './ExportSlideTerminal.svelte';
@@ -250,12 +251,10 @@
                 if (!el) continue;
                 exportProgress = { ...exportProgress, current: index, label: `Rendering slide ${index + 1}` };
 
-                const dataUrl = await toPng(el, {
-                    width: activeTarget.width,
-                    height: activeTarget.height,
-                    pixelRatio: 1,
-                    cacheBust: true,
-                });
+                const dataUrl = await toPng(
+                    el,
+                    buildHtmlToImageOptions(activeTarget.width, activeTarget.height)
+                );
 
                 const base64 = dataUrl.split(',')[1];
                 const path = await invoke<string>('save_export_image', {
@@ -284,7 +283,7 @@
                 showToast(`PDF saved: ${pdfPath.split('/').pop()}`, { type: 'success' });
             }
         } catch (e) {
-            showToast(`Export failed: ${e}`, { type: 'error' });
+            showToast(`Export failed: ${formatExportError(e, exportProgress.label)}`, { type: 'error' });
         } finally {
             exporting = false;
             exportProgress = { current: 0, total: 0, label: '' };
