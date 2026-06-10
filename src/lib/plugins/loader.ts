@@ -11,6 +11,7 @@ import { get } from 'svelte/store';
 import { getAppSetting } from '../api';
 import { activePluginIds, pluginsEnabled } from '../stores';
 import { registerPluginTab } from './tab-registry';
+import { setCommandHotkey, readCommandHotkeys, BUILT_IN_SHORTCUT_LABELS } from '../command-palette';
 import type {
     GrantPromptModel,
     LoadedPlugin,
@@ -90,6 +91,19 @@ export function getPluginPaletteCommands(): Array<{
     }));
 }
 
+/** Bind a plugin command's suggested hotkey only if the chord is unbound by a
+ * built-in or an existing user hotkey. Returns whether it bound. `bound` maps
+ * chord -> label/command for collision detection (injectable for tests). */
+export function applySuggestedHotkey(
+    commandId: string,
+    hotkey: string,
+    bound: Record<string, string | undefined>,
+): boolean {
+    if (bound[hotkey]) return false;        // collision with built-in or user binding
+    setCommandHotkey(commandId, hotkey);
+    return true;
+}
+
 export function createPluginHost(pluginId: string): PluginHost {
     return {
         mountView(el: HTMLElement) {
@@ -98,6 +112,12 @@ export function createPluginHost(pluginId: string): PluginHost {
         registerPaletteCommands(commands: PluginPaletteCommand[]) {
             for (const command of commands) {
                 paletteCommands.push({ ...command, pluginId });
+            }
+            const userHotkeys = readCommandHotkeys();
+            const bound: Record<string, string | undefined> = { ...BUILT_IN_SHORTCUT_LABELS };
+            for (const [id, chord] of Object.entries(userHotkeys)) bound[chord] = id;
+            for (const cmd of commands) {
+                if (cmd.suggestedHotkey) applySuggestedHotkey(`${pluginId}.${cmd.id}`, cmd.suggestedHotkey, bound);
             }
         },
         registerTab(tab) {

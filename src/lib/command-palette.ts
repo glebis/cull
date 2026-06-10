@@ -93,7 +93,7 @@ export const COMMAND_FREQUENCY_STORAGE_KEY = 'cull.commandPalette.frequency';
 export const COMMAND_HOTKEYS_STORAGE_KEY = 'cull.commandPalette.hotkeys';
 export const COMMAND_ALIASES_STORAGE_KEY = 'cull.commandPalette.aliases';
 
-const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
+export const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
     'Cmd+K': 'Open command palette',
     'Cmd+P': 'Open command palette',
     'Cmd+Shift+P': 'Open command-only palette',
