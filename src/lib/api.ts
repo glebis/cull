@@ -1478,3 +1478,44 @@ export async function recordAssetLoadEvent(event: AssetLoadEventRequest): Promis
 export async function getAssetLoadEvents(limit: number): Promise<AssetLoadEvent[]> {
     return invoke<AssetLoadEvent[]>('get_asset_load_events', { limit });
 }
+
+// Plugins (Track C2): registry fetch + checksum-verified install. All
+// commands are module_plugins-gated in Rust; the consent dialog runs in the
+// UI BEFORE installPlugin is invoked.
+export interface PluginManifestInfo {
+    id: string;
+    name: string;
+    version: string;
+    description: string;
+    entry: string;
+    permissions: string[];
+    minAppVersion: string;
+    checksum: string;
+    repo: string;
+}
+
+export interface RegistryPluginInfo {
+    manifest: PluginManifestInfo;
+    download: string;
+}
+
+export interface InstalledPluginInfo {
+    manifest: PluginManifestInfo;
+    granted: string[];
+}
+
+export async function fetchPluginRegistry(): Promise<RegistryPluginInfo[]> {
+    return invoke('fetch_plugin_registry');
+}
+
+export async function installPlugin(pluginId: string): Promise<void> {
+    return invoke('install_plugin', { pluginId });
+}
+
+export async function uninstallPlugin(pluginId: string): Promise<void> {
+    return invoke('uninstall_plugin', { pluginId });
+}
+
+export async function listInstalledPluginInfo(): Promise<InstalledPluginInfo[]> {
+    return invoke('list_installed_plugin_info');
+}
