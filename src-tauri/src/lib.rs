@@ -14,6 +14,7 @@ pub mod extensions;
 mod logging;
 mod mcp;
 mod menu;
+mod plugins;
 pub mod preview;
 pub mod raw;
 mod services;
