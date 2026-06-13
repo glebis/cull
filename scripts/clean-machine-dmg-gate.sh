@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fail_count=0
+
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+require_cmd() {
+  local cmd=$1
+  if ! command_exists "$cmd"; then
+    echo "$cmd is required" >&2
+    fail_count=$((fail_count + 1))
+    return 1
+  fi
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: ./scripts/clean-machine-dmg-gate.sh [--build] [--install] [--app-path PATH] [--dmg-path PATH] [--out-dir PATH]
+
+Runs the clean-machine style release verification for a local DMG build.
+
+Options:
+  --build                Run npm run tauri build before checks.
+  --install              Reinstall the built app to /Applications for a local smoke run.
+  --allow-local-dev      Continue if trust checks fail for unsigned/notarized local builds.
+  --app-path PATH        Override the signed app path (default: src-tauri/target/release/bundle/macos/Cull.app).
+  --dmg-path PATH        Override DMG path (supports glob-like matches in default directory).
+  --out-dir PATH         Write checksums/provenance into this dir (default: docs/release-audit-2026-06-09).
+  --help                 Show this help text.
+USAGE
+}
+
+BUILD=0
+INSTALL=0
+ALLOW_LOCAL_DEV=0
+APP_PATH=""
+DMG_PATH=""
+OUT_DIR="docs/release-audit-2026-06-09"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --build)
+      BUILD=1
+      shift
+      ;;
+    --install)
+      INSTALL=1
+      shift
+      ;;
+    --allow-local-dev)
+      ALLOW_LOCAL_DEV=1
+      shift
+      ;;
+    --app-path)
+      APP_PATH="$2"
+      shift 2
+      ;;
+    --dmg-path)
+      DMG_PATH="$2"
+      shift 2
+      ;;
+    --out-dir)
+      OUT_DIR="$2"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown arg: $1" >&2
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+require_cmd shasum
+
+if [[ $BUILD -eq 1 ]]; then
+  if ! command_exists npm; then
+    echo "npm is required for --build" >&2
+    fail_count=$((fail_count + 1))
+  else
+    npm run tauri build
+  fi
+fi
+
+if [[ -z "$APP_PATH" ]]; then
+  APP_PATH="src-tauri/target/release/bundle/macos/Cull.app"
+fi
+
+if [[ -z "$DMG_PATH" ]]; then
+  DMG_DIR="src-tauri/target/release/bundle/dmg"
+  shopt -s nullglob
+  DMGS=($(find "$DMG_DIR" -maxdepth 1 -name '*.dmg' -print0 | xargs -0 ls -1t))
+  shopt -u nullglob
+  if [[ ${#DMGS[@]} -eq 0 ]]; then
+    echo "No DMG found in $DMG_DIR. Run with --build or pass --dmg-path." >&2
+    exit 1
+  fi
+  DMG_PATH="${DMGS[0]}"
+fi
+
+if [[ ! -d "$APP_PATH" ]]; then
+  echo "App bundle not found at $APP_PATH" >&2
+  fail_count=$((fail_count + 1))
+fi
+if [[ ! -f "$DMG_PATH" ]]; then
+  echo "DMG not found at $DMG_PATH" >&2
+  fail_count=$((fail_count + 1))
+fi
+if [[ $fail_count -gt 0 ]]; then
+  echo "Aborting before checks. Fix the errors above." >&2
+  exit 1
+fi
+
+mkdir -p "$OUT_DIR"
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+PROVENANCE_FILE="$OUT_DIR/provenance.md"
+CHECKSUM_FILE="$OUT_DIR/checksums.txt"
+RUN_LOG="$OUT_DIR/clean-machine-gate-${TIMESTAMP}.log"
+APP_CHECK_FAIL=0
+SPCTL_CHECK_FAIL=0
+STAPLER_CHECK_FAIL=0
+DAMAGED_DMG=0
+
+run_check() {
+  local label=$1
+  local code=$2
+  local ok_msg=$3
+  local fail_msg=$4
+  shift 4
+  local tmp_log="$RUN_LOG.${label}.log"
+
+  if "$@" >"$tmp_log" 2>&1; then
+    echo "$ok_msg" | tee -a "$RUN_LOG"
+    echo "[$label]-OK" >> "$RUN_LOG"
+    return 0
+  fi
+  local status=$?
+  cat "$tmp_log" | tee -a "$RUN_LOG"
+  echo "$fail_msg (status $status)" | tee -a "$RUN_LOG"
+  if [[ $ALLOW_LOCAL_DEV -eq 1 ]]; then
+    echo "ALLOW_LOCAL_DEV=1: continuing despite $label failure" | tee -a "$RUN_LOG"
+  else
+    fail_count=$((fail_count + 1))
+  fi
+  return "$code"
+}
+
+if ! command_exists xcrun; then
+  echo "xcrun not available" | tee -a "$RUN_LOG"
+fi
+
+{
+  echo "[clean-machine-gate] $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "app_path: $APP_PATH"
+  echo "dmg_path: $DMG_PATH"
+  echo "out_dir: $OUT_DIR"
+  echo "allow_local_dev: $ALLOW_LOCAL_DEV"
+  echo
+} >> "$RUN_LOG"
+
+echo "=== Trust chain checks (app: $APP_PATH)" | tee -a "$RUN_LOG"
+if command_exists codesign; then
+  run_check "codesign" 1 "CODESIGN-OK" "CODESIGN-FAIL" \
+    codesign --verify --deep --strict "$APP_PATH" || APP_CHECK_FAIL=1
+else
+  echo "codesign not available" | tee -a "$RUN_LOG"
+fi
+
+if command -v spctl >/dev/null 2>&1; then
+  run_check "spctl" 1 "SPCTL-OK" "SPCTL-FAIL (notarization may be pending for local build)" \
+    spctl --assess --type execute "$APP_PATH" || SPCTL_CHECK_FAIL=1
+else
+  echo "spctl not available" | tee -a "$RUN_LOG"
+fi
+
+if command -v xcrun >/dev/null 2>&1; then
+  run_check "stapler" 1 "STAPLER-OK" "STAPLER-PENDING (notarization ticket may not exist for local build)" \
+    xcrun stapler validate "$APP_PATH" || STAPLER_CHECK_FAIL=1
+else
+  echo "xcrun not available" | tee -a "$RUN_LOG"
+fi
+
+run_check "dmg-sha256" 0 "DMG_CHECKSUM-OK" "DMG_CHECKSUM-FAIL" \
+  shasum -a 256 "$DMG_PATH" >> "$RUN_LOG" || DAMAGED_DMG=1
+
+{
+  echo "# Build Provenance — clean-machine verification ${TIMESTAMP}"
+  echo
+  echo "**Generated by:** scripts/clean-machine-dmg-gate.sh"
+  echo "**Scope:** Local clean-machine verification pass; trust-chain pass/fail messages are still authoritative for local artifacts."
+  echo
+  echo "## Toolchain"
+  echo "- commit: $(git rev-parse HEAD)"
+  echo "- rustc: $(rustc --version 2>/dev/null || echo missing)"
+  echo "- node: $(node --version 2>/dev/null || echo missing)"
+  echo "- tauri-cli: $(npx --yes tauri --version 2>/dev/null || echo missing)"
+  echo "- command: npm run tauri build"
+  echo "- app: $APP_PATH"
+  echo "- dmg: $DMG_PATH"
+  echo
+  echo "## Trust-chain notes"
+  echo "- codesign output: $(if [[ $APP_CHECK_FAIL -eq 0 ]]; then echo OK; else echo FAIL; fi)"
+  echo "- spctl output: $(if [[ $SPCTL_CHECK_FAIL -eq 0 ]]; then echo OK; else echo FAIL; fi)"
+  echo "- stapler output: $(if [[ $STAPLER_CHECK_FAIL -eq 0 ]]; then echo OK; else echo pending-or-fail; fi)"
+} > "$PROVENANCE_FILE"
+
+{
+  echo "# Clean-machine checksums ${TIMESTAMP}"
+  shasum -a 256 "$DMG_PATH"
+  echo
+} | tee "$CHECKSUM_FILE"
+
+restore_app() {
+  if [[ -n "${BACKUP_PATH:-}" && -d "/Applications/Cull.app.backup-${TIMESTAMP}" ]]; then
+    rm -rf /Applications/Cull.app 2>/dev/null || true
+    mv "/Applications/Cull.app.backup-${TIMESTAMP}" /Applications/Cull.app 2>/dev/null || true
+  fi
+}
+
+trap restore_app EXIT
+
+if [[ $INSTALL -eq 1 ]]; then
+  echo "=== Local app reinstall smoke (may require GUI access) ===" | tee -a "$RUN_LOG"
+  if [[ $(uname) != "Darwin" ]]; then
+    echo "--install requires macOS" | tee -a "$RUN_LOG"
+    exit 1
+  fi
+  require_cmd hdiutil
+  require_cmd osascript
+  if [[ $fail_count -gt 0 ]]; then
+    echo "Aborting install step due prerequisite tool errors." >&2
+    exit 1
+  fi
+
+  BACKUP_PATH="/Applications/Cull.app.backup-${TIMESTAMP}"
+  if [[ -d /Applications/Cull.app ]]; then
+    mv /Applications/Cull.app "$BACKUP_PATH"
+    echo "Backed up prior /Applications/Cull.app to $BACKUP_PATH" | tee -a "$RUN_LOG"
+  fi
+
+  osascript -e 'quit app "Cull"' >/dev/null 2>&1 || true
+  sleep 2
+
+  TMP_DMG_MOUNT="$(mktemp -d)"
+  ATTACH_LOG="$OUT_DIR/clean-machine-hdiattach-${TIMESTAMP}.log"
+  if ! hdiutil attach "$DMG_PATH" -nobrowse -readonly -mountpoint "$TMP_DMG_MOUNT" >"$ATTACH_LOG" 2>&1; then
+    cat "$ATTACH_LOG" | tee -a "$RUN_LOG"
+    echo "Failed to mount DMG for install smoke." | tee -a "$RUN_LOG"
+    fail_count=$((fail_count + 1))
+    exit 1
+  fi
+  trap 'hdiutil detach "$TMP_DMG_MOUNT" -quiet || true; restore_app' EXIT
+
+  DMG_APP_PATH="$(find "$TMP_DMG_MOUNT" -maxdepth 3 -name '*.app' -print | head -n 1)"
+  if [[ -z "$DMG_APP_PATH" ]]; then
+    echo "No .app found in mounted DMG $DMG_PATH" | tee -a "$RUN_LOG"
+    fail_count=$((fail_count + 1))
+    exit 1
+  fi
+
+  ditto --rsrc "$DMG_APP_PATH" /Applications/Cull.app
+  echo "Copied DMG-installed app into /Applications/Cull.app" | tee -a "$RUN_LOG"
+  hdiutil detach "$TMP_DMG_MOUNT" -quiet
+
+  open -a /Applications/Cull.app
+  sleep 8
+
+  if pgrep -x "Cull" >/dev/null 2>&1; then
+    echo "LAUNCH-OK" | tee -a "$RUN_LOG"
+  else
+    echo "LAUNCH-FAILED (process not running after open)" | tee -a "$RUN_LOG"
+    fail_count=$((fail_count + 1))
+  fi
+
+  osascript -e 'tell application "Cull" to quit' >/dev/null 2>&1 || true
+  sleep 1
+  restore_app
+  BACKUP_PATH=""
+  if [[ -n "$TMP_DMG_MOUNT" && -d "$TMP_DMG_MOUNT" ]]; then
+    rmdir "$TMP_DMG_MOUNT" 2>/dev/null || true
+  fi
+fi
+
+echo "Logs:"
+echo "  $RUN_LOG"
+echo "  $PROVENANCE_FILE"
+echo "  $CHECKSUM_FILE"
+
+if [[ $fail_count -gt 0 ]]; then
+  echo "clean-machine-dmg-gate FAILED with $fail_count check(s)." >&2
+  exit 1
+fi
+
+echo "clean-machine-dmg-gate completed"

@@ -30,6 +30,18 @@ python3 ../claude-skills/skills/release/scripts/release.py bump minor   # write 
 git commit -am "chore(release): vX.Y.Z" && git tag vX.Y.Z && git push --follow-tags
 ```
 
+## Release artifact gate checks
+
+Before publishing a macOS release build, run the clean-machine gate:
+
+```bash
+npm run clean-machine-dmg-gate -- --build                          # verify + checksums only
+npm run clean-machine-dmg-gate:build-install                       # builds, checks, installs from DMG on a clean macOS machine
+```
+
+Use `-- --allow-local-dev` for local ad-hoc builds where notarization checks are
+expected to fail.
+
 ## Notes
 
 - `main` lives in the `cull-main-landing` worktree; release from there.
