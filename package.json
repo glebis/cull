@@ -17,6 +17,8 @@
     "preflight:quick": "bash scripts/preflight.sh quick",
     "preflight:full": "bash scripts/preflight.sh full",
     "preflight:release": "bash scripts/preflight.sh release",
+    "clean-machine-dmg-gate": "bash scripts/clean-machine-dmg-gate.sh",
+    "clean-machine-dmg-gate:build-install": "bash scripts/clean-machine-dmg-gate.sh --build --install",
     "land": "bash scripts/land-session.sh",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
