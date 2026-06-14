@@ -19,6 +19,19 @@ Add to your Claude Code MCP config (`~/.claude/settings.json` or project `.claud
 
 The stdio bridge auto-launches Cull in tray mode if it isn't already running. Local connections get full admin access with no token required — the Unix socket uses filesystem permissions (`0600`).
 
+## Approval Boundary
+
+Cull exposes tools to MCP clients; it does not control whether a particular
+agent runtime can present or answer its own confirmation prompts. Claude Code's
+Agent SDK, for example, handles approvals in the client permission callback and
+documents that `AskUserQuestion` is not currently available inside subagents:
+<https://code.claude.com/docs/en/agent-sdk/user-input#limitations>.
+
+Do not depend on an agent-side confirmation tool for critical decisions such as
+file removal, token revocation, audit-log pruning, or broad destructive batch
+operations. Put the confirmation in the MCP client, Cull UI, shell wrapper, or
+human operator workflow before the Cull tool call is made.
+
 ## HTTP Access
 
 ### Enable

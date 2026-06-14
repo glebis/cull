@@ -167,6 +167,14 @@ Cull exposes an agent-friendly workflow surface through MCP-aligned commands and
 - MCP tools can inspect library state, work with collections, and publish clipboard monitor collections when the server is enabled.
 - The MCP HTTP server is disabled by default; enable it only when you need remote agent access.
 
+Agent confirmations have a boundary. Cull can expose tools, but it cannot
+guarantee that every agent runtime can surface or answer its own confirmation
+prompts through those tools. This especially matters for subagents and
+non-interactive CLI/MCP calls. For critical decisions such as file removal,
+token revocation, audit-log pruning, or broad destructive batch operations,
+confirm in the Cull UI, the MCP client, or your operator workflow before the
+tool is invoked.
+
 ## CLI
 
 Cull includes an MCP-aligned headless CLI slice for agent workflows:

@@ -55,7 +55,22 @@ Supported headless tools: `get_library_stats`, `list_images`, `list_folders`,
 The headless CLI is a **slice**, not the whole MCP surface. Token management,
 snapshots, and the audit log below run over the MCP server, not the CLI.
 
-## 2. Connecting an agent over MCP
+## 2. Approval and confirmation boundary
+
+Cull can expose MCP and CLI tools, but it cannot guarantee that the calling
+agent can surface or answer its own confirmation prompts through those tools.
+Claude Code's Agent SDK, for example, routes approval requests through the
+client `canUseTool` callback and currently documents `AskUserQuestion` as not
+available inside subagents spawned via the Agent tool:
+<https://code.claude.com/docs/en/agent-sdk/user-input#limitations>.
+
+Treat Cull tool calls as execution surfaces, not as the confirmation mechanism
+for critical decisions. Do not rely on an agent asking itself "are you sure?"
+before operations such as file removal, token revocation, audit-log pruning, or
+broad destructive batch changes. Put those confirmations in the app UI, MCP
+client, shell wrapper, or human operator workflow before the tool call is made.
+
+## 3. Connecting an agent over MCP
 
 Cull runs an MCP server inside the app over a local Unix socket. `cull
 --mcp-stdio` is a thin stdio↔socket bridge that launches the app in tray mode if
@@ -84,7 +99,7 @@ HTTP binds to `127.0.0.1` by default. Binding to a non-loopback host requires
 **both** `--mcp-http-host <host>` and the explicit `--mcp-http-allow-remote`
 flag, and you should only do that with scoped, least-privilege tokens.
 
-## 3. Creating a scoped token
+## 4. Creating a scoped token
 
 Two ways:
 
@@ -110,7 +125,7 @@ Access Log** show relative expiry ("expires in 12 days" / "expired 3 days ago")
 and surface `_auth_failed` rows so failed-auth attempts are visible, not just
 stored. Rotate before expiry with the "Rotate to renew" affordance.
 
-## 4. The agent_snapshots demo loop
+## 5. The agent_snapshots demo loop
 
 The snapshot tools turn the visible app into a multimodal observe→act loop. They
 are **local stdio only** in v1 (they drive the live window, so they are not
