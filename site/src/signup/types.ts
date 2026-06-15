@@ -31,3 +31,8 @@ export type RateLimitRecord = {
   count: number;
   resetAt: string;
 };
+
+export type RateLimitDecision = {
+  allowed: boolean;
+  retryAfterSeconds?: number;
+};
