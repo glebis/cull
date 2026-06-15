@@ -21,7 +21,9 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--bg);
+  background:
+    linear-gradient(180deg, rgba(122, 162, 247, 0.07), transparent 420px),
+    var(--bg);
   color: var(--text);
   font-family: var(--font);
 }
@@ -31,13 +33,50 @@ input {
   font: inherit;
 }
 
+.page-shell {
+  width: min(1120px, calc(100% - 32px));
+  margin: 0 auto;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 72px;
+  gap: calc(var(--spacing) * 2);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.mark img {
+  width: 20px;
+  height: 20px;
+}
+
+.release-note {
+  text-align: right;
+}
+
 .hero {
   display: grid;
-  align-content: center;
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+  align-items: center;
+  gap: calc(var(--spacing) * 6);
+  min-height: calc(100vh - 72px);
+  padding-bottom: calc(var(--spacing) * 5);
+}
+
+.hero-copy {
+  display: grid;
   gap: calc(var(--spacing) * 3);
-  min-height: 100vh;
-  width: min(760px, calc(100% - 32px));
-  margin: 0 auto;
 }
 
 .eyebrow {
@@ -100,6 +139,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .form-status {
   min-height: 20px;
   margin: 0;
@@ -107,10 +151,115 @@ button {
   font-size: 12px;
 }
 
+.form-status[data-kind="success"] {
+  color: var(--green);
+}
+
+.form-status[data-kind="error"] {
+  color: var(--red);
+}
+
+.product-shot {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.product-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.claims {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 8) 0;
+  border-top: 1px solid var(--border);
+}
+
+.claims div {
+  display: grid;
+  align-content: start;
+  gap: var(--spacing);
+}
+
+.claims span {
+  color: var(--orange);
+  font-size: 12px;
+}
+
+.claims h2,
+.bottom-signup h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.claims p,
+.founder-note p,
+.bottom-signup p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.technical {
+  padding: calc(var(--spacing) * 3) 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.technical p {
+  margin: 0;
+  color: var(--purple);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.founder-note {
+  width: min(780px, 100%);
+  padding: calc(var(--spacing) * 8) 0;
+}
+
+.bottom-signup {
+  display: grid;
+  gap: var(--spacing);
+  padding: calc(var(--spacing) * 6) 0 calc(var(--spacing) * 10);
+  border-top: 1px solid var(--border);
+}
+
+.compact {
+  margin-top: calc(var(--spacing) * 2);
+}
+
 @media (max-width: 620px) {
+  .page-shell {
+    width: min(100% - 24px, 1120px);
+  }
+
+  .topbar {
+    align-items: flex-start;
+    padding-top: calc(var(--spacing) * 2);
+  }
+
   .hero {
+    grid-template-columns: 1fr;
     min-height: auto;
-    padding: 56px 0;
+    padding: 40px 0;
+  }
+
+  h1 {
+    font-size: 42px;
+  }
+
+  .claims {
+    grid-template-columns: 1fr;
+    padding: calc(var(--spacing) * 5) 0;
   }
 
   .signup-row {
