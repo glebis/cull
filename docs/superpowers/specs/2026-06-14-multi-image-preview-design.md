@@ -97,6 +97,8 @@ Version 1 should include a small fixed set of recipes:
 
 Recipes should be deterministic for a given ordered image set and viewport size. Cycling layout recipes should not randomly reshuffle the set unless a later explicit "shuffle composition" command is added.
 
+First-pass raster prototypes live in `docs/prototypes/multi-image-preview/`. Use `masonry-preview.png` and `hero-strip-preview.png` as the primary v1 visual references; keep `multi-screen-control-room.png` as v2 direction only.
+
 ## State Model
 
 Add a presentation state concept for preview feed and layout recipe. The state should be separate from library data and should not mutate images, ratings, selections, collections, canvases, or files.

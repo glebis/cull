@@ -10,6 +10,15 @@
 
 ---
 
+## Visual References
+
+- `docs/prototypes/multi-image-preview/masonry-preview.png`
+- `docs/prototypes/multi-image-preview/hero-strip-preview.png`
+- `docs/prototypes/multi-image-preview/magazine-preview.png`
+- `docs/prototypes/multi-image-preview/multi-screen-control-room.png`
+
+Use masonry and hero strip as the v1 implementation references. Treat the multi-screen control-room image as v2 architecture guidance only.
+
 ## File Structure
 
 - Create `src/lib/preview-layout.ts`: pure layout recipe types, selected-set ordering helper, cap helper, and deterministic layout item computation.
