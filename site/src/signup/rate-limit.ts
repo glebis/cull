@@ -1,6 +1,6 @@
-import { addDays, iso } from "./time";
-import type { SignupStore } from "./store";
-import type { RateLimitDecision } from "./types";
+import { addDays, iso } from "./time.js";
+import type { SignupStore } from "./store.js";
+import type { RateLimitDecision } from "./types.js";
 
 export async function consumeRateLimit(
   store: SignupStore,

@@ -1,10 +1,10 @@
-import { generateToken, hashEmail, hashIp, hashToken } from "./crypto";
-import { normalizeEmail } from "./email";
-import { consumeRateLimit, sevenDayExpiry, SUBSCRIBE_RATE_LIMITS } from "./rate-limit";
-import { isExpired, iso } from "./time";
-import type { EmailSender } from "./resend";
-import type { SignupStore } from "./store";
-import type { ConfirmedSignup, PendingSignup, SignupStatus } from "./types";
+import { generateToken, hashEmail, hashIp, hashToken } from "./crypto.js";
+import { normalizeEmail } from "./email.js";
+import { consumeRateLimit, sevenDayExpiry, SUBSCRIBE_RATE_LIMITS } from "./rate-limit.js";
+import { isExpired, iso } from "./time.js";
+import type { EmailSender } from "./resend.js";
+import type { SignupStore } from "./store.js";
+import type { ConfirmedSignup, PendingSignup, SignupStatus } from "./types.js";
 
 export type SignupConfig = {
   secret: string;

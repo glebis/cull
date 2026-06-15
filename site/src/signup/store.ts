@@ -1,5 +1,5 @@
 import { del, get, put } from "@vercel/blob";
-import type { ConfirmedSignup, PendingSignup, RateLimitRecord } from "./types";
+import type { ConfirmedSignup, PendingSignup, RateLimitRecord } from "./types.js";
 
 const JSON_OPTIONS = {
   access: "private" as const,

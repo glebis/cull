@@ -1,8 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { confirm, subscribe, type SignupConfig } from "./service";
-import { ResendEmailSender, type EmailSender } from "./resend";
-import { VercelBlobSignupStore, type SignupStore } from "./store";
-import type { ConfirmResult, SubscribeResult } from "./service";
+import { confirm, subscribe, type ConfirmResult, type SignupConfig, type SubscribeResult } from "./service.js";
+import { ResendEmailSender, type EmailSender } from "./resend.js";
+import { VercelBlobSignupStore, type SignupStore } from "./store.js";
 
 export type JsonResponse = {
   statusCode: number;

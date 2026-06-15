@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { handleConfirm, requireEnv } from "../src/signup/http";
+import { handleConfirm, requireEnv } from "../src/signup/http.js";
 
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== "GET") {
