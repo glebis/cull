@@ -4,7 +4,7 @@ Generated on 2026-06-15 as first-pass raster prototypes for the live selected-se
 
 ## Files
 
-- `layout-experiments.html` — interactive playground for tuning recipe, density, gaps, outer spacing, hero weight, rhythm, crop bias, radius, shadow, and metadata display.
+- `layout-experiments.html` — interactive playground for tuning recipe, density, gaps, outer spacing, hero weight, rhythm, crop bias, radius, optional borders, border width, and metadata display.
 - `minimal-masonry-preview.png` — preferred v1 direction. Pinterest-style selected-set layout with minimalist art, logo studies, typography fragments, and clean reference images.
 - `minimal-magazine-preview.png` — preferred editorial direction. Best for judging hierarchy across art/logo/reference work.
 - `minimal-hero-strip-preview.png` — preferred live-review direction. Keeps one image dominant while the strip shows related marks, posters, packaging, and type studies.

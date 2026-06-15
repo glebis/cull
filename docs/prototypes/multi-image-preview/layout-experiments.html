@@ -19,6 +19,8 @@
       --red: #f7768e;
       --spacing: 8px;
       --radius: 4px;
+      --tile-border-width: 0px;
+      --tile-border-color: rgba(255, 255, 255, 0.14);
       --font: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
     }
 
@@ -195,7 +197,6 @@
       height: 9px;
       border-radius: 50%;
       background: var(--green);
-      box-shadow: 0 0 0 3px rgba(158, 206, 106, 0.12);
     }
 
     .header-label {
@@ -226,16 +227,16 @@
     .tile {
       position: absolute;
       overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      border: var(--tile-border-width) solid var(--tile-border-color);
       border-radius: var(--tile-radius);
       background: #e9e3d7;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, var(--shadow));
       transition:
         left 220ms ease,
         top 220ms ease,
         width 220ms ease,
         height 220ms ease,
-        border-radius 120ms ease;
+        border-radius 120ms ease,
+        border-width 120ms ease;
     }
 
     .tile.fit {
@@ -505,9 +506,14 @@
             <input id="radius" type="range" min="0" max="16" value="4" autocomplete="off" />
           </label>
 
+          <label class="toggle-row">
+            <input id="showBorder" type="checkbox" autocomplete="off" />
+            <span>Show tile borders</span>
+          </label>
+
           <label class="field">
-            <span class="field-row"><span>Shadow</span><span class="value" id="shadowValue">0.32</span></span>
-            <input id="shadow" type="range" min="0" max="70" value="32" autocomplete="off" />
+            <span class="field-row"><span>Border width</span><span class="value" id="borderWidthValue">1 px</span></span>
+            <input id="borderWidth" type="range" min="1" max="8" value="1" autocomplete="off" />
           </label>
 
           <label class="toggle-row">
@@ -549,17 +555,18 @@
       rhythm: 42,
       crop: 62,
       radius: 4,
-      shadow: 32,
+      showBorder: false,
+      borderWidth: 1,
       showMeta: false,
     };
 
     const state = { ...DEFAULTS };
 
     const presets = {
-      pinboard: { recipe: 'masonry', density: 70, gap: 8, padding: 18, heroWeight: 58, rhythm: 42, crop: 62, radius: 4, shadow: 32, showMeta: false },
-      editorial: { recipe: 'magazine', density: 58, gap: 12, padding: 22, heroWeight: 62, rhythm: 64, crop: 48, radius: 2, shadow: 24, showMeta: false },
-      shoot: { recipe: 'hero', density: 62, gap: 10, padding: 16, heroWeight: 70, rhythm: 28, crop: 38, radius: 4, shadow: 28, showMeta: true },
-      dense: { recipe: 'dense', density: 94, gap: 4, padding: 10, heroWeight: 50, rhythm: 18, crop: 76, radius: 1, shadow: 12, showMeta: false },
+      pinboard: { recipe: 'masonry', density: 70, gap: 8, padding: 18, heroWeight: 58, rhythm: 42, crop: 62, radius: 4, showBorder: false, borderWidth: 1, showMeta: false },
+      editorial: { recipe: 'magazine', density: 58, gap: 12, padding: 22, heroWeight: 62, rhythm: 64, crop: 48, radius: 2, showBorder: false, borderWidth: 1, showMeta: false },
+      shoot: { recipe: 'hero', density: 62, gap: 10, padding: 16, heroWeight: 70, rhythm: 28, crop: 38, radius: 4, showBorder: false, borderWidth: 1, showMeta: true },
+      dense: { recipe: 'dense', density: 94, gap: 4, padding: 10, heroWeight: 50, rhythm: 18, crop: 76, radius: 1, showBorder: false, borderWidth: 1, showMeta: false },
     };
 
     const tiles = [
@@ -614,12 +621,12 @@
       document.getElementById('rhythmValue').textContent = state.rhythm;
       document.getElementById('cropValue').textContent = state.crop;
       document.getElementById('radiusValue').textContent = `${state.radius} px`;
-      document.getElementById('shadowValue').textContent = (state.shadow / 100).toFixed(2);
+      document.getElementById('borderWidthValue').textContent = `${state.borderWidth} px`;
       document.getElementById('headerRecipe').textContent = labelRecipe(state.recipe);
       document.getElementById('headerCount').textContent = `${tiles.length} / 30`;
       document.documentElement.style.setProperty('--stage-pad', `${state.padding}px`);
       document.documentElement.style.setProperty('--tile-radius', `${state.radius}px`);
-      document.documentElement.style.setProperty('--shadow', (state.shadow / 100).toFixed(2));
+      document.documentElement.style.setProperty('--tile-border-width', `${state.showBorder ? state.borderWidth : 0}px`);
       stage.classList.toggle('show-meta', state.showMeta);
       document.querySelectorAll('.preset').forEach((button) => {
         const preset = presets[button.dataset.preset];
@@ -738,9 +745,9 @@
       if (state.rhythm !== DEFAULTS.rhythm) parts.push(state.rhythm > DEFAULTS.rhythm ? 'more varied visual rhythm' : 'more regular visual rhythm');
       if (state.crop !== DEFAULTS.crop) parts.push(state.crop > DEFAULTS.crop ? 'stronger cover-crop bias' : 'more contain/fit behavior');
       if (state.radius !== DEFAULTS.radius) parts.push(`${state.radius}px tile radius`);
-      if (state.shadow !== DEFAULTS.shadow) parts.push(state.shadow > DEFAULTS.shadow ? 'deeper tile shadows' : 'flatter tiles');
+      if (state.showBorder) parts.push(`${state.borderWidth}px optional tile borders`);
       if (state.showMeta) parts.push('small optional tile metadata labels');
-      promptEl.textContent = `${parts.join(', ')}. Keep the visual language minimal and Pinterest-like: abstract art, logos, typography fragments, packaging studies, and clean reference images rather than sci-fi or cinematic concept art.`;
+      promptEl.textContent = `${parts.join(', ')}. Keep tile shadows out of the visual system and keep tiles borderless by default; only show borders when the border option is enabled. Keep the visual language minimal and Pinterest-like: abstract art, logos, typography fragments, packaging studies, and clean reference images rather than sci-fi or cinematic concept art.`;
     }
 
     function updateAll() {
