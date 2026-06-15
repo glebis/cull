@@ -1,0 +1,23 @@
+{
+  "name": "@cull/site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.0.0",
+    "resend": "^6.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.0",
+    "vitest": "^4.1.8"
+  }
+}

@@ -1,0 +1,119 @@
+:root {
+  --bg: #08080c;
+  --surface: #0c0c12;
+  --border: #1a1a2e;
+  --text: #e0e0e0;
+  --text-secondary: #7a7fa0;
+  --blue: #7aa2f7;
+  --green: #9ece6a;
+  --orange: #e0af68;
+  --purple: #bb9af7;
+  --red: #f7768e;
+  --spacing: 8px;
+  --radius: 4px;
+  --font: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.hero {
+  display: grid;
+  align-content: center;
+  gap: calc(var(--spacing) * 3);
+  min-height: 100vh;
+  width: min(760px, calc(100% - 32px));
+  margin: 0 auto;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--blue);
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  max-width: 720px;
+  font-size: clamp(40px, 8vw, 76px);
+  line-height: 0.95;
+  letter-spacing: 0;
+}
+
+.lede {
+  margin: 0;
+  max-width: 680px;
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.signup-form {
+  display: grid;
+  gap: var(--spacing);
+  width: min(100%, 560px);
+}
+
+.signup-form label {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.signup-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--spacing);
+}
+
+input {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+
+button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--blue);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--blue);
+  cursor: pointer;
+}
+
+.form-status {
+  min-height: 20px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 620px) {
+  .hero {
+    min-height: auto;
+    padding: 56px 0;
+  }
+
+  .signup-row {
+    grid-template-columns: 1fr;
+  }
+}
