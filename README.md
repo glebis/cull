@@ -266,7 +266,7 @@ See `docs/design-system.md` for the full design spec.
 
 ## License
 
-Apache License 2.0. See [LICENSE.md](LICENSE.md).
+Apache License 2.0. See [LICENSE](LICENSE) and [AUTHORSHIP.md](AUTHORSHIP.md) for the authorship record.
 
 Cull is open source. Third-party dependencies, optional model weights, and example
 assets keep their own licenses; see [NOTICE](NOTICE) and
