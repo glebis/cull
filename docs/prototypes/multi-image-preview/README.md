@@ -4,11 +4,15 @@ Generated on 2026-06-15 as first-pass raster prototypes for the live selected-se
 
 ## Files
 
-- `masonry-preview.png` — strongest version for the core selected-set workflow. It keeps the Cull-like dark tool surface and shows many images together without becoming a plain grid.
-- `magazine-preview.png` — strongest version for editorial judgement. It communicates hierarchy and "body of work" review well, but has a little extra toolbar chrome.
-- `hero-strip-preview.png` — strongest version for live shoot or generation review. It keeps one image dominant while showing the surrounding sequence.
-- `multi-screen-control-room.png` — best direction for the bounded multi-surface follow-up. It should inform v2, not the first implementation.
+- `minimal-masonry-preview.png` — preferred v1 direction. Pinterest-style selected-set layout with minimalist art, logo studies, typography fragments, and clean reference images.
+- `minimal-magazine-preview.png` — preferred editorial direction. Best for judging hierarchy across art/logo/reference work.
+- `minimal-hero-strip-preview.png` — preferred live-review direction. Keeps one image dominant while the strip shows related marks, posters, packaging, and type studies.
+- `minimal-multi-screen-control-room.png` — preferred v2 direction for bounded multi-surface preview.
+- `masonry-preview.png` — first-pass layout study. Useful for spatial rhythm, but the content skews too sci-fi/fantasy for the intended product feel.
+- `magazine-preview.png` — first-pass editorial layout study.
+- `hero-strip-preview.png` — first-pass live-review layout study.
+- `multi-screen-control-room.png` — first-pass bounded multi-surface layout study.
 
 ## Product Notes
 
-Use `masonry-preview.png` and `hero-strip-preview.png` as the main visual references for v1. Use `multi-screen-control-room.png` to keep the architecture honest for future bounded multi-display work without expanding the first build.
+Use the `minimal-*` files as the main visual references. The product should feel closer to Pinterest-style art direction, logo review, and minimalist visual research than sci-fi concept-art browsing. Keep `minimal-multi-screen-control-room.png` as v2 direction only.

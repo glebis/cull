@@ -97,7 +97,7 @@ Version 1 should include a small fixed set of recipes:
 
 Recipes should be deterministic for a given ordered image set and viewport size. Cycling layout recipes should not randomly reshuffle the set unless a later explicit "shuffle composition" command is added.
 
-First-pass raster prototypes live in `docs/prototypes/multi-image-preview/`. Use `masonry-preview.png` and `hero-strip-preview.png` as the primary v1 visual references; keep `multi-screen-control-room.png` as v2 direction only.
+Raster prototypes live in `docs/prototypes/multi-image-preview/`. Use the `minimal-*` prototypes as the primary visual references: Pinterest-style art direction, logo review, typography fragments, packaging studies, and minimalist visual research. Keep `minimal-multi-screen-control-room.png` as v2 direction only.
 
 ## State Model
 
