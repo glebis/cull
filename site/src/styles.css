@@ -28,6 +28,12 @@ body {
   font-family: var(--font);
 }
 
+html,
+body,
+#app {
+  overflow-x: hidden;
+}
+
 button,
 input {
   font: inherit;
@@ -72,11 +78,13 @@ input {
   gap: calc(var(--spacing) * 6);
   min-height: calc(100vh - 72px);
   padding-bottom: calc(var(--spacing) * 5);
+  min-width: 0;
 }
 
 .hero-copy {
   display: grid;
   gap: calc(var(--spacing) * 3);
+  min-width: 0;
 }
 
 .eyebrow {
@@ -92,6 +100,7 @@ h1 {
   font-size: clamp(40px, 8vw, 76px);
   line-height: 0.95;
   letter-spacing: 0;
+  overflow-wrap: break-word;
 }
 
 .lede {
@@ -106,6 +115,8 @@ h1 {
   display: grid;
   gap: var(--spacing);
   width: min(100%, 560px);
+  max-width: 100%;
+  min-width: 0;
 }
 
 .signup-form label {
@@ -117,6 +128,7 @@ h1 {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: var(--spacing);
+  min-width: 0;
 }
 
 input {
@@ -161,6 +173,9 @@ button:disabled {
 
 .product-shot {
   margin: 0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -170,6 +185,7 @@ button:disabled {
 .product-shot img {
   display: block;
   width: 100%;
+  max-width: 100%;
   height: auto;
 }
 
@@ -239,12 +255,17 @@ button:disabled {
 
 @media (max-width: 620px) {
   .page-shell {
-    width: min(100% - 24px, 1120px);
+    width: min(1120px, calc(100% - 24px));
+    max-width: calc(100vw - 24px);
   }
 
   .topbar {
     align-items: flex-start;
     padding-top: calc(var(--spacing) * 2);
+  }
+
+  .release-note {
+    display: none;
   }
 
   .hero {
@@ -254,7 +275,24 @@ button:disabled {
   }
 
   h1 {
-    font-size: 42px;
+    max-width: 12ch;
+    font-size: 34px;
+    line-height: 1.05;
+  }
+
+  .lede,
+  .signup-form label,
+  .form-status,
+  .claims p,
+  .technical p,
+  .founder-note p,
+  .bottom-signup p {
+    max-width: 34ch;
+    overflow-wrap: anywhere;
+  }
+
+  .product-shot {
+    display: none;
   }
 
   .claims {
