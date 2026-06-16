@@ -13,7 +13,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <div class="hero-copy">
         <p class="eyebrow">local-first / agent-ready</p>
         <h1 id="hero-title">Go from 500 images to 20 keepers</h1>
-        <p class="lede">Cull is a fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac. A keyboard shortcut handles each decision. AI can pitch in whenever you want it.</p>
+        <p class="lede">Cull is a fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac. Work in the app, or drive the work through your agent via CLI or MCP.</p>
         <form class="signup-form signup-form--featured" data-signup-form>
           <label for="email">Get early builds and the open-source launch update.</label>
           <div class="signup-row">
@@ -48,7 +48,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <img src="/images/claim-agent-surface.png" alt="" />
         </figure>
         <h2>AI can help when you want it</h2>
-        <p>Let an agent sort a folder, surface near-duplicates, or find the sharpest frame from a burst.</p>
+        <p>Sort a folder yourself, or hand it to your agent through CLI or MCP when you want help.</p>
       </div>
     </section>
 
