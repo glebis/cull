@@ -79,6 +79,17 @@ describe('Preview Display UI contract', () => {
         expect(component).toContain('class="preview-stage"');
     });
 
+    it('cycles Preview Display presets from Ctrl+Tab inside the preview window', () => {
+        const component = source('src/lib/components/PreviewDisplay.svelte');
+
+        expect(component).toContain('isPreviewDisplayPresetCycleShortcut');
+        expect(component).toContain('nextPreviewDisplayPresetMode');
+        expect(component).toContain('updatePreviewState');
+        expect(component).toContain('setAppSetting');
+        expect(component).toContain('<svelte:window onkeydown={handlePreviewKeydown} />');
+        expect(component).toContain('event.preventDefault()');
+    });
+
     it('shows blanking text for only the first three seconds after blanking', () => {
         const component = source('src/lib/components/PreviewDisplay.svelte');
 

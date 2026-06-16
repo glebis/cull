@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+    isPreviewDisplayPresetCycleShortcut,
+    nextPreviewDisplayPresetMode,
     overlayForPreviewDisplayMode,
     previewDisplayStatusLabel,
     previewSyncImageId,
@@ -55,6 +57,19 @@ const frozenState: PreviewState = {
 };
 
 describe('Preview Display controls', () => {
+    it('cycles display presets in menu order from Ctrl+Tab', () => {
+        expect(nextPreviewDisplayPresetMode('image_only')).toBe('client_review');
+        expect(nextPreviewDisplayPresetMode('client_review')).toBe('metadata_review');
+        expect(nextPreviewDisplayPresetMode('metadata_review')).toBe('image_only');
+    });
+
+    it('accepts only Ctrl+Tab as the preview display preset cycle shortcut', () => {
+        expect(isPreviewDisplayPresetCycleShortcut({ key: 'Tab', ctrlKey: true })).toBe(true);
+        expect(isPreviewDisplayPresetCycleShortcut({ key: 'Tab', ctrlKey: false })).toBe(false);
+        expect(isPreviewDisplayPresetCycleShortcut({ key: 'Tab', ctrlKey: true, metaKey: true })).toBe(false);
+        expect(isPreviewDisplayPresetCycleShortcut({ key: 'Enter', ctrlKey: true })).toBe(false);
+    });
+
     it('maps display presets to bounded overlay fields', () => {
         expect(overlayForPreviewDisplayMode('image_only')).toEqual({
             showFilename: false,
