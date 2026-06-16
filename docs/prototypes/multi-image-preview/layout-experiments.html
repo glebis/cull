@@ -609,7 +609,7 @@
 
     const presets = {
       pinboard: { recipe: 'masonry', density: 70, gap: 8, padding: 18, heroWeight: 58, rhythm: 42, crop: 62, radius: 4, showBorder: false, borderWidth: 1, showMeta: false },
-      editorial: { recipe: 'magazine', density: 58, gap: 12, padding: 22, heroWeight: 62, rhythm: 64, crop: 48, radius: 2, showBorder: false, borderWidth: 1, showMeta: false },
+      editorial: { recipe: 'magazine', density: 46, gap: 14, padding: 22, heroWeight: 54, rhythm: 64, crop: 28, radius: 2, showBorder: false, borderWidth: 1, showMeta: false },
       shoot: { recipe: 'hero', density: 62, gap: 10, padding: 16, heroWeight: 70, rhythm: 28, crop: 38, radius: 4, showBorder: false, borderWidth: 1, showMeta: true },
       dense: { recipe: 'dense', density: 94, gap: 4, padding: 10, heroWeight: 50, rhythm: 18, crop: 76, radius: 1, showBorder: false, borderWidth: 1, showMeta: false },
     };
@@ -755,9 +755,41 @@
       const tiles = orderedActiveTiles();
       const heroW = Math.round(width * state.heroWeight / 100);
       const sideW = width - heroW - gap;
-      const hero = fitBox(tiles[0], 0, 0, heroW, height);
-      const side = denseLayout(sideW, height, tiles.slice(1, 13)).map((item) => ({ ...item, x: item.x + heroW + gap }));
-      return [hero, ...side];
+      const heroH = clamp(
+        Math.round(heroW * tiles[0].h / tiles[0].w),
+        Math.round(height * 0.38),
+        Math.round(height * 0.58),
+      );
+      const hero = fitBox(tiles[0], 0, 0, heroW, heroH, 'cover');
+      const featureTiles = tiles.slice(1, 5);
+      const featureW = Math.floor((heroW - gap) / 2);
+      const featureH = Math.floor((height - heroH - gap * 2) / 2);
+      const features = featureTiles.map((tile, index) => fitBox(
+        tile,
+        (index % 2) * (featureW + gap),
+        heroH + gap + Math.floor(index / 2) * (featureH + gap),
+        featureW,
+        featureH,
+        'cover',
+      ));
+      const side = editorialSideLayout(sideW, height, tiles.slice(5, 17)).map((item) => ({ ...item, x: item.x + heroW + gap }));
+      return [hero, ...features, ...side];
+    }
+
+    function editorialSideLayout(width, height, source) {
+      const gap = state.gap;
+      const columns = width < 340 ? 2 : 3;
+      const rows = Math.ceil(source.length / columns);
+      const cellW = Math.floor((width - gap * (columns - 1)) / columns);
+      const cellH = Math.floor((height - gap * (rows - 1)) / rows);
+      return source.map((tile, index) => fitBox(
+        tile,
+        (index % columns) * (cellW + gap),
+        Math.floor(index / columns) * (cellH + gap),
+        cellW,
+        cellH,
+        'cover',
+      ));
     }
 
     function heroLayout(width, height) {
@@ -784,8 +816,8 @@
       return source.map((tile, index) => fitBox(tile, (index % columns) * (cellW + gap), Math.floor(index / columns) * (cellH + gap), cellW, cellH));
     }
 
-    function fitBox(tile, x, y, boxW, boxH) {
-      const contain = state.crop < 35;
+    function fitBox(tile, x, y, boxW, boxH, fitMode = 'auto') {
+      const contain = fitMode === 'contain' || (fitMode !== 'cover' && state.crop < 35);
       if (!contain) return { id: tile.id, x, y, width: boxW, height: boxH };
       const scale = Math.min(boxW / tile.w, boxH / tile.h);
       const w = Math.max(1, Math.round(tile.w * scale));
@@ -964,6 +996,7 @@
       if (state.heroWeight !== DEFAULTS.heroWeight && (state.recipe === 'magazine' || state.recipe === 'hero')) parts.push(`${state.heroWeight}% hero weight`);
       if (state.rhythm !== DEFAULTS.rhythm) parts.push(state.rhythm > DEFAULTS.rhythm ? 'more varied visual rhythm' : 'more regular visual rhythm');
       if (state.crop !== DEFAULTS.crop) parts.push(state.crop > DEFAULTS.crop ? 'stronger cover-crop bias' : 'more contain/fit behavior');
+      if (state.recipe === 'magazine') parts.push('aspect-safe editorial slots with no skinny side-strip crops');
       if (state.radius !== DEFAULTS.radius) parts.push(`${state.radius}px tile radius`);
       if (state.showBorder) parts.push(`${state.borderWidth}px optional tile borders`);
       if (state.showMeta) parts.push('small optional tile metadata labels');
