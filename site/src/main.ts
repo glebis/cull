@@ -27,9 +27,9 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <p>Most tools are built for editing. This is built for the moment before that, when you have hundreds of images and need to reach a final set.</p>
           <p>Look carefully, decide clearly, and make your work available to people and agents without friction.</p>
         </div>
-        <div class="hero-origin hero-step-7">
-          <h2>Made in Berlin</h2>
-          <p>Created by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a> as a small open-source tool for local creative work.</p>
+        <div class="hero-maker-note hero-step-7">
+          <h2>Made by artists for artists</h2>
+          <p>I, <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a>, built this after getting tired of expensive, slow tools that made image work feel heavier than it needed to be. I wanted something agent-friendly, open, easy to modify, and closer to Obsidian for images: local, flexible, and built around the way creative work actually happens.</p>
         </div>
       </div>
       <figure class="product-shot hero-step-4">

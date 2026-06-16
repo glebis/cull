@@ -276,7 +276,7 @@ input:focus-visible {
 }
 
 .hero-experience,
-.hero-origin {
+.hero-maker-note {
   display: grid;
   gap: calc(var(--spacing) * 1.25);
   max-width: 620px;
@@ -285,7 +285,7 @@ input:focus-visible {
 }
 
 .hero-experience h2,
-.hero-origin h2 {
+.hero-maker-note h2 {
   margin: 0;
   max-width: 12ch;
   font-size: clamp(28px, 3.6vw, 46px);
@@ -294,20 +294,20 @@ input:focus-visible {
 }
 
 .hero-experience p,
-.hero-origin p {
+.hero-maker-note p {
   margin: 0;
   color: var(--text-secondary);
   font-size: 14px;
   line-height: 1.65;
 }
 
-.hero-origin a {
+.hero-maker-note a {
   color: var(--text);
   text-decoration-color: var(--field-border);
   text-underline-offset: 4px;
 }
 
-.hero-origin a:hover {
+.hero-maker-note a:hover {
   color: var(--blue);
 }
 
@@ -649,7 +649,7 @@ input:focus-visible {
   .hero-copy > .lede,
   .hero-copy > .signup-form,
   .hero-copy > .hero-experience,
-  .hero-copy > .hero-origin,
+  .hero-copy > .hero-maker-note,
   .product-shot {
     animation: hero-enter 680ms var(--ease-out-expo) var(--hero-delay, 0ms) both;
     will-change: opacity, transform;
@@ -725,7 +725,7 @@ input:focus-visible {
   .form-status,
   .claims p,
   .hero-experience p,
-  .hero-origin p,
+  .hero-maker-note p,
   .open-source-note p,
   .bottom-signup p {
     max-width: 34ch;
@@ -755,7 +755,7 @@ input:focus-visible {
 
   .workflow h2,
   .hero-experience h2,
-  .hero-origin h2,
+  .hero-maker-note h2,
   .open-source-copy h2,
   .bottom-signup h2 {
     max-width: 12ch;
