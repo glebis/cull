@@ -143,9 +143,10 @@ h3 {
 .lede {
   margin: 0;
   max-width: 620px;
-  color: var(--text-secondary);
-  font-size: 17px;
-  line-height: 1.6;
+  color: var(--text);
+  font-family: var(--serif-font);
+  font-size: clamp(24px, 2.5vw, 34px);
+  line-height: 1.08;
 }
 
 .signup-form {
@@ -274,6 +275,29 @@ input:focus-visible {
   color: var(--red);
 }
 
+.hero-experience {
+  display: grid;
+  gap: calc(var(--spacing) * 1.25);
+  max-width: 620px;
+  padding-top: calc(var(--spacing) * 1.5);
+  border-top: 1px solid var(--border);
+}
+
+.hero-experience h2 {
+  margin: 0;
+  max-width: 12ch;
+  font-size: clamp(28px, 3.6vw, 46px);
+  font-weight: 700;
+  line-height: 0.98;
+}
+
+.hero-experience p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
 .product-shot {
   margin: 0;
   width: 100%;
@@ -345,7 +369,6 @@ input:focus-visible {
 }
 
 .claims p,
-.experience-note p,
 .open-source-note p,
 .workflow p,
 .bottom-signup p {
@@ -390,36 +413,6 @@ input:focus-visible {
   font-size: 18px;
   font-weight: 700;
   line-height: 1.25;
-}
-
-.experience-note {
-  display: grid;
-  grid-template-columns: minmax(260px, 0.74fr) minmax(0, 1.26fr);
-  gap: calc(var(--spacing) * 4) calc(var(--spacing) * 8);
-  padding: calc(var(--spacing) * 8) 0;
-  border-top: 1px solid var(--border);
-}
-
-.experience-note h2 {
-  margin: 0;
-  max-width: 10ch;
-  font-size: clamp(30px, 4vw, 52px);
-  font-weight: 700;
-  line-height: 0.96;
-}
-
-.experience-copy {
-  display: grid;
-  gap: calc(var(--spacing) * 2);
-  max-width: 720px;
-}
-
-.experience-copy p {
-  color: var(--text);
-  font-family: var(--serif-font);
-  font-size: clamp(25px, 3vw, 36px);
-  font-weight: 400;
-  line-height: 1.08;
 }
 
 .open-source-note {
@@ -557,6 +550,10 @@ input:focus-visible {
   --hero-delay: 320ms;
 }
 
+.hero-step-6 {
+  --hero-delay: 410ms;
+}
+
 .reveal-delay-0 {
   --reveal-delay: 0ms;
 }
@@ -634,6 +631,7 @@ input:focus-visible {
   .hero-copy > h1,
   .hero-copy > .lede,
   .hero-copy > .signup-form,
+  .hero-copy > .hero-experience,
   .product-shot {
     animation: hero-enter 680ms var(--ease-out-expo) var(--hero-delay, 0ms) both;
     will-change: opacity, transform;
@@ -708,7 +706,7 @@ input:focus-visible {
   .signup-form label,
   .form-status,
   .claims p,
-  .experience-note p,
+  .hero-experience p,
   .open-source-note p,
   .bottom-signup p {
     max-width: 34ch;
@@ -729,7 +727,6 @@ input:focus-visible {
   }
 
   .workflow,
-  .experience-note,
   .open-source-note,
   .bottom-signup {
     grid-template-columns: 1fr;
@@ -738,14 +735,13 @@ input:focus-visible {
   }
 
   .workflow h2,
-  .experience-note h2,
+  .hero-experience h2,
   .open-source-copy h2,
   .bottom-signup h2 {
     max-width: 12ch;
     font-size: 30px;
   }
 
-  .experience-copy p,
   .bottom-signup p:last-child {
     max-width: 100%;
     font-size: 25px;

@@ -22,6 +22,11 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           </div>
           <p id="signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
         </form>
+        <div class="hero-experience hero-step-6">
+          <h2>The boring part of creative work, made fast</h2>
+          <p>Most tools are built for editing. This is built for the moment before that, when you have hundreds of images and need to reach a final set.</p>
+          <p>Look carefully, decide clearly, and make your work available to people and agents without friction.</p>
+        </div>
       </div>
       <figure class="product-shot hero-step-4">
         <img src="/images/cull-state-preview.png" alt="App state with batch counts, image decisions, prompt metadata, and agent queue" />
@@ -74,17 +79,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <h3>Send out the keepers</h3>
           <p>Export picks for social, publishing, clients, or the next agent-assisted step.</p>
         </article>
-      </div>
-    </section>
-
-    <section class="experience-note reveal-surface" aria-labelledby="experience-title" data-reveal>
-      <div class="reveal-item reveal-delay-0">
-        <p class="eyebrow">why it exists</p>
-        <h2 id="experience-title">The boring part of creative work, made fast</h2>
-      </div>
-      <div class="experience-copy reveal-item reveal-delay-2">
-        <p>Most tools are built for editing. This is built for the moment before that, when you have hundreds of images and need to reach a final set.</p>
-        <p>Look carefully, decide clearly, and make your work available to people and agents without friction.</p>
       </div>
     </section>
 
