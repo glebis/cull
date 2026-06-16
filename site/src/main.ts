@@ -22,19 +22,31 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           </div>
           <p id="signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
         </form>
-        <div class="hero-experience hero-step-6">
-          <h2>The boring part of creative work, made fast</h2>
-          <p>Most tools are built for editing. This is built for the moment before that, when you have hundreds of images and need to reach a final set.</p>
-          <p>Look carefully, decide clearly, and make your work available to people and agents without friction.</p>
-        </div>
-        <div class="hero-maker-note hero-step-7">
-          <h2>Made by artists for artists</h2>
-          <p>I, <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a>, built this after getting tired of expensive, slow tools that made image work feel heavier than it needed to be. I wanted something agent-friendly, open, easy to modify, and closer to Obsidian for images: local, flexible, and built around the way creative work actually happens.</p>
-        </div>
       </div>
       <figure class="product-shot hero-step-4">
         <img src="/images/cull-state-preview.png" alt="App state with batch counts, image decisions, prompt metadata, and agent queue" />
       </figure>
+    </section>
+
+    <section class="feature-note feature-note--boring reveal-surface" aria-labelledby="boring-title" data-reveal>
+      <figure class="feature-note-illustration reveal-item reveal-delay-0">
+        <img src="/images/boring-work-generated.png" alt="" />
+      </figure>
+      <div class="feature-note-copy reveal-item reveal-delay-2">
+        <h2 id="boring-title">The boring part of creative work, made fast</h2>
+        <p>Most tools are built for editing. This is built for the moment before that, when you have hundreds of images and need to reach a final set.</p>
+        <p>Look carefully, decide clearly, and make your work available to people and agents without friction.</p>
+      </div>
+    </section>
+
+    <section class="feature-note feature-note--artist reveal-surface" aria-labelledby="artist-title" data-reveal>
+      <figure class="feature-note-illustration reveal-item reveal-delay-0">
+        <img src="/images/artist-founder-generated.png" alt="" />
+      </figure>
+      <div class="feature-note-copy reveal-item reveal-delay-2">
+        <h2 id="artist-title">Made by artists for artists</h2>
+        <p>I, <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a>, built this after getting tired of expensive, slow tools that made image work feel heavier than it needed to be. I wanted something agent-friendly, open, easy to modify, and closer to Obsidian for images: local, flexible, and built around the way creative work actually happens.</p>
+      </div>
     </section>
 
     <section class="claims reveal-surface" aria-label="Core claims" data-reveal>

@@ -104,7 +104,7 @@ input {
 .hero {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(460px, 1.1fr);
-  align-items: center;
+  align-items: start;
   gap: calc(var(--spacing) * 7);
   min-height: calc(100vh - 72px);
   padding-bottom: calc(var(--spacing) * 7);
@@ -217,6 +217,7 @@ button,
 .signup-form,
 .product-shot,
 .claim-illustration img,
+.feature-note-illustration img,
 .open-source-illustration img,
 .footer-illustration img,
 .site-footer a {
@@ -275,39 +276,59 @@ input:focus-visible {
   color: var(--red);
 }
 
-.hero-experience,
-.hero-maker-note {
+.feature-note {
   display: grid;
-  gap: calc(var(--spacing) * 1.25);
-  max-width: 620px;
-  padding-top: calc(var(--spacing) * 1.5);
+  grid-template-columns: minmax(180px, 300px) minmax(0, 1fr);
+  align-items: start;
+  gap: calc(var(--spacing) * 7);
+  padding: calc(var(--spacing) * 8) 0;
   border-top: 1px solid var(--border);
 }
 
-.hero-experience h2,
-.hero-maker-note h2 {
+.feature-note-illustration {
+  width: min(100%, 300px);
+  aspect-ratio: 1;
   margin: 0;
-  max-width: 12ch;
-  font-size: clamp(28px, 3.6vw, 46px);
-  font-weight: 700;
-  line-height: 0.98;
+  border-radius: var(--radius);
+  background: var(--bg);
+  overflow: hidden;
 }
 
-.hero-experience p,
-.hero-maker-note p {
+.feature-note-illustration img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.feature-note-copy {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  max-width: 700px;
+}
+
+.feature-note h2 {
+  margin: 0;
+  max-width: 13ch;
+  font-size: clamp(30px, 4.8vw, 62px);
+  font-weight: 700;
+  line-height: 0.94;
+}
+
+.feature-note p {
   margin: 0;
   color: var(--text-secondary);
   font-size: 14px;
   line-height: 1.65;
 }
 
-.hero-maker-note a {
+.feature-note a {
   color: var(--text);
   text-decoration-color: var(--field-border);
   text-underline-offset: 4px;
 }
 
-.hero-maker-note a:hover {
+.feature-note a:hover {
   color: var(--blue);
 }
 
@@ -367,6 +388,7 @@ input:focus-visible {
 }
 
 .claim:hover .claim-illustration img,
+.feature-note:hover .feature-note-illustration img,
 .open-source-note:hover .open-source-illustration img,
 .footer-illustration:hover img {
   transform: scale(1.018);
@@ -382,6 +404,7 @@ input:focus-visible {
 }
 
 .claims p,
+.feature-note p,
 .open-source-note p,
 .workflow p,
 .bottom-signup p {
@@ -563,14 +586,6 @@ input:focus-visible {
   --hero-delay: 320ms;
 }
 
-.hero-step-6 {
-  --hero-delay: 410ms;
-}
-
-.hero-step-7 {
-  --hero-delay: 490ms;
-}
-
 .reveal-delay-0 {
   --reveal-delay: 0ms;
 }
@@ -648,8 +663,6 @@ input:focus-visible {
   .hero-copy > h1,
   .hero-copy > .lede,
   .hero-copy > .signup-form,
-  .hero-copy > .hero-experience,
-  .hero-copy > .hero-maker-note,
   .product-shot {
     animation: hero-enter 680ms var(--ease-out-expo) var(--hero-delay, 0ms) both;
     will-change: opacity, transform;
@@ -724,8 +737,7 @@ input:focus-visible {
   .signup-form label,
   .form-status,
   .claims p,
-  .hero-experience p,
-  .hero-maker-note p,
+  .feature-note p,
   .open-source-note p,
   .bottom-signup p {
     max-width: 34ch;
@@ -746,6 +758,7 @@ input:focus-visible {
   }
 
   .workflow,
+  .feature-note,
   .open-source-note,
   .bottom-signup {
     grid-template-columns: 1fr;
@@ -754,8 +767,7 @@ input:focus-visible {
   }
 
   .workflow h2,
-  .hero-experience h2,
-  .hero-maker-note h2,
+  .feature-note h2,
   .open-source-copy h2,
   .bottom-signup h2 {
     max-width: 12ch;
@@ -769,6 +781,10 @@ input:focus-visible {
 
   .open-source-illustration {
     width: min(100%, 240px);
+  }
+
+  .feature-note-illustration {
+    width: min(100%, 220px);
   }
 
   .site-footer {
