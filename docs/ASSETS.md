@@ -11,7 +11,7 @@ use before release.
 | Asset class | Paths | Source / author | License / permission | Release status |
 | --- | --- | --- | --- | --- |
 | Cull app icons | `app-icon.png`, `design/icons/tahoe/`, `src-tauri/icons/`, `static/icon-variants/`, `site/public/images/favicon-*`, `site/public/images/icon-*` | Project-owned Cull brand assets generated and curated by Gleb Kalinin | Included with Cull under Apache-2.0 unless a file-specific notice says otherwise | Allowed |
-| Product screenshots and generated mockups | `docs/slides/`, `docs/prototypes/command-palette-states/`, `docs/cull-hero-light-*.png`, `docs/privacy-dashboard-mockup.png`, `site/public/images/imageview-*` | Project-owned screenshots/mockups generated from Cull UI and project design work | Included with repository documentation; do not imply third-party artwork rights beyond visible UI content | Allowed |
+| Product screenshots and generated mockups | `docs/slides/`, `docs/prototypes/command-palette-states/`, `docs/privacy-dashboard-mockup.png`, `site/public/images/imageview-*` | Project-owned screenshots/mockups generated from Cull UI and project design work | Included with repository documentation; do not imply third-party artwork rights beyond visible UI content | Allowed |
 | DMG background | `src-tauri/dmg/cull-dmg-background.png` | Project-owned release packaging artwork | Included with Cull under Apache-2.0 unless replaced by file-specific notice | Allowed |
 | JetBrains Mono | `static/fonts/JetBrainsMono-*.woff2` | JetBrains Mono project | SIL Open Font License 1.1 | Allowed, retain font license attribution |
 | EB Garamond | `static/fonts/EBGaramond-*.woff2` | EB Garamond project | SIL Open Font License 1.1 | Allowed, retain font license attribution |
