@@ -104,6 +104,7 @@
     }
 
     .preset,
+    .action-btn,
     .copy-btn {
       min-height: 32px;
       border: 1px solid var(--border);
@@ -114,6 +115,7 @@
     }
 
     .preset:hover,
+    .action-btn:hover,
     .copy-btn:hover {
       border-color: var(--blue);
     }
@@ -121,6 +123,24 @@
     .preset.active {
       border-color: var(--green);
       color: var(--green);
+    }
+
+    .action-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .action-btn.primary {
+      border-color: rgba(122, 162, 247, 0.48);
+      color: var(--blue);
+    }
+
+    .status-note {
+      min-height: 32px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
     }
 
     .field {
@@ -222,6 +242,7 @@
       overflow: hidden;
       border: 1px solid var(--border);
       background: #07070b;
+      touch-action: none;
     }
 
     .tile {
@@ -237,6 +258,19 @@
         height 220ms ease,
         border-radius 120ms ease,
         border-width 120ms ease;
+      cursor: grab;
+      user-select: none;
+    }
+
+    .tile.dragging {
+      z-index: 2;
+      cursor: grabbing;
+      transition: none;
+    }
+
+    .tile.template-slot {
+      outline: 1px solid rgba(122, 162, 247, 0.42);
+      outline-offset: -1px;
     }
 
     .tile.fit {
@@ -454,6 +488,17 @@
         </section>
 
         <section class="group">
+          <div class="group-title">Flow</div>
+          <div class="action-grid">
+            <button class="action-btn primary" id="nextSet">Next set</button>
+            <button class="action-btn" id="resetTemplate">Reset drag</button>
+            <button class="action-btn" id="savePreview">Save image</button>
+            <button class="action-btn" id="copyTemplate">Copy slots</button>
+          </div>
+          <div class="status-note" id="flowStatus">Drag tiles to shape the template. Press S to save the displayed screen.</div>
+        </section>
+
+        <section class="group">
           <div class="group-title">Layout</div>
           <label class="field">
             <span class="field-row"><span>Recipe</span><span class="value" id="recipeValue">Masonry</span></span>
@@ -569,7 +614,7 @@
       dense: { recipe: 'dense', density: 94, gap: 4, padding: 10, heroWeight: 50, rhythm: 18, crop: 76, radius: 1, showBorder: false, borderWidth: 1, showMeta: false },
     };
 
-    const tiles = [
+    const tileBlueprints = [
       ['logo-a', 16, 9, 'kind-logo-a'],
       ['paper', 4, 3, 'kind-paper'],
       ['void', 1, 1, 'kind-void'],
@@ -592,10 +637,24 @@
       ['fold', 4, 3, 'kind-mark'],
       ['seal', 1, 1, 'kind-grid'],
       ['poster', 4, 5, 'kind-red'],
-    ].map(([id, w, h, kind], index) => ({ id, w, h, kind, index }));
+    ];
+
+    const tileSets = [0, 5, 11].map((offset, setIndex) => tileBlueprints.map((_, index) => {
+      const [id, w, h, kind] = tileBlueprints[(index + offset) % tileBlueprints.length];
+      return { id: `${id}-${setIndex + 1}`, label: id, w, h, kind, index };
+    }));
 
     const stage = document.getElementById('stage');
     const promptEl = document.getElementById('prompt');
+    const flowStatus = document.getElementById('flowStatus');
+    let setIndex = 0;
+    let currentLayout = [];
+    let templateSlots = null;
+    let dragState = null;
+
+    function activeTiles() {
+      return tileSets[setIndex % tileSets.length];
+    }
 
     function labelRecipe(value) {
       return {
@@ -622,8 +681,8 @@
       document.getElementById('cropValue').textContent = state.crop;
       document.getElementById('radiusValue').textContent = `${state.radius} px`;
       document.getElementById('borderWidthValue').textContent = `${state.borderWidth} px`;
-      document.getElementById('headerRecipe').textContent = labelRecipe(state.recipe);
-      document.getElementById('headerCount').textContent = `${tiles.length} / 30`;
+      document.getElementById('headerRecipe').textContent = `${labelRecipe(state.recipe)} / Set ${setIndex + 1}`;
+      document.getElementById('headerCount').textContent = `${activeTiles().length} / 30`;
       document.documentElement.style.setProperty('--stage-pad', `${state.padding}px`);
       document.documentElement.style.setProperty('--tile-radius', `${state.radius}px`);
       document.documentElement.style.setProperty('--tile-border-width', `${state.showBorder ? state.borderWidth : 0}px`);
@@ -638,17 +697,23 @@
       const rect = stage.getBoundingClientRect();
       const width = Math.max(1, Math.round(rect.width));
       const height = Math.max(1, Math.round(rect.height));
-      const layout = computeLayout(width, height);
+      const layout = templateSlots
+        ? applyTemplateSlots(computeLayout(width, height), width, height)
+        : computeLayout(width, height);
+      currentLayout = layout;
       stage.innerHTML = '';
+      const tiles = activeTiles();
       for (const item of layout) {
         const source = tiles.find((tile) => tile.id === item.id);
         const el = document.createElement('div');
-        el.className = `tile ${source.kind} ${state.crop < 35 ? 'fit' : ''}`;
+        el.className = `tile ${source.kind} ${state.crop < 35 ? 'fit' : ''} ${templateSlots ? 'template-slot' : ''}`;
+        el.dataset.id = item.id;
         el.style.left = `${item.x}px`;
         el.style.top = `${item.y}px`;
         el.style.width = `${item.width}px`;
         el.style.height = `${item.height}px`;
-        el.innerHTML = `<span class="meta">${source.id}</span>`;
+        el.innerHTML = `<span class="meta">${source.label}</span>`;
+        el.addEventListener('pointerdown', startTileDrag);
         stage.appendChild(el);
       }
     }
@@ -680,6 +745,7 @@
 
     function magazineLayout(width, height) {
       const gap = state.gap;
+      const tiles = activeTiles();
       const heroW = Math.round(width * state.heroWeight / 100);
       const sideW = width - heroW - gap;
       const hero = fitBox(tiles[0], 0, 0, heroW, height);
@@ -689,6 +755,7 @@
 
     function heroLayout(width, height) {
       const gap = state.gap;
+      const tiles = activeTiles();
       const heroH = Math.round(height * state.heroWeight / 100);
       const hero = fitBox(tiles[3], 0, 0, width, heroH);
       const strip = tiles.slice(0, 11);
@@ -700,7 +767,7 @@
       ];
     }
 
-    function denseLayout(width, height, source = tiles) {
+    function denseLayout(width, height, source = activeTiles()) {
       const gap = state.gap;
       const count = source.length;
       const columns = Math.max(4, Math.ceil(Math.sqrt(count * width / height) + state.density / 30));
@@ -720,6 +787,7 @@
     }
 
     function rhythmTiles() {
+      const tiles = activeTiles();
       const rotate = Math.round(state.rhythm / 9) % tiles.length;
       return [...tiles.slice(rotate), ...tiles.slice(0, rotate)];
     }
@@ -736,6 +804,123 @@
       })).filter((item) => item.x + item.width <= width && item.y + item.height <= height);
     }
 
+    function applyTemplateSlots(items, width, height) {
+      return items.map((item, index) => {
+        const slot = templateSlots[index % templateSlots.length];
+        const itemWidth = Math.max(1, Math.round(slot.width * width));
+        const itemHeight = Math.max(1, Math.round(slot.height * height));
+        return {
+          ...item,
+          x: clamp(Math.round(slot.x * width), 0, width - itemWidth),
+          y: clamp(Math.round(slot.y * height), 0, height - itemHeight),
+          width: itemWidth,
+          height: itemHeight,
+        };
+      });
+    }
+
+    function captureTemplateSlots() {
+      const rect = stage.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect.width));
+      const height = Math.max(1, Math.round(rect.height));
+      templateSlots = currentLayout.map((item, index) => ({
+        slot: index + 1,
+        x: roundRatio(item.x / width),
+        y: roundRatio(item.y / height),
+        width: roundRatio(item.width / width),
+        height: roundRatio(item.height / height),
+      }));
+    }
+
+    function startTileDrag(event) {
+      if (event.button !== 0) return;
+      const item = currentLayout.find((layoutItem) => layoutItem.id === event.currentTarget.dataset.id);
+      if (!item) return;
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      event.currentTarget.classList.add('dragging');
+      dragState = {
+        id: item.id,
+        element: event.currentTarget,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startX: item.x,
+        startY: item.y,
+      };
+      window.addEventListener('pointermove', moveTileDrag);
+      window.addEventListener('pointerup', endTileDrag, { once: true });
+    }
+
+    function moveTileDrag(event) {
+      if (!dragState) return;
+      const rect = stage.getBoundingClientRect();
+      const item = currentLayout.find((layoutItem) => layoutItem.id === dragState.id);
+      if (!item) return;
+      item.x = clamp(Math.round(dragState.startX + event.clientX - dragState.startClientX), 0, Math.round(rect.width) - item.width);
+      item.y = clamp(Math.round(dragState.startY + event.clientY - dragState.startClientY), 0, Math.round(rect.height) - item.height);
+      dragState.element.style.left = `${item.x}px`;
+      dragState.element.style.top = `${item.y}px`;
+    }
+
+    function endTileDrag() {
+      if (!dragState) return;
+      dragState.element.classList.remove('dragging');
+      window.removeEventListener('pointermove', moveTileDrag);
+      dragState = null;
+      captureTemplateSlots();
+      flowStatus.textContent = `Template captured from ${templateSlots.length} dragged slots. Next set will reuse this arrangement.`;
+      renderPreview();
+      updatePrompt();
+    }
+
+    function resetTemplate() {
+      templateSlots = null;
+      flowStatus.textContent = 'Drag tiles to shape the template. Press S to save the displayed screen.';
+      updateAll();
+    }
+
+    function showNextSet() {
+      setIndex = (setIndex + 1) % tileSets.length;
+      flowStatus.textContent = templateSlots
+        ? `Set ${setIndex + 1} is using the dragged template.`
+        : `Set ${setIndex + 1} is using the generated ${labelRecipe(state.recipe).toLowerCase()} layout.`;
+      updateAll();
+    }
+
+    async function copyTemplateSlots() {
+      const payload = JSON.stringify(templateSlots || [], null, 2);
+      await navigator.clipboard.writeText(payload);
+      flowStatus.textContent = templateSlots ? 'Copied normalized template slots.' : 'No dragged template yet. Copied an empty slot list.';
+    }
+
+    function savePreviewImage() {
+      const rect = stage.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect.width));
+      const height = Math.max(1, Math.round(rect.height));
+      const css = Array.from(document.styleSheets)
+        .flatMap((sheet) => Array.from(sheet.cssRules || []).map((rule) => rule.cssText))
+        .join('\n');
+      const snapshot = stage.cloneNode(true);
+      snapshot.querySelectorAll('.tile').forEach((tile) => tile.classList.remove('dragging'));
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml"><style>${css}</style>${snapshot.outerHTML}</div></foreignObject></svg>`;
+      const blob = new Blob([svg], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `cull-preview-set-${setIndex + 1}.svg`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      flowStatus.textContent = 'Saved this prototype as SVG. In Cull, save PNG and open the containing folder by default.';
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function roundRatio(value) {
+      return Math.round(value * 10000) / 10000;
+    }
+
     function updatePrompt() {
       const parts = [`Build the selected-set Preview Display with the ${labelRecipe(state.recipe).toLowerCase()} recipe`];
       if (state.density !== DEFAULTS.density) parts.push(state.density > DEFAULTS.density ? 'higher tile density' : 'more breathing room');
@@ -747,7 +932,8 @@
       if (state.radius !== DEFAULTS.radius) parts.push(`${state.radius}px tile radius`);
       if (state.showBorder) parts.push(`${state.borderWidth}px optional tile borders`);
       if (state.showMeta) parts.push('small optional tile metadata labels');
-      promptEl.textContent = `${parts.join(', ')}. Keep tile shadows out of the visual system and keep tiles borderless by default; only show borders when the border option is enabled. Keep the visual language minimal and Pinterest-like: abstract art, logos, typography fragments, packaging studies, and clean reference images rather than sci-fi or cinematic concept art.`;
+      if (templateSlots) parts.push('user-dragged normalized template slots that should be applied to the next selected set');
+      promptEl.textContent = `${parts.join(', ')}. Let users drag preview tiles directly; each drag updates a reusable template so the next selected image set is displayed through that arrangement. Add a Save Preview shortcut on S and Command/Ctrl+S that writes the displayed Preview Display as an image and opens the containing folder by default after every save. Keep tile shadows out of the visual system and keep tiles borderless by default; only show borders when the border option is enabled. Keep the visual language minimal and Pinterest-like: abstract art, logos, typography fragments, packaging studies, and clean reference images rather than sci-fi or cinematic concept art.`;
     }
 
     function updateAll() {
@@ -772,11 +958,25 @@
       });
     });
 
+    document.getElementById('nextSet').addEventListener('click', showNextSet);
+    document.getElementById('resetTemplate').addEventListener('click', resetTemplate);
+    document.getElementById('savePreview').addEventListener('click', savePreviewImage);
+    document.getElementById('copyTemplate').addEventListener('click', copyTemplateSlots);
+
     document.getElementById('copy').addEventListener('click', async () => {
       await navigator.clipboard.writeText(promptEl.textContent);
       const button = document.getElementById('copy');
       button.textContent = 'Copied';
       setTimeout(() => button.textContent = 'Copy', 900);
+    });
+
+    document.addEventListener('keydown', (event) => {
+      const target = event.target;
+      const isFormTarget = target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLButtonElement;
+      const saveShortcut = event.key.toLowerCase() === 's' && (event.metaKey || event.ctrlKey || !isFormTarget);
+      if (!saveShortcut) return;
+      event.preventDefault();
+      savePreviewImage();
     });
 
     window.addEventListener('resize', renderPreview);
