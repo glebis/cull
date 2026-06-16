@@ -16,12 +16,12 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <h1 id="hero-title">Cull image batches without giving up the archive</h1>
         <p class="lede">Review generations, compare variants, preserve prompt context, and export clean sets. Cull stays on your Mac while agents get the same surface through CLI and MCP.</p>
         <form class="signup-form" data-signup-form>
-          <label for="email">Get the open-source launch update and early builds.</label>
+          <label for="email">Get launch updates and early builds.</label>
           <div class="signup-row">
-            <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required />
+            <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="signup-status" required />
             <button type="submit" data-submit-button>Request access</button>
           </div>
-          <p class="form-status" data-form-status>Confirmed opt-in. No list until you click the email.</p>
+          <p id="signup-status" class="form-status" data-form-status aria-live="polite">You will get one confirmation email first.</p>
         </form>
       </div>
       <figure class="product-shot">
@@ -79,9 +79,9 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <p>It is not a promise about magic. It is a tool for the boring part that makes image work faster: looking carefully, deciding clearly, and keeping enough context to use the result later.</p>
     </section>
 
-    <section class="bottom-signup" aria-label="Signup">
-      <h2>Follow the release.</h2>
-      <p>One confirmation email, then launch updates only.</p>
+    <section class="bottom-signup" aria-labelledby="privacy-title">
+      <h2 id="privacy-title">Confirmed opt-in only.</h2>
+      <p>The launch list starts after you confirm the email. No imported lists, no background newsletter drift.</p>
     </section>
   </div>
 `;
