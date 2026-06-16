@@ -4,7 +4,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <div class="page-shell">
     <header class="topbar">
       <a class="mark" href="/" aria-label="Cull home">
-        <img src="/images/favicon-v3-grid.png" alt="" />
+        <img src="/images/cull-app-logo.png" alt="" />
         <span>Cull</span>
       </a>
       <span class="release-note">open source release in progress</span>
@@ -25,7 +25,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         </form>
       </div>
       <figure class="product-shot">
-        <img src="/images/imageview-final-loupe.png" alt="Cull loupe view showing image review controls" />
+        <img src="/images/cull-final-loupe.png" alt="Cull loupe view showing image review controls" />
       </figure>
     </section>
 
@@ -58,14 +58,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     <section class="bottom-signup" aria-label="Signup">
       <h2>Follow the release.</h2>
       <p>One confirmation email, then launch updates only.</p>
-      <form class="signup-form compact" data-signup-form>
-        <label for="email-bottom">Email address</label>
-        <div class="signup-row">
-          <input id="email-bottom" name="email" type="email" autocomplete="email" placeholder="you@example.com" required />
-          <button type="submit" data-submit-button>Request access</button>
-        </div>
-        <p class="form-status" data-form-status>Confirmed opt-in. No list until you click the email.</p>
-      </form>
     </section>
   </div>
 `;

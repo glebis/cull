@@ -12,6 +12,8 @@
   --spacing: 8px;
   --radius: 4px;
   --font: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --header-font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --logo-bg: #ffffff;
 }
 
 * {
@@ -51,6 +53,7 @@ input {
   min-height: 72px;
   gap: calc(var(--spacing) * 2);
   color: var(--text-secondary);
+  font-family: var(--header-font);
   font-size: 12px;
 }
 
@@ -59,12 +62,16 @@ input {
   align-items: center;
   gap: var(--spacing);
   color: var(--text);
+  font-weight: 600;
   text-decoration: none;
 }
 
 .mark img {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--logo-bg);
+  border-radius: 5px;
+  background: var(--logo-bg);
 }
 
 .release-note {
@@ -247,10 +254,6 @@ button:disabled {
   gap: var(--spacing);
   padding: calc(var(--spacing) * 6) 0 calc(var(--spacing) * 10);
   border-top: 1px solid var(--border);
-}
-
-.compact {
-  margin-top: calc(var(--spacing) * 2);
 }
 
 @media (max-width: 620px) {
