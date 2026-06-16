@@ -495,7 +495,7 @@
             <button class="action-btn" id="savePreview">Save image</button>
             <button class="action-btn" id="copyTemplate">Copy slots</button>
           </div>
-          <div class="status-note" id="flowStatus">Drag tiles to shape the template. Press S to save the displayed screen.</div>
+          <div class="status-note" id="flowStatus">Drag a tile to reshape the order. On release, the layout redraws and keeps the grid.</div>
         </section>
 
         <section class="group">
@@ -649,11 +649,20 @@
     const flowStatus = document.getElementById('flowStatus');
     let setIndex = 0;
     let currentLayout = [];
+    let templateOrder = null;
     let templateSlots = null;
     let dragState = null;
 
     function activeTiles() {
       return tileSets[setIndex % tileSets.length];
+    }
+
+    function orderedActiveTiles() {
+      const tiles = activeTiles();
+      if (!templateOrder) return tiles;
+      const ordered = templateOrder.map((index) => tiles[index]).filter(Boolean);
+      const used = new Set(templateOrder);
+      return [...ordered, ...tiles.filter((_, index) => !used.has(index))];
     }
 
     function labelRecipe(value) {
@@ -697,16 +706,14 @@
       const rect = stage.getBoundingClientRect();
       const width = Math.max(1, Math.round(rect.width));
       const height = Math.max(1, Math.round(rect.height));
-      const layout = templateSlots
-        ? applyTemplateSlots(computeLayout(width, height), width, height)
-        : computeLayout(width, height);
+      const layout = computeLayout(width, height);
       currentLayout = layout;
       stage.innerHTML = '';
       const tiles = activeTiles();
       for (const item of layout) {
         const source = tiles.find((tile) => tile.id === item.id);
         const el = document.createElement('div');
-        el.className = `tile ${source.kind} ${state.crop < 35 ? 'fit' : ''} ${templateSlots ? 'template-slot' : ''}`;
+        el.className = `tile ${source.kind} ${state.crop < 35 ? 'fit' : ''} ${templateOrder ? 'template-slot' : ''}`;
         el.dataset.id = item.id;
         el.style.left = `${item.x}px`;
         el.style.top = `${item.y}px`;
@@ -745,7 +752,7 @@
 
     function magazineLayout(width, height) {
       const gap = state.gap;
-      const tiles = activeTiles();
+      const tiles = orderedActiveTiles();
       const heroW = Math.round(width * state.heroWeight / 100);
       const sideW = width - heroW - gap;
       const hero = fitBox(tiles[0], 0, 0, heroW, height);
@@ -755,7 +762,7 @@
 
     function heroLayout(width, height) {
       const gap = state.gap;
-      const tiles = activeTiles();
+      const tiles = orderedActiveTiles();
       const heroH = Math.round(height * state.heroWeight / 100);
       const hero = fitBox(tiles[3], 0, 0, width, heroH);
       const strip = tiles.slice(0, 11);
@@ -767,7 +774,7 @@
       ];
     }
 
-    function denseLayout(width, height, source = activeTiles()) {
+    function denseLayout(width, height, source = orderedActiveTiles()) {
       const gap = state.gap;
       const count = source.length;
       const columns = Math.max(4, Math.ceil(Math.sqrt(count * width / height) + state.density / 30));
@@ -787,7 +794,8 @@
     }
 
     function rhythmTiles() {
-      const tiles = activeTiles();
+      const tiles = orderedActiveTiles();
+      if (templateOrder) return tiles;
       const rotate = Math.round(state.rhythm / 9) % tiles.length;
       return [...tiles.slice(rotate), ...tiles.slice(0, rotate)];
     }
@@ -804,27 +812,13 @@
       })).filter((item) => item.x + item.width <= width && item.y + item.height <= height);
     }
 
-    function applyTemplateSlots(items, width, height) {
-      return items.map((item, index) => {
-        const slot = templateSlots[index % templateSlots.length];
-        const itemWidth = Math.max(1, Math.round(slot.width * width));
-        const itemHeight = Math.max(1, Math.round(slot.height * height));
-        return {
-          ...item,
-          x: clamp(Math.round(slot.x * width), 0, width - itemWidth),
-          y: clamp(Math.round(slot.y * height), 0, height - itemHeight),
-          width: itemWidth,
-          height: itemHeight,
-        };
-      });
-    }
-
     function captureTemplateSlots() {
       const rect = stage.getBoundingClientRect();
       const width = Math.max(1, Math.round(rect.width));
       const height = Math.max(1, Math.round(rect.height));
       templateSlots = currentLayout.map((item, index) => ({
         slot: index + 1,
+        tileIndex: activeTiles().findIndex((tile) => tile.id === item.id),
         x: roundRatio(item.x / width),
         y: roundRatio(item.y / height),
         width: roundRatio(item.width / width),
@@ -864,33 +858,74 @@
 
     function endTileDrag() {
       if (!dragState) return;
+      const movedItem = currentLayout.find((layoutItem) => layoutItem.id === dragState.id);
+      const sourceSlot = currentLayout.findIndex((layoutItem) => layoutItem.id === dragState.id);
+      const targetSlot = movedItem ? nearestSlotIndex(movedItem, dragState.id) : sourceSlot;
       dragState.element.classList.remove('dragging');
       window.removeEventListener('pointermove', moveTileDrag);
       dragState = null;
-      captureTemplateSlots();
-      flowStatus.textContent = `Template captured from ${templateSlots.length} dragged slots. Next set will reuse this arrangement.`;
+      if (sourceSlot >= 0 && targetSlot >= 0 && sourceSlot !== targetSlot) {
+        templateOrder = moveArrayItem(currentOrderIndices(), sourceSlot, targetSlot);
+      } else if (!templateOrder) {
+        templateOrder = currentOrderIndices();
+      }
       renderPreview();
+      captureTemplateSlots();
+      flowStatus.textContent = `Layout redrawn into the ${labelRecipe(state.recipe).toLowerCase()} grid. Next set will reuse this order.`;
       updatePrompt();
     }
 
     function resetTemplate() {
+      templateOrder = null;
       templateSlots = null;
-      flowStatus.textContent = 'Drag tiles to shape the template. Press S to save the displayed screen.';
+      flowStatus.textContent = 'Drag a tile to reshape the order. On release, the layout redraws and keeps the grid.';
       updateAll();
     }
 
     function showNextSet() {
       setIndex = (setIndex + 1) % tileSets.length;
-      flowStatus.textContent = templateSlots
-        ? `Set ${setIndex + 1} is using the dragged template.`
+      flowStatus.textContent = templateOrder
+        ? `Set ${setIndex + 1} is using the dragged order inside the ${labelRecipe(state.recipe).toLowerCase()} grid.`
         : `Set ${setIndex + 1} is using the generated ${labelRecipe(state.recipe).toLowerCase()} layout.`;
       updateAll();
     }
 
     async function copyTemplateSlots() {
-      const payload = JSON.stringify(templateSlots || [], null, 2);
+      const payload = JSON.stringify({ order: templateOrder || [], slots: templateSlots || [] }, null, 2);
       await navigator.clipboard.writeText(payload);
-      flowStatus.textContent = templateSlots ? 'Copied normalized template slots.' : 'No dragged template yet. Copied an empty slot list.';
+      flowStatus.textContent = templateOrder ? 'Copied grid-preserving template order and normalized slots.' : 'No dragged template yet. Copied an empty template.';
+    }
+
+    function currentOrderIndices() {
+      const tiles = activeTiles();
+      return currentLayout.map((item) => tiles.findIndex((tile) => tile.id === item.id));
+    }
+
+    function nearestSlotIndex(movedItem, movedId) {
+      const movedCenter = {
+        x: movedItem.x + movedItem.width / 2,
+        y: movedItem.y + movedItem.height / 2,
+      };
+      let bestIndex = -1;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      currentLayout.forEach((item, index) => {
+        if (item.id === movedId) return;
+        const centerX = item.x + item.width / 2;
+        const centerY = item.y + item.height / 2;
+        const distance = Math.hypot(movedCenter.x - centerX, movedCenter.y - centerY);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIndex = index;
+        }
+      });
+      return bestIndex;
+    }
+
+    function moveArrayItem(items, fromIndex, toIndex) {
+      const next = [...items];
+      const [item] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, item);
+      return next;
     }
 
     function savePreviewImage() {
@@ -932,8 +967,8 @@
       if (state.radius !== DEFAULTS.radius) parts.push(`${state.radius}px tile radius`);
       if (state.showBorder) parts.push(`${state.borderWidth}px optional tile borders`);
       if (state.showMeta) parts.push('small optional tile metadata labels');
-      if (templateSlots) parts.push('user-dragged normalized template slots that should be applied to the next selected set');
-      promptEl.textContent = `${parts.join(', ')}. Let users drag preview tiles directly; each drag updates a reusable template so the next selected image set is displayed through that arrangement. Add a Save Preview shortcut on S and Command/Ctrl+S that writes the displayed Preview Display as an image and opens the containing folder by default after every save. Keep tile shadows out of the visual system and keep tiles borderless by default; only show borders when the border option is enabled. Keep the visual language minimal and Pinterest-like: abstract art, logos, typography fragments, packaging studies, and clean reference images rather than sci-fi or cinematic concept art.`;
+      if (templateOrder) parts.push('a user-dragged template order that redraws automatically into maintained grid slots');
+      promptEl.textContent = `${parts.join(', ')}. Let users drag preview tiles directly; each drag updates a reusable order/template, then immediately redraws the selected set through the active masonry, magazine, hero, or dense grid so spacing and alignment stay coherent. The next selected image set should inherit that grid-preserving order. Add a Save Preview shortcut on S and Command/Ctrl+S that writes the displayed Preview Display as an image and opens the containing folder by default after every save. Keep tile shadows out of the visual system and keep tiles borderless by default; only show borders when the border option is enabled. Keep the visual language minimal and Pinterest-like: abstract art, logos, typography fragments, packaging studies, and clean reference images rather than sci-fi or cinematic concept art.`;
     }
 
     function updateAll() {
