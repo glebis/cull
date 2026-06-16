@@ -30,15 +30,24 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     </section>
 
     <section class="claims" aria-label="Cull claims">
-      <div>
+      <div class="claim">
+        <figure class="claim-illustration">
+          <img src="/images/claim-local-library.png" alt="" loading="lazy" />
+        </figure>
         <h2>Local library</h2>
         <p>Review state lives in SQLite with SHA-256 deduplication. Originals stay untouched.</p>
       </div>
-      <div>
+      <div class="claim">
+        <figure class="claim-illustration">
+          <img src="/images/claim-keyboard-decisions.png" alt="" loading="lazy" />
+        </figure>
         <h2>Keyboard decisions</h2>
         <p>Rate, accept, reject, compare, collect, and jump through the Command Palette without losing rhythm.</p>
       </div>
-      <div>
+      <div class="claim">
+        <figure class="claim-illustration">
+          <img src="/images/claim-agent-surface.png" alt="" loading="lazy" />
+        </figure>
         <h2>Agent surface</h2>
         <p>CLI, MCP, and cull:// deep links share the same command model as the app.</p>
       </div>
