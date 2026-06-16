@@ -5,17 +5,24 @@
     import { maybeShowShortcutReminder, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from '$lib/shortcut-reminders';
     import { visibleViewTabs } from '$lib/view-tabs';
     import { tabRegistry } from '$lib/plugins/tab-registry';
+    import {
+        thumbnailSizeFromZoomPosition,
+        zoomPositionFromThumbnailSize,
+    } from '$lib/thumbnail-zoom';
     import ViewTabIcon from './ViewTabIcon.svelte';
 
     let registeredTabIds = $derived(new Set($tabRegistry.map(t => t.id)));
     let tabs = $derived(visibleViewTabs(registeredTabIds));
 
-    let size = $state(160);
-    thumbnailSize.subscribe(v => size = v);
+    let zoomPosition = $state(zoomPositionFromThumbnailSize(160));
+    thumbnailSize.subscribe(v => {
+        zoomPosition = zoomPositionFromThumbnailSize(v);
+    });
 
     function setSize(e: Event) {
-        const val = parseInt((e.target as HTMLInputElement).value);
-        size = val;
+        const position = parseFloat((e.target as HTMLInputElement).value);
+        const val = thumbnailSizeFromZoomPosition(position);
+        zoomPosition = position;
         thumbnailSize.set(val);
     }
 
@@ -44,46 +51,52 @@
 </script>
 
 <div class="tabbar" data-tauri-drag-region="deep">
-    <button
-        class="preview-display-launch"
-        type="button"
-        aria-label="Open Preview Display"
-        title="Open Preview Display"
-        onclick={openPreviewDisplayWindow}
-    >
-        <span class="preview-display-icon" aria-hidden="true">
-            <span class="preview-display-screen"></span>
-            <span class="preview-display-stand"></span>
-        </span>
-    </button>
-    <div class="tabs">
-        {#each tabs as tab}
-            <button
-                class="tab"
-                class:active={$viewMode === tab.id}
-                onclick={() => selectTab(tab.id)}
-            >
-                <ViewTabIcon icon={tab.icon} />{tab.label}{#if tab.key}<span class="tab-key">{tab.key}</span>{/if}
-            </button>
-        {/each}
+    <div class="tabbar-left">
+        <button
+            class="preview-display-launch"
+            type="button"
+            aria-label="Open Preview Display"
+            title="Open Preview Display"
+            onclick={openPreviewDisplayWindow}
+        >
+            <span class="preview-display-icon" aria-hidden="true">
+                <span class="preview-display-screen"></span>
+                <span class="preview-display-stand"></span>
+            </span>
+        </button>
     </div>
-    {#if $viewMode === 'grid'}
-        <div class="slider-group">
-            <span class="slider-icon">▪▪</span>
-            <div class="slider-track">
-                <input
-                    type="range"
-                    min="80"
-                    max="400"
-                    step="16"
-                    value={size}
-                    oninput={setSize}
-                    aria-label="Thumbnail size"
-                />
-            </div>
-            <span class="slider-icon">▪</span>
+    <div class="tabbar-center">
+        <div class="tabs">
+            {#each tabs as tab}
+                <button
+                    class="tab"
+                    class:active={$viewMode === tab.id}
+                    onclick={() => selectTab(tab.id)}
+                >
+                    <ViewTabIcon icon={tab.icon} />{tab.label}{#if tab.key}<span class="tab-key">{tab.key}</span>{/if}
+                </button>
+            {/each}
         </div>
-    {/if}
+    </div>
+    <div class="tabbar-right">
+        {#if $viewMode === 'grid'}
+            <div class="slider-group">
+                <span class="slider-icon">▪▪</span>
+                <div class="slider-track">
+                    <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={zoomPosition}
+                        oninput={setSize}
+                        aria-label="Thumbnail size"
+                    />
+                </div>
+                <span class="slider-icon">▪</span>
+            </div>
+        {/if}
+    </div>
 </div>
 
 <style>
@@ -91,12 +104,32 @@
         height: var(--macos-titlebar-safe-area);
         background: var(--surface);
         border-bottom: 1px solid var(--border);
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        align-items: center;
+        padding: 0 var(--spacing) 0 0;
+        grid-area: tabbar;
+    }
+
+    .tabbar-left,
+    .tabbar-right {
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        padding: 0 var(--spacing);
+        min-width: 0;
+    }
+
+    .tabbar-left {
+        justify-self: start;
         padding-left: var(--macos-window-controls-width);
-        grid-area: tabbar;
+    }
+
+    .tabbar-center {
+        justify-self: center;
+        min-width: 0;
+    }
+
+    .tabbar-right {
+        justify-self: end;
     }
 
     .preview-display-launch {
@@ -110,7 +143,6 @@
         place-items: center;
         cursor: pointer;
         flex: 0 0 auto;
-        margin-right: 8px;
     }
 
     .preview-display-launch:hover {

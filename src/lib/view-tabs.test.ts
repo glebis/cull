@@ -61,4 +61,12 @@ describe('view tabs', () => {
         expect(tabBarSource).toContain('padding-left: var(--macos-window-controls-width);');
         expect(pageSource).toContain('padding-top: var(--macos-titlebar-safe-area);');
     });
+
+    it('centers the tab menu independently of optional right-side controls', () => {
+        expect(tabBarSource).toContain('class="tabbar-left"');
+        expect(tabBarSource).toContain('class="tabbar-center"');
+        expect(tabBarSource).toContain('class="tabbar-right"');
+        expect(tabBarSource).toContain('grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);');
+        expect(tabBarSource).toContain('justify-self: center;');
+    });
 });
