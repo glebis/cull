@@ -36,7 +36,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       </div>
       <div>
         <h2>Keyboard decisions</h2>
-        <p>Rate, accept, reject, compare, collect, and move on without losing rhythm.</p>
+        <p>Rate, accept, reject, compare, collect, and jump through the Command Palette without losing rhythm.</p>
       </div>
       <div>
         <h2>Agent surface</h2>
@@ -56,7 +56,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         </article>
         <article>
           <h3>Review in context</h3>
-          <p>Grid, loupe, compare, canvas, lineage, and embedding views keep visual decisions close to metadata.</p>
+          <p>Grid, loupe, compare, canvas, lineage, embedding views, and fuzzy command search keep decisions close to metadata.</p>
         </article>
         <article>
           <h3>Search by meaning</h3>
