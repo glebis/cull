@@ -159,10 +159,13 @@ h3 {
 }
 
 .signup-form--featured {
-  padding: calc(var(--spacing) * 2);
-  border: 1px solid var(--field-border);
+  gap: calc(var(--spacing) * 1.5);
+  margin-top: calc(var(--spacing) * 4);
+  padding: calc(var(--spacing) * 4);
+  border: 1px solid color-mix(in srgb, var(--blue) 62%, var(--field-border));
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--surface) 84%, var(--blue) 16%);
+  background: color-mix(in srgb, var(--surface) 64%, var(--blue) 36%);
+  box-shadow: 0 0 15px color-mix(in srgb, var(--blue) 18%, transparent);
 }
 
 .signup-form label {
@@ -282,7 +285,6 @@ input:focus-visible {
   align-items: start;
   gap: calc(var(--spacing) * 7);
   padding: calc(var(--spacing) * 8) 0;
-  border-top: 1px solid var(--border);
 }
 
 .feature-note-illustration {
@@ -299,6 +301,10 @@ input:focus-visible {
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+.artist-founder-image {
+  transform-origin: 50% 52%;
 }
 
 .feature-note-copy {
@@ -332,6 +338,10 @@ input:focus-visible {
   color: var(--blue);
 }
 
+.founder-note-emphasis {
+  color: var(--orange);
+}
+
 .product-shot {
   margin: 0;
   width: 100%;
@@ -360,7 +370,6 @@ input:focus-visible {
   grid-template-columns: repeat(3, 1fr);
   gap: calc(var(--spacing) * 6);
   padding: calc(var(--spacing) * 8) 0;
-  border-top: 1px solid var(--border);
 }
 
 .claim {
@@ -419,7 +428,6 @@ input:focus-visible {
   grid-template-columns: minmax(260px, 0.74fr) minmax(0, 1.26fr);
   gap: calc(var(--spacing) * 8);
   padding: calc(var(--spacing) * 8) 0;
-  border-top: 1px solid var(--border);
 }
 
 .workflow h2 {
@@ -457,7 +465,6 @@ input:focus-visible {
   align-items: center;
   gap: calc(var(--spacing) * 6);
   padding: calc(var(--spacing) * 8) 0;
-  border-top: 1px solid var(--border);
 }
 
 .open-source-illustration {
@@ -499,7 +506,6 @@ input:focus-visible {
   gap: calc(var(--spacing) * 4) calc(var(--spacing) * 8);
   align-items: start;
   padding: calc(var(--spacing) * 6) 0;
-  border-top: 1px solid var(--border);
 }
 
 .bottom-signup h2 {
@@ -521,7 +527,6 @@ input:focus-visible {
 .footer-illustration {
   margin: 0;
   padding: calc(var(--spacing) * 3) 0 calc(var(--spacing) * 5);
-  border-top: 1px solid var(--border);
 }
 
 .footer-illustration img {
@@ -539,7 +544,6 @@ input:focus-visible {
   justify-content: space-between;
   gap: calc(var(--spacing) * 3);
   padding: calc(var(--spacing) * 3) 0 calc(var(--spacing) * 6);
-  border-top: 1px solid var(--border);
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.5;
@@ -642,6 +646,18 @@ input:focus-visible {
   }
 }
 
+@keyframes camera-direct {
+  from {
+    filter: contrast(1);
+    transform: translate3d(-2px, 2px, 0) scale(0.995);
+  }
+
+  to {
+    filter: contrast(1.08);
+    transform: translate3d(3px, -4px, 0) scale(1.018);
+  }
+}
+
 @keyframes status-update {
   from {
     opacity: 0.55;
@@ -670,6 +686,11 @@ input:focus-visible {
 
   .product-shot img {
     animation: product-settle 900ms var(--ease-out-quint) 360ms both;
+  }
+
+  .artist-founder-image--camera {
+    animation: camera-direct 4.8s var(--ease-out-quint) infinite alternate;
+    will-change: transform, filter;
   }
 
   .reveal-surface .reveal-item,

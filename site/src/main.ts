@@ -41,11 +41,11 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
 
     <section class="feature-note feature-note--artist reveal-surface" aria-labelledby="artist-title" data-reveal>
       <figure class="feature-note-illustration reveal-item reveal-delay-0">
-        <img src="/images/artist-founder-generated.png" alt="" />
+        <img class="artist-founder-image artist-founder-image--camera" src="/images/artist-founder-camera-generated.png" alt="" />
       </figure>
       <div class="feature-note-copy reveal-item reveal-delay-2">
         <h2 id="artist-title">Made by artists for artists</h2>
-        <p>I, <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a>, built this after getting tired of expensive, slow tools that made image work feel heavier than it needed to be. I wanted something agent-friendly, open, easy to modify, and closer to Obsidian for images: local, flexible, and built around the way creative work actually happens.</p>
+        <p>I, <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a>, built this after getting tired of expensive, slow tools that made image work feel heavier than it needed to be. I wanted something <span class="founder-note-emphasis">open, local, and agent-friendly</span>: closer to Obsidian for images than another locked creative suite.</p>
       </div>
     </section>
 
@@ -134,6 +134,11 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
 `;
 
 const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+const pageShell = document.querySelector<HTMLElement>(".page-shell");
+
+if (pageShell) {
+  protectHangingWords(pageShell);
+}
 
 if (motionQuery.matches) {
   document.documentElement.classList.add("reduced-motion");
@@ -221,9 +226,62 @@ function setStatus(form: HTMLFormElement, text: string, kind: StatusKind): void 
     return;
   }
   status.dataset.updating = "true";
-  status.textContent = text;
+  status.textContent = formatTextForLineBreaks(text);
   status.dataset.kind = kind;
   window.setTimeout(() => {
     delete status.dataset.updating;
   }, 260);
+}
+
+function protectHangingWords(root: HTMLElement): void {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (!parent || !node.textContent?.trim()) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      if (["SCRIPT", "STYLE", "TEXTAREA"].includes(parent.tagName)) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+
+  const textNodes: Text[] = [];
+  while (walker.nextNode()) {
+    textNodes.push(walker.currentNode as Text);
+  }
+
+  for (const node of textNodes) {
+    node.textContent = formatTextForLineBreaks(node.textContent ?? "");
+  }
+}
+
+function formatTextForLineBreaks(text: string): string {
+  const shortWords = [
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "by",
+    "for",
+    "from",
+    "in",
+    "is",
+    "it",
+    "no",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "via",
+    "with",
+  ];
+  const shortWordPattern = new RegExp(`\\b(${shortWords.join("|")})\\s+`, "gi");
+
+  return text
+    .replace(shortWordPattern, "$1\u00a0")
+    .replace(/\b(\d+)\s+(?=\S)/g, "$1\u00a0");
 }
