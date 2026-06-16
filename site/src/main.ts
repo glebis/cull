@@ -31,17 +31,14 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
 
     <section class="claims" aria-label="Cull claims">
       <div>
-        <span>01</span>
         <h2>Local-first</h2>
         <p>Your files stay on your Mac. Cull tracks review state in a local SQLite library and leaves originals untouched.</p>
       </div>
       <div>
-        <span>02</span>
         <h2>Keyboard-first</h2>
         <p>Move through hundreds of images, rate them, accept or reject them, compare variants, and export without losing rhythm.</p>
       </div>
       <div>
-        <span>03</span>
         <h2>Agent-first</h2>
         <p>The same work can be driven through app UI, token-efficient JSON CLI calls, and MCP tools for coding agents.</p>
       </div>

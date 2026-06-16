@@ -210,11 +210,6 @@ button:disabled {
   gap: var(--spacing);
 }
 
-.claims span {
-  color: var(--orange);
-  font-size: 12px;
-}
-
 .claims h2,
 .bottom-signup h2 {
   margin: 0;
