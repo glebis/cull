@@ -27,6 +27,10 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <p>Most tools are built for editing. This is built for the moment before that, when you have hundreds of images and need to reach a final set.</p>
           <p>Look carefully, decide clearly, and make your work available to people and agents without friction.</p>
         </div>
+        <div class="hero-origin hero-step-7">
+          <h2>Made in Berlin</h2>
+          <p>Created by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a> as a small open-source tool for local creative work.</p>
+        </div>
       </div>
       <figure class="product-shot hero-step-4">
         <img src="/images/cull-state-preview.png" alt="App state with batch counts, image decisions, prompt metadata, and agent queue" />
@@ -107,7 +111,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     </figure>
 
     <footer class="site-footer">
-      <p>Made in Berlin with 🇪🇺 by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a></p>
+      <p>Made in Berlin by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a></p>
       <nav aria-label="Footer links">
         <a href="https://github.com/glebis">Gleb GitHub</a>
         <a href="https://github.com/glebis/cull">Repository</a>
