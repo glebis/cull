@@ -13,7 +13,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
         <p class="eyebrow">agent-first image culling</p>
-        <h1 id="hero-title">A local-first image viewer for people and agents.</h1>
+        <h1 id="hero-title">A local-first image viewer for people and agents</h1>
         <p class="lede">Cull is a macOS desktop app for reviewing AI-generated image sets: fast keyboard decisions, real metadata, and an agent surface that speaks CLI and MCP.</p>
         <form class="signup-form" data-signup-form>
           <label for="email">Get the open-source launch update and early builds.</label>
