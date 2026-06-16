@@ -33,6 +33,9 @@
   --header-font: "Geist", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --serif-font: "EB Garamond", Georgia, "Times New Roman", serif;
   --logo-bg: #ffffff;
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 * {
@@ -208,6 +211,23 @@ button {
   white-space: nowrap;
 }
 
+input,
+button,
+.signup-form,
+.product-shot,
+.claim-illustration img,
+.open-source-illustration img,
+.footer-illustration img,
+.site-footer a {
+  transition:
+    border-color 180ms var(--ease-out-quart),
+    box-shadow 220ms var(--ease-out-quart),
+    color 180ms var(--ease-out-quart),
+    background-color 180ms var(--ease-out-quart),
+    opacity 180ms var(--ease-out-quart),
+    transform 220ms var(--ease-out-quart);
+}
+
 input:focus-visible,
 button:focus-visible {
   outline: 2px solid var(--orange);
@@ -217,6 +237,24 @@ button:focus-visible {
 button:disabled {
   cursor: wait;
   opacity: 0.55;
+}
+
+button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--blue) 88%, var(--text) 12%);
+  transform: translate3d(0, -1px, 0);
+}
+
+button:active:not(:disabled) {
+  transform: translate3d(0, 1px, 0) scale(0.985);
+}
+
+input:focus-visible {
+  border-color: var(--orange);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--orange) 18%, transparent);
+}
+
+.signup-form:focus-within {
+  border-color: color-mix(in srgb, var(--orange) 64%, var(--field-border));
 }
 
 .form-status {
@@ -254,6 +292,11 @@ button:disabled {
   height: auto;
 }
 
+.product-shot:hover {
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--border));
+  transform: translate3d(0, -2px, 0);
+}
+
 .claims {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -284,6 +327,12 @@ button:disabled {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.claim:hover .claim-illustration img,
+.open-source-note:hover .open-source-illustration img,
+.footer-illustration:hover img {
+  transform: scale(1.018);
 }
 
 .claims h2,
@@ -486,6 +535,146 @@ button:disabled {
 
 .site-footer a:hover {
   color: var(--blue);
+}
+
+.hero-step-1 {
+  --hero-delay: 80ms;
+}
+
+.hero-step-2 {
+  --hero-delay: 150ms;
+}
+
+.hero-step-3 {
+  --hero-delay: 230ms;
+}
+
+.hero-step-4 {
+  --hero-delay: 260ms;
+}
+
+.hero-step-5 {
+  --hero-delay: 320ms;
+}
+
+.reveal-delay-0 {
+  --reveal-delay: 0ms;
+}
+
+.reveal-delay-1 {
+  --reveal-delay: 80ms;
+}
+
+.reveal-delay-2 {
+  --reveal-delay: 140ms;
+}
+
+.reveal-delay-3 {
+  --reveal-delay: 200ms;
+}
+
+.reveal-delay-4 {
+  --reveal-delay: 260ms;
+}
+
+@keyframes topbar-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -8px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes hero-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 22px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes product-settle {
+  from {
+    filter: saturate(0.7) contrast(0.96);
+    transform: scale(1.018);
+  }
+
+  to {
+    filter: saturate(1) contrast(1);
+    transform: scale(1);
+  }
+}
+
+@keyframes status-update {
+  from {
+    opacity: 0.55;
+    transform: translate3d(0, 4px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .topbar {
+    animation: topbar-enter 460ms var(--ease-out-expo) 40ms both;
+  }
+
+  .hero-copy > .eyebrow,
+  .hero-copy > h1,
+  .hero-copy > .lede,
+  .hero-copy > .signup-form,
+  .product-shot {
+    animation: hero-enter 680ms var(--ease-out-expo) var(--hero-delay, 0ms) both;
+    will-change: opacity, transform;
+  }
+
+  .product-shot img {
+    animation: product-settle 900ms var(--ease-out-quint) 360ms both;
+  }
+
+  .reveal-surface .reveal-item,
+  .footer-illustration.reveal-surface {
+    opacity: 0;
+    transform: translate3d(0, 24px, 0);
+    transition:
+      opacity 560ms var(--ease-out-quint),
+      transform 560ms var(--ease-out-quint),
+      border-color 220ms var(--ease-out-quart);
+    transition-delay: var(--reveal-delay, 0ms);
+    will-change: opacity, transform;
+  }
+
+  .reveal-surface.is-visible .reveal-item,
+  .footer-illustration.reveal-surface.is-visible {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  .form-status[data-updating="true"] {
+    animation: status-update 240ms var(--ease-out-quart) both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @media (max-width: 620px) {

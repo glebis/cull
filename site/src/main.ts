@@ -11,10 +11,10 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
 
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <p class="eyebrow">local-first / agent-ready</p>
-        <h1 id="hero-title">Go from 500 images to 20 keepers</h1>
-        <p class="lede">Cull is a fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac. Work in the app, or drive the work through your agent via CLI or MCP.</p>
-        <form class="signup-form signup-form--featured" data-signup-form>
+        <p class="eyebrow hero-step-1">local-first / agent-ready</p>
+        <h1 id="hero-title" class="hero-step-2">Go from 500 images to 20 keepers</h1>
+        <p class="lede hero-step-3">Cull is a fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac. Work in the app, or drive the work through your agent via CLI or MCP.</p>
+        <form class="signup-form signup-form--featured hero-step-5" data-signup-form>
           <label for="email">Get early builds and the open-source launch update.</label>
           <div class="signup-row">
             <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="signup-status" required />
@@ -23,27 +23,27 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <p id="signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
         </form>
       </div>
-      <figure class="product-shot">
+      <figure class="product-shot hero-step-4">
         <img src="/images/cull-state-preview.png" alt="App state with batch counts, image decisions, prompt metadata, and agent queue" />
       </figure>
     </section>
 
-    <section class="claims" aria-label="Core claims">
-      <div class="claim">
+    <section class="claims reveal-surface" aria-label="Core claims" data-reveal>
+      <div class="claim reveal-item reveal-delay-0">
         <figure class="claim-illustration">
           <img src="/images/claim-local-library.png" alt="" />
         </figure>
         <h2>Your library, your machine</h2>
         <p>Images stay local and private. Originals stay untouched. No upload or cloud account required.</p>
       </div>
-      <div class="claim">
+      <div class="claim reveal-item reveal-delay-1">
         <figure class="claim-illustration">
           <img src="/images/claim-keyboard-decisions.png" alt="" />
         </figure>
         <h2>Decide in a keystroke</h2>
         <p>Rate, accept, reject, compare, and collect without lifting your hands from the keyboard.</p>
       </div>
-      <div class="claim">
+      <div class="claim reveal-item reveal-delay-2">
         <figure class="claim-illustration">
           <img src="/images/claim-agent-surface.png" alt="" />
         </figure>
@@ -52,47 +52,47 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       </div>
     </section>
 
-    <section class="workflow" aria-labelledby="workflow-title">
-      <div>
+    <section class="workflow reveal-surface" aria-labelledby="workflow-title" data-reveal>
+      <div class="reveal-item reveal-delay-0">
         <p class="eyebrow">how it works</p>
         <h2 id="workflow-title">From folder to final set</h2>
       </div>
       <div class="workflow-list">
-        <article>
+        <article class="reveal-item reveal-delay-1">
           <h3>Drop in your folder</h3>
           <p>Drag in any folder, any size, any structure. The app reads everything and stays out of the way.</p>
         </article>
-        <article>
+        <article class="reveal-item reveal-delay-2">
           <h3>See every shot clearly</h3>
           <p>Grid, loupe, and side-by-side compare. Move through images at whatever pace works.</p>
         </article>
-        <article>
+        <article class="reveal-item reveal-delay-3">
           <h3>Find what you are looking for</h3>
           <p>Search by look and feel rather than filename. Surface the sharp ones, the warm ones, or the ones that match a reference.</p>
         </article>
-        <article>
+        <article class="reveal-item reveal-delay-4">
           <h3>Send out the keepers</h3>
           <p>Export picks for social, publishing, clients, or the next agent-assisted step.</p>
         </article>
       </div>
     </section>
 
-    <section class="experience-note" aria-labelledby="experience-title">
-      <div>
+    <section class="experience-note reveal-surface" aria-labelledby="experience-title" data-reveal>
+      <div class="reveal-item reveal-delay-0">
         <p class="eyebrow">why it exists</p>
         <h2 id="experience-title">The boring part of creative work, made fast</h2>
       </div>
-      <div class="experience-copy">
+      <div class="experience-copy reveal-item reveal-delay-2">
         <p>Most tools are built for editing. This is built for the moment before that, when you have hundreds of images and need to reach a final set.</p>
         <p>Look carefully, decide clearly, and make your work available to people and agents without friction.</p>
       </div>
     </section>
 
-    <section class="open-source-note" aria-labelledby="open-source-title">
-      <figure class="open-source-illustration">
+    <section class="open-source-note reveal-surface" aria-labelledby="open-source-title" data-reveal>
+      <figure class="open-source-illustration reveal-item reveal-delay-0">
         <img src="/images/open-source-agents.png" alt="" />
       </figure>
-      <div class="open-source-copy">
+      <div class="open-source-copy reveal-item reveal-delay-2">
         <p class="eyebrow">built in the open</p>
         <h2 id="open-source-title">Open source by design</h2>
         <p>Free and open source. The code is public, your files stay on your machine, and no company can pull the tool away from you. Built with human direction and AI coding help, then reviewed and shipped by a person.</p>
@@ -100,15 +100,15 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       </div>
     </section>
 
-    <section class="bottom-signup" aria-labelledby="privacy-title">
-      <div>
+    <section class="bottom-signup reveal-surface" aria-labelledby="privacy-title" data-reveal>
+      <div class="reveal-item reveal-delay-0">
         <p class="eyebrow">early access</p>
         <h2 id="privacy-title">Be first when it ships</h2>
       </div>
-      <p>One confirmation email. That is it.</p>
+      <p class="reveal-item reveal-delay-2">One confirmation email. That is it.</p>
     </section>
 
-    <figure class="footer-illustration" aria-label="Image workflow from local archive to agent surfaces">
+    <figure class="footer-illustration reveal-surface" aria-label="Image workflow from local archive to agent surfaces" data-reveal>
       <img src="/images/footer-line-map.png" alt="" />
     </figure>
 
@@ -123,6 +123,37 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     </footer>
   </div>
 `;
+
+const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+if (motionQuery.matches) {
+  document.documentElement.classList.add("reduced-motion");
+}
+
+const revealTargets = document.querySelectorAll<HTMLElement>("[data-reveal]");
+
+if (!motionQuery.matches && "IntersectionObserver" in window) {
+  const revealObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) {
+          continue;
+        }
+        entry.target.classList.add("is-visible");
+        revealObserver.unobserve(entry.target);
+      }
+    },
+    { rootMargin: "0px 0px -14% 0px", threshold: 0.16 },
+  );
+
+  for (const target of revealTargets) {
+    revealObserver.observe(target);
+  }
+} else {
+  for (const target of revealTargets) {
+    target.classList.add("is-visible");
+  }
+}
 
 const queryState = new URLSearchParams(window.location.search).get("signup");
 
@@ -180,6 +211,10 @@ function setStatus(form: HTMLFormElement, text: string, kind: StatusKind): void 
   if (!status) {
     return;
   }
+  status.dataset.updating = "true";
   status.textContent = text;
   status.dataset.kind = kind;
+  window.setTimeout(() => {
+    delete status.dataset.updating;
+  }, 260);
 }
