@@ -112,7 +112,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <a href="https://github.com/glebis">Gleb GitHub</a>
         <a href="https://github.com/glebis/cull">Repository</a>
         <a href="https://t.me/glebkalinin">Telegram</a>
-        <a href="https://www.linkedin.com/in/glebkalinin/">LinkedIn</a>
       </nav>
     </footer>
   </div>
