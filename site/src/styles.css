@@ -1,3 +1,19 @@
+@font-face {
+  font-family: "EB Garamond";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/EBGaramond-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "EB Garamond";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/EBGaramond-SemiBold.ttf") format("truetype");
+}
+
 :root {
   --bg: #08080c;
   --surface: #0c0c12;
@@ -15,6 +31,7 @@
   --radius: 4px;
   --font: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --header-font: "Geist", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --serif-font: "EB Garamond", Georgia, "Times New Roman", serif;
   --logo-bg: #ffffff;
 }
 
@@ -25,9 +42,7 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    linear-gradient(180deg, rgba(122, 162, 247, 0.07), transparent 420px),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family: var(--font);
 }
@@ -135,6 +150,13 @@ h3 {
   max-width: 100%;
   min-width: 0;
   padding-top: calc(var(--spacing) * 1.25);
+}
+
+.signup-form--featured {
+  padding: calc(var(--spacing) * 2);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 84%, var(--blue) 16%);
 }
 
 .signup-form label {
@@ -263,7 +285,8 @@ button:disabled {
 }
 
 .claims h2,
-.bottom-signup h2 {
+.bottom-signup h2,
+.open-source-note h2 {
   margin: 0;
   font-size: 18px;
   font-weight: 700;
@@ -271,7 +294,8 @@ button:disabled {
 }
 
 .claims p,
-.founder-note p,
+.experience-note p,
+.open-source-note p,
 .workflow p,
 .bottom-signup p {
   margin: 0;
@@ -330,7 +354,7 @@ button:disabled {
   line-height: 1.6;
 }
 
-.founder-note {
+.experience-note {
   display: grid;
   grid-template-columns: minmax(260px, 0.74fr) minmax(0, 1.26fr);
   gap: calc(var(--spacing) * 4) calc(var(--spacing) * 8);
@@ -338,8 +362,7 @@ button:disabled {
   border-top: 1px solid var(--border);
 }
 
-.founder-note h2 {
-  grid-row: span 2;
+.experience-note h2 {
   margin: 0;
   max-width: 10ch;
   font-size: clamp(30px, 4vw, 52px);
@@ -347,11 +370,133 @@ button:disabled {
   line-height: 0.96;
 }
 
+.experience-copy {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  max-width: 720px;
+}
+
+.experience-copy p {
+  color: var(--text);
+  font-family: var(--serif-font);
+  font-size: clamp(25px, 3vw, 36px);
+  font-weight: 400;
+  line-height: 1.08;
+}
+
+.open-source-note {
+  display: grid;
+  grid-template-columns: minmax(220px, 360px) minmax(0, 1fr);
+  align-items: center;
+  gap: calc(var(--spacing) * 6);
+  padding: calc(var(--spacing) * 8) 0;
+  border-top: 1px solid var(--border);
+}
+
+.open-source-illustration {
+  width: min(100%, 360px);
+  aspect-ratio: 1;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.open-source-illustration img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.open-source-copy {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  max-width: 700px;
+}
+
+.open-source-copy h2 {
+  font-size: clamp(30px, 4vw, 52px);
+  line-height: 0.96;
+}
+
+.open-source-copy strong {
+  color: var(--orange);
+  font-weight: 700;
+}
+
 .bottom-signup {
   display: grid;
-  gap: var(--spacing);
-  padding: calc(var(--spacing) * 6) 0 calc(var(--spacing) * 10);
+  grid-template-columns: minmax(260px, 0.74fr) minmax(0, 1.26fr);
+  gap: calc(var(--spacing) * 4) calc(var(--spacing) * 8);
+  align-items: start;
+  padding: calc(var(--spacing) * 6) 0;
   border-top: 1px solid var(--border);
+}
+
+.bottom-signup h2 {
+  margin-top: calc(var(--spacing) * 1.5);
+  max-width: 13ch;
+  font-size: clamp(30px, 4vw, 52px);
+  line-height: 0.96;
+}
+
+.bottom-signup p:last-child {
+  max-width: 620px;
+  padding-top: calc(var(--spacing) * 4);
+  color: var(--text);
+  font-family: var(--serif-font);
+  font-size: clamp(24px, 3vw, 34px);
+  line-height: 1.1;
+}
+
+.footer-illustration {
+  margin: 0;
+  padding: calc(var(--spacing) * 3) 0 calc(var(--spacing) * 5);
+  border-top: 1px solid var(--border);
+}
+
+.footer-illustration img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.site-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+  padding: calc(var(--spacing) * 3) 0 calc(var(--spacing) * 6);
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.site-footer p {
+  margin: 0;
+}
+
+.site-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: calc(var(--spacing) * 2);
+}
+
+.site-footer a {
+  color: var(--text);
+  text-decoration-color: var(--field-border);
+  text-underline-offset: 4px;
+}
+
+.site-footer a:hover {
+  color: var(--blue);
 }
 
 @media (max-width: 620px) {
@@ -386,7 +531,8 @@ button:disabled {
   .form-status,
   .claims p,
   .technical p,
-  .founder-note p,
+  .experience-note p,
+  .open-source-note p,
   .bottom-signup p {
     max-width: 34ch;
     overflow-wrap: anywhere;
@@ -406,16 +552,39 @@ button:disabled {
   }
 
   .workflow,
-  .founder-note {
+  .experience-note,
+  .open-source-note,
+  .bottom-signup {
     grid-template-columns: 1fr;
     gap: calc(var(--spacing) * 3);
     padding: calc(var(--spacing) * 5) 0;
   }
 
   .workflow h2,
-  .founder-note h2 {
+  .experience-note h2,
+  .open-source-copy h2,
+  .bottom-signup h2 {
     max-width: 12ch;
     font-size: 30px;
+  }
+
+  .experience-copy p,
+  .bottom-signup p:last-child {
+    max-width: 100%;
+    font-size: 25px;
+  }
+
+  .open-source-illustration {
+    width: min(100%, 240px);
+  }
+
+  .site-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .site-footer nav {
+    justify-content: flex-start;
   }
 
   .workflow article {

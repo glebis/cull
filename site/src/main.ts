@@ -12,24 +12,24 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
 
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <p class="eyebrow">local-first image culling</p>
-        <h1 id="hero-title">Cull image batches without giving up the archive</h1>
-        <p class="lede">Review generations, compare variants, preserve prompt context, and export clean sets. Cull stays on your Mac while agents get the same surface through CLI and MCP.</p>
-        <form class="signup-form" data-signup-form>
-          <label for="email">Get launch updates and early builds.</label>
+        <p class="eyebrow">local-first image viewer</p>
+        <h1 id="hero-title">A local-first image viewer for people and agents</h1>
+        <p class="lede">Review large batches, compare variants, keep prompt context, and export a clean set. The archive stays on your Mac; the same work can be driven by the app, CLI, or MCP.</p>
+        <form class="signup-form signup-form--featured" data-signup-form>
+          <label for="email">Get the open-source launch update and early builds.</label>
           <div class="signup-row">
             <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="signup-status" required />
-            <button type="submit" data-submit-button>Request access</button>
+            <button type="submit" data-submit-button>Get notified</button>
           </div>
-          <p id="signup-status" class="form-status" data-form-status aria-live="polite">You will get one confirmation email first.</p>
+          <p id="signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email first. No imported lists.</p>
         </form>
       </div>
       <figure class="product-shot">
-        <img src="/images/cull-state-preview.png" alt="Cull app state with batch counts, image decisions, prompt metadata, and agent queue" />
+        <img src="/images/cull-state-preview.png" alt="App state with batch counts, image decisions, prompt metadata, and agent queue" />
       </figure>
     </section>
 
-    <section class="claims" aria-label="Cull claims">
+    <section class="claims" aria-label="Core claims">
       <div class="claim">
         <figure class="claim-illustration">
           <img src="/images/claim-local-library.png" alt="" />
@@ -69,7 +69,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         </article>
         <article>
           <h3>Search by meaning</h3>
-          <p>Local CLIP and DINOv2 embeddings support similarity search, UMAP exploration, and clustering.</p>
+          <p>Find images that look or feel related, surface nearby variations, and see clusters when a folder is too large to scan by hand. (Local CLIP, DINOv2, UMAP)</p>
         </article>
         <article>
           <h3>Export the result</h3>
@@ -82,16 +82,50 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <p>Tauri 2 / Rust / Svelte 5 / SQLite / ONNX Runtime / MCP / headless JSON CLI / cull:// deep links</p>
     </section>
 
-    <section class="founder-note" aria-labelledby="release-title">
-      <h2 id="release-title">Open source release in progress.</h2>
-      <p>Cull is for AI artists, creative technologists, designers, researchers, and agentic workflow builders who manage large local archives of generated images, references, prompts, ratings, selections, and collections.</p>
-      <p>It is not a promise about magic. It is a tool for the boring part that makes image work faster: looking carefully, deciding clearly, and keeping enough context to use the result later.</p>
+    <section class="experience-note" aria-labelledby="experience-title">
+      <div>
+        <p class="eyebrow">jobs to be done</p>
+        <h2 id="experience-title">Make the review feel smaller.</h2>
+      </div>
+      <div class="experience-copy">
+        <p>When a generation run leaves hundreds of near-misses, the job is not to admire the grid. It is to find the few images worth carrying forward.</p>
+        <p>Keep the originals intact. Keep enough context to return later. Let agents help with mechanical work without taking the eye out of the loop.</p>
+      </div>
+    </section>
+
+    <section class="open-source-note" aria-labelledby="open-source-title">
+      <figure class="open-source-illustration">
+        <img src="/images/open-source-agents.png" alt="" />
+      </figure>
+      <div class="open-source-copy">
+        <p class="eyebrow">open source</p>
+        <h2 id="open-source-title">Open source, but still authored.</h2>
+        <p>Released under Apache-2.0. The project is built with human product direction and multiple coding agents, with human review over architecture, copy, release choices, and the resulting intellectual property.</p>
+        <p>Current repository history: <strong>653 commits</strong> and counting.</p>
+      </div>
     </section>
 
     <section class="bottom-signup" aria-labelledby="privacy-title">
-      <h2 id="privacy-title">Confirmed opt-in only.</h2>
+      <div>
+        <p class="eyebrow">confirmed opt-in</p>
+        <h2 id="privacy-title">Get notified when the release is ready.</h2>
+      </div>
       <p>The launch list starts after you confirm the email. No imported lists, no background newsletter drift.</p>
     </section>
+
+    <figure class="footer-illustration" aria-label="Image workflow from local archive to agent surfaces">
+      <img src="/images/footer-line-map.png" alt="" />
+    </figure>
+
+    <footer class="site-footer">
+      <p>Local-first release, confirmed opt-in, open-source code.</p>
+      <nav aria-label="Footer links">
+        <a href="https://github.com/glebis">Gleb GitHub</a>
+        <a href="https://github.com/glebis/cull">Repository</a>
+        <a href="https://t.me/glebkalinin">Telegram</a>
+        <a href="https://www.linkedin.com/in/glebkalinin/">LinkedIn</a>
+      </nav>
+    </footer>
   </div>
 `;
 
@@ -99,7 +133,7 @@ const queryState = new URLSearchParams(window.location.search).get("signup");
 
 if (queryState) {
   const messages: Record<string, { text: string; kind: StatusKind }> = {
-    confirmed: { text: "Confirmed. You are on the Cull launch list.", kind: "success" },
+    confirmed: { text: "Confirmed. You are on the launch list.", kind: "success" },
     already_confirmed: { text: "Already confirmed. You are on the list.", kind: "success" },
     expired: { text: "That confirmation link expired. Submit your email again for a fresh link.", kind: "error" },
     invalid: { text: "That confirmation link is not valid. Submit your email again for a fresh link.", kind: "error" },
