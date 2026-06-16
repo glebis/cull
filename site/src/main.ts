@@ -6,21 +6,21 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <a class="mark" href="/" aria-label="Cull home">
         <img src="/images/cull-app-logo.png" alt="" />
       </a>
-      <span class="release-note">open source release in progress</span>
+      <span class="release-note">early release / open source</span>
     </header>
 
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <p class="eyebrow">local-first image viewer</p>
-        <h1 id="hero-title">A local-first image viewer for people and agents</h1>
-        <p class="lede">Review large batches, compare variants, keep prompt context, and export a clean set. The archive stays on your Mac; the same work can be driven by the app, CLI, or MCP.</p>
+        <p class="eyebrow">local-first / agent-ready</p>
+        <h1 id="hero-title">Go from 500 images to 20 keepers</h1>
+        <p class="lede">Cull is a fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac. A keyboard shortcut handles each decision. AI can pitch in whenever you want it.</p>
         <form class="signup-form signup-form--featured" data-signup-form>
-          <label for="email">Get the open-source launch update and early builds.</label>
+          <label for="email">Get early builds and the open-source launch update.</label>
           <div class="signup-row">
             <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="signup-status" required />
             <button type="submit" data-submit-button>Get notified</button>
           </div>
-          <p id="signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email first. No imported lists.</p>
+          <p id="signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
         </form>
       </div>
       <figure class="product-shot">
@@ -33,62 +33,58 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <figure class="claim-illustration">
           <img src="/images/claim-local-library.png" alt="" />
         </figure>
-        <h2>Local library</h2>
-        <p>Review state lives in SQLite with SHA-256 deduplication. Originals stay untouched.</p>
+        <h2>Your library, your machine</h2>
+        <p>Images stay local and private. Originals stay untouched. No upload or cloud account required.</p>
       </div>
       <div class="claim">
         <figure class="claim-illustration">
           <img src="/images/claim-keyboard-decisions.png" alt="" />
         </figure>
-        <h2>Keyboard decisions</h2>
-        <p>Rate, accept, reject, compare, collect, and jump through the Command Palette without losing rhythm.</p>
+        <h2>Decide in a keystroke</h2>
+        <p>Rate, accept, reject, compare, and collect without lifting your hands from the keyboard.</p>
       </div>
       <div class="claim">
         <figure class="claim-illustration">
           <img src="/images/claim-agent-surface.png" alt="" />
         </figure>
-        <h2>Agent surface</h2>
-        <p>CLI, MCP, and cull:// deep links share the same command model as the app.</p>
+        <h2>AI can help when you want it</h2>
+        <p>Let an agent sort a folder, surface near-duplicates, or find the sharpest frame from a burst.</p>
       </div>
     </section>
 
     <section class="workflow" aria-labelledby="workflow-title">
       <div>
-        <p class="eyebrow">from folder to final set</p>
-        <h2 id="workflow-title">Built for large local image libraries</h2>
+        <p class="eyebrow">how it works</p>
+        <h2 id="workflow-title">From folder to final set</h2>
       </div>
       <div class="workflow-list">
         <article>
-          <h3>Import the mess</h3>
-          <p>Recursive folders, generated sidecars, thumbnails, file associations, and drag-and-drop from Finder.</p>
+          <h3>Drop in your folder</h3>
+          <p>Drag in any folder, any size, any structure. The app reads everything and stays out of the way.</p>
         </article>
         <article>
-          <h3>Review in context</h3>
-          <p>Grid, loupe, compare, canvas, lineage, embedding views, and fuzzy command search keep decisions close to metadata.</p>
+          <h3>See every shot clearly</h3>
+          <p>Grid, loupe, and side-by-side compare. Move through images at whatever pace works.</p>
         </article>
         <article>
-          <h3>Search by meaning</h3>
-          <p>Find images that look or feel related, surface nearby variations, and see clusters when a folder is too large to scan by hand. (Local CLIP, DINOv2, UMAP)</p>
+          <h3>Find what you are looking for</h3>
+          <p>Search by look and feel rather than filename. Surface the sharp ones, the warm ones, or the ones that match a reference.</p>
         </article>
         <article>
-          <h3>Export the result</h3>
-          <p>Keepers can move to social exports, static publishing packages, and agent-readable snapshots.</p>
+          <h3>Send out the keepers</h3>
+          <p>Export picks for social, publishing, clients, or the next agent-assisted step.</p>
         </article>
       </div>
-    </section>
-
-    <section class="technical">
-      <p>Tauri 2 / Rust / Svelte 5 / SQLite / ONNX Runtime / MCP / headless JSON CLI / cull:// deep links</p>
     </section>
 
     <section class="experience-note" aria-labelledby="experience-title">
       <div>
-        <p class="eyebrow">jobs to be done</p>
-        <h2 id="experience-title">Make the review feel smaller</h2>
+        <p class="eyebrow">why it exists</p>
+        <h2 id="experience-title">The boring part of creative work, made fast</h2>
       </div>
       <div class="experience-copy">
-        <p>It is a tool for the boring part of art, design, photography, and content production. I built it out of frustration with existing tools that are slow, heavy, and don't understand my goals.</p>
-        <p>Cull makes image work faster. You look carefully, decide clearly, and make your work available to agents and people without friction.</p>
+        <p>Most tools are built for editing. This is built for the moment before that, when you have hundreds of images and need to reach a final set.</p>
+        <p>Look carefully, decide clearly, and make your work available to people and agents without friction.</p>
       </div>
     </section>
 
@@ -97,19 +93,19 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <img src="/images/open-source-agents.png" alt="" />
       </figure>
       <div class="open-source-copy">
-        <p class="eyebrow">open source</p>
+        <p class="eyebrow">built in the open</p>
         <h2 id="open-source-title">Open source by design</h2>
-        <p>Released under Apache-2.0. The project is built with human product direction and multiple coding agents, with human review over architecture, copy, release choices, and the resulting intellectual property.</p>
+        <p>Free and open source. The code is public, your files stay on your machine, and no company can pull the tool away from you. Built with human direction and AI coding help, then reviewed and shipped by a person.</p>
         <p>Current repository history: <strong>653 commits</strong> and counting.</p>
       </div>
     </section>
 
     <section class="bottom-signup" aria-labelledby="privacy-title">
       <div>
-        <p class="eyebrow">confirmed opt-in</p>
-        <h2 id="privacy-title">Get notified when the release is ready</h2>
+        <p class="eyebrow">early access</p>
+        <h2 id="privacy-title">Be first when it ships</h2>
       </div>
-      <p>The launch list starts after you confirm the email. No imported lists, no background newsletter drift.</p>
+      <p>One confirmation email. That is it.</p>
     </section>
 
     <figure class="footer-illustration" aria-label="Image workflow from local archive to agent surfaces">
@@ -117,7 +113,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     </figure>
 
     <footer class="site-footer">
-      <p>Local-first release, confirmed opt-in, open-source code.</p>
+      <p>Local-first. Open source. No cloud required.</p>
       <nav aria-label="Footer links">
         <a href="https://github.com/glebis">Gleb GitHub</a>
         <a href="https://github.com/glebis/cull">Repository</a>

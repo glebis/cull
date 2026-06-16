@@ -343,19 +343,6 @@ button:disabled {
   line-height: 1.25;
 }
 
-.technical {
-  padding: calc(var(--spacing) * 3) 0;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-
-.technical p {
-  margin: 0;
-  color: var(--purple);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
 .experience-note {
   display: grid;
   grid-template-columns: minmax(260px, 0.74fr) minmax(0, 1.26fr);
@@ -532,7 +519,6 @@ button:disabled {
   .signup-form label,
   .form-status,
   .claims p,
-  .technical p,
   .experience-note p,
   .open-source-note p,
   .bottom-signup p {
