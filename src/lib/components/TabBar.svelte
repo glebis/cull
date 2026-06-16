@@ -71,9 +71,18 @@
                 <button
                     class="tab"
                     class:active={$viewMode === tab.id}
+                    class:compact={tab.compact}
+                    class:show-label={$viewMode === tab.id}
+                    aria-label={tab.label}
+                    title={tab.compact ? tab.label : undefined}
                     onclick={() => selectTab(tab.id)}
                 >
-                    <ViewTabIcon icon={tab.icon} />{tab.label}{#if tab.key}<span class="tab-key">{tab.key}</span>{/if}
+                    <ViewTabIcon icon={tab.icon} />
+                    <span class="tab-label">{tab.label}</span>
+                    {#if tab.compact}
+                        <span class="tab-label-popover" aria-hidden="true">{tab.label}</span>
+                    {/if}
+                    {#if tab.key}<span class="tab-key">{tab.key}</span>{/if}
                 </button>
             {/each}
         </div>
@@ -205,6 +214,7 @@
         cursor: pointer;
         transition: all 0.15s;
         white-space: nowrap;
+        position: relative;
     }
     .tab:hover:not(:disabled) {
         color: var(--text);
@@ -212,6 +222,47 @@
     .tab.active {
         color: var(--green);
         border-bottom-color: var(--green);
+    }
+    .tab-label {
+        display: inline-block;
+        transition: opacity 0.16s ease, transform 0.16s ease, max-width 0.16s ease;
+    }
+    .tab.compact:not(.show-label) {
+        width: 34px;
+        justify-content: center;
+        gap: 0;
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+    .tab.compact:not(.show-label) .tab-label,
+    .tab.compact:not(.show-label) .tab-key {
+        max-width: 0;
+        opacity: 0;
+        overflow: hidden;
+        transform: translateX(-2px);
+    }
+    .tab-label-popover {
+        position: absolute;
+        left: calc(100% - 2px);
+        top: 50%;
+        padding: 4px 7px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        color: var(--text);
+        opacity: 0;
+        pointer-events: none;
+        transform: translate3d(-4px, -50%, 0);
+        transition: opacity 0.14s ease, transform 0.14s ease;
+        z-index: 3;
+    }
+    .tab.compact:hover .tab-label-popover,
+    .tab.compact:focus-visible .tab-label-popover {
+        opacity: 1;
+        transform: translate3d(0, -50%, 0);
+    }
+    .tab.compact.show-label .tab-label-popover {
+        display: none;
     }
     .tab-key {
         color: var(--text-secondary);
@@ -262,5 +313,12 @@
     }
     input[type="range"]::-webkit-slider-thumb:hover {
         background: var(--green);
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .tab,
+        .tab-label,
+        .tab-label-popover {
+            transition: none;
+        }
     }
 </style>
