@@ -113,7 +113,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     </figure>
 
     <footer class="site-footer">
-      <p>Local-first. Open source. No cloud required.</p>
+      <p>Made in Berlin with 🇪🇺 by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a></p>
       <nav aria-label="Footer links">
         <a href="https://github.com/glebis">Gleb GitHub</a>
         <a href="https://github.com/glebis/cull">Repository</a>
