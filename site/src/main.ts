@@ -5,7 +5,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     <header class="topbar">
       <a class="mark" href="/" aria-label="Cull home">
         <img src="/images/cull-app-logo.png" alt="" />
-        <span>Cull</span>
       </a>
       <span class="release-note">open source release in progress</span>
     </header>
@@ -56,7 +55,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     <section class="workflow" aria-labelledby="workflow-title">
       <div>
         <p class="eyebrow">from folder to final set</p>
-        <h2 id="workflow-title">Built for large local image libraries.</h2>
+        <h2 id="workflow-title">Built for large local image libraries</h2>
       </div>
       <div class="workflow-list">
         <article>
@@ -85,11 +84,11 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     <section class="experience-note" aria-labelledby="experience-title">
       <div>
         <p class="eyebrow">jobs to be done</p>
-        <h2 id="experience-title">Make the review feel smaller.</h2>
+        <h2 id="experience-title">Make the review feel smaller</h2>
       </div>
       <div class="experience-copy">
-        <p>When a generation run leaves hundreds of near-misses, the job is not to admire the grid. It is to find the few images worth carrying forward.</p>
-        <p>Keep the originals intact. Keep enough context to return later. Let agents help with mechanical work without taking the eye out of the loop.</p>
+        <p>It is a tool for the boring part of art, design, photography, and content production. I built it out of frustration with existing tools that are slow, heavy, and don't understand my goals.</p>
+        <p>Cull makes image work faster. You look carefully, decide clearly, and make your work available to agents and people without friction.</p>
       </div>
     </section>
 
@@ -99,7 +98,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       </figure>
       <div class="open-source-copy">
         <p class="eyebrow">open source</p>
-        <h2 id="open-source-title">Open source, but still authored.</h2>
+        <h2 id="open-source-title">Open source by design</h2>
         <p>Released under Apache-2.0. The project is built with human product direction and multiple coding agents, with human review over architecture, copy, release choices, and the resulting intellectual property.</p>
         <p>Current repository history: <strong>653 commits</strong> and counting.</p>
       </div>
@@ -108,7 +107,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     <section class="bottom-signup" aria-labelledby="privacy-title">
       <div>
         <p class="eyebrow">confirmed opt-in</p>
-        <h2 id="privacy-title">Get notified when the release is ready.</h2>
+        <h2 id="privacy-title">Get notified when the release is ready</h2>
       </div>
       <p>The launch list starts after you confirm the email. No imported lists, no background newsletter drift.</p>
     </section>
