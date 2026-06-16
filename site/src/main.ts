@@ -30,7 +30,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
 
     <section class="feature-note feature-note--boring reveal-surface" aria-labelledby="boring-title" data-reveal>
       <figure class="feature-note-illustration reveal-item reveal-delay-0">
-        <img src="/images/boring-work-generated.png" alt="" />
+        <img src="/images/boring-work-generated.png" alt="Photos, artwork, contact sheets, and color swatches being sorted into a portfolio box" />
       </figure>
       <div class="feature-note-copy reveal-item reveal-delay-2">
         <h2 id="boring-title">The boring part of creative work, made fast</h2>
