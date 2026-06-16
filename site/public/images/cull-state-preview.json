@@ -1,0 +1,6 @@
+{
+  "timestamp": "2026-06-16T15:11:01",
+  "source": "Deterministic composite generated from the Cull landing product screenshot asset.",
+  "output": "site/public/images/cull-state-preview.png",
+  "intent": "Show more of Cull state in one product image: batch counts, thumbnail decisions, selected loupe, prompt context, and agent/CLI surface."
+}

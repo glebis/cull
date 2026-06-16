@@ -12,9 +12,9 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
 
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <p class="eyebrow">agent-first image culling</p>
-        <h1 id="hero-title">A local-first image viewer for people and agents</h1>
-        <p class="lede">Cull is a macOS desktop app for reviewing AI-generated image sets: fast keyboard decisions, real metadata, and an agent surface that speaks CLI and MCP.</p>
+        <p class="eyebrow">local-first image culling</p>
+        <h1 id="hero-title">Cull image batches without giving up the archive</h1>
+        <p class="lede">Review generations, compare variants, preserve prompt context, and export clean sets. Cull stays on your Mac while agents get the same surface through CLI and MCP.</p>
         <form class="signup-form" data-signup-form>
           <label for="email">Get the open-source launch update and early builds.</label>
           <div class="signup-row">
@@ -25,31 +25,58 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         </form>
       </div>
       <figure class="product-shot">
-        <img src="/images/cull-final-loupe.png" alt="Cull loupe view showing image review controls" />
+        <img src="/images/cull-state-preview.png" alt="Cull app state with batch counts, image decisions, prompt metadata, and agent queue" />
       </figure>
     </section>
 
     <section class="claims" aria-label="Cull claims">
       <div>
-        <h2>Local-first</h2>
-        <p>Your files stay on your Mac. Cull tracks review state in a local SQLite library and leaves originals untouched.</p>
+        <h2>Local library</h2>
+        <p>Review state lives in SQLite with SHA-256 deduplication. Originals stay untouched.</p>
       </div>
       <div>
-        <h2>Keyboard-first</h2>
-        <p>Move through hundreds of images, rate them, accept or reject them, compare variants, and export without losing rhythm.</p>
+        <h2>Keyboard decisions</h2>
+        <p>Rate, accept, reject, compare, collect, and move on without losing rhythm.</p>
       </div>
       <div>
-        <h2>Agent-first</h2>
-        <p>The same work can be driven through app UI, token-efficient JSON CLI calls, and MCP tools for coding agents.</p>
+        <h2>Agent surface</h2>
+        <p>CLI, MCP, and cull:// deep links share the same command model as the app.</p>
+      </div>
+    </section>
+
+    <section class="workflow" aria-labelledby="workflow-title">
+      <div>
+        <p class="eyebrow">from folder to final set</p>
+        <h2 id="workflow-title">Built for large local image libraries.</h2>
+      </div>
+      <div class="workflow-list">
+        <article>
+          <h3>Import the mess</h3>
+          <p>Recursive folders, generated sidecars, thumbnails, file associations, and drag-and-drop from Finder.</p>
+        </article>
+        <article>
+          <h3>Review in context</h3>
+          <p>Grid, loupe, compare, canvas, lineage, and embedding views keep visual decisions close to metadata.</p>
+        </article>
+        <article>
+          <h3>Search by meaning</h3>
+          <p>Local CLIP and DINOv2 embeddings support similarity search, UMAP exploration, and clustering.</p>
+        </article>
+        <article>
+          <h3>Export the result</h3>
+          <p>Keepers can move to social exports, static publishing packages, and agent-readable snapshots.</p>
+        </article>
       </div>
     </section>
 
     <section class="technical">
-      <p>Tauri 2 / Rust / Svelte 5 / SQLite / ONNX embeddings / MCP / cull:// deep links</p>
+      <p>Tauri 2 / Rust / Svelte 5 / SQLite / ONNX Runtime / MCP / headless JSON CLI / cull:// deep links</p>
     </section>
 
-    <section class="founder-note">
-      <p>I built Cull after learning enough Mac development and engineering discipline to make agents useful inside deterministic software. It is not a promise about magic. It is a tool for the boring part that makes image work faster: looking carefully, deciding clearly, and exporting the right set.</p>
+    <section class="founder-note" aria-labelledby="release-title">
+      <h2 id="release-title">Open source release in progress.</h2>
+      <p>Cull is for AI artists, creative technologists, designers, researchers, and agentic workflow builders who manage large local archives of generated images, references, prompts, ratings, selections, and collections.</p>
+      <p>It is not a promise about magic. It is a tool for the boring part that makes image work faster: looking carefully, deciding clearly, and keeping enough context to use the result later.</p>
     </section>
 
     <section class="bottom-signup" aria-label="Signup">

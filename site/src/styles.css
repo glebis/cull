@@ -42,7 +42,7 @@ input {
 }
 
 .page-shell {
-  width: min(1120px, calc(100% - 32px));
+  width: min(1240px, calc(100% - 32px));
   margin: 0 auto;
 }
 
@@ -80,11 +80,11 @@ input {
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+  grid-template-columns: minmax(0, 0.9fr) minmax(460px, 1.1fr);
   align-items: center;
-  gap: calc(var(--spacing) * 6);
+  gap: calc(var(--spacing) * 7);
   min-height: calc(100vh - 72px);
-  padding-bottom: calc(var(--spacing) * 5);
+  padding-bottom: calc(var(--spacing) * 7);
   min-width: 0;
 }
 
@@ -105,18 +105,23 @@ h1 {
   margin: 0;
   max-width: 720px;
   font-family: var(--header-font);
-  font-size: clamp(40px, 8vw, 76px);
+  font-size: clamp(42px, 7vw, 86px);
   font-weight: 700;
-  line-height: 0.95;
+  line-height: 0.92;
   letter-spacing: 0;
   overflow-wrap: break-word;
 }
 
+h2,
+h3 {
+  font-family: var(--header-font);
+}
+
 .lede {
   margin: 0;
-  max-width: 680px;
+  max-width: 620px;
   color: var(--text-secondary);
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1.6;
 }
 
@@ -201,7 +206,7 @@ button:disabled {
 .claims {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: calc(var(--spacing) * 2);
+  gap: calc(var(--spacing) * 5);
   padding: calc(var(--spacing) * 8) 0;
   border-top: 1px solid var(--border);
 }
@@ -215,7 +220,6 @@ button:disabled {
 .claims h2,
 .bottom-signup h2 {
   margin: 0;
-  font-family: var(--header-font);
   font-size: 18px;
   font-weight: 700;
   line-height: 1.25;
@@ -223,11 +227,49 @@ button:disabled {
 
 .claims p,
 .founder-note p,
+.workflow p,
 .bottom-signup p {
   margin: 0;
   color: var(--text-secondary);
   font-size: 14px;
   line-height: 1.65;
+}
+
+.workflow {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.74fr) minmax(0, 1.26fr);
+  gap: calc(var(--spacing) * 8);
+  padding: calc(var(--spacing) * 8) 0;
+  border-top: 1px solid var(--border);
+}
+
+.workflow h2 {
+  margin: calc(var(--spacing) * 2) 0 0;
+  max-width: 10ch;
+  font-size: clamp(30px, 4vw, 52px);
+  font-weight: 700;
+  line-height: 0.96;
+}
+
+.workflow-list {
+  display: grid;
+  border-top: 1px solid var(--border);
+}
+
+.workflow article {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.4fr) minmax(0, 0.6fr);
+  gap: calc(var(--spacing) * 4);
+  padding: calc(var(--spacing) * 3) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.workflow h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .technical {
@@ -244,8 +286,20 @@ button:disabled {
 }
 
 .founder-note {
-  width: min(780px, 100%);
+  display: grid;
+  grid-template-columns: minmax(260px, 0.74fr) minmax(0, 1.26fr);
+  gap: calc(var(--spacing) * 4) calc(var(--spacing) * 8);
   padding: calc(var(--spacing) * 8) 0;
+  border-top: 1px solid var(--border);
+}
+
+.founder-note h2 {
+  grid-row: span 2;
+  margin: 0;
+  max-width: 10ch;
+  font-size: clamp(30px, 4vw, 52px);
+  font-weight: 700;
+  line-height: 0.96;
 }
 
 .bottom-signup {
@@ -300,6 +354,24 @@ button:disabled {
   .claims {
     grid-template-columns: 1fr;
     padding: calc(var(--spacing) * 5) 0;
+  }
+
+  .workflow,
+  .founder-note {
+    grid-template-columns: 1fr;
+    gap: calc(var(--spacing) * 3);
+    padding: calc(var(--spacing) * 5) 0;
+  }
+
+  .workflow h2,
+  .founder-note h2 {
+    max-width: 12ch;
+    font-size: 30px;
+  }
+
+  .workflow article {
+    grid-template-columns: 1fr;
+    gap: var(--spacing);
   }
 
   .signup-row {
