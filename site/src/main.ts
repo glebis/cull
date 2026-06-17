@@ -80,18 +80,22 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       </div>
       <div class="workflow-list">
         <article class="reveal-item reveal-delay-1">
+          <figure class="workflow-illustration"><img src="/images/workflow-folder.png" alt="" loading="lazy" /></figure>
           <h3>Drop in your folder</h3>
           <p>Drag in any folder, any size, any structure. The app reads everything and stays out of the way.</p>
         </article>
         <article class="reveal-item reveal-delay-2">
+          <figure class="workflow-illustration"><img src="/images/workflow-loupe.png" alt="" loading="lazy" /></figure>
           <h3>See every shot clearly</h3>
           <p>Grid, loupe, and side-by-side compare. Move through images at whatever pace works.</p>
         </article>
         <article class="reveal-item reveal-delay-3">
+          <figure class="workflow-illustration"><img src="/images/workflow-search.png" alt="" loading="lazy" /></figure>
           <h3>Find what you are looking for</h3>
           <p>Search by look and feel rather than filename. Surface the sharp ones, the warm ones, or the ones that match a reference.</p>
         </article>
         <article class="reveal-item reveal-delay-4">
+          <figure class="workflow-illustration"><img src="/images/workflow-export.png" alt="" loading="lazy" /></figure>
           <h3>Send out the keepers</h3>
           <p>Export picks for social, publishing, clients, or the next agent-assisted step.</p>
         </article>
