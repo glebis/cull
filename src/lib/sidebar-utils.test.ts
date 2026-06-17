@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { folderName, buildDisplayFolders, formatImportResult } from './sidebar-utils';
+import { folderName, buildDisplayFolders, formatImportResult, formatSidebarCount } from './sidebar-utils';
 
 describe('folderName', () => {
     it('returns last segment of a path', () => {
@@ -135,5 +135,16 @@ describe('formatImportResult', () => {
 
     it('handles zero counts', () => {
         expect(formatImportResult(0, 0, 0)).toBe('+0 imported, 0 skipped');
+    });
+});
+
+describe('formatSidebarCount', () => {
+    it('formats counts as plain numbers', () => {
+        expect(formatSidebarCount(42)).toBe('42');
+    });
+
+    it('uses zero for missing counts', () => {
+        expect(formatSidebarCount(null)).toBe('0');
+        expect(formatSidebarCount(undefined)).toBe('0');
     });
 });

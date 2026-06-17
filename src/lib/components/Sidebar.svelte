@@ -24,7 +24,7 @@
     let clipboardPublishing = $state(false);
     let clipboardPublishResult = $state<ClipboardPublishResult | null>(null);
 
-    import { buildDisplayFolders } from '$lib/sidebar-utils';
+    import { buildDisplayFolders, formatSidebarCount } from '$lib/sidebar-utils';
     import SessionSwitcher from './SessionSwitcher.svelte';
     import { activeCanvas, activeSession, navigateTo, sessionCanvases } from '$lib/stores';
     import { createCanvas, type Canvas } from '$lib/api';
@@ -493,14 +493,14 @@
         <button class="section-item" class:active={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null} onclick={() => selectFolder(null)}>
             <span class="icon">&#9632;</span>
             All Images
-            <span class="count">({$totalCount})</span>
+            <span class="count">{formatSidebarCount($totalCount)}</span>
         </button>
 
         {#if displayFolders.length > 0}
             <button class="folders-toggle" onclick={() => foldersExpanded = !foldersExpanded}>
                 <span class="toggle-arrow">{foldersExpanded ? '▾' : '▸'}</span>
                 <span class="folders-toggle-label">Folders</span>
-                <span class="count">({displayFolders.length})</span>
+                <span class="count">{formatSidebarCount(displayFolders.length)}</span>
             </button>
 
             {#if foldersExpanded}
@@ -511,7 +511,7 @@
                             <button class="section-item" onclick={() => selectFolder(folder.fullPath)} title={folder.fullPath}>
                                 <span class="icon">{folder.hasChildren ? '▾' : '▸'}</span>
                                 <span class="folder-label">{folder.name}</span>
-                                <span class="count">({folder.count})</span>
+                                <span class="count">{formatSidebarCount(folder.count)}</span>
                             </button>
                             <button class="delete-btn" onclick={(e: Event) => handleDeleteFolder(e, folder.fullPath)} title="Remove folder from library">&times;</button>
                         {:else}
@@ -556,7 +556,7 @@
         {#if aiExpanded}
             <div class="ai-models-content">
                 <div class="model-row">
-                    <span class="model-name">Object detection (YOLO)</span>
+                    <span class="model-name">Object detection YOLO</span>
                     {#if yoloReady}
                         <span class="model-status ready">ready</span>
                     {:else}
@@ -576,7 +576,7 @@
                 {/if}
 
                 <div class="model-row">
-                    <span class="model-name">Content filter (NudeNet)</span>
+                    <span class="model-name">Content filter NudeNet</span>
                     {#if nudenetReady}
                         <span class="model-status ready">ready</span>
                     {:else}
@@ -589,7 +589,7 @@
                 {/if}
 
                 <div class="model-row">
-                    <span class="model-name">Image descriptions (Ollama)</span>
+                    <span class="model-name">Image descriptions Ollama</span>
                     {#if ollamaReady}
                         <span class="model-status ready">{ollamaModels.length} models</span>
                     {:else}
@@ -604,7 +604,7 @@
                     </div>
                     {#if yoloProcessed < $totalCount}
                         <button class="detect-btn" onclick={handleDetectRemaining} disabled={detectingBatch}>
-                            {detectingBatch ? 'Detecting...' : `Analyze uncatalogued images (${ $totalCount - yoloProcessed })`}
+                            {detectingBatch ? 'Detecting...' : `Analyze uncatalogued images ${formatSidebarCount($totalCount - yoloProcessed)}`}
                         </button>
                     {/if}
                 {/if}
@@ -616,7 +616,7 @@
                     </div>
                     {#if visionProcessed < $totalCount}
                         <button class="detect-btn" onclick={handleAnalyzeBatch} disabled={analyzingBatch}>
-                            {analyzingBatch ? 'Analyzing...' : `Analyze uncatalogued images (${ $totalCount - visionProcessed })`}
+                            {analyzingBatch ? 'Analyzing...' : `Analyze uncatalogued images ${formatSidebarCount($totalCount - visionProcessed)}`}
                         </button>
                     {/if}
                 {/if}
@@ -626,7 +626,7 @@
                     {#each detectedClasses as [cls, count]}
                         <button class="section-item detected-class" onclick={() => filterByClass(cls)}>
                             <span class="class-tag">{cls}</span>
-                            <span class="count">{count}</span>
+                            <span class="count">{formatSidebarCount(count)}</span>
                         </button>
                     {/each}
                 {/if}
@@ -643,7 +643,7 @@
                 onclick={() => selectSmartCollection(sc)}>
                 <span class="icon">&#9733;</span>
                 {sc.name}
-                <span class="count">({sc.image_count ?? 0})</span>
+                <span class="count">{formatSidebarCount(sc.image_count)}</span>
             </button>
         {/each}
     </div>
@@ -725,7 +725,7 @@
                     <button class="section-item" onclick={() => selectCollection(id)}>
                         <span class="icon">&#9671;</span>
                         {name}
-                        <span class="count">({count})</span>
+                        <span class="count">{formatSidebarCount(count)}</span>
                     </button>
                     <button
                         class="pin-btn"
