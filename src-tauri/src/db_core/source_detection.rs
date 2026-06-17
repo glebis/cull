@@ -197,7 +197,7 @@ pub fn read_png_text_chunks(
     path: &std::path::Path,
 ) -> std::result::Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
     let file = std::fs::File::open(path)?;
-    let decoder = png::Decoder::new(file);
+    let decoder = png::Decoder::new(std::io::BufReader::new(file));
     let reader = decoder.read_info()?;
     let info = reader.info();
 
