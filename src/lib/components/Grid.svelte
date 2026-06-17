@@ -2,9 +2,11 @@
     import { onDestroy } from 'svelte';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { open } from '@tauri-apps/plugin-dialog';
-    import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState, showToast, totalCount, folders } from '$lib/stores';
+    import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState, showToast, totalCount, folders, gridPreset, GRID_PRESETS } from '$lib/stores';
     import { importFolder as apiImportFolder, getImageCount, listFolders } from '$lib/api';
     import { IMAGE_PAGE_SIZE, loadImagesForCurrentScope, loadMoreImagesForCurrentScope } from '$lib/image-loading';
+    import { wheelGestureIntent } from '$lib/gesture-interactions';
+    import { gridGestureZoom } from '$lib/grid-gesture-zoom';
     import { resolveLibraryViewState } from '$lib/library-view-state';
     import {
         computeGridClickSelection,
@@ -105,6 +107,52 @@
         gridScrollTop.set(scrollTop);
         maybeLoadMore();
         warmPrefetch();
+    }
+
+    function handleWheel(e: WheelEvent) {
+        if (!containerEl) return;
+        const intent = wheelGestureIntent({
+            surface: 'grid',
+            deltaX: e.deltaX,
+            deltaY: e.deltaY,
+            deltaMode: e.deltaMode,
+            clientX: e.clientX,
+            clientY: e.clientY,
+            ctrlKey: e.ctrlKey,
+            metaKey: e.metaKey,
+            altKey: e.altKey,
+            shiftKey: e.shiftKey,
+            viewportHeight: containerHeight || containerEl.clientHeight,
+            target: e.target,
+        });
+        if (!intent || intent.type !== 'zoom') return;
+        e.preventDefault();
+        applyThumbnailZoom(intent.factor, e.clientY);
+    }
+
+    function applyThumbnailZoom(factor: number, clientY: number) {
+        if (!containerEl) return;
+        const rect = containerEl.getBoundingClientRect();
+        const pointerY = clientY - rect.top;
+        const oldCellSize = size + gap;
+        const oldScrollTop = containerEl.scrollTop;
+        const next = gridGestureZoom({ size, gap, preset: $gridPreset }, factor, GRID_PRESETS);
+        if (next.size === size && next.gap === gap && next.preset === $gridPreset) return;
+
+        const anchorRow = oldCellSize > 0 ? (oldScrollTop + pointerY) / oldCellSize : 0;
+        const nextScrollTop = Math.max(0, anchorRow * (next.size + next.gap) - pointerY);
+
+        thumbnailSize.set(next.size);
+        gridPreset.set(next.preset);
+        gridGap.set(next.gap);
+        gridScrollTop.set(nextScrollTop);
+
+        requestAnimationFrame(() => {
+            if (!containerEl) return;
+            containerEl.scrollTop = nextScrollTop;
+            scrollTop = containerEl.scrollTop;
+            prevScrollTop = scrollTop;
+        });
     }
 
     function handleClick(index: number, event: MouseEvent | KeyboardEvent) {
@@ -229,6 +277,7 @@
     class="grid-container"
     bind:this={containerEl}
     onscroll={onScroll}
+    onwheel={handleWheel}
     role="grid"
     aria-label={"Image grid, " + $images.length + " images"}
 >
