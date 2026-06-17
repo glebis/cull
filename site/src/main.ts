@@ -12,7 +12,11 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
         <p class="eyebrow hero-step-1">local-first / agent-ready</p>
-        <h1 id="hero-title" class="hero-step-2">Go from 500 images to 20 keepers</h1>
+        <h1 id="hero-title" class="hero-step-2">
+          <span>Go from</span>
+          <span>500 images</span>
+          <span>to 20 keepers</span>
+        </h1>
         <p class="lede hero-step-3">Cull is a fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac. Work in the app, or drive the work through your agent via CLI or MCP.</p>
         <form class="signup-form signup-form--featured hero-step-5" data-signup-form>
           <label for="email">Get early builds and the open-source launch update.</label>
@@ -79,22 +83,22 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <h2 id="workflow-title">From folder to final set</h2>
       </div>
       <div class="workflow-list">
-        <article class="reveal-item reveal-delay-1">
+        <article class="reveal-item reveal-delay-1" data-command="import folder">
           <figure class="workflow-illustration"><img src="/images/workflow-folder.png" alt="" loading="lazy" /></figure>
           <h3>Drop in your folder</h3>
           <p>Drag in any folder, any size, any structure. The app reads everything and stays out of the way.</p>
         </article>
-        <article class="reveal-item reveal-delay-2">
+        <article class="reveal-item reveal-delay-2" data-command="open loupe">
           <figure class="workflow-illustration"><img src="/images/workflow-loupe.png" alt="" loading="lazy" /></figure>
           <h3>See every shot clearly</h3>
           <p>Grid, loupe, and side-by-side compare. Move through images at whatever pace works.</p>
         </article>
-        <article class="reveal-item reveal-delay-3">
+        <article class="reveal-item reveal-delay-3" data-command="find similar">
           <figure class="workflow-illustration"><img src="/images/workflow-search.png" alt="" loading="lazy" /></figure>
           <h3>Find what you are looking for</h3>
           <p>Search by look and feel rather than filename. Surface the sharp ones, the warm ones, or the ones that match a reference.</p>
         </article>
-        <article class="reveal-item reveal-delay-4">
+        <article class="reveal-item reveal-delay-4" data-command="export keepers">
           <figure class="workflow-illustration"><img src="/images/workflow-export.png" alt="" loading="lazy" /></figure>
           <h3>Send out the keepers</h3>
           <p>Export picks for social, publishing, clients, or the next agent-assisted step.</p>
@@ -232,6 +236,7 @@ function setStatus(form: HTMLFormElement, text: string, kind: StatusKind): void 
   status.dataset.updating = "true";
   status.textContent = formatTextForLineBreaks(text);
   status.dataset.kind = kind;
+  form.dataset.statusKind = kind;
   window.setTimeout(() => {
     delete status.dataset.updating;
   }, 260);
