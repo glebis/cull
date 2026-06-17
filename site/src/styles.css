@@ -864,8 +864,8 @@ input:focus-visible {
 
 @media (max-width: 620px) {
   .page-shell {
-    width: min(1120px, calc(100% - 24px));
-    max-width: calc(100vw - 24px);
+    width: calc(100% - 24px);
+    max-width: none;
   }
 
   .topbar {
@@ -896,8 +896,16 @@ input:focus-visible {
   .feature-note p,
   .open-source-note p,
   .bottom-signup p {
-    max-width: 34ch;
+    max-width: 100%;
     overflow-wrap: anywhere;
+  }
+
+  .signup-form {
+    width: 100%;
+  }
+
+  .signup-form--featured {
+    padding: calc(var(--spacing) * 2.5);
   }
 
   .product-shot {
@@ -910,7 +918,7 @@ input:focus-visible {
   }
 
   .claim-illustration {
-    width: min(100%, 180px);
+    width: 100%;
   }
 
   .workflow,
@@ -941,11 +949,11 @@ input:focus-visible {
   }
 
   .open-source-illustration {
-    width: min(100%, 240px);
+    width: 100%;
   }
 
   .feature-note-illustration {
-    width: min(100%, 220px);
+    width: 100%;
   }
 
   .site-footer {
@@ -959,13 +967,14 @@ input:focus-visible {
 
   .workflow article {
     grid-template-columns: 1fr;
-    grid-template-rows: 260px auto 1fr auto;
+    grid-template-rows: auto auto 1fr auto;
     gap: var(--spacing);
   }
 
   .workflow-illustration {
-    width: min(100%, 260px);
-    height: 260px;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1;
   }
 
   .signup-row {
