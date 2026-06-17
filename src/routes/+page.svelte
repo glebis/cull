@@ -25,6 +25,7 @@
     import Tinder from '$lib/components/Tinder.svelte';
     import McpSettings from '$lib/components/McpSettings.svelte';
     import AboutDialog from '$lib/components/AboutDialog.svelte';
+    import AgentSkillsDialog from '$lib/components/AgentSkillsDialog.svelte';
     import JobProgressPanel from '$lib/components/JobProgressPanel.svelte';
     import TrashConfirmDialog from '$lib/components/TrashConfirmDialog.svelte';
     import TextInputDialog from '$lib/components/TextInputDialog.svelte';
@@ -32,7 +33,7 @@
     import GenerationResultsStrip from '$lib/components/GenerationResultsStrip.svelte';
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel } from '$lib/stores';
+    import { totalCount, images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel } from '$lib/stores';
     import { trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
@@ -548,6 +549,10 @@
 
     {#if $aboutOpen}
         <AboutDialog onclose={() => aboutOpen.set(false)} />
+    {/if}
+
+    {#if $agentSkillsOpen}
+        <AgentSkillsDialog onclose={() => agentSkillsOpen.set(false)} />
     {/if}
 
     <TrashConfirmDialog

@@ -44,6 +44,21 @@ describe('Help menu contract', () => {
         expect(frontendMenuSource).toContain('https://github.com/glebis/cull/wiki');
     });
 
+    it('adds a native Help menu item for agent skill installation instructions', () => {
+        const menuSource = readProjectFile('src-tauri/src/menu.rs');
+        const frontendMenuSource = readProjectFile('src/lib/menu.ts');
+        const pageSource = readProjectFile('src/routes/+page.svelte');
+        const dialogSource = readProjectFile('src/lib/components/AgentSkillsDialog.svelte');
+
+        expect(menuSource).toContain('"agent_skills"');
+        expect(menuSource).toContain('"Install Agent Skills..."');
+        expect(frontendMenuSource).toContain("case 'agent_skills'");
+        expect(pageSource).toContain('AgentSkillsDialog');
+        expect(dialogSource).toContain('"command": "cull"');
+        expect(dialogSource).toContain('"args": ["--mcp-stdio"]');
+        expect(dialogSource).toContain('docs/agents.md');
+    });
+
     it('registers a native macOS Help Book in the app plist', () => {
         const plist = readProjectFile('src-tauri/Info.plist');
 

@@ -227,6 +227,26 @@ describe('native menu bridge', () => {
         expect(mocks.openUrl).toHaveBeenCalledWith('https://github.com/glebis/cull/wiki');
     });
 
+    it('opens the agent skills dialog when the native Help menu action fires', async () => {
+        let handler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, next) => {
+            handler = next as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+
+        const [{ initMenu }, { agentSkillsOpen }] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+
+        void initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        await flushMicrotasks();
+
+        handler?.({ payload: 'agent_skills' });
+
+        expect(get(agentSkillsOpen)).toBe(true);
+    });
+
     it('runs a manual update check when the native Cull menu action fires', async () => {
         let handler: ((event: { payload: string }) => void) | undefined;
         mocks.listen.mockImplementation(async (_eventName, next) => {
