@@ -448,6 +448,7 @@ input:focus-visible {
 .workflow article {
   display: grid;
   grid-template-columns: 1fr;
+  grid-template-rows: 340px auto 1fr;
   align-items: start;
   gap: calc(var(--spacing) * 1.5);
   min-width: 0;
@@ -455,7 +456,7 @@ input:focus-visible {
 
 .workflow-illustration {
   width: min(100%, 340px);
-  aspect-ratio: 1;
+  height: 340px;
   margin: 0 0 calc(var(--spacing) * 1.25);
   background: var(--bg);
   overflow: hidden;
@@ -467,10 +468,24 @@ input:focus-visible {
   height: 100%;
   object-fit: contain;
   opacity: 1;
+  transform: scale(var(--workflow-art-scale, 1));
+  transform-origin: center;
 }
 
 .workflow article:hover .workflow-illustration img {
-  transform: scale(1.018);
+  transform: scale(calc(var(--workflow-art-scale, 1) * 1.018));
+}
+
+.workflow article:nth-child(1) {
+  --workflow-art-scale: 1.04;
+}
+
+.workflow article:nth-child(3) {
+  --workflow-art-scale: 1.16;
+}
+
+.workflow article:nth-child(4) {
+  --workflow-art-scale: 1.24;
 }
 
 .workflow h3 {
@@ -850,11 +865,13 @@ input:focus-visible {
 
   .workflow article {
     grid-template-columns: 1fr;
+    grid-template-rows: 260px auto 1fr;
     gap: var(--spacing);
   }
 
   .workflow-illustration {
     width: min(100%, 260px);
+    height: 260px;
   }
 
   .signup-row {
