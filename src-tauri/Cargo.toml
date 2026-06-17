@@ -68,7 +68,7 @@ clap = { version = "4", features = ["derive"] }
 rand = "0.10"
 subtle = "2"
 hex = "0.4"
-dirs = "5"
+dirs = "6"
 rsraw = "0.1"
 notify = "6"
 dashmap = "6"
