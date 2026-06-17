@@ -441,22 +441,22 @@ input:focus-visible {
 
 .workflow-list {
   display: grid;
-  border-top: 1px solid var(--border);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(var(--spacing) * 6) calc(var(--spacing) * 5);
 }
 
 .workflow article {
   display: grid;
-  grid-template-columns: 72px minmax(140px, 0.36fr) minmax(0, 0.6fr);
+  grid-template-columns: 1fr;
   align-items: start;
-  gap: calc(var(--spacing) * 4);
-  padding: calc(var(--spacing) * 3) 0;
-  border-bottom: 1px solid var(--border);
+  gap: calc(var(--spacing) * 1.5);
+  min-width: 0;
 }
 
 .workflow-illustration {
-  width: 72px;
+  width: min(100%, 340px);
   aspect-ratio: 1;
-  margin: 0;
+  margin: 0 0 calc(var(--spacing) * 1.25);
   background: var(--bg);
   overflow: hidden;
 }
@@ -476,9 +476,13 @@ input:focus-visible {
 .workflow h3 {
   margin: 0;
   color: var(--text);
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
   line-height: 1.25;
+}
+
+.workflow article p {
+  max-width: 38ch;
 }
 
 .open-source-note {
@@ -817,6 +821,11 @@ input:focus-visible {
     font-size: 30px;
   }
 
+  .workflow-list {
+    grid-template-columns: 1fr;
+    gap: calc(var(--spacing) * 4);
+  }
+
   .bottom-signup p:last-child {
     max-width: 100%;
     font-size: 25px;
@@ -845,7 +854,7 @@ input:focus-visible {
   }
 
   .workflow-illustration {
-    width: 64px;
+    width: min(100%, 260px);
   }
 
   .signup-row {
