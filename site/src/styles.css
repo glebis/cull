@@ -134,9 +134,10 @@ input {
 
 h1 {
   display: grid;
-  gap: 0.03em;
+  justify-items: start;
+  gap: 0.08em;
   margin: 0;
-  max-width: 10ch;
+  max-width: 12ch;
   font-family: var(--header-font);
   font-size: clamp(42px, 7vw, 86px);
   font-weight: 700;
@@ -147,6 +148,60 @@ h1 {
 
 h1 span {
   display: block;
+}
+
+.rotating-line-control {
+  --rotating-line-color: var(--blue);
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  min-height: 0;
+  padding: 0 0 0.08em;
+  border: 0;
+  border-bottom: 2px dashed color-mix(in srgb, var(--rotating-line-color) 76%, transparent);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  box-shadow: 0 0.12em 0 color-mix(in srgb, var(--rotating-line-color) 12%, transparent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78em;
+  font-weight: inherit;
+  line-height: 0.96;
+  text-align: left;
+  white-space: normal;
+  transform-origin: left bottom;
+}
+
+.rotating-line-control--outcome {
+  --rotating-line-color: var(--orange);
+}
+
+h1 .rotating-line-control span {
+  display: inline;
+}
+
+.rotating-line-control:hover:not(:disabled),
+.rotating-line-control:focus-visible {
+  background: color-mix(in srgb, var(--rotating-line-color) 12%, transparent);
+  box-shadow:
+    0 0.12em 0 color-mix(in srgb, var(--rotating-line-color) 18%, transparent),
+    0 0 22px color-mix(in srgb, var(--rotating-line-color) 16%, transparent);
+  color: var(--text);
+  transform: translate3d(0, -1px, 0);
+}
+
+.rotating-line-control:focus-visible {
+  outline: 2px solid var(--rotating-line-color);
+  outline-offset: 5px;
+}
+
+.rotating-line-control.is-active {
+  animation: rotating-line-pulse 620ms var(--ease-out-quart);
+}
+
+.rotating-line-control.is-swapping span {
+  animation: rotating-line-swap 460ms var(--ease-out-quint);
 }
 
 h2,
@@ -814,6 +869,29 @@ input:focus-visible {
   }
 }
 
+@keyframes rotating-line-swap {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 0.22em, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes rotating-line-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+
+  48% {
+    filter: brightness(1.24);
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .topbar {
     animation: topbar-enter 460ms var(--ease-out-expo) 40ms both;
@@ -909,9 +987,13 @@ input:focus-visible {
   }
 
   h1 {
-    max-width: 12ch;
+    max-width: 100%;
     font-size: 34px;
     line-height: 1.05;
+  }
+
+  .rotating-line-control {
+    max-width: 100%;
   }
 
   .lede,
@@ -1007,5 +1089,9 @@ input:focus-visible {
 
   button {
     width: 100%;
+  }
+
+  .rotating-line-control {
+    width: fit-content;
   }
 }

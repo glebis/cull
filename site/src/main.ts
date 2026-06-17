@@ -14,8 +14,13 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <p class="eyebrow hero-step-1">local-first / agent-ready</p>
         <h1 id="hero-title" class="hero-step-2">
           <span>Go from</span>
-          <span>500 images</span>
-          <span>to 20 keepers</span>
+          <button class="rotating-line-control" type="button" data-rotating-line="from" aria-label="Change starting material">
+            <span data-rotating-line-value="from">500 images</span>
+          </button>
+          <span>to</span>
+          <button class="rotating-line-control rotating-line-control--outcome" type="button" data-rotating-line="to" aria-label="Change finished outcome">
+            <span data-rotating-line-value="to">20 keepers</span>
+          </button>
         </h1>
         <p class="lede hero-step-3">Cull is a fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac. Work in the app, or drive the work through your agent via CLI or MCP.</p>
       </div>
@@ -161,6 +166,41 @@ if (motionQuery.matches) {
   document.documentElement.classList.add("reduced-motion");
 }
 
+const rotatingLines = {
+  from: {
+    index: 0,
+    values: ["500 images", "a pile of sketches", "dusty SD cards", "751 test shots"],
+  },
+  to: {
+    index: 0,
+    values: ["20 keepers", "an exhibition", "a publication", "a movie", "an Insta post", "a photo album", "a documentary"],
+  },
+} satisfies Record<string, { index: number; values: string[] }>;
+
+type RotatingLineName = keyof typeof rotatingLines;
+
+let rotatingLineTurn: RotatingLineName = "from";
+let rotatingLineTimer: number | undefined;
+
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-rotating-line]")) {
+  button.addEventListener("click", () => {
+    cycleRotatingLine(button.dataset.rotatingLine, 1, true);
+  });
+
+  button.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+      event.preventDefault();
+      cycleRotatingLine(button.dataset.rotatingLine, 1, true);
+    }
+    if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+      event.preventDefault();
+      cycleRotatingLine(button.dataset.rotatingLine, -1, true);
+    }
+  });
+}
+
+startRotatingLineTimer();
+
 const revealTargets = document.querySelectorAll<HTMLElement>("[data-reveal]");
 
 if (!motionQuery.matches && "IntersectionObserver" in window) {
@@ -257,6 +297,50 @@ function setStatus(form: HTMLFormElement, text: string, kind: StatusKind, option
   window.setTimeout(() => {
     delete status.dataset.updating;
   }, 260);
+}
+
+function cycleRotatingLine(slotName: string | undefined, direction = 1, manual = false): void {
+  if (!isRotatingLineName(slotName)) {
+    return;
+  }
+
+  const slot = rotatingLines[slotName];
+  slot.index = (slot.index + direction + slot.values.length) % slot.values.length;
+  const value = document.querySelector<HTMLElement>(`[data-rotating-line-value="${slotName}"]`);
+  const button = document.querySelector<HTMLElement>(`[data-rotating-line="${slotName}"]`);
+  if (!value || !button) {
+    return;
+  }
+
+  value.textContent = formatTextForLineBreaks(slot.values[slot.index]);
+  button.classList.remove("is-swapping", "is-active");
+  void button.offsetWidth;
+  button.classList.add("is-swapping", "is-active");
+
+  window.setTimeout(() => {
+    button.classList.remove("is-active");
+  }, 620);
+
+  rotatingLineTurn = slotName === "from" ? "to" : "from";
+  if (manual) {
+    startRotatingLineTimer();
+  }
+}
+
+function isRotatingLineName(slotName: string | undefined): slotName is RotatingLineName {
+  return slotName === "from" || slotName === "to";
+}
+
+function startRotatingLineTimer(): void {
+  if (motionQuery.matches) {
+    return;
+  }
+  if (rotatingLineTimer !== undefined) {
+    window.clearInterval(rotatingLineTimer);
+  }
+  rotatingLineTimer = window.setInterval(() => {
+    cycleRotatingLine(rotatingLineTurn);
+  }, 2400);
 }
 
 function statusNoteForSubscribeStatus(status: string | undefined): StatusNote | undefined {
