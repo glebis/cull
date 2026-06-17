@@ -131,10 +131,10 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     </figure>
 
     <footer class="site-footer">
-      <p>Made in Berlin by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a></p>
+      <p>Made in 🇪🇺 Berlin by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a></p>
       <nav aria-label="Footer links">
-        <a href="https://github.com/glebis">Gleb GitHub</a>
         <a href="https://github.com/glebis/cull">Repository</a>
+        <a href="https://github.com/glebis">Gleb's Github</a>
         <a href="https://t.me/glebkalinin">Telegram</a>
       </nav>
     </footer>
