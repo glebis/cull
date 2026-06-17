@@ -105,7 +105,8 @@ input {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(460px, 1.1fr);
   align-items: start;
-  gap: calc(var(--spacing) * 7);
+  column-gap: calc(var(--spacing) * 7);
+  row-gap: calc(var(--spacing) * 3);
   min-height: calc(100vh - 72px);
   padding-bottom: calc(var(--spacing) * 7);
   min-width: 0;
@@ -114,7 +115,14 @@ input {
 .hero-copy {
   display: grid;
   gap: calc(var(--spacing) * 3);
+  grid-column: 1;
+  grid-row: 1;
   min-width: 0;
+}
+
+.hero > .signup-form {
+  grid-column: 1;
+  grid-row: 2;
 }
 
 .eyebrow {
@@ -391,6 +399,8 @@ input:focus-visible {
 
 .product-shot {
   position: relative;
+  grid-column: 2;
+  grid-row: 1 / span 2;
   margin: 0;
   width: 100%;
   max-width: 100%;
@@ -882,6 +892,22 @@ input:focus-visible {
     padding: 40px 0;
   }
 
+  .hero-copy {
+    order: 1;
+  }
+
+  .product-shot {
+    grid-column: auto;
+    grid-row: auto;
+    order: 2;
+  }
+
+  .hero > .signup-form {
+    grid-column: auto;
+    grid-row: auto;
+    order: 3;
+  }
+
   h1 {
     max-width: 12ch;
     font-size: 34px;
@@ -908,7 +934,7 @@ input:focus-visible {
   }
 
   .product-shot {
-    display: none;
+    display: block;
   }
 
   .claims {

@@ -18,18 +18,18 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <span>to 20 keepers</span>
         </h1>
         <p class="lede hero-step-3">Cull is a fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac. Work in the app, or drive the work through your agent via CLI or MCP.</p>
-        <form class="signup-form signup-form--featured hero-step-5" data-signup-form>
-          <label for="email">Get early builds and the open-source launch update.</label>
-          <div class="signup-row">
-            <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="signup-status" required />
-            <button type="submit" data-submit-button>Get notified</button>
-          </div>
-          <p id="signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
-        </form>
       </div>
       <figure class="product-shot hero-step-4">
         <img src="/images/cull-state-preview.png" alt="App state with batch counts, image decisions, prompt metadata, and agent queue" />
       </figure>
+      <form class="signup-form signup-form--featured hero-step-5" data-signup-form>
+        <label for="email">Get early builds and the open-source launch update.</label>
+        <div class="signup-row">
+          <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="signup-status" required />
+          <button type="submit" data-submit-button>Get notified</button>
+        </div>
+        <p id="signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
+      </form>
     </section>
 
     <section class="feature-note feature-note--boring reveal-surface" aria-labelledby="boring-title" data-reveal>
