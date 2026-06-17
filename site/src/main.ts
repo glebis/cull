@@ -132,7 +132,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           </div>
           <p id="bottom-signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
         </form>
-        <p>One confirmation email. That is it.</p>
       </div>
     </section>
 
