@@ -44,7 +44,7 @@
 
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
@@ -107,7 +107,7 @@ input {
   align-items: start;
   column-gap: calc(var(--spacing) * 7);
   row-gap: calc(var(--spacing) * 3);
-  min-height: calc(100vh - 72px);
+  min-height: calc(100dvh - 72px);
   padding-bottom: calc(var(--spacing) * 7);
   min-width: 0;
 }
@@ -184,9 +184,7 @@ h1 .rotating-line-control span {
 .rotating-line-control:hover:not(:disabled),
 .rotating-line-control:focus-visible {
   background: color-mix(in srgb, var(--rotating-line-color) 12%, transparent);
-  box-shadow:
-    0 0.12em 0 color-mix(in srgb, var(--rotating-line-color) 18%, transparent),
-    0 0 22px color-mix(in srgb, var(--rotating-line-color) 16%, transparent);
+  box-shadow: 0 0.12em 0 color-mix(in srgb, var(--rotating-line-color) 18%, transparent);
   color: var(--text);
   transform: translate3d(0, -1px, 0);
 }
@@ -235,7 +233,9 @@ h3 {
   border: 1px solid color-mix(in srgb, var(--blue) 62%, var(--field-border));
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--surface) 64%, var(--blue) 36%);
-  box-shadow: 0 0 15px color-mix(in srgb, var(--blue) 18%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--blue) 22%, transparent),
+    0 8px 24px rgb(0 0 0 / 0.35);
 }
 
 .signup-form--featured::after {
@@ -653,10 +653,20 @@ input:focus-visible {
 
 .open-source-note {
   display: grid;
-  grid-template-columns: minmax(220px, 360px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 360px);
   align-items: center;
   gap: calc(var(--spacing) * 6);
   padding: calc(var(--spacing) * 8) 0;
+}
+
+.open-source-illustration {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.open-source-copy {
+  grid-column: 1;
+  grid-row: 1;
 }
 
 .open-source-illustration {
@@ -949,6 +959,31 @@ input:focus-visible {
   }
 }
 
+@media (min-width: 621px) and (max-width: 900px) {
+  .hero {
+    grid-template-columns: 1fr;
+    min-height: auto;
+    row-gap: calc(var(--spacing) * 4);
+    padding-bottom: calc(var(--spacing) * 5);
+  }
+
+  .hero-copy {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .product-shot {
+    grid-column: 1;
+    grid-row: 2;
+    max-width: 640px;
+  }
+
+  .hero > .signup-form {
+    grid-column: 1;
+    grid-row: 3;
+  }
+}
+
 @media (max-width: 620px) {
   .page-shell {
     width: calc(100% - 24px);
@@ -1057,6 +1092,13 @@ input:focus-visible {
 
   .open-source-illustration {
     width: 100%;
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .open-source-copy {
+    grid-column: 1;
+    grid-row: auto;
   }
 
   .feature-note-illustration {
