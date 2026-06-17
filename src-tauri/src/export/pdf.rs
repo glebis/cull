@@ -33,7 +33,10 @@ pub fn assemble_pdf(
             .read_info()
             .map_err(|e| format!("Failed to decode PNG '{}': {}", img_path, e))?;
 
-        let mut buf = vec![0; reader.output_buffer_size()];
+        let output_buffer_size = reader
+            .output_buffer_size()
+            .ok_or_else(|| format!("Failed to determine PNG buffer size for '{}'", img_path))?;
+        let mut buf = vec![0; output_buffer_size];
         let info = reader
             .next_frame(&mut buf)
             .map_err(|e| format!("Failed to read PNG frame: {}", e))?;
