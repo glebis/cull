@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-05-07T16:10:49.563328",
+  "prompt": "A pixel-perfect macOS application window mockup for the 'Loupe' view of an AI image viewer called 'Cull'. Complete window with macOS traffic lights (red/yellow/green). Background #08080c. All monospace text (JetBrains Mono style). TOP BAR: traffic lights top-left, centered monospace tabs 'grid  compare  loupe  canvas  lineage  embeddings  export' with 'loupe' having a green #9ece6a underline. No sidebar. MAIN AREA: a single large AI-generated cinematic portrait photograph of a woman with dramatic lighting, displayed centered with dark space around it, taking about 70% of viewport. The image has no border, just floats on the dark background. BOTTOM OVERLAY: a semi-transparent bar (rgba(8,8,12,0.85)) at the very bottom showing monospace text: 'portrait_v3.png | 1024x1024 | png | \u2605\u2605\u2605\u2605 | ACCEPTED | 150%' with stars in orange #e0af68 and ACCEPTED in green #9ece6a and 150% in blue #7aa2f7. Clean, immersive, minimal \u2014 the image is the hero. Premium developer tool aesthetic.",
+  "preset": null,
+  "platform": null,
+  "thinking": "medium",
+  "quality": "high",
+  "provider": "openai",
+  "n": 1,
+  "seed": null,
+  "output": "site/public/images/cull-final-loupe.png",
+  "project": null,
+  "estimated_cost": 0.32,
+  "note": "Derived from imageview-final-loupe.png for the Cull landing page by replacing the stale window title with the current product name."
+}

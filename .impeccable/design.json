@@ -1,0 +1,304 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-16T16:24:00+02:00",
+  "title": "Design System: Cull",
+  "extensions": {
+    "colorMeta": {
+      "archive-black": {
+        "role": "neutral",
+        "displayName": "Archive Black",
+        "canonical": "#08080c",
+        "tonalRamp": [
+          "oklch(14% 0.01 275)",
+          "oklch(22% 0.01 275)",
+          "oklch(32% 0.01 275)",
+          "oklch(44% 0.01 275)",
+          "oklch(58% 0.01 275)",
+          "oklch(72% 0.008 275)",
+          "oklch(84% 0.006 275)",
+          "oklch(94% 0.004 275)"
+        ]
+      },
+      "panel-black": {
+        "role": "neutral",
+        "displayName": "Panel Black",
+        "canonical": "#0c0c12",
+        "tonalRamp": [
+          "oklch(16% 0.012 275)",
+          "oklch(24% 0.012 275)",
+          "oklch(34% 0.012 275)",
+          "oklch(46% 0.01 275)",
+          "oklch(60% 0.01 275)",
+          "oklch(74% 0.008 275)",
+          "oklch(86% 0.006 275)",
+          "oklch(95% 0.004 275)"
+        ]
+      },
+      "rule-blueblack": {
+        "role": "neutral",
+        "displayName": "Rule Blueblack",
+        "canonical": "#1a1a2e",
+        "tonalRamp": [
+          "oklch(18% 0.035 275)",
+          "oklch(26% 0.035 275)",
+          "oklch(36% 0.03 275)",
+          "oklch(48% 0.025 275)",
+          "oklch(60% 0.02 275)",
+          "oklch(74% 0.016 275)",
+          "oklch(86% 0.01 275)",
+          "oklch(95% 0.006 275)"
+        ]
+      },
+      "command-blue": {
+        "role": "primary",
+        "displayName": "Command Blue",
+        "canonical": "#7aa2f7",
+        "tonalRamp": [
+          "oklch(18% 0.08 265)",
+          "oklch(28% 0.10 265)",
+          "oklch(40% 0.12 265)",
+          "oklch(54% 0.14 265)",
+          "oklch(66% 0.14 265)",
+          "oklch(76% 0.11 265)",
+          "oklch(86% 0.07 265)",
+          "oklch(95% 0.03 265)"
+        ]
+      },
+      "accept-green": {
+        "role": "primary",
+        "displayName": "Accept Green",
+        "canonical": "#9ece6a",
+        "tonalRamp": [
+          "oklch(18% 0.08 135)",
+          "oklch(28% 0.10 135)",
+          "oklch(40% 0.12 135)",
+          "oklch(54% 0.13 135)",
+          "oklch(66% 0.13 135)",
+          "oklch(76% 0.10 135)",
+          "oklch(86% 0.06 135)",
+          "oklch(95% 0.03 135)"
+        ]
+      },
+      "warning-amber": {
+        "role": "secondary",
+        "displayName": "Warning Amber",
+        "canonical": "#e0af68",
+        "tonalRamp": [
+          "oklch(18% 0.07 75)",
+          "oklch(28% 0.09 75)",
+          "oklch(40% 0.11 75)",
+          "oklch(54% 0.12 75)",
+          "oklch(68% 0.12 75)",
+          "oklch(78% 0.09 75)",
+          "oklch(88% 0.06 75)",
+          "oklch(96% 0.025 75)"
+        ]
+      },
+      "metadata-purple": {
+        "role": "secondary",
+        "displayName": "Metadata Purple",
+        "canonical": "#bb9af7",
+        "tonalRamp": [
+          "oklch(18% 0.08 300)",
+          "oklch(28% 0.10 300)",
+          "oklch(40% 0.12 300)",
+          "oklch(54% 0.14 300)",
+          "oklch(68% 0.14 300)",
+          "oklch(78% 0.10 300)",
+          "oklch(88% 0.06 300)",
+          "oklch(96% 0.025 300)"
+        ]
+      },
+      "reject-red": {
+        "role": "tertiary",
+        "displayName": "Reject Red",
+        "canonical": "#f7768e",
+        "tonalRamp": [
+          "oklch(18% 0.08 20)",
+          "oklch(28% 0.10 20)",
+          "oklch(40% 0.13 20)",
+          "oklch(54% 0.16 20)",
+          "oklch(68% 0.16 20)",
+          "oklch(78% 0.11 20)",
+          "oklch(88% 0.07 20)",
+          "oklch(96% 0.03 20)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Landing Display",
+        "purpose": "Public landing page hero only."
+      },
+      "headline": {
+        "displayName": "Landing Headline",
+        "purpose": "Major landing sections and release-positioning statements."
+      },
+      "title": {
+        "displayName": "Control Title",
+        "purpose": "Readable section headings, form labels, and primary controls."
+      },
+      "body": {
+        "displayName": "Mono Body",
+        "purpose": "Dense app copy, metadata, and supporting landing text."
+      },
+      "label": {
+        "displayName": "Mono Label",
+        "purpose": "Command hints, eyebrows, status text, and metadata strings."
+      }
+    },
+    "shadows": [
+      {
+        "name": "overlay",
+        "value": "0 24px 88px color-mix(in srgb, var(--bg) 82%, transparent)",
+        "purpose": "Command Palette and modal-like command surfaces only."
+      },
+      {
+        "name": "compact-overlay",
+        "value": "0 16px 44px color-mix(in srgb, var(--bg) 78%, transparent)",
+        "purpose": "Small popovers and temporary menus."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-fast",
+        "value": "80ms-150ms ease-out",
+        "purpose": "Fast button, row, and hover feedback."
+      },
+      {
+        "name": "state-standard",
+        "value": "150ms-250ms ease-out",
+        "purpose": "Panel, overlay, and command surface state changes."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms",
+        "purpose": "Respect prefers-reduced-motion by collapsing animation and transition duration."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "site-mobile",
+        "value": "620px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Solid command action used for the public signup and major app commands.",
+      "html": "<button class=\"ds-button-primary\">Request access</button>",
+      "css": ".ds-button-primary { min-height: 50px; padding: 0 20px; border: 1px solid var(--blue, #7aa2f7); border-radius: var(--radius, 4px); background: var(--blue, #7aa2f7); color: var(--bg, #08080c); font-family: Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif; font-size: 15px; font-weight: 700; line-height: 1.2; white-space: nowrap; cursor: pointer; } .ds-button-primary:hover { filter: brightness(1.04); } .ds-button-primary:focus-visible { outline: 2px solid var(--orange, #e0af68); outline-offset: 3px; }"
+    },
+    {
+      "name": "Email Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Readable public-site input with app-token colors and product-grade focus behavior.",
+      "html": "<label class=\"ds-field\"><span>Email</span><input class=\"ds-input\" placeholder=\"you@example.com\" /></label>",
+      "css": ".ds-field { display: grid; gap: 10px; color: var(--text, #e0e0e0); font-family: Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif; font-size: 15px; font-weight: 650; } .ds-input { min-height: 50px; padding: 0 16px; border: 1px solid var(--field-border, #30324a); border-radius: var(--radius, 4px); background: var(--surface, #0c0c12); color: var(--text, #e0e0e0); font: inherit; font-size: 16px; font-weight: 400; line-height: 1.2; } .ds-input::placeholder { color: var(--placeholder, #8a8da3); } .ds-input:focus-visible { outline: 2px solid var(--orange, #e0af68); outline-offset: 3px; }"
+    },
+    {
+      "name": "Product Frame",
+      "kind": "card",
+      "refersTo": "product-frame",
+      "description": "A quiet frame for actual Cull app state, not a decorative marketing card.",
+      "html": "<figure class=\"ds-product-frame\"><div class=\"ds-product-surface\">Cull app state</div></figure>",
+      "css": ".ds-product-frame { margin: 0; border: 1px solid var(--border, #1a1a2e); border-radius: var(--radius, 4px); background: var(--surface, #0c0c12); overflow: hidden; } .ds-product-surface { display: grid; min-height: 180px; place-items: center; color: var(--text-secondary, #7a7fa0); font-family: var(--font, JetBrains Mono, ui-monospace, monospace); font-size: 13px; }"
+    },
+    {
+      "name": "Decision Chip Accept",
+      "kind": "chip",
+      "refersTo": "decision-chip-accept",
+      "description": "Accepted curation state.",
+      "html": "<span class=\"ds-chip-accept\">ACCEPTED</span>",
+      "css": ".ds-chip-accept { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 6px; border-radius: var(--radius, 4px); background: var(--green, #9ece6a); color: var(--bg, #08080c); font-family: var(--font, JetBrains Mono, ui-monospace, monospace); font-size: 11px; font-weight: 700; line-height: 1; }"
+    },
+    {
+      "name": "Decision Chip Reject",
+      "kind": "chip",
+      "refersTo": "decision-chip-reject",
+      "description": "Rejected curation state.",
+      "html": "<span class=\"ds-chip-reject\">REJECT</span>",
+      "css": ".ds-chip-reject { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 6px; border-radius: var(--radius, 4px); background: var(--red, #f7768e); color: var(--bg, #08080c); font-family: var(--font, JetBrains Mono, ui-monospace, monospace); font-size: 11px; font-weight: 700; line-height: 1; }"
+    },
+    {
+      "name": "Command Palette Surface",
+      "kind": "custom",
+      "refersTo": "command-palette",
+      "description": "Dense transient command surface for fuzzy search, shortcuts, and recent commands.",
+      "html": "<div class=\"ds-command-palette\"><div class=\"ds-command-search\">Search commands</div><div class=\"ds-command-row\"><span>Import folder</span><kbd>Cmd K</kbd></div></div>",
+      "css": ".ds-command-palette { width: 360px; border: 1px solid var(--border, #1a1a2e); border-radius: var(--radius, 4px); background: var(--surface, #0c0c12); box-shadow: 0 24px 88px color-mix(in srgb, var(--bg, #08080c) 82%, transparent); color: var(--text, #e0e0e0); font-family: var(--font, JetBrains Mono, ui-monospace, monospace); font-size: 13px; overflow: hidden; } .ds-command-search { padding: 12px; border-bottom: 1px solid var(--border, #1a1a2e); color: var(--text-secondary, #7a7fa0); } .ds-command-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 12px; } .ds-command-row:hover { background: color-mix(in srgb, var(--blue, #7aa2f7) 10%, transparent); color: var(--blue, #7aa2f7); } .ds-command-row kbd { border: 1px solid var(--border, #1a1a2e); border-radius: var(--radius, 4px); padding: 2px 5px; color: var(--text-secondary, #7a7fa0); font: inherit; font-size: 11px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Local Contact Sheet",
+    "overview": "Cull should feel like a serious desktop curation room: dark, quiet, precise, and built around the image archive rather than the brand chrome. The system borrows the discipline of a terminal, the patience of a photo contact sheet, and the command density of a macOS power tool. It is technical without becoming novelty developer cosplay.",
+    "keyCharacteristics": [
+      "Dark Tokyo Night base, one-pixel rules, and minimal tonal layering.",
+      "Monospace-first app UI, with Geist reserved for landing-page hierarchy and signup readability.",
+      "8px spacing grid, 4px radius, and predictable keyboard-oriented surfaces.",
+      "Accent colors carry state: blue for command/focus, green for accept, amber for warning/rating, red for reject/error.",
+      "Image content and decision state are the main signal. Chrome stays quiet."
+    ],
+    "rules": [
+      {
+        "name": "The Semantic Accent Rule",
+        "body": "Blue, green, amber, purple, and red are state and command colors. They are not decoration.",
+        "section": "colors"
+      },
+      {
+        "name": "The One-Pixel Rule",
+        "body": "Dividers and frame borders are 1px. Do not thicken borders to create emphasis unless the element is a real focus or selection state.",
+        "section": "colors"
+      },
+      {
+        "name": "The No-Blob Rule",
+        "body": "Decorative gradient blobs, bokeh, and ambient color clouds are forbidden. Cull's atmosphere comes from dark surfaces, real images, and precise state colors.",
+        "section": "colors"
+      },
+      {
+        "name": "The Mono-With-Purpose Rule",
+        "body": "Use JetBrains Mono for app chrome, commands, metadata, status, and technical content. Do not use monospace as a lazy shorthand for every marketing heading or form control.",
+        "section": "typography"
+      },
+      {
+        "name": "The Sans-For-Reading Rule",
+        "body": "Use Geist when the user needs to quickly parse a large heading, form label, or action. The header and signup block must never regress to oversized mono text.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-Until-Transient Rule",
+        "body": "Resting panels, cards, images, sidebars, and controls do not use shadows. Shadows are reserved for temporary overlays that must float above the current task.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Surface-Not-Card Rule",
+        "body": "Avoid marketing-style cards. Use full-width bands, rows, panels, or framed tools. Cards are allowed only for repeated items or modal surfaces where framing is functional.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep the image archive as the main content. Chrome should help users inspect, compare, and decide without competing for attention.",
+      "Do make local-first trust visible through clear copy, file/state language, and confirmation flows.",
+      "Do use Command Blue for focus, links, and primary commands; Accept Green for accepted/success states; Reject Red for failure/rejection.",
+      "Do preserve keyboard flow. Major actions should be reachable without a mouse and legible in the Command Palette.",
+      "Do use the 8px grid and 4px radius. Small deviations need a local reason, such as the logo asset.",
+      "Do keep signup and confirmation copy concrete: what happens next, what is safe, and what the user controls.",
+      "Do keep all interactive targets at least 44px in both dimensions when they are clickable or touchable.",
+      "Do use real Cull product imagery or app-state renders on the public site."
+    ],
+    "donts": [
+      "Don't make Cull look or sound like generic SaaS.",
+      "Don't use corporate AI boosterism, privacy fear marketing, cute onboarding, or vague productivity software language.",
+      "Don't add decorative gradient blobs, glassmorphism, rounded marketing cards everywhere, clinical feature grids, or noisy animations.",
+      "Don't write copy that explains obvious UI mechanics.",
+      "Don't dilute the terminal-inspired, monospace-first app UI with unrelated type, color, or component patterns.",
+      "Don't use gradient text, side-stripe card accents, or hero metric templates.",
+      "Don't use color as decoration. Accent colors must map to command, state, metadata, warning, success, or rejection.",
+      "Don't reintroduce old ImageView naming, stale 0px-radius guidance, or source-available positioning. Cull is Apache-2.0 open source."
+    ]
+  }
+}

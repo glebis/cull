@@ -45,5 +45,6 @@ docs/internal/
 **/.enzyme-embeddings/
 .beads/
 .superpowers/
+.impeccable/live/sessions/
 .worktrees/
 .tdd-state.json
