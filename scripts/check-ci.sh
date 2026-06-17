@@ -7,6 +7,7 @@ target="${1:-all}"
 
 run_frontend() {
   npm ci
+  (cd site && npm ci)
   npm run lint:issues
   npm run check
   npm test
