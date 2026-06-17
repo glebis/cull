@@ -2,6 +2,9 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { images, selectedIds, focusedIndex, compareActiveSide, compareImageOnly, zenMode } from '$lib/stores';
     import type { ImageWithFile } from '$lib/api';
+    import { nextCompareFocusedIndex } from '$lib/compare-gestures';
+    import { classifySwipe, wheelGestureIntent } from '$lib/gesture-interactions';
+    import { computeCompareSwap } from '$lib/compare-utils';
     import { safeAssetPreviewPath } from '$lib/view-utils';
     import ContextMenu from './ContextMenu.svelte';
 
@@ -38,6 +41,11 @@
     let rightName = $derived(rightImage?.path.split('/').pop() ?? '');
     let imageOnly = $derived($zenMode && $compareImageOnly);
     let focusedImageId = $derived($images[$focusedIndex]?.image.id ?? null);
+    let compareEl: HTMLDivElement | undefined = $state();
+    let wheelSwipeX = 0;
+    let wheelSwipeY = 0;
+    let wheelSwipeResetTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastWheelNavigationAt = 0;
 
     function ratingStars(img: ImageWithFile | null): number {
         return img?.selection?.star_rating ?? 0;
@@ -65,9 +73,76 @@
         e.preventDefault();
         ctxMenu = { visible: true, x: e.clientX, y: e.clientY, image: img };
     }
+
+    function handleWheel(e: WheelEvent) {
+        const rect = compareEl?.getBoundingClientRect();
+        if (!rect) return;
+        const intent = wheelGestureIntent({
+            surface: 'compare',
+            deltaX: e.deltaX,
+            deltaY: e.deltaY,
+            deltaMode: e.deltaMode,
+            clientX: e.clientX,
+            clientY: e.clientY,
+            ctrlKey: e.ctrlKey,
+            metaKey: e.metaKey,
+            altKey: e.altKey,
+            shiftKey: e.shiftKey,
+            viewportHeight: rect.height,
+            target: e.target,
+        });
+        if (!intent || intent.type !== 'pan') return;
+
+        wheelSwipeX += intent.deltaX;
+        wheelSwipeY += intent.deltaY;
+        scheduleWheelSwipeReset();
+        const direction = classifySwipe({ deltaX: wheelSwipeX, deltaY: wheelSwipeY });
+        const now = Date.now();
+        if (!direction || now - lastWheelNavigationAt < 250) return;
+
+        e.preventDefault();
+        lastWheelNavigationAt = now;
+        resetWheelSwipe();
+        applyCompareSwipe(direction);
+    }
+
+    function applyCompareSwipe(direction: 'previous' | 'next') {
+        const imgs = $images;
+        if (imgs.length === 0) return;
+
+        if ($selectedIds.size >= 2) {
+            const result = computeCompareSwap(
+                imgs.map(item => item.image.id),
+                $selectedIds,
+                $focusedIndex,
+                $compareActiveSide,
+                direction === 'next' ? 1 : -1,
+            );
+            if (result) selectedIds.set(result.newSelectedIds);
+            return;
+        }
+
+        selectedIds.set(new Set());
+        compareActiveSide.set(0);
+        focusedIndex.set(nextCompareFocusedIndex($focusedIndex, imgs.length, direction));
+    }
+
+    function scheduleWheelSwipeReset() {
+        if (wheelSwipeResetTimer) clearTimeout(wheelSwipeResetTimer);
+        wheelSwipeResetTimer = setTimeout(resetWheelSwipe, 180);
+    }
+
+    function resetWheelSwipe() {
+        wheelSwipeX = 0;
+        wheelSwipeY = 0;
+        if (wheelSwipeResetTimer) {
+            clearTimeout(wheelSwipeResetTimer);
+            wheelSwipeResetTimer = null;
+        }
+    }
 </script>
 
-<div class="compare-container" class:images-only={imageOnly}>
+<div class="compare-container" class:images-only={imageOnly} bind:this={compareEl} onwheel={handleWheel}>
     <div
         class="panel"
         class:active={$compareActiveSide === 0}

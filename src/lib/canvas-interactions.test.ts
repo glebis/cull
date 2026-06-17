@@ -3,6 +3,7 @@ import {
     computeCanvasItemDragPosition,
     computeCanvasResize,
     computeCanvasWheelZoom,
+    computeCanvasZoomAtPoint,
     isCanvasSpacePanKey,
     worldToCanvasScreen,
 } from './canvas-interactions';
@@ -22,6 +23,16 @@ describe('canvas interactions', () => {
         expect(next.zoom).toBeGreaterThan(viewport.zoom);
         expect(screenPoint.x).toBeCloseTo(pointer.x, 5);
         expect(screenPoint.y).toBeCloseTo(pointer.y, 5);
+    });
+
+    it('zooms canvas around a pointer using a factor', () => {
+        const next = computeCanvasZoomAtPoint(
+            { panX: 10, panY: 20, zoom: 1 },
+            { x: 100, y: 80 },
+            2,
+        );
+
+        expect(next).toEqual({ panX: -80, panY: -40, zoom: 2 });
     });
 
     it('maps dragged item coordinates through pan and zoom', () => {

@@ -18,9 +18,10 @@
         computeCanvasItemDragPosition,
         computeCanvasPanDrag,
         computeCanvasResize,
-        computeCanvasWheelZoom,
+        computeCanvasZoomAtPoint,
         isCanvasSpacePanKey,
     } from '$lib/canvas-interactions';
+    import { wheelGestureIntent } from '$lib/gesture-interactions';
     import { serializeCanvasDocumentLayout, type CanvasDocument } from '$lib/canvas-document';
     import {
         addCanvasItemAnnotation,
@@ -379,18 +380,45 @@
     }
 
     function handleWheel(e: WheelEvent) {
-        e.preventDefault();
+        if (dragItem || resizeItem || cropDraft) return;
         const rect = canvasEl?.getBoundingClientRect();
         if (!rect) return;
-        const nextViewport = computeCanvasWheelZoom(
-            { panX, panY, zoom },
-            { x: e.clientX - rect.left, y: e.clientY - rect.top },
-            e.deltaY,
-        );
-        panX = nextViewport.panX;
-        panY = nextViewport.panY;
-        zoom = nextViewport.zoom;
-        queueCanvasSave();
+        const intent = wheelGestureIntent({
+            surface: 'canvas',
+            deltaX: e.deltaX,
+            deltaY: e.deltaY,
+            deltaMode: e.deltaMode,
+            clientX: e.clientX,
+            clientY: e.clientY,
+            ctrlKey: e.ctrlKey,
+            metaKey: e.metaKey,
+            altKey: e.altKey,
+            shiftKey: e.shiftKey,
+            viewportHeight: rect.height,
+            target: e.target,
+        });
+        if (!intent) return;
+
+        if (intent.type === 'pan') {
+            e.preventDefault();
+            panX -= intent.deltaX;
+            panY -= intent.deltaY;
+            queueCanvasSave();
+            return;
+        }
+
+        if (intent.type === 'zoom') {
+            e.preventDefault();
+            const nextViewport = computeCanvasZoomAtPoint(
+                { panX, panY, zoom },
+                { x: e.clientX - rect.left, y: e.clientY - rect.top },
+                intent.factor,
+            );
+            panX = nextViewport.panX;
+            panY = nextViewport.panY;
+            zoom = nextViewport.zoom;
+            queueCanvasSave();
+        }
     }
 
     function handleCanvasKeydown(e: KeyboardEvent) {
