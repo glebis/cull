@@ -3,7 +3,7 @@
     import { onMount } from 'svelte';
     import ContextMenu from './ContextMenu.svelte';
     import PromptResubmitDialog from './PromptResubmitDialog.svelte';
-    import { images, focusedIndex, focusedImage, statusHint, showLoupeHistogram, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
+    import { images, focusedIndex, focusedImage, showLoupeHistogram, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
     import { getDetections, getVisionMetadata, cropImage, getImagesByIds, getGenerationRun, getImageHistogram, isRawFormat } from '$lib/api';
     import type { Detection, GenerationRun, ImageHistogram } from '$lib/api';
     import { focusImagePath } from '$lib/transform-results';
@@ -195,12 +195,6 @@
     function handleSpaceUp(e: KeyboardEvent) {
         if (e.code === 'Space') spaceHeld = false;
     }
-
-    $effect(() => {
-        const info = `${filename} | ${dimensions} | ${format}`;
-        statusHint.set(info);
-        return () => statusHint.set(null);
-    });
 
     // Reset pan (but keep zoom) when image changes
     let prevImageId = $state('');
@@ -886,6 +880,7 @@
     .loupe-container {
         flex: 1;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
         background: var(--bg);
@@ -905,7 +900,8 @@
         align-items: center;
         justify-content: center;
         width: 100%;
-        height: 100%;
+        flex: 1 1 auto;
+        min-height: 0;
     }
     img {
         max-width: 100%;
@@ -934,19 +930,26 @@
         font-size: 14px;
     }
     .overlay-bar {
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        right: 0;
+        position: relative;
+        flex: 0 0 auto;
+        width: 100%;
+        box-sizing: border-box;
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 6px 12px;
-        background: rgba(8, 8, 12, 0.85);
+        min-height: 32px;
+        padding: 0 12px;
+        background: var(--bg);
         font-size: 11px;
+        overflow: hidden;
+        white-space: nowrap;
+        z-index: 2;
     }
     .filename {
         color: var(--text);
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .sep {
         color: var(--border);
@@ -955,7 +958,7 @@
         color: var(--text-secondary);
     }
     .source {
-        color: var(--purple, #bb9af7);
+        color: var(--purple);
     }
     .rating {
         display: flex;
