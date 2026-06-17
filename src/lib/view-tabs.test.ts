@@ -26,6 +26,12 @@ describe('view tabs', () => {
         expect(ids.indexOf('publish')).toBe(ids.indexOf('export') - 1);
     });
 
+    it('marks every titlebar tab as compact by default', () => {
+        const compactIds = VIEW_TABS.filter(tab => tab.compact).map(tab => tab.id);
+
+        expect(compactIds).toEqual(VIEW_TABS.map(tab => tab.id));
+    });
+
     it('uses purpose-built icon ids for the primary image workflow tabs', () => {
         const icons = Object.fromEntries(VIEW_TABS.map(tab => [tab.id, tab.icon]));
 
@@ -60,5 +66,23 @@ describe('view tabs', () => {
         expect(appCssSource).toContain('--macos-titlebar-safe-area: 40px;');
         expect(tabBarSource).toContain('padding-left: var(--macos-window-controls-width);');
         expect(pageSource).toContain('padding-top: var(--macos-titlebar-safe-area);');
+    });
+
+    it('centers the tab menu independently of optional right-side controls', () => {
+        expect(tabBarSource).toContain('class="tabbar-left"');
+        expect(tabBarSource).toContain('class="tabbar-center"');
+        expect(tabBarSource).toContain('class="tabbar-right"');
+        expect(tabBarSource).toContain('grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);');
+        expect(tabBarSource).toContain('justify-self: center;');
+    });
+
+    it('reveals compact tab labels without changing layout on hover', () => {
+        expect(tabBarSource).toContain('class:compact={tab.compact}');
+        expect(tabBarSource).toContain('class:show-label={$viewMode === tab.id}');
+        expect(tabBarSource).toContain('class="tab-label-popover"');
+        expect(tabBarSource).toContain('position: absolute;');
+        expect(tabBarSource).toContain('.tab.compact:not(.show-label)');
+        expect(tabBarSource).toContain('.tab.compact:hover .tab-label-popover');
+        expect(tabBarSource).toContain('@media (prefers-reduced-motion: reduce)');
     });
 });

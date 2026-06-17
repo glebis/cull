@@ -428,6 +428,7 @@ export const activeCanvas = writable<Canvas | null>(null);
 // Settings panel
 export const settingsOpen = writable<boolean>(false);
 export const aboutOpen = writable<boolean>(false);
+export const agentSkillsOpen = writable<boolean>(false);
 export const searchOpen = writable<boolean>(false);
 export type CommandPaletteMode = 'all' | 'commands';
 export const commandPaletteOpen = writable<boolean>(false);

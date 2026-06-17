@@ -11,6 +11,7 @@ const TRAY_STATS_ID: &str = "stats";
 const TRAY_MCP_STATUS_ID: &str = "mcp_status";
 const QUIT_APP_ID: &str = "quit_app";
 const TRAY_CLIPBOARD_MONITOR_ID: &str = "tray_clipboard_monitor";
+const TRAY_AGENT_SKILLS_ID: &str = "tray_agent_skills";
 const RECORDING_BADGE_RGBA: [u8; 4] = [247, 118, 142, 255];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +42,7 @@ struct TrayMenuItemSpec {
 enum TrayMenuAction {
     ToggleWindow,
     ToggleClipboardMonitor,
+    OpenAgentSkills,
     Quit,
     None,
 }
@@ -55,6 +57,7 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
             move |app, event| match tray_action_for_id(event.id().0.as_str()) {
                 TrayMenuAction::ToggleWindow => toggle_window(app),
                 TrayMenuAction::ToggleClipboardMonitor => toggle_clipboard_monitor(app),
+                TrayMenuAction::OpenAgentSkills => open_agent_skills(app),
                 TrayMenuAction::Quit => {
                     app.exit(0);
                 }
@@ -145,6 +148,13 @@ fn build_tray_menu(app: &AppHandle, state: TrayMenuState) -> tauri::Result<Menu<
     let mcp_label = tray_mcp_label(state.mcp_connections);
     let stats = MenuItem::with_id(app, TRAY_STATS_ID, &stats_label, false, None::<&str>)?;
     let mcp_status = MenuItem::with_id(app, TRAY_MCP_STATUS_ID, &mcp_label, false, None::<&str>)?;
+    let agent_skills = MenuItem::with_id(
+        app,
+        TRAY_AGENT_SKILLS_ID,
+        "Install Agent Skills...",
+        true,
+        None::<&str>,
+    )?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, QUIT_APP_ID, "Quit Cull", true, None::<&str>)?;
 
@@ -156,6 +166,7 @@ fn build_tray_menu(app: &AppHandle, state: TrayMenuState) -> tauri::Result<Menu<
             &clipboard_monitor,
             &stats,
             &mcp_status,
+            &agent_skills,
             &sep2,
             &quit,
         ],
@@ -203,6 +214,13 @@ fn tray_menu_specs_for_state(state: TrayMenuState) -> Vec<TrayMenuItemSpec> {
             checked: false,
         },
         TrayMenuItemSpec {
+            id: TRAY_AGENT_SKILLS_ID,
+            label: "Install Agent Skills...".to_string(),
+            kind: TrayMenuItemKind::Item,
+            enabled: true,
+            checked: false,
+        },
+        TrayMenuItemSpec {
             id: QUIT_APP_ID,
             label: "Quit Cull".to_string(),
             kind: TrayMenuItemKind::Item,
@@ -232,6 +250,7 @@ fn tray_action_for_id(id: &str) -> TrayMenuAction {
     match id {
         SHOW_HIDE_ID => TrayMenuAction::ToggleWindow,
         TRAY_CLIPBOARD_MONITOR_ID => TrayMenuAction::ToggleClipboardMonitor,
+        TRAY_AGENT_SKILLS_ID => TrayMenuAction::OpenAgentSkills,
         QUIT_APP_ID => TrayMenuAction::Quit,
         _ => TrayMenuAction::None,
     }
@@ -265,11 +284,22 @@ fn toggle_window(app: &AppHandle) {
         if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
         } else {
-            let _ = window.show();
-            let _ = window.unminimize();
-            let _ = window.set_focus();
+            show_main_window(app);
         }
     }
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn open_agent_skills(app: &AppHandle) {
+    show_main_window(app);
+    let _ = app.emit("menu-action", "agent_skills");
 }
 
 fn toggle_clipboard_monitor(app: &AppHandle) {
@@ -323,6 +353,21 @@ mod tests {
         assert_eq!(
             tray_action_for_id(TRAY_CLIPBOARD_MONITOR_ID),
             TrayMenuAction::ToggleClipboardMonitor
+        );
+    }
+
+    #[test]
+    fn agent_skills_tray_item_dispatches_dialog_action() {
+        let spec = tray_menu_specs()
+            .into_iter()
+            .find(|item| item.id == TRAY_AGENT_SKILLS_ID)
+            .expect("agent skills tray item exists");
+
+        assert_eq!(spec.label, "Install Agent Skills...");
+        assert!(spec.enabled);
+        assert_eq!(
+            tray_action_for_id(TRAY_AGENT_SKILLS_ID),
+            TrayMenuAction::OpenAgentSkills
         );
     }
 

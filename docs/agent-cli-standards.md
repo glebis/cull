@@ -12,6 +12,11 @@ Cull's headless CLI and MCP server should expose the same task model. Agents sho
 - Commands must be non-interactive. Do not prompt, open dialogs, or depend on a visible Tauri window.
 - Long-running commands should return either a final JSON result or a `job_id` that is queryable through a matching job tool. Do not mix both patterns casually.
 - CLI and MCP behavior should call shared service functions, not duplicate business logic.
+- Critical confirmations belong outside the CLI command. Agent runtimes may not
+  be able to surface or answer their own confirmation tools from
+  non-interactive calls or subagents, so destructive or irreversible commands
+  must require confirmation in the caller, app UI, or operator workflow before
+  invoking Cull.
 
 ## Module Layout
 

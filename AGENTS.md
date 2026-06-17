@@ -177,9 +177,10 @@ SQL repair.
 
 Two `bd` binaries can be on PATH with **incompatible Dolt schemas**:
 `/usr/local/bin/bd` (e.g. 1.0.4) and `/opt/homebrew/bin/bd` (e.g. 0.59.0). The
-`scripts/bd.sh` wrapper prefers the Homebrew one, which can fail every write with
-`Error 1054 ... Unknown column 'crystallizes' in 'issues'` against a DB created
-by 1.0.4. If you hit that, force the matching binary explicitly:
+`scripts/bd.sh` wrapper prefers `/usr/local/bin/bd` when present because this
+repo's `.beads` Dolt DB is currently owned by the 1.x schema. If you still hit
+`Error 1054 ... Unknown column 'crystallizes' in 'issues'`, force the matching
+binary explicitly:
 
 ```bash
 export BD_BIN=/usr/local/bin/bd   # the binary that owns the .beads Dolt DB

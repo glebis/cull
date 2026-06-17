@@ -104,6 +104,16 @@ cull --json call_tool import_folder --params_json '{"folder_path":"/Users/me/ren
 
 Implemented headless tools: `get_library_stats`, `list_images`, `list_folders`, `list_collections`, `import_folder`, `import_files`, `get_embedding_model_download_info`, `download_embedding_model`, `generate_embeddings`, `analyze_image_quality`, `get_image_quality`, `get_quality_count`, `list_export_presets`, `export_images`.
 
+Agent approval boundary: Cull can expose MCP and CLI tools, but it cannot
+guarantee that a calling agent can surface or answer its own confirmation
+prompts through those tools. Claude Code's Agent SDK currently routes approvals
+through the client permission callback and does not make `AskUserQuestion`
+available inside subagents. Treat Cull tool calls as execution surfaces, not as
+the confirmation mechanism for critical decisions such as file removal, token
+revocation, audit-log pruning, or broad destructive batch operations. Put that
+confirmation in the app UI, MCP client, or operator workflow before invoking the
+tool.
+
 CLI module and output standards live in [docs/agent-cli-standards.md](docs/agent-cli-standards.md).
 
 ## Roadmap

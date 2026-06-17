@@ -50,6 +50,7 @@ import {
     pluginsEnabled,
     activePluginIds,
     aboutOpen,
+    agentSkillsOpen,
     navigateTo,
     showToast,
     requestTextInput,
@@ -546,6 +547,9 @@ function handleMenuAction(action: string) {
     switch (action) {
         case 'about':
             aboutOpen.set(true);
+            break;
+        case 'agent_skills':
+            agentSkillsOpen.set(true);
             break;
         case 'open_file':
             handleOpenFile();

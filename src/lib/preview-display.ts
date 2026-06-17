@@ -9,6 +9,8 @@ import type {
 } from './api';
 import { isRawFormat, updatePreviewState } from './api';
 
+const PREVIEW_DISPLAY_PRESET_ORDER: PreviewDisplayMode[] = ['image_only', 'client_review', 'metadata_review'];
+
 export const DEFAULT_PREVIEW_OVERLAY: PreviewOverlayConfig = {
     showFilename: false,
     showRating: false,
@@ -66,6 +68,21 @@ export function overlayForPreviewDisplayMode(mode: PreviewDisplayMode): PreviewO
         };
     }
     return DEFAULT_PREVIEW_OVERLAY;
+}
+
+export function nextPreviewDisplayPresetMode(mode: PreviewDisplayMode): PreviewDisplayMode {
+    const index = PREVIEW_DISPLAY_PRESET_ORDER.indexOf(mode);
+    const nextIndex = index === -1 ? 0 : (index + 1) % PREVIEW_DISPLAY_PRESET_ORDER.length;
+    return PREVIEW_DISPLAY_PRESET_ORDER[nextIndex];
+}
+
+export function isPreviewDisplayPresetCycleShortcut(input: {
+    key: string;
+    ctrlKey?: boolean;
+    metaKey?: boolean;
+    altKey?: boolean;
+}): boolean {
+    return input.key === 'Tab' && input.ctrlKey === true && input.metaKey !== true && input.altKey !== true;
 }
 
 export type PreviewDisplayField =

@@ -16,6 +16,10 @@ Cull is a local-first Tauri 2 desktop app. It never phones home. All data stays 
 - Connections authenticate as `AuthContext::Local` and bypass all capability checks — full admin access.
 - **This is intentional.** The socket is the local control plane. File permissions are the sole access control boundary.
 - Threat: a local process running as the same user can connect and issue any command. This matches the macOS security model — same-user processes already have equivalent filesystem access.
+- Confirmation boundary: Cull cannot guarantee that a connected agent can
+  surface or answer its own confirmation prompts through MCP. For critical
+  operations, require confirmation in the MCP client, Cull UI, or operator
+  workflow before issuing the tool call.
 
 ### MCP HTTP Server
 
@@ -24,6 +28,9 @@ Cull is a local-first Tauri 2 desktop app. It never phones home. All data stays 
 - Tokens carry a role: Viewer, Curator, Operator, or Admin. Each role maps to a set of capabilities; requests outside the role's scope are rejected.
 - Cross-origin requests blocked via `Origin` header validation.
 - Threat: token leakage grants remote access scoped to the token's role. Mitigation: tokens never leave Keychain, pepper is per-install, and the server binds to `127.0.0.1` by default.
+- Confirmation boundary: token roles and scopes authorize tool calls, but they
+  are not a substitute for human approval on critical decisions such as file
+  removal, token revocation, or audit-log pruning.
 
 ### Deep Links (`cull://`)
 

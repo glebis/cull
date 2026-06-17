@@ -9,14 +9,24 @@
         getPreviewState,
         isRawFormat,
         listImageTags,
+        setAppSetting,
+        updatePreviewState,
         type GenerationRun,
         type ImageHistogram,
         type ImageTag,
         type ImageWithFile,
+        type PreviewDisplayMode,
         type PreviewState,
     } from '$lib/api';
     import { histogramPolyline } from '$lib/histogram-utils';
-    import { previewDisplayImageSourcePath, previewDisplayRailVisible } from '$lib/preview-display';
+    import {
+        isPreviewDisplayPresetCycleShortcut,
+        nextPreviewDisplayPresetMode,
+        overlayForPreviewDisplayMode,
+        previewDisplayImageSourcePath,
+        previewDisplayRailVisible,
+    } from '$lib/preview-display';
+    import { PREVIEW_DISPLAY_MODE_SETTING, PREVIEW_DISPLAY_OVERLAY_SETTING } from '$lib/preview-display-store';
 
     type DisplayLoadState = 'loading' | 'empty' | 'ready' | 'missing' | 'error' | 'blanked';
 
@@ -180,6 +190,35 @@
         loadState = 'error';
     }
 
+    async function applyPreviewPreset(displayMode: PreviewDisplayMode) {
+        if (!previewState) return;
+        const overlay = overlayForPreviewDisplayMode(displayMode);
+        const next = await updatePreviewState(
+            previewState.image_id,
+            displayMode,
+            overlay,
+            previewState.frozen,
+            previewState.blanked
+        );
+        await applyPreviewState(next);
+        try {
+            await setAppSetting(PREVIEW_DISPLAY_MODE_SETTING, displayMode);
+            await setAppSetting(PREVIEW_DISPLAY_OVERLAY_SETTING, JSON.stringify(overlay));
+        } catch (e) {
+            console.warn('Failed to persist Preview Display preset:', e);
+        }
+    }
+
+    function handlePreviewKeydown(event: KeyboardEvent) {
+        if (!isPreviewDisplayPresetCycleShortcut(event)) return;
+        event.preventDefault();
+        if (!previewState) return;
+        const displayMode = nextPreviewDisplayPresetMode(previewState.display_mode);
+        applyPreviewPreset(displayMode).catch((e) => {
+            console.error('Failed to cycle Preview Display preset:', e);
+        });
+    }
+
     onMount(() => {
         getPreviewState()
             .then(applyPreviewState)
@@ -204,8 +243,14 @@
     });
 </script>
 
+<svelte:window onkeydown={handlePreviewKeydown} />
+
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="preview-display" data-state={loadState} onpointermove={handlePreviewPointerMove}>
+<div
+    class="preview-display"
+    data-state={loadState}
+    onpointermove={handlePreviewPointerMove}
+>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <header
         class="preview-header"

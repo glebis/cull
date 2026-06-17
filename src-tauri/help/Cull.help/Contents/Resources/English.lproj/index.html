@@ -151,6 +151,7 @@ npm run tauri dev</code></pre>
         <li>MCP tools can inspect library state, work with collections, and publish clipboard monitor collections when the server is enabled.</li>
         <li>The MCP HTTP server is disabled by default; enable it only when you need remote agent access.</li>
       </ul>
+      <p>Agent confirmations have a boundary: Cull exposes tools, but it cannot guarantee that every agent runtime can surface or answer its own confirmation prompts through those tools. Confirm critical decisions such as file removal, token revocation, audit-log pruning, or broad destructive batch operations in the app, MCP client, or operator workflow before invoking a tool.</p>
     </section>
 
     <section id="cli">

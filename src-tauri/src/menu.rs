@@ -9,6 +9,7 @@ const CULL_HELP_BOOK_ID: &str = "com.glebkalinin.cull.help";
 const CULL_HELP_PAGE: &str = "index.html";
 const VIEW_PUBLISH_ID: &str = "view_publish";
 const VIEW_EXPORT_ID: &str = "view_export";
+const AGENT_SKILLS_ID: &str = "agent_skills";
 const WINDOW_MENU_ID: &str = "window_menu";
 const WINDOW_MENU_FOCUS_PREFIX: &str = "window_focus:";
 
@@ -545,6 +546,14 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     )?)?;
     help_menu.append(&MenuItem::with_id(
         app,
+        AGENT_SKILLS_ID,
+        "Install Agent Skills...",
+        true,
+        None::<&str>,
+    )?)?;
+    help_menu.append(&PredefinedMenuItem::separator(app)?)?;
+    help_menu.append(&MenuItem::with_id(
+        app,
         "github_wiki",
         "GitHub Wiki",
         true,
@@ -1067,6 +1076,7 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
         | "zoom_in"
         | "zoom_out"
         | "actual_size"
+        | AGENT_SKILLS_ID
         | "github_wiki" => {
             let _ = app.emit("menu-action", id);
         }

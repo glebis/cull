@@ -1,0 +1,1055 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cull Multi-image Preview Layout Experiments</title>
+  <style>
+    :root {
+      --bg: #08080c;
+      --surface: #0c0c12;
+      --surface-2: #111119;
+      --border: #1a1a2e;
+      --text: #e0e0e0;
+      --muted: #7a7fa0;
+      --blue: #7aa2f7;
+      --green: #9ece6a;
+      --orange: #e0af68;
+      --purple: #bb9af7;
+      --red: #f7768e;
+      --spacing: 8px;
+      --radius: 4px;
+      --tile-border-width: 0px;
+      --tile-border-color: rgba(255, 255, 255, 0.14);
+      --font: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      letter-spacing: 0;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 344px minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr) auto;
+      min-height: 100vh;
+    }
+
+    .controls {
+      grid-row: 1 / span 2;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .controls-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--green);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+
+    .controls-body {
+      display: grid;
+      gap: 16px;
+      min-height: 0;
+      overflow: auto;
+      padding: 16px;
+    }
+
+    .group {
+      display: grid;
+      gap: 10px;
+    }
+
+    .group-title {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .presets {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .preset,
+    .action-btn,
+    .copy-btn {
+      min-height: 32px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #101018;
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .preset:hover,
+    .action-btn:hover,
+    .copy-btn:hover {
+      border-color: var(--blue);
+    }
+
+    .preset.active {
+      border-color: var(--green);
+      color: var(--green);
+    }
+
+    .action-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .action-btn.primary {
+      border-color: rgba(122, 162, 247, 0.48);
+      color: var(--blue);
+    }
+
+    .status-note {
+      min-height: 32px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .field-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .value {
+      color: var(--text);
+    }
+
+    select,
+    input[type="range"] {
+      width: 100%;
+    }
+
+    select {
+      min-height: 32px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #101018;
+      color: var(--text);
+      padding: 0 8px;
+    }
+
+    input[type="range"] {
+      accent-color: var(--blue);
+    }
+
+    .toggle-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .toggle-row input {
+      accent-color: var(--green);
+    }
+
+    .preview-shell {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-width: 0;
+      min-height: 0;
+      background: var(--bg);
+    }
+
+    .preview-header {
+      display: grid;
+      grid-template-columns: auto auto 1fr auto;
+      gap: 24px;
+      align-items: center;
+      min-height: 56px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(12, 12, 18, 0.96);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .indicator {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+
+    .header-label {
+      color: var(--text);
+    }
+
+    .stage-wrap {
+      min-width: 0;
+      min-height: 0;
+      padding: var(--stage-pad);
+      background:
+        linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px),
+        var(--bg);
+      background-size: 40px 40px;
+    }
+
+    .stage {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      min-height: 540px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #07070b;
+      touch-action: none;
+    }
+
+    .tile {
+      position: absolute;
+      overflow: hidden;
+      border: var(--tile-border-width) solid var(--tile-border-color);
+      border-radius: var(--tile-radius);
+      background: #e9e3d7;
+      transition:
+        left 220ms ease,
+        top 220ms ease,
+        width 220ms ease,
+        height 220ms ease,
+        border-radius 120ms ease,
+        border-width 120ms ease;
+      cursor: grab;
+      user-select: none;
+    }
+
+    .tile.dragging {
+      z-index: 2;
+      cursor: grabbing;
+      transition: none;
+    }
+
+    .tile.template-slot {
+      outline: 1px solid rgba(122, 162, 247, 0.42);
+      outline-offset: -1px;
+    }
+
+    .tile.fit {
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-position: center;
+      background-color: #0b0b10;
+    }
+
+    .tile::before,
+    .tile::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+    }
+
+    .kind-logo-a::before {
+      background:
+        radial-gradient(circle at 68% 30%, #0b0b0d 0 7%, transparent 7.5%),
+        conic-gradient(from 226deg at 38% 62%, transparent 0 18%, #0b0b0d 18% 31%, transparent 31% 45%, #0b0b0d 45% 59%, transparent 59%),
+        #eee8dc;
+    }
+
+    .kind-logo-b::before {
+      background:
+        radial-gradient(circle at 52% 50%, transparent 0 21%, #f1eee7 22% 31%, transparent 32%),
+        radial-gradient(circle at 48% 50%, #111 0 31%, transparent 32%),
+        #050506;
+    }
+
+    .kind-poster-blue::before {
+      background:
+        linear-gradient(90deg, transparent 0 44%, #eee7d8 44% 56%, transparent 56%),
+        linear-gradient(0deg, transparent 0 20%, #053cbb 20% 72%, transparent 72%),
+        #eee7d8;
+      transform: rotate(-4deg) scale(1.08);
+    }
+
+    .kind-paper::before {
+      background:
+        linear-gradient(145deg, transparent 0 52%, rgba(0,0,0,0.08) 52% 53%, transparent 53%),
+        radial-gradient(circle at 72% 34%, rgba(0,0,0,0.12) 0 8%, transparent 8.5%),
+        #d9d1c0;
+    }
+
+    .kind-grid::before {
+      background:
+        radial-gradient(circle at 24% 24%, #111 0 6%, transparent 6.5%),
+        radial-gradient(circle at 50% 24%, #111 0 6%, transparent 6.5%),
+        radial-gradient(circle at 76% 24%, #111 0 6%, transparent 6.5%),
+        radial-gradient(circle at 24% 50%, #111 0 6%, transparent 6.5%),
+        radial-gradient(circle at 50% 50%, #111 0 6%, transparent 6.5%),
+        radial-gradient(circle at 76% 50%, #111 0 6%, transparent 6.5%),
+        radial-gradient(circle at 24% 76%, #111 0 6%, transparent 6.5%),
+        radial-gradient(circle at 50% 76%, #111 0 6%, transparent 6.5%),
+        radial-gradient(circle at 76% 76%, transparent 0 5%, #111 5.5% 7%, transparent 7.5%),
+        #eee9de;
+    }
+
+    .kind-red::before {
+      background:
+        linear-gradient(90deg, transparent 0 48%, #f4ebdc 48% 52%, transparent 52%),
+        #a42c20;
+    }
+
+    .kind-type::before {
+      background:
+        conic-gradient(from 200deg at 36% 40%, transparent 0 27%, #111 27% 39%, transparent 39% 54%, #111 54% 68%, transparent 68%),
+        radial-gradient(circle at 62% 54%, transparent 0 18%, #111 19% 24%, transparent 25%),
+        #eee7d9;
+    }
+
+    .kind-object::before {
+      background:
+        radial-gradient(ellipse at 50% 72%, rgba(0,0,0,0.18) 0 26%, transparent 27%),
+        linear-gradient(90deg, transparent 0 37%, #111 37% 63%, transparent 63%),
+        linear-gradient(#efebe2 0 100%);
+    }
+
+    .kind-arch::before {
+      background:
+        repeating-radial-gradient(ellipse at 50% 76%, transparent 0 11px, #28231d 12px 14px),
+        radial-gradient(circle at 50% 76%, #050505 0 7%, transparent 7.5%),
+        #e7dcc9;
+    }
+
+    .kind-darkline::before {
+      background:
+        radial-gradient(circle at 34% 62%, #ede8db 0 5%, transparent 5.5%),
+        conic-gradient(from 112deg at 64% 44%, transparent 0 17%, #ede8db 17% 18%, transparent 18%),
+        #08080c;
+    }
+
+    .kind-photo::before {
+      background:
+        radial-gradient(ellipse at 50% 68%, rgba(0,0,0,0.14) 0 20%, transparent 21%),
+        linear-gradient(90deg, transparent 0 42%, #0b0b0d 42% 58%, transparent 58%),
+        linear-gradient(180deg, #e8e2d7 0 62%, #d4cbbd 62%);
+    }
+
+    .kind-yellow::before {
+      background:
+        linear-gradient(118deg, transparent 0 56%, #e0bf40 56%),
+        #e8e1cf;
+    }
+
+    .kind-mark::before {
+      background:
+        linear-gradient(45deg, transparent 0 48%, #111 48% 53%, transparent 53%),
+        radial-gradient(circle at 68% 50%, #111 0 6%, transparent 6.5%),
+        #eee8dc;
+    }
+
+    .kind-package::before {
+      background:
+        linear-gradient(90deg, transparent 0 36%, rgba(255,255,255,0.34) 36% 64%, transparent 64%),
+        linear-gradient(0deg, transparent 0 42%, rgba(0,0,0,0.16) 42% 43%, transparent 43%),
+        #b7925d;
+    }
+
+    .kind-green::before {
+      background:
+        linear-gradient(135deg, transparent 0 47%, rgba(255,255,255,0.62) 47% 48%, transparent 48%),
+        linear-gradient(45deg, transparent 0 40%, rgba(255,255,255,0.35) 40% 41%, transparent 41%),
+        #173622;
+    }
+
+    .kind-void::before {
+      background:
+        radial-gradient(circle at 50% 50%, #eee8dc 0 24%, transparent 24.5%),
+        linear-gradient(90deg, transparent 0 50%, #eee8dc 50% 55%, transparent 55%),
+        #060607;
+    }
+
+    .meta {
+      position: absolute;
+      left: 8px;
+      bottom: 8px;
+      display: none;
+      padding: 3px 5px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(8, 8, 12, 0.76);
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .show-meta .meta {
+      display: block;
+    }
+
+    .prompt-panel {
+      display: grid;
+      gap: 10px;
+      padding: 14px 18px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .prompt-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .prompt-title {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .prompt {
+      min-height: 52px;
+      margin: 0;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+
+    @media (max-width: 940px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .controls {
+        grid-row: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .controls-body {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        max-height: 360px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="controls">
+      <div class="controls-header">
+        <p class="eyebrow">Cull prototype</p>
+        <h1>Selected-set layout lab</h1>
+      </div>
+      <div class="controls-body">
+        <section class="group">
+          <div class="group-title">Presets</div>
+          <div class="presets">
+            <button class="preset active" data-preset="pinboard">Pinboard</button>
+            <button class="preset" data-preset="editorial">Editorial</button>
+            <button class="preset" data-preset="shoot">Live strip</button>
+            <button class="preset" data-preset="dense">Dense audit</button>
+          </div>
+        </section>
+
+        <section class="group">
+          <div class="group-title">Flow</div>
+          <div class="action-grid">
+            <button class="action-btn primary" id="nextSet">Next set</button>
+            <button class="action-btn" id="resetTemplate">Reset drag</button>
+            <button class="action-btn" id="savePreview">Save image</button>
+            <button class="action-btn" id="copyTemplate">Copy slots</button>
+          </div>
+          <div class="status-note" id="flowStatus">Drag a tile to reshape the order. On release, the layout redraws and keeps the grid.</div>
+        </section>
+
+        <section class="group">
+          <div class="group-title">Layout</div>
+          <label class="field">
+            <span class="field-row"><span>Recipe</span><span class="value" id="recipeValue">Masonry</span></span>
+            <select id="recipe" autocomplete="off">
+              <option value="masonry">Masonry</option>
+              <option value="magazine">Magazine</option>
+              <option value="hero">Hero strip</option>
+              <option value="dense">Dense overview</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span class="field-row"><span>Density</span><span class="value" id="densityValue">70</span></span>
+            <input id="density" type="range" min="35" max="100" value="70" autocomplete="off" />
+          </label>
+
+          <label class="field">
+            <span class="field-row"><span>Gap</span><span class="value" id="gapValue">8 px</span></span>
+            <input id="gap" type="range" min="0" max="28" value="8" autocomplete="off" />
+          </label>
+
+          <label class="field">
+            <span class="field-row"><span>Outer space</span><span class="value" id="paddingValue">18 px</span></span>
+            <input id="padding" type="range" min="0" max="56" value="18" autocomplete="off" />
+          </label>
+        </section>
+
+        <section class="group">
+          <div class="group-title">Composition</div>
+          <label class="field">
+            <span class="field-row"><span>Hero weight</span><span class="value" id="heroValue">58%</span></span>
+            <input id="heroWeight" type="range" min="42" max="76" value="58" autocomplete="off" />
+          </label>
+
+          <label class="field">
+            <span class="field-row"><span>Rhythm</span><span class="value" id="rhythmValue">42</span></span>
+            <input id="rhythm" type="range" min="0" max="100" value="42" autocomplete="off" />
+          </label>
+
+          <label class="field">
+            <span class="field-row"><span>Crop bias</span><span class="value" id="cropValue">62</span></span>
+            <input id="crop" type="range" min="0" max="100" value="62" autocomplete="off" />
+          </label>
+        </section>
+
+        <section class="group">
+          <div class="group-title">Surface</div>
+          <label class="field">
+            <span class="field-row"><span>Tile radius</span><span class="value" id="radiusValue">4 px</span></span>
+            <input id="radius" type="range" min="0" max="16" value="4" autocomplete="off" />
+          </label>
+
+          <label class="toggle-row">
+            <input id="showBorder" type="checkbox" autocomplete="off" />
+            <span>Show tile borders</span>
+          </label>
+
+          <label class="field">
+            <span class="field-row"><span>Border width</span><span class="value" id="borderWidthValue">1 px</span></span>
+            <input id="borderWidth" type="range" min="1" max="8" value="1" autocomplete="off" />
+          </label>
+
+          <label class="toggle-row">
+            <input id="showMeta" type="checkbox" autocomplete="off" />
+            <span>Show tile metadata</span>
+          </label>
+        </section>
+      </div>
+    </aside>
+
+    <main class="preview-shell">
+      <header class="preview-header">
+        <span class="indicator" aria-hidden="true"></span>
+        <span class="header-label">Selected Set</span>
+        <span id="headerRecipe">Masonry</span>
+        <span id="headerCount">22 / 30</span>
+      </header>
+      <div class="stage-wrap" id="stageWrap">
+        <section class="stage" id="stage" aria-label="Layout preview"></section>
+      </div>
+    </main>
+
+    <section class="prompt-panel">
+      <div class="prompt-head">
+        <span class="prompt-title">Implementation prompt</span>
+        <button class="copy-btn" id="copy">Copy</button>
+      </div>
+      <pre class="prompt" id="prompt"></pre>
+    </section>
+  </div>
+
+  <script>
+    const DEFAULTS = {
+      recipe: 'masonry',
+      density: 70,
+      gap: 8,
+      padding: 18,
+      heroWeight: 58,
+      rhythm: 42,
+      crop: 62,
+      radius: 4,
+      showBorder: false,
+      borderWidth: 1,
+      showMeta: false,
+    };
+
+    const state = { ...DEFAULTS };
+
+    const presets = {
+      pinboard: { recipe: 'masonry', density: 70, gap: 8, padding: 18, heroWeight: 58, rhythm: 42, crop: 62, radius: 4, showBorder: false, borderWidth: 1, showMeta: false },
+      editorial: { recipe: 'magazine', density: 46, gap: 14, padding: 22, heroWeight: 54, rhythm: 64, crop: 28, radius: 2, showBorder: false, borderWidth: 1, showMeta: false },
+      shoot: { recipe: 'hero', density: 62, gap: 10, padding: 16, heroWeight: 70, rhythm: 28, crop: 38, radius: 4, showBorder: false, borderWidth: 1, showMeta: true },
+      dense: { recipe: 'dense', density: 94, gap: 4, padding: 10, heroWeight: 50, rhythm: 18, crop: 76, radius: 1, showBorder: false, borderWidth: 1, showMeta: false },
+    };
+
+    const tileBlueprints = [
+      ['logo-a', 16, 9, 'kind-logo-a'],
+      ['paper', 4, 3, 'kind-paper'],
+      ['void', 1, 1, 'kind-void'],
+      ['blue', 3, 4, 'kind-poster-blue'],
+      ['object', 4, 3, 'kind-object'],
+      ['grid', 1, 1, 'kind-grid'],
+      ['mark', 16, 9, 'kind-mark'],
+      ['brush', 3, 4, 'kind-logo-b'],
+      ['green', 3, 4, 'kind-green'],
+      ['arch', 4, 5, 'kind-arch'],
+      ['red', 4, 3, 'kind-red'],
+      ['package', 4, 3, 'kind-package'],
+      ['darkline', 16, 9, 'kind-darkline'],
+      ['photo', 4, 3, 'kind-photo'],
+      ['type', 3, 4, 'kind-type'],
+      ['yellow', 4, 5, 'kind-yellow'],
+      ['black', 2, 3, 'kind-paper'],
+      ['symbol', 16, 9, 'kind-logo-a'],
+      ['vase', 3, 4, 'kind-object'],
+      ['fold', 4, 3, 'kind-mark'],
+      ['seal', 1, 1, 'kind-grid'],
+      ['poster', 4, 5, 'kind-red'],
+    ];
+
+    const tileSets = [0, 5, 11].map((offset, setIndex) => tileBlueprints.map((_, index) => {
+      const [id, w, h, kind] = tileBlueprints[(index + offset) % tileBlueprints.length];
+      return { id: `${id}-${setIndex + 1}`, label: id, w, h, kind, index };
+    }));
+
+    const stage = document.getElementById('stage');
+    const promptEl = document.getElementById('prompt');
+    const flowStatus = document.getElementById('flowStatus');
+    let setIndex = 0;
+    let currentLayout = [];
+    let templateOrder = null;
+    let templateSlots = null;
+    let dragState = null;
+
+    function activeTiles() {
+      return tileSets[setIndex % tileSets.length];
+    }
+
+    function orderedActiveTiles() {
+      const tiles = activeTiles();
+      if (!templateOrder) return tiles;
+      const ordered = templateOrder.map((index) => tiles[index]).filter(Boolean);
+      const used = new Set(templateOrder);
+      return [...ordered, ...tiles.filter((_, index) => !used.has(index))];
+    }
+
+    function labelRecipe(value) {
+      return {
+        masonry: 'Masonry',
+        magazine: 'Magazine',
+        hero: 'Hero Strip',
+        dense: 'Dense Overview',
+      }[value];
+    }
+
+    function syncControls() {
+      for (const [key, value] of Object.entries(state)) {
+        const input = document.getElementById(key);
+        if (!input) continue;
+        if (input.type === 'checkbox') input.checked = value;
+        else input.value = String(value);
+      }
+      document.getElementById('recipeValue').textContent = labelRecipe(state.recipe);
+      document.getElementById('densityValue').textContent = state.density;
+      document.getElementById('gapValue').textContent = `${state.gap} px`;
+      document.getElementById('paddingValue').textContent = `${state.padding} px`;
+      document.getElementById('heroValue').textContent = `${state.heroWeight}%`;
+      document.getElementById('rhythmValue').textContent = state.rhythm;
+      document.getElementById('cropValue').textContent = state.crop;
+      document.getElementById('radiusValue').textContent = `${state.radius} px`;
+      document.getElementById('borderWidthValue').textContent = `${state.borderWidth} px`;
+      document.getElementById('headerRecipe').textContent = `${labelRecipe(state.recipe)} / Set ${setIndex + 1}`;
+      document.getElementById('headerCount').textContent = `${activeTiles().length} / 30`;
+      document.documentElement.style.setProperty('--stage-pad', `${state.padding}px`);
+      document.documentElement.style.setProperty('--tile-radius', `${state.radius}px`);
+      document.documentElement.style.setProperty('--tile-border-width', `${state.showBorder ? state.borderWidth : 0}px`);
+      stage.classList.toggle('show-meta', state.showMeta);
+      document.querySelectorAll('.preset').forEach((button) => {
+        const preset = presets[button.dataset.preset];
+        button.classList.toggle('active', Object.keys(DEFAULTS).every((key) => preset[key] === state[key]));
+      });
+    }
+
+    function renderPreview() {
+      const rect = stage.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect.width));
+      const height = Math.max(1, Math.round(rect.height));
+      const layout = computeLayout(width, height);
+      currentLayout = layout;
+      stage.innerHTML = '';
+      const tiles = activeTiles();
+      for (const item of layout) {
+        const source = tiles.find((tile) => tile.id === item.id);
+        const el = document.createElement('div');
+        el.className = `tile ${source.kind} ${state.crop < 35 ? 'fit' : ''} ${templateOrder ? 'template-slot' : ''}`;
+        el.dataset.id = item.id;
+        el.style.left = `${item.x}px`;
+        el.style.top = `${item.y}px`;
+        el.style.width = `${item.width}px`;
+        el.style.height = `${item.height}px`;
+        el.innerHTML = `<span class="meta">${source.label}</span>`;
+        el.addEventListener('pointerdown', startTileDrag);
+        stage.appendChild(el);
+      }
+    }
+
+    function computeLayout(width, height) {
+      if (state.recipe === 'magazine') return magazineLayout(width, height);
+      if (state.recipe === 'hero') return heroLayout(width, height);
+      if (state.recipe === 'dense') return denseLayout(width, height);
+      return masonryLayout(width, height);
+    }
+
+    function masonryLayout(width, height) {
+      const baseColumns = Math.round(3 + state.density / 18);
+      const columns = Math.min(8, Math.max(3, baseColumns));
+      const gap = state.gap;
+      const colW = Math.floor((width - gap * (columns - 1)) / columns);
+      const heights = Array.from({ length: columns }, () => 0);
+      const out = [];
+      for (const tile of rhythmTiles()) {
+        const col = heights.indexOf(Math.min(...heights));
+        const aspect = tile.h / tile.w;
+        const rhythm = 0.82 + ((tile.index * 17 + state.rhythm) % 36) / 100;
+        const h = Math.max(72, Math.round(colW * aspect * rhythm));
+        out.push({ id: tile.id, x: col * (colW + gap), y: heights[col], width: colW, height: h });
+        heights[col] += h + gap;
+      }
+      return scaleDown(out, width, height);
+    }
+
+    function magazineLayout(width, height) {
+      const gap = state.gap;
+      const tiles = orderedActiveTiles();
+      const heroW = Math.round(width * state.heroWeight / 100);
+      const sideW = width - heroW - gap;
+      const heroH = clamp(
+        Math.round(heroW * tiles[0].h / tiles[0].w),
+        Math.round(height * 0.38),
+        Math.round(height * 0.58),
+      );
+      const hero = fitBox(tiles[0], 0, 0, heroW, heroH, 'cover');
+      const featureTiles = tiles.slice(1, 5);
+      const featureW = Math.floor((heroW - gap) / 2);
+      const featureH = Math.floor((height - heroH - gap * 2) / 2);
+      const features = featureTiles.map((tile, index) => fitBox(
+        tile,
+        (index % 2) * (featureW + gap),
+        heroH + gap + Math.floor(index / 2) * (featureH + gap),
+        featureW,
+        featureH,
+        'cover',
+      ));
+      const side = editorialSideLayout(sideW, height, tiles.slice(5, 17)).map((item) => ({ ...item, x: item.x + heroW + gap }));
+      return [hero, ...features, ...side];
+    }
+
+    function editorialSideLayout(width, height, source) {
+      const gap = state.gap;
+      const columns = width < 340 ? 2 : 3;
+      const rows = Math.ceil(source.length / columns);
+      const cellW = Math.floor((width - gap * (columns - 1)) / columns);
+      const cellH = Math.floor((height - gap * (rows - 1)) / rows);
+      return source.map((tile, index) => fitBox(
+        tile,
+        (index % columns) * (cellW + gap),
+        Math.floor(index / columns) * (cellH + gap),
+        cellW,
+        cellH,
+        'cover',
+      ));
+    }
+
+    function heroLayout(width, height) {
+      const gap = state.gap;
+      const tiles = orderedActiveTiles();
+      const heroH = Math.round(height * state.heroWeight / 100);
+      const hero = fitBox(tiles[3], 0, 0, width, heroH);
+      const strip = tiles.slice(0, 11);
+      const cellW = Math.floor((width - gap * (strip.length - 1)) / strip.length);
+      const stripH = height - heroH - gap;
+      return [
+        hero,
+        ...strip.map((tile, index) => fitBox(tile, index * (cellW + gap), heroH + gap, cellW, stripH)),
+      ];
+    }
+
+    function denseLayout(width, height, source = orderedActiveTiles()) {
+      const gap = state.gap;
+      const count = source.length;
+      const columns = Math.max(4, Math.ceil(Math.sqrt(count * width / height) + state.density / 30));
+      const rows = Math.ceil(count / columns);
+      const cellW = Math.floor((width - gap * (columns - 1)) / columns);
+      const cellH = Math.floor((height - gap * (rows - 1)) / rows);
+      return source.map((tile, index) => fitBox(tile, (index % columns) * (cellW + gap), Math.floor(index / columns) * (cellH + gap), cellW, cellH));
+    }
+
+    function fitBox(tile, x, y, boxW, boxH, fitMode = 'auto') {
+      const contain = fitMode === 'contain' || (fitMode !== 'cover' && state.crop < 35);
+      if (!contain) return { id: tile.id, x, y, width: boxW, height: boxH };
+      const scale = Math.min(boxW / tile.w, boxH / tile.h);
+      const w = Math.max(1, Math.round(tile.w * scale));
+      const h = Math.max(1, Math.round(tile.h * scale));
+      return { id: tile.id, x: Math.round(x + (boxW - w) / 2), y: Math.round(y + (boxH - h) / 2), width: w, height: h };
+    }
+
+    function rhythmTiles() {
+      const tiles = orderedActiveTiles();
+      if (templateOrder) return tiles;
+      const rotate = Math.round(state.rhythm / 9) % tiles.length;
+      return [...tiles.slice(rotate), ...tiles.slice(0, rotate)];
+    }
+
+    function scaleDown(items, width, height) {
+      const maxY = Math.max(...items.map((item) => item.y + item.height), 1);
+      const scale = Math.min(1, height / maxY);
+      return items.map((item) => ({
+        ...item,
+        x: Math.round(item.x * scale),
+        y: Math.round(item.y * scale),
+        width: Math.max(1, Math.round(item.width * scale)),
+        height: Math.max(1, Math.round(item.height * scale)),
+      })).filter((item) => item.x + item.width <= width && item.y + item.height <= height);
+    }
+
+    function captureTemplateSlots() {
+      const rect = stage.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect.width));
+      const height = Math.max(1, Math.round(rect.height));
+      templateSlots = currentLayout.map((item, index) => ({
+        slot: index + 1,
+        tileIndex: activeTiles().findIndex((tile) => tile.id === item.id),
+        x: roundRatio(item.x / width),
+        y: roundRatio(item.y / height),
+        width: roundRatio(item.width / width),
+        height: roundRatio(item.height / height),
+      }));
+    }
+
+    function startTileDrag(event) {
+      if (event.button !== 0) return;
+      const item = currentLayout.find((layoutItem) => layoutItem.id === event.currentTarget.dataset.id);
+      if (!item) return;
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      event.currentTarget.classList.add('dragging');
+      dragState = {
+        id: item.id,
+        element: event.currentTarget,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startX: item.x,
+        startY: item.y,
+      };
+      window.addEventListener('pointermove', moveTileDrag);
+      window.addEventListener('pointerup', endTileDrag, { once: true });
+    }
+
+    function moveTileDrag(event) {
+      if (!dragState) return;
+      const rect = stage.getBoundingClientRect();
+      const item = currentLayout.find((layoutItem) => layoutItem.id === dragState.id);
+      if (!item) return;
+      item.x = clamp(Math.round(dragState.startX + event.clientX - dragState.startClientX), 0, Math.round(rect.width) - item.width);
+      item.y = clamp(Math.round(dragState.startY + event.clientY - dragState.startClientY), 0, Math.round(rect.height) - item.height);
+      dragState.element.style.left = `${item.x}px`;
+      dragState.element.style.top = `${item.y}px`;
+    }
+
+    function endTileDrag() {
+      if (!dragState) return;
+      const movedItem = currentLayout.find((layoutItem) => layoutItem.id === dragState.id);
+      const sourceSlot = currentLayout.findIndex((layoutItem) => layoutItem.id === dragState.id);
+      const targetSlot = movedItem ? nearestSlotIndex(movedItem, dragState.id) : sourceSlot;
+      dragState.element.classList.remove('dragging');
+      window.removeEventListener('pointermove', moveTileDrag);
+      dragState = null;
+      if (sourceSlot >= 0 && targetSlot >= 0 && sourceSlot !== targetSlot) {
+        templateOrder = moveArrayItem(currentOrderIndices(), sourceSlot, targetSlot);
+      } else if (!templateOrder) {
+        templateOrder = currentOrderIndices();
+      }
+      renderPreview();
+      captureTemplateSlots();
+      flowStatus.textContent = `Layout redrawn into the ${labelRecipe(state.recipe).toLowerCase()} grid. Next set will reuse this order.`;
+      updatePrompt();
+    }
+
+    function resetTemplate() {
+      templateOrder = null;
+      templateSlots = null;
+      flowStatus.textContent = 'Drag a tile to reshape the order. On release, the layout redraws and keeps the grid.';
+      updateAll();
+    }
+
+    function showNextSet() {
+      setIndex = (setIndex + 1) % tileSets.length;
+      flowStatus.textContent = templateOrder
+        ? `Set ${setIndex + 1} is using the dragged order inside the ${labelRecipe(state.recipe).toLowerCase()} grid.`
+        : `Set ${setIndex + 1} is using the generated ${labelRecipe(state.recipe).toLowerCase()} layout.`;
+      updateAll();
+    }
+
+    async function copyTemplateSlots() {
+      const payload = JSON.stringify({ order: templateOrder || [], slots: templateSlots || [] }, null, 2);
+      await navigator.clipboard.writeText(payload);
+      flowStatus.textContent = templateOrder ? 'Copied grid-preserving template order and normalized slots.' : 'No dragged template yet. Copied an empty template.';
+    }
+
+    function currentOrderIndices() {
+      const tiles = activeTiles();
+      return currentLayout.map((item) => tiles.findIndex((tile) => tile.id === item.id));
+    }
+
+    function nearestSlotIndex(movedItem, movedId) {
+      const movedCenter = {
+        x: movedItem.x + movedItem.width / 2,
+        y: movedItem.y + movedItem.height / 2,
+      };
+      let bestIndex = -1;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      currentLayout.forEach((item, index) => {
+        if (item.id === movedId) return;
+        const centerX = item.x + item.width / 2;
+        const centerY = item.y + item.height / 2;
+        const distance = Math.hypot(movedCenter.x - centerX, movedCenter.y - centerY);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIndex = index;
+        }
+      });
+      return bestIndex;
+    }
+
+    function moveArrayItem(items, fromIndex, toIndex) {
+      const next = [...items];
+      const [item] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, item);
+      return next;
+    }
+
+    function savePreviewImage() {
+      const rect = stage.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect.width));
+      const height = Math.max(1, Math.round(rect.height));
+      const css = Array.from(document.styleSheets)
+        .flatMap((sheet) => Array.from(sheet.cssRules || []).map((rule) => rule.cssText))
+        .join('\n');
+      const snapshot = stage.cloneNode(true);
+      snapshot.querySelectorAll('.tile').forEach((tile) => tile.classList.remove('dragging'));
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml"><style>${css}</style>${snapshot.outerHTML}</div></foreignObject></svg>`;
+      const blob = new Blob([svg], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `cull-preview-set-${setIndex + 1}.svg`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      flowStatus.textContent = 'Saved this prototype as SVG. In Cull, save PNG and open the containing folder by default.';
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function roundRatio(value) {
+      return Math.round(value * 10000) / 10000;
+    }
+
+    function updatePrompt() {
+      const parts = [`Build the selected-set Preview Display with the ${labelRecipe(state.recipe).toLowerCase()} recipe`];
+      if (state.density !== DEFAULTS.density) parts.push(state.density > DEFAULTS.density ? 'higher tile density' : 'more breathing room');
+      if (state.gap !== DEFAULTS.gap) parts.push(`${state.gap}px inter-tile gap`);
+      if (state.padding !== DEFAULTS.padding) parts.push(`${state.padding}px outer stage padding`);
+      if (state.heroWeight !== DEFAULTS.heroWeight && (state.recipe === 'magazine' || state.recipe === 'hero')) parts.push(`${state.heroWeight}% hero weight`);
+      if (state.rhythm !== DEFAULTS.rhythm) parts.push(state.rhythm > DEFAULTS.rhythm ? 'more varied visual rhythm' : 'more regular visual rhythm');
+      if (state.crop !== DEFAULTS.crop) parts.push(state.crop > DEFAULTS.crop ? 'stronger cover-crop bias' : 'more contain/fit behavior');
+      if (state.recipe === 'magazine') parts.push('aspect-safe editorial slots with no skinny side-strip crops');
+      if (state.radius !== DEFAULTS.radius) parts.push(`${state.radius}px tile radius`);
+      if (state.showBorder) parts.push(`${state.borderWidth}px optional tile borders`);
+      if (state.showMeta) parts.push('small optional tile metadata labels');
+      if (templateOrder) parts.push('a user-dragged template order that redraws automatically into maintained grid slots');
+      promptEl.textContent = `${parts.join(', ')}. Let users drag preview tiles directly; each drag updates a reusable order/template, then immediately redraws the selected set through the active masonry, magazine, hero, or dense grid so spacing and alignment stay coherent. The next selected image set should inherit that grid-preserving order. Add a Save Preview shortcut on S and Command/Ctrl+S that writes the displayed Preview Display as an image and opens the containing folder by default after every save. Keep tile shadows out of the visual system and keep tiles borderless by default; only show borders when the border option is enabled. Keep the visual language minimal and Pinterest-like: abstract art, logos, typography fragments, packaging studies, and clean reference images rather than sci-fi or cinematic concept art.`;
+    }
+
+    function updateAll() {
+      syncControls();
+      renderPreview();
+      updatePrompt();
+    }
+
+    document.querySelectorAll('input, select').forEach((input) => {
+      input.addEventListener('input', () => {
+        if (input.type === 'checkbox') state[input.id] = input.checked;
+        else if (input.type === 'range') state[input.id] = Number(input.value);
+        else state[input.id] = input.value;
+        updateAll();
+      });
+    });
+
+    document.querySelectorAll('.preset').forEach((button) => {
+      button.addEventListener('click', () => {
+        Object.assign(state, presets[button.dataset.preset]);
+        updateAll();
+      });
+    });
+
+    document.getElementById('nextSet').addEventListener('click', showNextSet);
+    document.getElementById('resetTemplate').addEventListener('click', resetTemplate);
+    document.getElementById('savePreview').addEventListener('click', savePreviewImage);
+    document.getElementById('copyTemplate').addEventListener('click', copyTemplateSlots);
+
+    document.getElementById('copy').addEventListener('click', async () => {
+      await navigator.clipboard.writeText(promptEl.textContent);
+      const button = document.getElementById('copy');
+      button.textContent = 'Copied';
+      setTimeout(() => button.textContent = 'Copy', 900);
+    });
+
+    document.addEventListener('keydown', (event) => {
+      const target = event.target;
+      const isFormTarget = target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLButtonElement;
+      const saveShortcut = event.key.toLowerCase() === 's' && (event.metaKey || event.ctrlKey || !isFormTarget);
+      if (!saveShortcut) return;
+      event.preventDefault();
+      savePreviewImage();
+    });
+
+    window.addEventListener('resize', renderPreview);
+    Object.assign(state, presets.pinboard);
+    updateAll();
+  </script>
+</body>
+</html>

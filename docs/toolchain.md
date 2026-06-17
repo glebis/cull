@@ -41,10 +41,10 @@ npm run bd -- show imageview-2w6.8
 The wrapper resolves the binary deterministically:
 
 1. `BD_BIN`, when set, must point to an executable and is used explicitly.
-2. `/opt/homebrew/bin/bd`, when present, is preferred for Homebrew Apple Silicon
-   installs.
-3. `/usr/local/bin/bd`, when present, is used for Intel/Homebrew or manual
-   installs.
+2. `/usr/local/bin/bd`, when present, is preferred because this repository's
+   `.beads` Dolt database is currently owned by the bd 1.x schema.
+3. `/opt/homebrew/bin/bd`, when present, is used only when `/usr/local/bin/bd`
+   is unavailable; older Homebrew 0.x builds can be schema-incompatible.
 4. Otherwise the first executable `bd` found on `PATH` is used.
 
 The wrapper prints the selected binary before executing it so logs show which
