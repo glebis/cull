@@ -33,7 +33,7 @@
     import GenerationResultsStrip from '$lib/components/GenerationResultsStrip.svelte';
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { totalCount, images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel } from '$lib/stores';
+    import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel } from '$lib/stores';
     import { trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
@@ -57,7 +57,8 @@
         setPreviewDisplayOverlay,
     } from '$lib/preview-display-store';
     import { saveAppState, restoreAppStateBeforeImages, applyRestoredViewState, type PersistedState } from '$lib/persistence';
-    import { loadImagesForCurrentScope, type ImageLoadOptions } from '$lib/image-loading';
+    import { invalidateImageCache, loadImagesForCurrentScope, refreshImageCount, type ImageLoadOptions } from '$lib/image-loading';
+    import { clampFocusIndexToList, nextFocusIndexAfterFocusedRemoval } from '$lib/image-removal';
     import { buildAgentSnapshotManifest, collectVisibleImageTargets, drawAnnotatedSnapshot, type AgentSnapshotScope } from '$lib/agent-view-snapshot';
     import { listen } from '@tauri-apps/api/event';
     import { onMount } from 'svelte';
@@ -89,18 +90,29 @@
         activeDetectedClass.set(null);
     }
 
+    function removeVisibleImageById(imageId: string, plannedFocusIndex: number) {
+        let nextLength = 0;
+        images.update(list => {
+            const next = list.filter(item => item.image.id !== imageId);
+            nextLength = next.length;
+            return next;
+        });
+        focusedIndex.set(clampFocusIndexToList(plannedFocusIndex, nextLength));
+    }
+
     async function executeTrash() {
         const imgs = $images;
         const idx = $focusedIndex;
         const img = imgs[idx];
         if (!img) return;
+        const nextFocusIndex = nextFocusIndexAfterFocusedRemoval(idx, imgs.length);
         const count = await trashImages([img.image.id]);
         if (count > 0) {
             const name = img.path.split('/').pop() ?? '';
             showToast(`Moved to Trash`, { detail: name, type: 'info', duration: 5000 });
-            images.update(list => list.filter((_, i) => i !== idx));
-            focusedIndex.update(i => Math.min(i, $images.length - 1));
-            totalCount.update(c => c - 1);
+            invalidateImageCache();
+            removeVisibleImageById(img.image.id, nextFocusIndex);
+            refreshImageCount().catch(e => console.error('Failed to refresh image count after trash:', e));
         }
     }
 
@@ -140,9 +152,9 @@
         const count = await deleteImagesPermanently([img.image.id]);
         if (count > 0) {
             showToast(`Deleted permanently`, { detail: name, type: 'warning', duration: 5000 });
-            images.update(list => list.filter((_, i) => i !== idx));
-            focusedIndex.update(i => Math.min(i, $images.length - 1));
-            totalCount.update(c => c - 1);
+            invalidateImageCache();
+            removeVisibleImageById(img.image.id, nextFocusIndexAfterFocusedRemoval(idx, imgs.length));
+            refreshImageCount().catch(e => console.error('Failed to refresh image count after delete:', e));
         }
     }
 
@@ -387,7 +399,7 @@
 
         window.addEventListener('trash-focused-image', handleTrash);
         window.addEventListener('delete-focused-image', handlePermanentDelete);
-        const handleReloadImages = () => loadImages({ force: true, invalidateCache: true }).catch(e => console.error('Failed to reload:', e));
+        const handleReloadImages = () => loadImages({ resetFocus: false, force: true, invalidateCache: true }).catch(e => console.error('Failed to reload:', e));
         window.addEventListener('reload-images', handleReloadImages);
         const handleAgentSnapshotCommand = (event: Event) => {
             const detail = event instanceof CustomEvent ? event.detail : {};
@@ -397,7 +409,7 @@
         window.addEventListener('capture-agent-view-snapshot', handleAgentSnapshotCommand);
 
         const watcherUnlisten = listen<void>('images:changed', () => {
-            loadImages({ force: true, invalidateCache: true }).catch(e => console.error('Failed to reload after fs change:', e));
+            loadImages({ resetFocus: false, force: true, invalidateCache: true }).catch(e => console.error('Failed to reload after fs change:', e));
         });
 
         const agentSnapshotRequestUnlisten = listen<{
