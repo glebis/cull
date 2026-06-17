@@ -18,6 +18,7 @@
 use crate::mcp::auth::{require_capability, AuthContext};
 use crate::services::{tokens, ServiceContext};
 use crate::AppState;
+use serde::de::DeserializeOwned;
 
 /// Capability-check + audit + dispatch core of the `plugin_invoke` command.
 /// Takes the full `AppState` (constructible in tests — see
@@ -61,7 +62,7 @@ pub fn plugin_invoke_inner(
         }
     }
 
-    let result = dispatch(state, tool, args.as_ref());
+    let result = dispatch(state, &actor, tool, args.as_ref());
     let status = match &result {
         Ok(_) => "ok",
         Err(DispatchError::Unsupported) => "unsupported",
@@ -86,6 +87,123 @@ fn required_module_grant(tool: &str) -> Option<String> {
     Some(format!("module:{}", key.replace('_', "-")))
 }
 
+fn parse_args<T: DeserializeOwned>(
+    tool: &str,
+    args: Option<&serde_json::Value>,
+) -> Result<T, DispatchError> {
+    serde_json::from_value(args.cloned().unwrap_or_else(|| serde_json::json!({})))
+        .map_err(|e| DispatchError::Failed(format!("invalid {tool} arguments: {e}")))
+}
+
+#[derive(serde::Deserialize)]
+struct CatalogPresetIdArgs {
+    preset_id: String,
+}
+
+#[derive(Default, serde::Deserialize)]
+struct ListCatalogPresetsArgs {
+    preset_kind: Option<String>,
+}
+
+#[derive(Default, serde::Deserialize)]
+struct ListCatalogFieldsArgs {
+    subject_scope: Option<String>,
+    include_deprecated: Option<bool>,
+}
+
+#[derive(serde::Deserialize)]
+struct CreateCatalogFieldDefArgs {
+    stable_key: String,
+    label: String,
+    description: Option<String>,
+    subject_scope: String,
+    value_type: String,
+    cardinality: String,
+    unit_kind: Option<String>,
+    validation_json: Option<String>,
+    sensitivity: String,
+    derived_source: Option<String>,
+    crosswalk_json: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct CatalogFieldDefIdArgs {
+    field_def_id: String,
+}
+
+#[derive(serde::Deserialize)]
+struct CreateCatalogPresetArgs {
+    name: String,
+    description: Option<String>,
+    preset_kind: String,
+    field_def_ids: Vec<String>,
+    layout_json: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct UpdateCatalogPresetArgs {
+    preset_id: String,
+    name: Option<String>,
+    description: Option<String>,
+    field_def_ids: Option<Vec<String>>,
+    layout_json: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct CreateCatalogWorkArgs {
+    primary_image_id: String,
+}
+
+#[derive(serde::Deserialize)]
+struct AttachImagesToCatalogWorkArgs {
+    work_id: String,
+    images: Vec<crate::commands::catalog::CatalogWorkImageInput>,
+}
+
+#[derive(Default, serde::Deserialize)]
+struct ListCatalogValuesArgs {
+    subject_type: Option<String>,
+    subject_id: Option<String>,
+    status: Option<String>,
+    source_type: Option<String>,
+    field_def_id: Option<String>,
+}
+
+#[derive(Default, serde::Deserialize)]
+struct ListCatalogDraftsArgs {
+    subject_type: Option<String>,
+    subject_id: Option<String>,
+    source_type: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct CatalogRecordArgs {
+    subject_type: String,
+    subject_id: String,
+}
+
+#[derive(serde::Deserialize)]
+struct SetCatalogDraftValueArgs {
+    subject_type: String,
+    subject_id: String,
+    field_def_id: String,
+    value_json: String,
+    display_value: String,
+    source_type: Option<String>,
+    source_id: Option<String>,
+    confidence: Option<f64>,
+}
+
+#[derive(serde::Deserialize)]
+struct CatalogDraftValuesArgs {
+    values: Vec<crate::commands::catalog::CatalogDraftValueInput>,
+}
+
+#[derive(serde::Deserialize)]
+struct CatalogValueIdsArgs {
+    value_ids: Vec<String>,
+}
+
 enum DispatchError {
     /// Tool passed the capability check but is not in the v1 dispatch whitelist.
     Unsupported,
@@ -96,6 +214,7 @@ enum DispatchError {
 /// `cull-publish` proof plugin needs (Track C3) plus the C1 bootstrap op.
 fn dispatch(
     state: &AppState,
+    actor: &str,
     tool: &str,
     args: Option<&serde_json::Value>,
 ) -> Result<serde_json::Value, DispatchError> {
@@ -163,6 +282,253 @@ fn dispatch(
                 )
                 .map_err(DispatchError::Failed)?;
             serde_json::to_value(result).map_err(|e| DispatchError::Failed(e.to_string()))
+        }
+        "list_catalog_presets" => {
+            let params: ListCatalogPresetsArgs = parse_args(tool, args)?;
+            let mut presets = state
+                .db
+                .list_catalog_presets()
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            if let Some(preset_kind) = params.preset_kind {
+                presets.retain(|preset| preset.preset_kind == preset_kind);
+            }
+            serde_json::to_value(presets).map_err(|e| DispatchError::Failed(e.to_string()))
+        }
+        "get_catalog_preset" => {
+            let params: CatalogPresetIdArgs = parse_args(tool, args)?;
+            let preset = state
+                .db
+                .get_catalog_preset(&params.preset_id)
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            serde_json::to_value(preset).map_err(|e| DispatchError::Failed(e.to_string()))
+        }
+        "list_catalog_fields" => {
+            let params: ListCatalogFieldsArgs = parse_args(tool, args)?;
+            let fields = state
+                .db
+                .list_catalog_fields(
+                    params.subject_scope.as_deref(),
+                    params.include_deprecated.unwrap_or(false),
+                )
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            serde_json::to_value(fields).map_err(|e| DispatchError::Failed(e.to_string()))
+        }
+        "create_catalog_field_def" => {
+            let params: CreateCatalogFieldDefArgs = parse_args(tool, args)?;
+            let id = state
+                .db
+                .create_catalog_field_def(
+                    &params.stable_key,
+                    &params.label,
+                    params.description.as_deref(),
+                    &params.subject_scope,
+                    &params.value_type,
+                    &params.cardinality,
+                    params.unit_kind.as_deref(),
+                    params.validation_json.as_deref(),
+                    &params.sensitivity,
+                    params.derived_source.as_deref(),
+                    params.crosswalk_json.as_deref(),
+                )
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            Ok(serde_json::json!({ "id": id }))
+        }
+        "deprecate_catalog_field_def" => {
+            let params: CatalogFieldDefIdArgs = parse_args(tool, args)?;
+            state
+                .db
+                .deprecate_catalog_field_def(&params.field_def_id)
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            Ok(serde_json::json!({ "status": "ok" }))
+        }
+        "create_catalog_preset" => {
+            let params: CreateCatalogPresetArgs = parse_args(tool, args)?;
+            let id = state
+                .db
+                .create_catalog_preset(
+                    &params.name,
+                    params.description.as_deref(),
+                    &params.preset_kind,
+                    &params.field_def_ids,
+                    params.layout_json.as_deref(),
+                )
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            Ok(serde_json::json!({ "id": id }))
+        }
+        "update_catalog_preset" => {
+            let params: UpdateCatalogPresetArgs = parse_args(tool, args)?;
+            state
+                .db
+                .update_catalog_preset(
+                    &params.preset_id,
+                    params.name.as_deref(),
+                    params.description.as_deref(),
+                    params.field_def_ids.as_deref(),
+                    params.layout_json.as_deref(),
+                )
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            Ok(serde_json::json!({ "status": "ok", "id": params.preset_id }))
+        }
+        "create_catalog_work" => {
+            let params: CreateCatalogWorkArgs = parse_args(tool, args)?;
+            let id = state
+                .db
+                .create_catalog_work(&params.primary_image_id)
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            Ok(serde_json::json!({ "id": id }))
+        }
+        "attach_images_to_catalog_work" => {
+            let params: AttachImagesToCatalogWorkArgs = parse_args(tool, args)?;
+            let prepared: Vec<(String, String, i64, Option<String>)> = params
+                .images
+                .into_iter()
+                .map(|image| {
+                    (
+                        image.image_id,
+                        image.role,
+                        image.ordinal,
+                        image.edition_label,
+                    )
+                })
+                .collect();
+            let attached = state
+                .db
+                .attach_images_to_catalog_work(&params.work_id, &prepared)
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            Ok(serde_json::json!({ "attached": attached }))
+        }
+        "list_catalog_values" => {
+            let params: ListCatalogValuesArgs = parse_args(tool, args)?;
+            let values = state
+                .db
+                .list_catalog_values(
+                    params.subject_type.as_deref(),
+                    params.subject_id.as_deref(),
+                    params.status.as_deref(),
+                    params.source_type.as_deref(),
+                    params.field_def_id.as_deref(),
+                )
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            serde_json::to_value(values).map_err(|e| DispatchError::Failed(e.to_string()))
+        }
+        "list_catalog_drafts" => {
+            let params: ListCatalogDraftsArgs = parse_args(tool, args)?;
+            let values = state
+                .db
+                .list_catalog_drafts(
+                    params.subject_type.as_deref(),
+                    params.subject_id.as_deref(),
+                    params.source_type.as_deref(),
+                )
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            serde_json::to_value(values).map_err(|e| DispatchError::Failed(e.to_string()))
+        }
+        "get_catalog_record" => {
+            let params: CatalogRecordArgs = parse_args(tool, args)?;
+            let record = state
+                .db
+                .get_catalog_record(&params.subject_type, &params.subject_id)
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            serde_json::to_value(record).map_err(|e| DispatchError::Failed(e.to_string()))
+        }
+        "set_catalog_draft_value" => {
+            let params: SetCatalogDraftValueArgs = parse_args(tool, args)?;
+            let source_type = params.source_type.unwrap_or_else(|| "plugin".to_string());
+            let id = state
+                .db
+                .upsert_catalog_draft_value(
+                    &params.subject_type,
+                    &params.subject_id,
+                    &params.field_def_id,
+                    &params.value_json,
+                    &params.display_value,
+                    &source_type,
+                    params.source_id.as_deref(),
+                    params.confidence,
+                    "plugin",
+                    Some(actor),
+                    "draft",
+                )
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            Ok(serde_json::json!({ "value_id": id }))
+        }
+        "set_catalog_draft_values" => {
+            let params: CatalogDraftValuesArgs = parse_args(tool, args)?;
+            let payload: Vec<(
+                String,
+                String,
+                String,
+                String,
+                String,
+                Option<String>,
+                Option<f64>,
+                Option<String>,
+            )> = params
+                .values
+                .into_iter()
+                .map(|value| {
+                    (
+                        value.subject_type,
+                        value.subject_id,
+                        value.field_def_id,
+                        value.value_json,
+                        value.display_value,
+                        value.source_type.or_else(|| Some("plugin".to_string())),
+                        value.confidence,
+                        value.source_id,
+                    )
+                })
+                .collect();
+            let ids = state
+                .db
+                .set_catalog_draft_values(&payload, "plugin", Some(actor))
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            serde_json::to_value(ids).map_err(|e| DispatchError::Failed(e.to_string()))
+        }
+        "suggest_catalog_values" => {
+            let params: CatalogDraftValuesArgs = parse_args(tool, args)?;
+            let mut ids = Vec::new();
+            for value in params.values {
+                let id = state
+                    .db
+                    .upsert_catalog_draft_value(
+                        &value.subject_type,
+                        &value.subject_id,
+                        &value.field_def_id,
+                        &value.value_json,
+                        &value.display_value,
+                        "agent",
+                        value.source_id.as_deref(),
+                        value.confidence,
+                        "plugin",
+                        Some(actor),
+                        "draft",
+                    )
+                    .map_err(|e| DispatchError::Failed(e.to_string()))?;
+                ids.push(id);
+            }
+            Ok(serde_json::json!({
+                "status": "completed",
+                "drafted_count": ids.len(),
+                "written_count": ids.len(),
+                "ids": ids,
+            }))
+        }
+        "approve_catalog_values" => {
+            let params: CatalogValueIdsArgs = parse_args(tool, args)?;
+            let updated = state
+                .db
+                .approve_catalog_values(&params.value_ids, Some(actor))
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            Ok(serde_json::json!({ "updated": updated }))
+        }
+        "reject_catalog_values" => {
+            let params: CatalogValueIdsArgs = parse_args(tool, args)?;
+            let updated = state
+                .db
+                .reject_catalog_values(&params.value_ids, Some(actor))
+                .map_err(|e| DispatchError::Failed(e.to_string()))?;
+            Ok(serde_json::json!({ "updated": updated }))
         }
         _ => Err(DispatchError::Unsupported),
     }
@@ -464,5 +830,126 @@ mod tests {
         assert_eq!(entries[0].tool_name, "export_static_publish_package");
         assert_eq!(entries[0].result_status, "ok");
         assert_eq!(entries[0].token_id.as_deref(), Some("plugin:cull-publish"));
+    }
+
+    #[test]
+    fn plugin_invoke_catalog_capabilities_are_enforced() {
+        let (state, _tmp) = test_state();
+        state
+            .db
+            .set_plugin_grants("catalog-plugin", &[tokens::CAP_CATALOG_READ.to_string()])
+            .unwrap();
+
+        let fields = plugin_invoke_inner(&state, "catalog-plugin", "list_catalog_fields", None)
+            .expect("catalog:read should allow catalog field reads");
+        assert!(fields.as_array().is_some());
+
+        let write_err = plugin_invoke_inner(
+            &state,
+            "catalog-plugin",
+            "create_catalog_work",
+            Some(serde_json::json!({ "primary_image_id": "img_missing" })),
+        )
+        .unwrap_err();
+        assert_eq!(
+            write_err,
+            "Permission denied: 'create_catalog_work' requires 'catalog:write' capability"
+        );
+
+        let admin_err = plugin_invoke_inner(
+            &state,
+            "catalog-plugin",
+            "create_catalog_field_def",
+            Some(serde_json::json!({
+                "stable_key": "plugin.test",
+                "label": "Plugin Test",
+                "subject_scope": "image",
+                "value_type": "text",
+                "cardinality": "single",
+                "sensitivity": "normal"
+            })),
+        )
+        .unwrap_err();
+        assert_eq!(
+            admin_err,
+            "Permission denied: 'create_catalog_field_def' requires 'catalog:admin' capability"
+        );
+    }
+
+    #[test]
+    fn plugin_invoke_dispatches_catalog_draft_and_approval_flow() {
+        let (state, tmp) = test_state();
+        state
+            .db
+            .set_plugin_grants(
+                "catalog-plugin",
+                &[
+                    tokens::CAP_CATALOG_READ.to_string(),
+                    tokens::CAP_CATALOG_WRITE.to_string(),
+                    tokens::CAP_CATALOG_APPROVE.to_string(),
+                    tokens::CAP_CATALOG_ADMIN.to_string(),
+                ],
+            )
+            .unwrap();
+
+        let field = plugin_invoke_inner(
+            &state,
+            "catalog-plugin",
+            "create_catalog_field_def",
+            Some(serde_json::json!({
+                "stable_key": "plugin.caption",
+                "label": "Plugin Caption",
+                "subject_scope": "image",
+                "value_type": "text",
+                "cardinality": "single",
+                "sensitivity": "normal"
+            })),
+        )
+        .expect("catalog:admin grants field definition creation");
+        let field_def_id = field["id"].as_str().unwrap().to_string();
+
+        let image_id = import_test_image(&state, tmp.path(), "catalog-plugin.png");
+        let draft = plugin_invoke_inner(
+            &state,
+            "catalog-plugin",
+            "set_catalog_draft_value",
+            Some(serde_json::json!({
+                "subject_type": "image",
+                "subject_id": image_id,
+                "field_def_id": field_def_id,
+                "value_json": "{\"value\":\"Gallery wall\"}",
+                "display_value": "Gallery wall"
+            })),
+        )
+        .expect("catalog:write grants draft writes");
+        let value_id = draft["value_id"].as_str().unwrap().to_string();
+
+        let drafts = plugin_invoke_inner(
+            &state,
+            "catalog-plugin",
+            "list_catalog_drafts",
+            Some(serde_json::json!({ "subject_id": image_id })),
+        )
+        .expect("catalog:read grants draft reads");
+        assert_eq!(drafts.as_array().unwrap().len(), 1);
+
+        let approved = plugin_invoke_inner(
+            &state,
+            "catalog-plugin",
+            "approve_catalog_values",
+            Some(serde_json::json!({ "value_ids": [value_id] })),
+        )
+        .expect("catalog:approve grants approvals");
+        assert_eq!(approved["updated"], 1);
+
+        let values = plugin_invoke_inner(
+            &state,
+            "catalog-plugin",
+            "list_catalog_values",
+            Some(serde_json::json!({ "status": "approved" })),
+        )
+        .expect("catalog:read grants approved value reads");
+        assert_eq!(values.as_array().unwrap().len(), 1);
+        assert_eq!(values[0]["status"], "approved");
     }
 }

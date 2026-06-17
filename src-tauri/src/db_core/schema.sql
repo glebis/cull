@@ -10,6 +10,48 @@ CREATE TABLE IF NOT EXISTS images (
     imported_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS media_assets (
+    id TEXT PRIMARY KEY,
+    media_type TEXT NOT NULL CHECK (media_type IN ('image', 'pdf')),
+    primary_image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    sha256_hash TEXT NOT NULL,
+    format TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
+    page_count INTEGER,
+    title TEXT,
+    created_at TEXT NOT NULL,
+    imported_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS media_assets_type_idx ON media_assets(media_type);
+CREATE INDEX IF NOT EXISTS media_assets_primary_image_idx ON media_assets(primary_image_id);
+CREATE UNIQUE INDEX IF NOT EXISTS media_assets_sha256_uq ON media_assets(sha256_hash);
+
+CREATE TABLE IF NOT EXISTS media_files (
+    id TEXT PRIMARY KEY,
+    media_asset_id TEXT NOT NULL REFERENCES media_assets(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    missing_at TEXT,
+    last_seen_size INTEGER,
+    last_seen_mtime TEXT
+);
+CREATE INDEX IF NOT EXISTS media_files_path_idx ON media_files(path);
+CREATE INDEX IF NOT EXISTS media_files_asset_idx ON media_files(media_asset_id);
+
+CREATE TABLE IF NOT EXISTS pdf_pages (
+    id TEXT PRIMARY KEY,
+    media_asset_id TEXT NOT NULL REFERENCES media_assets(id) ON DELETE CASCADE,
+    page_index INTEGER NOT NULL,
+    width_points REAL,
+    height_points REAL,
+    thumbnail_path TEXT,
+    preview_path TEXT,
+    extracted_text TEXT,
+    text_extracted_at TEXT,
+    UNIQUE(media_asset_id, page_index)
+);
+CREATE INDEX IF NOT EXISTS pdf_pages_asset_idx ON pdf_pages(media_asset_id);
+
 -- Source detection evidence (added to images table via migration in db.rs)
 -- source_label TEXT, source_confidence REAL, source_evidence_json TEXT,
 -- source_detected_at TEXT, source_detector_version TEXT,

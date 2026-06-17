@@ -1,4 +1,5 @@
 pub mod agent_snapshots;
+pub mod catalog;
 pub mod clipboard_monitor;
 pub mod collections;
 pub mod color;
@@ -16,6 +17,7 @@ pub mod jobs;
 pub mod library;
 pub mod lineage;
 pub mod mcp;
+pub mod media;
 pub mod ocr;
 pub mod perceptual_hash;
 pub mod plugins;

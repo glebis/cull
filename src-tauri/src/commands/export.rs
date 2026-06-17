@@ -1,3 +1,4 @@
+use crate::db_core::models::ImageWithFile;
 use crate::export::manifest::*;
 use crate::export::patch::{self, JsonPatch, PatchResult};
 use crate::export::pdf;
@@ -147,27 +148,7 @@ pub async fn create_export_manifest(
         let clean_id = img.image.id.replace("-", "");
         let asset_id = format!("asset_src_{}", &clean_id[..clean_id.len().min(8)]);
 
-        let ext = std::path::Path::new(&img.path)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
-        let is_raw = crate::extensions::is_raw_extension(ext);
-
-        // For RAW files, export the preview thumbnail (JPEG) rather than the
-        // original RAW file, since most consumers cannot render proprietary RAW.
-        let (uri, mime, source_kind) = if is_raw {
-            (
-                format!("cull://images/{}/preview", img.image.id),
-                "image/jpeg".to_string(),
-                Some("raw_preview".to_string()),
-            )
-        } else {
-            (
-                format!("cull://images/{}/original", img.image.id),
-                format!("image/{}", img.image.format),
-                None,
-            )
-        };
+        let (uri, mime, source_kind) = export_asset_source(img);
 
         manifest.assets.push(Asset {
             id: asset_id.clone(),
@@ -246,6 +227,28 @@ pub async fn create_export_manifest(
     }
 
     Ok(manifest)
+}
+
+fn export_asset_source(img: &ImageWithFile) -> (String, String, Option<String>) {
+    let ext = Path::new(&img.path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if crate::extensions::is_raw_extension(ext) || crate::extensions::is_document_extension(ext) {
+        // For RAW and document formats that do not expose reliable image bytes to
+        // downstream consumers, prefer the generated thumbnail/preview.
+        return (
+            format!("cull://images/{}/preview", img.image.id),
+            "image/jpeg".to_string(),
+            Some("raw_preview".to_string()),
+        );
+    }
+
+    (
+        format!("cull://images/{}/original", img.image.id),
+        format!("image/{}", img.image.format),
+        None,
+    )
 }
 
 #[tauri::command]
@@ -329,7 +332,9 @@ pub async fn get_export_asset(
                 .extension()
                 .and_then(|e| e.to_str())
                 .unwrap_or("");
-            if crate::extensions::is_raw_extension(ext) {
+            if crate::extensions::is_raw_extension(ext)
+                || crate::extensions::is_document_extension(ext)
+            {
                 let thumb_path =
                     crate::db_core::thumbnails::thumbnail_path(&state.app_data_dir, &img.image.id);
                 asset_response(
@@ -518,5 +523,34 @@ mod tests {
         let data_url = asset_data_url(&image_path, "image/jpeg").unwrap();
 
         assert_eq!(data_url, "data:image/jpeg;base64,anBlZyBieXRlcw==");
+    }
+
+    #[test]
+    fn pdf_export_manifest_uses_preview_source() {
+        let img = ImageWithFile {
+            image: crate::db_core::models::Image {
+                id: "pdf-123".to_string(),
+                sha256_hash: "pdf-hash".to_string(),
+                width: 1200,
+                height: 1200,
+                format: "pdf".to_string(),
+                file_size: 100,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                imported_at: "2026-01-01T00:00:00Z".to_string(),
+                ai_prompt: None,
+                raw_metadata: None,
+            },
+            path: "/abs/documents/contract.pdf".to_string(),
+            thumbnail_path: Some("/abs/thumbnails/pdf-123.jpg".to_string()),
+            selection: None,
+            source_label: None,
+            missing_at: None,
+        };
+
+        let (uri, mime, source_kind) = export_asset_source(&img);
+
+        assert_eq!(uri, "cull://images/pdf-123/preview");
+        assert_eq!(mime, "image/jpeg");
+        assert_eq!(source_kind.as_deref(), Some("raw_preview"));
     }
 }

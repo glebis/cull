@@ -22,7 +22,7 @@ export interface Image {
     raw_metadata: string | null;
 }
 
-const RAW_EXTENSIONS = ['cr2', 'cr3', 'nef', 'arw', 'dng', 'orf', 'raf', 'rw2'];
+const RAW_EXTENSIONS = ['cr2', 'cr3', 'nef', 'arw', 'dng', 'orf', 'raf', 'rw2', 'pdf'];
 
 export function isRawFormat(format: string): boolean {
     return RAW_EXTENSIONS.includes(format.toLowerCase());
@@ -43,6 +43,41 @@ export interface ImageWithFile {
     selection: Selection | null;
     source_label: string | null;
     missing_at: string | null;
+}
+
+export interface MediaAsset {
+    id: string;
+    media_type: string;
+    primary_image_id: string;
+    sha256_hash: string;
+    format: string;
+    file_size: number;
+    page_count: number | null;
+    title: string | null;
+    created_at: string;
+    imported_at: string;
+}
+
+export interface MediaFile {
+    id: string;
+    media_asset_id: string;
+    path: string;
+    last_seen_at: string;
+    missing_at: string | null;
+    last_seen_size: number | null;
+    last_seen_mtime: string | null;
+}
+
+export interface PdfPage {
+    id: string;
+    media_asset_id: string;
+    page_index: number;
+    width_points: number | null;
+    height_points: number | null;
+    thumbnail_path: string | null;
+    preview_path: string | null;
+    extracted_text: string | null;
+    text_extracted_at: string | null;
 }
 
 export interface ImageQualityMetrics {
@@ -386,6 +421,34 @@ export interface SmartCollection {
 
 export async function listImages(limit: number, offset: number): Promise<ImageWithFile[]> {
     return invoke<ImageWithFile[]>('list_images', { limit, offset });
+}
+
+export async function listMediaAssets(
+    mediaType: string | null,
+    limit: number,
+    offset: number,
+): Promise<MediaAsset[]> {
+    return invoke<MediaAsset[]>('list_media_assets', {
+        mediaType,
+        limit,
+        offset,
+    });
+}
+
+export async function getMediaAsset(mediaAssetId: string): Promise<MediaAsset | null> {
+    return invoke<MediaAsset | null>('get_media_asset', { mediaAssetId });
+}
+
+export async function getMediaAssetForImage(imageId: string): Promise<MediaAsset | null> {
+    return invoke<MediaAsset | null>('get_media_asset_for_image', { imageId });
+}
+
+export async function listMediaFiles(mediaAssetId: string): Promise<MediaFile[]> {
+    return invoke<MediaFile[]>('list_media_files', { mediaAssetId });
+}
+
+export async function listPdfPages(mediaAssetId: string): Promise<PdfPage[]> {
+    return invoke<PdfPage[]>('list_pdf_pages', { mediaAssetId });
 }
 
 export async function getImageCount(): Promise<number> {

@@ -9,6 +9,11 @@ pub const ROLE_CURATOR: &str = "curator";
 pub const ROLE_OPERATOR: &str = "operator";
 pub const ROLE_ADMIN: &str = "admin";
 
+pub const CAP_CATALOG_READ: &str = "catalog:read";
+pub const CAP_CATALOG_WRITE: &str = "catalog:write";
+pub const CAP_CATALOG_APPROVE: &str = "catalog:approve";
+pub const CAP_CATALOG_ADMIN: &str = "catalog:admin";
+
 const VALID_ROLES: &[&str] = &[ROLE_VIEWER, ROLE_CURATOR, ROLE_OPERATOR, ROLE_ADMIN];
 const TOKEN_PREFIX: &str = "tok_";
 const SECRET_BYTES: usize = 32;
@@ -20,16 +25,20 @@ pub const DEFAULT_TOKEN_EXPIRY_DAYS: i64 = 90;
 
 pub fn capabilities_for_role(role: &str) -> Vec<&'static str> {
     match role {
-        ROLE_VIEWER => vec!["library:read", "library:search"],
+        ROLE_VIEWER => vec!["library:read", "library:search", CAP_CATALOG_READ],
         ROLE_CURATOR => vec![
             "library:read",
             "library:search",
+            CAP_CATALOG_READ,
+            CAP_CATALOG_WRITE,
             "curation:write",
             "export:read",
         ],
         ROLE_OPERATOR => vec![
             "library:read",
             "library:search",
+            CAP_CATALOG_READ,
+            CAP_CATALOG_WRITE,
             "curation:write",
             "export:read",
             "import:write",
@@ -42,6 +51,10 @@ pub fn capabilities_for_role(role: &str) -> Vec<&'static str> {
             "export:read",
             "import:write",
             "ai:run",
+            CAP_CATALOG_READ,
+            CAP_CATALOG_WRITE,
+            CAP_CATALOG_APPROVE,
+            CAP_CATALOG_ADMIN,
             "display:navigate",
             "tokens:manage",
             "settings:manage",
@@ -106,6 +119,27 @@ pub fn tool_capability(tool_name: &str) -> &'static str {
         | "detect_objects"
         | "analyze_images"
         | "start_ocr_batch" => "ai:run",
+
+        "list_catalog_presets"
+        | "get_catalog_preset"
+        | "list_catalog_fields"
+        | "get_catalog_record"
+        | "list_catalog_values"
+        | "list_catalog_drafts"
+        | "get_catalog_suggestion_job" => CAP_CATALOG_READ,
+
+        "create_catalog_work"
+        | "attach_images_to_catalog_work"
+        | "set_catalog_draft_value"
+        | "set_catalog_draft_values"
+        | "suggest_catalog_values" => CAP_CATALOG_WRITE,
+
+        "approve_catalog_values" | "reject_catalog_values" => CAP_CATALOG_APPROVE,
+
+        "create_catalog_field_def"
+        | "deprecate_catalog_field_def"
+        | "create_catalog_preset"
+        | "update_catalog_preset" => CAP_CATALOG_ADMIN,
 
         "create_token" | "list_tokens" | "revoke_token" | "rotate_token" | "get_audit_log"
         | "prune_audit_log" => "tokens:manage",
@@ -806,22 +840,33 @@ mod tests {
     #[test]
     fn test_capabilities_for_roles() {
         let viewer_caps = capabilities_for_role(ROLE_VIEWER);
-        assert_eq!(viewer_caps, vec!["library:read", "library:search"]);
+        assert_eq!(
+            viewer_caps,
+            vec!["library:read", "library:search", CAP_CATALOG_READ]
+        );
 
         let curator_caps = capabilities_for_role(ROLE_CURATOR);
         assert!(curator_caps.contains(&"curation:write"));
         assert!(curator_caps.contains(&"library:read"));
         assert!(curator_caps.contains(&"export:read"));
+        assert!(curator_caps.contains(&CAP_CATALOG_READ));
+        assert!(curator_caps.contains(&CAP_CATALOG_WRITE));
 
         let operator_caps = capabilities_for_role(ROLE_OPERATOR);
         assert!(operator_caps.contains(&"import:write"));
         assert!(operator_caps.contains(&"ai:run"));
+        assert!(operator_caps.contains(&CAP_CATALOG_READ));
+        assert!(operator_caps.contains(&CAP_CATALOG_WRITE));
 
         let admin_caps = capabilities_for_role(ROLE_ADMIN);
         assert!(admin_caps.contains(&"tokens:manage"));
         assert!(admin_caps.contains(&"display:navigate"));
         assert!(admin_caps.contains(&"settings:manage"));
-        assert_eq!(admin_caps.len(), 9);
+        assert!(admin_caps.contains(&CAP_CATALOG_READ));
+        assert!(admin_caps.contains(&CAP_CATALOG_WRITE));
+        assert!(admin_caps.contains(&CAP_CATALOG_APPROVE));
+        assert!(admin_caps.contains(&CAP_CATALOG_ADMIN));
+        assert_eq!(admin_caps.len(), 13);
 
         assert!(capabilities_for_role("bogus").is_empty());
     }
@@ -862,6 +907,18 @@ mod tests {
             tool_capability("export_static_publish_canvas"),
             "export:read"
         );
+        assert_eq!(tool_capability("list_catalog_presets"), CAP_CATALOG_READ);
+        assert_eq!(tool_capability("list_catalog_fields"), CAP_CATALOG_READ);
+        assert_eq!(tool_capability("create_catalog_work"), CAP_CATALOG_WRITE);
+        assert_eq!(
+            tool_capability("set_catalog_draft_values"),
+            CAP_CATALOG_WRITE
+        );
+        assert_eq!(
+            tool_capability("approve_catalog_values"),
+            CAP_CATALOG_APPROVE
+        );
+        assert_eq!(tool_capability("create_catalog_preset"), CAP_CATALOG_ADMIN);
         assert_eq!(
             tool_capability("serve_static_publish_package"),
             "settings:manage"

@@ -135,6 +135,24 @@ mod tests {
         "list_export_presets",
         "export_static_publish_package",
         "export_static_publish_canvas",
+        "list_catalog_presets",
+        "get_catalog_preset",
+        "list_catalog_fields",
+        "get_catalog_record",
+        "list_catalog_values",
+        "list_catalog_drafts",
+        "get_catalog_suggestion_job",
+        "create_catalog_work",
+        "attach_images_to_catalog_work",
+        "set_catalog_draft_value",
+        "set_catalog_draft_values",
+        "suggest_catalog_values",
+        "approve_catalog_values",
+        "reject_catalog_values",
+        "create_catalog_field_def",
+        "deprecate_catalog_field_def",
+        "create_catalog_preset",
+        "update_catalog_preset",
     ];
 
     const ADMIN_ONLY_TOOLS: &[&str] = &[
@@ -204,6 +222,29 @@ mod tests {
         "rotate_token",
         "get_audit_log",
         "prune_audit_log",
+    ];
+    const CATALOG_READ_TOOLS: &[&str] = &[
+        "list_catalog_presets",
+        "get_catalog_preset",
+        "list_catalog_fields",
+        "get_catalog_record",
+        "list_catalog_values",
+        "list_catalog_drafts",
+        "get_catalog_suggestion_job",
+    ];
+    const CATALOG_WRITE_TOOLS: &[&str] = &[
+        "create_catalog_work",
+        "attach_images_to_catalog_work",
+        "set_catalog_draft_value",
+        "set_catalog_draft_values",
+        "suggest_catalog_values",
+    ];
+    const CATALOG_APPROVE_TOOLS: &[&str] = &["approve_catalog_values", "reject_catalog_values"];
+    const CATALOG_ADMIN_TOOLS: &[&str] = &[
+        "create_catalog_field_def",
+        "deprecate_catalog_field_def",
+        "create_catalog_preset",
+        "update_catalog_preset",
     ];
 
     // --- Basic auth context tests ---
@@ -367,6 +408,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_viewer_catalog_access_is_read_only() {
+        let auth = viewer_auth();
+        for tool in CATALOG_READ_TOOLS {
+            assert!(
+                require_capability(&auth, tool).is_ok(),
+                "Viewer should access catalog read tool '{}'",
+                tool
+            );
+        }
+        for tool in CATALOG_WRITE_TOOLS
+            .iter()
+            .chain(CATALOG_APPROVE_TOOLS.iter())
+            .chain(CATALOG_ADMIN_TOOLS.iter())
+        {
+            assert!(
+                require_capability(&auth, tool).is_err(),
+                "Viewer should NOT access catalog mutation/admin tool '{}'",
+                tool
+            );
+        }
+    }
+
     // --- Curator access matrix ---
 
     #[test]
@@ -441,6 +505,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_curator_catalog_access_can_draft_but_not_approve_or_admin() {
+        let auth = curator_auth();
+        for tool in CATALOG_READ_TOOLS.iter().chain(CATALOG_WRITE_TOOLS.iter()) {
+            assert!(
+                require_capability(&auth, tool).is_ok(),
+                "Curator should access catalog read/write tool '{}'",
+                tool
+            );
+        }
+        for tool in CATALOG_APPROVE_TOOLS
+            .iter()
+            .chain(CATALOG_ADMIN_TOOLS.iter())
+        {
+            assert!(
+                require_capability(&auth, tool).is_err(),
+                "Curator should NOT access catalog approval/admin tool '{}'",
+                tool
+            );
+        }
+    }
+
     // --- Operator access matrix ---
 
     #[test]
@@ -508,6 +594,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_operator_catalog_access_can_draft_but_not_approve_or_admin() {
+        let auth = operator_auth();
+        for tool in CATALOG_READ_TOOLS.iter().chain(CATALOG_WRITE_TOOLS.iter()) {
+            assert!(
+                require_capability(&auth, tool).is_ok(),
+                "Operator should access catalog read/write tool '{}'",
+                tool
+            );
+        }
+        for tool in CATALOG_APPROVE_TOOLS
+            .iter()
+            .chain(CATALOG_ADMIN_TOOLS.iter())
+        {
+            assert!(
+                require_capability(&auth, tool).is_err(),
+                "Operator should NOT access catalog approval/admin tool '{}'",
+                tool
+            );
+        }
+    }
+
     // --- Admin access matrix ---
 
     #[test]
@@ -522,6 +630,10 @@ mod tests {
             .chain(DISPLAY_TOOLS.iter())
             .chain(AI_TOOLS.iter())
             .chain(TOKEN_TOOLS.iter())
+            .chain(CATALOG_READ_TOOLS.iter())
+            .chain(CATALOG_WRITE_TOOLS.iter())
+            .chain(CATALOG_APPROVE_TOOLS.iter())
+            .chain(CATALOG_ADMIN_TOOLS.iter())
             .chain(ADMIN_ONLY_TOOLS.iter())
             .collect();
 
@@ -570,6 +682,10 @@ mod tests {
             "display:navigate",
             "ai:run",
             "tokens:manage",
+            tokens::CAP_CATALOG_READ,
+            tokens::CAP_CATALOG_WRITE,
+            tokens::CAP_CATALOG_APPROVE,
+            tokens::CAP_CATALOG_ADMIN,
         ];
 
         let all_tools_extended: Vec<&str> = ALL_TOOLS
@@ -579,6 +695,10 @@ mod tests {
             .chain(EXPORT_TOOLS.iter().copied())
             .chain(AI_TOOLS.iter().copied())
             .chain(TOKEN_TOOLS.iter().copied())
+            .chain(CATALOG_READ_TOOLS.iter().copied())
+            .chain(CATALOG_WRITE_TOOLS.iter().copied())
+            .chain(CATALOG_APPROVE_TOOLS.iter().copied())
+            .chain(CATALOG_ADMIN_TOOLS.iter().copied())
             .collect();
 
         for cap in &all_capabilities {

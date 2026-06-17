@@ -72,6 +72,7 @@ describe('Preview Display utilities', () => {
 
     it('uses RAW thumbnails and source-load fallback consistently with Loupe', () => {
         expect(previewDisplayImageSourcePath(image('raw', 'dng'), false)).toBe('/thumbs/a.jpg');
+        expect(previewDisplayImageSourcePath(image('pdf', 'pdf'), false)).toBe('/thumbs/a.jpg');
         expect(previewDisplayImageSourcePath(image('png'), true)).toBe('/thumbs/a.jpg');
         expect(previewDisplayImageSourcePath(image('png'), false)).toBe('/images/png.png');
     });

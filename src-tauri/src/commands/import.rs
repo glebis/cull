@@ -1,6 +1,7 @@
 use crate::db_core::db::Database;
 use crate::db_core::models::NewSessionEvent;
 use crate::AppState;
+use std::collections::HashSet;
 use std::path::Path;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -115,10 +116,12 @@ pub async fn import_folder(
     };
 
     let image_ids_out = new_image_ids.clone();
+    let auto_process_ids =
+        filter_image_ids_for_auto_jobs(&db, &new_image_ids).map_err(|e| e.to_string())?;
 
-    if !new_image_ids.is_empty() {
-        run_post_import_quality_analysis(app.clone(), new_image_ids.clone());
-        run_post_import_detection(app.clone(), new_image_ids);
+    if !auto_process_ids.is_empty() {
+        run_post_import_quality_analysis(app.clone(), auto_process_ids.clone());
+        run_post_import_detection(app.clone(), auto_process_ids);
     }
     let _ = crate::tray::refresh_tray_menu(&app);
 
@@ -207,11 +210,15 @@ pub async fn import_files(
     };
 
     let image_ids_out = new_image_ids.clone();
+    let auto_process_ids =
+        filter_image_ids_for_auto_jobs(&db, &new_image_ids).map_err(|e| e.to_string())?;
 
     if !new_image_ids.is_empty() {
         let _ = crate::tray::refresh_tray_menu(&app);
-        run_post_import_quality_analysis(app.clone(), new_image_ids.clone());
-        run_post_import_detection(app, new_image_ids);
+        if !auto_process_ids.is_empty() {
+            run_post_import_quality_analysis(app.clone(), auto_process_ids.clone());
+            run_post_import_detection(app, auto_process_ids);
+        }
     }
 
     Ok(ImportResponse {
@@ -269,6 +276,21 @@ pub async fn regenerate_thumbnails(
                         }
                         Err(e) => {
                             crate::safe_eprintln!("RAW decode failed for {}: {}", img.path, e)
+                        }
+                    }
+                } else if crate::extensions::is_document_extension(ext) {
+                    match crate::db_core::thumbnails::generate_document_thumbnail(
+                        source_path,
+                        app_data_dir,
+                        &img.image.id,
+                    ) {
+                        Ok(_) => regenerated += 1,
+                        Err(e) => {
+                            crate::safe_eprintln!(
+                                "Document thumbnail failed for {}: {}",
+                                img.path,
+                                e
+                            )
                         }
                     }
                 } else {
@@ -339,6 +361,21 @@ pub async fn regenerate_thumbnails_by_ids(
                                 crate::safe_eprintln!("RAW decode failed for {}: {}", img.path, e)
                             }
                         }
+                    } else if crate::extensions::is_document_extension(ext) {
+                        match crate::db_core::thumbnails::generate_document_thumbnail(
+                            source_path,
+                            app_data_dir,
+                            &img.image.id,
+                        ) {
+                            Ok(_) => regenerated += 1,
+                            Err(e) => {
+                                crate::safe_eprintln!(
+                                    "Document thumbnail failed for {}: {}",
+                                    img.path,
+                                    e
+                                )
+                            }
+                        }
                     } else {
                         match crate::db_core::thumbnails::generate_thumbnail(
                             source_path,
@@ -391,6 +428,12 @@ pub async fn regenerate_single_thumbnail(
             .map_err(|e| format!("RAW decode failed: {}", e))?;
         crate::db_core::thumbnails::generate_thumbnail_from_image(
             &preview.image,
+            app_data_dir,
+            &image_id,
+        )?
+    } else if crate::extensions::is_document_extension(ext) {
+        crate::db_core::thumbnails::generate_document_thumbnail(
+            source_path,
             app_data_dir,
             &image_id,
         )?
@@ -805,4 +848,60 @@ mod tests {
         assert_eq!(summary.failed, 0);
         assert!(db.get_image_quality_metrics(&image_id).unwrap().is_some());
     }
+
+    #[test]
+    fn auto_job_filter_skips_pdf_assets() {
+        let tmp = tempfile::tempdir().unwrap();
+        let filter_db_path = tmp.path().join("filter.db");
+        let db = Database::open(&filter_db_path).unwrap();
+        let app_data_dir = tmp.path().join("app-data");
+        std::fs::create_dir(&app_data_dir).unwrap();
+
+        let png_path = tmp.path().join("image.png");
+        image::RgbImage::from_fn(2, 2, |_, _| image::Rgb([0, 0, 0]))
+            .save(&png_path)
+            .unwrap();
+
+        let pdf_path = tmp.path().join("doc.pdf");
+        std::fs::write(&pdf_path, b"%PDF-1.4 sample").unwrap();
+
+        let png_id = crate::db_core::import::import_file(&db, &png_path, &app_data_dir)
+            .unwrap()
+            .unwrap();
+        let pdf_id = crate::db_core::import::import_file(&db, &pdf_path, &app_data_dir)
+            .unwrap()
+            .unwrap();
+
+        let ids = filter_image_ids_for_auto_jobs(&db, &[png_id.clone(), pdf_id.clone()]).unwrap();
+        assert_eq!(ids, vec![png_id.clone()]);
+        assert!(!ids.contains(&pdf_id));
+    }
+}
+
+fn filter_image_ids_for_auto_jobs(
+    db: &Database,
+    image_ids: &[String],
+) -> Result<Vec<String>, String> {
+    if image_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let refs: Vec<&str> = image_ids.iter().map(|id| id.as_str()).collect();
+    let images = db.get_images_by_ids(&refs).map_err(|e| e.to_string())?;
+    let mut document_ids: HashSet<String> = HashSet::new();
+    let mut existing_ids: HashSet<String> = HashSet::new();
+
+    for img in images {
+        existing_ids.insert(img.image.id.clone());
+        if crate::extensions::is_document_extension(&img.image.format) {
+            document_ids.insert(img.image.id);
+        }
+    }
+
+    Ok(image_ids
+        .iter()
+        .filter(|id| existing_ids.contains(*id))
+        .filter(|id| !document_ids.contains(*id))
+        .cloned()
+        .collect())
 }

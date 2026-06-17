@@ -377,7 +377,7 @@ fn resolve_image_path_for_ml(img: &ImageWithFile, app_data_dir: &Path) -> PathBu
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("");
-    if crate::extensions::is_raw_extension(ext) {
+    if crate::extensions::should_use_thumbnail_for_ml(ext) {
         crate::db_core::thumbnails::thumbnail_path(app_data_dir, &img.image.id)
     } else {
         PathBuf::from(&img.path)
