@@ -1,38 +1,47 @@
 # Cull
 
-Local-first, keyboard-first review and curation for AI-generated image workflows on macOS.
+Fast local image review for artists, photographers, and people who produce at volume on macOS.
 
 Official site: [cull.company](https://cull.company/)
 
-Cull is a local-first reference engine for AI creativity. It helps humans and agents turn visual chaos into coherent projects, publications, posts, collections, and reusable creative memory.
+Cull is a fast image review tool for people who shoot, generate, or produce at volume. Go from hundreds of images, sketches, SD-card dumps, or test shots to a final set without uploading your work or fighting a heavy creative suite.
 
-It is image-first today: a desktop app for reviewing, comparing, curating, searching, exporting, and publishing large batches of generated images and visual references. Originals stay on your machine and are not modified.
+Most tools are built for editing. Cull is built for the moment before that, when you have too many images and need to look carefully, decide clearly, and turn the pile into something useful: a portfolio edit, a client selection, a post, a book, an exhibition, a reference board, or the next agent-assisted step.
+
+Made by artists for artists, Cull is open, local, and agent-friendly: closer to Obsidian for images than another locked creative suite.
 
 ## What It Is For
 
-- **Culling large runs** — go from hundreds of generated images, sketches, photos, or screenshots to a final set of keepers.
+- **Culling large runs** — go from 500 images to 20 keepers.
 - **Visual reference work** — build a local Pinterest-like archive for serious art direction, design research, and image memory.
 - **Social and editorial output** — organize batches into Instagram posts, LinkedIn posts, books, magazines, essays, exhibitions, field guides, and client selects.
-- **Agent-assisted creative workflows** — let an agent search, inspect, curate, compose exports, or publish reference sets through CLI and MCP surfaces.
+- **AI-generated image work** — keep prompts, variants, sources, and iterations attached to the images they produced.
+- **Agent-assisted workflows** — sort a folder yourself, or hand work to an agent through CLI or MCP when you want help.
 - **Second-screen review** — keep the main app private while a client, collaborator, projector, iPad, or browser sees only the current preview.
 
 ## What It Does
 
-- Import folders recursively, deduplicate by SHA-256, and keep a local SQLite library.
-- Review in Grid, Loupe, Compare, Canvas, Lineage, Embedding Explorer, Export, and Speed Review views.
-- Rate, accept, reject, undecide, collect, filter, and export without leaving the keyboard.
-- Generate thumbnails, histograms, image quality metrics, perceptual hashes, and local CLIP/DINOv2 embeddings.
-- Search by visual similarity and explore clusters with UMAP.
-- Read generation metadata from sidecar JSON, PNG text chunks, C2PA-style metadata, and filename evidence where available.
-- Export images, contact sheets, CSV delivery lists, social/editorial slides, PDFs, and static reference packages.
-- Expose agent workflows through a local MCP server, MCP-aligned headless CLI commands, and `cull://` deep links.
+- Drop in a folder, any size, any structure.
+- Move quickly through Grid, Loupe, Compare, Canvas, Lineage, Embedding Explorer, Export, and Speed Review views.
+- Rate, accept, reject, compare, collect, and filter without lifting your hands from the keyboard.
+- Search by look and feel rather than filename.
+- Surface the sharp ones, the warm ones, or the images that match a reference.
+- Export picks for social, publishing, clients, contact sheets, PDFs, static reference sets, or the next agent-assisted step.
+- Keep originals untouched and private by default.
+
+## Under The Hood
+
+- Local SQLite library with SHA-256 deduplication.
+- Local CLIP/DINOv2 embeddings, UMAP visualization, image quality metrics, perceptual hashes, and histograms.
+- Generation metadata from sidecar JSON, PNG text chunks, C2PA-style metadata, and filename evidence where available.
+- Agent workflows through a local MCP server, MCP-aligned headless CLI commands, and `cull://` deep links.
 
 ## Principles
 
 - **Local-first:** the library lives on your machine.
 - **Non-destructive:** source files are not rewritten.
 - **Keyboard-first:** common review actions are reachable without the mouse.
-- **Agent-native:** CLI and MCP use the same task model so agents can operate the archive directly.
+- **Agent-friendly:** work in the app, or let an agent operate the archive directly when that helps.
 - **Open source:** Cull is Apache-2.0 software, not source-available software.
 - **European-minded:** cloud/API features are explicit and optional; privacy, autonomy, and auditability matter.
 
