@@ -100,3 +100,7 @@ export function formatImportResult(imported: number, skipped: number, errorCount
     }
     return result;
 }
+
+export function formatSidebarCount(count: number | null | undefined): string {
+    return String(count ?? 0);
+}
