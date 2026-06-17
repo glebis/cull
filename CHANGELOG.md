@@ -4,6 +4,53 @@ All notable changes to this project will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+Reconstructed from the largest post-0.2.1 commit and merge chunks.
+
+### Added
+
+- Public `cull.company` landing site under `site/`, including Vercel signup and confirmation endpoints, generated visual assets, and a confirmed opt-in launch list flow.
+- Plugin runtime foundation: manifest validation, capability grants, checksum-verified install/uninstall, registry parsing, frontend loader, `plugin_invoke` bridge, and a dedicated Plugins settings tab.
+- Bundled `cull-publish` proof plugin that extracts the static publishing UI into a first-party plugin while keeping the backend export tools in core.
+- Tab registry as the single source of truth for app views, including plugin-provided tabs and suggested hotkeys.
+- Agent surface documentation covering the headless CLI, MCP connection flow, scoped tokens, audit log, approval boundaries, and the agent-snapshot demo loop.
+- Export workbench improvements for social/editorial output, PDF rendering, contact sheets, and command-driven export launch.
+- Preview Display recovery and refinements for second-screen and tokenized web preview workflows.
+- Gesture support across grid, loupe, compare, and canvas interactions.
+- Art catalog metadata layer and catalog commands for richer generation/source metadata workflows.
+- Scoped PDF/media import work, including preview fallback paths for formats that need generated previews.
+- Release readiness artifacts: audit reports, compatibility/release policy work, clean-machine DMG gate, release checksums, build provenance, and supply-chain audit commands.
+
+### Changed
+
+- README now focuses on positioning, use cases, installation, documentation links, development setup, and license/copyright boundaries instead of duplicating the user guide, roadmap, full CLI spec, and shortcut tables.
+- Static publishing is treated as a plugin-capable surface with core backend support rather than only a built-in view.
+- View commands, keyboard view cycling, and command-palette destinations now derive from the shared tab registry.
+- AI/model-heavy first-run UI copy was softened and collapsed so a new empty library does not lead with optional model jargon.
+- Delivery CSV and voice dictation are default-off module features; RAW support is visible/enabled by default.
+- Dependency/toolchain baseline moved forward, including Tauri 2.11.2, Svelte 5.56.3, SvelteKit 2.65.1, Vite 8 site tooling, reqwest 0.13.3, png 0.18.1, dirs 6.0.0, thiserror 2.0.18, and Vitest 4.1.9.
+
+### Fixed
+
+- Plugin security gates now block ID traversal, unsafe `file://` scope expansion, and denied permission grants.
+- Bundled plugin IDs survive third-party registry reloads.
+- Token expiry warning threshold was corrected and token expiry/audit information is surfaced in the configuration dashboard.
+- Backend initialization failures now show a distinct error state instead of a healthy-looking empty library.
+- Global Tab hijacking was removed so native keyboard focus order works again.
+- Toasts, clear/close buttons, and pill controls gained stronger accessibility labels and live-region behavior.
+- Prompt resubmit cost estimates now guard against stale async responses before paid generation.
+- Modal event containment and overlay layering were hardened for nested dialogs.
+- Export event failures and Tauri asset rasterization issues were fixed.
+- Site CI installs site dependencies and aligns the Rust toolchain before checks.
+
+### Security
+
+- The renderer CSP no longer whitelists unused AI provider hosts.
+- MCP `export_images` output directories are confined to approved home/temp policy roots.
+- The default asset-protocol scope no longer includes `$HOME/.codex/generated_images`.
+- Supply-chain license auditing is wired into release checks.
+
 ## [0.2.1] - 2026-06-04
 
 ### Changed
