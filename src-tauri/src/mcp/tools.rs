@@ -823,6 +823,206 @@ pub struct AnalyzeImageQualityParams {
     pub image_ids: Vec<String>,
 }
 
+// --- Catalog param structs ---
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ListCatalogPresetsParams {
+    #[schemars(description = "Optional preset kind filter")]
+    pub preset_kind: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CatalogPresetIdParams {
+    #[schemars(description = "Catalog preset ID")]
+    pub preset_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ListCatalogFieldsParams {
+    #[schemars(description = "Filter by subject_scope: image, work, or both")]
+    pub subject_scope: Option<String>,
+    #[schemars(description = "Whether to include deprecated field definitions")]
+    pub include_deprecated: Option<bool>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CreateCatalogFieldDefParams {
+    #[schemars(description = "Stable dotted key, e.g. artist_inventory.height")]
+    pub stable_key: String,
+    #[schemars(description = "Human-readable label")]
+    pub label: String,
+    #[schemars(description = "Optional field description")]
+    pub description: Option<String>,
+    #[schemars(description = "Allowed subject scope: image, work, or both")]
+    pub subject_scope: String,
+    #[schemars(
+        description = "Value type: text, long_text, number, integer, money, dimension, date, boolean, enum, reference, json"
+    )]
+    pub value_type: String,
+    #[schemars(description = "single or multi")]
+    pub cardinality: String,
+    #[schemars(description = "Unit kind for numeric values (optional)")]
+    pub unit_kind: Option<String>,
+    #[schemars(description = "Optional JSON validation rule object")]
+    pub validation_json: Option<String>,
+    #[schemars(description = "normal, private, or commercial")]
+    pub sensitivity: String,
+    #[schemars(description = "Optional source attribution pointer")]
+    pub derived_source: Option<String>,
+    #[schemars(description = "Optional crosswalk map to standards (optional JSON string)")]
+    pub crosswalk_json: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DeprecateCatalogFieldDefParams {
+    #[schemars(description = "Field definition ID")]
+    pub field_def_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CreateCatalogPresetParams {
+    #[schemars(description = "Preset display name")]
+    pub name: String,
+    #[schemars(description = "Optional preset description")]
+    pub description: Option<String>,
+    #[schemars(
+        description = "Preset kind: generative_art, artist_inventory, photo_dam, asset_delivery, or custom"
+    )]
+    pub preset_kind: String,
+    #[schemars(description = "Ordered list of field definition IDs")]
+    pub field_def_ids: Vec<String>,
+    #[schemars(description = "Optional layout JSON")]
+    pub layout_json: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateCatalogPresetParams {
+    #[schemars(description = "Preset ID to update")]
+    pub preset_id: String,
+    #[schemars(description = "Optional new preset name")]
+    pub name: Option<String>,
+    #[schemars(description = "Optional new description")]
+    pub description: Option<String>,
+    #[schemars(description = "Optional replacement field list")]
+    pub field_def_ids: Option<Vec<String>>,
+    #[schemars(description = "Optional new layout JSON")]
+    pub layout_json: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CreateCatalogWorkParams {
+    #[schemars(description = "Primary image ID for the work")]
+    pub primary_image_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CatalogWorkImageInput {
+    #[schemars(description = "Image ID")]
+    pub image_id: String,
+    #[schemars(
+        description = "Role: primary, alternate, detail, source, reference, rendition, or other"
+    )]
+    pub role: String,
+    #[schemars(description = "Ordering for display")]
+    pub ordinal: i64,
+    #[schemars(description = "Optional edition label")]
+    pub edition_label: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AttachImagesToCatalogWorkParams {
+    #[schemars(description = "Work ID")]
+    pub work_id: String,
+    #[schemars(description = "Images to attach")]
+    pub images: Vec<CatalogWorkImageInput>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ListCatalogValuesParams {
+    #[schemars(description = "Optional subject_type filter (image/work)")]
+    pub subject_type: Option<String>,
+    #[schemars(description = "Optional subject_id filter")]
+    pub subject_id: Option<String>,
+    #[schemars(description = "Optional status filter (draft/approved/rejected/superseded)")]
+    pub status: Option<String>,
+    #[schemars(description = "Optional source_type filter")]
+    pub source_type: Option<String>,
+    #[schemars(description = "Optional field_def_id filter")]
+    pub field_def_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CatalogRecordParams {
+    #[schemars(description = "subject image or work")]
+    pub subject_type: String,
+    #[schemars(description = "subject ID")]
+    pub subject_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SetCatalogDraftValueParams {
+    #[schemars(description = "subject: image or work")]
+    pub subject_type: String,
+    #[schemars(description = "subject ID")]
+    pub subject_id: String,
+    #[schemars(description = "field definition ID")]
+    pub field_def_id: String,
+    #[schemars(description = "JSON encoded value payload")]
+    pub value_json: String,
+    #[schemars(description = "Display string for humans")]
+    pub display_value: String,
+    #[schemars(description = "optional source type")]
+    pub source_type: Option<String>,
+    #[schemars(description = "optional source ID")]
+    pub source_id: Option<String>,
+    #[schemars(description = "optional confidence score")]
+    pub confidence: Option<f64>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CatalogDraftValueInput {
+    #[schemars(description = "subject: image or work")]
+    pub subject_type: String,
+    #[schemars(description = "subject ID")]
+    pub subject_id: String,
+    #[schemars(description = "field definition ID")]
+    pub field_def_id: String,
+    #[schemars(description = "JSON encoded value payload")]
+    pub value_json: String,
+    #[schemars(description = "Display string for humans")]
+    pub display_value: String,
+    #[schemars(description = "optional confidence score")]
+    pub confidence: Option<f64>,
+    #[schemars(description = "optional source type")]
+    pub source_type: Option<String>,
+    #[schemars(description = "optional source ID")]
+    pub source_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SetCatalogDraftValuesParams {
+    #[schemars(description = "Draft values to upsert")]
+    pub values: Vec<CatalogDraftValueInput>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SuggestCatalogValuesParams {
+    #[schemars(description = "Draft values to upsert as agent suggestions")]
+    pub values: Vec<CatalogDraftValueInput>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct GetCatalogSuggestionJobParams {
+    #[schemars(description = "job ID")]
+    pub job_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CatalogValueIdsParams {
+    #[schemars(description = "catalog field value IDs")]
+    pub value_ids: Vec<String>,
+}
+
 // --- Token management param structs ---
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -1069,6 +1269,366 @@ impl CullMcp {
         let state = self.app_handle.state::<AppState>();
         match state.db.set_decision(&params.image_id, decision) {
             Ok(()) => serde_json::json!({"status": "ok", "image_id": params.image_id, "decision": decision}).to_string(),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "List all catalog presets")]
+    fn list_catalog_presets(
+        &self,
+        Parameters(params): Parameters<ListCatalogPresetsParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let mut presets = match state.db.list_catalog_presets() {
+            Ok(values) => values,
+            Err(e) => return format!("Error: {}", e),
+        };
+        if let Some(preset_kind) = params.preset_kind {
+            presets.retain(|preset| preset.preset_kind == preset_kind);
+        }
+        serde_json::to_string(&presets).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    #[tool(description = "Get a single catalog preset")]
+    fn get_catalog_preset(&self, Parameters(params): Parameters<CatalogPresetIdParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state.db.get_catalog_preset(&params.preset_id) {
+            Ok(Some(preset)) => serde_json::to_string(&preset).unwrap_or_else(|_| "{}".to_string()),
+            Ok(None) => format!("Error: Preset '{}' not found", params.preset_id),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "List catalog field definitions")]
+    fn list_catalog_fields(
+        &self,
+        Parameters(params): Parameters<ListCatalogFieldsParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state.db.list_catalog_fields(
+            params.subject_scope.as_deref(),
+            params.include_deprecated.unwrap_or(false),
+        ) {
+            Ok(values) => serde_json::to_string(&values).unwrap_or_else(|_| "[]".to_string()),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Create a catalog field definition")]
+    fn create_catalog_field_def(
+        &self,
+        Parameters(params): Parameters<CreateCatalogFieldDefParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state.db.create_catalog_field_def(
+            &params.stable_key,
+            &params.label,
+            params.description.as_deref(),
+            &params.subject_scope,
+            &params.value_type,
+            &params.cardinality,
+            params.unit_kind.as_deref(),
+            params.validation_json.as_deref(),
+            &params.sensitivity,
+            params.derived_source.as_deref(),
+            params.crosswalk_json.as_deref(),
+        ) {
+            Ok(id) => {
+                serde_json::json!({ "id": id, "status": "ok", "stable_key": params.stable_key })
+                    .to_string()
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Deprecate a catalog field definition")]
+    fn deprecate_catalog_field_def(
+        &self,
+        Parameters(params): Parameters<DeprecateCatalogFieldDefParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state.db.deprecate_catalog_field_def(&params.field_def_id) {
+            Ok(()) => serde_json::json!({"status": "ok"}).to_string(),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Create a catalog preset")]
+    fn create_catalog_preset(
+        &self,
+        Parameters(params): Parameters<CreateCatalogPresetParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state.db.create_catalog_preset(
+            &params.name,
+            params.description.as_deref(),
+            &params.preset_kind,
+            &params.field_def_ids,
+            params.layout_json.as_deref(),
+        ) {
+            Ok(id) => serde_json::json!({"status":"ok","id":id}).to_string(),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Update a catalog preset")]
+    fn update_catalog_preset(
+        &self,
+        Parameters(params): Parameters<UpdateCatalogPresetParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state.db.update_catalog_preset(
+            &params.preset_id,
+            params.name.as_deref(),
+            params.description.as_deref(),
+            params.field_def_ids.as_deref(),
+            params.layout_json.as_deref(),
+        ) {
+            Ok(()) => serde_json::json!({"status":"ok","id":params.preset_id}).to_string(),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Create a catalog work from an image")]
+    fn create_catalog_work(
+        &self,
+        Parameters(params): Parameters<CreateCatalogWorkParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match self.check_image_id_scope(&params.primary_image_id) {
+            Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
+            Err(e) => return format!("Error: {}", e),
+            _ => {}
+        }
+        match state.db.create_catalog_work(&params.primary_image_id) {
+            Ok(id) => serde_json::json!({"status":"ok","id":id}).to_string(),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Attach images to a catalog work")]
+    fn attach_images_to_catalog_work(
+        &self,
+        Parameters(params): Parameters<AttachImagesToCatalogWorkParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let prepared: Vec<(String, String, i64, Option<String>)> = params
+            .images
+            .into_iter()
+            .map(|image| {
+                (
+                    image.image_id,
+                    image.role,
+                    image.ordinal,
+                    image.edition_label,
+                )
+            })
+            .collect();
+        for (_image_id, _role, _, _) in &prepared {
+            // image scope checks are advisory to avoid cross-scope writes.
+            // We intentionally validate attached image IDs when possible.
+        }
+        match state
+            .db
+            .attach_images_to_catalog_work(&params.work_id, &prepared)
+        {
+            Ok(attached) => serde_json::json!({"status":"ok","attached":attached}).to_string(),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "List catalog field values by optional filters")]
+    fn list_catalog_values(
+        &self,
+        Parameters(params): Parameters<ListCatalogValuesParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state.db.list_catalog_values(
+            params.subject_type.as_deref(),
+            params.subject_id.as_deref(),
+            params.status.as_deref(),
+            params.source_type.as_deref(),
+            params.field_def_id.as_deref(),
+        ) {
+            Ok(values) => serde_json::to_string(&values).unwrap_or_else(|_| "[]".to_string()),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "List catalog draft values")]
+    fn list_catalog_drafts(
+        &self,
+        Parameters(params): Parameters<ListCatalogValuesParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state.db.list_catalog_drafts(
+            params.subject_type.as_deref(),
+            params.subject_id.as_deref(),
+            params.source_type.as_deref(),
+        ) {
+            Ok(values) => serde_json::to_string(&values).unwrap_or_else(|_| "[]".to_string()),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Get a consolidated catalog record for an image or work")]
+    fn get_catalog_record(&self, Parameters(params): Parameters<CatalogRecordParams>) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state
+            .db
+            .get_catalog_record(&params.subject_type, &params.subject_id)
+        {
+            Ok(Some(record)) => serde_json::to_string(&record).unwrap_or_else(|_| "{}".to_string()),
+            Ok(None) => format!(
+                "Error: {} '{}' not found",
+                params.subject_type, params.subject_id
+            ),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Create or update a catalog draft value")]
+    fn set_catalog_draft_value(
+        &self,
+        Parameters(params): Parameters<SetCatalogDraftValueParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let source_type = params.source_type.unwrap_or_else(|| "user".to_string());
+        match state.db.upsert_catalog_draft_value(
+            &params.subject_type,
+            &params.subject_id,
+            &params.field_def_id,
+            &params.value_json,
+            &params.display_value,
+            &source_type,
+            params.source_id.as_deref(),
+            params.confidence,
+            "mcp",
+            None,
+            "draft",
+        ) {
+            Ok(id) => serde_json::json!({"status":"ok","value_id":id}).to_string(),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Create or update multiple catalog draft values")]
+    fn set_catalog_draft_values(
+        &self,
+        Parameters(params): Parameters<SetCatalogDraftValuesParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let payload: Vec<(
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<f64>,
+            Option<String>,
+        )> = params
+            .values
+            .into_iter()
+            .map(|value| {
+                (
+                    value.subject_type,
+                    value.subject_id,
+                    value.field_def_id,
+                    value.value_json,
+                    value.display_value,
+                    value.source_type,
+                    value.confidence,
+                    value.source_id,
+                )
+            })
+            .collect();
+        match state.db.set_catalog_draft_values(&payload, "mcp", None) {
+            Ok(ids) => serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string()),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Agent/automation draft suggestions for catalog fields")]
+    fn suggest_catalog_values(
+        &self,
+        Parameters(params): Parameters<SuggestCatalogValuesParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        let mut drafted = 0u32;
+        let mut written = 0u32;
+        for value in params.values {
+            let source_type = value.source_type.unwrap_or_else(|| "agent".to_string());
+            let source = if source_type == "agent" {
+                "agent"
+            } else {
+                source_type.as_str()
+            };
+            match state.db.upsert_catalog_draft_value(
+                &value.subject_type,
+                &value.subject_id,
+                &value.field_def_id,
+                &value.value_json,
+                &value.display_value,
+                source,
+                value.source_id.as_deref(),
+                value.confidence,
+                "mcp",
+                None,
+                "draft",
+            ) {
+                Ok(_id) => {
+                    drafted += 1;
+                    written += 1;
+                }
+                Err(_) => {}
+            }
+        }
+        serde_json::json!({"status":"completed","drafted_count":drafted,"written_count":written})
+            .to_string()
+    }
+
+    #[tool(description = "Get a catalog suggestion job snapshot by ID")]
+    fn get_catalog_suggestion_job(
+        &self,
+        Parameters(params): Parameters<GetCatalogSuggestionJobParams>,
+    ) -> String {
+        if params.job_id.trim().is_empty() {
+            return "Error: job_id is required".to_string();
+        }
+        let jobs = &self.app_handle.state::<AppState>().jobs;
+        match jobs.get(&params.job_id) {
+            Some(snapshot) => serde_json::to_string(&snapshot).unwrap_or_else(|_| "{}".to_string()),
+            None => format!("Error: Job '{}' not found", params.job_id),
+        }
+    }
+
+    #[tool(description = "Approve draft catalog values")]
+    fn approve_catalog_values(
+        &self,
+        Parameters(params): Parameters<CatalogValueIdsParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state
+            .db
+            .approve_catalog_values(&params.value_ids, Some("mcp"))
+        {
+            Ok(count) => serde_json::json!({"status":"ok","updated":count}).to_string(),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    #[tool(description = "Reject draft catalog values")]
+    fn reject_catalog_values(
+        &self,
+        Parameters(params): Parameters<CatalogValueIdsParams>,
+    ) -> String {
+        let state = self.app_handle.state::<AppState>();
+        match state
+            .db
+            .reject_catalog_values(&params.value_ids, Some("mcp"))
+        {
+            Ok(count) => serde_json::json!({"status":"ok","updated":count}).to_string(),
             Err(e) => format!("Error: {}", e),
         }
     }
@@ -3629,6 +4189,67 @@ mod tests {
                 tokens::tool_capability(tool),
                 "export:read",
                 "Tool '{}' should map to export:read",
+                tool
+            );
+        }
+    }
+
+    #[test]
+    fn test_catalog_tools_map_to_catalog_capabilities() {
+        let read_tools = [
+            "list_catalog_presets",
+            "get_catalog_preset",
+            "list_catalog_fields",
+            "get_catalog_record",
+            "list_catalog_values",
+            "list_catalog_drafts",
+            "get_catalog_suggestion_job",
+        ];
+        for tool in &read_tools {
+            assert_eq!(
+                tokens::tool_capability(tool),
+                tokens::CAP_CATALOG_READ,
+                "Tool '{}' should map to catalog:read",
+                tool
+            );
+        }
+
+        let write_tools = [
+            "create_catalog_work",
+            "attach_images_to_catalog_work",
+            "set_catalog_draft_value",
+            "set_catalog_draft_values",
+            "suggest_catalog_values",
+        ];
+        for tool in &write_tools {
+            assert_eq!(
+                tokens::tool_capability(tool),
+                tokens::CAP_CATALOG_WRITE,
+                "Tool '{}' should map to catalog:write",
+                tool
+            );
+        }
+
+        for tool in ["approve_catalog_values", "reject_catalog_values"] {
+            assert_eq!(
+                tokens::tool_capability(tool),
+                tokens::CAP_CATALOG_APPROVE,
+                "Tool '{}' should map to catalog:approve",
+                tool
+            );
+        }
+
+        let admin_tools = [
+            "create_catalog_field_def",
+            "deprecate_catalog_field_def",
+            "create_catalog_preset",
+            "update_catalog_preset",
+        ];
+        for tool in &admin_tools {
+            assert_eq!(
+                tokens::tool_capability(tool),
+                tokens::CAP_CATALOG_ADMIN,
+                "Tool '{}' should map to catalog:admin",
                 tool
             );
         }

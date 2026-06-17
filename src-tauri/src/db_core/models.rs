@@ -15,6 +15,136 @@ pub struct Image {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaAsset {
+    pub id: String,
+    pub media_type: String,
+    pub primary_image_id: String,
+    pub sha256_hash: String,
+    pub format: String,
+    pub file_size: u64,
+    pub page_count: Option<u32>,
+    pub title: Option<String>,
+    pub created_at: String,
+    pub imported_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaFile {
+    pub id: String,
+    pub media_asset_id: String,
+    pub path: String,
+    pub last_seen_at: String,
+    pub missing_at: Option<String>,
+    pub last_seen_size: Option<u64>,
+    pub last_seen_mtime: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogWork {
+    pub id: String,
+    pub primary_image_id: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogWorkImage {
+    pub id: String,
+    pub work_id: String,
+    pub image_id: String,
+    pub role: String,
+    pub ordinal: i64,
+    pub edition_label: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogFieldDef {
+    pub id: String,
+    pub stable_key: String,
+    pub label: String,
+    pub description: Option<String>,
+    pub subject_scope: String,
+    pub value_type: String,
+    pub cardinality: String,
+    pub unit_kind: Option<String>,
+    pub validation_json: Option<String>,
+    pub sensitivity: String,
+    pub derived_source: Option<String>,
+    pub crosswalk_json: Option<String>,
+    pub version: i64,
+    pub supersedes_field_def_id: Option<String>,
+    pub created_at: String,
+    pub deprecated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogPreset {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub preset_kind: String,
+    pub field_def_ids_json: String,
+    pub layout_json: Option<String>,
+    pub version: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogFieldValue {
+    pub id: String,
+    pub subject_type: String,
+    pub subject_id: String,
+    pub field_def_id: String,
+    pub value_json: String,
+    pub display_value: String,
+    pub source_type: String,
+    pub source_id: Option<String>,
+    pub confidence: Option<f64>,
+    pub status: String,
+    pub approved_by: Option<String>,
+    pub approved_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogValueEvent {
+    pub id: String,
+    pub value_id: String,
+    pub event_type: String,
+    pub actor_type: String,
+    pub actor_id: Option<String>,
+    pub before_json: Option<String>,
+    pub after_json: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogRecord {
+    pub subject_type: String,
+    pub subject_id: String,
+    pub work: Option<CatalogWork>,
+    pub work_images: Vec<CatalogWorkImage>,
+    pub values: Vec<CatalogFieldValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PdfPage {
+    pub id: String,
+    pub media_asset_id: String,
+    pub page_index: u32,
+    pub width_points: Option<f64>,
+    pub height_points: Option<f64>,
+    pub thumbnail_path: Option<String>,
+    pub preview_path: Option<String>,
+    pub extracted_text: Option<String>,
+    pub text_extracted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageFile {
     pub id: String,
     pub image_id: String,

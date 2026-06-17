@@ -68,6 +68,7 @@ pub fn sync_file(
 
     let path_str = file_path.to_string_lossy().to_string();
     let can_decode = crate::extensions::is_decodable(&ext, module_raw);
+    let is_document = crate::extensions::is_document_extension(&ext);
 
     if let Some(existing_file) = db
         .get_image_file_by_path(&path_str)
@@ -102,8 +103,8 @@ pub fn sync_file(
                     SyncOutcome::Unchanged
                 });
             }
-            let _ = db.repoint_image_file(&existing_file.id, &img.id, file_size, &mtime);
             if can_decode {
+                let _ = db.repoint_image_file(&existing_file.id, &img.id, file_size, &mtime);
                 match crate::db_core::image_decode::decode_image(file_path, module_raw) {
                     Ok(decoded) => {
                         let _ = thumbnails::generate_thumbnail_from_image(
@@ -116,6 +117,11 @@ pub fn sync_file(
                         crate::safe_eprintln!("Thumbnail decode failed for {}: {}", path_str, e)
                     }
                 }
+            } else if is_document {
+                validate_pdf_import(file_path)?;
+                let _ = db.repoint_image_file(&existing_file.id, &img.id, file_size, &mtime);
+                let _ = thumbnails::generate_document_thumbnail(file_path, app_data_dir, &img.id);
+                persist_pdf_media_metadata(db, file_path, &img.id)?;
             }
             return Ok(SyncOutcome::ContentChanged { image_id: img.id });
         }
@@ -173,6 +179,10 @@ pub fn sync_file(
 
     // New content: only now read the bytes (source detection / decode need them).
     let data = fs::read(file_path).map_err(|e| format!("Read error: {}", e))?;
+    if is_document {
+        validate_pdf_import(file_path)?;
+    }
+
     let (image_id, decoded) =
         create_image_record(db, file_path, &hash, &ext, &data, can_decode, module_raw)?;
     let file_record = ImageFile {
@@ -207,9 +217,94 @@ pub fn sync_file(
         run_perceptual_hash(db, file_path, &image_id, decoded.as_ref().map(|d| &d.image));
         run_color_metrics(db, file_path, &image_id, decoded.as_ref().map(|d| &d.image));
         Ok(SyncOutcome::NewImport { image_id })
+    } else if is_document {
+        let _ = thumbnails::generate_document_thumbnail(file_path, app_data_dir, &image_id);
+        persist_pdf_media_metadata(db, file_path, &image_id)?;
+        Ok(SyncOutcome::NewImport { image_id })
     } else {
         Ok(SyncOutcome::Registered)
     }
+}
+
+fn validate_pdf_import(file_path: &Path) -> Result<(), String> {
+    let mut file =
+        std::fs::File::open(file_path).map_err(|e| format!("Invalid PDF file: {}", e))?;
+    let mut buffer = [0u8; 1024];
+    let bytes_read = std::io::Read::read(&mut file, &mut buffer)
+        .map_err(|e| format!("Invalid PDF file: {}", e))?;
+
+    if bytes_read < b"%PDF-".len()
+        || !buffer[..bytes_read]
+            .windows(b"%PDF-".len())
+            .any(|window| window == b"%PDF-")
+    {
+        return Err("Invalid PDF file: missing PDF header".to_string());
+    }
+
+    Ok(())
+}
+
+fn persist_pdf_media_metadata(
+    db: &Database,
+    file_path: &Path,
+    image_id: &str,
+) -> Result<(), String> {
+    let media_asset = match db
+        .media_asset_for_image(image_id)
+        .map_err(|e| e.to_string())?
+    {
+        Some(asset) => asset,
+        None => return Ok(()),
+    };
+
+    let page_count = match thumbnails::read_pdf_page_count(file_path) {
+        Ok(count) => count,
+        Err(_) => return Ok(()),
+    };
+
+    db.set_media_asset_page_count_by_image_id(image_id, page_count)
+        .map_err(|e| e.to_string())?;
+
+    let metrics = thumbnails::read_pdf_page_metrics(file_path).unwrap_or_else(|_| {
+        (0..page_count)
+            .map(|page_index| (page_index, None, None))
+            .collect()
+    });
+    let page_texts = thumbnails::read_pdf_page_texts(file_path).unwrap_or_else(|_| {
+        (0..page_count)
+            .map(|page_index| (page_index, None))
+            .collect()
+    });
+    let media_title = thumbnails::read_pdf_title(file_path).unwrap_or(None);
+
+    db.clear_pdf_pages(&media_asset.id)
+        .map_err(|e| e.to_string())?;
+
+    if let Some(title) = media_title {
+        db.set_media_asset_title_by_image_id(image_id, &title)
+            .map_err(|e| e.to_string())?;
+    }
+
+    for (page_index, width_points, height_points) in metrics {
+        let extracted_text = page_texts
+            .iter()
+            .find(|(index, _)| *index == page_index)
+            .and_then(|(_, text)| text.clone());
+        let page = crate::db_core::models::PdfPage {
+            id: format!("pp_{}_{}", media_asset.id, page_index),
+            media_asset_id: media_asset.id.clone(),
+            page_index,
+            width_points,
+            height_points,
+            thumbnail_path: None,
+            preview_path: None,
+            extracted_text,
+            text_extracted_at: Some(Utc::now().to_rfc3339()),
+        };
+        db.upsert_pdf_page(&page).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }
 
 pub fn import_file(
@@ -241,10 +336,14 @@ fn create_image_record(
     } else {
         None
     };
-    let (width, height) = decoded
-        .as_ref()
-        .map(|d| (d.image.width(), d.image.height()))
-        .unwrap_or((0, 0));
+    let (width, height) = if crate::extensions::is_document_extension(ext) {
+        (DOCUMENT_PREVIEW_DIMENSION, DOCUMENT_PREVIEW_DIMENSION)
+    } else {
+        decoded
+            .as_ref()
+            .map(|d| (d.image.width(), d.image.height()))
+            .unwrap_or((0, 0))
+    };
 
     let image_id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
@@ -272,6 +371,8 @@ fn compute_hash(data: &[u8]) -> String {
     hasher.update(data);
     format!("{:x}", hasher.finalize())
 }
+
+const DOCUMENT_PREVIEW_DIMENSION: u32 = 1200;
 
 /// Upper bound on files we will read fully into memory during import. Pathological
 /// or malicious TIFF/PSD/RAW/GIF can be enormous; reject them up front rather than
@@ -410,6 +511,7 @@ fn run_color_metrics(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::params;
     use std::io::Write;
 
     #[test]
@@ -446,6 +548,90 @@ mod tests {
         let path = dir.path().join("empty.bin");
         std::fs::File::create(&path).unwrap();
         assert_eq!(hash_file(&path).unwrap(), compute_hash(&[]));
+    }
+
+    #[test]
+    fn pdf_import_returns_image_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        let app_data_dir = dir.path().join("app-data");
+
+        let pdf_path = dir.path().join("report.pdf");
+        std::fs::write(&pdf_path, b"%PDF-1.4 minimal").unwrap();
+
+        let image_id = import_file(&db, &pdf_path, &app_data_dir).unwrap().unwrap();
+        let items = db.list_images(10, 0).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].image.id, image_id);
+        assert_eq!(items[0].image.format, "pdf");
+        assert_eq!(items[0].image.width, 1200);
+        assert_eq!(items[0].image.height, 1200);
+    }
+
+    #[test]
+    fn pdf_import_generates_preview_thumbnail() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        let app_data_dir = dir.path().join("app-data");
+
+        let pdf_path = dir.path().join("previewable.pdf");
+        std::fs::write(&pdf_path, b"%PDF-1.7 preview").unwrap();
+
+        let image_id = import_file(&db, &pdf_path, &app_data_dir).unwrap().unwrap();
+
+        assert!(crate::db_core::thumbnails::thumbnail_path(&app_data_dir, &image_id).exists());
+    }
+
+    #[test]
+    fn pdf_import_populates_media_catalog() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        let app_data_dir = dir.path().join("app-data");
+
+        let pdf_path = dir.path().join("manual.pdf");
+        std::fs::write(&pdf_path, b"%PDF-1.4 manual test").unwrap();
+
+        let image_id = import_file(&db, &pdf_path, &app_data_dir).unwrap().unwrap();
+        let media_asset_id = db.media_asset_id_for_image_id(&image_id).unwrap().unwrap();
+        assert!(media_asset_id.starts_with("ma_"));
+
+        let (media_type, media_asset_path_count): (String, u32) = {
+            let conn = db.conn.lock();
+            let media_type: String = conn
+                .query_row(
+                    "SELECT media_type FROM media_assets WHERE id = ?1",
+                    params![&media_asset_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let media_asset_path_count: u32 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM media_files WHERE media_asset_id = ?1",
+                    params![&media_asset_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            (media_type, media_asset_path_count)
+        };
+
+        assert_eq!(media_type, "pdf");
+        assert_eq!(media_asset_path_count, 1);
+    }
+
+    #[test]
+    fn pdf_import_rejects_invalid_pdf_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        let app_data_dir = dir.path().join("app-data");
+
+        let pdf_path = dir.path().join("broken.pdf");
+        std::fs::write(&pdf_path, b"not-a-pdf").unwrap();
+
+        let result = import_file(&db, &pdf_path, &app_data_dir);
+        assert!(result.is_err());
+
+        let items = db.list_images(10, 0).unwrap();
+        assert_eq!(items.len(), 0);
     }
 
     #[test]

@@ -24,4 +24,10 @@ commands.allow = [
   "revoke_mcp_token",
   "rotate_mcp_token",
   "set_app_setting",
+  "create_catalog_field_def",
+  "create_catalog_preset",
+  "deprecate_catalog_field_def",
+  "update_catalog_preset",
+  "approve_catalog_values",
+  "reject_catalog_values",
 ]

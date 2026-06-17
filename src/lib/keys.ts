@@ -944,6 +944,17 @@ function handleLoupeKeys(e: KeyboardEvent) {
         }
         return;
     }
+
+    if (e.key === 'PageUp' || e.key === 'PageDown') {
+        const img = get(focusedImage);
+        if (!img || img.image.format.toLowerCase() !== 'pdf') {
+            return;
+        }
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent(e.key === 'PageUp' ? 'loupe-pdf-page-prev' : 'loupe-pdf-page-next'));
+        return;
+    }
+
     if (e.key === 'c' && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent('enter-crop-mode'));
