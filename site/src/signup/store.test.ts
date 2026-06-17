@@ -21,6 +21,23 @@ describe("MemorySignupStore", () => {
     await expect(store.getPendingByEmailHash("email-hash")).resolves.toEqual(pending);
   });
 
+  it("replaces pending signups for the same email hash", async () => {
+    const store = new MemorySignupStore();
+    const replacement: PendingSignup = {
+      ...pending,
+      tokenHash: "replacement-token-hash",
+      createdAt: "2026-06-16T00:01:00.000Z",
+    };
+
+    await store.savePending(pending);
+    await store.savePending(replacement);
+
+    await expect(store.getPending("token-hash")).resolves.toBeNull();
+    await expect(store.getPending("replacement-token-hash")).resolves.toEqual(replacement);
+    await expect(store.getPendingByEmailHash("email-hash")).resolves.toEqual(replacement);
+    expect(store.pending.size).toBe(1);
+  });
+
   it("deletes pending signups from both indexes", async () => {
     const store = new MemorySignupStore();
     await store.savePending(pending);

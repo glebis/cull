@@ -34,6 +34,10 @@ export class MemorySignupStore implements SignupStore {
   }
 
   async savePending(record: PendingSignup): Promise<void> {
+    const existingTokenHash = this.pendingByEmail.get(record.emailHash);
+    if (existingTokenHash && existingTokenHash !== record.tokenHash) {
+      this.pending.delete(existingTokenHash);
+    }
     this.pending.set(record.tokenHash, record);
     this.pendingByEmail.set(record.emailHash, record.tokenHash);
   }
@@ -71,10 +75,16 @@ export class VercelBlobSignupStore implements SignupStore {
   }
 
   async savePending(record: PendingSignup): Promise<void> {
+    const existing = await this.getPendingByEmailHash(record.emailHash);
+
     await Promise.all([
       writeJson(pendingPath(record.tokenHash), record),
       writeJson(pendingEmailPath(record.emailHash), { tokenHash: record.tokenHash }),
     ]);
+
+    if (existing && existing.tokenHash !== record.tokenHash) {
+      await del(pendingPath(existing.tokenHash));
+    }
   }
 
   async deletePending(record: PendingSignup): Promise<void> {

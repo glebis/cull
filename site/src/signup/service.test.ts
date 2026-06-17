@@ -75,7 +75,11 @@ describe("subscribe", () => {
     await subscribe({ email: "gleb@example.com", now: new Date("2026-06-16T00:01:00.000Z") }, store, sender, config);
     const second = await store.getPendingByEmailHash(hashEmail("gleb@example.com", secret));
 
-    expect(first?.tokenHash).not.toBe(second?.tokenHash);
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    expect(first!.tokenHash).not.toBe(second!.tokenHash);
+    await expect(store.getPending(first!.tokenHash)).resolves.toBeNull();
+    expect(store.pending.size).toBe(1);
     expect(sender.sent).toHaveLength(2);
   });
 

@@ -123,7 +123,17 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <p class="eyebrow">early access</p>
         <h2 id="privacy-title">Be first when it ships</h2>
       </div>
-      <p class="reveal-item reveal-delay-2">One confirmation email. That is it.</p>
+      <div class="bottom-signup-copy reveal-item reveal-delay-2">
+        <form class="signup-form signup-form--featured signup-form--bottom" data-signup-form>
+          <label for="bottom-email">Get early builds and the open-source launch update.</label>
+          <div class="signup-row">
+            <input id="bottom-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="bottom-signup-status" required />
+            <button type="submit" data-submit-button>Get notified</button>
+          </div>
+          <p id="bottom-signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
+        </form>
+        <p>One confirmation email. That is it.</p>
+      </div>
     </section>
 
     <figure class="footer-illustration reveal-surface" aria-label="Image workflow from local archive to agent surfaces" data-reveal>

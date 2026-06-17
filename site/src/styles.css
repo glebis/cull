@@ -209,6 +209,10 @@ h3 {
   color: var(--green);
 }
 
+.signup-form--bottom {
+  margin-top: 0;
+}
+
 .signup-form label {
   color: var(--text);
   font-family: var(--header-font);
@@ -482,7 +486,7 @@ input:focus-visible {
 .feature-note p,
 .open-source-note p,
 .workflow p,
-.bottom-signup p {
+.bottom-signup-copy > p {
   margin: 0;
   color: var(--text-secondary);
   font-size: 14px;
@@ -650,9 +654,16 @@ input:focus-visible {
   line-height: 0.96;
 }
 
-.bottom-signup p:last-child {
+.bottom-signup-copy {
+  display: grid;
+  gap: calc(var(--spacing) * 2.5);
   max-width: 620px;
-  padding-top: calc(var(--spacing) * 4);
+  min-width: 0;
+}
+
+.bottom-signup-copy > p {
+  max-width: 620px;
+  padding-top: calc(var(--spacing) * 1.5);
   color: var(--text);
   font-family: var(--serif-font);
   font-size: clamp(24px, 3vw, 34px);
@@ -895,7 +906,7 @@ input:focus-visible {
   .claims p,
   .feature-note p,
   .open-source-note p,
-  .bottom-signup p {
+  .bottom-signup-copy > p {
     max-width: 100%;
     overflow-wrap: anywhere;
   }
@@ -943,7 +954,7 @@ input:focus-visible {
     gap: calc(var(--spacing) * 4);
   }
 
-  .bottom-signup p:last-child {
+  .bottom-signup-copy > p {
     max-width: 100%;
     font-size: 25px;
   }
