@@ -42,6 +42,16 @@ export function computeCanvasWheelZoom(
     maxZoom = DEFAULT_MAX_ZOOM,
 ): CanvasViewportTransform {
     const factor = deltaY > 0 ? 0.9 : 1.1;
+    return computeCanvasZoomAtPoint(viewport, pointer, factor, minZoom, maxZoom);
+}
+
+export function computeCanvasZoomAtPoint(
+    viewport: CanvasViewportTransform,
+    pointer: CanvasPoint,
+    factor: number,
+    minZoom = DEFAULT_MIN_ZOOM,
+    maxZoom = DEFAULT_MAX_ZOOM,
+): CanvasViewportTransform {
     const newZoom = clamp(viewport.zoom * factor, minZoom, maxZoom);
     if (viewport.zoom === 0) {
         return { ...viewport, zoom: newZoom };
