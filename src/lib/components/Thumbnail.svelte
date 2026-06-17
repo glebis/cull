@@ -1,7 +1,7 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
     import type { ImageWithFile } from '$lib/api';
-    import { regenerateSingleThumbnail } from '$lib/api';
+    import { getMediaAssetForImage, regenerateSingleThumbnail } from '$lib/api';
     import { recordImageLoadFailure } from '$lib/diagnostics';
     import { buildThumbnailAriaLabel, safeAssetPreviewPath } from '$lib/view-utils';
     import ContextMenu from './ContextMenu.svelte';
@@ -58,6 +58,33 @@
     );
     let imgError = $state(false);
     let regenerating = $state(false);
+    let pdfPageCount = $state<number | null>(null);
+    let pageLookupSeq = $state(0);
+    const isPdf = $derived(item.image.format.toLowerCase() === 'pdf');
+
+    $effect(() => {
+        const imageId = item.image.id;
+
+        if (!isPdf) {
+            pdfPageCount = null;
+            return;
+        }
+
+        const seq = ++pageLookupSeq;
+        getMediaAssetForImage(imageId).then(asset => {
+            if (seq !== pageLookupSeq) return;
+            if (item.image.id !== imageId) return;
+            pdfPageCount = asset?.page_count ?? null;
+        }).catch(() => {
+            if (seq === pageLookupSeq && item.image.id === imageId) {
+                pdfPageCount = null;
+            }
+        });
+    });
+
+    const formatBadge = $derived(
+        isPdf && pdfPageCount ? `PDF · ${pdfPageCount}p` : isPdf ? 'PDF' : null
+    );
 
     let borderClass = $derived(
         focused ? 'focused' : selected ? 'selected' : ''
@@ -136,6 +163,10 @@
         <img {src} alt={filename} {loading} decoding="async" draggable="false" onerror={handleImgError} />
     {:else}
         <div class="fallback-text">{filename}</div>
+    {/if}
+
+    {#if formatBadge}
+        <div class="pdf-badge">{formatBadge}</div>
     {/if}
 
     {#if item.missing_at}
@@ -255,6 +286,19 @@
         color: var(--purple, #bb9af7);
         backdrop-filter: blur(4px);
         line-height: 1.4;
+    }
+    .pdf-badge {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        font-size: 9px;
+        line-height: 1.2;
+        padding: 2px 5px;
+        border-radius: 3px;
+        background: rgba(0, 0, 0, 0.7);
+        color: var(--blue);
+        letter-spacing: 0.02em;
+        font-weight: 600;
     }
     .badge {
         position: absolute;

@@ -5,6 +5,8 @@ pub const BASE_IMAGE_EXTENSIONS: &[&str] = &[
     "jxl", "ico", "psd",
 ];
 
+pub const DOCUMENT_EXTENSIONS: &[&str] = &["pdf"];
+
 pub const RAW_EXTENSIONS: &[&str] = &["cr2", "cr3", "nef", "arw", "dng", "orf", "raf", "rw2"];
 
 pub const IMAGE_CRATE_DECODABLE_EXTENSIONS: &[&str] = &[
@@ -19,6 +21,7 @@ pub const PLATFORM_DECODABLE_EXTENSIONS: &[&str] = &[];
 
 pub fn supported_extensions(module_raw: bool) -> Vec<&'static str> {
     let mut exts = BASE_IMAGE_EXTENSIONS.to_vec();
+    exts.extend_from_slice(DOCUMENT_EXTENSIONS);
     if module_raw {
         exts.extend_from_slice(RAW_EXTENSIONS);
     }
@@ -35,9 +38,14 @@ pub fn is_image_path(path: &Path, module_raw: bool) -> bool {
         .map(|ext| {
             let lower = ext.to_lowercase();
             BASE_IMAGE_EXTENSIONS.contains(&lower.as_str())
+                || DOCUMENT_EXTENSIONS.contains(&lower.as_str())
                 || (module_raw && RAW_EXTENSIONS.contains(&lower.as_str()))
         })
         .unwrap_or(false)
+}
+
+pub fn is_document_extension(ext: &str) -> bool {
+    DOCUMENT_EXTENSIONS.contains(&ext.to_lowercase().as_str())
 }
 
 pub fn is_decodable(ext: &str, module_raw: bool) -> bool {
@@ -58,7 +66,7 @@ pub fn is_platform_only_decodable(ext: &str) -> bool {
 }
 
 pub fn should_use_thumbnail_for_ml(ext: &str) -> bool {
-    is_raw_extension(ext) || is_platform_only_decodable(ext)
+    is_raw_extension(ext) || is_platform_only_decodable(ext) || is_document_extension(ext)
 }
 
 #[cfg(test)]
@@ -99,6 +107,26 @@ mod tests {
     }
 
     #[test]
+    fn supported_extensions_includes_pdf() {
+        let exts = supported_extensions(false);
+        assert!(exts.contains(&"pdf"));
+    }
+
+    #[test]
+    fn is_document_extension_checks() {
+        assert!(is_document_extension("pdf"));
+        assert!(is_document_extension("PDF"));
+        assert!(!is_document_extension("jpg"));
+    }
+
+    #[test]
+    fn is_image_path_recognizes_document_extensions() {
+        assert!(is_image_path(Path::new("report.pdf"), false));
+        assert!(is_image_path(Path::new("report.PDF"), false));
+        assert!(!is_image_path(Path::new("notes.txt"), false));
+    }
+
+    #[test]
     fn is_image_path_respects_module() {
         assert!(is_image_path(Path::new("photo.jpg"), false));
         assert!(!is_image_path(Path::new("photo.raf"), false));
@@ -116,6 +144,11 @@ mod tests {
         assert!(is_decodable("bmp", false));
         assert!(is_decodable("tif", false));
         assert!(is_decodable("ico", false));
+    }
+
+    #[test]
+    fn should_use_thumbnail_for_ml_includes_documents() {
+        assert!(should_use_thumbnail_for_ml("pdf"));
     }
 
     #[cfg(target_os = "macos")]

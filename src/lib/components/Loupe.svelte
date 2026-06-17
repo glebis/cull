@@ -3,9 +3,19 @@
     import { onMount } from 'svelte';
     import ContextMenu from './ContextMenu.svelte';
     import PromptResubmitDialog from './PromptResubmitDialog.svelte';
-    import { images, focusedIndex, focusedImage, statusHint, showLoupeHistogram, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
-    import { getDetections, getVisionMetadata, cropImage, getImagesByIds, getGenerationRun, getImageHistogram, isRawFormat } from '$lib/api';
-    import type { Detection, GenerationRun, ImageHistogram } from '$lib/api';
+    import { images, focusedIndex, focusedImage, showLoupeHistogram, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
+    import {
+        getDetections,
+        getVisionMetadata,
+        cropImage,
+        getImagesByIds,
+        getGenerationRun,
+        getImageHistogram,
+        isRawFormat,
+        getMediaAssetForImage,
+        listPdfPages,
+    } from '$lib/api';
+    import type { Detection, GenerationRun, ImageHistogram, ImageWithFile, MediaAsset, PdfPage } from '$lib/api';
     import { focusImagePath } from '$lib/transform-results';
     import {
         clientToImagePoint,
@@ -28,10 +38,40 @@
     let image = $derived($focusedImage);
     let isRaw = $derived(isRawFormat(image?.image.format ?? ''));
     let sourceLoadFailed = $state(false);
-    let previewPath = $derived(image ? chooseLoupeImagePath(image, isRaw, sourceLoadFailed) : null);
-    let src = $derived(previewPath ? convertFileSrc(previewPath) : '');
+    let mediaAsset = $state<MediaAsset | null>(null);
+    let pdfPages = $state<PdfPage[]>([]);
+    let pdfPageIndex = $state(0);
+    let pdfLookupSeq = $state(0);
+    let isPdf = $derived(image?.image.format.toLowerCase() === 'pdf');
     let filename = $derived(image?.path.split('/').pop() ?? '');
     let dimensions = $derived(image ? `${image.image.width}x${image.image.height}` : '');
+    let pdfDimensionLabel = $derived(
+        isPdf && pdfPages.length > 0
+            ? (() => {
+                const page = pdfPages[Math.min(pdfPageIndex, pdfPages.length - 1)];
+                if (!page?.width_points || !page.height_points) return null;
+                return `${Math.round(page.width_points)}x${Math.round(page.height_points)}`;
+            })()
+            : null
+    );
+    let infoDimensions = $derived(pdfDimensionLabel || dimensions);
+    let pdfPageCount = $derived(mediaAsset?.page_count ?? pdfPages.length);
+    let pdfCurrentPageLabel = $derived(
+        isPdf && pdfPageCount > 0 ? `Page ${pdfPageIndex + 1}/${pdfPageCount}` : null
+    );
+    let previewPath = $derived(
+        image
+            ? chooseLoupeImagePathWithPdf(
+                image,
+                isRaw,
+                sourceLoadFailed,
+                isPdf,
+                pdfPages,
+                pdfPageIndex
+            )
+            : null
+    );
+    let src = $derived(previewPath ? convertFileSrc(previewPath) : '');
     let format = $derived(image?.image.format ?? '');
     let rating = $derived(image?.selection?.star_rating ?? 0);
     let decision = $derived(image?.selection?.decision ?? 'undecided');
@@ -133,11 +173,15 @@
         }
         window.addEventListener('image-updated', handleImageUpdated);
         window.addEventListener('enter-crop-mode', enterCropMode);
+        window.addEventListener('loupe-pdf-page-prev', handlePdfPagePrev);
+        window.addEventListener('loupe-pdf-page-next', handlePdfPageNext);
 
         return () => {
             window.removeEventListener('toggle-loupe-overlays', toggleOverlays);
             window.removeEventListener('image-updated', handleImageUpdated);
             window.removeEventListener('enter-crop-mode', enterCropMode);
+            window.removeEventListener('loupe-pdf-page-prev', handlePdfPagePrev);
+            window.removeEventListener('loupe-pdf-page-next', handlePdfPageNext);
         };
     });
 
@@ -175,6 +219,46 @@
         });
     });
 
+    function chooseLoupeImagePathWithPdf(
+        currentImage: ImageWithFile | null,
+        currentIsRaw: boolean,
+        failedToLoad: boolean,
+        currentIsPdf: boolean,
+        pages: PdfPage[],
+        pageIndex: number,
+    ): string | null {
+        if (!currentImage) return null;
+
+        if (currentIsPdf) {
+            if (!failedToLoad && pages.length > 0) {
+                const clampedIndex = Math.max(0, Math.min(pageIndex, pages.length - 1));
+                const page = pages[clampedIndex];
+                if (!page) return null;
+
+                if (page.preview_path) {
+                    return page.preview_path;
+                }
+
+                if (page.thumbnail_path) {
+                    return page.thumbnail_path;
+                }
+            }
+
+            return currentImage.thumbnail_path;
+        }
+
+        return safeChooseLoupeImagePath(currentImage, currentIsRaw, failedToLoad);
+    }
+
+    function safeChooseLoupeImagePath(
+        currentImage: ImageWithFile | null,
+        currentIsRaw: boolean,
+        failedToLoad: boolean,
+    ): string | null {
+        if (!currentImage) return null;
+        return chooseLoupeImagePath(currentImage, currentIsRaw, failedToLoad);
+    }
+
     let shouldBlur = $derived(
         $nsfwMode === 'blur' && !spaceHeld && detectionsLoaded && isNsfw
     );
@@ -190,10 +274,74 @@
     }
 
     $effect(() => {
-        const info = `${filename} | ${dimensions} | ${format}`;
-        statusHint.set(info);
-        return () => statusHint.set(null);
+        const current = image;
+        const imageId = current?.image.id;
+
+        if (!current || !isPdf) {
+            pdfLookupSeq = 0;
+            mediaAsset = null;
+            pdfPages = [];
+            pdfPageIndex = 0;
+            return;
+        }
+
+        const seq = ++pdfLookupSeq;
+        mediaAsset = null;
+        pdfPages = [];
+        pdfPageIndex = 0;
+
+        getMediaAssetForImage(imageId).then(asset => {
+            if (seq !== pdfLookupSeq || image?.image.id !== imageId) return;
+            mediaAsset = asset;
+            if (!asset) return;
+            return listPdfPages(asset.id);
+        }).then(pages => {
+            if (!pages) return;
+            if (seq !== pdfLookupSeq || image?.image.id !== imageId) return;
+            pdfPages = pages;
+            pdfPageIndex = 0;
+        }).catch(() => {
+            if (seq === pdfLookupSeq && image?.image.id === imageId) {
+                pdfPages = [];
+                pdfPageIndex = 0;
+            }
+        });
     });
+
+    function hasPdfPages() {
+        return isPdf && pdfPageCount > 0;
+    }
+
+    function clampPdfPageIndex(nextIndex: number) {
+        if (!hasPdfPages()) return 0;
+        return Math.max(0, Math.min(nextIndex, pdfPageCount - 1));
+    }
+
+    function setPdfPage(delta: number) {
+        if (!hasPdfPages()) {
+            return;
+        }
+
+        const clamped = clampPdfPageIndex(pdfPageIndex + delta);
+        if (clamped === pdfPageIndex) {
+            return;
+        }
+
+        pdfPageIndex = clamped;
+        sourceLoadFailed = false;
+        loupePanX.set(0);
+        loupePanY.set(0);
+    }
+
+    function handlePdfPagePrev() {
+        if (!isPdf) return;
+        setPdfPage(-1);
+    }
+
+    function handlePdfPageNext() {
+        if (!isPdf) return;
+        setPdfPage(1);
+    }
 
     // Reset pan (but keep zoom) when image changes
     let prevImageId = $state('');
@@ -211,9 +359,9 @@
         const current = image;
         if (!current) return;
 
-        const currentPath = chooseLoupeImagePath(current, isRaw, sourceLoadFailed);
+        const currentPath = chooseLoupeImagePathWithPdf(current, isRaw, sourceLoadFailed, isPdf, pdfPages, pdfPageIndex);
         const thumbnailWasShown = !!current.thumbnail_path && currentPath === current.thumbnail_path;
-        const canFallbackToThumbnail = false;
+        const canFallbackToThumbnail = isPdf && current.thumbnail_path !== null && currentPath !== current.thumbnail_path;
         recordImageLoadFailure({
             view: 'loupe',
             image: current,
@@ -652,12 +800,30 @@
     <div class="overlay-bar">
         <span class="filename">{filename}</span>
         <span class="sep">|</span>
-        <span class="dim">{dimensions}</span>
+        <span class="dim">{infoDimensions}</span>
         <span class="sep">|</span>
         <span class="fmt">{format}</span>
         {#if sourceDisplay}
             <span class="sep">|</span>
             <span class="source">{sourceDisplay}</span>
+        {/if}
+        {#if pdfCurrentPageLabel}
+            <span class="sep">|</span>
+            <span class="pdf-page-controls">
+                <button
+                    class="pdf-page-button"
+                    onclick={() => setPdfPage(-1)}
+                    disabled={pdfPageIndex <= 0}
+                    title="Previous page"
+                >‹</button>
+                <span class="pdf-page-label">{pdfCurrentPageLabel}</span>
+                <button
+                    class="pdf-page-button"
+                    onclick={() => setPdfPage(1)}
+                    disabled={!hasPdfPages() || pdfPageIndex + 1 >= pdfPageCount}
+                    title="Next page"
+                >›</button>
+            </span>
         {/if}
         {#if rating > 0}
             <span class="sep">|</span>
@@ -782,6 +948,7 @@
     .loupe-container {
         flex: 1;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
         background: var(--bg);
@@ -801,7 +968,8 @@
         align-items: center;
         justify-content: center;
         width: 100%;
-        height: 100%;
+        flex: 1 1 auto;
+        min-height: 0;
     }
     img {
         max-width: 100%;
@@ -830,19 +998,26 @@
         font-size: 14px;
     }
     .overlay-bar {
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        right: 0;
+        position: relative;
+        flex: 0 0 auto;
+        width: 100%;
+        box-sizing: border-box;
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 6px 12px;
-        background: rgba(8, 8, 12, 0.85);
+        min-height: 32px;
+        padding: 0 12px;
+        background: var(--bg);
         font-size: 11px;
+        overflow: hidden;
+        white-space: nowrap;
+        z-index: 2;
     }
     .filename {
         color: var(--text);
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .sep {
         color: var(--border);
@@ -850,8 +1025,36 @@
     .dim, .fmt {
         color: var(--text-secondary);
     }
+    .pdf-page-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .pdf-page-button {
+        border: 1px solid var(--border);
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 4px;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        line-height: 16px;
+        cursor: pointer;
+        font-size: 11px;
+        font-family: var(--font);
+    }
+    .pdf-page-button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+    .pdf-page-label {
+        color: var(--blue);
+        min-width: 68px;
+        text-align: center;
+        font-size: 10px;
+    }
     .source {
-        color: var(--purple, #bb9af7);
+        color: var(--purple);
     }
     .rating {
         display: flex;

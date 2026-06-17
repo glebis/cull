@@ -193,7 +193,7 @@ is the field-level history needed by the catalog UI.
 
 ## Capabilities
 
-The initial capability set should be:
+The initial v1 capability set uses these names and maps to token roles as follows:
 
 | Capability | Purpose |
 |---|---|
@@ -201,6 +201,13 @@ The initial capability set should be:
 | `catalog:write` | Create works, attach images, and write draft field values. |
 | `catalog:approve` | Promote drafts to approved values or reject drafts. |
 | `catalog:admin` | Create/edit/deprecate field definitions and presets. |
+
+Role mapping in v1:
+
+- `viewer`: `catalog:read`
+- `curator`: `catalog:read`, `catalog:write`
+- `operator`: `catalog:read`, `catalog:write`
+- `admin`: `catalog:read`, `catalog:write`, `catalog:approve`, `catalog:admin`
 
 `catalog:write` never implies approval. This separation is the main safety
 boundary for agentic curation.
@@ -384,12 +391,15 @@ Plugin runtime whitelist:
 
 ## Search And Smart Collections
 
-Catalog values must not become a silo. V1 should make approved values queryable
+Catalog values must not become a silo. V1 must make approved values queryable
 by smart collections and search.
 
 Minimum:
 
-- Approved scalar values can be filtered by field key.
+- Approved values must be filterable by field key through a new `CatalogField` filter
+  path; text operators (`=` / `contains`) are available in v1.
+- Numeric/date fields use cast-based operators where safe and only after schema-level
+  enabling.
 - Draft values are hidden from normal search unless explicitly requested.
 - Derived generation-run fields remain searchable through existing generation
   metadata paths.
@@ -477,11 +487,12 @@ Manual checks:
 
 ## Phasing
 
-### Phase 1: Core Catalog Schema And Presets
+### Phase 1: Core Catalog Schema And Permissions
 
 - Add catalog tables, models, and migrations.
 - Seed initial field definitions and presets.
-- Add read/write/approve/admin capabilities.
+- Add `catalog:read`/`catalog:write` and role-aligned capability mapping.
+- Add hard rule: agent/plugin suggestions are draft-only, regardless of auth context.
 - Add CLI/MCP/Tauri read and draft-write commands.
 
 ### Phase 2: Catalog UI Plugin
@@ -519,10 +530,9 @@ Manual checks:
   support year-only in v1 and evaluate EDTF before ranges/circa become UI
   requirements.
 - Whether money/currency should use a strict ISO 4217 enum in v1.
-- Whether `catalog:approve` is available to local UI by default or represented
-  as a local-only capability.
-- Whether draft preset edits should share the same draft/approve mechanism as
-  field values or require direct `catalog:admin`.
+- Whether field-level ACL (`private`/`commercial`) is required in v1.
+- Whether strict typed numeric/date query casting should be expanded beyond simple
+  operators.
 
 ## References
 

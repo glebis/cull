@@ -170,8 +170,8 @@ export async function syncPreviewFocus(image: ImageWithFile | null, current: Pre
 
 export function previewDisplayImageSourcePath(image: ImageWithFile, sourceLoadFailed: boolean): string {
     // The Preview Display is a presentation surface, so it shows the full-resolution
-    // original by default. It falls back to the thumbnail only for RAW formats (no
-    // browser-decodable original) or when loading the original failed. (main's
+    // original by default. It falls back to the thumbnail for non-browser-decodable
+    // formats (e.g. RAW/PDF) or when loading the original failed. (main's
     // chooseLoupeImagePath now always prefers the thumbnail for grid/loupe perf,
     // which is the opposite of what a preview display wants.)
     if ((isRawFormat(image.image.format) || sourceLoadFailed) && image.thumbnail_path) {

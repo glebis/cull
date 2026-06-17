@@ -1,4 +1,5 @@
 use super::tags::normalize_tag_name;
+use chrono::DateTime;
 use rusqlite::types::Value as SqlValue;
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +63,10 @@ pub enum Field {
     SimilarityGroupId,
     ClipSimilarTo,
     ClipTextMatch,
+    #[serde(rename = "catalog_field")]
+    CatalogField {
+        key: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -153,7 +158,9 @@ impl Field {
             Field::MeanSaturation => "cm.mean_saturation",
             Field::Colorfulness => "cm.colorfulness",
             Field::SimilarityGroupId => "sgi.group_id",
-            Field::ClipSimilarTo | Field::ClipTextMatch => "unsupported",
+            Field::ClipSimilarTo | Field::ClipTextMatch | Field::CatalogField { .. } => {
+                "unsupported"
+            }
         }
     }
 }
@@ -183,6 +190,12 @@ impl FilterNode {
                 Ok((format!("NOT ({})", sql), params))
             }
             FilterNode::Rule { field, op, value } => {
+                if matches!(field, Field::CatalogField { .. }) {
+                    if let Field::CatalogField { key } = field {
+                        return catalog_field_clause(key, op, value);
+                    }
+                }
+
                 if matches!(field, Field::SearchText) {
                     return text_search_clause(op, value);
                 }
@@ -315,6 +328,173 @@ impl FilterNode {
     }
 }
 
+fn catalog_field_clause(
+    stable_key: &str,
+    op: &RuleOp,
+    value: &FilterValue,
+) -> std::result::Result<(String, Vec<SqlValue>), String> {
+    let key = stable_key.trim();
+    if key.is_empty() {
+        return Err("catalog_field requires a non-empty stable key".to_string());
+    }
+
+    let base_where = "cv.subject_type = 'image'
+             AND cv.subject_id = i.id
+             AND cv.status = 'approved'
+             AND cfd.stable_key = ?";
+    let key_param = SqlValue::Text(key.to_string());
+
+    let with_subject = |predicate: &str| {
+        format!(
+            "EXISTS (
+                SELECT 1
+                FROM catalog_field_values cv
+                JOIN catalog_field_defs cfd ON cv.field_def_id = cfd.id
+                WHERE {base_where} AND {predicate}
+            )",
+            base_where = base_where,
+            predicate = predicate
+        )
+    };
+
+    match (op, value) {
+        (RuleOp::Eq, FilterValue::String(v)) => Ok((
+            with_subject("cv.display_value = ?"),
+            vec![key_param, SqlValue::Text(v.clone())],
+        )),
+        (RuleOp::Eq, FilterValue::Number(v)) => Ok((
+            with_subject("CAST(json_extract(cv.value_json, '$.value') AS REAL) = ?"),
+            vec![key_param, SqlValue::Real(*v)],
+        )),
+        (RuleOp::Eq, FilterValue::Bool(v)) => Ok((
+            with_subject("CAST(json_extract(cv.value_json, '$.value') AS INTEGER) = ?"),
+            vec![key_param, SqlValue::Integer(*v as i64)],
+        )),
+        (RuleOp::Neq, FilterValue::String(v)) => Ok((
+            with_subject("cv.display_value != ?"),
+            vec![key_param, SqlValue::Text(v.clone())],
+        )),
+        (RuleOp::Neq, FilterValue::Number(v)) => Ok((
+            with_subject("CAST(json_extract(cv.value_json, '$.value') AS REAL) != ?"),
+            vec![key_param, SqlValue::Real(*v)],
+        )),
+        (RuleOp::Neq, FilterValue::Bool(v)) => Ok((
+            with_subject("CAST(json_extract(cv.value_json, '$.value') AS INTEGER) != ?"),
+            vec![key_param, SqlValue::Integer(*v as i64)],
+        )),
+        (RuleOp::Gt, FilterValue::Number(v)) => Ok((
+            with_subject("CAST(json_extract(cv.value_json, '$.value') AS REAL) > ?"),
+            vec![key_param, SqlValue::Real(*v)],
+        )),
+        (RuleOp::Gte, FilterValue::Number(v)) => Ok((
+            with_subject("CAST(json_extract(cv.value_json, '$.value') AS REAL) >= ?"),
+            vec![key_param, SqlValue::Real(*v)],
+        )),
+        (RuleOp::Lt, FilterValue::Number(v)) => Ok((
+            with_subject("CAST(json_extract(cv.value_json, '$.value') AS REAL) < ?"),
+            vec![key_param, SqlValue::Real(*v)],
+        )),
+        (RuleOp::Lte, FilterValue::Number(v)) => Ok((
+            with_subject("CAST(json_extract(cv.value_json, '$.value') AS REAL) <= ?"),
+            vec![key_param, SqlValue::Real(*v)],
+        )),
+        (RuleOp::Contains, FilterValue::String(v)) => Ok((
+            with_subject("cv.display_value LIKE ?"),
+            vec![key_param, SqlValue::Text(format!("%{}%", v))],
+        )),
+        (RuleOp::NotContains, FilterValue::String(v)) => Ok((
+            with_subject("cv.display_value NOT LIKE ?"),
+            vec![key_param, SqlValue::Text(format!("%{}%", v))],
+        )),
+        (RuleOp::In, FilterValue::StringArray(vals)) => {
+            if vals.is_empty() {
+                return Ok(("1=0".to_string(), vec![]));
+            }
+            let placeholders: Vec<&str> = vals.iter().map(|_| "?").collect();
+            let mut params = Vec::with_capacity(vals.len() + 1);
+            params.push(key_param);
+            params.extend(vals.iter().map(|v| SqlValue::Text(v.clone())));
+            let predicate = format!("cv.display_value IN ({})", placeholders.join(","));
+            Ok((with_subject(&predicate), params))
+        }
+        (RuleOp::NotIn, FilterValue::StringArray(vals)) => {
+            if vals.is_empty() {
+                return Ok(("1=1".to_string(), vec![]));
+            }
+            let placeholders: Vec<&str> = vals.iter().map(|_| "?").collect();
+            let mut params = Vec::with_capacity(vals.len() + 1);
+            params.push(key_param);
+            params.extend(vals.iter().map(|v| SqlValue::Text(v.clone())));
+            let predicate = format!("cv.display_value NOT IN ({})", placeholders.join(","));
+            Ok((with_subject(&predicate), params))
+        }
+        (RuleOp::Between, FilterValue::Range { from, to }) => {
+            let from_value = from.trim().to_string();
+            let to_value = to.trim().to_string();
+            if from_value.is_empty() || to_value.is_empty() {
+                return Err("between requires non-empty from and to values".to_string());
+            }
+            let is_date_range = DateTime::parse_from_rfc3339(&format!("{}T00:00:00Z", from_value))
+                .is_ok()
+                && DateTime::parse_from_rfc3339(&format!("{}T00:00:00Z", to_value)).is_ok();
+
+            if is_date_range {
+                Ok((
+                    with_subject(
+                        "date(json_extract(cv.value_json, '$.value')) BETWEEN date(?) AND date(?)",
+                    ),
+                    vec![
+                        key_param,
+                        SqlValue::Text(from_value),
+                        SqlValue::Text(to_value),
+                    ],
+                ))
+            } else {
+                Ok((
+                    with_subject(
+                        "CAST(json_extract(cv.value_json, '$.value') AS REAL) BETWEEN ? AND ?",
+                    ),
+                    vec![
+                        key_param,
+                        SqlValue::Text(from_value),
+                        SqlValue::Text(to_value),
+                    ],
+                ))
+            }
+        }
+        (RuleOp::IsEmpty, _) => Ok((
+            "NOT EXISTS (
+                SELECT 1
+                FROM catalog_field_values cv
+                JOIN catalog_field_defs cfd ON cv.field_def_id = cfd.id
+                WHERE cv.subject_type = 'image'
+                  AND cv.subject_id = i.id
+                  AND cv.status = 'approved'
+                  AND cfd.stable_key = ?
+             )"
+            .to_string(),
+            vec![key_param],
+        )),
+        (RuleOp::IsNotEmpty, _) => Ok((
+            "EXISTS (
+                SELECT 1
+                FROM catalog_field_values cv
+                JOIN catalog_field_defs cfd ON cv.field_def_id = cfd.id
+                WHERE cv.subject_type = 'image'
+                  AND cv.subject_id = i.id
+                  AND cv.status = 'approved'
+                  AND cfd.stable_key = ?
+             )"
+            .to_string(),
+            vec![key_param],
+        )),
+        _ => Err(format!(
+            "Unsupported operator {:?} for catalog field {:?}",
+            op, stable_key
+        )),
+    }
+}
+
 fn text_search_clause(
     op: &RuleOp,
     value: &FilterValue,
@@ -356,11 +536,22 @@ fn text_search_clause(
                 OR gr.raw_metadata_json LIKE ?
               )
         )
+        OR EXISTS (
+            SELECT 1 FROM media_assets ma
+            WHERE ma.primary_image_id = i.id
+              AND ma.title LIKE ?
+        )
+        OR EXISTS (
+            SELECT 1 FROM media_assets ma
+            JOIN pdf_pages pp ON pp.media_asset_id = ma.id
+            WHERE ma.primary_image_id = i.id
+              AND pp.extracted_text LIKE ?
+        )
     )";
 
     let pattern = format!("%{}%", term.trim());
     let params = std::iter::repeat(SqlValue::Text(pattern))
-        .take(13)
+        .take(15)
         .collect();
 
     match op {
@@ -699,7 +890,9 @@ mod tests {
         assert!(sql.contains("image_metadata"), "sql: {}", sql);
         assert!(sql.contains("image_tags"), "sql: {}", sql);
         assert!(sql.contains("generation_runs"), "sql: {}", sql);
-        assert_eq!(params.len(), 13);
+        assert!(sql.contains("media_assets"), "sql: {}", sql);
+        assert!(sql.contains("pdf_pages"), "sql: {}", sql);
+        assert_eq!(params.len(), 15);
         assert!(params.iter().all(|p| match p {
             SqlValue::Text(text) => text == "%astra%",
             _ => false,
@@ -717,6 +910,108 @@ mod tests {
         assert!(sql.contains("image_tags"), "sql: {}", sql);
         assert!(sql.contains("normalized_name"), "sql: {}", sql);
         assert_eq!(params, vec![SqlValue::Text("golden-hour".to_string())]);
+    }
+
+    #[test]
+    fn test_catalog_field_eq_filter() {
+        let filter = FilterNode::Rule {
+            field: Field::CatalogField {
+                key: "inventory.height".to_string(),
+            },
+            op: RuleOp::Eq,
+            value: FilterValue::String("110".to_string()),
+        };
+        let (sql, params) = filter.to_sql_clause().unwrap();
+
+        assert!(sql.contains("cv.display_value = ?"));
+        assert!(sql.contains("cv.status = 'approved'"));
+        assert!(sql.contains("cfd.stable_key = ?"));
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0], SqlValue::Text("inventory.height".to_string()));
+        assert_eq!(params[1], SqlValue::Text("110".to_string()));
+    }
+
+    #[test]
+    fn test_catalog_field_gt_filter_uses_numeric_cast() {
+        let filter = FilterNode::Rule {
+            field: Field::CatalogField {
+                key: "inventory.depth".to_string(),
+            },
+            op: RuleOp::Gt,
+            value: FilterValue::Number(42.0),
+        };
+        let (sql, params) = filter.to_sql_clause().unwrap();
+
+        assert!(sql.contains("CAST(json_extract(cv.value_json, '$.value') AS REAL) > ?"));
+        assert_eq!(params.len(), 2);
+        assert_eq!(
+            params,
+            vec![
+                SqlValue::Text("inventory.depth".to_string()),
+                SqlValue::Real(42.0)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_catalog_field_in_filter_empty_set_matches_nothing() {
+        let filter = FilterNode::Rule {
+            field: Field::CatalogField {
+                key: "inventory.materials".to_string(),
+            },
+            op: RuleOp::In,
+            value: FilterValue::StringArray(vec![]),
+        };
+        let (sql, params) = filter.to_sql_clause().unwrap();
+
+        assert!(sql.contains("1=0"));
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn test_catalog_field_between_range_uses_date_or_numeric_cast() {
+        let date_filter = FilterNode::Rule {
+            field: Field::CatalogField {
+                key: "creation.date".to_string(),
+            },
+            op: RuleOp::Between,
+            value: FilterValue::Range {
+                from: "2026-01-01".to_string(),
+                to: "2026-01-31".to_string(),
+            },
+        };
+        let (date_sql, params) = date_filter.to_sql_clause().unwrap();
+        assert!(date_sql
+            .contains("date(json_extract(cv.value_json, '$.value')) BETWEEN date(?) AND date(?)"));
+        assert_eq!(params.len(), 3);
+        assert_eq!(params[1], SqlValue::Text("2026-01-01".to_string()));
+        assert_eq!(params[2], SqlValue::Text("2026-01-31".to_string()));
+
+        let numeric_filter = FilterNode::Rule {
+            field: Field::CatalogField {
+                key: "size.width".to_string(),
+            },
+            op: RuleOp::Between,
+            value: FilterValue::Range {
+                from: "10".to_string(),
+                to: "20".to_string(),
+            },
+        };
+        let (numeric_sql, _numeric_params) = numeric_filter.to_sql_clause().unwrap();
+        assert!(numeric_sql
+            .contains("CAST(json_extract(cv.value_json, '$.value') AS REAL) BETWEEN ? AND ?"));
+    }
+
+    #[test]
+    fn test_catalog_field_with_empty_key_rejected() {
+        let filter = FilterNode::Rule {
+            field: Field::CatalogField {
+                key: "   ".to_string(),
+            },
+            op: RuleOp::Eq,
+            value: FilterValue::String("x".to_string()),
+        };
+        assert!(filter.to_sql_clause().is_err());
     }
 
     #[test]
