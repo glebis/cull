@@ -180,15 +180,15 @@ if (!motionQuery.matches && "IntersectionObserver" in window) {
 const queryState = new URLSearchParams(window.location.search).get("signup");
 
 if (queryState) {
-  const messages: Record<string, { text: string; kind: StatusKind }> = {
-    confirmed: { text: "Confirmed. You are on the launch list.", kind: "success" },
-    already_confirmed: { text: "Already confirmed. You are on the list.", kind: "success" },
+  const messages: Record<string, { text: string; kind: StatusKind; note?: StatusNote }> = {
+    confirmed: { text: "Confirmed. You are on the launch list.", kind: "success", note: "confirmed" },
+    already_confirmed: { text: "Already confirmed. You are on the list.", kind: "success", note: "confirmed" },
     expired: { text: "That confirmation link expired. Submit your email again for a fresh link.", kind: "error" },
     invalid: { text: "That confirmation link is not valid. Submit your email again for a fresh link.", kind: "error" },
   };
   const message = messages[queryState];
   if (message) {
-    setAllStatuses(message.text, message.kind);
+    setAllStatuses(message.text, message.kind, { note: message.note });
   }
 }
 
@@ -207,8 +207,10 @@ for (const form of document.querySelectorAll<HTMLFormElement>("[data-signup-form
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email }),
       });
-      const body = (await response.json()) as { message?: string; ok?: boolean };
-      setStatus(form, body.message ?? "Signup is temporarily unavailable.", body.ok ? "success" : "error");
+      const body = (await response.json()) as { message?: string; ok?: boolean; status?: string };
+      setStatus(form, body.message ?? "Signup is temporarily unavailable.", body.ok ? "success" : "error", {
+        note: body.ok ? statusNoteForSubscribeStatus(body.status) : undefined,
+      });
       if (body.ok) {
         form.reset();
       }
@@ -221,14 +223,15 @@ for (const form of document.querySelectorAll<HTMLFormElement>("[data-signup-form
 }
 
 type StatusKind = "neutral" | "success" | "error";
+type StatusNote = "confirmation-sent" | "confirmed";
 
-function setAllStatuses(text: string, kind: StatusKind): void {
+function setAllStatuses(text: string, kind: StatusKind, options: { note?: StatusNote } = {}): void {
   for (const form of document.querySelectorAll<HTMLFormElement>("[data-signup-form]")) {
-    setStatus(form, text, kind);
+    setStatus(form, text, kind, options);
   }
 }
 
-function setStatus(form: HTMLFormElement, text: string, kind: StatusKind): void {
+function setStatus(form: HTMLFormElement, text: string, kind: StatusKind, options: { note?: StatusNote } = {}): void {
   const status = form.querySelector<HTMLElement>("[data-form-status]");
   if (!status) {
     return;
@@ -237,9 +240,25 @@ function setStatus(form: HTMLFormElement, text: string, kind: StatusKind): void 
   status.textContent = formatTextForLineBreaks(text);
   status.dataset.kind = kind;
   form.dataset.statusKind = kind;
+  if (options.note) {
+    form.dataset.statusNote = options.note;
+  } else {
+    delete form.dataset.statusNote;
+  }
   window.setTimeout(() => {
     delete status.dataset.updating;
   }, 260);
+}
+
+function statusNoteForSubscribeStatus(status: string | undefined): StatusNote | undefined {
+  switch (status) {
+    case "pending":
+      return "confirmation-sent";
+    case "already_confirmed":
+      return "confirmed";
+    default:
+      return undefined;
+  }
 }
 
 function protectHangingWords(root: HTMLElement): void {

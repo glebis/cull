@@ -194,13 +194,18 @@ h3 {
 }
 
 .signup-form--featured:focus-within::after,
-.signup-form--featured[data-status-kind="success"]::after {
+.signup-form--featured[data-status-note]::after {
   opacity: 1;
   transform: translate3d(0, 0, 0);
 }
 
-.signup-form--featured[data-status-kind="success"]::after {
+.signup-form--featured[data-status-note="confirmation-sent"]::after {
   content: "confirmation link sent";
+  color: var(--green);
+}
+
+.signup-form--featured[data-status-note="confirmed"]::after {
+  content: "confirmed opt-in";
   color: var(--green);
 }
 
