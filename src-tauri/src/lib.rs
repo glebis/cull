@@ -153,6 +153,10 @@ fn run_stdio_bridge() {
             Err(_) => {
                 crate::safe_eprintln!("MCP socket not found, launching app in tray mode...");
                 let exe = std::env::current_exe().expect("Can't find own executable");
+                #[expect(
+                    clippy::zombie_processes,
+                    reason = "stdio bridge intentionally detaches the GUI tray helper and connects over its socket"
+                )]
                 std::process::Command::new(&exe)
                     .arg("--tray")
                     .spawn()

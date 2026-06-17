@@ -152,6 +152,10 @@ pub fn read_pdf_page_texts(source_path: &Path) -> Result<Vec<(u32, Option<String
     })
 }
 
+#[expect(
+    clippy::type_complexity,
+    reason = "PDF page metrics are an internal tuple of page index plus optional width and height"
+)]
 pub fn read_pdf_page_metrics(
     source_path: &Path,
 ) -> Result<Vec<(u32, Option<f64>, Option<f64>)>, String> {

@@ -70,7 +70,7 @@ pub fn load_image_histogram_from_source(
     path: &Path,
     source: HistogramSource,
 ) -> Result<ImageHistogram, String> {
-    let decoded = crate::db_core::image_decode::decode_image(&path, true).map_err(|e| {
+    let decoded = crate::db_core::image_decode::decode_image(path, true).map_err(|e| {
         format!(
             "Failed to decode histogram source '{}': {}",
             path.display(),

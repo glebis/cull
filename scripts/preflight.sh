@@ -63,7 +63,7 @@ run_rust() {
   (
     cd src-tauri
     run cargo fmt --all -- --check
-    run cargo clippy --all-targets
+    run cargo clippy --locked --all-targets -- -D warnings
     run cargo test --all-targets
   )
 }

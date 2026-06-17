@@ -1,9 +1,11 @@
 use crate::db_core::models::ImageWithFile;
 use crate::db_core::thumbnails;
 use crate::services::{Pagination, ServiceContext, ServiceError};
+use std::path::Path;
+#[cfg(test)]
 use std::path::PathBuf;
 
-pub fn enrich_thumbnails(images: &mut [ImageWithFile], app_data_dir: &PathBuf) {
+pub fn enrich_thumbnails(images: &mut [ImageWithFile], app_data_dir: &Path) {
     for img in images.iter_mut() {
         let thumb = thumbnails::thumbnail_path(app_data_dir, &img.image.id);
         if thumb.exists() {

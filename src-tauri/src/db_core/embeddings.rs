@@ -63,7 +63,7 @@ pub const CLIP_MODEL_SPEC: EmbeddingModelSpec = EmbeddingModelSpec {
     input_size: 224,
     output_dims: 512,
     mean: [0.48145466, 0.4578275, 0.40821073],
-    std: [0.26862954, 0.26130258, 0.27577711],
+    std: [0.26862954, 0.261_302_6, 0.275_777_1],
 };
 
 pub const DINO_V2_SMALL_MODEL_SPEC: EmbeddingModelSpec = EmbeddingModelSpec {

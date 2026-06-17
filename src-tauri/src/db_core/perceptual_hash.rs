@@ -23,9 +23,9 @@ pub fn analyze_dynamic_image_perceptual_hash(
         .resize_exact(PHASH_SIZE as u32, PHASH_SIZE as u32, FilterType::Triangle)
         .to_luma8();
     let mut pixels = [[0.0f64; PHASH_SIZE]; PHASH_SIZE];
-    for y in 0..PHASH_SIZE {
-        for x in 0..PHASH_SIZE {
-            pixels[y][x] = resized.get_pixel(x as u32, y as u32)[0] as f64;
+    for (y, row) in pixels.iter_mut().enumerate().take(PHASH_SIZE) {
+        for (x, pixel) in row.iter_mut().enumerate().take(PHASH_SIZE) {
+            *pixel = resized.get_pixel(x as u32, y as u32)[0] as f64;
         }
     }
 
@@ -58,11 +58,11 @@ pub fn hamming_distance_parts(a_hi: i64, a_lo: i64, b_hi: i64, b_lo: i64) -> u32
 
 fn dct_coefficient(pixels: &[[f64; PHASH_SIZE]; PHASH_SIZE], u: usize, v: usize) -> f64 {
     let mut sum = 0.0;
-    for y in 0..PHASH_SIZE {
-        for x in 0..PHASH_SIZE {
+    for (y, row) in pixels.iter().enumerate().take(PHASH_SIZE) {
+        for (x, pixel) in row.iter().enumerate().take(PHASH_SIZE) {
             let x_cos = (((2 * x + 1) as f64 * u as f64 * PI) / (2.0 * PHASH_SIZE as f64)).cos();
             let y_cos = (((2 * y + 1) as f64 * v as f64 * PI) / (2.0 * PHASH_SIZE as f64)).cos();
-            sum += pixels[y][x] * x_cos * y_cos;
+            sum += *pixel * x_cos * y_cos;
         }
     }
     alpha(u) * alpha(v) * sum

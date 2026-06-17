@@ -175,7 +175,7 @@ mod tests {
         assert_eq!(event.image_id.as_deref(), Some("img-1"));
         assert_eq!(event.path_basename.as_deref(), Some("ig_abc.png"));
         assert_eq!(event.path_hash.as_deref(), Some("path-123"));
-        assert_eq!(event.fallback_used, true);
+        assert!(event.fallback_used);
         assert_eq!(event.fallback_succeeded, None);
 
         let serialized = serde_json::to_string(&event).unwrap();

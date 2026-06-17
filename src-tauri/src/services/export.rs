@@ -210,6 +210,10 @@ fn validate_export_format(format: &str) -> Result<(), String> {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "export worker keeps per-image inputs explicit while sharing batch state"
+)]
 fn export_one_image(
     image: &ImageWithFile,
     idx: usize,
@@ -376,6 +380,22 @@ fn sanitize_stem(value: &str) -> String {
         .to_string()
 }
 
+fn unique_target_path(
+    target_dir: &Path,
+    stem: &str,
+    ext: &str,
+    used_paths: &mut HashSet<PathBuf>,
+) -> PathBuf {
+    let mut candidate = target_dir.join(format!("{}.{}", stem, ext));
+    let mut suffix = 2;
+    while candidate.exists() || used_paths.contains(&candidate) {
+        candidate = target_dir.join(format!("{}_{}.{}", stem, suffix, ext));
+        suffix += 1;
+    }
+    used_paths.insert(candidate.clone());
+    candidate
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,20 +540,4 @@ mod tests {
         let err = confine_output_dir_with_roots(&outside, &home, &temp).unwrap_err();
         assert!(err.contains("home directory"), "{err}");
     }
-}
-
-fn unique_target_path(
-    target_dir: &Path,
-    stem: &str,
-    ext: &str,
-    used_paths: &mut HashSet<PathBuf>,
-) -> PathBuf {
-    let mut candidate = target_dir.join(format!("{}.{}", stem, ext));
-    let mut suffix = 2;
-    while candidate.exists() || used_paths.contains(&candidate) {
-        candidate = target_dir.join(format!("{}_{}.{}", stem, suffix, ext));
-        suffix += 1;
-    }
-    used_paths.insert(candidate.clone());
-    candidate
 }

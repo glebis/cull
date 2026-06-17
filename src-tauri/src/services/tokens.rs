@@ -200,7 +200,7 @@ fn get_or_create_pepper(ctx: &ServiceContext) -> Result<String, ServiceError> {
             let new_pepper = generate_secret();
             ctx.secrets
                 .set("mcp_pepper", &new_pepper)
-                .map_err(|e| ServiceError::Engine(e))?;
+                .map_err(ServiceError::Engine)?;
             Ok(new_pepper)
         }
         Err(e) => Err(ServiceError::Engine(e)),

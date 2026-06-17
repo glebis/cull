@@ -32,7 +32,7 @@ pub fn print_error(json: bool, message: &str) {
     if json {
         println!(
             "{}",
-            serde_json::json!({"event": "error", "message": message}).to_string()
+            serde_json::json!({"event": "error", "message": message})
         );
     } else {
         crate::safe_eprintln!("{}", message);

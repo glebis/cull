@@ -76,7 +76,7 @@ fn validate_path_with_home(raw: &str, mode: PathMode, home: &Path) -> Result<Pat
         if mode == PathMode::Deeplink {
             for component in relative.components() {
                 if let Component::Normal(name) = component {
-                    if name.to_str().map_or(false, |s| s.starts_with('.')) {
+                    if name.to_str().is_some_and(|s| s.starts_with('.')) {
                         return Err(format!(
                             "Access to '{}' is blocked (hidden path component '{}')",
                             canonical.display(),

@@ -141,7 +141,7 @@ pub fn build_manifest(
         .filter(|img| {
             selected
                 .as_ref()
-                .map_or(true, |ids| ids.contains(&img.image.id))
+                .is_none_or(|ids| ids.contains(&img.image.id))
         })
         .collect::<Vec<_>>();
 

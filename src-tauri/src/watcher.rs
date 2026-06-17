@@ -52,6 +52,12 @@ fn normalize_path_for_db(path: &std::path::Path) -> String {
     }
 }
 
+impl Default for FileWatcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileWatcher {
     pub fn new() -> Self {
         Self {
@@ -290,7 +296,7 @@ impl FileWatcher {
                     // Cloud eviction check: if file is in a cloud folder and the parent
                     // dir still exists, check for .icloud stub or zero-byte placeholder
                     if let Some(provider) = crate::cloud::detect_cloud_provider(path) {
-                        if path.parent().map_or(false, |p| p.exists()) {
+                        if path.parent().is_some_and(|p| p.exists()) {
                             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                             let stub_name = format!(".{}.icloud", name);
                             let stub_path = path.parent().unwrap().join(&stub_name);
@@ -366,8 +372,8 @@ impl FileWatcher {
                             return;
                         }
                         let new_str = normalize_path_for_db(new);
-                        match find_file_by_path_flexible(db, old) {
-                            Some(file) => match db.update_image_file_path(&file.id, &new_str) {
+                        if let Some(file) = find_file_by_path_flexible(db, old) {
+                            match db.update_image_file_path(&file.id, &new_str) {
                                 Ok(()) => {
                                     crate::safe_eprintln!(
                                         "[watcher] Renamed: {} -> {}",
@@ -379,8 +385,7 @@ impl FileWatcher {
                                 Err(e) => {
                                     crate::safe_eprintln!("[watcher] Error updating path: {}", e)
                                 }
-                            },
-                            None => {}
+                            }
                         }
                     }
                 } else {

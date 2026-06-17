@@ -52,7 +52,7 @@ impl Pagination {
     pub fn clamped(offset: u32, limit: u32) -> Self {
         Self {
             offset,
-            limit: limit.min(250).max(1),
+            limit: limit.clamp(1, 250),
         }
     }
 }

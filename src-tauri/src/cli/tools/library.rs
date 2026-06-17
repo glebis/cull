@@ -70,5 +70,5 @@ fn image_value(img: &ImageWithFile) -> Value {
 }
 
 fn clamp_limit(limit: u32) -> u32 {
-    limit.min(100).max(1)
+    limit.clamp(1, 100)
 }

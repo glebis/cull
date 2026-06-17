@@ -80,20 +80,20 @@ pub fn serialize_xmp(meta: &XmpMetadata) -> String {
 }
 
 pub fn parse_xmp(input: &str) -> XmpMetadata {
-    let mut meta = XmpMetadata::default();
-    meta.rating = tag(input, "xmp:Rating").and_then(|s| s.parse::<u8>().ok());
-    meta.color_label = tag(input, "xmp:Label");
-    meta.title = lang_alt_value(input, "dc:title").or_else(|| tag(input, "dc:title"));
-    meta.description =
-        lang_alt_value(input, "dc:description").or_else(|| tag(input, "dc:description"));
-    meta.creator = seq_first(input, "dc:creator");
-    meta.keywords = bag_values(input, "dc:subject");
-    meta.copyright = lang_alt_value(input, "dc:rights");
-    meta.prompt = tag(input, "cull:Prompt");
-    meta.provider = tag(input, "cull:Provider");
-    meta.model = tag(input, "cull:Model");
-    meta.seed = tag(input, "cull:Seed");
-    meta
+    XmpMetadata {
+        rating: tag(input, "xmp:Rating").and_then(|s| s.parse::<u8>().ok()),
+        color_label: tag(input, "xmp:Label"),
+        title: lang_alt_value(input, "dc:title").or_else(|| tag(input, "dc:title")),
+        description: lang_alt_value(input, "dc:description")
+            .or_else(|| tag(input, "dc:description")),
+        creator: seq_first(input, "dc:creator"),
+        keywords: bag_values(input, "dc:subject"),
+        copyright: lang_alt_value(input, "dc:rights"),
+        prompt: tag(input, "cull:Prompt"),
+        provider: tag(input, "cull:Provider"),
+        model: tag(input, "cull:Model"),
+        seed: tag(input, "cull:Seed"),
+    }
 }
 
 fn lang_alt(out: &mut String, tag: &str, value: &str) {

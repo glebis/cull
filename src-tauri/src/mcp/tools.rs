@@ -16,6 +16,7 @@ use crate::db_core::models::{Canvas, TokenScope};
 use crate::services::tokens;
 use crate::AppState;
 
+#[cfg(test)]
 fn redact_path(path: &str) -> String {
     std::path::Path::new(path)
         .file_name()
@@ -182,7 +183,7 @@ fn collection_summaries_for_mcp(
 }
 
 fn clamp_limit(limit: u32) -> u32 {
-    limit.min(100).max(1)
+    limit.clamp(1, 100)
 }
 
 fn is_valid_rating(rating: u8) -> bool {
@@ -581,7 +582,11 @@ impl CullMcp {
             let image_count = collection_images
                 .iter()
                 .filter(|image| {
-                    tokens::image_in_scope(&scope_ref, &image.path, &[collection_id.clone()])
+                    tokens::image_in_scope(
+                        &scope_ref,
+                        &image.path,
+                        std::slice::from_ref(&collection_id),
+                    )
                 })
                 .count() as u32;
 
@@ -1518,6 +1523,10 @@ impl CullMcp {
         Parameters(params): Parameters<SetCatalogDraftValuesParams>,
     ) -> String {
         let state = self.app_handle.state::<AppState>();
+        #[expect(
+            clippy::type_complexity,
+            reason = "MCP catalog batch payload mirrors the database batch tuple"
+        )]
         let payload: Vec<(
             String,
             String,
@@ -1564,7 +1573,7 @@ impl CullMcp {
             } else {
                 source_type.as_str()
             };
-            match state.db.upsert_catalog_draft_value(
+            if let Ok(_id) = state.db.upsert_catalog_draft_value(
                 &value.subject_type,
                 &value.subject_id,
                 &value.field_def_id,
@@ -1577,11 +1586,8 @@ impl CullMcp {
                 None,
                 "draft",
             ) {
-                Ok(_id) => {
-                    drafted += 1;
-                    written += 1;
-                }
-                Err(_) => {}
+                drafted += 1;
+                written += 1;
             }
         }
         serde_json::json!({"status":"completed","drafted_count":drafted,"written_count":written})
@@ -3416,45 +3422,43 @@ impl ServerHandler for CullMcp {
         })
     }
 
-    fn call_tool(
+    async fn call_tool(
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<CallToolResult, ErrorData>> + Send + '_ {
-        async move {
-            let tool_name = request.name.to_string();
-            let params_json = request
-                .arguments
-                .as_ref()
-                .and_then(|args| serde_json::to_string(args).ok());
+    ) -> Result<CallToolResult, ErrorData> {
+        let tool_name = request.name.to_string();
+        let params_json = request
+            .arguments
+            .as_ref()
+            .and_then(|args| serde_json::to_string(args).ok());
 
-            if let Err(msg) = require_capability(&self.auth, &tool_name) {
-                self.log_tool_call(&tool_name, None, "denied");
-                return Err(ErrorData::invalid_request(msg, None));
-            }
-
-            if let Err(msg) = self.require_tool_module_enabled(&tool_name) {
-                self.log_tool_call(&tool_name, None, "disabled");
-                return Err(ErrorData::invalid_request(msg, None));
-            }
-
-            let call_context = ToolCallContext::new(self, request, context);
-            let result = self.tool_router.call(call_context).await;
-
-            let status = match &result {
-                Err(_) => "error",
-                Ok(r) => {
-                    if r.is_error.unwrap_or(false) {
-                        "error"
-                    } else {
-                        "ok"
-                    }
-                }
-            };
-            self.log_tool_call(&tool_name, params_json.as_deref(), status);
-
-            result
+        if let Err(msg) = require_capability(&self.auth, &tool_name) {
+            self.log_tool_call(&tool_name, None, "denied");
+            return Err(ErrorData::invalid_request(msg, None));
         }
+
+        if let Err(msg) = self.require_tool_module_enabled(&tool_name) {
+            self.log_tool_call(&tool_name, None, "disabled");
+            return Err(ErrorData::invalid_request(msg, None));
+        }
+
+        let call_context = ToolCallContext::new(self, request, context);
+        let result = self.tool_router.call(call_context).await;
+
+        let status = match &result {
+            Err(_) => "error",
+            Ok(r) => {
+                if r.is_error.unwrap_or(false) {
+                    "error"
+                } else {
+                    "ok"
+                }
+            }
+        };
+        self.log_tool_call(&tool_name, params_json.as_deref(), status);
+
+        result
     }
 }
 

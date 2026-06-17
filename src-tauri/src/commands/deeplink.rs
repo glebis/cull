@@ -190,6 +190,10 @@ pub async fn drain_pending_open_params() -> Result<Vec<OpenParams>, String> {
 
 /// Tauri command that agents can call via IPC to control the app.
 #[tauri::command]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "deep-link IPC exposes each optional URL parameter as a stable command argument"
+)]
 pub async fn open_with_params(
     app: AppHandle,
     path: Option<String>,
@@ -483,7 +487,7 @@ mod tests {
         let image = dir.path().join("image.jpg");
         std::fs::write(&image, b"not a real jpeg").unwrap();
 
-        let params = open_params_for_drag_drop_paths(&[image.clone()]);
+        let params = open_params_for_drag_drop_paths(std::slice::from_ref(&image));
         assert!(params.is_empty());
 
         let file_params = open_params_for_file_paths(vec![image.to_string_lossy().into_owned()]);
@@ -510,7 +514,7 @@ mod tests {
         let image = dir.path().join("image.jpg");
         std::fs::write(&image, b"not a real jpeg").unwrap();
 
-        let params = open_params_for_drag_drop_paths(&[image.clone()]);
+        let params = open_params_for_drag_drop_paths(std::slice::from_ref(&image));
 
         let canonical = image.canonicalize().unwrap().to_string_lossy().into_owned();
         assert_eq!(params.len(), 1);
@@ -549,7 +553,7 @@ mod tests {
         let folder = dir.path().join("Library");
         std::fs::create_dir(&folder).unwrap();
 
-        let params = open_params_for_drag_drop_paths(&[folder.clone()]);
+        let params = open_params_for_drag_drop_paths(std::slice::from_ref(&folder));
 
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].path, None);

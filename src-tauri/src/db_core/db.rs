@@ -204,14 +204,6 @@ fn map_catalog_value_event_row(row: &rusqlite::Row) -> rusqlite::Result<CatalogV
     })
 }
 
-fn catalog_field_def_id(stable_key: &str) -> String {
-    let sanitized = stable_key
-        .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
-        .collect::<String>();
-    format!("cfd_{}", sanitized)
-}
-
 fn catalog_work_image_id(work_id: &str, image_id: &str, role: &str) -> String {
     format!(
         "cwi_{}",
@@ -921,6 +913,10 @@ impl Database {
     }
 
     fn seed_catalog_defaults(&self, conn: &mut Connection) -> Result<()> {
+        #[expect(
+            clippy::type_complexity,
+            reason = "migration seed rows match the catalog_fields table column order"
+        )]
         let catalog_fields: Vec<(
             &str,
             &str,
@@ -1284,6 +1280,10 @@ impl Database {
         .optional()
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "catalog field definitions map directly to persisted schema columns"
+    )]
     pub fn create_catalog_field_def(
         &self,
         stable_key: &str,
@@ -1347,8 +1347,7 @@ impl Database {
         if field_def_ids.is_empty() {
             return Err(rusqlite::Error::InvalidParameterName(
                 "catalog preset requires at least one field".to_string(),
-            )
-            .into());
+            ));
         }
         let id = format!("cp_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
         let now = chrono::Utc::now().to_rfc3339();
@@ -1456,8 +1455,7 @@ impl Database {
             return Err(rusqlite::Error::InvalidParameterName(format!(
                 "Image '{}' not found",
                 primary_image_id
-            ))
-            .into());
+            )));
         }
 
         let conn = self.conn.lock();
@@ -1503,8 +1501,7 @@ impl Database {
             return Err(rusqlite::Error::InvalidParameterName(format!(
                 "Work '{}' not found",
                 work_id
-            ))
-            .into());
+            )));
         }
 
         let mut attached = 0u32;
@@ -1617,8 +1614,7 @@ impl Database {
                 return Err(rusqlite::Error::InvalidParameterName(format!(
                     "Unsupported subject_type '{}'",
                     other
-                ))
-                .into());
+                )));
             }
         };
 
@@ -1674,6 +1670,10 @@ impl Database {
         }
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "catalog value drafts map directly to persisted value and provenance columns"
+    )]
     pub fn upsert_catalog_draft_value(
         &self,
         subject_type: &str,
@@ -1699,8 +1699,7 @@ impl Database {
             return Err(rusqlite::Error::InvalidParameterName(format!(
                 "Unsupported catalog value status '{}'",
                 status
-            ))
-            .into());
+            )));
         }
         let source_type = if source_type == "agent" {
             "agent"
@@ -1730,16 +1729,14 @@ impl Database {
                 return Err(rusqlite::Error::InvalidParameterName(format!(
                     "Unsupported subject_type '{}'",
                     subject_type
-                ))
-                .into());
+                )));
             }
         };
         if subject_exists == 0 {
             return Err(rusqlite::Error::InvalidParameterName(format!(
                 "Subject '{}' of type '{}' not found",
                 subject_id, subject_type
-            ))
-            .into());
+            )));
         }
 
         let field_def_exists: i64 = tx.query_row(
@@ -1751,8 +1748,7 @@ impl Database {
             return Err(rusqlite::Error::InvalidParameterName(format!(
                 "Field definition '{}' not found",
                 field_def_id
-            ))
-            .into());
+            )));
         }
 
         let maybe_value: Option<CatalogFieldValue> = tx
@@ -1778,8 +1774,7 @@ impl Database {
             if user_approved > 0 && source_type == "agent" {
                 return Err(rusqlite::Error::InvalidParameterName(
                     "agent writes cannot overwrite approved user values".to_string(),
-                )
-                .into());
+                ));
             }
         }
 
@@ -1825,11 +1820,7 @@ impl Database {
                     "status": effective_status,
                 })
                 .to_string();
-                let event_type = if existing.status == "approved" || existing.status == "draft" {
-                    "updated"
-                } else {
-                    "updated"
-                };
+                let event_type = "updated";
                 tx.execute(
                     "INSERT INTO catalog_value_events (id, value_id, event_type, actor_type, actor_id, before_json, after_json, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -1908,6 +1899,10 @@ impl Database {
         Ok(value_id)
     }
 
+    #[expect(
+        clippy::type_complexity,
+        reason = "batch insert reuses the command payload tuple without another conversion layer"
+    )]
     pub fn set_catalog_draft_values(
         &self,
         values: &[(
@@ -4957,7 +4952,7 @@ impl Database {
 
         let (where_clause, params) = filter
             .to_sql_clause()
-            .map_err(|e| rusqlite::Error::InvalidParameterName(e))?;
+            .map_err(rusqlite::Error::InvalidParameterName)?;
 
         let conn = self.conn.lock();
         let sql = format!(
@@ -4990,7 +4985,7 @@ impl Database {
 
         let (where_clause, mut params) = filter
             .to_sql_clause()
-            .map_err(|e| rusqlite::Error::InvalidParameterName(e))?;
+            .map_err(rusqlite::Error::InvalidParameterName)?;
 
         let conn = self.conn.lock();
         let mut sql = format!(
@@ -5051,6 +5046,10 @@ impl Database {
         rows.collect::<Result<Vec<_>>>()
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "source detection writes a single denormalized analysis result row"
+    )]
     pub fn update_source_detection(
         &self,
         image_id: &str,
@@ -6018,7 +6017,7 @@ mod tests {
         let db = test_db();
         insert_test_pdf(&db, "document-title-1", "hash-document-title-1");
 
-        db.set_media_asset_title_by_image_id(&"document-title-1", "Quarterly Report")
+        db.set_media_asset_title_by_image_id("document-title-1", "Quarterly Report")
             .unwrap();
 
         let title: Option<String> = {
@@ -6455,7 +6454,7 @@ mod tests {
         insert_test_image(&db, "plain-image", "hash-plain-image");
         insert_test_pdf(&db, "pdf-text-match", "hash-pdf-text-match");
 
-        db.set_media_asset_title_by_image_id(&"pdf-text-match", "Astra Appendix")
+        db.set_media_asset_title_by_image_id("pdf-text-match", "Astra Appendix")
             .unwrap();
 
         let pdf_media_asset_id = db

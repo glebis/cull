@@ -24,7 +24,7 @@ describe('Cull preflight command', () => {
         expect(source).toContain('npm run check');
         expect(source).toContain('npm test');
         expect(source).toContain('cargo fmt --all -- --check');
-        expect(source).toContain('cargo clippy --all-targets');
+        expect(source).toContain('cargo clippy --locked --all-targets -- -D warnings');
         expect(source).toContain('cargo test --all-targets');
         expect(source).toContain('npm run audit:licenses');
         expect(source).toContain('npm run build');

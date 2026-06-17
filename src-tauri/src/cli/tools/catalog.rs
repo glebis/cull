@@ -319,6 +319,10 @@ pub fn set_catalog_draft_value(ctx: &HeadlessContext, params: Value) -> Result<V
 pub fn set_catalog_draft_values(ctx: &HeadlessContext, params: Value) -> Result<Value, String> {
     let parsed: SetCatalogDraftValuesParams = serde_json::from_value(params)
         .map_err(|e| format!("Invalid set_catalog_draft_values params: {}", e))?;
+    #[expect(
+        clippy::type_complexity,
+        reason = "headless catalog batch payload mirrors the database batch tuple"
+    )]
     let payload: Vec<(
         String,
         String,

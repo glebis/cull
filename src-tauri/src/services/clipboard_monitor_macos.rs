@@ -104,7 +104,7 @@ fn read_string_for_type(pasteboard: &NSPasteboard, ty: &NSPasteboardType) -> Opt
 }
 
 fn nsdata_to_vec(data: &NSData) -> Vec<u8> {
-    let len = data.length() as usize;
+    let len = data.length();
     let mut bytes = vec![0u8; len];
     if len > 0 {
         let ptr =

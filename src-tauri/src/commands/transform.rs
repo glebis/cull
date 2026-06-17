@@ -106,8 +106,8 @@ fn crop_image_inner(
     let img = image::open(&path).map_err(|e| format!("Failed to open image: {e}"))?;
     let (img_w, img_h) = img.dimensions();
 
-    if x.checked_add(width).map_or(true, |r| r > img_w)
-        || y.checked_add(height).map_or(true, |r| r > img_h)
+    if x.checked_add(width).is_none_or(|r| r > img_w)
+        || y.checked_add(height).is_none_or(|r| r > img_h)
     {
         return Err(format!(
             "Crop region ({x},{y},{width},{height}) exceeds image dimensions ({img_w}x{img_h})"
@@ -375,10 +375,7 @@ mod tests {
         }
 
         fn flush(&mut self) -> std::io::Result<()> {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "injected flush failure",
-            ))
+            Err(std::io::Error::other("injected flush failure"))
         }
     }
 

@@ -456,6 +456,10 @@ fn preview_web_stream_snapshot(
     Ok(PreviewWebStreamSnapshot { preview, image })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "preview stream response assembly combines independently-computed view state fields"
+)]
 fn preview_web_stream_image(
     image: &ImageWithFile,
     app_data_dir: &Path,

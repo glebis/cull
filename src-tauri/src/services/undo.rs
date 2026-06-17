@@ -35,6 +35,12 @@ pub struct ActionManager {
     max_depth: usize,
 }
 
+impl Default for ActionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ActionManager {
     pub fn new() -> Self {
         Self {
@@ -292,6 +298,10 @@ impl ActionManager {
         }
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "undo audit records keep target, payload, and backup metadata explicit"
+    )]
     pub fn record_action(
         &self,
         db: &Database,

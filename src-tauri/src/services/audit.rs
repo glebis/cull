@@ -20,6 +20,10 @@ pub struct AuditLogEntry {
     pub jurisdiction: String,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "audit rows intentionally keep provider, endpoint, cost, and jurisdiction explicit at call sites"
+)]
 pub fn log_api_call(
     db: &Database,
     provider: &str,

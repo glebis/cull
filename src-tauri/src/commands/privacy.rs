@@ -250,7 +250,7 @@ pub async fn get_api_audit_log(
     state: State<'_, AppState>,
     limit: u32,
 ) -> Result<Vec<audit::AuditLogEntry>, String> {
-    let clamped = limit.min(100).max(1);
+    let clamped = limit.clamp(1, 100);
     audit::get_audit_log(&state.db, clamped).map_err(|e| e.to_string())
 }
 

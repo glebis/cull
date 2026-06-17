@@ -291,6 +291,10 @@ fn load_image(db: &Database, image_id: &str) -> Result<Option<ImageWithFile>, St
     Ok(images.into_iter().next())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "embedding item inserts mirror the model_run_items schema columns"
+)]
 fn insert_embedding_item(
     db: &Database,
     model_run_id: &str,

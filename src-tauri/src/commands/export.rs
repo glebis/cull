@@ -119,7 +119,7 @@ pub async fn create_export_manifest(
 ) -> Result<ExportManifest, String> {
     let id = format!(
         "story_{}",
-        uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string()
+        &uuid::Uuid::new_v4().to_string().replace("-", "")[..12]
     );
     let mut manifest = ExportManifest::new(id, "Untitled Story".to_string());
 

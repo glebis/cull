@@ -428,16 +428,16 @@ mod tests {
 
         apply_recording_badge_to_rgba(&mut rgba, width as u32, height as u32);
 
-        let badge_center = ((2 * width + 14) * 4) as usize;
+        let badge_center = (2 * width + 14) * 4;
         assert_eq!(&rgba[badge_center..badge_center + 4], &[247, 118, 142, 255]);
 
-        let old_large_badge_pixel = ((4 * width + 9) * 4) as usize;
+        let old_large_badge_pixel = (4 * width + 9) * 4;
         assert_eq!(
             &rgba[old_large_badge_pixel..old_large_badge_pixel + 4],
             &[0, 0, 0, 0]
         );
 
-        let untouched_corner = ((14 * width + 1) * 4) as usize;
+        let untouched_corner = (14 * width + 1) * 4;
         assert_eq!(&rgba[untouched_corner..untouched_corner + 4], &[0, 0, 0, 0]);
     }
 }

@@ -18,7 +18,7 @@ pub fn assemble_pdf(
     for (i, img_path) in image_paths.iter().enumerate() {
         if i > 0 {
             let (new_page, new_layer) =
-                doc.add_page(width_mm, height_mm, &format!("Layer {}", i + 1));
+                doc.add_page(width_mm, height_mm, format!("Layer {}", i + 1));
             page_idx = new_page;
             layer_idx = new_layer;
         }

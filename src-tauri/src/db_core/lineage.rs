@@ -220,7 +220,6 @@ impl Database {
             })
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(Into::into)
     }
 
     pub fn get_lineage_group_images(&self, group_id: &str) -> Result<Vec<ImageWithFile>> {
@@ -269,7 +268,6 @@ impl Database {
             })
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(Into::into)
     }
 
     pub fn merge_lineage_groups(&self, keep_id: &str, merge_id: &str) -> Result<()> {
@@ -381,7 +379,6 @@ impl Database {
             })
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(Into::into)
     }
 
     // --- Lineage detection pipeline ---

@@ -66,6 +66,10 @@ pub async fn list_catalog_fields(
 }
 
 #[tauri::command]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Tauri IPC command parameters are the public catalog field wire contract"
+)]
 pub async fn create_catalog_field_def(
     state: State<'_, AppState>,
     stable_key: String,
@@ -139,7 +143,7 @@ pub async fn update_catalog_preset(
     field_def_ids: Option<Vec<String>>,
     layout_json: Option<String>,
 ) -> Result<(), String> {
-    let field_defs = field_def_ids.as_ref().map(Vec::as_slice);
+    let field_defs = field_def_ids.as_deref();
     state
         .db
         .update_catalog_preset(
@@ -237,6 +241,10 @@ pub async fn get_catalog_record(
 }
 
 #[tauri::command]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Tauri IPC command parameters mirror one catalog draft value payload"
+)]
 pub async fn set_catalog_draft_value(
     state: State<'_, AppState>,
     subject_type: String,
@@ -272,6 +280,10 @@ pub async fn set_catalog_draft_values(
     state: State<'_, AppState>,
     values: Vec<CatalogDraftValueInput>,
 ) -> Result<Vec<String>, String> {
+    #[expect(
+        clippy::type_complexity,
+        reason = "database batch API accepts positional draft-value fields to avoid per-row allocation wrappers"
+    )]
     let payload: Vec<(
         String,
         String,

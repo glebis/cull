@@ -117,7 +117,7 @@ pub async fn import_folder(
 
     let image_ids_out = new_image_ids.clone();
     let auto_process_ids =
-        filter_image_ids_for_auto_jobs(&db, &new_image_ids).map_err(|e| e.to_string())?;
+        filter_image_ids_for_auto_jobs(db, &new_image_ids).map_err(|e| e.to_string())?;
 
     if !auto_process_ids.is_empty() {
         run_post_import_quality_analysis(app.clone(), auto_process_ids.clone());
@@ -211,7 +211,7 @@ pub async fn import_files(
 
     let image_ids_out = new_image_ids.clone();
     let auto_process_ids =
-        filter_image_ids_for_auto_jobs(&db, &new_image_ids).map_err(|e| e.to_string())?;
+        filter_image_ids_for_auto_jobs(db, &new_image_ids).map_err(|e| e.to_string())?;
 
     if !new_image_ids.is_empty() {
         let _ = crate::tray::refresh_tray_menu(&app);
@@ -749,6 +749,34 @@ fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
     });
 }
 
+fn filter_image_ids_for_auto_jobs(
+    db: &Database,
+    image_ids: &[String],
+) -> Result<Vec<String>, String> {
+    if image_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let refs: Vec<&str> = image_ids.iter().map(|id| id.as_str()).collect();
+    let images = db.get_images_by_ids(&refs).map_err(|e| e.to_string())?;
+    let mut document_ids: HashSet<String> = HashSet::new();
+    let mut existing_ids: HashSet<String> = HashSet::new();
+
+    for img in images {
+        existing_ids.insert(img.image.id.clone());
+        if crate::extensions::is_document_extension(&img.image.format) {
+            document_ids.insert(img.image.id);
+        }
+    }
+
+    Ok(image_ids
+        .iter()
+        .filter(|id| existing_ids.contains(*id))
+        .filter(|id| !document_ids.contains(*id))
+        .cloned()
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -776,7 +804,7 @@ mod tests {
         let summary = analyze_quality_for_imported_images(
             &db,
             &app_data_dir,
-            &[image_id.clone()],
+            std::slice::from_ref(&image_id),
             |_current, _total| {},
             || false,
         );
@@ -839,7 +867,7 @@ mod tests {
         let summary = analyze_quality_for_imported_images(
             &db,
             &app_data_dir,
-            &[image_id.clone()],
+            std::slice::from_ref(&image_id),
             |_current, _total| {},
             || false,
         );
@@ -876,32 +904,4 @@ mod tests {
         assert_eq!(ids, vec![png_id.clone()]);
         assert!(!ids.contains(&pdf_id));
     }
-}
-
-fn filter_image_ids_for_auto_jobs(
-    db: &Database,
-    image_ids: &[String],
-) -> Result<Vec<String>, String> {
-    if image_ids.is_empty() {
-        return Ok(vec![]);
-    }
-
-    let refs: Vec<&str> = image_ids.iter().map(|id| id.as_str()).collect();
-    let images = db.get_images_by_ids(&refs).map_err(|e| e.to_string())?;
-    let mut document_ids: HashSet<String> = HashSet::new();
-    let mut existing_ids: HashSet<String> = HashSet::new();
-
-    for img in images {
-        existing_ids.insert(img.image.id.clone());
-        if crate::extensions::is_document_extension(&img.image.format) {
-            document_ids.insert(img.image.id);
-        }
-    }
-
-    Ok(image_ids
-        .iter()
-        .filter(|id| existing_ids.contains(*id))
-        .filter(|id| !document_ids.contains(*id))
-        .cloned()
-        .collect())
 }

@@ -46,7 +46,7 @@ license/model download policy. Do not use `bd preflight --check` for Cull
 readiness; this bd version's embedded preflight is a generic Go/Nix checklist
 and is not configurable for Cull.
 
-**Rust:** `npm run ci:rust` runs `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets`, and `cargo test --locked --all-targets`. Clippy warnings are reported but not denied until `imageview-2w6.11` cleans up the existing warning backlog.
+**Rust:** `npm run ci:rust` runs `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets -- -D warnings`, and `cargo test --locked --all-targets`. New Rust code must either satisfy Clippy or use a narrow local `#[expect(..., reason = "...")]`/`#[allow(...)]` with a rationale when preserving an external API or wire contract is the safer choice.
 
 **Svelte/TypeScript:** `npm run ci:frontend` runs `npm ci`, `npm run check`, `npm test`, and `npm run build`.
 

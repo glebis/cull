@@ -813,10 +813,9 @@ async fn download_embedding_model_for(
     // Load the model after download
     {
         let mut engine = state.embedding_engine.lock();
-        engine.load_model_for(spec.model_id).map_err(|err| {
-            state.jobs.fail(&job_id, &err);
+        engine.load_model_for(spec.model_id).inspect_err(|err| {
+            state.jobs.fail(&job_id, err);
             state.jobs.persist_terminal(&job_id, &state.db);
-            err
         })?;
     }
 

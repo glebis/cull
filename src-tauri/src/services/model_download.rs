@@ -328,6 +328,7 @@ where
     .await
 }
 
+#[cfg(test)]
 pub async fn write_stream_to_model_file_verified_controlled<S, E, F>(
     destination: &Path,
     resume_from: u64,

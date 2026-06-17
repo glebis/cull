@@ -897,11 +897,9 @@ fn set_menu_item_enabled(app: &AppHandle, id: &str, enabled: bool) -> Result<(),
 }
 
 fn set_menu_item_checked(app: &AppHandle, id: &str, checked: bool) -> Result<(), String> {
-    if let Some(item) = find_menu_item(app, id)? {
-        if let MenuItemKind::Check(item) = item {
-            item.set_checked(checked)
-                .map_err(|e| format!("Failed to check menu item '{}': {}", id, e))?;
-        }
+    if let Some(MenuItemKind::Check(item)) = find_menu_item(app, id)? {
+        item.set_checked(checked)
+            .map_err(|e| format!("Failed to check menu item '{}': {}", id, e))?;
     }
     Ok(())
 }

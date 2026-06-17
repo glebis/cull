@@ -280,10 +280,8 @@ pub async fn check_library_health(
                 .query_map(rusqlite::params![threshold], |row| row.get::<_, String>(0))
                 .map_err(|e| e.to_string())?;
             let mut result = Vec::new();
-            for row in rows {
-                if let Ok(id) = row {
-                    result.push(id);
-                }
+            for id in rows.flatten() {
+                result.push(id);
             }
             result
         };

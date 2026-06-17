@@ -524,7 +524,7 @@ mod tests {
 
         let result = capture_clipboard_image(&db, &app_data, &session, &capture, 1).unwrap();
 
-        assert_eq!(result.imported, true);
+        assert!(result.imported);
         assert!(std::path::Path::new(&result.path).exists());
         assert!(result.path.ends_with("_red-reference_001.png"));
         let images = db.list_collection_images(&session.collection_id).unwrap();

@@ -64,6 +64,10 @@ pub enum Field {
     ClipSimilarTo,
     ClipTextMatch,
     #[serde(rename = "catalog_field")]
+    #[expect(
+        clippy::enum_variant_names,
+        reason = "FilterNode JSON schema uses CatalogField to distinguish the catalog rule namespace"
+    )]
     CatalogField {
         key: String,
     },
@@ -550,9 +554,7 @@ fn text_search_clause(
     )";
 
     let pattern = format!("%{}%", term.trim());
-    let params = std::iter::repeat(SqlValue::Text(pattern))
-        .take(15)
-        .collect();
+    let params = std::iter::repeat_n(SqlValue::Text(pattern), 15).collect();
 
     match op {
         RuleOp::Contains | RuleOp::Eq => Ok((sql.to_string(), params)),

@@ -454,6 +454,10 @@ fn dispatch(
         }
         "set_catalog_draft_values" => {
             let params: CatalogDraftValuesArgs = parse_args(tool, args)?;
+            #[expect(
+                clippy::type_complexity,
+                reason = "plugin catalog batch payload mirrors the database batch tuple"
+            )]
             let payload: Vec<(
                 String,
                 String,

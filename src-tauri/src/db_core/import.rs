@@ -74,13 +74,11 @@ pub fn sync_file(
         .get_image_file_by_path(&path_str)
         .map_err(|e| e.to_string())?
     {
-        let size_match = existing_file
-            .last_seen_size
-            .map_or(false, |s| s == file_size);
+        let size_match = existing_file.last_seen_size == Some(file_size);
         let mtime_match = existing_file
             .last_seen_mtime
             .as_deref()
-            .map_or(false, |m| m == mtime);
+            .is_some_and(|m| m == mtime);
 
         if size_match && mtime_match && existing_file.missing_at.is_none() {
             let _ = db.touch_image_file(&existing_file.id, file_size, &mtime);

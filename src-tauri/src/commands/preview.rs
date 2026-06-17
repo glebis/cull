@@ -140,15 +140,16 @@ pub async fn place_preview_display(
     fullscreen: bool,
 ) -> Result<String, String> {
     let window = ensure_preview_display_window(&app)?;
-    let state = app.state::<AppState>();
-    let effective_monitor_id = match monitor_id {
-        Some(id) => Some(id),
-        None => state
-            .db
-            .get_setting(PREVIEW_DISPLAY_MONITOR_SETTING)
-            .map_err(|e| e.to_string())?,
+    let effective_monitor_id = {
+        let state = app.state::<AppState>();
+        match monitor_id {
+            Some(id) => Some(id),
+            None => state
+                .db
+                .get_setting(PREVIEW_DISPLAY_MONITOR_SETTING)
+                .map_err(|e| e.to_string())?,
+        }
     };
-    drop(state);
 
     place_preview_display_window(&app, &window, effective_monitor_id.as_deref(), fullscreen)?;
     let state = app.state::<AppState>();
@@ -169,18 +170,20 @@ pub async fn place_preview_display(
 }
 
 fn apply_saved_preview_display_placement(app: &AppHandle) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let monitor_id = state
-        .db
-        .get_setting(PREVIEW_DISPLAY_MONITOR_SETTING)
-        .map_err(|e| e.to_string())?;
-    let fullscreen = state
-        .db
-        .get_setting(PREVIEW_DISPLAY_FULLSCREEN_SETTING)
-        .map_err(|e| e.to_string())?
-        .map(|value| value == "true")
-        .unwrap_or(false);
-    drop(state);
+    let (monitor_id, fullscreen) = {
+        let state = app.state::<AppState>();
+        let monitor_id = state
+            .db
+            .get_setting(PREVIEW_DISPLAY_MONITOR_SETTING)
+            .map_err(|e| e.to_string())?;
+        let fullscreen = state
+            .db
+            .get_setting(PREVIEW_DISPLAY_FULLSCREEN_SETTING)
+            .map_err(|e| e.to_string())?
+            .map(|value| value == "true")
+            .unwrap_or(false);
+        (monitor_id, fullscreen)
+    };
 
     if monitor_id.is_none() && !fullscreen {
         return Ok(());

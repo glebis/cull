@@ -438,7 +438,7 @@ fn export_static_publish_package_with_canvas_inner(
     let snapshot = canvas_document
         .as_ref()
         .and_then(|document| {
-            export_canvas_snapshot(state, &document, &images_by_id, &site_dir, &mut warnings)
+            export_canvas_snapshot(state, document, &images_by_id, &site_dir, &mut warnings)
                 .transpose()
         })
         .transpose()?;
@@ -1019,7 +1019,7 @@ fn export_canvas_snapshot(
     let png_path_str = png_path.to_string_lossy().to_string();
     let pdf_path_str = pdf_path.to_string_lossy().to_string();
     crate::export::pdf::assemble_pdf(
-        &[png_path_str.clone()],
+        std::slice::from_ref(&png_path_str),
         output_width,
         output_height,
         &pdf_path_str,
@@ -1290,9 +1290,7 @@ fn sanitize_ext(ext: &str) -> String {
         .take(8)
         .flat_map(|ch| ch.to_lowercase())
         .collect();
-    if cleaned.is_empty() {
-        "jpg".to_string()
-    } else if cleaned == "jpeg" {
+    if cleaned.is_empty() || cleaned == "jpeg" {
         "jpg".to_string()
     } else {
         cleaned

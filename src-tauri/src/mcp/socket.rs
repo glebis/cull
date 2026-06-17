@@ -1,5 +1,5 @@
 use rmcp::ServiceExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::net::UnixListener;
 
@@ -7,7 +7,7 @@ use super::tools::CullMcp;
 
 static CONNECTION_COUNT: AtomicU32 = AtomicU32::new(0);
 
-pub fn socket_path(app_data_dir: &PathBuf) -> PathBuf {
+pub fn socket_path(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("mcp.sock")
 }
 

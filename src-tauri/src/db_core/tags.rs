@@ -6,11 +6,12 @@ pub fn normalize_tag_name(name: &str) -> Option<String> {
         if ch.is_ascii_alphanumeric() {
             normalized.push(ch);
             last_was_dash = false;
-        } else if ch.is_whitespace() || matches!(ch, '-' | '_' | '/' | '\\' | ':' | '.') {
-            if !last_was_dash && !normalized.is_empty() {
-                normalized.push('-');
-                last_was_dash = true;
-            }
+        } else if (ch.is_whitespace() || matches!(ch, '-' | '_' | '/' | '\\' | ':' | '.'))
+            && !last_was_dash
+            && !normalized.is_empty()
+        {
+            normalized.push('-');
+            last_was_dash = true;
         }
     }
 
@@ -24,7 +25,7 @@ pub fn normalize_tag_name(name: &str) -> Option<String> {
 
 pub fn split_tag_list(value: &str) -> Vec<String> {
     value
-        .split(|ch| matches!(ch, ',' | ';' | '\n' | '|'))
+        .split([',', ';', '\n', '|'])
         .filter_map(|part| {
             let trimmed = part.trim();
             if trimmed.is_empty() {

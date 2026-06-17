@@ -30,12 +30,11 @@ describe('CI quality gate contract', () => {
     const releaseWorkflow = read('.github/workflows/release.yml');
     const contributing = read('CONTRIBUTING.md');
 
-    expect(checkCi).toContain('cargo clippy --locked --all-targets');
-    expect(checkCi).not.toContain('-D warnings');
+    expect(checkCi).toContain('cargo clippy --locked --all-targets -- -D warnings');
     expect(checkCi).toContain('cargo test --locked --all-targets');
     expect(releaseWorkflow).toContain('npm run ci:rust');
     expect(contributing).toContain(
-      '`npm run ci:rust` runs `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets`, and `cargo test --locked --all-targets`. Clippy warnings are reported but not denied until `imageview-2w6.11` cleans up the existing warning backlog.',
+      '`npm run ci:rust` runs `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets -- -D warnings`, and `cargo test --locked --all-targets`. New Rust code must either satisfy Clippy or use a narrow local `#[expect(..., reason = "...")]`/`#[allow(...)]` with a rationale when preserving an external API or wire contract is the safer choice.',
     );
   });
 });

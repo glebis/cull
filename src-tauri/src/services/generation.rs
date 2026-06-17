@@ -252,6 +252,10 @@ fn extract_image_gemini(resp_body: &str) -> Result<Vec<u8>, String> {
     Err("No image data in Gemini response".to_string())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "generation orchestration depends on explicit service handles and request context"
+)]
 pub async fn generate_images(
     request: &GenerationRequest,
     api_key: &str,
@@ -314,7 +318,7 @@ pub async fn generate_images(
             );
             let resp = with_generation_heartbeat(
                 client
-                    .post(&format!("{}/images/generations", base_url))
+                    .post(format!("{}/images/generations", base_url))
                     .header("Authorization", format!("Bearer {}", api_key))
                     .json(&serde_json::json!({
                         "model": &request.model,
@@ -426,15 +430,14 @@ pub async fn generate_images(
                 request.n,
                 "Decoding generated images",
             );
-            let decoded_images = extract_images_openai(&resp_body).map_err(|e| {
-                jobs.fail(job_id, &e);
+            let decoded_images = extract_images_openai(&resp_body).inspect_err(|e| {
+                jobs.fail(job_id, e);
                 let _ = app_handle.emit(
                     "job-status-changed",
                     serde_json::json!({
                         "job_id": job_id, "kind": "generation", "status": "failed",
                     }),
                 );
-                e
             })?;
 
             for (i, bytes) in decoded_images.iter().enumerate() {
@@ -727,10 +730,10 @@ fn save_image_bytes(
     let filename = format!("{}_{}.png", &image_id[..8], index);
     let file_path = generated_dir.join(&filename);
 
-    std::fs::write(&file_path, &bytes).map_err(|e| format!("Write error: {}", e))?;
+    std::fs::write(&file_path, bytes).map_err(|e| format!("Write error: {}", e))?;
 
     let mut hasher = Sha256::new();
-    hasher.update(&bytes);
+    hasher.update(bytes);
     let hash = format!("{:x}", hasher.finalize());
 
     let img = image::open(&file_path).map_err(|e| format!("Image decode error: {}", e))?;

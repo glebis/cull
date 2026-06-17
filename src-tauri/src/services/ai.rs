@@ -465,7 +465,7 @@ mod tests {
     fn test_get_embedding_count_with_data() {
         let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
         insert_test_image(&db, "img1");
-        db.store_embedding("img1", "clip-vit-b32", &vec![0.1, 0.2, 0.3])
+        db.store_embedding("img1", "clip-vit-b32", &[0.1, 0.2, 0.3])
             .unwrap();
         let c = ctx(&db, &s, &d, &ee, &de, &se);
         assert_eq!(get_embedding_count(&c, None).unwrap(), 1);
@@ -476,9 +476,9 @@ mod tests {
         let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
         insert_test_image(&db, "img1");
         insert_test_image(&db, "img2");
-        db.store_embedding("img1", "clip-vit-b32", &vec![0.1, 0.2, 0.3])
+        db.store_embedding("img1", "clip-vit-b32", &[0.1, 0.2, 0.3])
             .unwrap();
-        db.store_embedding("img2", "clip-vit-b32", &vec![0.4, 0.5, 0.6])
+        db.store_embedding("img2", "clip-vit-b32", &[0.4, 0.5, 0.6])
             .unwrap();
         let c = ctx(&db, &s, &d, &ee, &de, &se);
         let embs = get_all_embeddings(&c, None).unwrap();
@@ -491,11 +491,11 @@ mod tests {
         insert_test_image(&db, "img1");
         insert_test_image(&db, "img2");
         insert_test_image(&db, "img3");
-        db.store_embedding("img1", "clip-vit-b32", &vec![0.1, 0.2])
+        db.store_embedding("img1", "clip-vit-b32", &[0.1, 0.2])
             .unwrap();
-        db.store_embedding("img2", "clip-vit-b32", &vec![0.3, 0.4])
+        db.store_embedding("img2", "clip-vit-b32", &[0.3, 0.4])
             .unwrap();
-        db.store_embedding("img3", "clip-vit-b32", &vec![0.5, 0.6])
+        db.store_embedding("img3", "clip-vit-b32", &[0.5, 0.6])
             .unwrap();
         let c = ctx(&db, &s, &d, &ee, &de, &se);
 
@@ -524,11 +524,11 @@ mod tests {
         insert_test_image(&db, "img1");
         insert_test_image(&db, "img2");
         insert_test_image(&db, "img3");
-        db.store_embedding("img1", "clip-vit-b32", &vec![1.0, 0.0])
+        db.store_embedding("img1", "clip-vit-b32", &[1.0, 0.0])
             .unwrap();
-        db.store_embedding("img2", "clip-vit-b32", &vec![0.99, 0.01])
+        db.store_embedding("img2", "clip-vit-b32", &[0.99, 0.01])
             .unwrap();
-        db.store_embedding("img3", "clip-vit-b32", &vec![0.0, 1.0])
+        db.store_embedding("img3", "clip-vit-b32", &[0.0, 1.0])
             .unwrap();
 
         let c = ctx(&db, &s, &d, &ee, &de, &se);
