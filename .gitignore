@@ -43,6 +43,7 @@ docs/internal/
 # Tooling (Enzyme, Beads, Superpowers)
 **/.enzyme/
 **/.enzyme-embeddings/
+.playwright-mcp/
 .beads/
 .superpowers/
 .impeccable/live/sessions/
