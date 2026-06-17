@@ -22,7 +22,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
             <span data-rotating-line-value="to">20 keepers</span>
           </button>
         </h1>
-        <p class="lede hero-step-3">Cull is a fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac. Work in the app, or drive the work through your agent via CLI or MCP.</p>
+        <p class="lede hero-step-3">A fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac.</p>
       </div>
       <figure class="product-shot hero-step-4">
         <img src="/images/cull-state-preview.png" alt="App state with batch counts, image decisions, prompt metadata, and agent queue" />
@@ -84,7 +84,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
 
     <section class="workflow reveal-surface" aria-labelledby="workflow-title" data-reveal>
       <div class="reveal-item reveal-delay-0">
-        <p class="eyebrow">how it works</p>
         <h2 id="workflow-title">From folder to final set</h2>
       </div>
       <div class="workflow-list">
@@ -125,7 +124,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
 
     <section class="bottom-signup reveal-surface" aria-labelledby="privacy-title" data-reveal>
       <div class="reveal-item reveal-delay-0">
-        <p class="eyebrow">early access</p>
         <h2 id="privacy-title">Be first when it ships</h2>
       </div>
       <div class="bottom-signup-copy reveal-item reveal-delay-2">
