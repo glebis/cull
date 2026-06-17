@@ -60,8 +60,8 @@
     </div>
 
     <div class="dialog-footer">
-        <button class="btn secondary" data-modal-initial-focus onclick={oncancel}>Cancel</button>
-        <button class="btn primary" onclick={confirm}>Move to Trash</button>
+        <button class="btn secondary" onclick={oncancel}>Cancel</button>
+        <button class="btn primary" data-modal-initial-focus onclick={confirm}>Move to Trash</button>
     </div>
 </ModalDialog>
 {/if}
@@ -138,6 +138,13 @@
     }
     input[type="checkbox"], input[type="radio"] {
         accent-color: var(--blue);
+    }
+    input[type="checkbox"]:focus-visible,
+    input[type="radio"]:focus-visible,
+    .close-btn:focus-visible,
+    .btn:focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: 2px;
     }
     .dialog-footer {
         display: flex;

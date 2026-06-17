@@ -100,4 +100,9 @@ describe('modal dialog accessibility contract', () => {
     it('does not bind trash confirmation to bare Enter keyboard handling', () => {
         expect(trashDialog).not.toContain('event.key === \'Enter\'');
     });
+
+    it('defaults trash confirmation focus to the destructive move action', () => {
+        expect(trashDialog).toContain('<button class="btn secondary" onclick={oncancel}>Cancel</button>');
+        expect(trashDialog).toContain('<button class="btn primary" data-modal-initial-focus onclick={confirm}>Move to Trash</button>');
+    });
 });
