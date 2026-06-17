@@ -7,10 +7,13 @@ if [[ -n "${BD_BIN:-}" ]]; then
     exit 127
   fi
   selected="$BD_BIN"
+elif [[ -x /usr/local/bin/bd ]]; then
+  # This repo's .beads Dolt database is currently owned by bd 1.x. On machines
+  # with both binaries installed, /opt/homebrew/bin/bd may be an older 0.x build
+  # with an incompatible schema (for example, missing the crystallizes column).
+  selected=/usr/local/bin/bd
 elif [[ -x /opt/homebrew/bin/bd ]]; then
   selected=/opt/homebrew/bin/bd
-elif [[ -x /usr/local/bin/bd ]]; then
-  selected=/usr/local/bin/bd
 else
   selected="$(command -v bd || true)"
   if [[ -z "$selected" ]]; then
