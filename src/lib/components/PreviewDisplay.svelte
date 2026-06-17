@@ -20,11 +20,16 @@
     } from '$lib/api';
     import { histogramPolyline } from '$lib/histogram-utils';
     import {
+        clampPreviewDisplayPan,
+        clampPreviewDisplayZoom,
         isPreviewDisplayPresetCycleShortcut,
         nextPreviewDisplayPresetMode,
         overlayForPreviewDisplayMode,
+        previewDisplayNormalizedFocus,
+        previewDisplayPanForNormalizedFocus,
         previewDisplayImageSourcePath,
         previewDisplayRailVisible,
+        previewDisplayZoomedSize,
     } from '$lib/preview-display';
     import { PREVIEW_DISPLAY_MODE_SETTING, PREVIEW_DISPLAY_OVERLAY_SETTING } from '$lib/preview-display-store';
 
@@ -41,6 +46,20 @@
     let headerVisible = $state(true);
     let pointerOverHeader = $state(false);
     let blankMessageVisible = $state(false);
+    let stageEl: HTMLElement | undefined = $state();
+    let previewZoom = $state(1);
+    let previewPanX = $state(0);
+    let previewPanY = $state(0);
+    let stageWidth = $state(0);
+    let stageHeight = $state(0);
+    let draggingPreview = $state(false);
+    let dragPointerId = $state<number | null>(null);
+    let dragStartX = $state(0);
+    let dragStartY = $state(0);
+    let dragStartPanX = $state(0);
+    let dragStartPanY = $state(0);
+    let savedPreviewFocus = { x: 0.5, y: 0.5 };
+    let savedPreviewZoom = 1;
     let headerHideTimer: ReturnType<typeof setTimeout> | null = null;
     let blankMessageTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -61,6 +80,10 @@
     let redPoints = $derived(histogram ? histogramPolyline(histogram.red, 64) : '');
     let greenPoints = $derived(histogram ? histogramPolyline(histogram.green, 64) : '');
     let bluePoints = $derived(histogram ? histogramPolyline(histogram.blue, 64) : '');
+    let previewTransform = $derived(
+        `translate(${previewPanX}px, ${previewPanY}px) scale(${previewZoom})`
+    );
+    let previewZoomLabel = $derived(`${Math.round(previewZoom * 100)}%`);
 
     function resetDetails() {
         generationRun = null;
@@ -86,8 +109,171 @@
         if (!pointerOverHeader) scheduleHeaderHide();
     }
 
-    function handlePreviewPointerMove() {
+    function currentImageSize() {
+        if (!image) return null;
+        return { width: image.image.width, height: image.image.height };
+    }
+
+    function currentViewportSize() {
+        return { width: stageWidth, height: stageHeight };
+    }
+
+    function rememberPreviewView() {
+        const imageSize = currentImageSize();
+        const viewport = currentViewportSize();
+        if (!imageSize || viewport.width <= 0 || viewport.height <= 0) return;
+
+        savedPreviewZoom = clampPreviewDisplayZoom(previewZoom);
+        savedPreviewFocus = previewDisplayNormalizedFocus(
+            imageSize,
+            viewport,
+            savedPreviewZoom,
+            { x: previewPanX, y: previewPanY }
+        );
+    }
+
+    function applySavedPreviewView() {
+        const imageSize = currentImageSize();
+        const viewport = currentViewportSize();
+        previewZoom = clampPreviewDisplayZoom(savedPreviewZoom);
+
+        if (!imageSize || viewport.width <= 0 || viewport.height <= 0 || previewZoom <= 1) {
+            previewPanX = 0;
+            previewPanY = 0;
+            return;
+        }
+
+        const nextPan = previewDisplayPanForNormalizedFocus(
+            imageSize,
+            viewport,
+            previewZoom,
+            savedPreviewFocus
+        );
+        previewPanX = nextPan.x;
+        previewPanY = nextPan.y;
+    }
+
+    function clampCurrentPreviewPan() {
+        const imageSize = currentImageSize();
+        const viewport = currentViewportSize();
+        if (!imageSize || viewport.width <= 0 || viewport.height <= 0) {
+            previewPanX = 0;
+            previewPanY = 0;
+            return;
+        }
+
+        const nextPan = clampPreviewDisplayPan(
+            imageSize,
+            viewport,
+            previewZoom,
+            { x: previewPanX, y: previewPanY }
+        );
+        previewPanX = nextPan.x;
+        previewPanY = nextPan.y;
+    }
+
+    function resetPreviewZoomToFit() {
+        savedPreviewZoom = 1;
+        savedPreviewFocus = { x: 0.5, y: 0.5 };
+        previewZoom = 1;
+        previewPanX = 0;
+        previewPanY = 0;
+    }
+
+    function applyPreviewZoom(nextZoom: number, pointer?: { x: number; y: number }) {
+        const imageSize = currentImageSize();
+        const viewport = currentViewportSize();
+        const previousZoom = previewZoom;
+        const zoom = clampPreviewDisplayZoom(nextZoom);
+
+        if (!imageSize || viewport.width <= 0 || viewport.height <= 0) {
+            previewZoom = zoom;
+            previewPanX = 0;
+            previewPanY = 0;
+            rememberPreviewView();
+            return;
+        }
+
+        if (zoom <= 1) {
+            resetPreviewZoomToFit();
+            return;
+        }
+
+        if (pointer && previousZoom > 0) {
+            const previousZoomed = previewDisplayZoomedSize(imageSize, viewport, previousZoom);
+            const focus = previousZoomed.width > 0 && previousZoomed.height > 0
+                ? {
+                    x: Math.max(0, Math.min(1, 0.5 + (pointer.x - previewPanX) / previousZoomed.width)),
+                    y: Math.max(0, Math.min(1, 0.5 + (pointer.y - previewPanY) / previousZoomed.height)),
+                }
+                : savedPreviewFocus;
+            const nextZoomed = previewDisplayZoomedSize(imageSize, viewport, zoom);
+            const nextPan = clampPreviewDisplayPan(imageSize, viewport, zoom, {
+                x: pointer.x - (focus.x - 0.5) * nextZoomed.width,
+                y: pointer.y - (focus.y - 0.5) * nextZoomed.height,
+            });
+            previewZoom = zoom;
+            previewPanX = nextPan.x;
+            previewPanY = nextPan.y;
+        } else {
+            previewZoom = zoom;
+            const nextPan = previewDisplayPanForNormalizedFocus(imageSize, viewport, zoom, savedPreviewFocus);
+            previewPanX = nextPan.x;
+            previewPanY = nextPan.y;
+        }
+
+        rememberPreviewView();
+    }
+
+    function zoomPreviewByFactor(factor: number) {
+        applyPreviewZoom(previewZoom * factor);
+    }
+
+    function handlePreviewPointerMove(event: PointerEvent) {
         showPreviewHeader();
+        if (!draggingPreview || dragPointerId !== event.pointerId) return;
+        const imageSize = currentImageSize();
+        const viewport = currentViewportSize();
+        if (!imageSize) return;
+
+        const nextPan = clampPreviewDisplayPan(imageSize, viewport, previewZoom, {
+            x: dragStartPanX + (event.clientX - dragStartX),
+            y: dragStartPanY + (event.clientY - dragStartY),
+        });
+        previewPanX = nextPan.x;
+        previewPanY = nextPan.y;
+        rememberPreviewView();
+    }
+
+    function handlePreviewPointerDown(event: PointerEvent) {
+        if (event.button !== 0 || previewZoom <= 1) return;
+        event.preventDefault();
+        draggingPreview = true;
+        dragPointerId = event.pointerId;
+        dragStartX = event.clientX;
+        dragStartY = event.clientY;
+        dragStartPanX = previewPanX;
+        dragStartPanY = previewPanY;
+        (event.currentTarget as HTMLImageElement | null)?.setPointerCapture(event.pointerId);
+    }
+
+    function stopPreviewDrag(event?: PointerEvent) {
+        if (!draggingPreview) return;
+        if (event && dragPointerId !== event.pointerId) return;
+        draggingPreview = false;
+        dragPointerId = null;
+        rememberPreviewView();
+    }
+
+    function handlePreviewWheel(event: WheelEvent) {
+        if ((event.target as HTMLElement | null)?.closest('.preview-info')) return;
+        event.preventDefault();
+        const rect = stageEl?.getBoundingClientRect();
+        const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
+        applyPreviewZoom(previewZoom * factor, rect ? {
+            x: event.clientX - rect.left - rect.width / 2,
+            y: event.clientY - rect.top - rect.height / 2,
+        } : undefined);
     }
 
     function handleHeaderPointerEnter() {
@@ -145,6 +331,7 @@
         resetDetails();
 
         if (next.blanked) {
+            rememberPreviewView();
             requestSeq++;
             image = null;
             loadState = 'blanked';
@@ -155,6 +342,7 @@
         hideBlankMessage();
 
         if (!next.image_id) {
+            rememberPreviewView();
             requestSeq++;
             image = null;
             loadState = 'empty';
@@ -167,8 +355,10 @@
         try {
             const records = await getImagesByIds([next.image_id]);
             if (seq !== requestSeq) return;
+            rememberPreviewView();
             image = records[0] ?? null;
             loadState = image ? 'ready' : 'missing';
+            applySavedPreviewView();
             if (image) {
                 await loadDetails(next, image.image.id, seq);
             }
@@ -210,16 +400,41 @@
     }
 
     function handlePreviewKeydown(event: KeyboardEvent) {
-        if (!isPreviewDisplayPresetCycleShortcut(event)) return;
-        event.preventDefault();
-        if (!previewState) return;
-        const displayMode = nextPreviewDisplayPresetMode(previewState.display_mode);
-        applyPreviewPreset(displayMode).catch((e) => {
-            console.error('Failed to cycle Preview Display preset:', e);
-        });
+        if (isPreviewDisplayPresetCycleShortcut(event)) {
+            event.preventDefault();
+            if (!previewState) return;
+            const displayMode = nextPreviewDisplayPresetMode(previewState.display_mode);
+            applyPreviewPreset(displayMode).catch((e) => {
+                console.error('Failed to cycle Preview Display preset:', e);
+            });
+            return;
+        }
+
+        if (event.metaKey || event.ctrlKey || event.altKey) return;
+        if (event.key === '+' || event.key === '=') {
+            event.preventDefault();
+            zoomPreviewByFactor(1.15);
+        } else if (event.key === '-' || event.key === '_') {
+            event.preventDefault();
+            zoomPreviewByFactor(1 / 1.15);
+        } else if (event.key === '0' || event.key === 'Home') {
+            event.preventDefault();
+            resetPreviewZoomToFit();
+        }
     }
 
     onMount(() => {
+        const observer = new ResizeObserver((entries) => {
+            const rect = entries[0]?.contentRect;
+            if (!rect) return;
+            rememberPreviewView();
+            stageWidth = rect.width;
+            stageHeight = rect.height;
+            applySavedPreviewView();
+            clampCurrentPreviewPan();
+        });
+        if (stageEl) observer.observe(stageEl);
+
         getPreviewState()
             .then(applyPreviewState)
             .catch((e) => {
@@ -237,6 +452,7 @@
 
         return () => {
             stateUnlisten.then((fn) => fn());
+            observer.disconnect();
             clearHeaderHideTimer();
             clearBlankMessageTimer();
         };
@@ -262,14 +478,25 @@
     >
         <span class="preview-title" data-tauri-drag-region="deep">Preview Display</span>
     </header>
-    <main class="preview-stage">
+    <main
+        bind:this={stageEl}
+        class="preview-stage"
+        onwheel={handlePreviewWheel}
+    >
         {#if loadState === 'ready' && image}
             <img
                 class="preview-image"
+                class:zoomed={previewZoom > 1}
+                class:dragging={draggingPreview}
                 src={imageSrc}
                 alt={filename}
                 draggable="false"
+                title={previewZoomLabel}
+                style="transform: {previewTransform};"
                 onerror={handleImageError}
+                onpointerdown={handlePreviewPointerDown}
+                onpointerup={stopPreviewDrag}
+                onpointercancel={stopPreviewDrag}
             />
             {#if previewState?.overlay.showFilename || previewState?.overlay.showRating || previewState?.overlay.showDecision || railVisible}
                 <aside
@@ -410,7 +637,19 @@
         width: auto;
         height: auto;
         object-fit: contain;
+        transform-origin: center center;
+        touch-action: none;
         user-select: none;
+        will-change: transform;
+        cursor: zoom-in;
+    }
+
+    .preview-image.zoomed {
+        cursor: grab;
+    }
+
+    .preview-image.dragging {
+        cursor: grabbing;
     }
 
     .preview-message {

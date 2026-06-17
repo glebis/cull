@@ -179,3 +179,96 @@ export function previewDisplayImageSourcePath(image: ImageWithFile, sourceLoadFa
     }
     return image.path;
 }
+
+export interface PreviewDisplaySize {
+    width: number;
+    height: number;
+}
+
+export interface PreviewDisplayPoint {
+    x: number;
+    y: number;
+}
+
+export const PREVIEW_DISPLAY_MIN_ZOOM = 1;
+export const PREVIEW_DISPLAY_MAX_ZOOM = 20;
+
+function boundedNumber(value: number, min: number, max: number): number {
+    if (!Number.isFinite(value)) return min;
+    return Math.max(min, Math.min(max, value));
+}
+
+export function clampPreviewDisplayZoom(zoom: number): number {
+    return boundedNumber(zoom, PREVIEW_DISPLAY_MIN_ZOOM, PREVIEW_DISPLAY_MAX_ZOOM);
+}
+
+export function previewDisplayFitSize(image: PreviewDisplaySize, viewport: PreviewDisplaySize): PreviewDisplaySize {
+    if (image.width <= 0 || image.height <= 0 || viewport.width <= 0 || viewport.height <= 0) {
+        return { width: 0, height: 0 };
+    }
+
+    const fitScale = Math.min(viewport.width / image.width, viewport.height / image.height);
+    return {
+        width: image.width * fitScale,
+        height: image.height * fitScale,
+    };
+}
+
+export function previewDisplayZoomedSize(
+    image: PreviewDisplaySize,
+    viewport: PreviewDisplaySize,
+    zoom: number
+): PreviewDisplaySize {
+    const fit = previewDisplayFitSize(image, viewport);
+    const safeZoom = clampPreviewDisplayZoom(zoom);
+    return {
+        width: fit.width * safeZoom,
+        height: fit.height * safeZoom,
+    };
+}
+
+export function clampPreviewDisplayPan(
+    image: PreviewDisplaySize,
+    viewport: PreviewDisplaySize,
+    zoom: number,
+    pan: PreviewDisplayPoint
+): PreviewDisplayPoint {
+    const zoomed = previewDisplayZoomedSize(image, viewport, zoom);
+    const maxX = Math.max(0, (zoomed.width - viewport.width) / 2);
+    const maxY = Math.max(0, (zoomed.height - viewport.height) / 2);
+
+    return {
+        x: boundedNumber(pan.x, -maxX, maxX),
+        y: boundedNumber(pan.y, -maxY, maxY),
+    };
+}
+
+export function previewDisplayNormalizedFocus(
+    image: PreviewDisplaySize,
+    viewport: PreviewDisplaySize,
+    zoom: number,
+    pan: PreviewDisplayPoint
+): PreviewDisplayPoint {
+    const zoomed = previewDisplayZoomedSize(image, viewport, zoom);
+    if (zoomed.width <= 0 || zoomed.height <= 0) return { x: 0.5, y: 0.5 };
+
+    return {
+        x: boundedNumber(0.5 - pan.x / zoomed.width, 0, 1),
+        y: boundedNumber(0.5 - pan.y / zoomed.height, 0, 1),
+    };
+}
+
+export function previewDisplayPanForNormalizedFocus(
+    image: PreviewDisplaySize,
+    viewport: PreviewDisplaySize,
+    zoom: number,
+    focus: PreviewDisplayPoint
+): PreviewDisplayPoint {
+    const zoomed = previewDisplayZoomedSize(image, viewport, zoom);
+    const requested = {
+        x: (0.5 - boundedNumber(focus.x, 0, 1)) * zoomed.width,
+        y: (0.5 - boundedNumber(focus.y, 0, 1)) * zoomed.height,
+    };
+
+    return clampPreviewDisplayPan(image, viewport, zoom, requested);
+}
