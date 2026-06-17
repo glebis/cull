@@ -52,7 +52,7 @@ regex = "1"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 png = "0.18"
 printpdf = "0.7"
-thiserror = "1"
+thiserror = "2"
 parking_lot = "0.12"
 schemars = "1.2"
 rmcp = { version = "1.7", features = ["server", "macros", "transport-streamable-http-server"] }
