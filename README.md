@@ -47,7 +47,13 @@ Made by artists for artists, Cull is open, local, and agent-friendly: closer to 
 
 ## Download & Install
 
-No developer tools required:
+Quickest path, with [Homebrew](https://brew.sh):
+
+```sh
+brew install --cask glebis/tap/cull
+```
+
+Prefer a manual download (no developer tools required):
 
 1. Download the latest `.dmg` for your Mac from [GitHub Releases](https://github.com/glebis/cull/releases).
 2. Open the DMG and drag **Cull** into **Applications**.

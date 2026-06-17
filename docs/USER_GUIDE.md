@@ -2,6 +2,16 @@
 
 Cull is a local-first desktop image viewer for reviewing, comparing, curating, searching, monitoring, and exporting AI-generated image sets. The app stores its library metadata in SQLite and never modifies original image files during normal viewing or curation.
 
+## Install
+
+Quickest path, with [Homebrew](https://brew.sh):
+
+```bash
+brew install --cask glebis/tap/cull
+```
+
+Or download the latest `.dmg` for your Mac from [GitHub Releases](https://github.com/glebis/cull/releases), open it, and drag **Cull** into **Applications**. Current builds are not yet signed/notarized, so on first launch right-click the app and choose **Open** to clear the macOS Gatekeeper warning.
+
 ## Install And Run From Source
 
 Prerequisites:
