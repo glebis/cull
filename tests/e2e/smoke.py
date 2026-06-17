@@ -890,9 +890,15 @@ def test_command_palette_arrows_and_favorite(page: Page) -> None:
 
 
 def test_keyboard_shortcuts_panel(page: Page) -> None:
-    """zu0.7/zu0.8 — palette opens the searchable keyboard-shortcuts panel."""
+    """zu0.7/zu0.8 — palette and status bar open the searchable keyboard-shortcuts panel."""
     press(page, "Meta+1")
     wait_mode(page, "grid")
+
+    page.locator('.statusbar .shortcut-button[title="?:help"]').click()
+    expect(page.locator(".shortcuts-panel")).to_be_visible()
+    expect(page.locator(".shortcuts-row").first).to_be_visible()
+    page.locator(".shortcuts-close").click()
+    expect(page.locator(".shortcuts-panel")).to_have_count(0)
 
     press(page, "Meta+K")
     expect(page.locator(".palette-panel")).to_be_visible()

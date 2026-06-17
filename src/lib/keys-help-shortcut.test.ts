@@ -95,11 +95,13 @@ describe("'?' opens the keyboard-shortcuts help (UX-07)", () => {
 describe('the palette and help are advertised (UX-07)', () => {
     const statusBar = readFileSync(join(process.cwd(), 'src/lib/components/StatusBar.svelte'), 'utf8');
 
-    it('status bar hint strip advertises ?:help', () => {
+    it('status bar shortcut control advertises ?:help', () => {
+        expect(statusBar).toContain('shortcutsOpen.set(true)');
         expect(statusBar).toContain('?:help');
     });
 
-    it('status bar hint strip advertises Cmd+P:commands', () => {
+    it('status bar command control advertises Cmd+P:commands', () => {
+        expect(statusBar).toContain("openCommandPalette('commands')");
         expect(statusBar).toContain('Cmd+P:commands');
     });
 });

@@ -1,7 +1,8 @@
 <script lang="ts">
-    import { viewMode, totalCount, images, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections, activeFolder, folders, activeSmartCollection, activeDetectedClass, imageLoadState, showDetectionBoxes, nsfwMode } from '$lib/stores';
+    import { viewMode, totalCount, images, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections, activeFolder, folders, activeSmartCollection, activeDetectedClass, imageLoadState, showDetectionBoxes, nsfwMode, shortcutsOpen } from '$lib/stores';
     import { previewDisplayBlanked, previewDisplayFrozen, previewDisplayWebStreamStatus } from '$lib/preview-display-store';
     import { previewDisplayStatusLabel } from '$lib/preview-display';
+    import { openCommandPalette } from '$lib/command-palette';
     import { derived } from 'svelte/store';
 
     const displayCount = derived(
@@ -42,6 +43,14 @@
         [previewDisplayFrozen, previewDisplayBlanked],
         ([$frozen, $blanked]) => previewDisplayStatusLabel($frozen, $blanked)
     );
+
+    function openShortcuts() {
+        shortcutsOpen.set(true);
+    }
+
+    function openCommands() {
+        openCommandPalette('commands');
+    }
 </script>
 
 <div class="statusbar">
@@ -76,24 +85,17 @@
     </div>
     <div class="right">
         {#if $showDetectionBoxes}
-            <span class="hint active-hint">D:boxes</span>
-        {:else}
-            <span class="hint">D:boxes</span>
+            <span class="state-chip active-hint">D:boxes</span>
         {/if}
-        <span class="hint">B:nsfw:{$nsfwMode}</span>
-        <span class="hint">hjkl:nav</span>
-        <span class="hint">space:select</span>
-        <span class="hint">1-5:rate</span>
-        <span class="hint">0:clear</span>
-        <span class="hint">a:accept</span>
-        <span class="hint">x:reject</span>
-        <span class="hint">u:undecide</span>
-        <span class="hint">c:collect</span>
-        <span class="hint">b:batch</span>
-        <span class="hint">f:fullscreen</span>
-        <span class="hint">+/-:size</span>
-        <span class="hint">?:help</span>
-        <span class="hint">Cmd+P:commands</span>
+        <span class="state-chip">B:nsfw:{$nsfwMode}</span>
+        <button class="shortcut-button" type="button" onclick={openShortcuts} title="?:help" aria-label="Open keyboard shortcuts">
+            <kbd>?</kbd>
+            <span>Shortcuts</span>
+        </button>
+        <button class="shortcut-button" type="button" onclick={openCommands} title="Cmd+P:commands" aria-label="Open command palette">
+            <kbd>Cmd+P</kbd>
+            <span>Commands</span>
+        </button>
     </div>
 </div>
 
@@ -134,18 +136,48 @@
     }
     .right {
         display: flex;
-        gap: 12px;
+        align-items: center;
+        gap: 8px;
         overflow: hidden;
         flex: 0 1 auto;
         min-width: 0;
     }
-    .hint {
+    .state-chip,
+    .shortcut-button {
         color: var(--text-secondary);
         font-size: 10px;
         white-space: nowrap;
     }
+    .state-chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 18px;
+    }
+    .shortcut-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 22px;
+        padding: 0 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        font: inherit;
+        line-height: 1;
+        cursor: default;
+    }
+    .shortcut-button:hover,
+    .shortcut-button:focus-visible {
+        color: var(--text);
+        border-color: var(--blue);
+        outline: none;
+    }
+    .shortcut-button kbd {
+        color: var(--blue);
+        font: inherit;
+    }
     .active-hint {
-        color: var(--green, #9ece6a);
+        color: var(--green);
     }
     .preset {
         color: var(--text-secondary);
