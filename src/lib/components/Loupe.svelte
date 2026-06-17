@@ -18,12 +18,15 @@
     import type { CropPoint, CropRect, CropResizeHandle } from '$lib/view-utils';
     import { recordImageLoadFailure } from '$lib/diagnostics';
     import { histogramExposureWarnings, histogramPolyline } from '$lib/histogram-utils';
+    import { classifySwipe, wheelGestureIntent } from '$lib/gesture-interactions';
+    import { clampLoupePan, computeLoupeFocalZoom } from '$lib/loupe-transform';
 
     let dragging = $state(false);
     let dragStartX = $state(0);
     let dragStartY = $state(0);
     let panStartX = $state(0);
     let panStartY = $state(0);
+    let loupeEl: HTMLDivElement | undefined = $state();
 
     let image = $derived($focusedImage);
     let isRaw = $derived(isRawFormat(image?.image.format ?? ''));
@@ -93,6 +96,10 @@
     let hideOverlays = $state(false);
     let toastDecision = $state<string | null>(null);
     let toastKey = $state(0);
+    let wheelSwipeX = 0;
+    let wheelSwipeY = 0;
+    let wheelSwipeResetTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastWheelNavigationAt = 0;
 
     let prevDecision = $state('');
     let prevImageIdForToast = $state('');
@@ -230,16 +237,98 @@
     }
 
     function handleWheel(e: WheelEvent) {
-        e.preventDefault();
-        const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-        loupeScale.update(s => {
-            const next = Math.max(0.1, Math.min(20, s * factor));
-            if (next <= 1) {
-                loupePanX.set(0);
-                loupePanY.set(0);
-            }
-            return next;
+        if (!image || cropMode) return;
+        const rect = loupeEl?.getBoundingClientRect();
+        if (!rect) return;
+        const intent = wheelGestureIntent({
+            surface: 'loupe',
+            deltaX: e.deltaX,
+            deltaY: e.deltaY,
+            deltaMode: e.deltaMode,
+            clientX: e.clientX,
+            clientY: e.clientY,
+            ctrlKey: e.ctrlKey,
+            metaKey: e.metaKey,
+            altKey: e.altKey,
+            shiftKey: e.shiftKey,
+            viewportHeight: rect.height,
+            target: e.target,
         });
+        if (!intent) return;
+
+        if (intent.type === 'zoom') {
+            e.preventDefault();
+            const next = computeLoupeFocalZoom(
+                { scale: $loupeScale, panX: $loupePanX, panY: $loupePanY },
+                { width: rect.width, height: rect.height },
+                { width: image.image.width, height: image.image.height },
+                { x: e.clientX - rect.left, y: e.clientY - rect.top },
+                intent.factor,
+            );
+            applyLoupeTransform(next);
+            resetWheelSwipe();
+            return;
+        }
+
+        if (intent.type !== 'pan') return;
+
+        if ($loupeScale > 1) {
+            e.preventDefault();
+            const next = clampLoupePan(
+                {
+                    scale: $loupeScale,
+                    panX: $loupePanX - intent.deltaX,
+                    panY: $loupePanY - intent.deltaY,
+                },
+                { width: rect.width, height: rect.height },
+                { width: image.image.width, height: image.image.height },
+            );
+            applyLoupeTransform(next);
+            resetWheelSwipe();
+            return;
+        }
+
+        wheelSwipeX += intent.deltaX;
+        wheelSwipeY += intent.deltaY;
+        scheduleWheelSwipeReset();
+        const direction = classifySwipe({ deltaX: wheelSwipeX, deltaY: wheelSwipeY });
+        const now = Date.now();
+        if (!direction || now - lastWheelNavigationAt < 250) return;
+        e.preventDefault();
+        lastWheelNavigationAt = now;
+        resetWheelSwipe();
+        moveLoupeFocus(direction === 'next' ? 1 : -1);
+    }
+
+    function applyLoupeTransform(transform: { scale: number; panX: number; panY: number }) {
+        loupeScale.set(transform.scale);
+        if (transform.scale <= 1) {
+            loupePanX.set(0);
+            loupePanY.set(0);
+            return;
+        }
+        loupePanX.set(transform.panX);
+        loupePanY.set(transform.panY);
+    }
+
+    function moveLoupeFocus(delta: number) {
+        const total = $images.length;
+        if (total === 0) return;
+        focusedIndex.update(i => Math.max(0, Math.min(total - 1, i + delta)));
+    }
+
+    function scheduleWheelSwipeReset() {
+        if (wheelSwipeResetTimer) clearTimeout(wheelSwipeResetTimer);
+        wheelSwipeResetTimer = setTimeout(resetWheelSwipe, 180);
+    }
+
+    function resetWheelSwipe() {
+        wheelSwipeX = 0;
+        wheelSwipeY = 0;
+        if (wheelSwipeResetTimer) {
+            clearTimeout(wheelSwipeResetTimer);
+            wheelSwipeResetTimer = null;
+        }
     }
 
     function handleMouseDown(e: MouseEvent) {
@@ -253,8 +342,22 @@
 
     function handleMouseMove(e: MouseEvent) {
         if (!dragging) return;
-        loupePanX.set(panStartX + (e.clientX - dragStartX));
-        loupePanY.set(panStartY + (e.clientY - dragStartY));
+        if (!image || !loupeEl) {
+            loupePanX.set(panStartX + (e.clientX - dragStartX));
+            loupePanY.set(panStartY + (e.clientY - dragStartY));
+            return;
+        }
+        const rect = loupeEl.getBoundingClientRect();
+        const next = clampLoupePan(
+            {
+                scale: $loupeScale,
+                panX: panStartX + (e.clientX - dragStartX),
+                panY: panStartY + (e.clientY - dragStartY),
+            },
+            { width: rect.width, height: rect.height },
+            { width: image.image.width, height: image.image.height },
+        );
+        applyLoupeTransform(next);
     }
 
     function handleMouseUp() {
@@ -463,6 +566,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
 <div
     class="loupe-container"
+    bind:this={loupeEl}
     onwheel={handleWheel}
     onmousedown={handleMouseDown}
     onmousemove={handleMouseMove}
