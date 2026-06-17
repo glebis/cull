@@ -87,7 +87,7 @@
         onclick={(e: MouseEvent) => e.stopPropagation()}
     >
         <header class="about-header">
-            <img class="app-icon" src="/icon-variants/cull-primary.png" alt="" aria-hidden="true" />
+            <img class="app-icon" src="/icon-variants/cull-dark.png" alt="" aria-hidden="true" />
             <div class="title-group">
                 <p class="eyebrow">Local-first image review</p>
                 <h2 id="about-title">Cull</h2>

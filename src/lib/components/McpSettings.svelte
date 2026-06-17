@@ -2,7 +2,7 @@
     import { onMount, tick } from 'svelte';
     import { listMcpTokens, createMcpToken, revokeMcpToken, rotateMcpToken, getAppSetting, setAppSetting, applyAppIconVariant, hasApiKey, setApiKey, deleteApiKey, validateApiKey, backfillRawPreviews } from '$lib/api';
     import type { McpToken } from '$lib/api';
-    import { APP_ICON_VARIANTS, normalizeAppIconVariant, type AppIconVariantId } from '$lib/app-icons';
+    import { APP_ICON_VARIANTS, DEFAULT_APP_ICON_VARIANT, normalizeAppIconVariant, type AppIconVariantId } from '$lib/app-icons';
     import { clientToolsEnabled, navigateTo, showToast, staticPublishingEnabled, viewMode, voiceDictationEnabled } from '$lib/stores';
     import { CLIPBOARD_PASTE_DATE_FORMAT_SETTING, DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT } from '$lib/clipboard-actions';
     import { relativeExpiry, expiryState } from '$lib/token-expiry';
@@ -36,7 +36,7 @@
     let moduleStaticPublishing = $state(false);
     let moduleClientTools = $state(false);
     let moduleVoiceDictation = $state(false);
-    let appIconVariant = $state<AppIconVariantId>('primary');
+    let appIconVariant = $state<AppIconVariantId>(DEFAULT_APP_ICON_VARIANT);
     let clipboardPasteDateFormat = $state(DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT);
     let cohereEmbeddingModel = $state('embed-v4.0');
     let openaiEmbeddingModel = $state('text-embedding-3-large');

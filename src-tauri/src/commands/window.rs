@@ -5,7 +5,7 @@ use tauri::{image::Image, AppHandle, Emitter, Manager};
 
 static WINDOW_COUNTER: AtomicU32 = AtomicU32::new(2);
 const TRAY_ID: &str = "main";
-const DEFAULT_ICON_VARIANT: &str = "primary";
+pub(crate) const DEFAULT_ICON_VARIANT: &str = "dark";
 
 #[derive(Serialize, Clone)]
 pub struct WindowInfo {

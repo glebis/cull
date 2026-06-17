@@ -93,7 +93,7 @@ fn ensure_preview_display_window(app: &AppHandle) -> Result<WebviewWindow, Strin
         .get_setting("app_icon_variant")
         .ok()
         .flatten()
-        .unwrap_or_else(|| "primary".to_string());
+        .unwrap_or_else(|| crate::commands::window::DEFAULT_ICON_VARIANT.to_string());
     let _ = crate::commands::window::apply_app_icon_variant_to_app(app, &icon_variant);
     let _ = window.emit(
         "set-window-name",

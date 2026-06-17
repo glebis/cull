@@ -375,7 +375,7 @@ pub fn run() {
                     .get_setting("app_icon_variant")
                     .ok()
                     .flatten()
-                    .unwrap_or_else(|| "primary".to_string());
+                    .unwrap_or_else(|| commands::window::DEFAULT_ICON_VARIANT.to_string());
                 if let Err(e) =
                     commands::window::apply_app_icon_variant_to_app(app.handle(), &icon_variant)
                 {

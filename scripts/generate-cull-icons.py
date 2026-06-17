@@ -19,6 +19,7 @@ TAHOE_DOCUMENTS = TAHOE_DIR / "icon-composer-documents"
 TAHOE_RENDERS = TAHOE_DIR / "icon-composer-renders"
 TAHOE_ICNS = TAHOE_DIR / "icns"
 RUNTIME_VARIANT_DIRS = [TAURI_ICONS / "variants", ROOT / "static" / "icon-variants"]
+DEFAULT_BUNDLE_VARIANT = "dark"
 
 VARIANTS = {
     "primary": {
@@ -69,6 +70,27 @@ WINDOWS_SIZES = {
     "Square284x284Logo.png": 284,
     "Square310x310Logo.png": 310,
     "StoreLogo.png": 50,
+}
+
+IOS_SIZES = {
+    "AppIcon-20x20@1x.png": 20,
+    "AppIcon-20x20@2x.png": 40,
+    "AppIcon-20x20@2x-1.png": 40,
+    "AppIcon-20x20@3x.png": 60,
+    "AppIcon-29x29@1x.png": 29,
+    "AppIcon-29x29@2x.png": 58,
+    "AppIcon-29x29@2x-1.png": 58,
+    "AppIcon-29x29@3x.png": 87,
+    "AppIcon-40x40@1x.png": 40,
+    "AppIcon-40x40@2x.png": 80,
+    "AppIcon-40x40@2x-1.png": 80,
+    "AppIcon-40x40@3x.png": 120,
+    "AppIcon-60x60@2x.png": 120,
+    "AppIcon-60x60@3x.png": 180,
+    "AppIcon-76x76@1x.png": 76,
+    "AppIcon-76x76@2x.png": 152,
+    "AppIcon-83.5x83.5@2x.png": 167,
+    "AppIcon-512@2x.png": 1024,
 }
 
 
@@ -437,18 +459,20 @@ def generate_tahoe_icns():
 
 
 def generate_bundle_icons():
-    primary = VARIANTS["primary"]
+    default = VARIANTS[DEFAULT_BUNDLE_VARIANT]
     for filename, size in BUNDLE_SIZES.items():
-        write_masked_png(TAURI_ICONS / filename, size, primary["background"], primary["mark"])
+        write_masked_png(TAURI_ICONS / filename, size, default["background"], default["mark"])
     for filename, size in WINDOWS_SIZES.items():
-        write_png(TAURI_ICONS / filename, size, primary["background"], primary["mark"])
+        write_png(TAURI_ICONS / filename, size, default["background"], default["mark"])
+    for filename, size in IOS_SIZES.items():
+        write_png(TAURI_ICONS / "ios" / filename, size, default["background"], default["mark"])
 
     ico_pngs = []
     for size in (16, 24, 32, 48, 64, 128, 256):
-        data = encode_png(size, render_masked_preview(size, primary["background"], primary["mark"]))
+        data = encode_png(size, render_masked_preview(size, default["background"], default["mark"]))
         ico_pngs.append((size, data))
     write_ico(TAURI_ICONS / "icon.ico", ico_pngs)
-    write_icns(TAURI_ICONS / "icon.icns", primary)
+    write_icns(TAURI_ICONS / "icon.icns", default)
 
 
 def main():

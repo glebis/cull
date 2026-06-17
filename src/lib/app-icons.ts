@@ -7,9 +7,15 @@ export interface AppIconVariant {
     asset: string;
 }
 
-export const DEFAULT_APP_ICON_VARIANT: AppIconVariantId = 'primary';
+export const DEFAULT_APP_ICON_VARIANT: AppIconVariantId = 'dark';
 
 export const APP_ICON_VARIANTS: AppIconVariant[] = [
+    {
+        id: 'dark',
+        label: 'Dark Mono',
+        description: 'Black / off-white',
+        asset: '/icon-variants/cull-dark.png',
+    },
     {
         id: 'primary',
         label: 'Primary Mono',
@@ -27,12 +33,6 @@ export const APP_ICON_VARIANTS: AppIconVariant[] = [
         label: 'Bauhaus Blue',
         description: 'Blue / off-white',
         asset: '/icon-variants/cull-blue.png',
-    },
-    {
-        id: 'dark',
-        label: 'Dark Mono',
-        description: 'Black / off-white',
-        asset: '/icon-variants/cull-dark.png',
     },
     {
         id: 'yellow',
