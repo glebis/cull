@@ -1,4 +1,7 @@
 import "./styles.css";
+import { inject } from "@vercel/analytics";
+
+inject();
 
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <div class="page-shell">
