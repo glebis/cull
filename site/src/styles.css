@@ -792,6 +792,16 @@ input:focus-visible {
   margin: 0;
 }
 
+.site-footer-meta {
+  display: grid;
+  gap: calc(var(--spacing) * 0.5);
+}
+
+.footer-fineprint {
+  color: color-mix(in srgb, var(--text-secondary) 78%, transparent);
+  font-size: 12px;
+}
+
 .site-footer nav {
   display: flex;
   flex-wrap: wrap;

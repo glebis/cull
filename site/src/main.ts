@@ -146,7 +146,10 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     </figure>
 
     <footer class="site-footer">
-      <p>Made in 🇪🇺 Berlin by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a></p>
+      <div class="site-footer-meta">
+        <p>Made in 🇪🇺 Berlin by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a></p>
+        <p class="footer-fineprint">No cookies, no cross-site tracking.</p>
+      </div>
       <nav aria-label="Footer links">
         <a href="https://github.com/glebis/cull">Repository</a>
         <a href="https://github.com/glebis">Gleb's Github</a>
