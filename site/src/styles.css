@@ -502,8 +502,8 @@ input:focus-visible {
 
 .claims {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: calc(var(--spacing) * 6);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: calc(var(--spacing) * 5) calc(var(--spacing) * 7);
   padding: calc(var(--spacing) * 8) 0;
 }
 
@@ -512,6 +512,36 @@ input:focus-visible {
   align-content: start;
   gap: calc(var(--spacing) * 1.5);
   min-width: 0;
+}
+
+/* Feature the local-first claim as a tall tile on the left */
+.claim:first-child {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
+.claim:first-child .claim-illustration {
+  width: 100%;
+  max-width: 460px;
+  aspect-ratio: 4 / 3;
+  margin-bottom: calc(var(--spacing) * 2);
+}
+
+/* Stack the other two as compact horizontal rows on the right */
+.claim:nth-child(2),
+.claim:nth-child(3) {
+  grid-column: 2;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-content: center;
+  gap: calc(var(--spacing) * 0.5) calc(var(--spacing) * 2.5);
+}
+
+.claim:nth-child(2) .claim-illustration,
+.claim:nth-child(3) .claim-illustration {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  width: 88px;
+  margin: 0;
 }
 
 .claim-illustration {
@@ -1059,8 +1089,22 @@ input:focus-visible {
     padding: calc(var(--spacing) * 5) 0;
   }
 
-  .claim-illustration {
+  .claim:first-child,
+  .claim:nth-child(2),
+  .claim:nth-child(3) {
+    grid-column: 1;
+    grid-row: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .claim:first-child .claim-illustration,
+  .claim:nth-child(2) .claim-illustration,
+  .claim:nth-child(3) .claim-illustration {
+    grid-column: auto;
+    grid-row: auto;
     width: 100%;
+    max-width: none;
+    aspect-ratio: 1;
   }
 
   .workflow,
