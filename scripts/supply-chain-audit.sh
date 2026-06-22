@@ -23,10 +23,16 @@ run_rust_audits() {
   fi
 
   if require_tool cargo-audit 'cargo install cargo-audit --locked'; then
-    # cargo-audit scans the lockfile (it has no --manifest-path flag). The
-    # Linux-only gtk3-stack unmaintained warnings are expected and non-fatal;
-    # the accepted ignores are recorded in src-tauri/deny.toml.
-    cargo audit --file "$ROOT/src-tauri/Cargo.lock"
+    # cargo-audit scans the full lockfile and does not read cargo-deny's
+    # target-scoped graph policy. Keep accepted RustSec IDs documented once in
+    # deny.toml and forward them here.
+    local audit_args=()
+    local advisory
+    while IFS= read -r advisory; do
+      audit_args+=(--ignore "$advisory")
+    done < <(grep -E '^\s*"RUSTSEC-[0-9]{4}-[0-9]{4}"' "$ROOT/src-tauri/deny.toml" | sed -E 's/.*"(RUSTSEC-[0-9]{4}-[0-9]{4})".*/\1/')
+
+    cargo audit --file "$ROOT/src-tauri/Cargo.lock" "${audit_args[@]}"
   fi
 }
 

@@ -16,11 +16,27 @@ targets = [
 [advisories]
 version = 2
 yanked = "deny"
-# Note: the Linux-only gtk3/glib advisories (e.g. RUSTSEC-2024-0429 and the
-# related ~17 cargo-audit unmaintained warnings) are excluded from cargo-deny
-# scope by the [graph] targets restriction above; cargo-audit still reports
-# them against the full Cargo.lock as accepted, non-fatal warnings.
+# Note: the Linux-only gtk3/glib advisories are excluded from cargo-deny scope
+# by the [graph] targets restriction above; cargo-audit still scans the full
+# Cargo.lock, so the shared audit script forwards this same ignore list to
+# cargo-audit. Review before enabling Linux release targets.
 ignore = [
+    # Linux-only GTK3 stack pulled by Tauri/wry. Cull ships macOS bundles only;
+    # accepted until Linux release work replaces or scopes these dependencies.
+    "RUSTSEC-2024-0411", # gdkwayland-sys
+    "RUSTSEC-2024-0412", # gdk
+    "RUSTSEC-2024-0413", # atk
+    "RUSTSEC-2024-0414", # gdkx11-sys
+    "RUSTSEC-2024-0415", # gtk
+    "RUSTSEC-2024-0416", # atk-sys
+    "RUSTSEC-2024-0417", # gdkx11
+    "RUSTSEC-2024-0418", # gdk-sys
+    "RUSTSEC-2024-0419", # gtk3-macros
+    "RUSTSEC-2024-0420", # gtk-sys
+    "RUSTSEC-2024-0429", # glib
+    # proc-macro-error is a transitive build-time dependency; accepted until
+    # upstream codegen crates remove it.
+    "RUSTSEC-2024-0370", # proc-macro-error
     # Unmaintained unic-* crates: transitive build-time deps of tauri-codegen
     # (tauri-utils). No runtime exposure; accepted until Tauri replaces them.
     "RUSTSEC-2025-0075", # unic-char-range
