@@ -306,6 +306,11 @@ export interface ImageHistogram {
     luma: number[];
 }
 
+export interface WindowInfo {
+    label: string;
+    title: string;
+}
+
 export async function openPreviewDisplay(): Promise<string> {
     return invoke<string>('open_preview_display');
 }
@@ -356,6 +361,30 @@ export async function updatePreviewState(
         frozen,
         blanked,
     });
+}
+
+export async function createWindow(name?: string | null): Promise<string> {
+    return invoke<string>('create_window', { name: name ?? null });
+}
+
+export async function listWindows(): Promise<WindowInfo[]> {
+    return invoke<WindowInfo[]>('list_windows');
+}
+
+export async function renameWindow(label: string, newName: string): Promise<void> {
+    return invoke<void>('rename_window', { label, newName });
+}
+
+export async function sendToWindow(windowName: string, event: string, payload: unknown): Promise<string> {
+    return invoke<string>('send_to_window', { windowName, event, payload });
+}
+
+export async function startDictation(locale?: string | null): Promise<void> {
+    return invoke<void>('start_dictation', { locale: locale ?? null });
+}
+
+export async function stopDictation(): Promise<void> {
+    return invoke<void>('stop_dictation');
 }
 
 export interface CullExchangeExportOptions {
