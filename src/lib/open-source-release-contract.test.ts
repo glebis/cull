@@ -208,7 +208,11 @@ describe('repo-going-public content pass (HYG-004/SEC-005)', () => {
     const readme = read('README.md');
     const cli = read('src-tauri/src/cli/mod.rs');
     const headlessTools = read('src-tauri/src/cli/tools/mod.rs');
-    const mcpTools = read('src-tauri/src/mcp/tools.rs');
+    const mcpTools = read('src-tauri/src/mcp/tools.rs')
+      + readdirSync('src-tauri/src/mcp/tools')
+          .filter(f => f.endsWith('.rs'))
+          .map(f => read(`src-tauri/src/mcp/tools/${f}`))
+          .join('\n');
 
     // README links the doc so a stranger can find it.
     expect(readme).toContain('docs/agents.md');
