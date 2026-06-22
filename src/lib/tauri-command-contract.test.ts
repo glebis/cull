@@ -35,6 +35,57 @@ function frontendInvokeNames(): string[] {
     return [...names].sort();
 }
 
+function apiInvokeNames(): string[] {
+    const source = readFileSync(join(root, 'src/lib/api.ts'), 'utf8');
+    const names = new Set<string>();
+    const invokeRe = /invoke(?:<[^>]+>)?\(\s*['"]([a-zA-Z0-9_]+)['"]/g;
+
+    for (const match of source.matchAll(invokeRe)) {
+        names.add(match[1]);
+    }
+
+    return [...names].sort();
+}
+
+const REGISTERED_COMMANDS_WITHOUT_API_WRAPPER = [
+    'apply_export_patches',
+    'approve_catalog_values',
+    'assemble_export_pdf',
+    'attach_images_to_catalog_work',
+    'create_catalog_field_def',
+    'create_catalog_preset',
+    'create_catalog_work',
+    'create_export_manifest',
+    'create_window',
+    'deprecate_catalog_field_def',
+    'get_catalog_preset',
+    'get_catalog_record',
+    'get_catalog_suggestion_job',
+    'get_export_asset',
+    'get_undo_status',
+    'list_catalog_drafts',
+    'list_catalog_fields',
+    'list_catalog_presets',
+    'list_catalog_values',
+    'list_export_presets',
+    'list_session_events',
+    'list_undo_history',
+    'list_windows',
+    'load_installed_plugins',
+    'plugin_invoke',
+    'reject_catalog_values',
+    'rename_window',
+    'save_export_image',
+    'send_to_window',
+    'set_catalog_draft_value',
+    'set_catalog_draft_values',
+    'start_dictation',
+    'stop_dictation',
+    'suggest_catalog_values',
+    'update_catalog_preset',
+    'validate_export_manifest',
+];
+
 function invokeHandlerSource(): string {
     const source = readFileSync(join(root, 'src-tauri/src/lib.rs'), 'utf8');
     const startToken = '.invoke_handler(tauri::generate_handler![';
@@ -130,6 +181,13 @@ describe('Tauri command contract', () => {
         const missing = frontendInvokeNames().filter((name) => !registered.has(name));
 
         expect(missing).toEqual([]);
+    });
+
+    it('tracks registered commands that do not yet have api.ts wrappers', () => {
+        const apiCommands = new Set(apiInvokeNames());
+        const missing = registeredCommandNames().filter((name) => !apiCommands.has(name));
+
+        expect(missing).toEqual(REGISTERED_COMMANDS_WITHOUT_API_WRAPPER);
     });
 
     it('grants every registered app command through an active capability permission', () => {
