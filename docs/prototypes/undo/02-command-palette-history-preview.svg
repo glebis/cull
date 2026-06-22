@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">Cull command palette undo history preview prototype</title>
+  <desc id="desc">Command palette search results showing undo and redo actions with a preview pane for the selected history item.</desc>
+  <style>
+    :root {
+      --bg: #08080c;
+      --surface: #0c0c12;
+      --border: #1a1a2e;
+      --text: #e0e0e0;
+      --text-secondary: #7a7fa0;
+      --blue: #7aa2f7;
+      --green: #9ece6a;
+      --orange: #e0af68;
+      --purple: #bb9af7;
+      --red: #f7768e;
+      --spacing: 8px;
+      --radius: 4px;
+    }
+    text {
+      font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+      fill: var(--text);
+      letter-spacing: 0;
+    }
+    .bg { fill: var(--bg); }
+    .surface { fill: var(--surface); }
+    .panel { fill: #0d0d14; stroke: var(--border); stroke-width: 1; rx: 4; }
+    .line { stroke: var(--border); stroke-width: 1; }
+    .muted { fill: var(--text-secondary); }
+    .blue { fill: var(--blue); }
+    .green { fill: var(--green); }
+    .orange { fill: var(--orange); }
+    .purple { fill: var(--purple); }
+    .red { fill: var(--red); }
+    .label { font-size: 13px; }
+    .tiny { font-size: 11px; }
+    .body { font-size: 15px; }
+    .title { font-size: 20px; font-weight: 700; }
+    .selected { fill: #11111b; stroke: var(--blue); stroke-width: 1; rx: 4; }
+    .row { fill: #0c0c12; stroke: var(--border); stroke-width: 1; rx: 4; }
+    .disabled { opacity: .36; }
+  </style>
+
+  <rect class="bg" width="1600" height="1000"/>
+
+  <rect class="surface" x="0" y="0" width="1600" height="56"/>
+  <line class="line" x1="0" y1="56" x2="1600" y2="56"/>
+  <text class="title" x="24" y="35">Cull</text>
+  <text class="label muted" x="86" y="35">Command palette</text>
+  <rect class="surface" x="0" y="56" width="252" height="944"/>
+  <line class="line" x1="252" y1="56" x2="252" y2="1000"/>
+  <text class="label muted" x="24" y="96">LIBRARY</text>
+  <text class="body muted" x="32" y="136">All Images</text>
+  <text class="body muted" x="32" y="176">Favorites</text>
+  <text class="body muted" x="32" y="216">Review Queue</text>
+  <text class="label muted" x="280" y="94">Open palette with Cmd K</text>
+
+  <g opacity=".42">
+    <rect x="292" y="144" width="236" height="168" rx="4" fill="#101018" stroke="#1a1a2e"/>
+    <rect x="556" y="144" width="236" height="168" rx="4" fill="#101018" stroke="#1a1a2e"/>
+    <rect x="820" y="144" width="236" height="168" rx="4" fill="#101018" stroke="#1a1a2e"/>
+    <rect x="1084" y="144" width="236" height="168" rx="4" fill="#101018" stroke="#1a1a2e"/>
+    <rect x="292" y="356" width="236" height="168" rx="4" fill="#101018" stroke="#1a1a2e"/>
+    <rect x="556" y="356" width="236" height="168" rx="4" fill="#101018" stroke="#1a1a2e"/>
+    <rect x="820" y="356" width="236" height="168" rx="4" fill="#101018" stroke="#1a1a2e"/>
+    <rect x="1084" y="356" width="236" height="168" rx="4" fill="#101018" stroke="#1a1a2e"/>
+  </g>
+
+  <rect x="314" y="112" width="972" height="740" rx="4" fill="#08080c" opacity=".82"/>
+  <rect class="panel" x="330" y="128" width="940" height="708"/>
+
+  <rect x="354" y="152" width="892" height="56" rx="4" fill="#0c0c12" stroke="#1a1a2e"/>
+  <text class="label muted" x="374" y="185">Command</text>
+  <text class="body" x="466" y="185">undo</text>
+  <text class="label muted" x="1182" y="185">Esc</text>
+
+  <line class="line" x1="820" y1="232" x2="820" y2="812"/>
+  <text class="label muted" x="354" y="250">UNDO HISTORY</text>
+  <text class="label muted" x="844" y="250">PREVIEW</text>
+
+  <rect class="selected" x="354" y="272" width="438" height="80"/>
+  <text class="body" x="374" y="300">Undo rating change</text>
+  <text class="label muted" x="374" y="323">aurora-courtyard.png</text>
+  <text class="label orange" x="690" y="300">5 -&gt; 4</text>
+  <text class="tiny muted" x="724" y="330">now</text>
+
+  <rect class="row" x="354" y="364" width="438" height="72"/>
+  <text class="body" x="374" y="392">Undo decision</text>
+  <text class="label muted" x="374" y="415">neon-cathedral.png</text>
+  <text class="label green" x="648" y="392">Reject -&gt; Keep</text>
+
+  <rect class="row" x="354" y="448" width="438" height="72"/>
+  <text class="body" x="374" y="476">Undo collection add</text>
+  <text class="label muted" x="374" y="499">glass-orchard.png added to Cover selects</text>
+  <text class="label purple" x="694" y="476">collection</text>
+
+  <rect class="row" x="354" y="532" width="438" height="72"/>
+  <text class="body" x="374" y="560">Undo file move</text>
+  <text class="label muted" x="374" y="583">quiet-machine.png moved to exports/review</text>
+  <text class="label blue" x="714" y="560">file</text>
+
+  <g class="disabled">
+    <rect class="row" x="354" y="632" width="438" height="64"/>
+    <text class="body muted" x="374" y="660">Redo last action</text>
+    <text class="label muted" x="374" y="681">No redo actions available</text>
+  </g>
+
+  <g opacity=".54">
+    <rect x="354" y="720" width="438" height="72" rx="4" fill="#09090e" stroke="#1a1a2e"/>
+    <text class="body muted" x="374" y="750">No deleted-file actions</text>
+    <text class="label muted" x="374" y="773">History preview only shows reversible changes</text>
+  </g>
+
+  <rect x="844" y="278" width="160" height="118" rx="4" fill="#101018" stroke="#1a1a2e"/>
+  <rect x="860" y="294" width="128" height="86" rx="3" fill="#151523"/>
+  <path d="M870 366h108l-28-38-24 22-18-28z" fill="#1a1a2e"/>
+  <text class="body" x="1030" y="306">aurora-courtyard.png</text>
+  <text class="label muted" x="1030" y="331">Image metadata and selection state</text>
+
+  <rect x="844" y="430" width="180" height="104" rx="4" fill="#0c0c12" stroke="#1a1a2e"/>
+  <text class="label muted" x="864" y="458">BEFORE</text>
+  <text class="title orange" x="864" y="496">5</text>
+  <text class="label muted" x="900" y="496">stars</text>
+  <rect x="1048" y="430" width="180" height="104" rx="4" fill="#0c0c12" stroke="#1a1a2e"/>
+  <text class="label muted" x="1068" y="458">AFTER UNDO</text>
+  <text class="title orange" x="1068" y="496">4</text>
+  <text class="label muted" x="1104" y="496">stars</text>
+
+  <line class="line" x1="844" y1="568" x2="1228" y2="568"/>
+  <text class="label muted" x="844" y="600">WILL CHANGE</text>
+  <rect x="844" y="620" width="384" height="44" rx="4" fill="#0c0c12" stroke="#1a1a2e"/>
+  <text class="label" x="864" y="648">Rating value</text>
+  <text class="label muted" x="1058" y="648">5</text>
+  <text class="label blue" x="1102" y="648">-&gt;</text>
+  <text class="label orange" x="1144" y="648">4</text>
+  <rect x="844" y="676" width="384" height="44" rx="4" fill="#0c0c12" stroke="#1a1a2e"/>
+  <text class="label" x="864" y="704">Smart collection count</text>
+  <text class="label muted" x="1058" y="704">42</text>
+  <text class="label blue" x="1102" y="704">-&gt;</text>
+  <text class="label orange" x="1144" y="704">41</text>
+
+  <rect x="844" y="760" width="116" height="36" rx="4" fill="#11111b" stroke="#1a1a2e"/>
+  <text class="label blue" x="878" y="783">Undo</text>
+  <rect x="972" y="760" width="132" height="36" rx="4" fill="#0c0c12" stroke="#1a1a2e"/>
+  <text class="label muted" x="1004" y="783">Preview</text>
+  <text class="tiny muted" x="1132" y="783">Enter runs selected action</text>
+
+  <text class="tiny muted" x="330" y="884">Prototype 02: command palette history preview with disabled redo and empty reversible-history state</text>
+</svg>

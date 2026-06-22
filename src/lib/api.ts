@@ -1133,12 +1133,41 @@ export async function deleteImagesPermanently(imageIds: string[]): Promise<numbe
 }
 
 // Undo/Redo
+export interface UndoStatus {
+    can_undo: boolean;
+    can_redo: boolean;
+    undo_label: string | null;
+    redo_label: string | null;
+    stack_depth: number;
+}
+
+export interface UndoRecord {
+    seq: number;
+    id: string;
+    action_type: string;
+    label: string;
+    before_json: string;
+    after_json: string;
+    affected_image_ids: string | null;
+    group_id: string | null;
+    has_file_backup: boolean;
+    created_at: string;
+}
+
 export async function undo(): Promise<string | null> {
-    return invoke('undo');
+    return invoke<string | null>('undo');
 }
 
 export async function redo(): Promise<string | null> {
-    return invoke('redo');
+    return invoke<string | null>('redo');
+}
+
+export async function getUndoStatus(): Promise<UndoStatus> {
+    return invoke<UndoStatus>('get_undo_status');
+}
+
+export async function listUndoHistory(limit?: number | null): Promise<UndoRecord[]> {
+    return invoke<UndoRecord[]>('list_undo_history', { limit: limit ?? null });
 }
 
 // Settings

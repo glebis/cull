@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">Cull dedicated undo history popover prototype</title>
+  <desc id="desc">Toolbar anchored undo history popover with timeline, disabled redo state, and selected action details.</desc>
+  <style>
+    :root {
+      --bg: #08080c;
+      --surface: #0c0c12;
+      --border: #1a1a2e;
+      --text: #e0e0e0;
+      --text-secondary: #7a7fa0;
+      --blue: #7aa2f7;
+      --green: #9ece6a;
+      --orange: #e0af68;
+      --purple: #bb9af7;
+      --red: #f7768e;
+      --spacing: 8px;
+      --radius: 4px;
+    }
+    text {
+      font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+      fill: var(--text);
+      letter-spacing: 0;
+    }
+    .bg { fill: var(--bg); }
+    .surface { fill: var(--surface); }
+    .panel { fill: #0d0d14; stroke: var(--border); stroke-width: 1; rx: 4; }
+    .line { stroke: var(--border); stroke-width: 1; }
+    .muted { fill: var(--text-secondary); }
+    .blue { fill: var(--blue); }
+    .green { fill: var(--green); }
+    .orange { fill: var(--orange); }
+    .purple { fill: var(--purple); }
+    .red { fill: var(--red); }
+    .label { font-size: 13px; }
+    .tiny { font-size: 11px; }
+    .body { font-size: 15px; }
+    .title { font-size: 20px; font-weight: 700; }
+    .row { fill: #0c0c12; stroke: var(--border); stroke-width: 1; rx: 4; }
+    .selected { fill: #11111b; stroke: var(--blue); stroke-width: 1; rx: 4; }
+    .button { fill: #11111b; stroke: var(--border); stroke-width: 1; rx: 4; }
+    .disabled { opacity: .36; }
+  </style>
+
+  <rect class="bg" width="1600" height="1000"/>
+
+  <rect class="surface" x="0" y="0" width="1600" height="56"/>
+  <line class="line" x1="0" y1="56" x2="1600" y2="56"/>
+  <text class="title" x="24" y="35">Cull</text>
+  <text class="label muted" x="86" y="35">Undo history popover</text>
+
+  <rect class="button" x="1112" y="12" width="44" height="32"/>
+  <path d="M1142 28c0-6-5-10-11-10h-8m19 10-7-7m7 7-7 7" fill="none" stroke="#7a7fa0" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect class="button" x="1164" y="12" width="44" height="32"/>
+  <path d="M1176 28c0-6 5-10 11-10h8m-19 10 7-7m-7 7 7 7" fill="none" stroke="#7aa2f7" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect class="button" x="1216" y="12" width="142" height="32"/>
+  <text class="label muted" x="1232" y="33">History</text>
+  <text class="label blue" x="1298" y="33">8 actions</text>
+
+  <rect class="surface" x="0" y="56" width="260" height="944"/>
+  <line class="line" x1="260" y1="56" x2="260" y2="1000"/>
+  <text class="label muted" x="24" y="96">FILTERS</text>
+  <text class="body muted" x="32" y="136">All Images</text>
+  <text class="body muted" x="32" y="176">Needs rating</text>
+  <text class="body muted" x="32" y="216">Rejected today</text>
+  <text class="label muted" x="24" y="292">SELECTION</text>
+  <rect x="24" y="312" width="212" height="48" rx="4" fill="#11111b" stroke="#1a1a2e"/>
+  <text class="label" x="40" y="342">14 selected</text>
+
+  <g opacity=".74">
+    <rect x="292" y="96" width="260" height="188" rx="4" fill="#101018" stroke="#1a1a2e"/>
+    <rect x="316" y="120" width="96" height="140" rx="3" fill="#151523"/>
+    <rect x="432" y="148" width="92" height="56" rx="3" fill="#1a1a2e"/>
+    <text class="label muted" x="308" y="320">aurora-courtyard.png</text>
+    <rect x="584" y="96" width="260" height="188" rx="4" fill="#101018" stroke="#1a1a2e"/>
+    <rect x="608" y="120" width="212" height="140" rx="3" fill="#111827"/>
+    <text class="label muted" x="600" y="320">neon-cathedral.png</text>
+    <rect x="876" y="96" width="260" height="188" rx="4" fill="#101018" stroke="#1a1a2e"/>
+    <rect x="900" y="120" width="212" height="140" rx="3" fill="#151523"/>
+    <text class="label muted" x="892" y="320">glass-orchard.png</text>
+    <rect x="292" y="368" width="260" height="188" rx="4" fill="#101018" stroke="#1a1a2e"/>
+    <rect x="584" y="368" width="260" height="188" rx="4" fill="#101018" stroke="#1a1a2e"/>
+    <rect x="876" y="368" width="260" height="188" rx="4" fill="#101018" stroke="#1a1a2e"/>
+  </g>
+
+  <path d="M1186 56 1174 72h24z" fill="#0d0d14" stroke="#1a1a2e"/>
+  <rect class="panel" x="902" y="72" width="520" height="780"/>
+  <rect x="926" y="96" width="472" height="54" rx="4" fill="#0c0c12" stroke="#1a1a2e"/>
+  <text class="title" x="946" y="129">Undo history</text>
+  <text class="label muted" x="1284" y="129">session</text>
+
+  <rect class="button" x="926" y="170" width="136" height="36"/>
+  <path d="M954 188c0-5 4-9 9-9h8m-17 9 7-7m-7 7 7 7" fill="none" stroke="#7aa2f7" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text class="label blue" x="982" y="193">Undo</text>
+  <rect class="button disabled" x="1074" y="170" width="136" height="36"/>
+  <path d="M1184 188c0-5-4-9-9-9h-8m17 9-7-7m7 7-7 7" fill="none" stroke="#7a7fa0" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text class="label muted" x="1104" y="193">Redo</text>
+  <rect class="button" x="1222" y="170" width="176" height="36"/>
+  <text class="label muted" x="1242" y="193">Show in palette</text>
+
+  <line class="line" x1="958" y1="244" x2="958" y2="650"/>
+  <circle cx="958" cy="266" r="5" fill="#7aa2f7"/>
+  <text class="tiny blue" x="982" y="270">current state</text>
+
+  <rect class="selected" x="982" y="288" width="392" height="74"/>
+  <text class="body" x="1000" y="316">Rated aurora-courtyard.png</text>
+  <text class="label muted" x="1000" y="339">5 stars from keyboard shortcut</text>
+  <text class="label orange" x="1296" y="316">undo</text>
+  <circle cx="958" cy="325" r="5" fill="#e0af68"/>
+
+  <rect class="row" x="982" y="374" width="392" height="70"/>
+  <text class="body" x="1000" y="402">Changed decision to Keep</text>
+  <text class="label muted" x="1000" y="425">neon-cathedral.png</text>
+  <text class="label green" x="1304" y="402">keep</text>
+  <circle cx="958" cy="409" r="5" fill="#9ece6a"/>
+
+  <rect class="row" x="982" y="456" width="392" height="70"/>
+  <text class="body" x="1000" y="484">Added to Cover selects</text>
+  <text class="label muted" x="1000" y="507">glass-orchard.png</text>
+  <text class="label purple" x="1280" y="484">collection</text>
+  <circle cx="958" cy="491" r="5" fill="#bb9af7"/>
+
+  <rect class="row" x="982" y="538" width="392" height="70"/>
+  <text class="body" x="1000" y="566">Moved file to exports/review</text>
+  <text class="label muted" x="1000" y="589">quiet-machine.png</text>
+  <text class="label blue" x="1328" y="566">file</text>
+  <circle cx="958" cy="573" r="5" fill="#7aa2f7"/>
+
+  <g opacity=".56">
+    <rect x="982" y="636" width="392" height="58" rx="4" fill="#09090e" stroke="#1a1a2e"/>
+    <text class="body muted" x="1000" y="663">No redo steps</text>
+    <text class="label muted" x="1000" y="684">Redo appears here after you undo something</text>
+    <circle cx="958" cy="665" r="5" fill="#7a7fa0"/>
+  </g>
+
+  <line class="line" x1="926" y1="724" x2="1398" y2="724"/>
+  <text class="label muted" x="926" y="756">SELECTED ACTION</text>
+  <rect x="926" y="776" width="472" height="52" rx="4" fill="#0c0c12" stroke="#1a1a2e"/>
+  <text class="label" x="946" y="808">Undo will restore rating 4 and remove this image from rating 5+</text>
+
+  <text class="tiny muted" x="292" y="966">Prototype 03: dedicated undo history popover anchored to toolbar history controls</text>
+</svg>
