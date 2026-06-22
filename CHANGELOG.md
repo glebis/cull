@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.2.3] - 2026-06-18
+
+### Fixed
+
+- Limited the signed macOS release workflow to Apple Silicon while Intel
+  packaging is blocked by the current ONNX Runtime dependency setup.
+
+## [0.2.2] - 2026-06-18
+
 Reconstructed from the largest post-0.2.1 commit and merge chunks.
 
 ### Added

@@ -1,6 +1,6 @@
 [package]
 name = "cull"
-version = "0.2.1"
+version = "0.2.3"
 description = "Local-first desktop image viewer for AI-generated art workflows."
 authors = ["Gleb Kalinin <glebis@gmail.com>"]
 license = "Apache-2.0"
