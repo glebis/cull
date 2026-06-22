@@ -234,6 +234,9 @@ impl Database {
 
     fn configure_connection(conn: &Connection) -> Result<()> {
         conn.pragma_update(None, "foreign_keys", true)?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.pragma_update(None, "busy_timeout", 5000)?;
         Ok(())
     }
 
@@ -7313,5 +7316,108 @@ mod file_watcher_tests {
         let db = test_db();
         let file = db.get_image_file_by_path("/nonexistent/path.png").unwrap();
         assert!(file.is_none());
+    }
+
+    #[test]
+    fn test_wal_mode_enabled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open(&tmp.path().join("wal_test.db")).unwrap();
+        let conn = db.conn.lock();
+        let mode: String = conn
+            .pragma_query_value(None, "journal_mode", |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode.to_lowercase(), "wal");
+    }
+
+    #[test]
+    fn test_busy_timeout_configured() {
+        let db = test_db();
+        let conn = db.conn.lock();
+        let timeout: i64 = conn
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .unwrap();
+        assert_eq!(timeout, 5000);
+    }
+
+    #[test]
+    fn test_concurrent_read_write_lock_hold_times() {
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("bench.db");
+        let db = Arc::new(Database::open(&db_path).unwrap());
+
+        // Seed with images
+        for i in 0..200 {
+            insert_test_image(&db, &format!("img-{}", i), &format!("hash-{}", i));
+        }
+
+        let db_clone = Arc::clone(&db);
+        let writer = thread::spawn(move || {
+            let mut max_hold = Duration::ZERO;
+            for i in 0..100 {
+                let t0 = Instant::now();
+                {
+                    let conn = db_clone.conn.lock();
+                    let _ = conn.execute(
+                        "INSERT OR REPLACE INTO selections (image_id, project_id, decision, rating, color_label) VALUES (?1, '__global__', 'accept', 3, '')",
+                        rusqlite::params![format!("img-{}", i % 200)],
+                    );
+                }
+                let hold = t0.elapsed();
+                if hold > max_hold {
+                    max_hold = hold;
+                }
+            }
+            max_hold
+        });
+
+        let db_clone2 = Arc::clone(&db);
+        let reader = thread::spawn(move || {
+            let mut max_hold = Duration::ZERO;
+            for _ in 0..100 {
+                let t0 = Instant::now();
+                {
+                    let conn = db_clone2.conn.lock();
+                    let _ = conn.query_row("SELECT COUNT(*) FROM images", [], |row| {
+                        row.get::<_, i64>(0)
+                    });
+                }
+                let hold = t0.elapsed();
+                if hold > max_hold {
+                    max_hold = hold;
+                }
+            }
+            max_hold
+        });
+
+        let writer_max = writer.join().unwrap();
+        let reader_max = reader.join().unwrap();
+
+        // Document findings: with a single Mutex<Connection>, all access
+        // serializes. WAL mode helps when multiple connections exist, but the
+        // current single-connection architecture means lock contention is the
+        // bottleneck. Report the measured hold times.
+        eprintln!(
+            "Lock hold times — writer max: {:.2}ms, reader max: {:.2}ms",
+            writer_max.as_secs_f64() * 1000.0,
+            reader_max.as_secs_f64() * 1000.0,
+        );
+
+        // Under normal desktop load, holds should be well under 50ms even
+        // with contention from a competing thread.
+        let threshold = Duration::from_millis(50);
+        assert!(
+            writer_max < threshold,
+            "Writer lock hold exceeded threshold: {:.2}ms",
+            writer_max.as_secs_f64() * 1000.0
+        );
+        assert!(
+            reader_max < threshold,
+            "Reader lock hold exceeded threshold: {:.2}ms",
+            reader_max.as_secs_f64() * 1000.0
+        );
     }
 }
