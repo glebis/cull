@@ -99,4 +99,19 @@ describe('impeccable audit UI contracts', () => {
         expect(staticPublishing).toContain('Allow search indexing');
         expect(staticPublishing).toContain('Start Local Preview');
     });
+
+    it('keeps the sidebar footer bounded and exposes sidebar control state', () => {
+        expect(sidebar).toContain('class="sidebar-scroll"');
+        expect(sidebar).toContain('class="footer-secondary-actions"');
+        expect(sidebar).toContain('aria-expanded={foldersExpanded}');
+        expect(sidebar).toContain('aria-expanded={aiExpanded}');
+        expect(sidebar).not.toContain('aria-controls="sidebar-folder-tree"');
+        expect(sidebar).not.toContain('aria-controls="sidebar-ai-models"');
+        expect(sidebar).toContain('aria-pressed={clipboardStatus?.running ?? false}');
+        expect(sidebar).toContain('aria-label={regenerating ?');
+        expect(sidebar).toContain('Regenerate thumbnails');
+        expect(sidebar).toContain('aria-label={rescanning ?');
+        expect(sidebar).toContain('Rescan sources');
+        expect(sidebar).toContain('Regenerating thumbnails {regenProgress.current} of {regenProgress.total}');
+    });
 });

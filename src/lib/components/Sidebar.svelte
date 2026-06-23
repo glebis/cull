@@ -80,7 +80,7 @@
 
     function pinCollection(collectionId: string) {
         pinnedCollection.set(collectionId);
-        showToast('Collection pinned — new imports will be added here', { type: 'info', duration: 5000 });
+        showToast('Collection pinned, new imports will be added here', { type: 'info', duration: 5000 });
     }
 
     function unpinCollection() {
@@ -460,8 +460,9 @@
     }
 </script>
 
-<div class="sidebar">
-    <SessionSwitcher />
+<aside class="sidebar" aria-label="Library sidebar">
+    <div class="sidebar-scroll">
+        <SessionSwitcher />
 
     {#if $activeSession}
         <div class="section">
@@ -473,15 +474,16 @@
                         sessionCanvases.update(c => [...c, canvas]);
                         selectCanvas(canvas);
                     }
-                }}>+</button>
+                }} aria-label="New canvas">+</button>
             </div>
             {#each $sessionCanvases as canvas}
                 <button
                     class="section-item"
                     class:active={$activeCanvas?.id === canvas.id}
                     onclick={() => selectCanvas(canvas)}
+                    aria-current={$activeCanvas?.id === canvas.id ? 'true' : undefined}
                 >
-                    <span>{canvas.name}</span>
+                    <span class="item-label">{canvas.name}</span>
                     <span class="count">{canvas.canvas_type}</span>
                 </button>
             {/each}
@@ -490,14 +492,23 @@
 
     <div class="section">
         <div class="section-header">LIBRARY</div>
-        <button class="section-item" class:active={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null} onclick={() => selectFolder(null)}>
+        <button
+            class="section-item"
+            class:active={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null}
+            onclick={() => selectFolder(null)}
+            aria-current={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null ? 'true' : undefined}
+        >
             <span class="icon">&#9632;</span>
-            All Images
+            <span class="item-label">All Images</span>
             <span class="count">{formatSidebarCount($totalCount)}</span>
         </button>
 
         {#if displayFolders.length > 0}
-            <button class="folders-toggle" onclick={() => foldersExpanded = !foldersExpanded}>
+            <button
+                class="folders-toggle"
+                onclick={() => foldersExpanded = !foldersExpanded}
+                aria-expanded={foldersExpanded}
+            >
                 <span class="toggle-arrow">{foldersExpanded ? '▾' : '▸'}</span>
                 <span class="folders-toggle-label">Folders</span>
                 <span class="count">{formatSidebarCount(displayFolders.length)}</span>
@@ -508,12 +519,22 @@
                 {#each displayFolders as folder}
                     <div class="folder-row" class:active={$activeFolder === folder.fullPath} style="padding-left: {folder.depth * 12}px" role="treeitem" aria-level={folder.depth + 1} {...(folder.hasChildren && folder.count === 0 ? { 'aria-expanded': 'true' } : {})}>
                         {#if folder.count > 0}
-                            <button class="section-item" onclick={() => selectFolder(folder.fullPath)} title={folder.fullPath}>
+                            <button
+                                class="section-item"
+                                onclick={() => selectFolder(folder.fullPath)}
+                                title={folder.fullPath}
+                                aria-current={$activeFolder === folder.fullPath ? 'true' : undefined}
+                            >
                                 <span class="icon">{folder.hasChildren ? '▾' : '▸'}</span>
                                 <span class="folder-label">{folder.name}</span>
                                 <span class="count">{formatSidebarCount(folder.count)}</span>
                             </button>
-                            <button class="delete-btn" onclick={(e: Event) => handleDeleteFolder(e, folder.fullPath)} title="Remove folder from library">&times;</button>
+                            <button
+                                class="delete-btn"
+                                onclick={(e: Event) => handleDeleteFolder(e, folder.fullPath)}
+                                title="Remove folder from library"
+                                aria-label={`Remove folder from library: ${folder.name}`}
+                            >&times;</button>
                         {:else}
                             <span class="section-item folder-group">
                                 <span class="icon">▾</span>
@@ -548,7 +569,11 @@
     </div>
 
     <div class="section">
-        <button class="folders-toggle" onclick={() => aiToggled = !aiExpanded}>
+        <button
+            class="folders-toggle"
+            onclick={() => aiToggled = !aiExpanded}
+            aria-expanded={aiExpanded}
+        >
             <span class="toggle-arrow">{aiExpanded ? '▾' : '▸'}</span>
             <span class="folders-toggle-label">AI MODELS</span>
         </button>
@@ -593,7 +618,7 @@
                     {#if ollamaReady}
                         <span class="model-status ready">{ollamaModels.length} models</span>
                     {:else}
-                        <span class="model-status missing">optional — not connected</span>
+                        <span class="model-status missing">optional</span>
                     {/if}
                 </div>
 
@@ -640,9 +665,10 @@
         {#each $smartCollections as sc}
             <button class="section-item"
                 class:active={$activeSmartCollection?.id === sc.id}
-                onclick={() => selectSmartCollection(sc)}>
+                onclick={() => selectSmartCollection(sc)}
+                aria-current={$activeSmartCollection?.id === sc.id ? 'true' : undefined}>
                 <span class="icon">&#9733;</span>
-                {sc.name}
+                <span class="item-label">{sc.name}</span>
                 <span class="count">{formatSidebarCount(sc.image_count)}</span>
             </button>
         {/each}
@@ -656,6 +682,7 @@
             class:active={clipboardStatus?.running}
             onclick={handleToggleClipboardMonitor}
             disabled={clipboardMoving || clipboardPublishing}
+            aria-pressed={clipboardStatus?.running ?? false}
         >
             <span class="icon">{clipboardStatus?.running ? '■' : '▶'}</span>
             {clipboardStatus?.running ? 'Stop Monitor' : 'Monitor Clipboard'}
@@ -704,7 +731,7 @@
     <div class="section">
         <div class="section-header">
             COLLECTIONS
-            <button class="new-collection-btn" onclick={handleNewCollection} title="New Collection">+</button>
+            <button class="new-collection-btn" onclick={handleNewCollection} title="New Collection" aria-label="New collection">+</button>
         </div>
         {#if $pinnedCollection}
             {@const pinnedName = $collections.find(([id]) => id === $pinnedCollection)?.[1] ?? 'Unknown'}
@@ -722,9 +749,13 @@
         {:else}
             {#each $collections as [id, name, count]}
                 <div class="folder-row" class:active={$activeCollection === id}>
-                    <button class="section-item" onclick={() => selectCollection(id)}>
+                    <button
+                        class="section-item"
+                        onclick={() => selectCollection(id)}
+                        aria-current={$activeCollection === id ? 'true' : undefined}
+                    >
                         <span class="icon">&#9671;</span>
-                        {name}
+                        <span class="item-label">{name}</span>
                         <span class="count">{formatSidebarCount(count)}</span>
                     </button>
                     <button
@@ -732,30 +763,63 @@
                         class:active={$pinnedCollection === id}
                         onclick={(e: Event) => { e.stopPropagation(); $pinnedCollection === id ? unpinCollection() : pinCollection(id); }}
                         title={$pinnedCollection === id ? 'Unpin' : 'Pin as active'}
+                        aria-label={$pinnedCollection === id ? `Unpin collection: ${name}` : `Pin collection as active: ${name}`}
+                        aria-pressed={$pinnedCollection === id}
                     >
                         {$pinnedCollection === id ? '📌' : '📎'}
                     </button>
-                    <button class="delete-btn" onclick={(e: Event) => handleDeleteCollection(e, id, name)} title="Delete collection">&times;</button>
+                    <button
+                        class="delete-btn"
+                        onclick={(e: Event) => handleDeleteCollection(e, id, name)}
+                        title="Delete collection"
+                        aria-label={`Delete collection: ${name}`}
+                    >&times;</button>
                 </div>
             {/each}
         {/if}
     </div>
+    </div>
 
-    <div class="sidebar-footer" aria-live="polite">
+    <div class="sidebar-footer" aria-live="polite" aria-busy={importing || regenerating || rescanning}>
         {#if lastResult}
             <div class="import-result">{lastResult}</div>
         {/if}
-        <button class="import-btn" onclick={handleImportFolder} disabled={importing || regenerating}>
-            {importing ? (importTotal > 0 ? `Importing ${importCurrent}/${importTotal}...` : 'Scanning...') : '+ Import Folder'}
-        </button>
-        <button class="import-btn secondary" onclick={handleRegenerateThumbnails} disabled={importing || regenerating}>
-            {regenerating ? `Thumbnails ${regenProgress.current}/${regenProgress.total}...` : 'Regenerate Thumbnails'}
-        </button>
-        <button class="import-btn secondary" onclick={handleRescan} disabled={importing || regenerating || rescanning}>
-            {rescanning ? 'Scanning sources...' : 'Rescan Sources'}
-        </button>
+        {#if importing}
+            <div class="sr-only">
+                {importTotal > 0 ? `Importing ${importCurrent} of ${importTotal}` : 'Scanning folder'}
+            </div>
+        {:else if regenerating}
+            <div class="sr-only">
+                Regenerating thumbnails {regenProgress.current} of {regenProgress.total}
+            </div>
+        {:else if rescanning}
+            <div class="sr-only">Rescanning sources</div>
+        {/if}
+        <div class="footer-actions">
+            <button class="import-btn primary" onclick={handleImportFolder} disabled={importing || regenerating || rescanning}>
+                {importing ? (importTotal > 0 ? `Importing ${importCurrent}/${importTotal}...` : 'Scanning...') : '+ Import Folder'}
+            </button>
+            <div class="footer-secondary-actions">
+                <button
+                    class="import-btn secondary"
+                    onclick={handleRegenerateThumbnails}
+                    disabled={importing || regenerating || rescanning}
+                    aria-label={regenerating ? `Regenerating thumbnails ${regenProgress.current} of ${regenProgress.total}` : 'Regenerate thumbnails'}
+                >
+                    {regenerating ? `${regenProgress.current}/${regenProgress.total}` : 'Thumbnails'}
+                </button>
+                <button
+                    class="import-btn secondary"
+                    onclick={handleRescan}
+                    disabled={importing || regenerating || rescanning}
+                    aria-label={rescanning ? 'Rescanning sources' : 'Rescan sources'}
+                >
+                    {rescanning ? 'Scanning' : 'Sources'}
+                </button>
+            </div>
+        </div>
     </div>
-</div>
+</aside>
 
 <style>
     .sidebar {
@@ -765,7 +829,14 @@
         display: flex;
         flex-direction: column;
         grid-area: sidebar;
+        min-height: 0;
+        overflow: hidden;
+    }
+    .sidebar-scroll {
+        flex: 1 1 auto;
+        min-height: 0;
         overflow-y: auto;
+        padding-bottom: var(--spacing);
     }
     .section {
         padding: var(--spacing);
@@ -796,6 +867,7 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        min-height: 28px;
     }
     .section-item:hover {
         background: var(--border);
@@ -810,11 +882,14 @@
     }
     .section-item.compact {
         font-size: 11px;
-        padding: 5px 6px;
+        line-height: 1.25;
+        min-height: 32px;
+        padding: 6px 8px;
+        white-space: normal;
     }
     .section-actions {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr);
         gap: 4px;
         padding-top: 4px;
     }
@@ -842,11 +917,19 @@
     }
     .icon {
         font-size: 8px;
+        flex: none;
+    }
+    .item-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .count {
         color: var(--text-secondary);
         margin-left: auto;
         font-size: 11px;
+        flex: none;
     }
     .folder-row {
         display: flex;
@@ -870,7 +953,10 @@
         min-width: 0;
     }
     .delete-btn {
-        display: none;
+        align-items: center;
+        display: inline-flex;
+        height: 24px;
+        justify-content: center;
         margin-right: 4px;
         font-size: 14px;
         line-height: 1;
@@ -879,11 +965,16 @@
         flex-shrink: 0;
         background: none;
         border: none;
-        padding: 6px 6px;
+        opacity: 0;
+        padding: 0;
+        pointer-events: none;
         font-family: inherit;
+        width: 24px;
     }
-    .folder-row:hover .delete-btn {
-        display: inline;
+    .folder-row:hover .delete-btn,
+    .folder-row:focus-within .delete-btn {
+        opacity: 1;
+        pointer-events: auto;
     }
     .delete-btn:hover {
         color: var(--red);
@@ -902,6 +993,7 @@
         font-family: inherit;
         text-align: left;
         margin-top: 4px;
+        min-height: 28px;
     }
     .folders-toggle:hover {
         color: var(--text);
@@ -979,6 +1071,9 @@
         accent-color: var(--blue);
     }
     .new-collection-btn {
+        align-items: center;
+        display: inline-flex;
+        justify-content: center;
         margin-left: auto;
         background: none;
         border: none;
@@ -986,9 +1081,11 @@
         cursor: pointer;
         font-size: 14px;
         font-weight: 700;
-        padding: 0 2px;
+        height: 24px;
+        padding: 0;
         line-height: 1;
         font-family: inherit;
+        width: 24px;
     }
     .new-collection-btn:hover {
         color: var(--blue);
@@ -1009,12 +1106,23 @@
         margin-top: auto;
         padding: var(--spacing);
         border-top: 1px solid var(--border);
+        background: var(--surface);
+        flex: 0 0 auto;
     }
     .import-result {
         font-size: 10px;
         color: var(--green);
         margin-bottom: 6px;
         word-break: break-word;
+    }
+    .footer-actions {
+        display: grid;
+        gap: 6px;
+    }
+    .footer-secondary-actions {
+        display: grid;
+        gap: 6px;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     }
     .import-btn {
         width: 100%;
@@ -1023,10 +1131,19 @@
         border: 1px solid var(--border);
         font-family: var(--font);
         font-size: 12px;
-        padding: 6px 12px;
+        align-items: center;
         border-radius: var(--radius);
         cursor: pointer;
-        transition: all 0.15s;
+        display: flex;
+        justify-content: center;
+        line-height: 1.2;
+        min-height: 32px;
+        overflow: hidden;
+        padding: 0 10px;
+        text-align: center;
+        text-overflow: ellipsis;
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+        white-space: nowrap;
     }
     .import-btn:hover:not(:disabled) {
         background: color-mix(in srgb, var(--blue) 25%, transparent);
@@ -1039,26 +1156,33 @@
     .import-btn.secondary {
         background: color-mix(in srgb, var(--blue) 8%, transparent);
         font-size: 10px;
-        padding: 4px 8px;
-        margin-top: 4px;
+        min-height: 32px;
+        padding: 0 6px;
     }
     /* AI Models section */
     .ai-models-content {
-        padding: 0 8px;
+        padding: 0 0 0 8px;
     }
     .model-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
+        gap: 6px;
         padding: 3px 0;
         font-size: 11px;
     }
     .model-name {
         color: var(--text);
         font-weight: 600;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .model-status {
+        flex: none;
         font-size: 10px;
+        white-space: nowrap;
     }
     .model-status.ready {
         color: var(--green);
@@ -1093,6 +1217,7 @@
         cursor: pointer;
         font-family: var(--font);
         font-size: 10px;
+        min-height: 24px;
         padding: 2px 0;
         text-align: left;
         text-decoration: underline;
@@ -1195,12 +1320,28 @@
     }
     .pin-action:hover { color: var(--text); }
     .pin-btn {
+        align-items: center;
         background: none;
         border: none;
         cursor: pointer;
+        display: inline-flex;
         font-size: 11px;
+        height: 24px;
+        justify-content: center;
         opacity: 0.4;
-        padding: 4px 6px;
+        padding: 0;
+        width: 24px;
     }
     .pin-btn:hover, .pin-btn.active { opacity: 1; }
+    .sr-only {
+        border: 0;
+        clip: rect(0 0 0 0);
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        padding: 0;
+        position: absolute;
+        white-space: nowrap;
+        width: 1px;
+    }
 </style>
