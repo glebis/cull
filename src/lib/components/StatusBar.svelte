@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { viewMode, totalCount, images, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections, activeFolder, folders, activeSmartCollection, activeDetectedClass, imageLoadState, showDetectionBoxes, nsfwMode, shortcutsOpen } from '$lib/stores';
+    import { viewMode, totalCount, images, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections, activeFolder, folders, activeSmartCollection, activeDetectedClass, imageLoadState, showDetectionBoxes, nsfwMode, shortcutsOpen, agentPanelPinned, agentPanelVisible } from '$lib/stores';
     import { previewDisplayBlanked, previewDisplayFrozen, previewDisplayWebStreamStatus } from '$lib/preview-display-store';
     import { previewDisplayStatusLabel } from '$lib/preview-display';
     import { openCommandPalette } from '$lib/command-palette';
@@ -51,6 +51,12 @@
     function openCommands() {
         openCommandPalette('commands');
     }
+
+    function toggleAgentPanel() {
+        const open = $agentPanelVisible || $agentPanelPinned;
+        agentPanelVisible.set(!open);
+        agentPanelPinned.set(!open);
+    }
 </script>
 
 <div class="statusbar">
@@ -88,6 +94,18 @@
             <span class="state-chip active-hint">D:boxes</span>
         {/if}
         <span class="state-chip">B:nsfw:{$nsfwMode}</span>
+        <button
+            class="shortcut-button agent-toggle"
+            class:active={$agentPanelVisible || $agentPanelPinned}
+            type="button"
+            onclick={toggleAgentPanel}
+            title="Toggle Claude Agent panel"
+            aria-label="Toggle Claude Agent panel"
+            aria-pressed={$agentPanelVisible || $agentPanelPinned}
+        >
+            <kbd>AI</kbd>
+            <span>Agent</span>
+        </button>
         <button class="shortcut-button" type="button" onclick={openShortcuts} title="?:help" aria-label="Open keyboard shortcuts">
             <kbd>?</kbd>
             <span>Shortcuts</span>
@@ -172,9 +190,17 @@
         border-color: var(--blue);
         outline: none;
     }
+    .shortcut-button.active {
+        color: var(--text);
+        border-color: var(--green);
+        background: var(--bg);
+    }
     .shortcut-button kbd {
         color: var(--blue);
         font: inherit;
+    }
+    .shortcut-button.active kbd {
+        color: var(--green);
     }
     .active-hint {
         color: var(--green);
