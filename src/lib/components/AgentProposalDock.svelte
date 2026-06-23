@@ -4,6 +4,7 @@
         AgentSelectionPreset,
         AgentVisualLevel,
     } from '$lib/api';
+    import { estimateAgentBudget } from '$lib/agent-token-estimate';
 
     type Candidate = {
         image_id: string;
@@ -21,6 +22,8 @@
         lastMessage = null,
         visualLevel,
         activePresetId,
+        activeProposalId = null,
+        candidateCount = 0,
         onreviewproposal = () => {},
         ondismissproposal = () => {},
         oncreateproposal = () => {},
@@ -39,6 +42,8 @@
         lastMessage?: string | null;
         visualLevel: AgentVisualLevel;
         activePresetId: string | null;
+        activeProposalId?: string | null;
+        candidateCount?: number;
         onreviewproposal?: (proposalId: string) => void;
         ondismissproposal?: (proposalId: string) => void;
         oncreateproposal?: (presetId: string | null, instruction: string) => void;
@@ -53,7 +58,11 @@
     let editingPresetId = $state<string | null>(null);
     let presetPromptDraft = $state('');
 
-    const activeProposal = $derived(proposals.find(p => p.status === 'pending') ?? null);
+    const activeProposal = $derived(
+        (activeProposalId ? proposals.find(p => p.id === activeProposalId) : null)
+            ?? proposals.find(p => p.status === 'pending')
+            ?? null,
+    );
     const activePreset = $derived(
         presets.find(p => p.id === activePresetId) ?? presets[0] ?? null,
     );
@@ -61,6 +70,13 @@
     const contextLabel = $derived(visualLevel === 'text'
         ? 'Text-only'
         : visualLevel[0].toUpperCase() + visualLevel.slice(1));
+    const draftEstimate = $derived(estimateAgentBudget({
+        candidateCount,
+        instruction,
+        visualLevel,
+    }));
+    const displayInputTokens = $derived(activeProposal?.estimated_input_tokens ?? draftEstimate.inputTokens);
+    const displayCostEur = $derived(activeProposal?.estimated_cost_eur ?? draftEstimate.costEur);
 
     function parseCandidates(itemsJson: string | undefined): Candidate[] {
         if (!itemsJson) return [];
@@ -106,7 +122,7 @@
         </header>
 
         <button class="context-chip" type="button" title="Change visual level" onclick={onvisuallevelcycle}>
-            Context: {contextLabel} - EUR {activeProposal?.estimated_cost_eur?.toFixed(3) ?? '0.000'} est - {activeProposal?.estimated_input_tokens ?? 0} tokens
+            Context: {contextLabel} - EUR {displayCostEur.toFixed(3)} est - {displayInputTokens} tokens
         </button>
 
         <section class="chat-box" aria-label="Agent chat">

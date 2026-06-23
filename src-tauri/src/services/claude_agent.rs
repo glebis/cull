@@ -592,24 +592,10 @@ fn create_proposal_from_draft(
         "runtime": usage_value,
     })
     .to_string();
-    let estimated_input_tokens = usage_value
-        .pointer("/usage/input_tokens")
-        .and_then(Value::as_i64)
-        .map(|base| {
-            base + usage_value
-                .pointer("/usage/cache_creation_input_tokens")
-                .and_then(Value::as_i64)
-                .unwrap_or(0)
-                + usage_value
-                    .pointer("/usage/cache_read_input_tokens")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0)
-        });
-    let estimated_output_tokens = usage_value
-        .pointer("/usage/output_tokens")
-        .and_then(Value::as_i64);
-    let estimated_cost_eur =
-        total_cost_usd.map(|usd| (usd * USD_TO_EUR_DISPLAY_ESTIMATE * 1000.0).round() / 1000.0);
+    let estimated_input_tokens = estimated_input_tokens_from_usage(&usage_value);
+    let estimated_output_tokens = estimated_output_tokens_from_usage(&usage_value);
+    let estimated_cost_eur = estimated_cost_usd_from_usage(&usage_value, total_cost_usd)
+        .map(|usd| (usd * USD_TO_EUR_DISPLAY_ESTIMATE * 1000.0).round() / 1000.0);
 
     proposals::create_action_proposal_db(
         db,
@@ -629,6 +615,116 @@ fn create_proposal_from_draft(
             guard_results_json: draft.guard_results.to_string(),
         },
     )
+}
+
+fn estimated_input_tokens_from_usage(usage_value: &Value) -> Option<i64> {
+    usage_value
+        .get("usage")
+        .and_then(usage_input_tokens)
+        .or_else(|| {
+            usage_value
+                .get("model_usage")
+                .or_else(|| usage_value.get("modelUsage"))
+                .and_then(sum_model_input_tokens)
+        })
+}
+
+fn estimated_output_tokens_from_usage(usage_value: &Value) -> Option<i64> {
+    usage_value
+        .get("usage")
+        .and_then(|usage| token_field(usage, "output_tokens", "outputTokens"))
+        .or_else(|| {
+            usage_value
+                .get("model_usage")
+                .or_else(|| usage_value.get("modelUsage"))
+                .and_then(sum_model_output_tokens)
+        })
+}
+
+fn estimated_cost_usd_from_usage(usage_value: &Value, total_cost_usd: Option<f64>) -> Option<f64> {
+    total_cost_usd
+        .or_else(|| usage_value.get("total_cost_usd").and_then(Value::as_f64))
+        .or_else(|| {
+            usage_value
+                .get("model_usage")
+                .or_else(|| usage_value.get("modelUsage"))
+                .and_then(sum_model_cost_usd)
+        })
+}
+
+fn usage_input_tokens(usage: &Value) -> Option<i64> {
+    let base = token_field(usage, "input_tokens", "inputTokens")?;
+    Some(
+        base + token_field(
+            usage,
+            "cache_creation_input_tokens",
+            "cacheCreationInputTokens",
+        )
+        .unwrap_or(0)
+            + token_field(usage, "cache_read_input_tokens", "cacheReadInputTokens").unwrap_or(0),
+    )
+}
+
+fn token_field(value: &Value, snake: &str, camel: &str) -> Option<i64> {
+    value
+        .get(snake)
+        .or_else(|| value.get(camel))
+        .and_then(Value::as_i64)
+}
+
+fn cost_field(value: &Value, snake: &str, camel: &str) -> Option<f64> {
+    value
+        .get(snake)
+        .or_else(|| value.get(camel))
+        .and_then(Value::as_f64)
+}
+
+fn sum_model_input_tokens(model_usage: &Value) -> Option<i64> {
+    let models = model_usage.as_object()?;
+    if models.is_empty() {
+        return None;
+    }
+    let mut total = 0;
+    let mut seen = false;
+    for usage in models.values() {
+        if let Some(tokens) = usage_input_tokens(usage) {
+            total += tokens;
+            seen = true;
+        }
+    }
+    seen.then_some(total)
+}
+
+fn sum_model_output_tokens(model_usage: &Value) -> Option<i64> {
+    let models = model_usage.as_object()?;
+    if models.is_empty() {
+        return None;
+    }
+    let mut total = 0;
+    let mut seen = false;
+    for usage in models.values() {
+        if let Some(tokens) = token_field(usage, "output_tokens", "outputTokens") {
+            total += tokens;
+            seen = true;
+        }
+    }
+    seen.then_some(total)
+}
+
+fn sum_model_cost_usd(model_usage: &Value) -> Option<f64> {
+    let models = model_usage.as_object()?;
+    if models.is_empty() {
+        return None;
+    }
+    let mut total = 0.0;
+    let mut seen = false;
+    for usage in models.values() {
+        if let Some(cost) = cost_field(usage, "cost_usd", "costUSD") {
+            total += cost;
+            seen = true;
+        }
+    }
+    seen.then_some(total)
 }
 
 fn claude_decision_schema() -> &'static str {
@@ -980,6 +1076,47 @@ process.stdout.write(JSON.stringify({
         )
         .unwrap_err();
         assert!(err.to_string().contains("outside the candidate context"));
+    }
+
+    #[test]
+    fn proposal_estimates_fall_back_to_sdk_model_usage() {
+        let db = test_db();
+        let draft = ClaudeProposalDraft {
+            kind: "select_images".to_string(),
+            lens: Some("portfolio".to_string()),
+            criteria: "strong".to_string(),
+            items: vec![ClaudeProposalItem {
+                image_id: "img_a".to_string(),
+                reason: Some("best candidate".to_string()),
+                confidence: None,
+            }],
+            guard_results: json!({}),
+        };
+
+        let proposal = create_proposal_from_draft(
+            &db,
+            &sample_request(),
+            &draft,
+            r#"{
+                "usage": {},
+                "model_usage": {
+                    "claude-haiku": {
+                        "inputTokens": 2000,
+                        "cacheCreationInputTokens": 75,
+                        "cacheReadInputTokens": 25,
+                        "outputTokens": 64,
+                        "costUSD": 0.014
+                    }
+                }
+            }"#,
+            None,
+            ClaudeRuntimeSource::AgentSdk,
+        )
+        .unwrap();
+
+        assert_eq!(proposal.estimated_input_tokens, Some(2100));
+        assert_eq!(proposal.estimated_output_tokens, Some(64));
+        assert_eq!(proposal.estimated_cost_eur, Some(0.013));
     }
 
     #[test]

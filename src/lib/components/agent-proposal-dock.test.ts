@@ -7,9 +7,16 @@ const source = readFileSync(join(process.cwd(), 'src/lib/components/AgentProposa
 describe('AgentProposalDock source contract', () => {
     it('keeps visual level and cost visible as secondary context', () => {
         expect(source).toContain('Context: {contextLabel}');
-        expect(source).toContain("activeProposal?.estimated_cost_eur?.toFixed(3)");
-        expect(source).toContain('activeProposal?.estimated_input_tokens');
+        expect(source).toContain('displayCostEur.toFixed(3)');
+        expect(source).toContain('displayInputTokens');
         expect(source).toContain('context-chip');
+    });
+
+    it('uses live candidate estimates and active proposal selection for the context chip', () => {
+        expect(source).toContain("from '$lib/agent-token-estimate'");
+        expect(source).toContain('activeProposalId ? proposals.find');
+        expect(source).toContain('candidateCount');
+        expect(source).toContain('estimateAgentBudget');
     });
 
     it('supports editable selection presets through the chat panel', () => {

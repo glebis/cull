@@ -62,6 +62,7 @@
     import { invalidateImageCache, loadImagesForCurrentScope, refreshImageCount, type ImageLoadOptions } from '$lib/image-loading';
     import { clampFocusIndexToList, nextFocusIndexAfterFocusedRemoval } from '$lib/image-removal';
     import { buildAgentSnapshotManifest, collectVisibleImageTargets, drawAnnotatedSnapshot, type AgentSnapshotScope } from '$lib/agent-view-snapshot';
+    import { estimateAgentBudget } from '$lib/agent-token-estimate';
     import { listen } from '@tauri-apps/api/event';
     import { onMount } from 'svelte';
 
@@ -81,6 +82,7 @@
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
     let noSidebar = $derived(immersive || !$sidebarVisible);
     let reviewProposal = $derived(agentProposals.find(p => p.id === reviewProposalId) ?? null);
+    let agentCandidateCount = $derived(proposalCandidateIds().length);
 
     async function loadImages(options: ImageLoadOptions = {}) {
         await loadImagesForCurrentScope(options);
@@ -374,7 +376,11 @@
             return;
         }
         const kind = proposalKindForPreset(preset, instruction);
-        const estimatedInputTokens = Math.max(300, ids.length * 80 + instruction.length / 4);
+        const estimatedBudget = estimateAgentBudget({
+            candidateCount: ids.length,
+            instruction,
+            visualLevel: $agentVisualLevel,
+        });
         const items = ids.map((image_id, index) => ({
             image_id,
             reason: `${preset?.name ?? 'Manual preset'} candidate ${index + 1}: ${instruction}`,
@@ -387,9 +393,9 @@
             criteria: `${preset?.prompt ?? 'Selection proposal'}\n\nUser: ${instruction}`,
             visual_level: $agentVisualLevel,
             selection_preset_id: preset?.id ?? null,
-            estimated_input_tokens: Math.round(estimatedInputTokens),
-            estimated_output_tokens: 420,
-            estimated_cost_eur: Number(((estimatedInputTokens / 1000) * 0.006).toFixed(3)),
+            estimated_input_tokens: estimatedBudget.inputTokens,
+            estimated_output_tokens: estimatedBudget.outputTokens,
+            estimated_cost_eur: estimatedBudget.costEur,
             source_context_json: JSON.stringify({
                 source: 'agent_chat_manual_seed',
                 selected_count: $selectedIds.size,
@@ -773,6 +779,8 @@
                 lastMessage={lastAgentMessage}
                 visualLevel={$agentVisualLevel}
                 activePresetId={$activeAgentSelectionPresetId}
+                activeProposalId={$activeAgentProposalId}
+                candidateCount={agentCandidateCount}
                 onreviewproposal={handleReviewAgentProposal}
                 ondismissproposal={handleDismissAgentProposal}
                 oncreateproposal={handleCreateAgentProposal}
