@@ -7,3 +7,5 @@ Static SVG design prototypes for Cull's Tokyo Night desktop UI. These are visual
 - `03-undo-history-popover.svg` explores a dedicated toolbar popover for undo history.
 
 All three prototypes are standalone `1600x1000` SVG files intended to open directly in Cull.
+`03-undo-history-popover.svg` includes explicit vector/text rendering hints and layered SVG
+effects for a higher-quality direct render without embedding raster artwork.
