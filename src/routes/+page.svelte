@@ -36,7 +36,7 @@
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
     import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel, agentPanelPinned, agentPanelVisible, agentVisualLevel, activeAgentProposalId, activeAgentSelectionPresetId, cycleAgentVisualLevel } from '$lib/stores';
-    import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type ImageWithFile, type PreviewState } from '$lib/api';
+    import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
     import { loadInstalledPlugins, activateBundledPlugins } from '$lib/plugins/loader';
@@ -63,6 +63,7 @@
     import { clampFocusIndexToList, nextFocusIndexAfterFocusedRemoval } from '$lib/image-removal';
     import { buildAgentSnapshotManifest, collectVisibleImageTargets, drawAnnotatedSnapshot, type AgentSnapshotScope } from '$lib/agent-view-snapshot';
     import { estimateAgentBudget } from '$lib/agent-token-estimate';
+    import { effectiveAgentVisualLevel } from '$lib/agent-visual-context';
     import { listen } from '@tauri-apps/api/event';
     import { onMount } from 'svelte';
 
@@ -344,16 +345,27 @@
         return $images.slice(0, 12).map(item => item.image.id);
     }
 
+    function proposalCandidateImages(ids: string[]): ImageWithFile[] {
+        const wanted = new Set(ids);
+        return $images.filter(item => wanted.has(item.image.id));
+    }
+
+    function visualLevelForAgentRequest(candidateImages: ImageWithFile[]) {
+        return effectiveAgentVisualLevel({
+            requestedVisualLevel: $agentVisualLevel,
+            candidateCount: candidateImages.length,
+            thumbnailCount: candidateImages.filter(item => !!item.thumbnail_path).length,
+        });
+    }
+
     function proposalKindForPreset(preset: AgentSelectionPreset | null, instruction: string) {
         const text = `${preset?.purpose ?? ''} ${instruction}`.toLowerCase();
         if (/\b(trash|cleanup|reject|remove)\b/.test(text)) return 'trash_images';
         return 'select_images';
     }
 
-    function imageContextForAgent(ids: string[]): AgentChatImageContext[] {
-        const wanted = new Set(ids);
-        return $images
-            .filter(item => wanted.has(item.image.id))
+    function imageContextForAgent(candidateImages: ImageWithFile[], visualLevel: AgentVisualLevel): AgentChatImageContext[] {
+        return candidateImages
             .map(item => ({
                 image_id: item.image.id,
                 filename: item.path.split(/[\\/]/).pop() ?? null,
@@ -364,7 +376,7 @@
                 color_label: item.selection?.color_label ?? null,
                 decision: item.selection?.decision ?? null,
                 source_label: item.source_label ?? null,
-                thumbnail_path: $agentVisualLevel === 'text' ? null : item.thumbnail_path,
+                thumbnail_path: visualLevel === 'text' ? null : item.thumbnail_path,
             }));
     }
 
@@ -375,11 +387,14 @@
             showToast('No images available for proposal', { type: 'warning', duration: 5000 });
             return;
         }
+        const candidateImages = proposalCandidateImages(ids);
+        const visualLevel = visualLevelForAgentRequest(candidateImages);
+        if (visualLevel !== $agentVisualLevel) agentVisualLevel.set(visualLevel);
         const kind = proposalKindForPreset(preset, instruction);
         const estimatedBudget = estimateAgentBudget({
             candidateCount: ids.length,
             instruction,
-            visualLevel: $agentVisualLevel,
+            visualLevel,
         });
         const items = ids.map((image_id, index) => ({
             image_id,
@@ -391,7 +406,7 @@
             persona: 'copilot',
             lens: preset?.purpose ?? 'selection',
             criteria: `${preset?.prompt ?? 'Selection proposal'}\n\nUser: ${instruction}`,
-            visual_level: $agentVisualLevel,
+            visual_level: visualLevel,
             selection_preset_id: preset?.id ?? null,
             estimated_input_tokens: estimatedBudget.inputTokens,
             estimated_output_tokens: estimatedBudget.outputTokens,
@@ -419,7 +434,10 @@
         if (agentChatBusy) return;
         const preset = agentSelectionPresets.find(item => item.id === presetId) ?? agentSelectionPresets[0] ?? null;
         const ids = proposalCandidateIds();
-        const candidateImages = imageContextForAgent(ids);
+        const rawCandidateImages = proposalCandidateImages(ids);
+        const visualLevel = visualLevelForAgentRequest(rawCandidateImages);
+        if (visualLevel !== $agentVisualLevel) agentVisualLevel.set(visualLevel);
+        const candidateImages = imageContextForAgent(rawCandidateImages, visualLevel);
         if (candidateImages.length === 0) {
             showToast('No images available for Claude', { type: 'warning', duration: 5000 });
             return;
@@ -430,7 +448,7 @@
         try {
             const result = await runClaudeAgentChatTurn({
                 instruction,
-                visual_level: $agentVisualLevel,
+                visual_level: visualLevel,
                 preset,
                 candidate_images: candidateImages,
                 selected_count: $selectedIds.size,
