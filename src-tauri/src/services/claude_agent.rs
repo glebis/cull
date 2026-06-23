@@ -5,14 +5,16 @@ use crate::services::ServiceError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
 const DEFAULT_MODEL: &str = "haiku";
 const DEFAULT_MAX_BUDGET_USD: f64 = 0.05;
 const USD_TO_EUR_DISPLAY_ESTIMATE: f64 = 0.93;
+const SDK_RUNNER_RESOURCE_NAME: &str = "claude-agent-sdk-runner.mjs";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClaudeAgentChatTurnRequest {
@@ -53,6 +55,8 @@ pub struct ClaudeAgentChatTurnResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ClaudeCliEnvelope {
     #[serde(default)]
+    runtime: Option<String>,
+    #[serde(default)]
     structured_output: Value,
     #[serde(default)]
     usage: Value,
@@ -65,6 +69,21 @@ struct ClaudeCliEnvelope {
     result: Option<String>,
     #[serde(default)]
     is_error: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClaudeRuntimeSource {
+    AgentSdk,
+    CliFallback,
+}
+
+impl ClaudeRuntimeSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::AgentSdk => "claude_agent_sdk",
+            Self::CliFallback => "claude_code_cli_fallback",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,6 +130,8 @@ struct ClaudePresetUpdateDraft {
 #[derive(Debug, Clone)]
 pub struct ClaudeInvocation {
     pub args: Vec<String>,
+    pub sdk_request_json: String,
+    pub runner_path: Option<PathBuf>,
     #[cfg(test)]
     pub allowed_dirs: Vec<String>,
     #[cfg(test)]
@@ -125,7 +146,7 @@ pub async fn run_claude_agent_chat_turn_db(
 ) -> Result<ClaudeAgentChatTurnResult, ServiceError> {
     validate_request(&request)?;
     let invocation = build_claude_invocation(&request)?;
-    let output = run_claude_cli(invocation).await?;
+    let (output, runtime_source) = run_claude_agent_runtime(invocation).await?;
     let envelope: ClaudeCliEnvelope = serde_json::from_str(&output)
         .map_err(|e| ServiceError::Engine(format!("Claude returned invalid JSON: {}", e)))?;
     if envelope.is_error == Some(true) {
@@ -136,7 +157,7 @@ pub async fn run_claude_agent_chat_turn_db(
         ));
     }
     let decision = parse_structured_decision(&envelope.structured_output)?;
-    persist_decision(db, request, decision, envelope, output)
+    persist_decision(db, request, decision, envelope, output, runtime_source)
 }
 
 pub fn build_claude_invocation(
@@ -152,6 +173,16 @@ pub fn build_claude_invocation(
         .unwrap_or(DEFAULT_MAX_BUDGET_USD)
         .clamp(0.02, 2.0);
     let allowed_dirs = allowed_thumbnail_dirs(request);
+    let prompt = build_claude_prompt(request)?;
+    let sdk_request_json = serde_json::to_string(&json!({
+        "prompt": prompt,
+        "model": model.clone(),
+        "max_budget_usd": budget,
+        "visual_level": request.visual_level,
+        "allowed_dirs": allowed_dirs,
+        "schema": claude_decision_schema_value()?,
+    }))
+    .map_err(|e| ServiceError::Engine(format!("Failed to build Claude SDK request: {}", e)))?;
     let mut args = vec![
         "--safe-mode".to_string(),
         "--print".to_string(),
@@ -178,14 +209,16 @@ pub fn build_claude_invocation(
             args.push(dir.clone());
         }
     }
-    args.push(build_claude_prompt(request)?);
+    args.push(prompt.clone());
 
     Ok(ClaudeInvocation {
         args,
+        sdk_request_json,
+        runner_path: resolve_agent_sdk_runner(),
         #[cfg(test)]
         allowed_dirs,
         #[cfg(test)]
-        prompt: build_claude_prompt(request)?,
+        prompt,
         #[cfg(test)]
         removes_anthropic_api_key: true,
     })
@@ -251,10 +284,16 @@ fn build_claude_prompt(request: &ClaudeAgentChatTurnRequest) -> Result<String, S
     let context_json = serde_json::to_string_pretty(&context)
         .map_err(|e| ServiceError::Engine(format!("Failed to build Claude prompt: {}", e)))?;
 
+    let schema_json = serde_json::to_string_pretty(&claude_decision_schema_value()?)
+        .map_err(|e| ServiceError::Engine(format!("Failed to build Claude schema: {}", e)))?;
+
     Ok(format!(
         r#"You are Claude inside Cull, a desktop image curation app.
 
-Return only structured output matching the provided JSON schema.
+Return only one JSON object matching this JSON schema. Do not wrap it in Markdown.
+
+JSON schema:
+{schema_json}
 
 Hard rules:
 - Do not execute, apply, delete, trash, move, or mutate anything.
@@ -307,6 +346,107 @@ async fn run_claude_cli(invocation: ClaudeInvocation) -> Result<String, ServiceE
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+async fn run_claude_agent_runtime(
+    invocation: ClaudeInvocation,
+) -> Result<(String, ClaudeRuntimeSource), ServiceError> {
+    if std::env::var("CULL_AGENT_RUNTIME").as_deref() == Ok("cli") {
+        return run_claude_cli(invocation)
+            .await
+            .map(|output| (output, ClaudeRuntimeSource::CliFallback));
+    }
+    match invocation.runner_path.as_ref() {
+        Some(path) => run_claude_agent_sdk(path, &invocation.sdk_request_json)
+            .await
+            .map(|output| (output, ClaudeRuntimeSource::AgentSdk)),
+        None => run_claude_cli(invocation)
+            .await
+            .map(|output| (output, ClaudeRuntimeSource::CliFallback)),
+    }
+}
+
+async fn run_claude_agent_sdk(
+    runner_path: &Path,
+    request_json: &str,
+) -> Result<String, ServiceError> {
+    let mut command = Command::new("node");
+    command
+        .arg(runner_path)
+        .env_remove("ANTHROPIC_API_KEY")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = command.spawn().map_err(|e| {
+        ServiceError::Engine(format!(
+            "Failed to start Claude Agent SDK runner at '{}': {}",
+            runner_path.display(),
+            e
+        ))
+    })?;
+    {
+        let mut stdin = child.stdin.take().ok_or_else(|| {
+            ServiceError::Engine("Failed to open Claude Agent SDK runner stdin".to_string())
+        })?;
+        stdin
+            .write_all(request_json.as_bytes())
+            .await
+            .map_err(ServiceError::Io)?;
+        stdin.write_all(b"\n").await.map_err(ServiceError::Io)?;
+    }
+    let output = timeout(Duration::from_secs(120), child.wait_with_output())
+        .await
+        .map_err(|_| {
+            ServiceError::Engine("Claude Agent SDK timed out after 120 seconds".to_string())
+        })?
+        .map_err(ServiceError::Io)?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(ServiceError::Engine(format!(
+            "Claude Agent SDK failed with status {}{}",
+            output.status,
+            if stderr.is_empty() {
+                String::new()
+            } else {
+                format!(": {stderr}")
+            }
+        )));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn resolve_agent_sdk_runner() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("CULL_AGENT_SDK_RUNNER") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(app_contents) = exe_path
+            .parent()
+            .and_then(|path| path.parent())
+            .filter(|path| path.file_name().and_then(|name| name.to_str()) == Some("Contents"))
+        {
+            let resource_path = app_contents
+                .join("Resources")
+                .join(SDK_RUNNER_RESOURCE_NAME);
+            if resource_path.exists() {
+                return Some(resource_path);
+            }
+        }
+    }
+
+    let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("scripts")
+        .join(SDK_RUNNER_RESOURCE_NAME);
+    if repo_path.exists() {
+        return Some(repo_path);
+    }
+    None
+}
+
 fn parse_structured_decision(value: &Value) -> Result<ClaudeAgentDecision, ServiceError> {
     if value.is_object() {
         return serde_json::from_value(value.clone()).map_err(|e| {
@@ -332,9 +472,11 @@ fn persist_decision(
     decision: ClaudeAgentDecision,
     envelope: ClaudeCliEnvelope,
     raw_result_json: String,
+    runtime_source: ClaudeRuntimeSource,
 ) -> Result<ClaudeAgentChatTurnResult, ServiceError> {
     let usage_json = json!({
-        "source": "claude_code_cli",
+        "source": runtime_source.as_str(),
+        "sdk_reported_runtime": envelope.runtime,
         "subscription_auth": true,
         "anthropic_api_key_removed": true,
         "usage": envelope.usage,
@@ -386,6 +528,7 @@ fn persist_decision(
                 &draft,
                 &usage_json,
                 envelope.total_cost_usd,
+                runtime_source,
             )?);
         }
         other => {
@@ -412,6 +555,7 @@ fn create_proposal_from_draft(
     draft: &ClaudeProposalDraft,
     usage_json: &str,
     total_cost_usd: Option<f64>,
+    runtime_source: ClaudeRuntimeSource,
 ) -> Result<AgentActionProposal, ServiceError> {
     if !matches!(draft.kind.as_str(), "select_images" | "trash_images") {
         return Err(ServiceError::InvalidInput(format!(
@@ -440,7 +584,7 @@ fn create_proposal_from_draft(
     let usage_value: Value = serde_json::from_str(usage_json)
         .map_err(|e| ServiceError::Engine(format!("Invalid usage JSON: {}", e)))?;
     let source_context_json = json!({
-        "source": "claude_code_cli",
+        "source": runtime_source.as_str(),
         "selected_count": request.selected_count,
         "visible_count": request.visible_count,
         "candidate_count": request.candidate_images.len(),
@@ -491,9 +635,18 @@ fn claude_decision_schema() -> &'static str {
     r#"{"type":"object","properties":{"operation":{"type":"string","enum":["answer","create_proposal","update_preset"]},"message":{"type":"string"},"proposal":{"type":"object","properties":{"kind":{"type":"string","enum":["select_images","trash_images"]},"lens":{"type":["string","null"]},"criteria":{"type":"string"},"items":{"type":"array","items":{"type":"object","properties":{"image_id":{"type":"string"},"reason":{"type":"string"},"confidence":{}},"required":["image_id","reason"],"additionalProperties":false},"minItems":1},"guard_results":{"type":"object"}},"required":["kind","criteria","items"],"additionalProperties":false},"preset_update":{"type":"object","properties":{"name":{"type":"string"},"purpose":{"type":"string"},"prompt":{"type":"string"},"criteria_json":{"type":"object"}},"required":["prompt"],"additionalProperties":false}},"required":["operation","message"],"additionalProperties":false}"#
 }
 
+fn claude_decision_schema_value() -> Result<Value, ServiceError> {
+    serde_json::from_str(claude_decision_schema())
+        .map_err(|e| ServiceError::Engine(format!("Invalid Claude decision schema: {}", e)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tokio::sync::Mutex as AsyncMutex;
+
+    static AGENT_ENV_LOCK: AsyncMutex<()> = AsyncMutex::const_new(());
 
     fn sample_request() -> ClaudeAgentChatTurnRequest {
         ClaudeAgentChatTurnRequest {
@@ -528,6 +681,60 @@ mod tests {
         }
     }
 
+    fn test_db() -> Database {
+        let dir = tempfile::tempdir().unwrap();
+        Database::open(&dir.path().join("test.db")).unwrap()
+    }
+
+    fn fake_sdk_runner(dir: &Path) -> PathBuf {
+        let runner_path = dir.join("fake-claude-agent-sdk-runner.mjs");
+        fs::write(
+            &runner_path,
+            r#"#!/usr/bin/env node
+import { readFileSync } from 'node:fs';
+const request = JSON.parse(readFileSync(0, 'utf8'));
+if (process.env.ANTHROPIC_API_KEY) {
+  console.error('ANTHROPIC_API_KEY leaked into runner');
+  process.exit(1);
+}
+const structured = JSON.parse(process.env.CULL_FAKE_AGENT_RESPONSE);
+const inputTokens = request.visual_level === 'tiny' ? 2100 : 4200;
+process.stdout.write(JSON.stringify({
+  runtime: 'claude_agent_sdk',
+  structured_output: structured,
+  usage: { input_tokens: inputTokens, output_tokens: 64 },
+  modelUsage: { [request.model]: { input_tokens: inputTokens, output_tokens: 64 } },
+  total_cost_usd: 0.014,
+  result: JSON.stringify(structured),
+  is_error: false,
+  seen_tools: request.visual_level === 'text' ? [] : ['Read'],
+  seen_allowed_dirs: request.allowed_dirs
+}) + '\n');
+"#,
+        )
+        .unwrap();
+        runner_path
+    }
+
+    async fn run_with_fake_sdk(
+        db: &Database,
+        mut request: ClaudeAgentChatTurnRequest,
+        structured_output: Value,
+    ) -> Result<ClaudeAgentChatTurnResult, ServiceError> {
+        let _guard = AGENT_ENV_LOCK.lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let runner_path = fake_sdk_runner(dir.path());
+        request.model = Some("haiku".to_string());
+        std::env::set_var("CULL_AGENT_SDK_RUNNER", runner_path);
+        std::env::set_var("CULL_FAKE_AGENT_RESPONSE", structured_output.to_string());
+        std::env::set_var("ANTHROPIC_API_KEY", "must-not-leak");
+        let result = run_claude_agent_chat_turn_db(db, request).await;
+        std::env::remove_var("CULL_AGENT_SDK_RUNNER");
+        std::env::remove_var("CULL_FAKE_AGENT_RESPONSE");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        result
+    }
+
     #[test]
     fn invocation_uses_subscription_auth_and_thumbnail_read_only_context() {
         let invocation = build_claude_invocation(&sample_request()).unwrap();
@@ -557,6 +764,158 @@ mod tests {
             .args
             .windows(2)
             .any(|pair| pair == ["--tools", ""]));
+        let sdk_request: Value = serde_json::from_str(&invocation.sdk_request_json).unwrap();
+        assert_eq!(sdk_request["visual_level"], "text");
+        assert_eq!(sdk_request["allowed_dirs"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn sdk_answer_task_returns_message_without_persisting_proposal() {
+        let db = test_db();
+        let result = run_with_fake_sdk(
+            &db,
+            sample_request(),
+            json!({
+                "operation": "answer",
+                "message": "I need Preview before making a selection."
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.operation, "answer");
+        assert!(result.proposal.is_none());
+        assert_eq!(db.list_action_proposals(None, 20).unwrap().len(), 0);
+        let usage: Value = serde_json::from_str(&result.usage_json).unwrap();
+        assert_eq!(usage["source"], "claude_agent_sdk");
+        assert_eq!(usage["anthropic_api_key_removed"], true);
+    }
+
+    #[tokio::test]
+    async fn sdk_select_images_task_persists_pending_proposal() {
+        let db = test_db();
+        let result = run_with_fake_sdk(
+            &db,
+            sample_request(),
+            json!({
+                "operation": "create_proposal",
+                "message": "I found one strong candidate.",
+                "proposal": {
+                    "kind": "select_images",
+                    "lens": "portfolio",
+                    "criteria": "strong composition",
+                    "items": [{"image_id": "img_a", "reason": "best composition", "confidence": 0.86}],
+                    "guard_results": {"blocked": []}
+                }
+            }),
+        )
+        .await
+        .unwrap();
+
+        let proposal = result.proposal.unwrap();
+        assert_eq!(proposal.kind, "select_images");
+        assert_eq!(proposal.status, "pending");
+        assert_eq!(proposal.estimated_input_tokens, Some(2100));
+        assert_eq!(
+            db.list_action_proposals(Some("pending"), 20).unwrap().len(),
+            1
+        );
+        let source_context: Value = serde_json::from_str(&proposal.source_context_json).unwrap();
+        assert_eq!(source_context["source"], "claude_agent_sdk");
+    }
+
+    #[tokio::test]
+    async fn sdk_trash_images_task_persists_pending_proposal_without_applying() {
+        let db = test_db();
+        let result = run_with_fake_sdk(
+            &db,
+            sample_request(),
+            json!({
+                "operation": "create_proposal",
+                "message": "I can queue this as a trash proposal.",
+                "proposal": {
+                    "kind": "trash_images",
+                    "lens": "near_duplicates",
+                    "criteria": "visually weaker near duplicate",
+                    "items": [{"image_id": "img_a", "reason": "weaker duplicate candidate", "confidence": "medium"}],
+                    "guard_results": {"requires_user_accept": true}
+                }
+            }),
+        )
+        .await
+        .unwrap();
+
+        let proposal = result.proposal.unwrap();
+        assert_eq!(proposal.kind, "trash_images");
+        assert_eq!(proposal.status, "pending");
+        assert!(proposal.applied_at.is_none());
+        assert!(proposal.guard_results_json.contains("requires_user_accept"));
+    }
+
+    #[tokio::test]
+    async fn sdk_update_preset_task_persists_active_preset_edit() {
+        let db = test_db();
+        let active_preset = db
+            .list_agent_selection_presets()
+            .unwrap()
+            .into_iter()
+            .find(|preset| preset.id == "selpreset_portfolio")
+            .unwrap();
+        let mut request = sample_request();
+        request.preset = Some(active_preset.clone());
+        let result = run_with_fake_sdk(
+            &db,
+            request,
+            json!({
+                "operation": "update_preset",
+                "message": "Updated the active preset.",
+                "preset_update": {
+                    "name": "Portfolio agent edit",
+                    "purpose": "portfolio",
+                    "prompt": "Select only cohesive, publication-ready images.",
+                    "criteria_json": {"agent_edited": true}
+                }
+            }),
+        )
+        .await
+        .unwrap();
+
+        let updated = result.updated_preset.unwrap();
+        assert_eq!(updated.id, active_preset.id);
+        assert_eq!(updated.name, "Portfolio agent edit");
+        assert!(updated.prompt.contains("publication-ready"));
+        assert_eq!(
+            db.get_agent_selection_preset(&active_preset.id)
+                .unwrap()
+                .unwrap()
+                .criteria_json,
+            r#"{"agent_edited":true}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn sdk_rejects_create_proposal_with_image_id_outside_context() {
+        let db = test_db();
+        let err = run_with_fake_sdk(
+            &db,
+            sample_request(),
+            json!({
+                "operation": "create_proposal",
+                "message": "Bad ID",
+                "proposal": {
+                    "kind": "select_images",
+                    "lens": "portfolio",
+                    "criteria": "strong",
+                    "items": [{"image_id": "img_missing", "reason": "not in context", "confidence": 0.1}],
+                    "guard_results": {}
+                }
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("outside the candidate context"));
+        assert_eq!(db.list_action_proposals(None, 20).unwrap().len(), 0);
     }
 
     #[test]
@@ -603,6 +962,7 @@ mod tests {
             &draft,
             r#"{"usage":{"input_tokens":1,"output_tokens":1}}"#,
             Some(0.01),
+            ClaudeRuntimeSource::AgentSdk,
         )
         .unwrap_err();
         assert!(err.to_string().contains("outside the candidate context"));
@@ -638,6 +998,7 @@ mod tests {
                 }),
             },
             ClaudeCliEnvelope {
+                runtime: Some("claude_agent_sdk".to_string()),
                 structured_output: json!({}),
                 usage: json!({"input_tokens": 10, "output_tokens": 4}),
                 model_usage: json!({}),
@@ -646,6 +1007,7 @@ mod tests {
                 is_error: Some(false),
             },
             "{}".to_string(),
+            ClaudeRuntimeSource::AgentSdk,
         )
         .unwrap();
 

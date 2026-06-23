@@ -70,7 +70,9 @@
     ],
     "macOS": {
       "files": {
-        "Resources/Cull.help": "help/Cull.help"
+        "Resources/Cull.help": "help/Cull.help",
+        "Resources/claude-agent-sdk-runner.mjs": "../scripts/claude-agent-sdk-runner.mjs",
+        "Resources/node_modules/@anthropic-ai/claude-agent-sdk": "../node_modules/@anthropic-ai/claude-agent-sdk"
       },
       "dmg": {
         "background": "dmg/cull-dmg-background.png",
