@@ -36,7 +36,7 @@
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
     import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel, agentPanelPinned, agentPanelVisible, agentVisualLevel, activeAgentProposalId, activeAgentSelectionPresetId, cycleAgentVisualLevel } from '$lib/stores';
-    import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, type AgentActionProposal, type AgentSelectionPreset, type ImageWithFile, type PreviewState } from '$lib/api';
+    import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
     import { loadInstalledPlugins, activateBundledPlugins } from '$lib/plugins/loader';
@@ -74,6 +74,8 @@
     let lastPreviewSyncKey = $state('');
     let agentProposals = $state<AgentActionProposal[]>([]);
     let agentSelectionPresets = $state<AgentSelectionPreset[]>([]);
+    let agentChatBusy = $state(false);
+    let lastAgentMessage = $state<string | null>(null);
     let reviewProposalId = $state<string | null>(null);
 
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
@@ -346,7 +348,25 @@
         return 'select_images';
     }
 
-    async function handleCreateAgentProposal(presetId: string | null, instruction: string) {
+    function imageContextForAgent(ids: string[]): AgentChatImageContext[] {
+        const wanted = new Set(ids);
+        return $images
+            .filter(item => wanted.has(item.image.id))
+            .map(item => ({
+                image_id: item.image.id,
+                filename: item.path.split(/[\\/]/).pop() ?? null,
+                width: item.image.width ?? null,
+                height: item.image.height ?? null,
+                format: item.image.format ?? null,
+                star_rating: item.selection?.star_rating ?? null,
+                color_label: item.selection?.color_label ?? null,
+                decision: item.selection?.decision ?? null,
+                source_label: item.source_label ?? null,
+                thumbnail_path: $agentVisualLevel === 'text' ? null : item.thumbnail_path,
+            }));
+    }
+
+    async function createManualAgentProposal(presetId: string | null, instruction: string) {
         const preset = agentSelectionPresets.find(item => item.id === presetId) ?? agentSelectionPresets[0] ?? null;
         const ids = proposalCandidateIds();
         if (ids.length === 0) {
@@ -387,6 +407,59 @@
             type: 'info',
             duration: 5000,
         });
+    }
+
+    async function handleCreateAgentProposal(presetId: string | null, instruction: string) {
+        if (agentChatBusy) return;
+        const preset = agentSelectionPresets.find(item => item.id === presetId) ?? agentSelectionPresets[0] ?? null;
+        const ids = proposalCandidateIds();
+        const candidateImages = imageContextForAgent(ids);
+        if (candidateImages.length === 0) {
+            showToast('No images available for Claude', { type: 'warning', duration: 5000 });
+            return;
+        }
+
+        agentChatBusy = true;
+        lastAgentMessage = null;
+        try {
+            const result = await runClaudeAgentChatTurn({
+                instruction,
+                visual_level: $agentVisualLevel,
+                preset,
+                candidate_images: candidateImages,
+                selected_count: $selectedIds.size,
+                visible_count: $images.length,
+                model: null,
+                max_budget_usd: null,
+            });
+            lastAgentMessage = result.message;
+
+            if (result.proposal) {
+                agentProposals = [result.proposal, ...agentProposals.filter(item => item.id !== result.proposal?.id)];
+                activeAgentProposalId.set(result.proposal.id);
+                agentPanelVisible.set(true);
+                agentPanelPinned.set(true);
+                showToast('Claude proposal created', {
+                    detail: result.proposal.kind === 'trash_images' ? 'Review before moving files to Trash' : 'Review before changing selection',
+                    type: 'info',
+                    duration: 5000,
+                });
+            }
+
+            if (result.updated_preset) {
+                agentSelectionPresets = agentSelectionPresets.map(item => item.id === result.updated_preset?.id ? result.updated_preset : item);
+                activeAgentSelectionPresetId.set(result.updated_preset.id);
+                showToast('Claude updated preset', { detail: result.updated_preset.name, type: 'success', duration: 5000 });
+            }
+
+            if (!result.proposal && !result.updated_preset) {
+                showToast('Claude replied', { detail: result.message, type: 'info', duration: 6000 });
+            }
+        } catch (e) {
+            showToast('Claude agent failed', { detail: String(e), type: 'error', duration: 9000 });
+        } finally {
+            agentChatBusy = false;
+        }
     }
 
     async function handleUpdateAgentPreset(presetId: string, prompt: string) {
@@ -545,7 +618,7 @@
         const handleReloadImages = () => loadImages({ resetFocus: false, force: true, invalidateCache: true }).catch(e => console.error('Failed to reload:', e));
         window.addEventListener('reload-images', handleReloadImages);
         const handleCreateAgentTestProposal = () => {
-            handleCreateAgentProposal($activeAgentSelectionPresetId, 'Create a test proposal from the current selection')
+            createManualAgentProposal($activeAgentSelectionPresetId, 'Create a test proposal from the current selection')
                 .catch(e => console.error('Failed to create test proposal:', e));
         };
         window.addEventListener('create-agent-test-proposal', handleCreateAgentTestProposal);
@@ -696,6 +769,8 @@
                 selectedCount={$selectedIds.size}
                 pinned={$agentPanelPinned}
                 visible={$agentPanelVisible}
+                busy={agentChatBusy}
+                lastMessage={lastAgentMessage}
                 visualLevel={$agentVisualLevel}
                 activePresetId={$activeAgentSelectionPresetId}
                 onreviewproposal={handleReviewAgentProposal}

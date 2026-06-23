@@ -17,6 +17,8 @@
         selectedCount,
         pinned,
         visible,
+        busy = false,
+        lastMessage = null,
         visualLevel,
         activePresetId,
         onreviewproposal = () => {},
@@ -33,6 +35,8 @@
         selectedCount: number;
         pinned: boolean;
         visible: boolean;
+        busy?: boolean;
+        lastMessage?: string | null;
         visualLevel: AgentVisualLevel;
         activePresetId: string | null;
         onreviewproposal?: (proposalId: string) => void;
@@ -115,9 +119,12 @@
                 placeholder="Ask for a selection proposal or edit the active preset"
                 rows="3"
             ></textarea>
-            <button class="primary" type="button" onclick={submitInstruction} disabled={!instruction.trim()}>
-                Propose selection
+            <button class="primary" type="button" onclick={submitInstruction} disabled={!instruction.trim() || busy}>
+                {busy ? 'Asking Claude' : 'Ask Claude'}
             </button>
+            {#if lastMessage}
+                <p class="agent-message">{lastMessage}</p>
+            {/if}
         </section>
 
         <section class="preset-box" aria-label="Selection presets">
@@ -229,6 +236,7 @@
     .summary p,
     .candidate span,
     .empty p,
+    .agent-message,
     .section-header,
     .preset-main span {
         color: var(--text-secondary);

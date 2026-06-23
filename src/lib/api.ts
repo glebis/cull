@@ -517,6 +517,39 @@ export interface UpsertAgentSelectionPresetRequest {
     sort_order: number | null;
 }
 
+export interface AgentChatImageContext {
+    image_id: string;
+    filename: string | null;
+    width: number | null;
+    height: number | null;
+    format: string | null;
+    star_rating: number | null;
+    color_label: string | null;
+    decision: string | null;
+    source_label: string | null;
+    thumbnail_path: string | null;
+}
+
+export interface ClaudeAgentChatTurnRequest {
+    instruction: string;
+    visual_level: AgentVisualLevel;
+    preset: AgentSelectionPreset | null;
+    candidate_images: AgentChatImageContext[];
+    selected_count: number;
+    visible_count: number;
+    model: string | null;
+    max_budget_usd: number | null;
+}
+
+export interface ClaudeAgentChatTurnResult {
+    operation: 'answer' | 'create_proposal' | 'update_preset';
+    message: string;
+    proposal: AgentActionProposal | null;
+    updated_preset: AgentSelectionPreset | null;
+    usage_json: string;
+    raw_result_json: string;
+}
+
 export async function listImages(limit: number, offset: number): Promise<ImageWithFile[]> {
     return invoke<ImageWithFile[]>('list_images', { limit, offset });
 }
@@ -1241,6 +1274,10 @@ export async function listAgentSelectionPresets(): Promise<AgentSelectionPreset[
 
 export async function upsertAgentSelectionPreset(request: UpsertAgentSelectionPresetRequest): Promise<AgentSelectionPreset> {
     return invoke<AgentSelectionPreset>('upsert_agent_selection_preset', { request });
+}
+
+export async function runClaudeAgentChatTurn(request: ClaudeAgentChatTurnRequest): Promise<ClaudeAgentChatTurnResult> {
+    return invoke<ClaudeAgentChatTurnResult>('run_claude_agent_chat_turn', { request });
 }
 
 // Undo/Redo

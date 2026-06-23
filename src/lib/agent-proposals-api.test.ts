@@ -10,6 +10,7 @@ import {
     createActionProposal,
     listAgentSelectionPresets,
     listActionProposals,
+    runClaudeAgentChatTurn,
     trashImagesDetailed,
     upsertAgentSelectionPreset,
 } from './api';
@@ -82,5 +83,40 @@ describe('agent proposal API wrappers', () => {
         vi.mocked(invoke).mockResolvedValueOnce({ ...request, created_at: '', updated_at: '' });
         await upsertAgentSelectionPreset(request);
         expect(invoke).toHaveBeenCalledWith('upsert_agent_selection_preset', { request });
+    });
+
+    it('invokes Claude agent chat turn with candidate context', async () => {
+        const request = {
+            instruction: 'select portfolio candidates',
+            visual_level: 'tiny' as const,
+            preset: null,
+            candidate_images: [{
+                image_id: 'img_1',
+                filename: 'one.png',
+                width: 1024,
+                height: 768,
+                format: 'png',
+                star_rating: 4,
+                color_label: null,
+                decision: 'undecided',
+                source_label: 'midjourney',
+                thumbnail_path: '/tmp/thumbs/one.png',
+            }],
+            selected_count: 1,
+            visible_count: 12,
+            model: null,
+            max_budget_usd: null,
+        };
+        vi.mocked(invoke).mockResolvedValueOnce({
+            operation: 'create_proposal',
+            message: 'Created',
+            proposal: { id: 'proposal_1' },
+            updated_preset: null,
+            usage_json: '{}',
+            raw_result_json: '{}',
+        });
+
+        await runClaudeAgentChatTurn(request);
+        expect(invoke).toHaveBeenCalledWith('run_claude_agent_chat_turn', { request });
     });
 });

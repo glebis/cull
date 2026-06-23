@@ -44,7 +44,7 @@ ndarray = "0.17"
 reqwest = { version = "0.13", features = ["stream", "json"] }
 futures-util = "0.3"
 base64 = "0.22"
-tokio = { version = "1", features = ["time", "net", "io-util", "io-std", "rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["time", "net", "io-util", "io-std", "rt", "rt-multi-thread", "macros", "process"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"

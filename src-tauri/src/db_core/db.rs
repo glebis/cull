@@ -7,9 +7,35 @@ use rusqlite::{ffi, params, Connection, Error as SqlError, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 2;
+const CURRENT_SCHEMA_VERSION: i64 = 25;
 
-const MIGRATIONS: &[(i64, &str)] = &[(1, "initial_schema"), (2, "agent_action_proposals")];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, "initial_schema"),
+    (2, "reserved_schema_history_2"),
+    (3, "reserved_schema_history_3"),
+    (4, "reserved_schema_history_4"),
+    (5, "reserved_schema_history_5"),
+    (6, "reserved_schema_history_6"),
+    (7, "reserved_schema_history_7"),
+    (8, "reserved_schema_history_8"),
+    (9, "reserved_schema_history_9"),
+    (10, "reserved_schema_history_10"),
+    (11, "reserved_schema_history_11"),
+    (12, "reserved_schema_history_12"),
+    (13, "reserved_schema_history_13"),
+    (14, "reserved_schema_history_14"),
+    (15, "reserved_schema_history_15"),
+    (16, "reserved_schema_history_16"),
+    (17, "reserved_schema_history_17"),
+    (18, "reserved_schema_history_18"),
+    (19, "reserved_schema_history_19"),
+    (20, "reserved_schema_history_20"),
+    (21, "reserved_schema_history_21"),
+    (22, "reserved_schema_history_22"),
+    (23, "reserved_schema_history_23"),
+    (24, "reserved_schema_history_24"),
+    (25, "agent_action_proposals"),
+];
 
 #[derive(Clone)]
 pub struct Database {
@@ -276,7 +302,14 @@ impl Database {
             }
             Ok(())
         })?;
-        self.run_migration_step(2, "agent_action_proposals", || {
+        for (version, name) in MIGRATIONS
+            .iter()
+            .copied()
+            .filter(|(version, _)| (2..25).contains(version))
+        {
+            self.run_migration_step(version, name, || Ok(()))?;
+        }
+        self.run_migration_step(25, "agent_action_proposals", || {
             let conn = self.conn.lock();
             conn.execute_batch(agent_action_proposals_schema())?;
             drop(conn);
@@ -1334,6 +1367,40 @@ mod migration_safety_tests {
         assert!(table_exists(&conn, "images").unwrap());
         let user_version = user_version(&conn).unwrap();
         assert_eq!(user_version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn test_open_user_version_24_runs_agent_proposal_migration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("existing-v24.db");
+        {
+            let _ = Database::open(&db_path).unwrap();
+        }
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "
+                DROP TABLE agent_action_proposals;
+                DROP TABLE agent_selection_presets;
+                DELETE FROM schema_migrations WHERE version >= 25;
+                DELETE FROM schema_migration_steps WHERE version >= 25;
+                PRAGMA user_version = 24;
+                ",
+            )
+            .unwrap();
+        }
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock();
+        assert!(table_exists(&conn, "agent_action_proposals").unwrap());
+        assert!(table_exists(&conn, "agent_selection_presets").unwrap());
+        assert_eq!(user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+        let preset_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM agent_selection_presets", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert!(preset_count >= 4);
     }
 }
 

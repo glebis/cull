@@ -480,6 +480,7 @@ pub fn run() {
             commands::agent_proposals::apply_action_proposal,
             commands::agent_proposals::list_agent_selection_presets,
             commands::agent_proposals::upsert_agent_selection_preset,
+            commands::agent_proposals::run_claude_agent_chat_turn,
             commands::deeplink::open_with_params,
             commands::collections::create_collection,
             commands::collections::list_collections,

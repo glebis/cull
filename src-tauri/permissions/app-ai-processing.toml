@@ -52,6 +52,7 @@ commands.allow = [
   "list_similarity_group_images",
   "list_similarity_groups",
   "rescan_sidecars",
+  "run_claude_agent_chat_turn",
   "resubmit_prompt",
   "search_by_detected_class",
   "set_api_key",
