@@ -78,7 +78,7 @@
         "background": "dmg/cull-dmg-background.png",
         "windowSize": {
           "width": 660,
-          "height": 400
+          "height": 488
         },
         "appPosition": {
           "x": 130,
