@@ -1,6 +1,7 @@
 // Copyright (c) 2026-present Gleb Kalinin. Architecture and design by author.
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
+pub mod agent_proposals;
 pub mod agent_snapshots;
 #[allow(dead_code)]
 pub mod ai;

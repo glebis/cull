@@ -448,6 +448,75 @@ export interface SmartCollection {
     image_count: number | null;
 }
 
+export type AgentPersona = 'curator' | 'copilot' | 'operator';
+export type AgentVisualLevel = 'text' | 'tiny' | 'preview' | 'full';
+export type AgentProposalStatus = 'pending' | 'applied' | 'dismissed';
+
+export interface AgentActionProposal {
+    id: string;
+    kind: string;
+    status: AgentProposalStatus;
+    persona: AgentPersona;
+    lens: string | null;
+    criteria: string;
+    visual_level: AgentVisualLevel;
+    selection_preset_id: string | null;
+    estimated_input_tokens: number | null;
+    estimated_output_tokens: number | null;
+    estimated_cost_eur: number | null;
+    source_context_json: string;
+    items_json: string;
+    guard_results_json: string;
+    apply_result_json: string | null;
+    undo_journal_json: string | null;
+    created_at: string;
+    updated_at: string;
+    applied_at: string | null;
+}
+
+export interface CreateActionProposalRequest {
+    kind: string;
+    persona: AgentPersona;
+    lens: string | null;
+    criteria: string;
+    visual_level: AgentVisualLevel;
+    selection_preset_id: string | null;
+    estimated_input_tokens: number | null;
+    estimated_output_tokens: number | null;
+    estimated_cost_eur: number | null;
+    source_context_json: string;
+    items_json: string;
+    guard_results_json: string;
+}
+
+export interface ApplyActionProposalResult {
+    proposal_id: string;
+    status: string;
+    applied_count: number;
+    failed_count: number;
+    result_json: string;
+}
+
+export interface AgentSelectionPreset {
+    id: string;
+    name: string;
+    purpose: string;
+    prompt: string;
+    criteria_json: string;
+    sort_order: number;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface UpsertAgentSelectionPresetRequest {
+    id: string | null;
+    name: string;
+    purpose: string;
+    prompt: string;
+    criteria_json: string;
+    sort_order: number | null;
+}
+
 export async function listImages(limit: number, offset: number): Promise<ImageWithFile[]> {
     return invoke<ImageWithFile[]>('list_images', { limit, offset });
 }
@@ -1124,12 +1193,54 @@ export async function findNearDuplicatesByPhash(
 }
 
 // Delete commands
+export interface TrashImageResult {
+    image_id: string;
+    path: string | null;
+    status: 'trashed' | 'missing' | 'not_found' | 'failed';
+    error: string | null;
+}
+
+export interface TrashImagesDetailedResult {
+    requested: number;
+    succeeded: number;
+    failed: number;
+    results: TrashImageResult[];
+}
+
 export async function trashImages(imageIds: string[]): Promise<number> {
     return invoke('trash_images', { imageIds });
 }
 
+export async function trashImagesDetailed(imageIds: string[]): Promise<TrashImagesDetailedResult> {
+    return invoke<TrashImagesDetailedResult>('trash_images_detailed', { imageIds });
+}
+
 export async function deleteImagesPermanently(imageIds: string[]): Promise<number> {
     return invoke('delete_images_permanently', { imageIds });
+}
+
+export async function createActionProposal(request: CreateActionProposalRequest): Promise<AgentActionProposal> {
+    return invoke<AgentActionProposal>('create_action_proposal', { request });
+}
+
+export async function listActionProposals(status: AgentProposalStatus | null = 'pending', limit = 20): Promise<AgentActionProposal[]> {
+    return invoke<AgentActionProposal[]>('list_action_proposals', { status, limit });
+}
+
+export async function dismissActionProposal(proposalId: string): Promise<void> {
+    return invoke<void>('dismiss_action_proposal', { proposalId });
+}
+
+export async function applyActionProposal(proposalId: string, approvedImageIds: string[], resultJson: string): Promise<ApplyActionProposalResult> {
+    return invoke<ApplyActionProposalResult>('apply_action_proposal', { proposalId, approvedImageIds, resultJson });
+}
+
+export async function listAgentSelectionPresets(): Promise<AgentSelectionPreset[]> {
+    return invoke<AgentSelectionPreset[]>('list_agent_selection_presets');
+}
+
+export async function upsertAgentSelectionPreset(request: UpsertAgentSelectionPresetRequest): Promise<AgentSelectionPreset> {
+    return invoke<AgentSelectionPreset>('upsert_agent_selection_preset', { request });
 }
 
 // Undo/Redo

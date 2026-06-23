@@ -33,6 +33,8 @@ commands.allow = [
   "list_catalog_presets",
   "list_catalog_values",
   "list_catalog_drafts",
+  "list_action_proposals",
+  "list_agent_selection_presets",
   "list_image_tags",
   "list_pdf_pages",
   "list_images",
