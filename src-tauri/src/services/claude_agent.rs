@@ -607,4 +607,58 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("outside the candidate context"));
     }
+
+    #[test]
+    fn update_preset_decision_persists_agent_chat_edit() {
+        let db = {
+            let dir = tempfile::tempdir().unwrap();
+            Database::open(&dir.path().join("test.db")).unwrap()
+        };
+        let active_preset = db
+            .list_agent_selection_presets()
+            .unwrap()
+            .into_iter()
+            .find(|preset| preset.id == "selpreset_portfolio")
+            .unwrap();
+        let mut request = sample_request();
+        request.preset = Some(active_preset.clone());
+
+        let result = persist_decision(
+            &db,
+            request,
+            ClaudeAgentDecision {
+                operation: "update_preset".to_string(),
+                message: "Updated the portfolio selection preset.".to_string(),
+                proposal: None,
+                preset_update: Some(ClaudePresetUpdateDraft {
+                    name: Some("Portfolio tight edit".to_string()),
+                    purpose: Some("portfolio".to_string()),
+                    prompt: "Select only cohesive, publication-ready portfolio images.".to_string(),
+                    criteria_json: Some(json!({"agent_edited": true})),
+                }),
+            },
+            ClaudeCliEnvelope {
+                structured_output: json!({}),
+                usage: json!({"input_tokens": 10, "output_tokens": 4}),
+                model_usage: json!({}),
+                total_cost_usd: Some(0.01),
+                result: None,
+                is_error: Some(false),
+            },
+            "{}".to_string(),
+        )
+        .unwrap();
+
+        let updated = result.updated_preset.unwrap();
+        assert_eq!(updated.id, active_preset.id);
+        assert_eq!(updated.name, "Portfolio tight edit");
+        assert!(updated.prompt.contains("publication-ready"));
+
+        let stored = db
+            .get_agent_selection_preset("selpreset_portfolio")
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.prompt, updated.prompt);
+        assert_eq!(stored.criteria_json, r#"{"agent_edited":true}"#);
+    }
 }
