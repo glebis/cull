@@ -12,7 +12,7 @@ use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
 const DEFAULT_MODEL: &str = "haiku";
-const DEFAULT_MAX_BUDGET_USD: f64 = 0.05;
+const DEFAULT_MAX_BUDGET_USD: f64 = 0.50;
 const USD_TO_EUR_DISPLAY_ESTIMATE: f64 = 0.93;
 const SDK_RUNNER_RESOURCE_NAME: &str = "claude-agent-sdk-runner.mjs";
 
@@ -753,6 +753,20 @@ process.stdout.write(JSON.stringify({
             .contains(&"/tmp/cull/thumbs".to_string()));
         assert!(invocation.prompt.contains("thumbnail_path"));
         assert!(!invocation.prompt.contains("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn invocation_uses_practical_default_budget_when_ui_leaves_budget_unset() {
+        let mut request = sample_request();
+        request.max_budget_usd = None;
+        let invocation = build_claude_invocation(&request).unwrap();
+        let sdk_request: Value = serde_json::from_str(&invocation.sdk_request_json).unwrap();
+
+        assert_eq!(sdk_request["max_budget_usd"], json!(0.50));
+        assert!(invocation
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--max-budget-usd", "0.50"]));
     }
 
     #[test]
