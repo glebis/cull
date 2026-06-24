@@ -6,7 +6,7 @@ const source = readFileSync(join(process.cwd(), 'src/lib/components/AgentProposa
 
 describe('AgentProposalDock source contract', () => {
     it('keeps visual level and cost visible as secondary context', () => {
-        expect(source).toContain('Context: {contextLabel}');
+        expect(source).toContain('Context {contextLabel}');
         expect(source).toContain('displayCostEur.toFixed(3)');
         expect(source).toContain('displayInputTokens');
         expect(source).toContain('context-chip');
@@ -21,6 +21,8 @@ describe('AgentProposalDock source contract', () => {
 
     it('supports editable selection presets through the chat panel', () => {
         expect(source).toContain('Selection presets');
+        expect(source).toContain('onclick={() => selectPreset(preset.id)}');
+        expect(source).toContain('startEditActivePreset');
         expect(source).toContain('onupdatepreset(editingPresetId, presetPromptDraft.trim())');
         expect(source).toContain('aria-label="Preset prompt"');
         expect(source).toContain('Save preset');
