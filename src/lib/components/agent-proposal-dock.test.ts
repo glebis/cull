@@ -35,6 +35,19 @@ describe('AgentProposalDock source contract', () => {
         expect(source).not.toContain('dispatchEvent');
     });
 
+    it('keeps pending proposal state visible above the chat transcript', () => {
+        const proposalIndex = source.indexOf('aria-label="Pending agent proposal"');
+        const presetIndex = source.indexOf('aria-label="Selection presets"');
+        const chatIndex = source.indexOf('aria-label="Agent chat"');
+        expect(proposalIndex).toBeGreaterThan(-1);
+        expect(proposalIndex).toBeLessThan(presetIndex);
+        expect(proposalIndex).toBeLessThan(chatIndex);
+        expect(source).toContain('Review required');
+        expect(source).toContain('Review and apply');
+        expect(source).toContain('candidateCountLabel');
+        expect(source).toContain('max-height: min(260px, 34vh)');
+    });
+
     it('renders agent chat as a compact conversation rather than an SDK event rail', () => {
         expect(source).toContain('ClaudeAgentStreamEvent');
         expect(source).toContain('streamEvents = []');

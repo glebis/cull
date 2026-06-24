@@ -75,6 +75,7 @@
         editingPresetId ? presets.find(p => p.id === editingPresetId) ?? null : null,
     );
     const candidates = $derived(parseCandidates(activeProposal?.items_json));
+    const candidateCountLabel = $derived(`${candidates.length} ${candidates.length === 1 ? 'image' : 'images'}`);
     const contextLabel = $derived(visualLevel === 'text'
         ? 'Text-only'
         : visualLevel[0].toUpperCase() + visualLevel.slice(1));
@@ -163,6 +164,32 @@
             <span>{displayInputTokens} tok</span>
         </button>
 
+        {#if activeProposal}
+            <section class="proposal-card" aria-label="Pending agent proposal">
+                <div class="section-header">
+                    <span>{activeProposal.kind === 'trash_images' ? 'Trash proposal' : 'Selection proposal'}</span>
+                    <strong>Review required</strong>
+                </div>
+                <h3>{activeProposal.kind === 'trash_images' ? `${candidateCountLabel} proposed for Trash` : `${candidateCountLabel} proposed`}</h3>
+                <p>{activeProposal.criteria}</p>
+                {#if candidates[0]}
+                    <article class="candidate featured-candidate">
+                        <div class="candidate-index">1</div>
+                        <div>
+                            <strong>{candidates[0].image_id}</strong>
+                            <span>{candidates[0].reason ?? 'Candidate selected by proposal criteria'}</span>
+                        </div>
+                    </article>
+                {/if}
+                <div class="proposal-actions">
+                    <button class="primary" type="button" onclick={() => onreviewproposal(activeProposal.id)}>
+                        Review and apply
+                    </button>
+                    <button type="button" onclick={() => ondismissproposal(activeProposal.id)}>Dismiss</button>
+                </div>
+            </section>
+        {/if}
+
         <section class="preset-box" aria-label="Selection presets">
             <div class="section-header">
                 <span>Job</span>
@@ -240,35 +267,7 @@
             </button>
         </section>
 
-        {#if activeProposal}
-            <section class="summary">
-                <div class="persona-row">
-                    <span class:active={activeProposal.persona === 'curator'}>Curator</span>
-                    <span class:active={activeProposal.persona === 'copilot'}>Copilot</span>
-                    <span class:active={activeProposal.persona === 'operator'}>Operator</span>
-                </div>
-                <h3>{activeProposal.kind === 'trash_images' ? 'Trash proposal ready' : 'Selection proposal ready'}</h3>
-                <p>{activeProposal.criteria}</p>
-                <div class="proposal-actions">
-                    <button class="primary" type="button" onclick={() => onreviewproposal(activeProposal.id)}>
-                        Open review gate
-                    </button>
-                    <button type="button" onclick={() => ondismissproposal(activeProposal.id)}>Dismiss</button>
-                </div>
-            </section>
-
-            <section class="candidate-list" aria-label="Candidate reasons">
-                {#each candidates.slice(0, 5) as candidate}
-                    <article class="candidate">
-                        <div class="mini-thumb"></div>
-                        <div>
-                            <strong>{candidate.image_id}</strong>
-                            <span>{candidate.reason ?? 'Candidate selected by proposal criteria'}</span>
-                        </div>
-                    </article>
-                {/each}
-            </section>
-        {:else}
+        {#if !activeProposal}
             <section class="empty">
                 <h3>No active proposal</h3>
                 <p>Pick a job, write the request, then create a proposal.</p>
@@ -285,7 +284,9 @@
         display: flex;
         flex-direction: column;
         gap: calc(var(--spacing) * 0.75);
+        min-height: 0;
         min-width: 304px;
+        overflow: hidden;
         padding: calc(var(--spacing) * 0.75);
     }
 
@@ -301,7 +302,6 @@
 
     .agent-header,
     .header-actions,
-    .persona-row,
     .proposal-actions,
     .editor-actions,
     .section-header {
@@ -328,7 +328,6 @@
     }
 
     .agent-header span,
-    .summary p,
     .candidate span,
     .empty p,
     .section-header,
@@ -399,8 +398,7 @@
         min-width: 28px;
     }
 
-    .primary,
-    .persona-row span.active {
+    .primary {
         background: color-mix(in srgb, var(--blue) 10%, var(--surface));
         border-color: var(--blue);
         color: var(--blue);
@@ -410,15 +408,7 @@
         min-height: 32px;
     }
 
-    .persona-row span {
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        color: var(--text-secondary);
-        font-size: 10px;
-        padding: 4px 6px;
-    }
-
-    .summary,
+    .proposal-card,
     .candidate,
     .empty,
     .chat-box,
@@ -431,10 +421,15 @@
 
     .chat-box,
     .preset-box,
+    .proposal-card,
     .preset-editor {
         display: flex;
         flex-direction: column;
         gap: calc(var(--spacing) * 0.75);
+    }
+
+    .proposal-card {
+        flex: 0 0 auto;
     }
 
     .preset-grid {
@@ -443,16 +438,13 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .candidate-list {
-        display: flex;
-        flex-direction: column;
-        gap: calc(var(--spacing) * 0.75);
-    }
-
     .chat-thread {
         display: flex;
         flex-direction: column;
         gap: calc(var(--spacing) * 0.75);
+        max-height: min(260px, 34vh);
+        overflow: auto;
+        padding-right: 2px;
     }
 
     .chat-message {
@@ -492,6 +484,43 @@
 
     .assistant-message p {
         background: var(--bg);
+    }
+
+    .proposal-card h3 {
+        font-size: 13px;
+        line-height: 1.25;
+        margin: 0;
+    }
+
+    .proposal-card p {
+        color: var(--text-secondary);
+        font-size: 11px;
+        line-height: 1.35;
+        margin: 0;
+    }
+
+    .proposal-card .section-header strong {
+        color: var(--orange);
+        font-size: 11px;
+        font-weight: 600;
+    }
+
+    .featured-candidate {
+        background: var(--bg);
+        grid-template-columns: 22px 1fr;
+    }
+
+    .candidate-index {
+        align-items: center;
+        background: color-mix(in srgb, var(--green) 13%, var(--surface));
+        border: 1px solid var(--green);
+        border-radius: var(--radius);
+        color: var(--green);
+        display: flex;
+        font-size: 11px;
+        height: 22px;
+        justify-content: center;
+        width: 22px;
     }
 
     .thinking-line {
@@ -573,14 +602,12 @@
         min-width: 76px;
     }
 
-    .summary h3,
     .empty h3 {
         font-size: 13px;
         line-height: 1.25;
         margin: 6px 0 4px;
     }
 
-    .summary p,
     .empty p,
     .empty-note {
         line-height: 1.35;
@@ -591,12 +618,6 @@
         display: grid;
         grid-template-columns: 40px 1fr;
         gap: calc(var(--spacing) * 0.75);
-    }
-
-    .mini-thumb {
-        aspect-ratio: 1 / 1;
-        background: var(--border);
-        border-radius: var(--radius);
     }
 
     @media (max-width: 420px) {
