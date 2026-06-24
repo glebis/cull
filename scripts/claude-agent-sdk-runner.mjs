@@ -55,15 +55,54 @@ function textFromContent(content) {
     .trim();
 }
 
-function textFromStreamEvent(event) {
-  if (!event || typeof event !== 'object') return '';
-  if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-    return event.delta.text ?? '';
+function streamEventSummary(event, subtype) {
+  const details = {
+    sdk_event_type: 'stream_event',
+    subtype,
+    raw_event_type: event?.type ?? null,
+    content_block_type: event?.content_block?.type ?? null,
+    delta_type: event?.delta?.type ?? null,
+  };
+  if (event?.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+    return {
+      phase: 'sdk_tool',
+      message: `Using ${event.content_block.name ?? 'tool'}`,
+      details: { ...details, tool_name: event.content_block.name ?? null },
+    };
   }
-  if (event.type === 'content_block_start' && event.content_block?.type === 'text') {
-    return event.content_block.text ?? '';
+  if (event?.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+    return {
+      phase: 'sdk_stream',
+      message: 'Writing response',
+      details,
+    };
   }
-  return '';
+  if (event?.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
+    return {
+      phase: 'sdk_tool',
+      message: 'Preparing tool input',
+      details,
+    };
+  }
+  if (event?.type === 'content_block_stop') {
+    return {
+      phase: 'sdk_stream',
+      message: 'Finished response block',
+      details,
+    };
+  }
+  if (event?.type === 'message_stop') {
+    return {
+      phase: 'sdk_stream',
+      message: 'Finished message',
+      details,
+    };
+  }
+  return {
+    phase: 'sdk_stream',
+    message: 'Streaming response',
+    details,
+  };
 }
 
 function clipText(text, max = 180) {
@@ -92,7 +131,7 @@ function summarizeMessage(message) {
       if (message.subtype === 'thinking_tokens') {
         return {
           phase: 'sdk_thinking',
-          message: `Thinking ${message.estimated_tokens ?? 0} tokens`,
+          message: 'Thinking',
           details: { sdk_event_type: message.type, subtype, estimated_tokens: message.estimated_tokens ?? null },
         };
       }
@@ -109,12 +148,7 @@ function summarizeMessage(message) {
         details: { sdk_event_type: message.type, subtype },
       };
     case 'stream_event': {
-      const text = clipText(textFromStreamEvent(message.event), 140);
-      return {
-        phase: 'sdk_stream',
-        message: text || `Streaming ${message.event?.type ?? 'assistant event'}`,
-        details: { sdk_event_type: message.type, subtype },
-      };
+      return streamEventSummary(message.event, subtype);
     }
     case 'assistant': {
       const text = clipText(textFromContent(message.message?.content), 180);

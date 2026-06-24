@@ -78,6 +78,7 @@
     let agentSelectionPresets = $state<AgentSelectionPreset[]>([]);
     let agentChatBusy = $state(false);
     let lastAgentMessage = $state<string | null>(null);
+    let lastAgentInstruction = $state<string | null>(null);
     let activeAgentRequestId = $state<string | null>(null);
     let agentStreamEvents = $state<ClaudeAgentStreamEvent[]>([]);
     let reviewProposalId = $state<string | null>(null);
@@ -447,6 +448,7 @@
 
         agentChatBusy = true;
         lastAgentMessage = null;
+        lastAgentInstruction = instruction;
         const requestId = crypto.randomUUID?.() ?? `agent-${Date.now()}`;
         activeAgentRequestId = requestId;
         agentStreamEvents = [];
@@ -512,6 +514,15 @@
         await dismissActionProposal(proposalId);
         agentProposals = agentProposals.filter(item => item.id !== proposalId);
         if ($activeAgentProposalId === proposalId) activeAgentProposalId.set(null);
+    }
+
+    function isVisibleAgentChatEvent(event: ClaudeAgentStreamEvent) {
+        return ![
+            'sdk_init',
+            'sdk_status',
+            'sdk_stream',
+            'sdk_thinking',
+        ].includes(event.phase);
     }
 
     function handleCloseAgentPanel() {
@@ -689,6 +700,7 @@
 
         const agentStreamUnlisten = listen<ClaudeAgentStreamEvent>('claude-agent:stream-event', (event) => {
             if (event.payload.request_id !== activeAgentRequestId) return;
+            if (!isVisibleAgentChatEvent(event.payload)) return;
             agentStreamEvents = [
                 ...agentStreamEvents.filter(item => item.sequence !== event.payload.sequence),
                 event.payload,
@@ -813,6 +825,7 @@
                 visible={$agentPanelVisible}
                 busy={agentChatBusy}
                 lastMessage={lastAgentMessage}
+                lastInstruction={lastAgentInstruction}
                 streamEvents={agentStreamEvents}
                 visualLevel={$agentVisualLevel}
                 activePresetId={$activeAgentSelectionPresetId}

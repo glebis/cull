@@ -35,13 +35,17 @@ describe('AgentProposalDock source contract', () => {
         expect(source).not.toContain('dispatchEvent');
     });
 
-    it('renders a compact stream event rail for SDK progress', () => {
+    it('renders agent chat as a compact conversation rather than an SDK event rail', () => {
         expect(source).toContain('ClaudeAgentStreamEvent');
         expect(source).toContain('streamEvents = []');
-        expect(source).toContain('visibleStreamEvents = $derived(streamEvents.slice(-6))');
-        expect(source).toContain('aria-label="Agent run events"');
+        expect(source).toContain('lastInstruction = null');
+        expect(source).toContain('latestRunEvent = $derived');
+        expect(source).toContain('statusForEvent(latestRunEvent, busy)');
+        expect(source).toContain('class="chat-thread"');
+        expect(source).toContain('class="chat-message user-message"');
+        expect(source).toContain('class="chat-message assistant-message"');
         expect(source).toContain('aria-live="polite"');
-        expect(source).toContain('{event.phase.replace');
-        expect(source).toContain('{event.message}');
+        expect(source).not.toContain('Agent run events');
+        expect(source).not.toContain('{event.phase.replace');
     });
 });

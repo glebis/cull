@@ -21,6 +21,7 @@
         visible,
         busy = false,
         lastMessage = null,
+        lastInstruction = null,
         streamEvents = [],
         visualLevel,
         activePresetId,
@@ -42,6 +43,7 @@
         visible: boolean;
         busy?: boolean;
         lastMessage?: string | null;
+        lastInstruction?: string | null;
         streamEvents?: ClaudeAgentStreamEvent[];
         visualLevel: AgentVisualLevel;
         activePresetId: string | null;
@@ -81,7 +83,10 @@
         instruction,
         visualLevel,
     }));
-    const visibleStreamEvents = $derived(streamEvents.slice(-6));
+    const latestRunEvent = $derived(streamEvents.slice().reverse().find(Boolean) ?? null);
+    const runStatus = $derived(statusForEvent(latestRunEvent, busy));
+    const assistantMessage = $derived(lastMessage ?? (latestRunEvent?.is_error ? latestRunEvent.message : null));
+    const showChatThread = $derived(Boolean(lastInstruction || assistantMessage || busy));
     const displayInputTokens = $derived(activeProposal?.estimated_input_tokens ?? draftEstimate.inputTokens);
     const displayCostEur = $derived(activeProposal?.estimated_cost_eur ?? draftEstimate.costEur);
 
@@ -125,6 +130,17 @@
         if (!message) return;
         oncreateproposal(activePreset?.id ?? null, message);
         instruction = '';
+    }
+
+    function statusForEvent(event: ClaudeAgentStreamEvent | null, isBusy: boolean) {
+        if (!isBusy && event?.is_error) return 'Could not complete the request';
+        if (!isBusy) return 'Ready';
+        if (!event) return 'Thinking';
+        if (event.phase === 'sdk_retry') return 'Retrying connection';
+        if (event.phase === 'sdk_tool') return 'Looking at image context';
+        if (event.phase === 'parse') return 'Preparing response';
+        if (event.phase === 'context' || event.phase === 'runtime' || event.phase === 'queued') return 'Thinking';
+        return 'Thinking';
     }
 </script>
 
@@ -191,41 +207,38 @@
 
         <section class="chat-box" aria-label="Agent chat">
             <div class="section-header">
-                <span>Request</span>
+                <span>Chat</span>
                 <span>{selectedCount} selected</span>
             </div>
+            {#if showChatThread}
+                <div class="chat-thread" aria-live="polite">
+                    {#if lastInstruction}
+                        <article class="chat-message user-message">
+                            <span>You</span>
+                            <p>{lastInstruction}</p>
+                        </article>
+                    {/if}
+                    {#if busy || assistantMessage}
+                        <article class="chat-message assistant-message" class:thinking={busy && !assistantMessage}>
+                            <span>Claude</span>
+                            {#if busy && !assistantMessage}
+                                <p class="thinking-line"><span class="thinking-dot"></span>{runStatus}</p>
+                            {:else if assistantMessage}
+                                <p>{assistantMessage}</p>
+                            {/if}
+                        </article>
+                    {/if}
+                </div>
+            {/if}
             <textarea
                 bind:value={instruction}
-                placeholder="Describe the proposal you need"
-                rows="4"
+                placeholder="Ask Claude to propose a selection"
+                rows="3"
             ></textarea>
             <button class="primary" type="button" onclick={submitInstruction} disabled={!instruction.trim() || busy}>
-                {busy ? 'Asking Claude' : 'Create proposal'}
+                {busy ? 'Thinking' : 'Send'}
             </button>
-            {#if lastMessage}
-                <p class="agent-message">{lastMessage}</p>
-            {/if}
         </section>
-
-        {#if visibleStreamEvents.length > 0}
-            <section class="stream-box" aria-label="Agent run events" aria-live="polite">
-                <div class="section-header">
-                    <span>Run</span>
-                    <span>{busy ? 'live' : 'done'}</span>
-                </div>
-                <ol class="stream-list">
-                    {#each visibleStreamEvents as event}
-                        <li class:error={event.is_error} class:final={event.is_final}>
-                            <span class="stream-dot"></span>
-                            <div>
-                                <strong>{event.phase.replace('sdk_', '')}</strong>
-                                <span>{event.message}</span>
-                            </div>
-                        </li>
-                    {/each}
-                </ol>
-            </section>
-        {/if}
 
         {#if activeProposal}
             <section class="summary">
@@ -318,7 +331,6 @@
     .summary p,
     .candidate span,
     .empty p,
-    .agent-message,
     .section-header,
     .preset-main span {
         color: var(--text-secondary);
@@ -410,8 +422,7 @@
     .candidate,
     .empty,
     .chat-box,
-    .preset-box,
-    .stream-box {
+    .preset-box {
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: var(--radius);
@@ -438,53 +449,75 @@
         gap: calc(var(--spacing) * 0.75);
     }
 
-    .stream-list {
+    .chat-thread {
         display: flex;
         flex-direction: column;
-        gap: calc(var(--spacing) * 0.5);
-        list-style: none;
-        margin: calc(var(--spacing) * 0.75) 0 0;
-        padding: 0;
+        gap: calc(var(--spacing) * 0.75);
     }
 
-    .stream-list li {
-        display: grid;
-        gap: calc(var(--spacing) * 0.75);
-        grid-template-columns: 8px 1fr;
+    .chat-message {
+        max-width: 92%;
         min-width: 0;
     }
 
-    .stream-dot {
-        align-self: start;
-        background: var(--blue);
-        border-radius: 50%;
-        height: 6px;
-        margin-top: 5px;
-        width: 6px;
-    }
-
-    .stream-list li.final .stream-dot {
-        background: var(--green);
-    }
-
-    .stream-list li.error .stream-dot {
-        background: var(--red);
-    }
-
-    .stream-list strong {
+    .chat-message span {
         color: var(--text-secondary);
         display: block;
         font-size: 10px;
         line-height: 1.2;
-        text-transform: uppercase;
+        margin-bottom: 3px;
     }
 
-    .stream-list span {
-        color: var(--text);
-        display: block;
-        font-size: 11px;
-        line-height: 1.3;
+    .chat-message p {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        line-height: 1.35;
+        margin: 0;
         overflow-wrap: anywhere;
+        padding: 7px;
+    }
+
+    .user-message {
+        align-self: flex-end;
+    }
+
+    .user-message p {
+        background: color-mix(in srgb, var(--blue) 8%, var(--bg));
+        border-color: color-mix(in srgb, var(--blue) 55%, var(--border));
+    }
+
+    .assistant-message {
+        align-self: flex-start;
+    }
+
+    .assistant-message p {
+        background: var(--bg);
+    }
+
+    .thinking-line {
+        align-items: center;
+        color: var(--text-secondary);
+        display: flex;
+        gap: calc(var(--spacing) * 0.75);
+    }
+
+    .thinking-dot {
+        animation: pulse 1.4s ease-in-out infinite;
+        background: var(--blue);
+        border-radius: 50%;
+        display: inline-block;
+        height: 6px;
+        width: 6px;
+    }
+
+    @keyframes pulse {
+        0%, 100% {
+            opacity: 0.35;
+        }
+
+        50% {
+            opacity: 1;
+        }
     }
 
     .preset-item {
@@ -549,8 +582,7 @@
 
     .summary p,
     .empty p,
-    .empty-note,
-    .agent-message {
+    .empty-note {
         line-height: 1.35;
         margin: 0;
     }
