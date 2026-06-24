@@ -2,6 +2,7 @@
     import type {
         AgentActionProposal,
         AgentSelectionPreset,
+        ClaudeAgentStreamEvent,
         AgentVisualLevel,
     } from '$lib/api';
     import { estimateAgentBudget } from '$lib/agent-token-estimate';
@@ -20,6 +21,7 @@
         visible,
         busy = false,
         lastMessage = null,
+        streamEvents = [],
         visualLevel,
         activePresetId,
         activeProposalId = null,
@@ -40,6 +42,7 @@
         visible: boolean;
         busy?: boolean;
         lastMessage?: string | null;
+        streamEvents?: ClaudeAgentStreamEvent[];
         visualLevel: AgentVisualLevel;
         activePresetId: string | null;
         activeProposalId?: string | null;
@@ -78,6 +81,7 @@
         instruction,
         visualLevel,
     }));
+    const visibleStreamEvents = $derived(streamEvents.slice(-6));
     const displayInputTokens = $derived(activeProposal?.estimated_input_tokens ?? draftEstimate.inputTokens);
     const displayCostEur = $derived(activeProposal?.estimated_cost_eur ?? draftEstimate.costEur);
 
@@ -202,6 +206,26 @@
                 <p class="agent-message">{lastMessage}</p>
             {/if}
         </section>
+
+        {#if visibleStreamEvents.length > 0}
+            <section class="stream-box" aria-label="Agent run events" aria-live="polite">
+                <div class="section-header">
+                    <span>Run</span>
+                    <span>{busy ? 'live' : 'done'}</span>
+                </div>
+                <ol class="stream-list">
+                    {#each visibleStreamEvents as event}
+                        <li class:error={event.is_error} class:final={event.is_final}>
+                            <span class="stream-dot"></span>
+                            <div>
+                                <strong>{event.phase.replace('sdk_', '')}</strong>
+                                <span>{event.message}</span>
+                            </div>
+                        </li>
+                    {/each}
+                </ol>
+            </section>
+        {/if}
 
         {#if activeProposal}
             <section class="summary">
@@ -386,7 +410,8 @@
     .candidate,
     .empty,
     .chat-box,
-    .preset-box {
+    .preset-box,
+    .stream-box {
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: var(--radius);
@@ -411,6 +436,55 @@
         display: flex;
         flex-direction: column;
         gap: calc(var(--spacing) * 0.75);
+    }
+
+    .stream-list {
+        display: flex;
+        flex-direction: column;
+        gap: calc(var(--spacing) * 0.5);
+        list-style: none;
+        margin: calc(var(--spacing) * 0.75) 0 0;
+        padding: 0;
+    }
+
+    .stream-list li {
+        display: grid;
+        gap: calc(var(--spacing) * 0.75);
+        grid-template-columns: 8px 1fr;
+        min-width: 0;
+    }
+
+    .stream-dot {
+        align-self: start;
+        background: var(--blue);
+        border-radius: 50%;
+        height: 6px;
+        margin-top: 5px;
+        width: 6px;
+    }
+
+    .stream-list li.final .stream-dot {
+        background: var(--green);
+    }
+
+    .stream-list li.error .stream-dot {
+        background: var(--red);
+    }
+
+    .stream-list strong {
+        color: var(--text-secondary);
+        display: block;
+        font-size: 10px;
+        line-height: 1.2;
+        text-transform: uppercase;
+    }
+
+    .stream-list span {
+        color: var(--text);
+        display: block;
+        font-size: 11px;
+        line-height: 1.3;
+        overflow-wrap: anywhere;
     }
 
     .preset-item {

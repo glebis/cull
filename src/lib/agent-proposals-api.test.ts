@@ -87,6 +87,7 @@ describe('agent proposal API wrappers', () => {
 
     it('invokes Claude agent chat turn with candidate context', async () => {
         const request = {
+            request_id: 'agent-request-1',
             instruction: 'select portfolio candidates',
             visual_level: 'tiny' as const,
             preset: null,

@@ -34,4 +34,14 @@ describe('AgentProposalDock source contract', () => {
         expect(source).toContain('ondismissproposal(activeProposal.id)');
         expect(source).not.toContain('dispatchEvent');
     });
+
+    it('renders a compact stream event rail for SDK progress', () => {
+        expect(source).toContain('ClaudeAgentStreamEvent');
+        expect(source).toContain('streamEvents = []');
+        expect(source).toContain('visibleStreamEvents = $derived(streamEvents.slice(-6))');
+        expect(source).toContain('aria-label="Agent run events"');
+        expect(source).toContain('aria-live="polite"');
+        expect(source).toContain('{event.phase.replace');
+        expect(source).toContain('{event.message}');
+    });
 });

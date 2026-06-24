@@ -36,7 +36,7 @@
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
     import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel, agentPanelPinned, agentPanelVisible, agentVisualLevel, activeAgentProposalId, activeAgentSelectionPresetId, cycleAgentVisualLevel } from '$lib/stores';
-    import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ImageWithFile, type PreviewState } from '$lib/api';
+    import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ClaudeAgentStreamEvent, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
     import { loadInstalledPlugins, activateBundledPlugins } from '$lib/plugins/loader';
@@ -78,6 +78,8 @@
     let agentSelectionPresets = $state<AgentSelectionPreset[]>([]);
     let agentChatBusy = $state(false);
     let lastAgentMessage = $state<string | null>(null);
+    let activeAgentRequestId = $state<string | null>(null);
+    let agentStreamEvents = $state<ClaudeAgentStreamEvent[]>([]);
     let reviewProposalId = $state<string | null>(null);
 
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
@@ -445,8 +447,12 @@
 
         agentChatBusy = true;
         lastAgentMessage = null;
+        const requestId = crypto.randomUUID?.() ?? `agent-${Date.now()}`;
+        activeAgentRequestId = requestId;
+        agentStreamEvents = [];
         try {
             const result = await runClaudeAgentChatTurn({
+                request_id: requestId,
                 instruction,
                 visual_level: visualLevel,
                 preset,
@@ -483,6 +489,7 @@
             showToast('Claude agent failed', { detail: String(e), type: 'error', duration: 9000 });
         } finally {
             agentChatBusy = false;
+            activeAgentRequestId = null;
         }
     }
 
@@ -680,6 +687,16 @@
             applyAgentViewSnapshotSelection(event.payload);
         });
 
+        const agentStreamUnlisten = listen<ClaudeAgentStreamEvent>('claude-agent:stream-event', (event) => {
+            if (event.payload.request_id !== activeAgentRequestId) return;
+            agentStreamEvents = [
+                ...agentStreamEvents.filter(item => item.sequence !== event.payload.sequence),
+                event.payload,
+            ]
+                .sort((a, b) => a.sequence - b.sequence)
+                .slice(-8);
+        });
+
         const panicUnlisten = listen<{thread: string, location: string | null, message: string}>('rust-panic', (event) => {
             console.error('[rust-panic]', event.payload);
             showToast('Background thread crashed', { detail: event.payload.message, type: 'error', duration: 10000 });
@@ -725,6 +742,7 @@
             watcherUnlisten.then(fn => fn());
             agentSnapshotRequestUnlisten.then(fn => fn());
             agentSnapshotSelectionUnlisten.then(fn => fn());
+            agentStreamUnlisten.then(fn => fn());
             panicUnlisten.then(fn => fn());
             taskFailUnlisten.then(fn => fn());
             cloudUnlisten.then(fn => fn());
@@ -795,6 +813,7 @@
                 visible={$agentPanelVisible}
                 busy={agentChatBusy}
                 lastMessage={lastAgentMessage}
+                streamEvents={agentStreamEvents}
                 visualLevel={$agentVisualLevel}
                 activePresetId={$activeAgentSelectionPresetId}
                 activeProposalId={$activeAgentProposalId}

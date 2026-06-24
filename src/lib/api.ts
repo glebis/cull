@@ -531,6 +531,7 @@ export interface AgentChatImageContext {
 }
 
 export interface ClaudeAgentChatTurnRequest {
+    request_id?: string | null;
     instruction: string;
     visual_level: AgentVisualLevel;
     preset: AgentSelectionPreset | null;
@@ -548,6 +549,16 @@ export interface ClaudeAgentChatTurnResult {
     updated_preset: AgentSelectionPreset | null;
     usage_json: string;
     raw_result_json: string;
+}
+
+export interface ClaudeAgentStreamEvent {
+    request_id: string;
+    sequence: number;
+    phase: string;
+    message: string;
+    details: Record<string, unknown> | null;
+    is_final: boolean;
+    is_error: boolean;
 }
 
 export async function listImages(limit: number, offset: number): Promise<ImageWithFile[]> {

@@ -3,6 +3,8 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
 
+const EVENT_PREFIX = 'CULL_AGENT_EVENT ';
+
 function readStdinJson() {
   const input = readFileSync(0, 'utf8');
   if (!input.trim()) {
@@ -25,6 +27,7 @@ function buildOptions(request) {
     maxBudgetUsd: request.max_budget_usd,
     permissionMode: 'dontAsk',
     persistSession: false,
+    includePartialMessages: true,
     env: inheritedEnvWithoutAnthropicKey(),
     pathToClaudeCodeExecutable: request.claude_executable || 'claude',
     cwd: request.cwd || process.cwd(),
@@ -40,6 +43,121 @@ function buildOptions(request) {
   }
 
   return options;
+}
+
+function textFromContent(content) {
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter((block) => block?.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function textFromStreamEvent(event) {
+  if (!event || typeof event !== 'object') return '';
+  if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+    return event.delta.text ?? '';
+  }
+  if (event.type === 'content_block_start' && event.content_block?.type === 'text') {
+    return event.content_block.text ?? '';
+  }
+  return '';
+}
+
+function clipText(text, max = 180) {
+  const clean = String(text ?? '').replace(/\s+/g, ' ').trim();
+  return clean.length > max ? `${clean.slice(0, max - 1)}...` : clean;
+}
+
+function summarizeMessage(message) {
+  const subtype = message.subtype ?? message.event?.type ?? null;
+  switch (message.type) {
+    case 'system':
+      if (message.subtype === 'init') {
+        return {
+          phase: 'sdk_init',
+          message: `Claude SDK ready with ${message.tools?.length ?? 0} tools`,
+          details: { sdk_event_type: message.type, subtype, model: message.model ?? null },
+        };
+      }
+      if (message.subtype === 'status') {
+        return {
+          phase: 'sdk_status',
+          message: message.status ? `Claude is ${message.status}` : 'Claude status updated',
+          details: { sdk_event_type: message.type, subtype, status: message.status ?? null },
+        };
+      }
+      if (message.subtype === 'thinking_tokens') {
+        return {
+          phase: 'sdk_thinking',
+          message: `Thinking ${message.estimated_tokens ?? 0} tokens`,
+          details: { sdk_event_type: message.type, subtype, estimated_tokens: message.estimated_tokens ?? null },
+        };
+      }
+      if (message.subtype === 'api_retry') {
+        return {
+          phase: 'sdk_retry',
+          message: `Retrying Claude API (${message.attempt}/${message.max_retries})`,
+          details: { sdk_event_type: message.type, subtype, attempt: message.attempt, max_retries: message.max_retries },
+        };
+      }
+      return {
+        phase: 'sdk_system',
+        message: subtype ? `SDK ${subtype}` : 'SDK system event',
+        details: { sdk_event_type: message.type, subtype },
+      };
+    case 'stream_event': {
+      const text = clipText(textFromStreamEvent(message.event), 140);
+      return {
+        phase: 'sdk_stream',
+        message: text || `Streaming ${message.event?.type ?? 'assistant event'}`,
+        details: { sdk_event_type: message.type, subtype },
+      };
+    }
+    case 'assistant': {
+      const text = clipText(textFromContent(message.message?.content), 180);
+      return {
+        phase: 'sdk_assistant',
+        message: text || 'Assistant message received',
+        details: { sdk_event_type: message.type, subtype, request_id: message.request_id ?? null },
+      };
+    }
+    case 'tool_progress':
+      return {
+        phase: 'sdk_tool',
+        message: `${message.tool_name ?? 'Tool'} running ${Math.round(message.elapsed_time_seconds ?? 0)}s`,
+        details: { sdk_event_type: message.type, subtype, tool_name: message.tool_name ?? null },
+      };
+    case 'tool_use_summary':
+      return {
+        phase: 'sdk_tool',
+        message: clipText(message.summary || 'Tool use summarized'),
+        details: { sdk_event_type: message.type, subtype },
+      };
+    case 'result':
+      return {
+        phase: message.is_error ? 'sdk_error' : 'sdk_result',
+        message: message.is_error ? 'Claude returned an execution error' : 'Claude returned a result',
+        details: {
+          sdk_event_type: message.type,
+          subtype,
+          duration_ms: message.duration_ms ?? null,
+          total_cost_usd: message.total_cost_usd ?? null,
+        },
+      };
+    default:
+      return {
+        phase: 'sdk_event',
+        message: `SDK ${message.type ?? 'event'}`,
+        details: { sdk_event_type: message.type ?? null, subtype },
+      };
+  }
+}
+
+function emitEvent(message) {
+  process.stderr.write(`${EVENT_PREFIX}${JSON.stringify(summarizeMessage(message))}\n`);
 }
 
 function parseStructuredOutput(result) {
@@ -82,6 +200,7 @@ try {
     options: buildOptions(request),
   })) {
     messages.push(message);
+    emitEvent(message);
   }
   process.stdout.write(`${JSON.stringify(normalizeResult(messages))}\n`);
 } catch (error) {

@@ -2,7 +2,7 @@ use crate::db_core::models::{AgentActionProposal, AgentSelectionPreset};
 use crate::services::agent_proposals as svc;
 use crate::services::claude_agent as claude_svc;
 use crate::AppState;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub async fn create_action_proposal(
@@ -58,10 +58,11 @@ pub async fn upsert_agent_selection_preset(
 
 #[tauri::command]
 pub async fn run_claude_agent_chat_turn(
+    app: AppHandle,
     state: State<'_, AppState>,
     request: claude_svc::ClaudeAgentChatTurnRequest,
 ) -> Result<claude_svc::ClaudeAgentChatTurnResult, String> {
-    claude_svc::run_claude_agent_chat_turn_db(&state.db, request)
+    claude_svc::run_claude_agent_chat_turn_db_with_events(&state.db, request, Some(app))
         .await
         .map_err(|e| e.to_string())
 }
