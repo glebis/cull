@@ -42,9 +42,12 @@ describe('AgentProposalDock source contract', () => {
         expect(proposalIndex).toBeGreaterThan(-1);
         expect(proposalIndex).toBeLessThan(presetIndex);
         expect(proposalIndex).toBeLessThan(chatIndex);
-        expect(source).toContain('Review required');
+        expect(source).toContain('Needs approval');
         expect(source).toContain('Review and apply');
         expect(source).toContain('candidateCountLabel');
+        expect(source).toContain('visibleImages');
+        expect(source).toContain('candidate-preview');
+        expect(source).toContain('safeAssetPreviewPath');
         expect(source).toContain('max-height: min(260px, 34vh)');
     });
 

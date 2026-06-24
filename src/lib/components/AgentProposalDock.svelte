@@ -1,11 +1,14 @@
 <script lang="ts">
+    import { convertFileSrc } from '@tauri-apps/api/core';
     import type {
         AgentActionProposal,
         AgentSelectionPreset,
         ClaudeAgentStreamEvent,
         AgentVisualLevel,
+        ImageWithFile,
     } from '$lib/api';
     import { estimateAgentBudget } from '$lib/agent-token-estimate';
+    import { safeAssetPreviewPath } from '$lib/view-utils';
 
     type Candidate = {
         image_id: string;
@@ -27,6 +30,7 @@
         activePresetId,
         activeProposalId = null,
         candidateCount = 0,
+        visibleImages = [],
         onreviewproposal = () => {},
         ondismissproposal = () => {},
         oncreateproposal = () => {},
@@ -49,6 +53,7 @@
         activePresetId: string | null;
         activeProposalId?: string | null;
         candidateCount?: number;
+        visibleImages?: ImageWithFile[];
         onreviewproposal?: (proposalId: string) => void;
         ondismissproposal?: (proposalId: string) => void;
         oncreateproposal?: (presetId: string | null, instruction: string) => void;
@@ -76,6 +81,11 @@
     );
     const candidates = $derived(parseCandidates(activeProposal?.items_json));
     const candidateCountLabel = $derived(`${candidates.length} ${candidates.length === 1 ? 'image' : 'images'}`);
+    const primaryCandidate = $derived(candidates[0] ?? null);
+    const primaryImage = $derived(primaryCandidate ? imageForCandidate(primaryCandidate.image_id) : null);
+    const primaryImagePreviewPath = $derived(primaryImage ? safeAssetPreviewPath(primaryImage, { displayPx: 120 }) : null);
+    const primaryImageSrc = $derived(primaryImagePreviewPath ? convertFileSrc(primaryImagePreviewPath) : null);
+    const primaryImageName = $derived(primaryImage ? filenameForPath(primaryImage.path) : null);
     const contextLabel = $derived(visualLevel === 'text'
         ? 'Text-only'
         : visualLevel[0].toUpperCase() + visualLevel.slice(1));
@@ -99,6 +109,18 @@
         } catch {
             return [];
         }
+    }
+
+    function imageForCandidate(imageId: string) {
+        return visibleImages.find(item => item.image.id === imageId) ?? null;
+    }
+
+    function filenameForPath(path: string) {
+        return path.split('/').pop() ?? path;
+    }
+
+    function shortImageId(imageId: string) {
+        return imageId.slice(0, 8);
     }
 
     function startEditPreset(preset: AgentSelectionPreset) {
@@ -166,18 +188,29 @@
 
         {#if activeProposal}
             <section class="proposal-card" aria-label="Pending agent proposal">
-                <div class="section-header">
+                <div class="proposal-topline">
                     <span>{activeProposal.kind === 'trash_images' ? 'Trash proposal' : 'Selection proposal'}</span>
-                    <strong>Review required</strong>
+                    <strong>Needs approval</strong>
                 </div>
-                <h3>{activeProposal.kind === 'trash_images' ? `${candidateCountLabel} proposed for Trash` : `${candidateCountLabel} proposed`}</h3>
-                <p>{activeProposal.criteria}</p>
-                {#if candidates[0]}
+                <div class="proposal-headline">
+                    <h3>{activeProposal.kind === 'trash_images' ? `${candidateCountLabel} proposed for Trash` : `${candidateCountLabel} proposed`}</h3>
+                    <span>{contextLabel}</span>
+                </div>
+                <p class="proposal-criteria">{activeProposal.criteria}</p>
+                {#if primaryCandidate}
                     <article class="candidate featured-candidate">
-                        <div class="candidate-index">1</div>
-                        <div>
-                            <strong>{candidates[0].image_id}</strong>
-                            <span>{candidates[0].reason ?? 'Candidate selected by proposal criteria'}</span>
+                        <div class="candidate-preview" aria-hidden="true">
+                            {#if primaryImageSrc}
+                                <img src={primaryImageSrc} alt="" loading="lazy" decoding="async" draggable="false" />
+                            {:else}
+                                <span>{shortImageId(primaryCandidate.image_id)}</span>
+                            {/if}
+                        </div>
+                        <div class="candidate-copy">
+                            <span class="candidate-label">Candidate</span>
+                            <strong>{primaryImageName ?? shortImageId(primaryCandidate.image_id)}</strong>
+                            <span class="candidate-id">{shortImageId(primaryCandidate.image_id)}</span>
+                            <p>{primaryCandidate.reason ?? 'Candidate selected by proposal criteria'}</p>
                         </div>
                     </article>
                 {/if}
@@ -304,7 +337,9 @@
     .header-actions,
     .proposal-actions,
     .editor-actions,
-    .section-header {
+    .section-header,
+    .proposal-topline,
+    .proposal-headline {
         align-items: center;
         display: flex;
         gap: var(--spacing);
@@ -313,7 +348,9 @@
     .agent-header,
     .proposal-actions,
     .editor-actions,
-    .section-header {
+    .section-header,
+    .proposal-topline,
+    .proposal-headline {
         justify-content: space-between;
     }
 
@@ -331,6 +368,7 @@
     .candidate span,
     .empty p,
     .section-header,
+    .proposal-topline,
     .preset-main span {
         color: var(--text-secondary);
         display: block;
@@ -408,15 +446,28 @@
         min-height: 32px;
     }
 
-    .proposal-card,
     .candidate,
     .empty,
     .chat-box,
     .preset-box {
-        background: var(--surface);
         border: 1px solid var(--border);
         border-radius: var(--radius);
         padding: calc(var(--spacing) * 0.75);
+    }
+
+    .proposal-card {
+        background:
+            linear-gradient(180deg, color-mix(in srgb, var(--green) 10%, var(--surface)), var(--surface) 44%);
+        border: 1px solid color-mix(in srgb, var(--green) 65%, var(--border));
+        border-left: 3px solid var(--green);
+        border-radius: var(--radius);
+        padding: calc(var(--spacing) * 1);
+    }
+
+    .preset-box,
+    .chat-box,
+    .empty {
+        background: transparent;
     }
 
     .chat-box,
@@ -430,6 +481,15 @@
 
     .proposal-card {
         flex: 0 0 auto;
+    }
+
+    .preset-box,
+    .chat-box {
+        border-color: color-mix(in srgb, var(--border) 70%, transparent);
+    }
+
+    .chat-box {
+        margin-top: calc(var(--spacing) * 0.25);
     }
 
     .preset-grid {
@@ -486,41 +546,92 @@
         background: var(--bg);
     }
 
+    .proposal-topline {
+        font-size: 11px;
+        line-height: 1.2;
+    }
+
+    .proposal-topline strong {
+        color: var(--orange);
+        font-size: 11px;
+        font-weight: 700;
+    }
+
     .proposal-card h3 {
-        font-size: 13px;
+        font-size: 16px;
         line-height: 1.25;
         margin: 0;
     }
 
-    .proposal-card p {
+    .proposal-headline span,
+    .proposal-criteria {
         color: var(--text-secondary);
         font-size: 11px;
-        line-height: 1.35;
+    }
+
+    .proposal-criteria {
+        line-height: 1.3;
         margin: 0;
     }
 
-    .proposal-card .section-header strong {
-        color: var(--orange);
-        font-size: 11px;
-        font-weight: 600;
-    }
-
     .featured-candidate {
-        background: var(--bg);
-        grid-template-columns: 22px 1fr;
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        border-top: 1px solid color-mix(in srgb, var(--green) 36%, var(--border));
+        grid-template-columns: 86px 1fr;
+        padding: calc(var(--spacing) * 0.75) 0 0;
     }
 
-    .candidate-index {
+    .candidate-preview {
         align-items: center;
-        background: color-mix(in srgb, var(--green) 13%, var(--surface));
-        border: 1px solid var(--green);
+        aspect-ratio: 4 / 3;
+        background: var(--border);
+        border: 1px solid color-mix(in srgb, var(--green) 36%, var(--border));
         border-radius: var(--radius);
-        color: var(--green);
         display: flex;
-        font-size: 11px;
-        height: 22px;
         justify-content: center;
-        width: 22px;
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .candidate-preview img {
+        height: 100%;
+        object-fit: cover;
+        width: 100%;
+    }
+
+    .candidate-preview span {
+        color: var(--text-secondary);
+        font-size: 11px;
+    }
+
+    .candidate-copy {
+        min-width: 0;
+    }
+
+    .candidate-label,
+    .candidate-id {
+        color: var(--text-secondary);
+        font-size: 10px;
+        line-height: 1.2;
+    }
+
+    .candidate-copy strong {
+        display: block;
+        font-size: 13px;
+        line-height: 1.25;
+        margin-top: 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .candidate-copy p {
+        color: var(--text-secondary);
+        font-size: 11px;
+        line-height: 1.3;
+        margin: 5px 0 0;
     }
 
     .thinking-line {
@@ -563,6 +674,10 @@
     .preset-item.active {
         background: color-mix(in srgb, var(--green) 9%, var(--surface));
         border-color: var(--green);
+    }
+
+    .preset-item:not(.active) {
+        background: color-mix(in srgb, var(--surface) 58%, var(--bg));
     }
 
     .preset-main {

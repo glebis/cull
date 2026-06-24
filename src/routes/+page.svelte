@@ -831,6 +831,7 @@
                 activePresetId={$activeAgentSelectionPresetId}
                 activeProposalId={$activeAgentProposalId}
                 candidateCount={agentCandidateCount}
+                visibleImages={$images}
                 onreviewproposal={handleReviewAgentProposal}
                 ondismissproposal={handleDismissAgentProposal}
                 oncreateproposal={handleCreateAgentProposal}
