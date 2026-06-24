@@ -141,6 +141,29 @@
         }
     }
 
+    function handleProfileChange(event: Event) {
+        const target = event.currentTarget as HTMLSelectElement | null;
+        if (!target?.value) return;
+        selectPreset(target.value);
+    }
+
+    function profileSummary(preset: AgentSelectionPreset) {
+        const searchable = `${preset.id} ${preset.name} ${preset.purpose}`.toLowerCase();
+        if (searchable.includes('client')) {
+            return 'Claude optimizes proposals for one polished image to show a client.';
+        }
+        if (searchable.includes('print')) {
+            return 'Claude prioritizes print-ready detail, clarity, and exposure.';
+        }
+        if (searchable.includes('cleanup') || searchable.includes('reject')) {
+            return 'Claude looks for weak alternates and failed variants to remove.';
+        }
+        if (searchable.includes('portfolio')) {
+            return 'Claude chooses strong portfolio candidates and avoids near-duplicates.';
+        }
+        return 'Claude uses this profile as the criteria for the next proposal.';
+    }
+
     function savePreset() {
         if (!editingPresetId || !presetPromptDraft.trim()) return;
         onupdatepreset(editingPresetId, presetPromptDraft.trim());
@@ -196,7 +219,6 @@
                     <h3>{activeProposal.kind === 'trash_images' ? `${candidateCountLabel} proposed for Trash` : `${candidateCountLabel} proposed`}</h3>
                     <span>{contextLabel}</span>
                 </div>
-                <p class="proposal-criteria">{activeProposal.criteria}</p>
                 {#if primaryCandidate}
                     <article class="candidate featured-candidate">
                         <div class="candidate-preview" aria-hidden="true">
@@ -223,31 +245,25 @@
             </section>
         {/if}
 
-        <section class="preset-box" aria-label="Selection presets">
+        <section class="profile-box" aria-label="Agent profile">
             <div class="section-header">
-                <span>Job</span>
-                <button class="link-button" type="button" onclick={startEditActivePreset} disabled={!activePreset}>Edit active</button>
+                <span>Profile</span>
+                <button class="link-button" type="button" onclick={startEditActivePreset} disabled={!activePreset}>Edit</button>
             </div>
             {#if presets.length > 0}
-                <div class="preset-grid">
-                    {#each presets as preset}
-                        <button
-                            type="button"
-                            aria-pressed={preset.id === activePreset?.id}
-                            class:active={preset.id === activePreset?.id}
-                            class="preset-item"
-                            title={preset.prompt}
-                            onclick={() => selectPreset(preset.id)}
-                        >
-                            <span class="preset-main">
-                                <strong>{preset.name}</strong>
-                                <span>{preset.purpose}</span>
-                            </span>
-                        </button>
-                    {/each}
-                </div>
+                <label class="profile-control" for="agent-profile-select">
+                    <span>Selection criteria</span>
+                    <select id="agent-profile-select" value={activePreset?.id ?? ''} onchange={handleProfileChange}>
+                        {#each presets as preset}
+                            <option value={preset.id}>{preset.name}</option>
+                        {/each}
+                    </select>
+                </label>
+                {#if activePreset}
+                    <p class="profile-summary">{profileSummary(activePreset)}</p>
+                {/if}
             {:else}
-                <p class="empty-note">No jobs loaded.</p>
+                <p class="empty-note">No profiles loaded.</p>
             {/if}
 
             {#if editingPresetId}
@@ -369,13 +385,15 @@
     .empty p,
     .section-header,
     .proposal-topline,
-    .preset-main span {
+    .profile-control span,
+    .profile-summary {
         color: var(--text-secondary);
         display: block;
         font-size: 11px;
     }
 
     button,
+    select,
     textarea,
     .context-chip {
         background: var(--surface);
@@ -400,6 +418,7 @@
     }
 
     button:focus-visible,
+    select:focus-visible,
     textarea:focus-visible {
         border-color: var(--blue);
         outline: 1px solid var(--blue);
@@ -417,6 +436,17 @@
         min-width: 0;
         padding: 7px;
         resize: vertical;
+        width: 100%;
+    }
+
+    select {
+        appearance: none;
+        background:
+            linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%) right 11px center / 6px 6px no-repeat,
+            linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%) right 7px center / 6px 6px no-repeat,
+            var(--surface);
+        min-height: 32px;
+        padding: 5px 26px 5px 7px;
         width: 100%;
     }
 
@@ -449,7 +479,7 @@
     .candidate,
     .empty,
     .chat-box,
-    .preset-box {
+    .profile-box {
         border: 1px solid var(--border);
         border-radius: var(--radius);
         padding: calc(var(--spacing) * 0.75);
@@ -464,14 +494,14 @@
         padding: calc(var(--spacing) * 1);
     }
 
-    .preset-box,
+    .profile-box,
     .chat-box,
     .empty {
         background: transparent;
     }
 
     .chat-box,
-    .preset-box,
+    .profile-box,
     .proposal-card,
     .preset-editor {
         display: flex;
@@ -483,26 +513,28 @@
         flex: 0 0 auto;
     }
 
-    .preset-box,
+    .profile-box,
     .chat-box {
         border-color: color-mix(in srgb, var(--border) 70%, transparent);
     }
 
-    .chat-box {
-        margin-top: calc(var(--spacing) * 0.25);
+    .profile-box {
+        flex: 0 0 auto;
     }
 
-    .preset-grid {
-        display: grid;
-        gap: calc(var(--spacing) * 0.5);
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+    .chat-box {
+        flex: 1 1 auto;
+        margin-top: calc(var(--spacing) * 0.25);
+        min-height: 220px;
+        overflow: hidden;
     }
 
     .chat-thread {
         display: flex;
+        flex: 1 1 auto;
         flex-direction: column;
         gap: calc(var(--spacing) * 0.75);
-        max-height: min(260px, 34vh);
+        min-height: 0;
         overflow: auto;
         padding-right: 2px;
     }
@@ -563,15 +595,9 @@
         margin: 0;
     }
 
-    .proposal-headline span,
-    .proposal-criteria {
+    .proposal-headline span {
         color: var(--text-secondary);
         font-size: 11px;
-    }
-
-    .proposal-criteria {
-        line-height: 1.3;
-        margin: 0;
     }
 
     .featured-candidate {
@@ -660,51 +686,22 @@
         }
     }
 
-    .preset-item {
-        align-items: stretch;
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        display: block;
-        min-height: 45px;
-        min-width: 0;
-        padding: 6px 7px;
-        text-align: left;
-    }
-
-    .preset-item.active {
-        background: color-mix(in srgb, var(--green) 9%, var(--surface));
-        border-color: var(--green);
-    }
-
-    .preset-item:not(.active) {
-        background: color-mix(in srgb, var(--surface) 58%, var(--bg));
-    }
-
-    .preset-main {
-        min-width: 0;
-    }
-
-    .preset-main strong {
-        display: block;
-        font-size: 12px;
-        line-height: 1.25;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .preset-main span {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
     .link-button {
         background: transparent;
         border: 0;
         color: var(--blue);
         font-size: 11px;
         padding: 0;
+    }
+
+    .profile-control {
+        display: grid;
+        gap: 4px;
+    }
+
+    .profile-summary {
+        line-height: 1.35;
+        margin: 0;
     }
 
     .preset-editor {

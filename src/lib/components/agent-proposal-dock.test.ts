@@ -19,9 +19,11 @@ describe('AgentProposalDock source contract', () => {
         expect(source).toContain('estimateAgentBudget');
     });
 
-    it('supports editable selection presets through the chat panel', () => {
-        expect(source).toContain('Selection presets');
-        expect(source).toContain('onclick={() => selectPreset(preset.id)}');
+    it('supports editable selection profiles through a compact selector', () => {
+        expect(source).toContain('Agent profile');
+        expect(source).toContain('Selection criteria');
+        expect(source).toContain('onchange={handleProfileChange}');
+        expect(source).toContain('profileSummary(activePreset)');
         expect(source).toContain('startEditActivePreset');
         expect(source).toContain('onupdatepreset(editingPresetId, presetPromptDraft.trim())');
         expect(source).toContain('aria-label="Preset prompt"');
@@ -37,10 +39,10 @@ describe('AgentProposalDock source contract', () => {
 
     it('keeps pending proposal state visible above the chat transcript', () => {
         const proposalIndex = source.indexOf('aria-label="Pending agent proposal"');
-        const presetIndex = source.indexOf('aria-label="Selection presets"');
+        const profileIndex = source.indexOf('aria-label="Agent profile"');
         const chatIndex = source.indexOf('aria-label="Agent chat"');
         expect(proposalIndex).toBeGreaterThan(-1);
-        expect(proposalIndex).toBeLessThan(presetIndex);
+        expect(proposalIndex).toBeLessThan(profileIndex);
         expect(proposalIndex).toBeLessThan(chatIndex);
         expect(source).toContain('Needs approval');
         expect(source).toContain('Review and apply');
@@ -48,7 +50,9 @@ describe('AgentProposalDock source contract', () => {
         expect(source).toContain('visibleImages');
         expect(source).toContain('candidate-preview');
         expect(source).toContain('safeAssetPreviewPath');
-        expect(source).toContain('max-height: min(260px, 34vh)');
+        expect(source).not.toContain('proposal-criteria');
+        expect(source).toContain('flex: 1 1 auto;');
+        expect(source).toContain('min-height: 220px');
     });
 
     it('renders agent chat as a compact conversation rather than an SDK event rail', () => {
