@@ -38,7 +38,6 @@
         onselectpreset = () => {},
         onvisuallevelcycle = () => {},
         onclose = () => {},
-        onpintoggle = () => {},
     }: {
         proposals: AgentActionProposal[];
         presets: AgentSelectionPreset[];
@@ -61,7 +60,6 @@
         onselectpreset?: (presetId: string) => void;
         onvisuallevelcycle?: () => void;
         onclose?: () => void;
-        onpintoggle?: () => void;
     } = $props();
 
     let instruction = $state('');
@@ -198,8 +196,7 @@
                 <span>{activeProposal?.lens ?? activePreset?.purpose ?? 'selection'} proposal</span>
             </div>
             <div class="header-actions">
-                <button class="icon-button" type="button" title={pinned ? 'Float panel' : 'Pin panel'} onclick={onpintoggle}>{pinned ? ']' : '['}</button>
-                <button class="icon-button" type="button" title="Close" onclick={onclose}>x</button>
+                <button class="close-button" type="button" title="Close" aria-label="Close agent panel" onclick={onclose}>×</button>
             </div>
         </header>
 
@@ -461,9 +458,19 @@
         text-align: left;
     }
 
-    .icon-button {
+    .close-button {
+        background: transparent;
+        border: 0;
+        color: var(--text-secondary);
+        font-size: 18px;
+        line-height: 1;
         min-height: 28px;
         min-width: 28px;
+        padding: 0;
+    }
+
+    .close-button:hover:not(:disabled) {
+        color: var(--text);
     }
 
     .primary {

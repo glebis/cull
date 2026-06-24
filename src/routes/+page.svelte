@@ -530,11 +530,6 @@
         agentPanelPinned.set(false);
     }
 
-    function handleToggleAgentPanelPinned() {
-        agentPanelPinned.update(value => !value);
-        agentPanelVisible.set(true);
-    }
-
     function handleReviewAgentProposal(proposalId: string) {
         reviewProposalId = proposalId;
         activeAgentProposalId.set(proposalId);
@@ -839,7 +834,6 @@
                 onselectpreset={(presetId) => activeAgentSelectionPresetId.set(presetId)}
                 onvisuallevelcycle={cycleAgentVisualLevel}
                 onclose={handleCloseAgentPanel}
-                onpintoggle={handleToggleAgentPanelPinned}
             />
         </div>
         {#if !$zenMode}

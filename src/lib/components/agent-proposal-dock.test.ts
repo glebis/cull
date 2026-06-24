@@ -12,6 +12,14 @@ describe('AgentProposalDock source contract', () => {
         expect(source).toContain('context-chip');
     });
 
+    it('keeps header controls minimal', () => {
+        expect(source).toContain('aria-label="Close agent panel"');
+        expect(source).toContain('>×</button>');
+        expect(source).toContain('close-button');
+        expect(source).not.toContain('onpintoggle');
+        expect(source).not.toContain('icon-button');
+    });
+
     it('uses live candidate estimates and active proposal selection for the context chip', () => {
         expect(source).toContain("from '$lib/agent-token-estimate'");
         expect(source).toContain('activeProposalId ? proposals.find');
