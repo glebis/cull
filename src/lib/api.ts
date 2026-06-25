@@ -306,6 +306,11 @@ export interface ImageHistogram {
     luma: number[];
 }
 
+export interface WindowInfo {
+    label: string;
+    title: string;
+}
+
 export async function openPreviewDisplay(): Promise<string> {
     return invoke<string>('open_preview_display');
 }
@@ -356,6 +361,30 @@ export async function updatePreviewState(
         frozen,
         blanked,
     });
+}
+
+export async function createWindow(name?: string | null): Promise<string> {
+    return invoke<string>('create_window', { name: name ?? null });
+}
+
+export async function listWindows(): Promise<WindowInfo[]> {
+    return invoke<WindowInfo[]>('list_windows');
+}
+
+export async function renameWindow(label: string, newName: string): Promise<void> {
+    return invoke<void>('rename_window', { label, newName });
+}
+
+export async function sendToWindow(windowName: string, event: string, payload: unknown): Promise<string> {
+    return invoke<string>('send_to_window', { windowName, event, payload });
+}
+
+export async function startDictation(locale?: string | null): Promise<void> {
+    return invoke<void>('start_dictation', { locale: locale ?? null });
+}
+
+export async function stopDictation(): Promise<void> {
+    return invoke<void>('stop_dictation');
 }
 
 export interface CullExchangeExportOptions {
@@ -417,6 +446,119 @@ export interface SmartCollection {
     sort_order: number;
     created_at: string;
     image_count: number | null;
+}
+
+export type AgentPersona = 'curator' | 'copilot' | 'operator';
+export type AgentVisualLevel = 'text' | 'tiny' | 'preview' | 'full';
+export type AgentProposalStatus = 'pending' | 'applied' | 'dismissed';
+
+export interface AgentActionProposal {
+    id: string;
+    kind: string;
+    status: AgentProposalStatus;
+    persona: AgentPersona;
+    lens: string | null;
+    criteria: string;
+    visual_level: AgentVisualLevel;
+    selection_preset_id: string | null;
+    estimated_input_tokens: number | null;
+    estimated_output_tokens: number | null;
+    estimated_cost_eur: number | null;
+    source_context_json: string;
+    items_json: string;
+    guard_results_json: string;
+    apply_result_json: string | null;
+    undo_journal_json: string | null;
+    created_at: string;
+    updated_at: string;
+    applied_at: string | null;
+}
+
+export interface CreateActionProposalRequest {
+    kind: string;
+    persona: AgentPersona;
+    lens: string | null;
+    criteria: string;
+    visual_level: AgentVisualLevel;
+    selection_preset_id: string | null;
+    estimated_input_tokens: number | null;
+    estimated_output_tokens: number | null;
+    estimated_cost_eur: number | null;
+    source_context_json: string;
+    items_json: string;
+    guard_results_json: string;
+}
+
+export interface ApplyActionProposalResult {
+    proposal_id: string;
+    status: string;
+    applied_count: number;
+    failed_count: number;
+    result_json: string;
+}
+
+export interface AgentSelectionPreset {
+    id: string;
+    name: string;
+    purpose: string;
+    prompt: string;
+    criteria_json: string;
+    sort_order: number;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface UpsertAgentSelectionPresetRequest {
+    id: string | null;
+    name: string;
+    purpose: string;
+    prompt: string;
+    criteria_json: string;
+    sort_order: number | null;
+}
+
+export interface AgentChatImageContext {
+    image_id: string;
+    filename: string | null;
+    width: number | null;
+    height: number | null;
+    format: string | null;
+    star_rating: number | null;
+    color_label: string | null;
+    decision: string | null;
+    source_label: string | null;
+    thumbnail_path: string | null;
+}
+
+export interface ClaudeAgentChatTurnRequest {
+    request_id?: string | null;
+    instruction: string;
+    visual_level: AgentVisualLevel;
+    preset: AgentSelectionPreset | null;
+    candidate_images: AgentChatImageContext[];
+    selected_count: number;
+    visible_count: number;
+    model: string | null;
+    max_budget_usd: number | null;
+}
+
+export interface ClaudeAgentChatTurnResult {
+    operation: 'answer' | 'create_proposal' | 'update_preset';
+    message: string;
+    proposal: AgentActionProposal | null;
+    updated_preset: AgentSelectionPreset | null;
+    usage_json: string;
+    raw_result_json: string;
+}
+
+export interface ClaudeAgentStreamEvent {
+    request_id: string;
+    sequence: number;
+    phase: string;
+    message: string;
+    details: Record<string, unknown> | null;
+    is_final: boolean;
+    is_error: boolean;
 }
 
 export async function listImages(limit: number, offset: number): Promise<ImageWithFile[]> {
@@ -1095,21 +1237,96 @@ export async function findNearDuplicatesByPhash(
 }
 
 // Delete commands
+export interface TrashImageResult {
+    image_id: string;
+    path: string | null;
+    status: 'trashed' | 'missing' | 'not_found' | 'failed';
+    error: string | null;
+}
+
+export interface TrashImagesDetailedResult {
+    requested: number;
+    succeeded: number;
+    failed: number;
+    results: TrashImageResult[];
+}
+
 export async function trashImages(imageIds: string[]): Promise<number> {
     return invoke('trash_images', { imageIds });
+}
+
+export async function trashImagesDetailed(imageIds: string[]): Promise<TrashImagesDetailedResult> {
+    return invoke<TrashImagesDetailedResult>('trash_images_detailed', { imageIds });
 }
 
 export async function deleteImagesPermanently(imageIds: string[]): Promise<number> {
     return invoke('delete_images_permanently', { imageIds });
 }
 
+export async function createActionProposal(request: CreateActionProposalRequest): Promise<AgentActionProposal> {
+    return invoke<AgentActionProposal>('create_action_proposal', { request });
+}
+
+export async function listActionProposals(status: AgentProposalStatus | null = 'pending', limit = 20): Promise<AgentActionProposal[]> {
+    return invoke<AgentActionProposal[]>('list_action_proposals', { status, limit });
+}
+
+export async function dismissActionProposal(proposalId: string): Promise<void> {
+    return invoke<void>('dismiss_action_proposal', { proposalId });
+}
+
+export async function applyActionProposal(proposalId: string, approvedImageIds: string[], resultJson: string): Promise<ApplyActionProposalResult> {
+    return invoke<ApplyActionProposalResult>('apply_action_proposal', { proposalId, approvedImageIds, resultJson });
+}
+
+export async function listAgentSelectionPresets(): Promise<AgentSelectionPreset[]> {
+    return invoke<AgentSelectionPreset[]>('list_agent_selection_presets');
+}
+
+export async function upsertAgentSelectionPreset(request: UpsertAgentSelectionPresetRequest): Promise<AgentSelectionPreset> {
+    return invoke<AgentSelectionPreset>('upsert_agent_selection_preset', { request });
+}
+
+export async function runClaudeAgentChatTurn(request: ClaudeAgentChatTurnRequest): Promise<ClaudeAgentChatTurnResult> {
+    return invoke<ClaudeAgentChatTurnResult>('run_claude_agent_chat_turn', { request });
+}
+
 // Undo/Redo
+export interface UndoStatus {
+    can_undo: boolean;
+    can_redo: boolean;
+    undo_label: string | null;
+    redo_label: string | null;
+    stack_depth: number;
+}
+
+export interface UndoRecord {
+    seq: number;
+    id: string;
+    action_type: string;
+    label: string;
+    before_json: string;
+    after_json: string;
+    affected_image_ids: string | null;
+    group_id: string | null;
+    has_file_backup: boolean;
+    created_at: string;
+}
+
 export async function undo(): Promise<string | null> {
-    return invoke('undo');
+    return invoke<string | null>('undo');
 }
 
 export async function redo(): Promise<string | null> {
-    return invoke('redo');
+    return invoke<string | null>('redo');
+}
+
+export async function getUndoStatus(): Promise<UndoStatus> {
+    return invoke<UndoStatus>('get_undo_status');
+}
+
+export async function listUndoHistory(limit?: number | null): Promise<UndoRecord[]> {
+    return invoke<UndoRecord[]>('list_undo_history', { limit: limit ?? null });
 }
 
 // Settings

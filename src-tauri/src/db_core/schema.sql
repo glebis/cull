@@ -20,6 +20,53 @@ CREATE TABLE IF NOT EXISTS app_settings (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS agent_selection_presets (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        criteria_json TEXT NOT NULL DEFAULT '{}',
+        sort_order INTEGER NOT NULL DEFAULT 100,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+
+CREATE TABLE IF NOT EXISTS agent_action_proposals (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (
+            kind IN (
+                'select_images',
+                'set_decisions',
+                'create_collection',
+                'add_to_collection',
+                'remove_from_collection',
+                'reorder_canvas',
+                'remove_from_canvas',
+                'trash_images'
+            )
+        ),
+        status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'applied', 'dismissed')),
+        persona TEXT NOT NULL
+            CHECK (persona IN ('curator', 'copilot', 'operator')),
+        lens TEXT,
+        criteria TEXT NOT NULL,
+        visual_level TEXT NOT NULL
+            CHECK (visual_level IN ('text', 'tiny', 'preview', 'full')),
+        selection_preset_id TEXT REFERENCES agent_selection_presets(id) ON DELETE SET NULL,
+        estimated_input_tokens INTEGER,
+        estimated_output_tokens INTEGER,
+        estimated_cost_eur REAL,
+        source_context_json TEXT NOT NULL DEFAULT '{}',
+        items_json TEXT NOT NULL DEFAULT '[]',
+        guard_results_json TEXT NOT NULL DEFAULT '{}',
+        apply_result_json TEXT,
+        undo_journal_json TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        applied_at TEXT
+    );
+
 CREATE TABLE IF NOT EXISTS asset_load_events (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
@@ -541,6 +588,12 @@ CREATE INDEX IF NOT EXISTS asset_load_events_error_idx ON asset_load_events(erro
 
 CREATE INDEX IF NOT EXISTS asset_load_events_image_created_idx ON asset_load_events(image_id, created_at);
 
+CREATE INDEX IF NOT EXISTS idx_agent_action_proposals_preset ON agent_action_proposals(selection_preset_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_action_proposals_status_created ON agent_action_proposals(status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_selection_presets_purpose ON agent_selection_presets(purpose, sort_order);
+
 CREATE INDEX IF NOT EXISTS client_feedback_favorite_idx ON client_feedback(favorite);
 
 CREATE INDEX IF NOT EXISTS collection_items_pos_idx ON collection_items(collection_id, position);
@@ -672,4 +725,3 @@ CREATE INDEX IF NOT EXISTS session_events_subject_idx ON session_events(subject_
 CREATE INDEX IF NOT EXISTS session_events_type_created_idx ON session_events(event_type, created_at);
 
 CREATE INDEX IF NOT EXISTS tags_type_idx ON tags(tag_type);
-

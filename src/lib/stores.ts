@@ -179,6 +179,23 @@ export const pluginsEnabled = writable<boolean>(false);
 export const activePluginIds = writable<ReadonlySet<string>>(new Set());
 export const showLoupeHistogram = writable<boolean>(false);
 
+export type AgentVisualLevel = 'text' | 'tiny' | 'preview' | 'full';
+
+export const agentPanelPinned = writable<boolean>(false);
+export const agentPanelVisible = writable<boolean>(false);
+export const activeAgentProposalId = writable<string | null>(null);
+export const activeAgentSelectionPresetId = writable<string | null>('selpreset_portfolio');
+export const agentVisualLevel = writable<AgentVisualLevel>('tiny');
+
+const AGENT_VISUAL_LEVELS: AgentVisualLevel[] = ['tiny', 'preview', 'full', 'text'];
+
+export function cycleAgentVisualLevel() {
+    agentVisualLevel.update(current => {
+        const index = AGENT_VISUAL_LEVELS.indexOf(current);
+        return AGENT_VISUAL_LEVELS[(index + 1) % AGENT_VISUAL_LEVELS.length];
+    });
+}
+
 export const GRID_PRESETS = [
     { name: 'compact', size: 80, gap: 2 },
     { name: 'normal', size: 160, gap: 4 },

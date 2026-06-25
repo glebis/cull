@@ -76,6 +76,18 @@ describe('Help menu contract', () => {
         expect(config.bundle.macOS.files['Resources/Cull.help']).toBe('help/Cull.help');
     });
 
+    it('bundles the Claude Agent SDK runtime into app resources', () => {
+        const config = JSON.parse(readProjectFile('src-tauri/tauri.conf.json'));
+
+        expect(config.bundle.resources['../scripts/claude-agent-sdk-runner.mjs']).toBe('claude-agent-sdk-runner.mjs');
+        expect(config.bundle.resources['../node_modules/@anthropic-ai/claude-agent-sdk']).toBe(
+            'node_modules/@anthropic-ai/claude-agent-sdk'
+        );
+        expect(projectFileExists('scripts/claude-agent-sdk-runner.mjs')).toBe(true);
+        expect(projectFileExists('node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs')).toBe(true);
+        expect(projectFileExists('node_modules/@anthropic-ai/claude-agent-sdk/package.json')).toBe(true);
+    });
+
     it('ships the user guide as an indexed Apple Help Book', () => {
         const helpInfo = readProjectFile(`${helpBookRoot}/Info.plist`);
         const index = readProjectFile(`${helpBookRoot}/Resources/English.lproj/index.html`);

@@ -1,3 +1,4 @@
+pub mod agent_proposals;
 pub mod agent_snapshots;
 pub mod catalog;
 pub mod clipboard_monitor;

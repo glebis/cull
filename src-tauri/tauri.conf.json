@@ -68,6 +68,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "../scripts/claude-agent-sdk-runner.mjs": "claude-agent-sdk-runner.mjs",
+      "../node_modules/@anthropic-ai/claude-agent-sdk": "node_modules/@anthropic-ai/claude-agent-sdk"
+    },
     "macOS": {
       "files": {
         "Resources/Cull.help": "help/Cull.help"
@@ -76,7 +80,7 @@
         "background": "dmg/cull-dmg-background.png",
         "windowSize": {
           "width": 660,
-          "height": 400
+          "height": 488
         },
         "appPosition": {
           "x": 130,

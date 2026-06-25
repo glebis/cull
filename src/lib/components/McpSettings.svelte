@@ -405,7 +405,9 @@
                 </div>
             </div>
         {:else if activeSettingsTab === 'plugins'}
-            <PluginsSettings />
+            <div class="section">
+                <PluginsSettings />
+            </div>
         {:else if loading}
             <p class="loading">Loading...</p>
         {:else}

@@ -6,6 +6,9 @@ import {
     activeFolder,
     activeSession,
     activeSmartCollection,
+    agentPanelPinned,
+    agentPanelVisible,
+    agentVisualLevel,
     collectMode,
     collectModeTarget,
     collections,
@@ -34,6 +37,7 @@ import {
     statusHint,
     resetLoupeTransform,
     clientToolsEnabled,
+    cycleAgentVisualLevel,
     viewMode,
     zenMode,
     navigateBack,
@@ -478,6 +482,12 @@ async function addFocusedImageToCollectTarget() {
     statusHint.set('Added to collection. Space for next, B to exit');
 }
 
+function toggleAgentPanel() {
+    const open = get(agentPanelVisible) || get(agentPanelPinned);
+    agentPanelVisible.set(!open);
+    agentPanelPinned.set(!open);
+}
+
 export const WORKFLOW_CREATE_COMMAND_ID = 'workflow.create-from-recents';
 
 async function executeWorkflow(workflow: CommandWorkflow) {
@@ -677,6 +687,38 @@ function commandItems(): CommandPaletteItem[] {
             kind: 'command',
             keywords: ['fullscreen', 'focus', 'immersive'],
             run: () => zenMode.update(value => !value),
+        },
+        {
+            id: 'agent.toggle-panel',
+            title: 'Toggle Claude Agent Panel',
+            subtitle: get(agentPanelVisible) || get(agentPanelPinned)
+                ? 'Hide agent chat and proposals'
+                : 'Show agent chat and proposals',
+            category: 'Agent',
+            kind: 'command',
+            keywords: ['agent', 'claude', 'chat', 'proposal', 'panel', 'assistant'],
+            run: toggleAgentPanel,
+        },
+        {
+            id: 'agent.cycle-visual-level',
+            title: 'Cycle Agent Visual Level',
+            subtitle: `Current context: ${get(agentVisualLevel)}`,
+            category: 'Agent',
+            kind: 'command',
+            keywords: ['agent', 'claude', 'context', 'visual', 'tokens', 'thumbnail', 'cost'],
+            run: cycleAgentVisualLevel,
+        },
+        {
+            id: 'agent.create-test-proposal',
+            title: 'Create Agent Proposal from Selection',
+            subtitle: selectedCount > 0 ? `${selectedCount} selected` : 'Select images first',
+            category: 'Agent',
+            kind: 'command',
+            keywords: ['agent', 'claude', 'proposal', 'selection', 'curate', 'trash'],
+            disabled: selectedCount === 0,
+            run: () => {
+                window.dispatchEvent(new CustomEvent('create-agent-test-proposal'));
+            },
         },
         {
             id: 'agent.capture-view-snapshot',

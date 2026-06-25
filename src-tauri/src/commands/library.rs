@@ -1,4 +1,4 @@
-use crate::db_core::models::ImageWithFile;
+use crate::db_core::models::{ImageWithFile, TrashImageResult, TrashImagesDetailedResult};
 use crate::services::library as svc;
 use crate::services::{Pagination, ServiceContext};
 use crate::AppState;
@@ -140,6 +140,87 @@ pub async fn trash_images(
         }
     }
     Ok(trashed)
+}
+
+#[tauri::command]
+pub async fn trash_images_detailed(
+    state: State<'_, AppState>,
+    image_ids: Vec<String>,
+) -> Result<TrashImagesDetailedResult, String> {
+    let mut results = Vec::new();
+
+    for image_id in &image_ids {
+        let id_refs: Vec<&str> = vec![image_id.as_str()];
+        let found = state
+            .db
+            .get_images_by_ids(&id_refs)
+            .map_err(|e| e.to_string())?;
+
+        let Some(img) = found.first() else {
+            results.push(TrashImageResult {
+                image_id: image_id.clone(),
+                path: None,
+                status: "not_found".to_string(),
+                error: Some("Image was not found in the library".to_string()),
+            });
+            continue;
+        };
+
+        let path = std::path::Path::new(&img.path);
+        if !path.exists() {
+            results.push(TrashImageResult {
+                image_id: image_id.clone(),
+                path: Some(img.path.clone()),
+                status: "missing".to_string(),
+                error: Some("File is already missing on disk".to_string()),
+            });
+            continue;
+        }
+
+        match trash::delete(path) {
+            Ok(()) => {
+                let _ = state.db.mark_file_missing(&img.path);
+                let filename = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("file")
+                    .to_string();
+                let _ = state.action_manager.record_action(
+                    &state.db,
+                    "trash_image",
+                    format!("Trash {}", filename),
+                    serde_json::json!({"image_id": image_id, "path": &img.path}).to_string(),
+                    serde_json::json!({"image_id": image_id, "path": &img.path, "trashed": true})
+                        .to_string(),
+                    image_id.clone(),
+                    true,
+                );
+                results.push(TrashImageResult {
+                    image_id: image_id.clone(),
+                    path: Some(img.path.clone()),
+                    status: "trashed".to_string(),
+                    error: None,
+                });
+            }
+            Err(e) => {
+                results.push(TrashImageResult {
+                    image_id: image_id.clone(),
+                    path: Some(img.path.clone()),
+                    status: "failed".to_string(),
+                    error: Some(e.to_string()),
+                });
+            }
+        }
+    }
+
+    let succeeded = results.iter().filter(|r| r.status == "trashed").count() as u32;
+    let failed = results.len() as u32 - succeeded;
+    Ok(TrashImagesDetailedResult {
+        requested: image_ids.len() as u32,
+        succeeded,
+        failed,
+        results,
+    })
 }
 
 #[tauri::command]

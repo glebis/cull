@@ -7,9 +7,35 @@ use rusqlite::{ffi, params, Connection, Error as SqlError, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 1;
+const CURRENT_SCHEMA_VERSION: i64 = 25;
 
-const MIGRATIONS: &[(i64, &str)] = &[(1, "initial_schema")];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, "initial_schema"),
+    (2, "reserved_schema_history_2"),
+    (3, "reserved_schema_history_3"),
+    (4, "reserved_schema_history_4"),
+    (5, "reserved_schema_history_5"),
+    (6, "reserved_schema_history_6"),
+    (7, "reserved_schema_history_7"),
+    (8, "reserved_schema_history_8"),
+    (9, "reserved_schema_history_9"),
+    (10, "reserved_schema_history_10"),
+    (11, "reserved_schema_history_11"),
+    (12, "reserved_schema_history_12"),
+    (13, "reserved_schema_history_13"),
+    (14, "reserved_schema_history_14"),
+    (15, "reserved_schema_history_15"),
+    (16, "reserved_schema_history_16"),
+    (17, "reserved_schema_history_17"),
+    (18, "reserved_schema_history_18"),
+    (19, "reserved_schema_history_19"),
+    (20, "reserved_schema_history_20"),
+    (21, "reserved_schema_history_21"),
+    (22, "reserved_schema_history_22"),
+    (23, "reserved_schema_history_23"),
+    (24, "reserved_schema_history_24"),
+    (25, "agent_action_proposals"),
+];
 
 #[derive(Clone)]
 pub struct Database {
@@ -276,6 +302,20 @@ impl Database {
             }
             Ok(())
         })?;
+        for (version, name) in MIGRATIONS
+            .iter()
+            .copied()
+            .filter(|(version, _)| (2..25).contains(version))
+        {
+            self.run_migration_step(version, name, || Ok(()))?;
+        }
+        self.run_migration_step(25, "agent_action_proposals", || {
+            let conn = self.conn.lock();
+            conn.execute_batch(agent_action_proposals_schema())?;
+            drop(conn);
+            self.seed_agent_selection_presets()?;
+            Ok(())
+        })?;
 
         self.verify_schema_invariants()?;
         Ok(())
@@ -311,6 +351,8 @@ impl Database {
             "tags",
             "image_tags",
             "generation_runs",
+            "agent_action_proposals",
+            "agent_selection_presets",
             "schema_migrations",
         ];
         let conn = self.conn.lock();
@@ -801,6 +843,63 @@ impl Database {
 
         Ok(())
     }
+
+    fn seed_agent_selection_presets(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        let existing: i64 =
+            conn.query_row("SELECT COUNT(*) FROM agent_selection_presets", [], |row| {
+                row.get(0)
+            })?;
+        if existing > 0 {
+            return Ok(());
+        }
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let presets = [
+            (
+                "selpreset_portfolio",
+                "Portfolio edit",
+                "portfolio",
+                "Select the strongest coherent set for a portfolio page. Prefer finished work, visual range, and images that can stand alone.",
+                r#"{"prefer":["finished_work","visual_range","standalone_strength"],"avoid":["near_duplicate","weak_focus","test_render"]}"#,
+                10_i64,
+            ),
+            (
+                "selpreset_client_review",
+                "Client review",
+                "client_review",
+                "Select a concise review set for a client. Prefer variety and clear choices, avoid confusing near duplicates.",
+                r#"{"prefer":["variety","clear_choice","representative_options"],"avoid":["confusing_duplicates","technical_failures"]}"#,
+                20_i64,
+            ),
+            (
+                "selpreset_print_shortlist",
+                "Print shortlist",
+                "print",
+                "Select images likely to print well. Prefer sharpness, clean edges, balanced exposure, and high resolution.",
+                r#"{"prefer":["sharpness","balanced_exposure","high_resolution"],"avoid":["blur","compression_artifacts","low_resolution"]}"#,
+                30_i64,
+            ),
+            (
+                "selpreset_cleanup",
+                "Cleanup rejects",
+                "cleanup",
+                "Select weak alternates and failed variants for review before moving to Trash. Be conservative and explain each candidate.",
+                r#"{"prefer":["weak_alternate","failed_variant","lower_focus"],"avoid":["unique_strong_image"],"requires_review":true}"#,
+                40_i64,
+            ),
+        ];
+
+        for (id, name, purpose, prompt, criteria_json, sort_order) in presets {
+            conn.execute(
+                "INSERT INTO agent_selection_presets (
+                    id, name, purpose, prompt, criteria_json, sort_order, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+                params![id, name, purpose, prompt, criteria_json, sort_order, now],
+            )?;
+        }
+        Ok(())
+    }
 }
 
 fn should_consider_migration_backup(db_path: &Path) -> bool {
@@ -861,6 +960,64 @@ fn migration_backup_dir(db_path: &Path) -> Result<PathBuf> {
         .ok_or_else(|| migration_error(format!("invalid database path {}", db_path.display())))?
         .to_string_lossy();
     Ok(db_path.with_file_name(format!("{}.backups", file_name)))
+}
+
+fn agent_action_proposals_schema() -> &'static str {
+    r#"
+    CREATE TABLE IF NOT EXISTS agent_selection_presets (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        criteria_json TEXT NOT NULL DEFAULT '{}',
+        sort_order INTEGER NOT NULL DEFAULT 100,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_action_proposals (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (
+            kind IN (
+                'select_images',
+                'set_decisions',
+                'create_collection',
+                'add_to_collection',
+                'remove_from_collection',
+                'reorder_canvas',
+                'remove_from_canvas',
+                'trash_images'
+            )
+        ),
+        status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'applied', 'dismissed')),
+        persona TEXT NOT NULL
+            CHECK (persona IN ('curator', 'copilot', 'operator')),
+        lens TEXT,
+        criteria TEXT NOT NULL,
+        visual_level TEXT NOT NULL
+            CHECK (visual_level IN ('text', 'tiny', 'preview', 'full')),
+        selection_preset_id TEXT REFERENCES agent_selection_presets(id) ON DELETE SET NULL,
+        estimated_input_tokens INTEGER,
+        estimated_output_tokens INTEGER,
+        estimated_cost_eur REAL,
+        source_context_json TEXT NOT NULL DEFAULT '{}',
+        items_json TEXT NOT NULL DEFAULT '[]',
+        guard_results_json TEXT NOT NULL DEFAULT '{}',
+        apply_result_json TEXT,
+        undo_journal_json TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        applied_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_action_proposals_status_created
+        ON agent_action_proposals(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_agent_action_proposals_preset
+        ON agent_action_proposals(selection_preset_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_selection_presets_purpose
+        ON agent_selection_presets(purpose, sort_order);
+    "#
 }
 
 fn migration_checksum(version: i64, name: &str) -> String {
@@ -1210,6 +1367,40 @@ mod migration_safety_tests {
         assert!(table_exists(&conn, "images").unwrap());
         let user_version = user_version(&conn).unwrap();
         assert_eq!(user_version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn test_open_user_version_24_runs_agent_proposal_migration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("existing-v24.db");
+        {
+            let _ = Database::open(&db_path).unwrap();
+        }
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "
+                DROP TABLE agent_action_proposals;
+                DROP TABLE agent_selection_presets;
+                DELETE FROM schema_migrations WHERE version >= 25;
+                DELETE FROM schema_migration_steps WHERE version >= 25;
+                PRAGMA user_version = 24;
+                ",
+            )
+            .unwrap();
+        }
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock();
+        assert!(table_exists(&conn, "agent_action_proposals").unwrap());
+        assert!(table_exists(&conn, "agent_selection_presets").unwrap());
+        assert_eq!(user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+        let preset_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM agent_selection_presets", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert!(preset_count >= 4);
     }
 }
 

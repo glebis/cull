@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod agent_proposals;
 pub mod c2pa_reader;
 pub mod canvas_document;
 pub mod color;
