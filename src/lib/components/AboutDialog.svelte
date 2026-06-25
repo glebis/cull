@@ -7,46 +7,120 @@
 
     let closeButton: HTMLButtonElement | undefined = $state();
 
-    const credits = [
+    type Link = {
+        label: string;
+        href: string;
+    };
+
+    type ProvenanceRow = {
+        label: string;
+        value: string;
+        note: string;
+        links: Link[];
+    };
+
+    type LicensePacket = {
+        name: string;
+        role: string;
+        sourceHref: string;
+        licenseLinks: Link[];
+    };
+
+    const provenanceRows: ProvenanceRow[] = [
         {
-            label: 'Gleb Kalinin',
-            role: 'architecture, product direction, design',
-            href: 'https://github.com/glebis',
+            label: 'Author',
+            value: 'Gleb Kalinin',
+            note: 'Architecture, product direction, visual system, release decisions.',
+            links: [
+                { label: 'GitHub', href: 'https://github.com/glebis' },
+                { label: 'Authorship', href: 'https://github.com/glebis/cull/blob/main/AUTHORSHIP.md' },
+            ],
         },
         {
-            label: 'Claude by Anthropic',
-            role: 'implementation assistance',
-            href: 'https://www.anthropic.com/claude-code',
+            label: 'AI assistance',
+            value: 'Claude by Anthropic',
+            note: 'Implementation assistance, reviewed and integrated under human direction.',
+            links: [
+                { label: 'Disclosure', href: 'https://github.com/glebis/cull/blob/main/NOTICE' },
+                { label: 'Terms', href: 'https://www.anthropic.com/legal/commercial-terms' },
+            ],
+        },
+    ];
+
+    const licensePackets: LicensePacket[] = [
+        {
+            name: 'Cull source',
+            role: 'application code',
+            sourceHref: 'https://github.com/glebis/cull',
+            licenseLinks: [{ label: 'Apache-2.0', href: 'https://github.com/glebis/cull/blob/main/LICENSE' }],
         },
         {
-            label: 'Tauri',
-            role: 'desktop application framework',
-            href: 'https://tauri.app/',
+            name: 'Tauri 2',
+            role: 'desktop shell',
+            sourceHref: 'https://github.com/tauri-apps/tauri',
+            licenseLinks: [
+                { label: 'Apache-2.0', href: 'https://github.com/tauri-apps/tauri/blob/dev/LICENSE_APACHE-2.0' },
+                { label: 'MIT', href: 'https://github.com/tauri-apps/tauri/blob/dev/LICENSE_MIT' },
+            ],
         },
         {
-            label: 'SvelteKit',
-            role: 'application UI framework',
-            href: 'https://svelte.dev/docs/kit',
+            name: 'SvelteKit',
+            role: 'application UI',
+            sourceHref: 'https://github.com/sveltejs/kit',
+            licenseLinks: [{ label: 'MIT', href: 'https://github.com/sveltejs/kit/blob/main/LICENSE' }],
         },
         {
-            label: 'Rust',
-            role: 'native backend',
-            href: 'https://www.rust-lang.org/',
+            name: 'Svelte',
+            role: 'component runtime',
+            sourceHref: 'https://github.com/sveltejs/svelte',
+            licenseLinks: [{ label: 'MIT', href: 'https://github.com/sveltejs/svelte/blob/main/LICENSE.md' }],
         },
         {
-            label: 'SQLite',
-            role: 'local library database',
-            href: 'https://www.sqlite.org/',
+            name: 'rusqlite',
+            role: 'SQLite access',
+            sourceHref: 'https://github.com/rusqlite/rusqlite',
+            licenseLinks: [{ label: 'MIT', href: 'https://github.com/rusqlite/rusqlite/blob/master/LICENSE' }],
         },
         {
-            label: 'ONNX Runtime',
+            name: 'SQLite',
+            role: 'bundled database engine',
+            sourceHref: 'https://www.sqlite.org/',
+            licenseLinks: [{ label: 'public domain', href: 'https://www.sqlite.org/copyright.html' }],
+        },
+        {
+            name: 'ort',
             role: 'local model execution',
-            href: 'https://onnxruntime.ai/',
+            sourceHref: 'https://github.com/pykeio/ort',
+            licenseLinks: [
+                { label: 'MIT', href: 'https://github.com/pykeio/ort/blob/main/LICENSE-MIT' },
+                { label: 'Apache-2.0', href: 'https://github.com/pykeio/ort/blob/main/LICENSE-APACHE' },
+            ],
         },
         {
-            label: 'OpenAI CLIP',
-            role: 'semantic image embeddings',
-            href: 'https://github.com/openai/CLIP',
+            name: 'ONNX Runtime',
+            role: 'inference engine binaries',
+            sourceHref: 'https://github.com/microsoft/onnxruntime',
+            licenseLinks: [{ label: 'MIT', href: 'https://github.com/microsoft/onnxruntime/blob/main/LICENSE' }],
+        },
+        {
+            name: 'CLIP ViT-B/32 ONNX',
+            role: 'local image embeddings',
+            sourceHref: 'https://huggingface.co/Qdrant/clip-ViT-B-32-vision',
+            licenseLinks: [{ label: 'MIT', href: 'https://github.com/openai/CLIP/blob/main/LICENSE' }],
+        },
+        {
+            name: 'DINOv2 ViT-S/14 ONNX',
+            role: 'local image embeddings',
+            sourceHref: 'https://huggingface.co/sefaburak/dinov2-small-onnx',
+            licenseLinks: [{ label: 'Apache-2.0', href: 'https://github.com/facebookresearch/dinov2/blob/main/LICENSE' }],
+        },
+        {
+            name: 'Claude Agent SDK',
+            role: 'agent runtime integration',
+            sourceHref: 'https://github.com/anthropics/claude-agent-sdk-typescript',
+            licenseLinks: [
+                { label: 'terms', href: 'https://code.claude.com/docs/en/legal-and-compliance' },
+            ],
         },
     ];
 
@@ -67,7 +141,7 @@
         }
     }
 
-    function handleCreditClick(e: MouseEvent, href: string) {
+    function handleLinkClick(e: MouseEvent, href: string) {
         e.preventDefault();
         void openExternal(href);
     }
@@ -111,13 +185,16 @@
             <div class="meta-grid" aria-label="Application details">
                 <div>
                     <span class="meta-label">License</span>
-                    <span class="meta-value">Apache-2.0</span>
+                    <a
+                        href="https://github.com/glebis/cull/blob/main/LICENSE"
+                        onclick={(e) => handleLinkClick(e, 'https://github.com/glebis/cull/blob/main/LICENSE')}
+                    >Apache-2.0</a>
                 </div>
                 <div>
                     <span class="meta-label">Repository</span>
                     <a
                         href="https://github.com/glebis/cull"
-                        onclick={(e) => handleCreditClick(e, 'https://github.com/glebis/cull')}
+                        onclick={(e) => handleLinkClick(e, 'https://github.com/glebis/cull')}
                     >github.com/glebis/cull</a>
                 </div>
                 <div>
@@ -126,19 +203,61 @@
                 </div>
             </div>
 
-            <section class="credits-section" aria-labelledby="credits-title">
-                <h3 id="credits-title">Credits</h3>
-                <div class="credits-list">
-                    {#each credits as credit}
-                        <a
-                            class="credit-row"
-                            href={credit.href}
-                            rel="noreferrer"
-                            onclick={(e) => handleCreditClick(e, credit.href)}
-                        >
-                            <span class="credit-label">{credit.label}</span>
-                            <span class="credit-role">{credit.role}</span>
-                        </a>
+            <section class="provenance-section" aria-labelledby="provenance-title">
+                <h3 id="provenance-title">Authorship</h3>
+                <div class="provenance-list">
+                    {#each provenanceRows as row}
+                        <article class="provenance-row">
+                            <div class="provenance-copy">
+                                <span class="row-label">{row.label}</span>
+                                <span class="row-value">{row.value}</span>
+                                <span class="row-note">{row.note}</span>
+                            </div>
+                            <div class="row-links" aria-label={`${row.label} links`}>
+                                {#each row.links as link}
+                                    <a
+                                        href={link.href}
+                                        rel="noreferrer"
+                                        onclick={(e) => handleLinkClick(e, link.href)}
+                                    >{link.label}</a>
+                                {/each}
+                            </div>
+                        </article>
+                    {/each}
+                </div>
+            </section>
+
+            <section class="license-section" aria-labelledby="licenses-title">
+                <div class="section-heading">
+                    <h3 id="licenses-title">Core packages and models</h3>
+                    <a
+                        href="https://github.com/glebis/cull/blob/main/docs/OPEN_SOURCE_AUDIT.md"
+                        rel="noreferrer"
+                        onclick={(e) => handleLinkClick(e, 'https://github.com/glebis/cull/blob/main/docs/OPEN_SOURCE_AUDIT.md')}
+                    >audit</a>
+                </div>
+                <div class="license-list">
+                    {#each licensePackets as packet}
+                        <article class="license-row">
+                            <div class="packet-copy">
+                                <span class="packet-name">{packet.name}</span>
+                                <span class="packet-role">{packet.role}</span>
+                            </div>
+                            <div class="packet-links">
+                                <a
+                                    href={packet.sourceHref}
+                                    rel="noreferrer"
+                                    onclick={(e) => handleLinkClick(e, packet.sourceHref)}
+                                >source</a>
+                                {#each packet.licenseLinks as link}
+                                    <a
+                                        href={link.href}
+                                        rel="noreferrer"
+                                        onclick={(e) => handleLinkClick(e, link.href)}
+                                    >{link.label}</a>
+                                {/each}
+                            </div>
+                        </article>
                     {/each}
                 </div>
             </section>
@@ -270,8 +389,11 @@
     .meta-label,
     .meta-value,
     .meta-grid a,
-    .credit-label,
-    .credit-role {
+    .row-label,
+    .row-value,
+    .row-note,
+    .packet-name,
+    .packet-role {
         display: block;
         min-width: 0;
         overflow-wrap: anywhere;
@@ -299,12 +421,15 @@
     }
 
     .meta-grid a:hover,
-    .credit-row:hover .credit-label {
+    .section-heading a:hover,
+    .row-links a:hover,
+    .packet-links a:hover {
         color: var(--blue);
         text-decoration: underline;
     }
 
-    .credits-section {
+    .provenance-section,
+    .license-section {
         display: flex;
         flex-direction: column;
         gap: var(--spacing);
@@ -318,17 +443,31 @@
         text-transform: uppercase;
     }
 
-    .credits-list {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+    .section-heading {
+        display: flex;
+        min-width: 0;
+        align-items: baseline;
+        justify-content: space-between;
         gap: var(--spacing);
     }
 
-    .credit-row {
-        display: flex;
+    .section-heading a {
+        color: var(--green);
+        font-size: 11px;
+        text-decoration: none;
+    }
+
+    .provenance-list,
+    .license-list {
+        display: grid;
+        gap: var(--spacing);
+    }
+
+    .provenance-row,
+    .license-row {
+        display: grid;
         min-width: 0;
-        flex-direction: column;
-        gap: 2px;
+        gap: var(--spacing);
         padding: calc(var(--spacing) * 1.5);
         border: 1px solid var(--border-subtle);
         border-radius: var(--radius);
@@ -337,21 +476,79 @@
         text-decoration: none;
     }
 
-    .credit-row:focus-visible {
-        border-color: var(--blue);
-        outline: none;
+    .provenance-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
     }
 
-    .credit-label {
+    .license-row {
+        grid-template-columns: minmax(0, 1fr) minmax(168px, auto);
+        align-items: center;
+    }
+
+    .provenance-copy,
+    .packet-copy {
+        min-width: 0;
+    }
+
+    .row-label {
+        margin-bottom: 2px;
+        color: var(--text-secondary);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0;
+        text-transform: uppercase;
+    }
+
+    .row-value,
+    .packet-name {
         color: var(--text);
         font-size: 12px;
         font-weight: 700;
     }
 
-    .credit-role {
+    .row-note,
+    .packet-role {
         color: var(--text-secondary);
         font-size: 11px;
         line-height: 1.35;
+    }
+
+    .row-note {
+        margin-top: 3px;
+    }
+
+    .row-links,
+    .packet-links {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 6px;
+        min-width: 0;
+    }
+
+    .row-links a,
+    .packet-links a {
+        min-height: 24px;
+        padding: 3px 6px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius);
+        color: var(--green);
+        font-size: 10px;
+        line-height: 16px;
+        text-decoration: none;
+    }
+
+    .row-links a:focus-visible,
+    .packet-links a:focus-visible {
+        border-color: var(--blue);
+        outline: none;
+    }
+
+    .section-heading a:focus-visible,
+    .meta-grid a:focus-visible {
+        outline: 1px solid var(--blue);
+        outline-offset: 2px;
     }
 
     @media (max-width: 620px) {
@@ -371,8 +568,14 @@
         }
 
         .meta-grid,
-        .credits-list {
+        .provenance-row,
+        .license-row {
             grid-template-columns: 1fr;
+        }
+
+        .row-links,
+        .packet-links {
+            justify-content: flex-start;
         }
 
         h2 {
