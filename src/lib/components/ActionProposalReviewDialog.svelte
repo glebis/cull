@@ -1,17 +1,21 @@
 <script lang="ts">
+    import { convertFileSrc } from '@tauri-apps/api/core';
     import ModalDialog from '$lib/components/ModalDialog.svelte';
-    import type { AgentActionProposal } from '$lib/api';
+    import type { AgentActionProposal, ImageWithFile } from '$lib/api';
+    import { safeAssetPreviewPath } from '$lib/view-utils';
 
     type Candidate = { image_id: string; reason?: string };
 
     let {
         proposal,
         visible,
+        visibleImages = [],
         onapplyproposal = () => {},
         oncancelreview = () => {},
     }: {
         proposal: AgentActionProposal | null;
         visible: boolean;
+        visibleImages?: ImageWithFile[];
         onapplyproposal?: (proposalId: string, approvedImageIds: string[]) => void;
         oncancelreview?: () => void;
     } = $props();
@@ -39,6 +43,22 @@
         if (next.has(imageId)) next.delete(imageId);
         else next.add(imageId);
         approvedIds = next;
+    }
+
+    function imageForCandidate(imageId: string) {
+        return visibleImages.find(item => item.image.id === imageId) ?? null;
+    }
+
+    function previewSrc(imageId: string) {
+        const image = imageForCandidate(imageId);
+        if (!image) return null;
+        const previewPath = safeAssetPreviewPath(image, { displayPx: 120 });
+        return previewPath ? convertFileSrc(previewPath) : null;
+    }
+
+    function filenameForCandidate(imageId: string) {
+        const image = imageForCandidate(imageId);
+        return image?.path.split('/').pop() ?? imageId;
     }
 </script>
 
@@ -75,8 +95,16 @@
                         aria-label={`Include ${candidate.image_id}`}
                         onchange={() => toggle(candidate.image_id)}
                     />
+                    <span class="candidate-preview" aria-hidden="true">
+                        {#if previewSrc(candidate.image_id)}
+                            <img src={previewSrc(candidate.image_id) ?? ''} alt="" loading="lazy" decoding="async" draggable="false" />
+                        {:else}
+                            <small>{candidate.image_id.slice(0, 8)}</small>
+                        {/if}
+                    </span>
                     <span>
-                        <strong>{candidate.image_id}</strong>
+                        <strong>{filenameForCandidate(candidate.image_id)}</strong>
+                        <em>{candidate.image_id.slice(0, 8)}</em>
                         <small>{candidate.reason ?? 'Candidate selected by proposal criteria'}</small>
                     </span>
                 </label>
@@ -180,8 +208,32 @@
         border-radius: var(--radius);
         display: grid;
         gap: var(--spacing);
-        grid-template-columns: auto 1fr;
+        grid-template-columns: auto 72px 1fr;
         padding: var(--spacing);
+    }
+
+    .candidate-preview {
+        align-items: center;
+        aspect-ratio: 4 / 3;
+        background: var(--border);
+        border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+        border-radius: var(--radius);
+        display: flex;
+        justify-content: center;
+        overflow: hidden;
+    }
+
+    .candidate-preview img {
+        height: 100%;
+        object-fit: cover;
+        width: 100%;
+    }
+
+    .candidate em {
+        color: var(--text-secondary);
+        display: block;
+        font-style: normal;
+        margin-top: 2px;
     }
 
     .candidate small {

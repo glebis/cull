@@ -2,10 +2,11 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 
-const EVENT_PREFIX = 'CULL_AGENT_EVENT ';
+export const EVENT_PREFIX = 'CULL_AGENT_EVENT ';
 
-function readStdinJson() {
+export function readStdinJson() {
   const input = readFileSync(0, 'utf8');
   if (!input.trim()) {
     throw new Error('Expected Claude Agent SDK request JSON on stdin');
@@ -13,14 +14,14 @@ function readStdinJson() {
   return JSON.parse(input);
 }
 
-function inheritedEnvWithoutAnthropicKey() {
+export function inheritedEnvWithoutAnthropicKey() {
   const env = { ...process.env };
   delete env.ANTHROPIC_API_KEY;
   env.CLAUDE_AGENT_SDK_CLIENT_APP = env.CLAUDE_AGENT_SDK_CLIENT_APP || 'cull/agent-chat';
   return env;
 }
 
-function buildOptions(request) {
+export function buildOptions(request) {
   const textOnly = request.visual_level === 'text' || !request.allowed_dirs?.length;
   const options = {
     model: request.model,
@@ -32,6 +33,13 @@ function buildOptions(request) {
     pathToClaudeCodeExecutable: request.claude_executable || 'claude',
     cwd: request.cwd || process.cwd(),
   };
+
+  if (request.schema) {
+    options.outputFormat = {
+      type: 'json_schema',
+      schema: request.schema,
+    };
+  }
 
   if (textOnly) {
     options.tools = [];
@@ -45,7 +53,7 @@ function buildOptions(request) {
   return options;
 }
 
-function textFromContent(content) {
+export function textFromContent(content) {
   if (!Array.isArray(content)) return '';
   return content
     .filter((block) => block?.type === 'text' && typeof block.text === 'string')
@@ -55,7 +63,12 @@ function textFromContent(content) {
     .trim();
 }
 
-function streamEventSummary(event, subtype) {
+export function clipText(text, max = 180) {
+  const clean = String(text ?? '').replace(/\s+/g, ' ').trim();
+  return clean.length > max ? `${clean.slice(0, max - 1)}...` : clean;
+}
+
+export function streamEventSummary(event, subtype, accumulatedText = '') {
   const details = {
     sdk_event_type: 'stream_event',
     subtype,
@@ -71,10 +84,11 @@ function streamEventSummary(event, subtype) {
     };
   }
   if (event?.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+    const text = clipText(accumulatedText || event.delta.text || 'Writing response');
     return {
       phase: 'sdk_stream',
-      message: 'Writing response',
-      details,
+      message: text,
+      details: { ...details, text_length: accumulatedText.length },
     };
   }
   if (event?.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
@@ -105,12 +119,23 @@ function streamEventSummary(event, subtype) {
   };
 }
 
-function clipText(text, max = 180) {
-  const clean = String(text ?? '').replace(/\s+/g, ' ').trim();
-  return clean.length > max ? `${clean.slice(0, max - 1)}...` : clean;
+export function createMessageSummarizer() {
+  let assistantText = '';
+  return (message) => {
+    if (message.type === 'stream_event'
+      && message.event?.type === 'content_block_delta'
+      && message.event.delta?.type === 'text_delta'
+      && typeof message.event.delta.text === 'string') {
+      assistantText += message.event.delta.text;
+    }
+    if (message.type === 'result') {
+      assistantText = '';
+    }
+    return summarizeMessage(message, assistantText);
+  };
 }
 
-function summarizeMessage(message) {
+export function summarizeMessage(message, accumulatedText = '') {
   const subtype = message.subtype ?? message.event?.type ?? null;
   switch (message.type) {
     case 'system':
@@ -148,7 +173,7 @@ function summarizeMessage(message) {
         details: { sdk_event_type: message.type, subtype },
       };
     case 'stream_event': {
-      return streamEventSummary(message.event, subtype);
+      return streamEventSummary(message.event, subtype, accumulatedText);
     }
     case 'assistant': {
       const text = clipText(textFromContent(message.message?.content), 180);
@@ -190,11 +215,11 @@ function summarizeMessage(message) {
   }
 }
 
-function emitEvent(message) {
-  process.stderr.write(`${EVENT_PREFIX}${JSON.stringify(summarizeMessage(message))}\n`);
+export function emitEvent(message, summarize = summarizeMessage) {
+  process.stderr.write(`${EVENT_PREFIX}${JSON.stringify(summarize(message))}\n`);
 }
 
-function parseStructuredOutput(result) {
+export function parseStructuredOutput(result) {
   if (result.structured_output) return result.structured_output;
   const text = result.result ?? '';
   try {
@@ -208,7 +233,7 @@ function parseStructuredOutput(result) {
   }
 }
 
-function normalizeResult(messages) {
+export function normalizeResult(messages) {
   const result = [...messages].reverse().find((message) => message.type === 'result');
   if (!result) {
     throw new Error('Claude Agent SDK did not emit a result message');
@@ -226,19 +251,24 @@ function normalizeResult(messages) {
   };
 }
 
-try {
+export async function main() {
   const request = readStdinJson();
   const messages = [];
+  const summarize = createMessageSummarizer();
   for await (const message of query({
     prompt: request.prompt,
     options: buildOptions(request),
   })) {
     messages.push(message);
-    emitEvent(message);
+    emitEvent(message, summarize);
   }
   process.stdout.write(`${JSON.stringify(normalizeResult(messages))}\n`);
-} catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`${message}\n`);
-  process.exit(1);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`${message}\n`);
+    process.exit(1);
+  });
 }

@@ -9,14 +9,17 @@ const serviceSource = readFileSync(join(process.cwd(), 'src-tauri/src/services/c
 
 describe('Claude agent stream event bridge', () => {
     it('streams SDK iterator messages through a prefixed runner channel', () => {
-        expect(runnerSource).toContain("const EVENT_PREFIX = 'CULL_AGENT_EVENT '");
+        expect(runnerSource).toContain("export const EVENT_PREFIX = 'CULL_AGENT_EVENT '");
         expect(runnerSource).toContain('includePartialMessages: true');
-        expect(runnerSource).toContain('emitEvent(message)');
-        expect(runnerSource).toContain("message: 'Writing response'");
+        expect(runnerSource).toContain('outputFormat');
+        expect(runnerSource).toContain('createMessageSummarizer');
+        expect(runnerSource).toContain('emitEvent(message, summarize)');
+        expect(runnerSource).toContain('event.delta.text');
         expect(runnerSource).toContain("message: 'Thinking'");
         expect(runnerSource).not.toContain('Streaming content_block_delta');
         expect(serviceSource).toContain('const SDK_EVENT_PREFIX: &str = "CULL_AGENT_EVENT "');
         expect(serviceSource).toContain('read_sdk_stderr_events');
+        expect(serviceSource).toContain('parse_sdk_stderr_event_line');
         expect(serviceSource).toContain('emitter.emit_sdk_event(value)');
     });
 
@@ -25,9 +28,8 @@ describe('Claude agent stream event bridge', () => {
         expect(pageSource).toContain("listen<ClaudeAgentStreamEvent>('claude-agent:stream-event'");
         expect(pageSource).toContain('activeAgentRequestId');
         expect(pageSource).toContain('request_id: requestId');
-        expect(pageSource).toContain('isVisibleAgentChatEvent(event.payload)');
-        expect(pageSource).toContain("'sdk_stream'");
-        expect(pageSource).toContain("'sdk_thinking'");
+        expect(pageSource).not.toContain('isVisibleAgentChatEvent(event.payload)');
+        expect(pageSource).toContain('.slice(-24)');
         expect(pageSource).toContain('streamEvents={agentStreamEvents}');
     });
 });

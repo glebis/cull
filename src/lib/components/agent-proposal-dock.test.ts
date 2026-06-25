@@ -32,6 +32,7 @@ describe('AgentProposalDock source contract', () => {
         expect(source).toContain('Selection criteria');
         expect(source).toContain('onchange={handleProfileChange}');
         expect(source).toContain('profileSummary(activePreset)');
+        expect(source).toContain('preset.prompt.replace');
         expect(source).toContain('startEditActivePreset');
         expect(source).toContain('onupdatepreset(editingPresetId, presetPromptDraft.trim())');
         expect(source).toContain('aria-label="Preset prompt"');
@@ -42,6 +43,7 @@ describe('AgentProposalDock source contract', () => {
         expect(source).toContain('oncreateproposal(activePreset?.id ?? null, message)');
         expect(source).toContain('onreviewproposal(activeProposal.id)');
         expect(source).toContain('ondismissproposal(activeProposal.id)');
+        expect(source).toContain('onselectproposal?: (proposalId: string) => void');
         expect(source).not.toContain('dispatchEvent');
     });
 
@@ -58,22 +60,27 @@ describe('AgentProposalDock source contract', () => {
         expect(source).toContain('visibleImages');
         expect(source).toContain('candidate-preview');
         expect(source).toContain('safeAssetPreviewPath');
+        expect(source).toContain('proposal-switcher');
+        expect(source).toContain('pendingProposals.length');
         expect(source).not.toContain('proposal-criteria');
         expect(source).toContain('flex: 1 1 auto;');
         expect(source).toContain('min-height: 220px');
     });
 
-    it('renders agent chat as a compact conversation rather than an SDK event rail', () => {
+    it('renders agent chat as a compact live conversation with optional activity', () => {
         expect(source).toContain('ClaudeAgentStreamEvent');
         expect(source).toContain('streamEvents = []');
         expect(source).toContain('lastInstruction = null');
         expect(source).toContain('latestRunEvent = $derived');
+        expect(source).toContain('latestAssistantEvent = $derived');
         expect(source).toContain('statusForEvent(latestRunEvent, busy)');
+        expect(source).toContain('event.message && !');
         expect(source).toContain('class="chat-thread"');
         expect(source).toContain('class="chat-message user-message"');
         expect(source).toContain('class="chat-message assistant-message"');
+        expect(source).toContain('class="activity-log"');
+        expect(source).toContain('handleInstructionKeydown');
         expect(source).toContain('aria-live="polite"');
-        expect(source).not.toContain('Agent run events');
-        expect(source).not.toContain('{event.phase.replace');
+        expect(source).not.toContain('Streaming content_block_delta');
     });
 });

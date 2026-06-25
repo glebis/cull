@@ -36,6 +36,7 @@
         oncreateproposal = () => {},
         onupdatepreset = () => {},
         onselectpreset = () => {},
+        onselectproposal = () => {},
         onvisuallevelcycle = () => {},
         onclose = () => {},
     }: {
@@ -58,6 +59,7 @@
         oncreateproposal?: (presetId: string | null, instruction: string) => void;
         onupdatepreset?: (presetId: string, prompt: string) => void;
         onselectpreset?: (presetId: string) => void;
+        onselectproposal?: (proposalId: string) => void;
         onvisuallevelcycle?: () => void;
         onclose?: () => void;
     } = $props();
@@ -71,6 +73,7 @@
             ?? proposals.find(p => p.status === 'pending')
             ?? null,
     );
+    const pendingProposals = $derived(proposals.filter(p => p.status === 'pending'));
     const activePreset = $derived(
         presets.find(p => p.id === activePresetId) ?? presets[0] ?? null,
     );
@@ -93,8 +96,11 @@
         visualLevel,
     }));
     const latestRunEvent = $derived(streamEvents.slice().reverse().find(Boolean) ?? null);
+    const latestAssistantEvent = $derived(
+        streamEvents.slice().reverse().find(event => ['sdk_assistant', 'sdk_stream'].includes(event.phase) && event.message) ?? null,
+    );
     const runStatus = $derived(statusForEvent(latestRunEvent, busy));
-    const assistantMessage = $derived(lastMessage ?? (latestRunEvent?.is_error ? latestRunEvent.message : null));
+    const assistantMessage = $derived(lastMessage ?? (busy ? latestAssistantEvent?.message ?? null : latestRunEvent?.is_error ? latestRunEvent.message : null));
     const showChatThread = $derived(Boolean(lastInstruction || assistantMessage || busy));
     const displayInputTokens = $derived(activeProposal?.estimated_input_tokens ?? draftEstimate.inputTokens);
     const displayCostEur = $derived(activeProposal?.estimated_cost_eur ?? draftEstimate.costEur);
@@ -146,20 +152,9 @@
     }
 
     function profileSummary(preset: AgentSelectionPreset) {
-        const searchable = `${preset.id} ${preset.name} ${preset.purpose}`.toLowerCase();
-        if (searchable.includes('client')) {
-            return 'Claude optimizes proposals for one polished image to show a client.';
-        }
-        if (searchable.includes('print')) {
-            return 'Claude prioritizes print-ready detail, clarity, and exposure.';
-        }
-        if (searchable.includes('cleanup') || searchable.includes('reject')) {
-            return 'Claude looks for weak alternates and failed variants to remove.';
-        }
-        if (searchable.includes('portfolio')) {
-            return 'Claude chooses strong portfolio candidates and avoids near-duplicates.';
-        }
-        return 'Claude uses this profile as the criteria for the next proposal.';
+        const prompt = preset.prompt.replace(/\s+/g, ' ').trim();
+        if (!prompt) return 'Claude uses this profile as the criteria for the next proposal.';
+        return prompt.length > 150 ? `${prompt.slice(0, 149)}…` : prompt;
     }
 
     function savePreset() {
@@ -176,12 +171,18 @@
         instruction = '';
     }
 
+    function handleInstructionKeydown(event: KeyboardEvent) {
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+            event.preventDefault();
+            if (!busy) submitInstruction();
+        }
+    }
+
     function statusForEvent(event: ClaudeAgentStreamEvent | null, isBusy: boolean) {
         if (!isBusy && event?.is_error) return 'Could not complete the request';
         if (!isBusy) return 'Ready';
         if (!event) return 'Thinking';
-        if (event.phase === 'sdk_retry') return 'Retrying connection';
-        if (event.phase === 'sdk_tool') return 'Looking at image context';
+        if (event.message && !['sdk_init', 'sdk_status'].includes(event.phase)) return event.message;
         if (event.phase === 'parse') return 'Preparing response';
         if (event.phase === 'context' || event.phase === 'runtime' || event.phase === 'queued') return 'Thinking';
         return 'Thinking';
@@ -212,6 +213,18 @@
                     <span>{activeProposal.kind === 'trash_images' ? 'Trash proposal' : 'Selection proposal'}</span>
                     <strong>Needs approval</strong>
                 </div>
+                {#if pendingProposals.length > 1}
+                    <label class="proposal-switcher" for="agent-proposal-select">
+                        <span>{pendingProposals.length} pending</span>
+                        <select id="agent-proposal-select" value={activeProposal.id} onchange={(event) => onselectproposal((event.currentTarget as HTMLSelectElement).value)}>
+                            {#each pendingProposals as proposal}
+                                <option value={proposal.id}>
+                                    {proposal.kind === 'trash_images' ? 'Trash' : 'Selection'} · {proposal.lens ?? 'proposal'}
+                                </option>
+                            {/each}
+                        </select>
+                    </label>
+                {/if}
                 <div class="proposal-headline">
                     <h3>{activeProposal.kind === 'trash_images' ? `${candidateCountLabel} proposed for Trash` : `${candidateCountLabel} proposed`}</h3>
                     <span>{contextLabel}</span>
@@ -301,12 +314,26 @@
                             {/if}
                         </article>
                     {/if}
+                    {#if streamEvents.length > 0}
+                        <details class="activity-log">
+                            <summary>Activity</summary>
+                            <ol>
+                                {#each streamEvents.slice(-12) as event}
+                                    <li class:error={event.is_error}>
+                                        <strong>{event.phase.replace(/^sdk_/, '')}</strong>
+                                        <span>{event.message}</span>
+                                    </li>
+                                {/each}
+                            </ol>
+                        </details>
+                    {/if}
                 </div>
             {/if}
             <textarea
                 bind:value={instruction}
                 placeholder="Ask Claude to propose a selection"
                 rows="3"
+                onkeydown={handleInstructionKeydown}
             ></textarea>
             <button class="primary" type="button" onclick={submitInstruction} disabled={!instruction.trim() || busy}>
                 {busy ? 'Thinking' : 'Send'}
@@ -585,6 +612,49 @@
         background: var(--bg);
     }
 
+    .activity-log {
+        border-top: 1px solid var(--border);
+        color: var(--text-secondary);
+        font-size: 10px;
+        padding-top: calc(var(--spacing) * 0.5);
+    }
+
+    .activity-log summary {
+        cursor: pointer;
+    }
+
+    .activity-log ol {
+        display: grid;
+        gap: 3px;
+        list-style: none;
+        margin: 6px 0 0;
+        padding: 0;
+    }
+
+    .activity-log li {
+        display: grid;
+        gap: 2px;
+        grid-template-columns: 72px minmax(0, 1fr);
+    }
+
+    .activity-log li.error {
+        color: var(--red);
+    }
+
+    .activity-log strong {
+        color: var(--text);
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .activity-log span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
     .proposal-topline {
         font-size: 11px;
         line-height: 1.2;
@@ -605,6 +675,16 @@
     .proposal-headline span {
         color: var(--text-secondary);
         font-size: 11px;
+    }
+
+    .proposal-switcher {
+        display: grid;
+        gap: 4px;
+    }
+
+    .proposal-switcher span {
+        color: var(--text-secondary);
+        font-size: 10px;
     }
 
     .featured-candidate {

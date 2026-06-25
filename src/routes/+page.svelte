@@ -516,15 +516,6 @@
         if ($activeAgentProposalId === proposalId) activeAgentProposalId.set(null);
     }
 
-    function isVisibleAgentChatEvent(event: ClaudeAgentStreamEvent) {
-        return ![
-            'sdk_init',
-            'sdk_status',
-            'sdk_stream',
-            'sdk_thinking',
-        ].includes(event.phase);
-    }
-
     function handleCloseAgentPanel() {
         agentPanelVisible.set(false);
         agentPanelPinned.set(false);
@@ -551,16 +542,33 @@
                 duration: 6000,
             });
         } else {
-            selectedIds.set(new Set(approvedImageIds));
+            const visibleIds = new Set($images.map(item => item.image.id));
+            const visibleApprovedIds = approvedImageIds.filter(id => visibleIds.has(id));
+            if (visibleApprovedIds.length === 0) {
+                showToast('Selection proposal no longer matches this view', {
+                    detail: 'None of the approved images are currently loaded',
+                    type: 'warning',
+                    duration: 6000,
+                });
+                return;
+            }
+            selectedIds.set(new Set(visibleApprovedIds));
+            const firstIndex = $images.findIndex(item => item.image.id === visibleApprovedIds[0]);
+            if (firstIndex >= 0) focusedIndex.set(firstIndex);
             await applyActionProposal(
                 proposalId,
-                approvedImageIds,
-                JSON.stringify({ selected: approvedImageIds.length }),
+                visibleApprovedIds,
+                JSON.stringify({
+                    selected: visibleApprovedIds.length,
+                    missing: approvedImageIds.length - visibleApprovedIds.length,
+                }),
             );
             showToast('Selection proposal applied', {
-                detail: `${approvedImageIds.length} images selected`,
-                type: 'success',
-                duration: 5000,
+                detail: approvedImageIds.length === visibleApprovedIds.length
+                    ? `${visibleApprovedIds.length} images selected`
+                    : `${visibleApprovedIds.length} selected, ${approvedImageIds.length - visibleApprovedIds.length} no longer visible`,
+                type: visibleApprovedIds.length === approvedImageIds.length ? 'success' : 'warning',
+                duration: 6000,
             });
         }
         reviewProposalId = null;
@@ -695,13 +703,12 @@
 
         const agentStreamUnlisten = listen<ClaudeAgentStreamEvent>('claude-agent:stream-event', (event) => {
             if (event.payload.request_id !== activeAgentRequestId) return;
-            if (!isVisibleAgentChatEvent(event.payload)) return;
             agentStreamEvents = [
                 ...agentStreamEvents.filter(item => item.sequence !== event.payload.sequence),
                 event.payload,
             ]
                 .sort((a, b) => a.sequence - b.sequence)
-                .slice(-8);
+                .slice(-24);
         });
 
         const panicUnlisten = listen<{thread: string, location: string | null, message: string}>('rust-panic', (event) => {
@@ -832,6 +839,7 @@
                 oncreateproposal={handleCreateAgentProposal}
                 onupdatepreset={handleUpdateAgentPreset}
                 onselectpreset={(presetId) => activeAgentSelectionPresetId.set(presetId)}
+                onselectproposal={(proposalId) => activeAgentProposalId.set(proposalId)}
                 onvisuallevelcycle={cycleAgentVisualLevel}
                 onclose={handleCloseAgentPanel}
             />
@@ -879,6 +887,7 @@
     <ActionProposalReviewDialog
         proposal={reviewProposal}
         visible={reviewProposal !== null}
+        visibleImages={$images}
         onapplyproposal={handleApplyAgentProposal}
         oncancelreview={() => reviewProposalId = null}
     />

@@ -610,10 +610,8 @@ async fn read_sdk_stderr_events(
     let mut lines = BufReader::new(stderr).lines();
     let mut stderr_lines = Vec::new();
     while let Some(line) = lines.next_line().await? {
-        if let Some(payload) = line.strip_prefix(SDK_EVENT_PREFIX) {
-            if let (Some(emitter), Ok(value)) =
-                (emitter.as_ref(), serde_json::from_str::<Value>(payload))
-            {
+        if let Some(value) = parse_sdk_stderr_event_line(&line) {
+            if let Some(emitter) = emitter.as_ref() {
                 emitter.emit_sdk_event(value);
             }
         } else {
@@ -621,6 +619,11 @@ async fn read_sdk_stderr_events(
         }
     }
     Ok(stderr_lines.join("\n"))
+}
+
+fn parse_sdk_stderr_event_line(line: &str) -> Option<Value> {
+    let payload = line.strip_prefix(SDK_EVENT_PREFIX)?;
+    serde_json::from_str::<Value>(payload).ok()
 }
 
 fn resolve_agent_sdk_runner() -> Option<PathBuf> {
@@ -1005,6 +1008,23 @@ if (process.env.ANTHROPIC_API_KEY) {
 }
 const structured = JSON.parse(process.env.CULL_FAKE_AGENT_RESPONSE);
 const inputTokens = request.visual_level === 'tiny' ? 2100 : 4200;
+if (process.env.CULL_FAKE_AGENT_ERROR_RESULT) {
+  process.stdout.write(JSON.stringify({
+    runtime: 'claude_agent_sdk',
+    structured_output: null,
+    usage: { input_tokens: inputTokens, output_tokens: 12 },
+    modelUsage: {},
+    total_cost_usd: 0.004,
+    result: process.env.CULL_FAKE_AGENT_ERROR_RESULT,
+    is_error: true
+  }) + '\n');
+  process.exit(0);
+}
+if (process.env.CULL_FAKE_AGENT_EXIT) {
+  console.error('CULL_AGENT_EVENT {"phase":"sdk_stream","message":"partial event"}');
+  console.error('runner failed after event');
+  process.exit(Number(process.env.CULL_FAKE_AGENT_EXIT));
+}
 process.stdout.write(JSON.stringify({
   runtime: 'claude_agent_sdk',
   structured_output: structured,
@@ -1037,6 +1057,8 @@ process.stdout.write(JSON.stringify({
         let result = run_claude_agent_chat_turn_db_with_events(db, request, None).await;
         std::env::remove_var("CULL_AGENT_SDK_RUNNER");
         std::env::remove_var("CULL_FAKE_AGENT_RESPONSE");
+        std::env::remove_var("CULL_FAKE_AGENT_ERROR_RESULT");
+        std::env::remove_var("CULL_FAKE_AGENT_EXIT");
         std::env::remove_var("ANTHROPIC_API_KEY");
         result
     }
@@ -1069,6 +1091,8 @@ process.stdout.write(JSON.stringify({
         let sdk_request: Value = serde_json::from_str(&invocation.sdk_request_json).unwrap();
 
         assert_eq!(sdk_request["max_budget_usd"], json!(0.50));
+        assert_eq!(sdk_request["schema"]["type"], "object");
+        assert!(sdk_request["schema"]["properties"]["operation"].is_object());
         assert!(invocation
             .args
             .windows(2)
@@ -1087,6 +1111,19 @@ process.stdout.write(JSON.stringify({
         let sdk_request: Value = serde_json::from_str(&invocation.sdk_request_json).unwrap();
         assert_eq!(sdk_request["visual_level"], "text");
         assert_eq!(sdk_request["allowed_dirs"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn parses_prefixed_sdk_stderr_events_without_polluting_stderr() {
+        let event = parse_sdk_stderr_event_line(
+            r#"CULL_AGENT_EVENT {"phase":"sdk_stream","message":"Selecting image","details":{"text_length":16}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(event["phase"], "sdk_stream");
+        assert_eq!(event["message"], "Selecting image");
+        assert!(parse_sdk_stderr_event_line("plain stderr").is_none());
+        assert!(parse_sdk_stderr_event_line("CULL_AGENT_EVENT not-json").is_none());
     }
 
     #[tokio::test]
@@ -1236,6 +1273,55 @@ process.stdout.write(JSON.stringify({
 
         assert!(err.to_string().contains("outside the candidate context"));
         assert_eq!(db.list_action_proposals(None, 20).unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn sdk_error_envelope_surfaces_engine_error_without_persisting() {
+        let _guard = AGENT_ENV_LOCK.lock().await;
+        let db = test_db();
+        let dir = tempfile::tempdir().unwrap();
+        let runner_path = fake_sdk_runner(dir.path());
+        std::env::set_var("CULL_AGENT_SDK_RUNNER", runner_path);
+        std::env::set_var(
+            "CULL_FAKE_AGENT_RESPONSE",
+            json!({"operation": "answer", "message": "unused"}).to_string(),
+        );
+        std::env::set_var("CULL_FAKE_AGENT_ERROR_RESULT", "tool failed");
+        let err = run_claude_agent_chat_turn_db_with_events(&db, sample_request(), None)
+            .await
+            .unwrap_err();
+        std::env::remove_var("CULL_AGENT_SDK_RUNNER");
+        std::env::remove_var("CULL_FAKE_AGENT_RESPONSE");
+        std::env::remove_var("CULL_FAKE_AGENT_ERROR_RESULT");
+
+        assert!(err.to_string().contains("tool failed"));
+        assert_eq!(db.list_action_proposals(None, 20).unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn sdk_nonzero_exit_surfaces_plain_stderr_not_event_lines() {
+        let _guard = AGENT_ENV_LOCK.lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let runner_path = fake_sdk_runner(dir.path());
+        std::env::set_var(
+            "CULL_FAKE_AGENT_RESPONSE",
+            json!({"operation": "answer"}).to_string(),
+        );
+        std::env::set_var("CULL_FAKE_AGENT_EXIT", "1");
+        let err = run_claude_agent_sdk(
+            &runner_path,
+            &build_claude_invocation(&sample_request())
+                .unwrap()
+                .sdk_request_json,
+            None,
+        )
+        .await
+        .unwrap_err();
+        std::env::remove_var("CULL_FAKE_AGENT_RESPONSE");
+        std::env::remove_var("CULL_FAKE_AGENT_EXIT");
+
+        assert!(err.to_string().contains("runner failed after event"));
+        assert!(!err.to_string().contains("partial event"));
     }
 
     #[test]

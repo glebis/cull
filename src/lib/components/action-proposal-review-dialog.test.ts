@@ -15,6 +15,15 @@ describe('ActionProposalReviewDialog source contract', () => {
         expect(source).toContain('onapplyproposal(proposal.id, Array.from(approvedIds))');
     });
 
+    it('renders visual context for proposal candidates', () => {
+        expect(source).toContain("from '@tauri-apps/api/core'");
+        expect(source).toContain("from '$lib/view-utils'");
+        expect(source).toContain('visibleImages?: ImageWithFile[]');
+        expect(source).toContain('safeAssetPreviewPath');
+        expect(source).toContain('class="candidate-preview"');
+        expect(source).toContain('filenameForCandidate(candidate.image_id)');
+    });
+
     it('uses separate labels for Trash and selection proposals', () => {
         expect(source).toContain("proposal?.kind === 'trash_images'");
         expect(source).toContain('Move approved to Trash');
