@@ -527,6 +527,12 @@ export interface AgentChatImageContext {
     color_label: string | null;
     decision: string | null;
     source_label: string | null;
+    ai_prompt: string | null;
+    generation_prompt: string | null;
+    generation_provider: string | null;
+    generation_model: string | null;
+    generation_seed: string | null;
+    generation_settings_json: string | null;
     thumbnail_path: string | null;
 }
 
@@ -543,10 +549,21 @@ export interface ClaudeAgentChatTurnRequest {
 }
 
 export interface ClaudeAgentChatTurnResult {
-    operation: 'answer' | 'create_proposal' | 'update_preset';
+    operation: 'answer' | 'create_proposal' | 'update_preset' | 'generate_variation';
     message: string;
     proposal: AgentActionProposal | null;
     updated_preset: AgentSelectionPreset | null;
+    generation: {
+        image_id: string;
+        prompt: string;
+        provider?: string | null;
+        model?: string | null;
+        size?: string | null;
+        quality?: string | null;
+        n?: number | null;
+        include_source?: boolean | null;
+    } | null;
+    generation_job_id: string | null;
     usage_json: string;
     raw_result_json: string;
 }

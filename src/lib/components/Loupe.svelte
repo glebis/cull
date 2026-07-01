@@ -732,6 +732,12 @@
             data-agent-filename={filename}
             data-agent-path={image.path}
             data-agent-thumbnail-path={image.thumbnail_path ?? ''}
+            data-agent-ai-prompt={image.image.ai_prompt ?? ''}
+            data-agent-generation-prompt={generationRun?.prompt ?? ''}
+            data-agent-generation-provider={generationRun?.provider ?? ''}
+            data-agent-generation-model={generationRun?.model ?? ''}
+            data-agent-generation-seed={generationRun?.seed ?? ''}
+            data-agent-generation-settings-json={generationRun?.settings_json ?? ''}
             data-agent-rating={rating || ''}
             data-agent-decision={decision}
             data-agent-selected={isSelected}

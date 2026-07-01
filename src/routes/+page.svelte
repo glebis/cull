@@ -36,7 +36,7 @@
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
     import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel, agentPanelPinned, agentPanelVisible, agentVisualLevel, activeAgentProposalId, activeAgentSelectionPresetId, cycleAgentVisualLevel } from '$lib/stores';
-    import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ClaudeAgentStreamEvent, type ImageWithFile, type PreviewState } from '$lib/api';
+    import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, getGenerationRun, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ClaudeAgentStreamEvent, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
     import { loadInstalledPlugins, activateBundledPlugins } from '$lib/plugins/loader';
@@ -367,9 +367,11 @@
         return 'select_images';
     }
 
-    function imageContextForAgent(candidateImages: ImageWithFile[], visualLevel: AgentVisualLevel): AgentChatImageContext[] {
-        return candidateImages
-            .map(item => ({
+    async function imageContextForAgent(candidateImages: ImageWithFile[], visualLevel: AgentVisualLevel): Promise<AgentChatImageContext[]> {
+        return Promise.all(candidateImages
+            .map(async item => {
+                const run = await getGenerationRun(item.image.id).catch(() => null);
+                return {
                 image_id: item.image.id,
                 filename: item.path.split(/[\\/]/).pop() ?? null,
                 width: item.image.width ?? null,
@@ -379,7 +381,14 @@
                 color_label: item.selection?.color_label ?? null,
                 decision: item.selection?.decision ?? null,
                 source_label: item.source_label ?? null,
+                ai_prompt: item.image.ai_prompt ?? null,
+                generation_prompt: run?.prompt ?? null,
+                generation_provider: run?.provider ?? null,
+                generation_model: run?.model ?? null,
+                generation_seed: run?.seed ?? null,
+                generation_settings_json: run?.settings_json ?? null,
                 thumbnail_path: visualLevel === 'text' ? null : item.thumbnail_path,
+                };
             }));
     }
 
@@ -440,7 +449,7 @@
         const rawCandidateImages = proposalCandidateImages(ids);
         const visualLevel = visualLevelForAgentRequest(rawCandidateImages);
         if (visualLevel !== $agentVisualLevel) agentVisualLevel.set(visualLevel);
-        const candidateImages = imageContextForAgent(rawCandidateImages, visualLevel);
+        const candidateImages = await imageContextForAgent(rawCandidateImages, visualLevel);
         if (candidateImages.length === 0) {
             showToast('No images available for Claude', { type: 'warning', duration: 5000 });
             return;
@@ -484,7 +493,15 @@
                 showToast('Claude updated preset', { detail: result.updated_preset.name, type: 'success', duration: 5000 });
             }
 
-            if (!result.proposal && !result.updated_preset) {
+            if (result.generation_job_id) {
+                showToast('Claude started generation', {
+                    detail: `Job ${result.generation_job_id}`,
+                    type: 'success',
+                    duration: 6000,
+                });
+            }
+
+            if (!result.proposal && !result.updated_preset && !result.generation_job_id) {
                 showToast('Claude replied', { detail: result.message, type: 'info', duration: 6000 });
             }
         } catch (e) {

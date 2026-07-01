@@ -157,6 +157,7 @@
         data-agent-filename={leftName}
         data-agent-path={leftImage?.path ?? ''}
         data-agent-thumbnail-path={leftImage?.thumbnail_path ?? ''}
+        data-agent-ai-prompt={leftImage?.image.ai_prompt ?? ''}
         data-agent-rating={leftImage?.selection?.star_rating ?? ''}
         data-agent-decision={leftImage?.selection?.decision ?? 'undecided'}
         data-agent-selected={leftImage ? $selectedIds.has(leftImage.image.id) : false}
@@ -211,6 +212,7 @@
         data-agent-filename={rightName}
         data-agent-path={rightImage?.path ?? ''}
         data-agent-thumbnail-path={rightImage?.thumbnail_path ?? ''}
+        data-agent-ai-prompt={rightImage?.image.ai_prompt ?? ''}
         data-agent-rating={rightImage?.selection?.star_rating ?? ''}
         data-agent-decision={rightImage?.selection?.decision ?? 'undecided'}
         data-agent-selected={rightImage ? $selectedIds.has(rightImage.image.id) : false}

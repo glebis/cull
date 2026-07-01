@@ -12,6 +12,12 @@ export interface AgentSnapshotRectItem {
     filename: string;
     path: string;
     thumbnailPath: string | null;
+    aiPrompt: string | null;
+    generationPrompt: string | null;
+    generationProvider: string | null;
+    generationModel: string | null;
+    generationSeed: string | null;
+    generationSettingsJson: string | null;
     bounds: AgentSnapshotRect;
     rating: number | null;
     decision: string | null;
@@ -26,6 +32,12 @@ export interface AgentSnapshotVisibleImage {
     filename: string;
     path: string;
     thumbnail_path: string | null;
+    ai_prompt: string | null;
+    generation_prompt: string | null;
+    generation_provider: string | null;
+    generation_model: string | null;
+    generation_seed: string | null;
+    generation_settings_json: string | null;
     bounds_css: AgentSnapshotRect;
     bounds_px: AgentSnapshotRect;
     visible_ratio: number;
@@ -167,6 +179,12 @@ export function collectVisibleImageTargetsFromRects(
             filename: item.filename || fileNameFromPath(item.path),
             path: item.path,
             thumbnail_path: item.thumbnailPath,
+            ai_prompt: item.aiPrompt,
+            generation_prompt: item.generationPrompt,
+            generation_provider: item.generationProvider,
+            generation_model: item.generationModel,
+            generation_seed: item.generationSeed,
+            generation_settings_json: item.generationSettingsJson,
             bounds_css: {
                 left: round(item.bounds.left),
                 top: round(item.bounds.top),
@@ -209,6 +227,12 @@ export function collectVisibleImageTargets(
             filename: element.dataset.agentFilename ?? fileNameFromPath(path),
             path,
             thumbnailPath: element.dataset.agentThumbnailPath || null,
+            aiPrompt: element.dataset.agentAiPrompt || null,
+            generationPrompt: element.dataset.agentGenerationPrompt || null,
+            generationProvider: element.dataset.agentGenerationProvider || null,
+            generationModel: element.dataset.agentGenerationModel || null,
+            generationSeed: element.dataset.agentGenerationSeed || null,
+            generationSettingsJson: element.dataset.agentGenerationSettingsJson || null,
             bounds: {
                 left: rect.left,
                 top: rect.top,

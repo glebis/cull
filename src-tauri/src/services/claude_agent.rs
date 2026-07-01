@@ -48,6 +48,18 @@ pub struct AgentChatImageContext {
     pub color_label: Option<String>,
     pub decision: Option<String>,
     pub source_label: Option<String>,
+    #[serde(default)]
+    pub ai_prompt: Option<String>,
+    #[serde(default)]
+    pub generation_prompt: Option<String>,
+    #[serde(default)]
+    pub generation_provider: Option<String>,
+    #[serde(default)]
+    pub generation_model: Option<String>,
+    #[serde(default)]
+    pub generation_seed: Option<String>,
+    #[serde(default)]
+    pub generation_settings_json: Option<String>,
     pub thumbnail_path: Option<String>,
 }
 
@@ -57,6 +69,8 @@ pub struct ClaudeAgentChatTurnResult {
     pub message: String,
     pub proposal: Option<AgentActionProposal>,
     pub updated_preset: Option<AgentSelectionPreset>,
+    pub generation: Option<ClaudeGenerationDraft>,
+    pub generation_job_id: Option<String>,
     pub usage_json: String,
     pub raw_result_json: String,
 }
@@ -180,6 +194,8 @@ struct ClaudeAgentDecision {
     proposal: Option<ClaudeProposalDraft>,
     #[serde(default)]
     preset_update: Option<ClaudePresetUpdateDraft>,
+    #[serde(default)]
+    generation: Option<ClaudeGenerationDraft>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,6 +227,24 @@ struct ClaudePresetUpdateDraft {
     prompt: String,
     #[serde(default)]
     criteria_json: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudeGenerationDraft {
+    pub image_id: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub size: Option<String>,
+    #[serde(default)]
+    pub quality: Option<String>,
+    #[serde(default)]
+    pub n: Option<u8>,
+    #[serde(default)]
+    pub include_source: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -448,9 +482,12 @@ JSON schema:
 
 Hard rules:
 - Do not execute, apply, delete, trash, move, or mutate anything.
-- You may only return intent: answer, update_preset, or create_proposal.
+- You may only return intent: answer, update_preset, create_proposal, or generate_variation.
+- Return generate_variation only when the user asks to regenerate, make a new version, or create a variation from a candidate image prompt.
 - Proposal kinds allowed in this bridge: select_images or trash_images.
 - Proposal item image_id values must come from candidate_images.
+- For generate_variation, include generation with image_id, prompt, provider/model/size/quality/n when known. Use candidate_images[].generation_prompt first, then ai_prompt. Do not invent a prompt if neither exists.
+- Defaults for generate_variation are provider openai, model gpt-image-2, size 1024x1024, quality auto, n 1.
 - For trash_images, be conservative and explain uncertainty in guard_results.
 - If the user asks to change the active preset, return operation update_preset.
 - If the task is curation, return operation create_proposal.
@@ -743,6 +780,24 @@ fn persist_decision(
                 runtime_source,
             )?);
         }
+        "generate_variation" => {
+            let draft = decision.generation.ok_or_else(|| {
+                ServiceError::InvalidInput(
+                    "Claude generate_variation result omitted generation".to_string(),
+                )
+            })?;
+            validate_generation_draft(&request, &draft)?;
+            return Ok(ClaudeAgentChatTurnResult {
+                operation: decision.operation,
+                message: decision.message,
+                proposal,
+                updated_preset,
+                generation: Some(draft),
+                generation_job_id: None,
+                usage_json,
+                raw_result_json,
+            });
+        }
         other => {
             return Err(ServiceError::InvalidInput(format!(
                 "Unsupported Claude operation '{}'",
@@ -756,9 +811,45 @@ fn persist_decision(
         message: decision.message,
         proposal,
         updated_preset,
+        generation: None,
+        generation_job_id: None,
         usage_json,
         raw_result_json,
     })
+}
+
+fn validate_generation_draft(
+    request: &ClaudeAgentChatTurnRequest,
+    draft: &ClaudeGenerationDraft,
+) -> Result<(), ServiceError> {
+    let candidate = request
+        .candidate_images
+        .iter()
+        .find(|image| image.image_id == draft.image_id)
+        .ok_or_else(|| {
+            ServiceError::InvalidInput(format!(
+                "Claude returned image_id '{}' outside the candidate context",
+                draft.image_id
+            ))
+        })?;
+    if draft.prompt.trim().is_empty() {
+        return Err(ServiceError::InvalidInput(
+            "Claude generate_variation result omitted prompt".to_string(),
+        ));
+    }
+    let has_source_prompt = candidate
+        .generation_prompt
+        .as_deref()
+        .or(candidate.ai_prompt.as_deref())
+        .map(|prompt| !prompt.trim().is_empty())
+        .unwrap_or(false);
+    if !has_source_prompt {
+        return Err(ServiceError::InvalidInput(format!(
+            "Image '{}' has no prompt metadata available for regeneration",
+            draft.image_id
+        )));
+    }
+    Ok(())
 }
 
 fn create_proposal_from_draft(
@@ -940,7 +1031,7 @@ fn sum_model_cost_usd(model_usage: &Value) -> Option<f64> {
 }
 
 fn claude_decision_schema() -> &'static str {
-    r#"{"type":"object","properties":{"operation":{"type":"string","enum":["answer","create_proposal","update_preset"]},"message":{"type":"string"},"proposal":{"type":"object","properties":{"kind":{"type":"string","enum":["select_images","trash_images"]},"lens":{"type":["string","null"]},"criteria":{"type":"string"},"items":{"type":"array","items":{"type":"object","properties":{"image_id":{"type":"string"},"reason":{"type":"string"},"confidence":{}},"required":["image_id","reason"],"additionalProperties":false},"minItems":1},"guard_results":{"type":"object"}},"required":["kind","criteria","items"],"additionalProperties":false},"preset_update":{"type":"object","properties":{"name":{"type":"string"},"purpose":{"type":"string"},"prompt":{"type":"string"},"criteria_json":{"type":"object"}},"required":["prompt"],"additionalProperties":false}},"required":["operation","message"],"additionalProperties":false}"#
+    r#"{"type":"object","properties":{"operation":{"type":"string","enum":["answer","create_proposal","update_preset","generate_variation"]},"message":{"type":"string"},"proposal":{"type":"object","properties":{"kind":{"type":"string","enum":["select_images","trash_images"]},"lens":{"type":["string","null"]},"criteria":{"type":"string"},"items":{"type":"array","items":{"type":"object","properties":{"image_id":{"type":"string"},"reason":{"type":"string"},"confidence":{}},"required":["image_id","reason"],"additionalProperties":false},"minItems":1},"guard_results":{"type":"object"}},"required":["kind","criteria","items"],"additionalProperties":false},"preset_update":{"type":"object","properties":{"name":{"type":"string"},"purpose":{"type":"string"},"prompt":{"type":"string"},"criteria_json":{"type":"object"}},"required":["prompt"],"additionalProperties":false},"generation":{"type":"object","properties":{"image_id":{"type":"string"},"prompt":{"type":"string"},"provider":{"type":["string","null"]},"model":{"type":["string","null"]},"size":{"type":["string","null"]},"quality":{"type":["string","null"]},"n":{"type":["integer","null"],"minimum":1,"maximum":4},"include_source":{"type":["boolean","null"]}},"required":["image_id","prompt"],"additionalProperties":false}},"required":["operation","message"],"additionalProperties":false}"#
 }
 
 fn claude_decision_schema_value() -> Result<Value, ServiceError> {
@@ -981,6 +1072,14 @@ mod tests {
                 color_label: None,
                 decision: Some("undecided".to_string()),
                 source_label: Some("midjourney".to_string()),
+                ai_prompt: Some("portrait in a quiet neon studio".to_string()),
+                generation_prompt: Some("portrait in a quiet neon studio".to_string()),
+                generation_provider: Some("openai".to_string()),
+                generation_model: Some("gpt-image-2".to_string()),
+                generation_seed: Some("42".to_string()),
+                generation_settings_json: Some(
+                    r#"{"size":"1024x1024","quality":"auto"}"#.to_string(),
+                ),
                 thumbnail_path: Some("/tmp/cull/thumbs/a.png".to_string()),
             }],
             selected_count: 1,
@@ -1080,7 +1179,31 @@ process.stdout.write(JSON.stringify({
             .allowed_dirs
             .contains(&"/tmp/cull/thumbs".to_string()));
         assert!(invocation.prompt.contains("thumbnail_path"));
+        assert!(invocation.prompt.contains("generation_prompt"));
+        assert!(invocation
+            .prompt
+            .contains("portrait in a quiet neon studio"));
         assert!(!invocation.prompt.contains("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn generation_intent_requires_candidate_prompt_metadata() {
+        let mut request = sample_request();
+        request.candidate_images[0].ai_prompt = None;
+        request.candidate_images[0].generation_prompt = None;
+        let draft = ClaudeGenerationDraft {
+            image_id: "img_a".to_string(),
+            prompt: "new image".to_string(),
+            provider: None,
+            model: None,
+            size: None,
+            quality: None,
+            n: None,
+            include_source: None,
+        };
+
+        let err = validate_generation_draft(&request, &draft).unwrap_err();
+        assert!(err.to_string().contains("no prompt metadata"));
     }
 
     #[test]
@@ -1179,6 +1302,39 @@ process.stdout.write(JSON.stringify({
         );
         let source_context: Value = serde_json::from_str(&proposal.source_context_json).unwrap();
         assert_eq!(source_context["source"], "claude_agent_sdk");
+    }
+
+    #[tokio::test]
+    async fn sdk_generate_variation_task_returns_generation_draft() {
+        let db = test_db();
+        let result = run_with_fake_sdk(
+            &db,
+            sample_request(),
+            json!({
+                "operation": "generate_variation",
+                "message": "Starting a new version from the stored prompt.",
+                "generation": {
+                    "image_id": "img_a",
+                    "prompt": "portrait in a quiet neon studio",
+                    "provider": "openai",
+                    "model": "gpt-image-2",
+                    "size": "1024x1024",
+                    "quality": "auto",
+                    "n": 2,
+                    "include_source": true
+                }
+            }),
+        )
+        .await
+        .unwrap();
+
+        let generation = result.generation.unwrap();
+        assert_eq!(result.operation, "generate_variation");
+        assert_eq!(generation.image_id, "img_a");
+        assert_eq!(generation.prompt, "portrait in a quiet neon studio");
+        assert_eq!(generation.n, Some(2));
+        assert!(result.proposal.is_none());
+        assert_eq!(db.list_action_proposals(None, 20).unwrap().len(), 0);
     }
 
     #[tokio::test]
@@ -1443,6 +1599,7 @@ process.stdout.write(JSON.stringify({
                     prompt: "Select only cohesive, publication-ready portfolio images.".to_string(),
                     criteria_json: Some(json!({"agent_edited": true})),
                 }),
+                generation: None,
             },
             ClaudeCliEnvelope {
                 runtime: Some("claude_agent_sdk".to_string()),

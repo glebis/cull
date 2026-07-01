@@ -570,6 +570,7 @@
                 data-agent-filename={item.image.path.split('/').filter(Boolean).pop() ?? item.imageId}
                 data-agent-path={item.image.path}
                 data-agent-thumbnail-path={item.image.thumbnail_path ?? ''}
+                data-agent-ai-prompt={item.image.image.ai_prompt ?? ''}
                 data-agent-rating={rating || ''}
                 data-agent-decision={decision}
                 data-agent-selected={$selectedIds.has(item.imageId)}

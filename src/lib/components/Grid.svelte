@@ -316,6 +316,7 @@
                     data-agent-filename={vi.item.path.split('/').filter(Boolean).pop() ?? vi.item.image.id}
                     data-agent-path={vi.item.path}
                     data-agent-thumbnail-path={vi.item.thumbnail_path ?? ''}
+                    data-agent-ai-prompt={vi.item.image.ai_prompt ?? ''}
                     data-agent-rating={vi.item.selection?.star_rating ?? ''}
                     data-agent-decision={vi.item.selection?.decision ?? 'undecided'}
                     data-agent-selected={$selectedIds.has(vi.item.image.id)}
