@@ -18,7 +18,7 @@ impl CullMcp {
     }
 
     #[tool(
-        description = "List images with pagination. Returns id, path, dimensions, format, rating, decision."
+        description = "List images with pagination. Returns id, path, dimensions, format, rating, decision, prompt, and generation metadata."
     )]
     fn list_images(&self, Parameters(params): Parameters<ListImagesParams>) -> String {
         let state = self.app_handle.state::<AppState>();
@@ -41,24 +41,29 @@ impl CullMcp {
 
         match images {
             Ok(images) => {
-                let result: Vec<serde_json::Value> = images
+                let result = images
                     .iter()
                     .map(|img| {
-                        serde_json::json!({
-                            "id": img.image.id,
-                            "path": self.maybe_redact_path(&img.path),
-                            "width": img.image.width,
-                            "height": img.image.height,
-                            "format": img.image.format,
-                            "file_size": img.image.file_size,
-                            "rating": img.selection.as_ref().and_then(|s| s.star_rating),
-                            "decision": img.selection.as_ref().map(|s| &s.decision),
-                        })
+                        let generation_run = state
+                            .db
+                            .get_generation_run_for_image(&img.image.id)
+                            .map_err(|e| e.to_string())?;
+                        Ok(image_value_for_mcp(
+                            img,
+                            generation_run.as_ref(),
+                            &self.auth,
+                            self.maybe_redact_path(&img.path),
+                            false,
+                        ))
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>, String>>();
+                let result = match result {
+                    Ok(result) => result,
+                    Err(e) => return error_for_mcp(&e, &self.auth),
+                };
                 serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
             }
-            Err(e) => format!("Error: {}", e),
+            Err(e) => error_for_mcp(&e.to_string(), &self.auth),
         }
     }
 
@@ -77,23 +82,23 @@ impl CullMcp {
                         }
                         Err(e) => return format!("Error: {}", e),
                     }
-                    serde_json::json!({
-                        "id": img.image.id,
-                        "path": self.maybe_redact_path(&img.path),
-                        "width": img.image.width,
-                        "height": img.image.height,
-                        "format": img.image.format,
-                        "file_size": img.image.file_size,
-                        "created_at": img.image.created_at,
-                        "imported_at": img.image.imported_at,
-                        "rating": img.selection.as_ref().and_then(|s| s.star_rating),
-                        "decision": img.selection.as_ref().map(|s| &s.decision),
-                    })
+                    let generation_run = match state.db.get_generation_run_for_image(&img.image.id)
+                    {
+                        Ok(run) => run,
+                        Err(e) => return error_for_mcp(&e.to_string(), &self.auth),
+                    };
+                    image_value_for_mcp(
+                        &img,
+                        generation_run.as_ref(),
+                        &self.auth,
+                        self.maybe_redact_path(&img.path),
+                        true,
+                    )
                     .to_string()
                 }
                 None => format!("Error: Image '{}' not found", params.image_id),
             },
-            Err(e) => format!("Error: {}", e),
+            Err(e) => error_for_mcp(&e.to_string(), &self.auth),
         }
     }
 
@@ -114,7 +119,9 @@ impl CullMcp {
         }
     }
 
-    #[tool(description = "List images in a specific folder with pagination")]
+    #[tool(
+        description = "List images in a specific folder with pagination, prompts, and generation metadata"
+    )]
     fn list_folder_images(&self, Parameters(params): Parameters<ListFolderImagesParams>) -> String {
         let scope = self.token_scope();
         if !tokens::folder_in_scope(&scope, &params.folder_path) {
@@ -129,24 +136,30 @@ impl CullMcp {
             .list_images_by_folder(&params.folder_path, limit, offset)
         {
             Ok(images) => {
-                let result: Vec<serde_json::Value> = images
+                let result = images
                     .iter()
                     .filter(|img| tokens::image_in_scope(&scope, &img.path, &[]))
                     .map(|img| {
-                        serde_json::json!({
-                            "id": img.image.id,
-                            "path": self.maybe_redact_path(&img.path),
-                            "width": img.image.width,
-                            "height": img.image.height,
-                            "format": img.image.format,
-                            "rating": img.selection.as_ref().and_then(|s| s.star_rating),
-                            "decision": img.selection.as_ref().map(|s| &s.decision),
-                        })
+                        let generation_run = state
+                            .db
+                            .get_generation_run_for_image(&img.image.id)
+                            .map_err(|e| e.to_string())?;
+                        Ok(image_value_for_mcp(
+                            img,
+                            generation_run.as_ref(),
+                            &self.auth,
+                            self.maybe_redact_path(&img.path),
+                            false,
+                        ))
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>, String>>();
+                let result = match result {
+                    Ok(result) => result,
+                    Err(e) => return error_for_mcp(&e, &self.auth),
+                };
                 serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
             }
-            Err(e) => format!("Error: {}", e),
+            Err(e) => error_for_mcp(&e.to_string(), &self.auth),
         }
     }
 }

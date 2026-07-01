@@ -12,7 +12,7 @@ use tauri::{Emitter, Manager};
 
 use super::auth::{require_capability, AuthContext};
 use crate::db_core::canvas_document::CanvasDocument;
-use crate::db_core::models::{Canvas, TokenScope};
+use crate::db_core::models::{Canvas, GenerationRun, ImageWithFile, TokenScope};
 use crate::services::tokens;
 use crate::AppState;
 
@@ -32,10 +32,7 @@ fn can_expose_private_metadata(auth: &AuthContext) -> bool {
     }
 }
 
-fn generation_run_for_mcp(
-    run: &crate::db_core::models::GenerationRun,
-    auth: &AuthContext,
-) -> serde_json::Value {
+fn generation_run_for_mcp(run: &GenerationRun, auth: &AuthContext) -> serde_json::Value {
     if can_expose_private_metadata(auth) {
         return serde_json::to_value(run).unwrap_or(serde_json::Value::Null);
     }
@@ -52,6 +49,66 @@ fn generation_run_for_mcp(
         "created_at": &run.created_at,
         "imported_at": &run.imported_at,
     })
+}
+
+fn private_string_for_mcp(value: Option<&String>, auth: &AuthContext) -> serde_json::Value {
+    if can_expose_private_metadata(auth) {
+        value
+            .cloned()
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null)
+    } else {
+        serde_json::Value::Null
+    }
+}
+
+fn image_prompt_for_mcp(
+    image: &ImageWithFile,
+    generation_run: Option<&GenerationRun>,
+    auth: &AuthContext,
+) -> serde_json::Value {
+    if !can_expose_private_metadata(auth) {
+        return serde_json::Value::Null;
+    }
+
+    generation_run
+        .and_then(|run| run.prompt.as_ref())
+        .or(image.image.ai_prompt.as_ref())
+        .cloned()
+        .map(serde_json::Value::String)
+        .unwrap_or(serde_json::Value::Null)
+}
+
+fn image_value_for_mcp(
+    image: &ImageWithFile,
+    generation_run: Option<&GenerationRun>,
+    auth: &AuthContext,
+    path: serde_json::Value,
+    include_dates: bool,
+) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "id": image.image.id,
+        "path": path,
+        "width": image.image.width,
+        "height": image.image.height,
+        "format": image.image.format,
+        "file_size": image.image.file_size,
+        "source_label": image.source_label,
+        "prompt": image_prompt_for_mcp(image, generation_run, auth),
+        "ai_prompt": private_string_for_mcp(image.image.ai_prompt.as_ref(), auth),
+        "generation": generation_run
+            .map(|run| generation_run_for_mcp(run, auth))
+            .unwrap_or(serde_json::Value::Null),
+        "rating": image.selection.as_ref().and_then(|s| s.star_rating),
+        "decision": image.selection.as_ref().map(|s| &s.decision),
+    });
+
+    if include_dates {
+        value["created_at"] = serde_json::Value::String(image.image.created_at.clone());
+        value["imported_at"] = serde_json::Value::String(image.image.imported_at.clone());
+    }
+
+    value
 }
 
 fn library_stats_for_mcp(
@@ -1165,7 +1222,7 @@ impl ServerHandler for CullMcp {
 #[cfg(test)]
 mod tests {
     use super::AuthContext;
-    use crate::db_core::models::{Canvas, McpToken, TokenScope};
+    use crate::db_core::models::{Canvas, Image, ImageWithFile, McpToken, TokenScope};
     use crate::services::tokens;
 
     // --- Path redaction (tests production `redact_path`) ---
@@ -1231,6 +1288,52 @@ mod tests {
         assert_eq!(value["prompt"], "private prompt");
         assert_eq!(value["source_path"], "/Users/gleb/art/share/image.json");
         assert_eq!(value["raw_metadata_json"], r#"{"prompt":"private prompt"}"#);
+    }
+
+    #[test]
+    fn test_local_image_value_exposes_prompt_context() {
+        let image = image_fixture();
+        let run = generation_run_fixture();
+
+        let value = super::image_value_for_mcp(
+            &image,
+            Some(&run),
+            &AuthContext::Local,
+            serde_json::Value::String(image.path.clone()),
+            true,
+        );
+
+        assert_eq!(value["prompt"], "private prompt");
+        assert_eq!(value["ai_prompt"], "legacy prompt");
+        assert_eq!(value["generation"]["prompt"], "private prompt");
+        assert_eq!(value["source_label"], "midjourney");
+        assert_eq!(value["created_at"], "2026-05-30T12:00:00Z");
+    }
+
+    #[test]
+    fn test_scoped_image_value_redacts_prompt_context() {
+        let auth = AuthContext::Authenticated(make_token(
+            "viewer",
+            Some(r#"{"folders":["/Users/gleb/art/share"]}"#.to_string()),
+        ));
+        let image = image_fixture();
+        let run = generation_run_fixture();
+
+        let value = super::image_value_for_mcp(
+            &image,
+            Some(&run),
+            &auth,
+            serde_json::Value::String("[redacted:path]".to_string()),
+            false,
+        );
+        let json = value.to_string();
+
+        assert_eq!(value["prompt"], serde_json::Value::Null);
+        assert_eq!(value["ai_prompt"], serde_json::Value::Null);
+        assert_eq!(value["generation"]["prompt"], serde_json::Value::Null);
+        assert_eq!(value["generation"]["model"], "gpt-image-1");
+        assert!(!json.contains("private prompt"));
+        assert!(!json.contains("legacy prompt"));
     }
 
     #[test]
@@ -1989,6 +2092,28 @@ mod tests {
             raw_metadata_json: Some(r#"{"prompt":"private prompt"}"#.to_string()),
             created_at: Some("2026-05-30T12:00:00Z".to_string()),
             imported_at: "2026-05-30T12:01:00Z".to_string(),
+        }
+    }
+
+    fn image_fixture() -> ImageWithFile {
+        ImageWithFile {
+            image: Image {
+                id: "img-1".to_string(),
+                sha256_hash: "hash".to_string(),
+                width: 1024,
+                height: 768,
+                format: "png".to_string(),
+                file_size: 42,
+                created_at: "2026-05-30T12:00:00Z".to_string(),
+                imported_at: "2026-05-30T12:01:00Z".to_string(),
+                ai_prompt: Some("legacy prompt".to_string()),
+                raw_metadata: None,
+            },
+            path: "/Users/gleb/art/share/image.png".to_string(),
+            thumbnail_path: None,
+            selection: None,
+            source_label: Some("midjourney".to_string()),
+            missing_at: None,
         }
     }
 

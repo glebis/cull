@@ -70,6 +70,18 @@ pub enum CliCommand {
         limit: u32,
     },
 
+    #[command(name = "get_image")]
+    GetImage {
+        #[arg(long = "image_id", visible_alias = "image-id")]
+        image_id: String,
+    },
+
+    #[command(name = "get_generation_run")]
+    GetGenerationRun {
+        #[arg(long = "image_id", visible_alias = "image-id")]
+        image_id: String,
+    },
+
     #[command(name = "list_folders")]
     ListFolders,
 
@@ -184,6 +196,16 @@ fn execute_headless(args: &CliArgs) -> Result<Value, String> {
             &ctx,
             "list_images",
             serde_json::json!({ "offset": offset, "limit": limit }),
+        ),
+        CliCommand::GetImage { image_id } => tools::execute_named_tool(
+            &ctx,
+            "get_image",
+            serde_json::json!({ "image_id": image_id }),
+        ),
+        CliCommand::GetGenerationRun { image_id } => tools::execute_named_tool(
+            &ctx,
+            "get_generation_run",
+            serde_json::json!({ "image_id": image_id }),
         ),
         CliCommand::ListFolders => {
             tools::execute_named_tool(&ctx, "list_folders", serde_json::json!({}))
@@ -386,6 +408,25 @@ mod tests {
                 );
             }
             other => panic!("expected call_tool command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_get_image_subcommand() {
+        let args = CliArgs::try_parse_from(["cull", "get_image", "--image_id", "img-1"]).unwrap();
+        match args.command {
+            Some(CliCommand::GetImage { image_id }) => assert_eq!(image_id, "img-1"),
+            other => panic!("expected get_image command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_get_generation_run_subcommand() {
+        let args =
+            CliArgs::try_parse_from(["cull", "get_generation_run", "--image-id", "img-1"]).unwrap();
+        match args.command {
+            Some(CliCommand::GetGenerationRun { image_id }) => assert_eq!(image_id, "img-1"),
+            other => panic!("expected get_generation_run command, got {:?}", other),
         }
     }
 
