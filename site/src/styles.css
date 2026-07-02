@@ -284,6 +284,47 @@ h3 {
   line-height: 1.4;
 }
 
+.download-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  padding-bottom: calc(var(--spacing) * 1.5);
+  border-bottom: 1px solid color-mix(in srgb, var(--field-border) 60%, transparent);
+}
+
+.download-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 50px;
+  padding: 0 22px;
+  border: 1px solid var(--green);
+  border-radius: var(--radius);
+  background: var(--green);
+  color: var(--bg);
+  font-family: var(--header-font);
+  font-size: 16px;
+  font-weight: 650;
+  text-decoration: none;
+  transition: filter 160ms var(--ease-out-quart);
+}
+
+.download-button:hover {
+  filter: brightness(1.08);
+}
+
+.download-button:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
+.download-specs {
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .signup-row {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(148px, auto);

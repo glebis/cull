@@ -28,10 +28,14 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <p class="lede hero-step-3">A fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac.</p>
       </div>
       <figure class="product-shot hero-step-4">
-        <img src="/images/cull-state-preview.png" alt="App state with batch counts, image decisions, prompt metadata, and agent queue" />
+        <img src="/images/cull-state-preview.png" alt="Loupe view with an image selected, an agent context menu offering Regenerate, Select, and Review, and a pending agent proposal in the side rail" />
       </figure>
       <form class="signup-form signup-form--featured hero-step-5" data-signup-form>
-        <label for="email">Get early builds and the open-source launch update.</label>
+        <div class="download-row">
+          <a class="download-button" href="https://github.com/glebis/cull/releases/latest" data-download-button>Download Cull</a>
+          <span class="download-specs">macOS 11+ &middot; Apple Silicon &middot; free &amp; open source</span>
+        </div>
+        <label for="email">Stay up to date with releases.</label>
         <div class="signup-row">
           <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="signup-status" required />
           <button type="submit" data-submit-button>Get notified</button>
@@ -85,6 +89,18 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       </div>
     </section>
 
+    <section class="feature-note feature-note--agent-sdk reveal-surface" aria-labelledby="agent-sdk-title" data-reveal>
+      <figure class="feature-note-illustration reveal-item reveal-delay-0">
+        <img src="/images/agent-sdk-generated.png" alt="A person at a desk while a small robot assistant sorts a stream of pictures into two neat stacks" loading="lazy" />
+      </figure>
+      <div class="feature-note-copy reveal-item reveal-delay-2">
+        <p class="eyebrow">new / claude agent sdk</p>
+        <h2 id="agent-sdk-title">Ask Claude to do the first pass</h2>
+        <p>Cull now ships with a built-in agent chat powered by the Claude Agent SDK. Describe what you want in plain language — "pick the sharpest shot from every series", "shortlist the warm portraits" — and Claude works through your library.</p>
+        <p>Nothing changes without you: the agent proposes a selection, you see exactly which images are affected and what it costs, then approve or reject. Prefer your own setup? The same surface is open to any agent over MCP or the headless CLI.</p>
+      </div>
+    </section>
+
     <section class="workflow reveal-surface" aria-labelledby="workflow-title" data-reveal>
       <div class="reveal-item reveal-delay-0">
         <h2 id="workflow-title">From folder to final set</h2>
@@ -131,7 +147,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       </div>
       <div class="bottom-signup-copy reveal-item reveal-delay-2">
         <form class="signup-form signup-form--featured signup-form--bottom" data-signup-form>
-          <label for="bottom-email">Get early builds and the open-source launch update.</label>
+          <label for="bottom-email">Stay up to date with releases.</label>
           <div class="signup-row">
             <input id="bottom-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="bottom-signup-status" required />
             <button type="submit" data-submit-button>Get notified</button>
