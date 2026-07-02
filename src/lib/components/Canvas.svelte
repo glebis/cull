@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onDestroy } from 'svelte';
+    import { onDestroy, onMount } from 'svelte';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import {
         activeCanvas,
@@ -25,6 +25,7 @@
     import { serializeCanvasDocumentLayout, type CanvasDocument } from '$lib/canvas-document';
     import {
         addCanvasItemAnnotation,
+        addImagesToCanvasDocument,
         applyCanvasViewItemCrop,
         canvasItemAnnotations,
         createCanvasDocumentFromLayoutJson,
@@ -45,6 +46,19 @@
 
     type CropPoint = { x: number; y: number };
     type CropDraft = { itemId: string; anchor: CropPoint; current: CropPoint };
+    type CanvasImportDropDetail = {
+        images: ImageWithFile[];
+        folder?: string | null;
+        paths?: string[] | null;
+        dropX: number;
+        dropY: number;
+        importResult: {
+            imported: number;
+            skipped: number;
+            errors: string[];
+            image_ids: string[];
+        };
+    };
 
     const MIN_CROP_DRAG_SIZE = 0.02;
 
@@ -105,6 +119,21 @@
 
     onDestroy(() => {
         if (saveTimer) clearTimeout(saveTimer);
+    });
+
+    onMount(() => {
+        const handleCanvasImportDrop = (event: Event) => {
+            const detail = event instanceof CustomEvent ? detailFromCanvasImportDrop(event) : null;
+            if (!detail || detail.images.length === 0) {
+                showToast('No images found in drop', { type: 'info', duration: 5000 });
+                return;
+            }
+            placeImportedImagesOnCanvas(detail).catch(e => {
+                showToast('Canvas drop failed', { detail: String(e), type: 'error', duration: 10000 });
+            });
+        };
+        window.addEventListener('canvas-import-drop', handleCanvasImportDrop);
+        return () => window.removeEventListener('canvas-import-drop', handleCanvasImportDrop);
     });
 
     function handleResizeMouseDown(e: MouseEvent, item: CanvasViewItem) {
@@ -173,6 +202,77 @@
         } catch (e) {
             showToast('Canvas save failed', { detail: String(e), type: 'error', duration: 10000 });
         }
+    }
+
+    async function placeImportedImagesOnCanvas(detail: CanvasImportDropDetail) {
+        const mergedImages = mergeImageLists($images, detail.images);
+        const origin = canvasDropOrigin(detail);
+        const baseDocument = canvasDocument ?? createCanvasDocumentFromLayoutJson($activeCanvas?.layout_json ?? '{}', mergedImages);
+        const result = addImagesToCanvasDocument(baseDocument, detail.images, origin);
+
+        if (result.addedImageIds.length === 0) {
+            showToast('Images already on canvas', {
+                detail: `${result.skippedImageIds.length} image${result.skippedImageIds.length === 1 ? '' : 's'} already placed`,
+                type: 'info',
+                duration: 6000,
+            });
+            return;
+        }
+
+        const layoutJson = serializeCanvasDocumentLayout(result.document);
+        const updatedCanvas = $activeCanvas ? { ...$activeCanvas, layout_json: layoutJson } : null;
+
+        if (updatedCanvas) {
+            await updateCanvasLayout(updatedCanvas.id, layoutJson);
+            activeCanvas.set(updatedCanvas);
+            sessionCanvases.update(list => list.map(item => item.id === updatedCanvas.id ? updatedCanvas : item));
+        }
+
+        canvasDocument = result.document;
+        canvasItems = createCanvasViewItems(result.document, mergedImages);
+        images.set(mergedImages);
+        selectedIds.reset(new Set(result.addedImageIds));
+        focusFirstAddedImage(result.addedImageIds[0], mergedImages);
+
+        const sourceName = detail.folder
+            ? detail.folder.split('/').filter(Boolean).pop() ?? detail.folder
+            : 'dropped files';
+        const skippedDetail = detail.importResult.skipped > 0
+            ? `, ${detail.importResult.skipped} already imported`
+            : '';
+        showToast(`Added ${result.addedImageIds.length} to canvas`, {
+            detail: `${sourceName}: ${detail.importResult.imported} new${skippedDetail}`,
+            type: 'success',
+            duration: 8000,
+        });
+    }
+
+    function detailFromCanvasImportDrop(event: CustomEvent): CanvasImportDropDetail | null {
+        const detail = event.detail as CanvasImportDropDetail | null;
+        if (!detail || !Array.isArray(detail.images)) return null;
+        return detail;
+    }
+
+    function canvasDropOrigin(detail: CanvasImportDropDetail) {
+        const rect = canvasEl?.getBoundingClientRect();
+        if (!rect) return { x: 0, y: 0 };
+        return {
+            x: (detail.dropX - rect.left - panX) / zoom,
+            y: (detail.dropY - rect.top - panY) / zoom,
+        };
+    }
+
+    function mergeImageLists(existing: ImageWithFile[], incoming: ImageWithFile[]) {
+        const byId = new Map<string, ImageWithFile>();
+        for (const image of existing) byId.set(image.image.id, image);
+        for (const image of incoming) byId.set(image.image.id, image);
+        return Array.from(byId.values());
+    }
+
+    function focusFirstAddedImage(imageId: string | undefined, availableImages: ImageWithFile[]) {
+        if (!imageId) return;
+        const idx = availableImages.findIndex(image => image.image.id === imageId);
+        if (idx >= 0) focusedIndex.set(idx);
     }
 
     function handleCanvasMouseDown(e: MouseEvent) {

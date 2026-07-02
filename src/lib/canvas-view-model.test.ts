@@ -8,6 +8,7 @@ import {
     type CanvasDocument,
 } from './canvas-document';
 import {
+    addImagesToCanvasDocument,
     addCanvasItemAnnotation,
     applyCanvasViewItemCrop,
     canvasItemAnnotations,
@@ -268,6 +269,36 @@ describe('canvas view model', () => {
         );
 
         expect(cropped.crop).toEqual({ x: 0.25, y: 0.2, width: 0.5, height: 0.6 });
+    });
+
+    it('adds dropped images to a compact grid from the drop point', () => {
+        const doc = createCanvasDocumentForImages([image('img-a')]);
+
+        const result = addImagesToCanvasDocument(
+            doc,
+            [image('img-b', 400, 200), image('img-c', 100, 200), image('img-d', 200, 200)],
+            { x: 50, y: 60 },
+        );
+
+        expect(result.addedImageIds).toEqual(['img-b', 'img-c', 'img-d']);
+        expect(result.skippedImageIds).toEqual([]);
+        expect(result.document.items.map(item => item.imageId)).toEqual(['img-a', 'img-b', 'img-c', 'img-d']);
+        expect(result.document.items.slice(1)).toMatchObject([
+            { imageId: 'img-b', x: 50, y: 60, width: 400, height: 200, z: 1 },
+            { imageId: 'img-c', x: 470, y: 60, width: 100, height: 200, z: 2 },
+            { imageId: 'img-d', x: 50, y: 280, width: 200, height: 200, z: 3 },
+        ]);
+        expect(validateCanvasDocument(result.document)).toEqual([]);
+    });
+
+    it('does not duplicate images already present on the canvas', () => {
+        const doc = createCanvasDocumentForImages([image('img-a')]);
+
+        const result = addImagesToCanvasDocument(doc, [image('img-a'), image('img-b')], { x: 10, y: 20 });
+
+        expect(result.addedImageIds).toEqual(['img-b']);
+        expect(result.skippedImageIds).toEqual(['img-a']);
+        expect(result.document.items.map(item => item.imageId)).toEqual(['img-a', 'img-b']);
     });
 
     it('adds item annotations to the persisted canvas document', () => {
