@@ -15,6 +15,10 @@ run_frontend() {
 }
 
 run_rust() {
+  # tauri.conf.json bundles ../node_modules/@anthropic-ai/claude-agent-sdk as a
+  # resource, so cargo needs node_modules present even for fmt/clippy/test.
+  npm ci
+
   (
     cd src-tauri
     cargo fmt --all -- --check
