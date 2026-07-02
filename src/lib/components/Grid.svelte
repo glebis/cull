@@ -2,7 +2,7 @@
     import { onDestroy } from 'svelte';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { open } from '@tauri-apps/plugin-dialog';
-    import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState, showToast, totalCount, folders, gridPreset, GRID_PRESETS, activeSmartCollection, activeCollection, activeDetectedClass, activeFolder, minSizeFilter } from '$lib/stores';
+    import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState, showToast, totalCount, folders, gridPreset, GRID_PRESETS, activeSmartCollection, activeCollection, activeDetectedClass, activeFolder, minSizeFilter, clipboardMonitorStatus } from '$lib/stores';
     import { importFolder as apiImportFolder, getImageCount, listFolders } from '$lib/api';
     import { IMAGE_PAGE_SIZE, loadImagesForCurrentScope, loadMoreImagesForCurrentScope } from '$lib/image-loading';
     import { wheelGestureIntent } from '$lib/gesture-interactions';
@@ -19,6 +19,7 @@
         type ScrollDirection,
     } from '$lib/view-utils';
     import { createPrefetchCache } from '$lib/prefetch-cache';
+    import clipboardMonitorEmptySrc from '$lib/assets/clipboard-monitor-empty.png';
     import Thumbnail from './Thumbnail.svelte';
 
     let containerEl: HTMLDivElement | undefined = $state(undefined);
@@ -240,6 +241,9 @@
         imageCount: $images.length,
         scopeKind,
     }));
+    let isClipboardMonitorEmpty = $derived(Boolean(
+        $activeCollection && $clipboardMonitorStatus?.collection_id === $activeCollection,
+    ));
 
     let scopeCopy = $derived(scopeEmptyCopy(scopeKind));
 
@@ -312,6 +316,20 @@
     {:else if libraryViewState === 'loading'}
         <div class="empty" aria-live="polite">
             <div class="empty-text">Loading library&hellip;</div>
+        </div>
+    {:else if (libraryViewState === 'scope-empty' || libraryViewState === 'empty') && isClipboardMonitorEmpty}
+        <div class="empty clipboard-empty">
+            <img
+                class="clipboard-empty-image"
+                src={clipboardMonitorEmptySrc}
+                alt=""
+                aria-hidden="true"
+            />
+            <div class="empty-text">Clipboard monitor is waiting</div>
+            <div class="empty-hint">Copied images will appear here as they arrive.</div>
+            {#if $clipboardMonitorStatus?.collection_name}
+                <div class="empty-hint">Saving into {$clipboardMonitorStatus.collection_name}</div>
+            {/if}
         </div>
     {:else if libraryViewState === 'scope-empty'}
         <div class="empty" data-testid="scope-empty-state">
@@ -433,6 +451,20 @@
     .empty-icon {
         font-size: 48px;
         color: var(--border);
+    }
+    .clipboard-empty {
+        padding: calc(var(--spacing) * 3);
+        text-align: center;
+    }
+    .clipboard-empty-image {
+        width: min(54vw, 520px);
+        max-height: 42vh;
+        aspect-ratio: 1040 / 650;
+        object-fit: contain;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 8%, transparent);
     }
     .empty-import-btn {
         padding: var(--spacing) calc(var(--spacing) * 2);
