@@ -1,7 +1,7 @@
 <script lang="ts">
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, showMissing, requestTextInput } from '$lib/stores';
+    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, showMissing, requestTextInput, clipboardMonitorStatus } from '$lib/stores';
     import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, deleteCollectionApi, listSmartCollections, isYoloAvailable, isNudenetAvailable, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, SmartCollection } from '$lib/api';
@@ -23,6 +23,11 @@
     let clipboardMoving = $state(false);
     let clipboardPublishing = $state(false);
     let clipboardPublishResult = $state<ClipboardPublishResult | null>(null);
+
+    function setClipboardStatus(status: ClipboardMonitorStatus | null) {
+        clipboardStatus = status;
+        clipboardMonitorStatus.set(status);
+    }
 
     import { buildDisplayFolders, formatSidebarCount } from '$lib/sidebar-utils';
     import SessionSwitcher from './SessionSwitcher.svelte';
@@ -54,13 +59,13 @@
             showToast('Failed to load smart collections', { detail: String(e), type: 'error', duration: 8000 });
         }
         try {
-            clipboardStatus = await getClipboardMonitorStatus();
+            setClipboardStatus(await getClipboardMonitorStatus());
         } catch (e) {
             console.error('Failed to load clipboard monitor status:', e);
         }
         try {
             await listen('clipboard-monitor:capture', async () => {
-                clipboardStatus = await getClipboardMonitorStatus();
+                setClipboardStatus(await getClipboardMonitorStatus());
                 const c = await listCollections();
                 collections.set(c);
                 if (clipboardStatus?.collection_id && get(activeCollection) === clipboardStatus.collection_id) {
@@ -188,13 +193,14 @@
     async function handleToggleClipboardMonitor() {
         const wasRunning = clipboardStatus?.running ?? false;
         try {
-            clipboardStatus = wasRunning
+            const nextStatus = wasRunning
                 ? await stopClipboardMonitor()
                 : await startClipboardMonitor(null);
+            setClipboardStatus(nextStatus);
             const c = await listCollections();
             collections.set(c);
-            if (!wasRunning && clipboardStatus.collection_id) {
-                await applyClipboardMonitorCollection(clipboardStatus.collection_id);
+            if (!wasRunning && nextStatus.collection_id) {
+                await applyClipboardMonitorCollection(nextStatus.collection_id);
             }
         } catch (e) {
             showToast('Clipboard Monitor failed', { detail: String(e), type: 'error', duration: 8000 });
@@ -207,7 +213,7 @@
         if (!selected || Array.isArray(selected)) return;
         clipboardMoving = true;
         try {
-            clipboardStatus = await moveClipboardCaptureFolder(selected);
+            setClipboardStatus(await moveClipboardCaptureFolder(selected));
             showToast('Clipboard folder moved', { detail: selected, type: 'success', duration: 8000 });
         } catch (e) {
             showToast('Move failed', { detail: String(e), type: 'error', duration: 10000 });
@@ -219,7 +225,7 @@
     async function handleClipboardCaptureExistingChange(event: Event) {
         const enabled = (event.currentTarget as HTMLInputElement).checked;
         try {
-            clipboardStatus = await setClipboardMonitorCaptureExistingOnStart(enabled);
+            setClipboardStatus(await setClipboardMonitorCaptureExistingOnStart(enabled));
         } catch (e) {
             showToast('Clipboard setting failed', { detail: String(e), type: 'error', duration: 8000 });
         }
