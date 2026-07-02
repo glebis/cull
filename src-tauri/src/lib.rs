@@ -30,8 +30,8 @@ pub mod test_support {
 }
 
 use crate::commands::deeplink::{
-    emit_open_params, open_params_for_drag_drop_paths, open_params_for_file_paths,
-    open_params_for_urls, parse_deep_link,
+    emit_open_params, open_params_for_drag_drop_paths, open_params_for_drag_drop_paths_at,
+    open_params_for_file_paths, open_params_for_urls, parse_deep_link,
 };
 use crate::db_core::db::Database;
 use crate::db_core::detection::DetectionEngine;
@@ -727,10 +727,16 @@ pub fn run() {
                     tauri::DragDropEvent::Leave => {
                         let _ = app.emit("drag-hover", false);
                     }
-                    tauri::DragDropEvent::Drop { paths, .. } => {
+                    tauri::DragDropEvent::Drop { paths, position } => {
                         let _ = app.emit("drag-hover", false);
 
-                        for params in open_params_for_drag_drop_paths(paths) {
+                        let scale_factor = app
+                            .get_webview_window("main")
+                            .and_then(|window| window.scale_factor().ok())
+                            .unwrap_or(1.0);
+                        let logical_position = (position.x / scale_factor, position.y / scale_factor);
+
+                        for params in open_params_for_drag_drop_paths_at(paths, Some(logical_position)) {
                             let _ = emit_open_params(app, params);
                         }
                     }

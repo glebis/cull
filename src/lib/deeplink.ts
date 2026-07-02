@@ -21,10 +21,11 @@ import {
     activeCollection,
     activeSmartCollection,
     activeDetectedClass,
+    activeSession,
     collections,
     type ViewMode,
 } from './stores';
-import { importFolder, importFiles, addToCollection, listCollections, getBatchImages, listFolders, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls } from './api';
+import { importFolder, importFiles, addToCollection, listCollections, getBatchImages, listFolders, listImagesByFolder, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls, type ImageWithFile, type ImportResponse } from './api';
 import { applyClipboardMonitorCollection } from './clipboard-monitor';
 import { clearImageScope, invalidateImageCache, loadAllImages, loadImagesForCurrentScope, loadImagesUntil, resetImagePaging } from './image-loading';
 
@@ -40,9 +41,23 @@ interface OpenParams {
     image_id?: string | null;
     imageId?: string | null;
     gap?: number | null;
+    drag_drop?: boolean | null;
+    drop_x?: number | null;
+    drop_y?: number | null;
 }
 
 const VALID_VIEWS: ViewMode[] = ['grid', 'compare', 'loupe', 'canvas', 'lineage', 'embeddings', 'export'];
+const FOLDER_IMAGE_PAGE_SIZE = 250;
+const FOLDER_IMAGE_PAGE_LIMIT = 200;
+
+interface CanvasImportDropDetail {
+    images: ImageWithFile[];
+    folder?: string | null;
+    paths?: string[] | null;
+    dropX: number;
+    dropY: number;
+    importResult: ImportResponse;
+}
 
 function focusIndex(index: number) {
     focusedImageOverride.set(null);
@@ -86,6 +101,11 @@ async function focusImageById(imageId: string): Promise<boolean> {
 
 export async function handleParams(params: OpenParams) {
     console.log('[deep-link] handleParams called:', JSON.stringify(params));
+    if (params.drag_drop && get(viewMode) === 'canvas' && (params.folder || params.path || (params.paths && params.paths.length > 0))) {
+        await handleCanvasDropImport(params);
+        return;
+    }
+
     // Set view mode
     if (params.view && VALID_VIEWS.includes(params.view as ViewMode)) {
         navigateTo(params.view as ViewMode);
@@ -234,6 +254,77 @@ export async function handleParams(params: OpenParams) {
             console.error('Deep link: fullscreen request failed', e);
         }
     }
+}
+
+async function handleCanvasDropImport(params: OpenParams) {
+    if (params.folder) {
+        await handleCanvasFolderDrop(params);
+        return;
+    }
+
+    const droppedPaths = params.paths?.length ? params.paths : (params.path ? [params.path] : []);
+    if (droppedPaths.length === 0) return;
+
+    try {
+        const result = await importFiles(droppedPaths, get(activeSession)?.id ?? null);
+        const imagesForPaths = await Promise.all(droppedPaths.map(path => getImageByPath(path)));
+        emitCanvasImportDrop({
+            images: uniqueImages(imagesForPaths.filter((image): image is ImageWithFile => image !== null)),
+            paths: droppedPaths,
+            dropX: params.drop_x ?? 0,
+            dropY: params.drop_y ?? 0,
+            importResult: result,
+        });
+    } catch (e) {
+        console.error('Deep link: failed to import dropped canvas files', e);
+        showToast('Canvas import failed', { detail: String(e), type: 'error', duration: 10000 });
+    }
+}
+
+async function handleCanvasFolderDrop(params: OpenParams) {
+    if (!params.folder) return;
+    try {
+        const result = await importFolder(params.folder, get(activeSession)?.id ?? null);
+        const folderImages = await listAllImagesByFolder(params.folder);
+        const f = await listFolders();
+        folders.set(f);
+        emitCanvasImportDrop({
+            images: folderImages,
+            folder: params.folder,
+            dropX: params.drop_x ?? 0,
+            dropY: params.drop_y ?? 0,
+            importResult: result,
+        });
+    } catch (e) {
+        console.error('Deep link: failed to import dropped canvas folder', e);
+        showToast('Canvas folder import failed', { detail: String(e), type: 'error', duration: 10000 });
+    }
+}
+
+async function listAllImagesByFolder(folder: string): Promise<ImageWithFile[]> {
+    const allImages: ImageWithFile[] = [];
+    for (let page = 0; page < FOLDER_IMAGE_PAGE_LIMIT; page++) {
+        const offset = page * FOLDER_IMAGE_PAGE_SIZE;
+        const batch = await listImagesByFolder(folder, FOLDER_IMAGE_PAGE_SIZE, offset);
+        allImages.push(...batch);
+        if (batch.length < FOLDER_IMAGE_PAGE_SIZE) break;
+    }
+    return uniqueImages(allImages);
+}
+
+function emitCanvasImportDrop(detail: CanvasImportDropDetail) {
+    window.dispatchEvent(new CustomEvent<CanvasImportDropDetail>('canvas-import-drop', { detail }));
+}
+
+function uniqueImages(input: ImageWithFile[]): ImageWithFile[] {
+    const seen = new Set<string>();
+    const images: ImageWithFile[] = [];
+    for (const image of input) {
+        if (seen.has(image.image.id)) continue;
+        seen.add(image.image.id);
+        images.push(image);
+    }
+    return images;
 }
 
 let lastHandledKey = '';
