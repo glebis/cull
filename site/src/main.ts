@@ -6,21 +6,27 @@ inject();
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <div class="page-shell">
     <header class="topbar">
-      <a class="mark" href="/" aria-label="Cull home">
-        <img src="/images/cull-app-logo.png" alt="" />
-      </a>
-      <span class="release-note">early release / open source</span>
+      <div class="topbar-brand">
+        <a class="mark" href="/" aria-label="Cull home">
+          <img src="/images/cull-app-logo.png" alt="" />
+          <span class="mark-name">CULL</span>
+        </a>
+        <span class="topbar-tagline">local-first &times; agent-ready: mcp &times; cli &times; skill</span>
+      </div>
+      <span class="release-note">
+        <svg class="osi-mark" viewBox="0 0 24 24" role="img" aria-label="Open source" fill="currentColor"><path fill-rule="evenodd" d="M12 1.6C6.26 1.6 1.6 6.26 1.6 12c0 4.51 2.87 8.35 6.88 9.79l2.06-5.53a4.52 4.52 0 1 1 2.92 0l2.06 5.53A10.41 10.41 0 0 0 22.4 12c0-5.74-4.66-10.4-10.4-10.4Z"/></svg>
+        open source
+      </span>
     </header>
 
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <p class="eyebrow hero-step-1">local-first / agent-ready</p>
         <h1 id="hero-title" class="hero-step-2">
-          <span>Go from</span>
+          <span class="h1-connector">Go from</span>
           <button class="rotating-line-control" type="button" data-rotating-line="from" aria-label="Change starting material">
             <span data-rotating-line-value="from">500 images</span>
           </button>
-          <span>to</span>
+          <span class="h1-connector">to</span>
           <button class="rotating-line-control rotating-line-control--outcome" type="button" data-rotating-line="to" aria-label="Change finished outcome">
             <span data-rotating-line-value="to">20 keepers</span>
           </button>
@@ -30,11 +36,17 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <figure class="product-shot hero-step-4">
         <img src="/images/cull-state-preview.png" alt="Loupe view with an image selected, an agent context menu offering Regenerate, Select, and Review, and a pending agent proposal in the side rail" />
       </figure>
-      <form class="signup-form signup-form--featured hero-step-5" data-signup-form>
-        <div class="download-row">
-          <a class="download-button" href="https://github.com/glebis/cull/releases/latest" data-download-button>Download Cull</a>
-          <span class="download-specs">macOS 11+ &middot; Apple Silicon &middot; free &amp; open source</span>
+      <aside class="download-block hero-step-5" aria-label="Download Cull">
+        <div class="download-copy">
+          <p class="download-title">Get Cull</p>
+          <p class="download-specs">macOS 11+ &middot; Apple Silicon &middot; free &amp; open source</p>
         </div>
+        <a class="download-button" href="https://github.com/glebis/cull/releases/latest" data-download-button>
+          Download
+          <span class="download-version">v0.2.4 &middot; .dmg</span>
+        </a>
+      </aside>
+      <form class="signup-form signup-form--featured hero-step-6" data-signup-form>
         <label for="email">Stay up to date with releases.</label>
         <div class="signup-row">
           <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="signup-status" required />
