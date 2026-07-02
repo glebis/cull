@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { MCP_CONFIG_SNIPPET } from './mcp-config';
+
+const componentsDir = join(process.cwd(), 'src/lib/components');
 
 describe('MCP config snippet', () => {
     it('is valid JSON describing the cull stdio server', () => {
@@ -11,7 +13,7 @@ describe('MCP config snippet', () => {
     });
 
     it('is the single source for both McpSettings display and copy', () => {
-        const src = readFileSync(resolve(__dirname, 'components/McpSettings.svelte'), 'utf8');
+        const src = readFileSync(join(componentsDir, 'McpSettings.svelte'), 'utf8');
         expect(src).toContain('MCP_CONFIG_SNIPPET');
         // The old bug: copyConfig() copied a hardcoded app-bundle path that
         // differed from the rendered snippet.
@@ -20,7 +22,7 @@ describe('MCP config snippet', () => {
     });
 
     it('is the single source for AgentSkillsDialog', () => {
-        const src = readFileSync(resolve(__dirname, 'components/AgentSkillsDialog.svelte'), 'utf8');
+        const src = readFileSync(join(componentsDir, 'AgentSkillsDialog.svelte'), 'utf8');
         expect(src).toContain('MCP_CONFIG_SNIPPET');
         expect(src).not.toContain('"mcpServers": {');
     });

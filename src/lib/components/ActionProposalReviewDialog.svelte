@@ -134,7 +134,7 @@
         inset: 0;
         justify-content: center;
         position: fixed;
-        z-index: 1000;
+        z-index: var(--z-modal);
     }
 
     :global(.agent-review-dialog) {

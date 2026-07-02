@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 // Token create/revoke/rotate are security-relevant: a failed revoke that only
 // hits console.error leaves the user believing access was removed. Each
 // handler's catch block must surface a visible error toast.
 describe('McpSettings token operation error surfacing', () => {
-    const src = readFileSync(resolve(__dirname, 'McpSettings.svelte'), 'utf8');
+    const src = readFileSync(join(process.cwd(), 'src/lib/components/McpSettings.svelte'), 'utf8');
 
     function catchBlockOf(handler: string): string {
         const start = src.indexOf(`async function ${handler}`);
