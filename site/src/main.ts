@@ -164,10 +164,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       </div>
     </section>
 
-    <section class="bottom-signup reveal-surface" aria-labelledby="privacy-title" data-reveal>
-      <div class="reveal-item reveal-delay-0">
-        <h2 id="privacy-title">Be first when it ships</h2>
-      </div>
+    <section class="bottom-signup reveal-surface" aria-label="Sign up for release updates" data-reveal>
       <div class="bottom-signup-copy reveal-item reveal-delay-2">
         <form class="signup-form signup-form--featured signup-form--bottom" data-signup-form>
           <label for="bottom-email">Stay up to date with releases.</label>
