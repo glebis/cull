@@ -199,7 +199,7 @@
         align-items: flex-start;
         justify-content: center;
         padding-top: 8vh;
-        z-index: 1210;
+        z-index: var(--z-modal);
     }
     .gr-panel {
         width: min(560px, 94vw);

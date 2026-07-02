@@ -702,7 +702,7 @@
 <style>
     .context-menu {
         position: fixed;
-        z-index: 10000;
+        z-index: var(--z-context-menu);
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: var(--radius);

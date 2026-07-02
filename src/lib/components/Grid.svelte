@@ -2,12 +2,12 @@
     import { onDestroy } from 'svelte';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { open } from '@tauri-apps/plugin-dialog';
-    import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState, showToast, totalCount, folders, gridPreset, GRID_PRESETS } from '$lib/stores';
+    import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState, showToast, totalCount, folders, gridPreset, GRID_PRESETS, activeSmartCollection, activeCollection, activeDetectedClass, activeFolder, minSizeFilter } from '$lib/stores';
     import { importFolder as apiImportFolder, getImageCount, listFolders } from '$lib/api';
     import { IMAGE_PAGE_SIZE, loadImagesForCurrentScope, loadMoreImagesForCurrentScope } from '$lib/image-loading';
     import { wheelGestureIntent } from '$lib/gesture-interactions';
     import { gridGestureZoom } from '$lib/grid-gesture-zoom';
-    import { resolveLibraryViewState } from '$lib/library-view-state';
+    import { resolveLibraryViewState, scopeEmptyCopy, type LibraryScopeKind } from '$lib/library-view-state';
     import {
         computeGridClickSelection,
         computeGridLayout,
@@ -222,12 +222,33 @@
         });
     });
 
+    // Same precedence as currentScope() in image-loading.ts, so the empty
+    // state describes what the user is actually looking at.
+    let scopeKind = $derived.by<LibraryScopeKind>(() => {
+        if ($activeSmartCollection?.filter_json) return 'smart';
+        if ($activeCollection) return 'collection';
+        if ($activeDetectedClass) return 'detected-class';
+        if ($activeFolder) return 'folder';
+        if ($minSizeFilter > 0) return 'filtered';
+        return 'all';
+    });
+
     let libraryViewState = $derived(resolveLibraryViewState({
         loading: $imageLoadState.loading,
         error: $imageLoadState.error,
         loaded: $imageLoadState.loaded,
         imageCount: $images.length,
+        scopeKind,
     }));
+
+    let scopeCopy = $derived(scopeEmptyCopy(scopeKind));
+
+    function clearFilters() {
+        activeDetectedClass.set(null);
+        minSizeFilter.set(0);
+        loadImagesForCurrentScope({ force: true })
+            .catch(e => console.error('Failed to reload after clearing filters:', e));
+    }
 
     function retryLoad() {
         loadImagesForCurrentScope({ force: true, invalidateCache: true })
@@ -291,6 +312,15 @@
     {:else if libraryViewState === 'loading'}
         <div class="empty" aria-live="polite">
             <div class="empty-text">Loading library&hellip;</div>
+        </div>
+    {:else if libraryViewState === 'scope-empty'}
+        <div class="empty" data-testid="scope-empty-state">
+            <div class="empty-icon">&#9776;</div>
+            <div class="empty-text">{scopeCopy.title}</div>
+            {#if scopeCopy.clearFilters}
+                <button class="empty-import-btn" onclick={clearFilters}>Clear Filters</button>
+            {/if}
+            <div class="empty-hint">{scopeCopy.hint}</div>
         </div>
     {:else if libraryViewState === 'empty'}
         <div class="empty">

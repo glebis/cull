@@ -111,7 +111,7 @@
         border: 1px solid var(--border);
         border-radius: calc(var(--radius) * 2);
         padding: var(--spacing);
-        z-index: 900;
+        z-index: var(--z-panel);
         min-width: 200px;
         max-width: 90vw;
         box-shadow: 0 0 0 1px var(--bg);
