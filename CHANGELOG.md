@@ -8,6 +8,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 No changes yet.
 
+## [0.2.4] - 2026-07-02
+
+### Added
+
+- Claude Agent SDK chat in the agent dock: streamed agent events, chat-driven
+  selection proposals, agent profiles, token/cost estimates, and visual context
+  for selected images.
+- Agent panel commands exposed in the command palette.
+
+### Fixed
+
+- Empty collections, folders, and filters now show scope-specific empty states
+  instead of claiming the whole library is empty (with a Clear Filters action
+  for filter views).
+- MCP settings: the copied Claude Code config now matches the displayed
+  snippet exactly, and token create/revoke/rotate failures surface visible
+  errors instead of failing silently.
+- Toasts always render above dialogs and context menus via a tokenized
+  z-index scale.
+- Sidebar footer fit and accessibility; DMG installer window scrollbars.
+- CI: Rust checks install node_modules (required by bundled agent-SDK
+  resources) and the supply-chain audit passes again (anyhow updated for
+  RUSTSEC-2026-0190; unresolvable transitive advisories documented in
+  deny.toml).
+
 ## [0.2.3] - 2026-06-18
 
 ### Fixed
