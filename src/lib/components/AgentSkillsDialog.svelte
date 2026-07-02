@@ -2,20 +2,14 @@
     import { tick } from 'svelte';
     import { openUrl } from '@tauri-apps/plugin-opener';
     import { showToast } from '$lib/stores';
+    import { MCP_CONFIG_SNIPPET } from '$lib/mcp-config';
 
     let { onclose }: { onclose: () => void } = $props();
 
     let closeButton: HTMLButtonElement | undefined = $state();
 
     const agentDocsUrl = 'https://github.com/glebis/cull/blob/main/docs/agents.md';
-    const mcpConfig = `{
-  "mcpServers": {
-    "cull": {
-      "command": "cull",
-      "args": ["--mcp-stdio"]
-    }
-  }
-}`;
+    const mcpConfig = MCP_CONFIG_SNIPPET;
 
     const agentInstructions = `Use Cull through MCP when you need the live app, selections, snapshots, tokens, or audit logs.
 Use cull --json for headless import, export, library stats, embeddings, and quality analysis.
