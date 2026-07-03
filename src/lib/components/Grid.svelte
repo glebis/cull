@@ -28,8 +28,8 @@
     let containerHeight = $state(600);
     let scrollTop = $state(0);
     let scrollRestoreSeq = 0;
-    let pendingZoomAnchor: { x: number; y: number } | null = null;
-    let previousZoomLayout: {
+    let pendingGridAnchor: { x: number; y: number } | null = null;
+    let previousGridLayout: {
         size: number;
         gap: number;
         cols: number;
@@ -150,7 +150,7 @@
         const next = gridGestureZoom({ size, gap, preset: $gridPreset }, factor, GRID_PRESETS);
         if (next.size === size && next.gap === gap && next.preset === $gridPreset) return;
 
-        pendingZoomAnchor = { x: pointerX, y: pointerY };
+        pendingGridAnchor = { x: pointerX, y: pointerY };
         thumbnailSize.set(next.size);
         gridPreset.set(next.preset);
         gridGap.set(next.gap);
@@ -215,18 +215,28 @@
             containerWidth,
             containerHeight,
         };
-        const previous = previousZoomLayout;
-        previousZoomLayout = current;
-        if (!previous || (previous.size === size && previous.gap === gap)) {
-            pendingZoomAnchor = null;
+        const previous = previousGridLayout;
+        previousGridLayout = current;
+        if (!previous) {
+            pendingGridAnchor = null;
             return;
         }
 
-        const anchor = pendingZoomAnchor ?? {
-            x: containerWidth / 2,
-            y: containerHeight / 2,
+        const layoutChanged =
+            previous.size !== size ||
+            previous.gap !== gap ||
+            previous.cols !== cols ||
+            previous.cellSize !== cellSize;
+        if (!layoutChanged) {
+            pendingGridAnchor = null;
+            return;
+        }
+
+        const anchor = pendingGridAnchor ?? {
+            x: previous.containerWidth / 2,
+            y: previous.containerHeight / 2,
         };
-        pendingZoomAnchor = null;
+        pendingGridAnchor = null;
         const nextScrollTop = computeAnchoredGridScrollTop({
             oldScrollTop: previous.scrollTop,
             viewportWidth: previous.containerWidth,

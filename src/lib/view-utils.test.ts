@@ -358,6 +358,23 @@ describe('computeAnchoredGridScrollTop', () => {
         expect(scrollTop).toBeCloseTo(164, 0);
     });
 
+    it('keeps the same anchor image when the viewport changes column count without zooming', () => {
+        const scrollTop = computeAnchoredGridScrollTop({
+            oldScrollTop: 820,
+            viewportWidth: 800,
+            viewportHeight: 600,
+            anchorX: 400,
+            anchorY: 300,
+            oldCols: 4,
+            oldCellSize: 164,
+            newCols: 5,
+            newCellSize: 164,
+            totalItems: 100,
+        });
+
+        expect(scrollTop).toBeCloseTo(656, 0);
+    });
+
     it('clamps anchored scroll to the new layout bounds', () => {
         const scrollTop = computeAnchoredGridScrollTop({
             oldScrollTop: 4000,
