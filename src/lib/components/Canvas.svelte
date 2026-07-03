@@ -15,7 +15,7 @@
         showToast,
         statusHint,
     } from '$lib/stores';
-    import { updateCanvasLayout, type ImageWithFile } from '$lib/api';
+    import { updateCanvasLayout, type Canvas, type ImageWithFile } from '$lib/api';
     import {
         computeCanvasItemDragPosition,
         computeCanvasPanDrag,
@@ -49,6 +49,7 @@
 
     type CropPoint = { x: number; y: number };
     type CropDraft = { itemId: string; anchor: CropPoint; current: CropPoint };
+    type PendingCanvasSave = { canvasId: string; layoutJson: string };
     type CanvasImportDropDetail = {
         images: ImageWithFile[];
         folder?: string | null;
@@ -93,6 +94,8 @@
     let loadedCanvasKey = $state('');
     let appliedCanvasZoomRequestId = 0;
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
+    let pendingCanvasSaves = new Map<string, PendingCanvasSave>();
+    let saveInFlight: Promise<void> | null = null;
 
     // Viewport culling + render cap (P2): only mount items intersecting the viewport.
     const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
@@ -122,7 +125,7 @@
     });
 
     onDestroy(() => {
-        if (saveTimer) clearTimeout(saveTimer);
+        void flushPendingCanvasSaves();
     });
 
     onMount(() => {
@@ -136,8 +139,22 @@
                 showToast('Canvas drop failed', { detail: String(e), type: 'error', duration: 10000 });
             });
         };
+        const flushForPageLifecycle = () => {
+            void flushPendingCanvasSaves();
+        };
+        const flushWhenHidden = () => {
+            if (document.visibilityState === 'hidden') flushForPageLifecycle();
+        };
         window.addEventListener('canvas-import-drop', handleCanvasImportDrop);
-        return () => window.removeEventListener('canvas-import-drop', handleCanvasImportDrop);
+        window.addEventListener('pagehide', flushForPageLifecycle);
+        window.addEventListener('beforeunload', flushForPageLifecycle);
+        document.addEventListener('visibilitychange', flushWhenHidden);
+        return () => {
+            window.removeEventListener('canvas-import-drop', handleCanvasImportDrop);
+            window.removeEventListener('pagehide', flushForPageLifecycle);
+            window.removeEventListener('beforeunload', flushForPageLifecycle);
+            document.removeEventListener('visibilitychange', flushWhenHidden);
+        };
     });
 
     function handleResizeMouseDown(e: MouseEvent, item: CanvasViewItem) {
@@ -153,16 +170,21 @@
     $effect(() => {
         const imgs = $images;
         const canvas = $activeCanvas;
-        const key = [
-            canvas?.id ?? '__ephemeral__',
-            canvas?.layout_json ?? '{}',
-            imgs.map(i => i.image.id).join(','),
-        ].join('|');
+        const key = canvasLoadKey(canvas, imgs);
         if (key !== loadedCanvasKey) {
+            void flushPendingCanvasSaves();
             loadedCanvasKey = key;
             loadCanvasState(canvas?.layout_json ?? '{}', imgs);
         }
     });
+
+    function canvasLoadKey(canvas: Canvas | null, imgs: ImageWithFile[]) {
+        return [
+            canvas?.id ?? '__ephemeral__',
+            canvas?.layout_json ?? '{}',
+            imgs.map(i => i.image.id).join(','),
+        ].join('|');
+    }
 
     function loadCanvasState(layoutJson: string, imgs: ImageWithFile[]) {
         try {
@@ -178,15 +200,6 @@
     }
 
     function queueCanvasSave() {
-        if (!$activeCanvas || !canvasDocument) return;
-        if (saveTimer) clearTimeout(saveTimer);
-        saveTimer = setTimeout(() => {
-            saveTimer = null;
-            persistCanvasLayout();
-        }, 350);
-    }
-
-    async function persistCanvasLayout() {
         const canvas = $activeCanvas;
         if (!canvas || !canvasDocument) return;
 
@@ -198,13 +211,62 @@
 
         try {
             const layoutJson = serializeCanvasDocumentLayout(updatedDocument);
-            canvasDocument = updatedDocument;
-            await updateCanvasLayout(canvas.id, layoutJson);
             const updatedCanvas = { ...canvas, layout_json: layoutJson };
+
+            canvasDocument = updatedDocument;
+            loadedCanvasKey = canvasLoadKey(updatedCanvas, $images);
             activeCanvas.set(updatedCanvas);
             sessionCanvases.update(list => list.map(item => item.id === updatedCanvas.id ? updatedCanvas : item));
+            pendingCanvasSaves.set(updatedCanvas.id, { canvasId: updatedCanvas.id, layoutJson });
+            scheduleCanvasSaveFlush();
         } catch (e) {
             showToast('Canvas save failed', { detail: String(e), type: 'error', duration: 10000 });
+        }
+    }
+
+    function scheduleCanvasSaveFlush(delay = 350) {
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+            saveTimer = null;
+            void flushPendingCanvasSaves();
+        }, delay);
+    }
+
+    async function flushPendingCanvasSaves(): Promise<void> {
+        if (saveTimer) {
+            clearTimeout(saveTimer);
+            saveTimer = null;
+        }
+        if (saveInFlight) {
+            await saveInFlight;
+            if (pendingCanvasSaves.size > 0) return flushPendingCanvasSaves();
+            return;
+        }
+
+        const saves = Array.from(pendingCanvasSaves.values());
+        if (saves.length === 0) return;
+
+        saveInFlight = (async () => {
+            for (const save of saves) {
+                const current = pendingCanvasSaves.get(save.canvasId);
+                if (!current || current.layoutJson !== save.layoutJson) continue;
+
+                pendingCanvasSaves.delete(save.canvasId);
+                try {
+                    await updateCanvasLayout(save.canvasId, save.layoutJson);
+                } catch (e) {
+                    if (!pendingCanvasSaves.has(save.canvasId)) {
+                        pendingCanvasSaves.set(save.canvasId, save);
+                    }
+                    showToast('Canvas save failed', { detail: String(e), type: 'error', duration: 10000 });
+                }
+            }
+        })();
+
+        try {
+            await saveInFlight;
+        } finally {
+            saveInFlight = null;
         }
     }
 
