@@ -133,20 +133,36 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     </section>
 
     <section class="pull-quote reveal-surface" aria-label="Keep what matters" data-reveal>
+      <svg class="pull-quote-decor pull-quote-decor--left" viewBox="0 0 120 90" aria-hidden="true">
+        <circle cx="26" cy="34" r="16" fill="var(--green)" opacity="0.85" />
+        <path d="M40 46 C 62 66, 84 70, 108 62" fill="none" stroke="var(--text-secondary)" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.6" />
+        <circle cx="112" cy="61" r="4" fill="var(--orange)" opacity="0.9" />
+      </svg>
+      <svg class="pull-quote-decor pull-quote-decor--right" viewBox="0 0 120 90" aria-hidden="true">
+        <path d="M10 28 C 38 20, 62 24, 82 38" fill="none" stroke="var(--text-secondary)" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.6" />
+        <path d="M116 30 L 88 44 L 116 58 Z" fill="var(--purple)" opacity="0.85" />
+      </svg>
       <p class="pull-quote-text reveal-item reveal-delay-1">Keep what matters.</p>
     </section>
 
     <section class="bottom-signup reveal-surface" aria-label="Sign up for release updates" data-reveal>
-      <div class="bottom-signup-copy reveal-item reveal-delay-2">
-        <form class="signup-form signup-form--featured signup-form--bottom" data-signup-form>
-          <label for="bottom-email">Stay up to date with releases.</label>
-          <div class="signup-row">
-            <input id="bottom-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="bottom-signup-status" required />
-            <button type="submit" data-submit-button>Get notified</button>
-          </div>
-          <p id="bottom-signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
-        </form>
-      </div>
+      <form class="signup-form signup-form--featured signup-form--bottom reveal-item reveal-delay-1" data-signup-form>
+        <svg class="signup-decor signup-decor--left" viewBox="0 0 90 100" aria-hidden="true">
+          <path d="M18 18 L 40 30 L 20 44 Z" fill="none" stroke="var(--text)" stroke-width="1.5" opacity="0.75" />
+          <path d="M22 50 C 26 70, 40 82, 58 86" fill="none" stroke="var(--text-secondary)" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.6" />
+          <circle cx="63" cy="87" r="4.5" fill="var(--orange)" opacity="0.9" />
+        </svg>
+        <svg class="signup-decor signup-decor--right" viewBox="0 0 60 120" aria-hidden="true">
+          <path d="M22 14 L 40 32 M 40 14 L 22 32" stroke="var(--text-secondary)" stroke-width="1.5" opacity="0.65" />
+          <circle cx="34" cy="98" r="9" fill="none" stroke="var(--text-secondary)" stroke-width="1.5" opacity="0.65" />
+        </svg>
+        <label for="bottom-email">Stay up to date with releases.</label>
+        <div class="signup-row">
+          <input id="bottom-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="bottom-signup-status" required />
+          <button type="submit" data-submit-button>Get notified</button>
+        </div>
+        <p id="bottom-signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
+      </form>
     </section>
 
     <footer class="site-footer">
