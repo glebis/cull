@@ -33,16 +33,24 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       </div>
       <figure class="product-shot hero-step-4" data-slideshow>
         <div class="slideshow-track">
-          <img class="slideshow-slide is-current" src="/images/cull-grid-real.png" alt="Cull's grid view with smart collections in the sidebar and a library of images with ratings" />
+          <img class="slideshow-slide is-current" src="/images/cull-grid-real.png" alt="Cull's grid view with the search bar open, showing smart filters like Picks, Rejects, and GPT Images across a large library" />
+          <img class="slideshow-slide" src="/images/cull-loupe-real.png" alt="Cull's loupe view showing a single painterly landscape image full-screen" loading="lazy" />
+          <img class="slideshow-slide" src="/images/cull-compare-real.png" alt="Cull's side-by-side compare view weighing two poster variants against each other" loading="lazy" />
+          <img class="slideshow-slide" src="/images/cull-lineage-real.png" alt="Cull's lineage view grouping a generation series with charts and variant comparisons" loading="lazy" />
+          <img class="slideshow-slide" src="/images/cull-canvas-real.png" alt="Cull's canvas view arranging dozens of images into a freeform moodboard" loading="lazy" />
           <img class="slideshow-slide" src="/images/cull-agent-real.png" alt="Cull's AI Agent panel proposing a portfolio selection next to the image grid" loading="lazy" />
-          <img class="slideshow-slide" src="/images/cull-lineage-real.png" alt="Cull's lineage view grouping images by generation run" loading="lazy" />
           <img class="slideshow-slide" src="/images/cull-export-real.png" alt="Cull's export master with client delivery presets and a slide preview" loading="lazy" />
+          <img class="slideshow-slide" src="/images/cull-publish-real.png" alt="Cull's publish view packaging a collection into a shareable static site" loading="lazy" />
         </div>
         <div class="slideshow-dots" role="tablist" aria-label="Screenshots">
           <button type="button" role="tab" aria-selected="true" aria-label="Screenshot 1" data-slide-dot="0" class="is-current"></button>
           <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 2" data-slide-dot="1"></button>
           <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 3" data-slide-dot="2"></button>
           <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 4" data-slide-dot="3"></button>
+          <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 5" data-slide-dot="4"></button>
+          <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 6" data-slide-dot="5"></button>
+          <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 7" data-slide-dot="6"></button>
+          <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 8" data-slide-dot="7"></button>
         </div>
       </figure>
       <aside class="download-block hero-step-5" aria-label="Download Cull">
