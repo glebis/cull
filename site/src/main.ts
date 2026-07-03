@@ -6,13 +6,11 @@ inject();
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <div class="page-shell">
     <header class="topbar">
-      <div class="topbar-brand">
-        <a class="mark" href="/" aria-label="Cull home">
-          <img src="/images/cull-app-logo.png" alt="" />
-          <span class="mark-name">CULL</span>
-        </a>
-        <span class="topbar-tagline">local-first &times; agent-ready: mcp &times; cli &times; skill</span>
-      </div>
+      <a class="mark" href="/" aria-label="Cull home">
+        <img src="/images/cull-app-logo.png" alt="" />
+        <span class="mark-name">CULL</span>
+      </a>
+      <span class="topbar-tagline">local-first <span class="tagline-x">&times;</span> agent-ready: <span class="tagline-tag tagline-tag--mcp">mcp</span> <span class="tagline-x">&times;</span> <span class="tagline-tag tagline-tag--cli">cli</span> <span class="tagline-x">&times;</span> <span class="tagline-tag tagline-tag--skill">skill</span></span>
       <span class="release-note">
         <svg class="osi-mark" viewBox="0 0 24 24" role="img" aria-label="Open source" fill="currentColor"><path fill-rule="evenodd" d="M12 1.6C6.26 1.6 1.6 6.26 1.6 12c0 4.51 2.87 8.35 6.88 9.79l2.06-5.53a4.52 4.52 0 1 1 2.92 0l2.06 5.53A10.41 10.41 0 0 0 22.4 12c0-5.74-4.66-10.4-10.4-10.4Z"/></svg>
         open source
@@ -34,7 +32,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <p class="lede hero-step-3">A fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac.</p>
       </div>
       <figure class="product-shot hero-step-4">
-        <img src="/images/cull-state-preview.png" alt="Loupe view with an image selected, an agent context menu offering Regenerate, Select, and Review, and a pending agent proposal in the side rail" />
+        <img src="/images/cull-grid-real.png" alt="Cull's grid view with smart collections in the sidebar and a library of images with ratings" />
       </figure>
       <aside class="download-block hero-step-5" aria-label="Download Cull">
         <div class="download-header">
@@ -52,40 +50,15 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <li><span class="spec-icon" aria-hidden="true">&#9673;</span>macOS 11+ &middot; Apple Silicon</li>
           <li><span class="spec-icon" aria-hidden="true">&#9098;</span>v0.2.4 &middot; free &amp; open source</li>
         </ul>
+        <p class="brew-label">or install with Homebrew</p>
         <div class="brew-row">
           <code class="brew-command" id="brew-command">brew install --cask glebis/tap/cull</code>
-          <button class="brew-copy" type="button" data-brew-copy aria-label="Copy brew install command">Copy</button>
+          <button class="brew-copy" type="button" data-brew-copy aria-label="Copy brew install command">
+            <svg class="brew-copy-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg>
+            <svg class="brew-copy-icon brew-copy-icon--done" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5"/></svg>
+          </button>
         </div>
       </aside>
-      <form class="signup-form signup-form--featured hero-step-6" data-signup-form>
-        <label for="email">Stay up to date with releases.</label>
-        <div class="signup-row">
-          <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="signup-status" required />
-          <button type="submit" data-submit-button>Get notified</button>
-        </div>
-        <p id="signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
-      </form>
-    </section>
-
-    <section class="feature-note feature-note--boring reveal-surface" aria-labelledby="boring-title" data-reveal>
-      <figure class="feature-note-illustration reveal-item reveal-delay-0">
-        <img src="/images/boring-work-generated.png" alt="Photos, artwork, contact sheets, and color swatches being sorted into a portfolio box" />
-      </figure>
-      <div class="feature-note-copy reveal-item reveal-delay-2">
-        <h2 id="boring-title">The boring part of creative work, made fast</h2>
-        <p>Most tools are built for editing. This is built for the moment before that, when you have hundreds of images and need to reach a final set.</p>
-        <p>Look carefully, decide clearly, and make your work available to people and agents without friction.</p>
-      </div>
-    </section>
-
-    <section class="feature-note feature-note--artist reveal-surface" aria-labelledby="artist-title" data-reveal>
-      <figure class="feature-note-illustration reveal-item reveal-delay-0">
-        <img class="artist-founder-image artist-founder-image--camera" src="/images/artist-founder-camera-generated.png" alt="" />
-      </figure>
-      <div class="feature-note-copy reveal-item reveal-delay-2">
-        <h2 id="artist-title">Made by artists for artists</h2>
-        <p>I, <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a>, built this after getting tired of expensive, slow tools that made image work feel heavier than it needed to be. I wanted something <span class="founder-note-emphasis">open, local, and agent-friendly</span>: closer to Obsidian for images than another locked creative suite.</p>
-      </div>
     </section>
 
     <section class="claims reveal-surface" aria-label="Core claims" data-reveal>
@@ -107,27 +80,23 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <figure class="claim-illustration">
           <img src="/images/claim-agent-surface.png" alt="" />
         </figure>
-        <h2>AI can help when you want it</h2>
-        <p>Sort a folder yourself, or hand it to your agent through CLI or MCP when you want help.</p>
+        <h2>Agents when you want them</h2>
+        <p>Integrate via MCP or CLI. Let agents help you cull, tag, and organize &mdash; on your terms.</p>
       </div>
     </section>
 
     <section class="feature-note feature-note--agent-sdk reveal-surface" aria-labelledby="agent-sdk-title" data-reveal>
       <figure class="feature-note-illustration reveal-item reveal-delay-0">
-        <img src="/images/agent-sdk-generated.png" alt="A person at a desk while a small robot assistant sorts a stream of pictures into two neat stacks" loading="lazy" />
+        <img src="/images/agent-sdk-mono.png" alt="A person at a desk directing a stream of pictures that sorts itself into keep and reject stacks" loading="lazy" />
       </figure>
       <div class="feature-note-copy reveal-item reveal-delay-2">
-        <p class="eyebrow">new / claude agent sdk</p>
         <h2 id="agent-sdk-title">Ask Claude to do the first pass</h2>
         <p>Cull now ships with a built-in agent chat powered by the Claude Agent SDK. Describe what you want in plain language — "pick the sharpest shot from every series", "shortlist the warm portraits" — and Claude works through your library.</p>
         <p>Nothing changes without you: the agent proposes a selection, you see exactly which images are affected and what it costs, then approve or reject. Prefer your own setup? The same surface is open to any agent over MCP or the headless CLI.</p>
       </div>
     </section>
 
-    <section class="workflow reveal-surface" aria-labelledby="workflow-title" data-reveal>
-      <div class="reveal-item reveal-delay-0">
-        <h2 id="workflow-title">From folder to final set</h2>
-      </div>
+    <section class="workflow reveal-surface" aria-label="From folder to final set" data-reveal>
       <div class="workflow-list">
         <article class="reveal-item reveal-delay-1" data-command="import folder">
           <figure class="workflow-illustration"><img src="/images/workflow-folder.png" alt="" loading="lazy" /></figure>
@@ -152,45 +121,75 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       </div>
     </section>
 
-    <section class="open-source-note reveal-surface" aria-labelledby="open-source-title" data-reveal>
-      <figure class="open-source-illustration reveal-item reveal-delay-0">
-        <img src="/images/open-source-agents.png" alt="" />
-      </figure>
-      <div class="open-source-copy reveal-item reveal-delay-2">
-        <p class="eyebrow">built in the open</p>
-        <h2 id="open-source-title">Open source by design</h2>
-        <p>Free and open source. The code is public, your files stay on your machine, and no company can pull the tool away from you. Built with human direction and AI coding help, then reviewed and shipped by a person.</p>
-        <p>Current repository history: <strong>653 commits</strong> and counting.</p>
+    <section class="artist-panel reveal-surface" aria-labelledby="artist-title" data-reveal>
+      <div class="artist-panel-copy reveal-item reveal-delay-1">
+        <h2 id="artist-title">Made by artists for artists</h2>
+        <p>I, <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a>, built this after getting tired of expensive, slow tools that made image work feel heavier than it needed to be. I wanted something <span class="founder-note-emphasis">open, local, and agent-friendly</span>: closer to Obsidian for images than another locked creative suite.</p>
+        <p>Free and open source. The code is public, your files stay on your machine, and no company can pull the tool away from you.</p>
+        <p class="artist-panel-links">
+          <a href="https://github.com/glebis/cull">GitHub</a><span class="tagline-x">|</span><a href="https://t.me/glebkalinin">Telegram</a><span class="tagline-x">|</span><a href="https://www.linkedin.com/in/glebkalinin/">LinkedIn</a>
+        </p>
       </div>
+      <figure class="artist-panel-illustration reveal-item reveal-delay-2">
+        <img class="artist-founder-image artist-founder-image--camera" src="/images/artist-founder-camera-generated.png" alt="" />
+      </figure>
+    </section>
+
+    <section class="pull-quote reveal-surface" aria-label="Keep what matters" data-reveal>
+      <svg class="pull-quote-decor pull-quote-decor--left" viewBox="0 0 120 90" aria-hidden="true">
+        <circle cx="26" cy="34" r="16" fill="var(--green)" opacity="0.85" />
+        <path d="M40 46 C 62 66, 84 70, 108 62" fill="none" stroke="var(--text-secondary)" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.6" />
+        <circle cx="112" cy="61" r="4" fill="var(--orange)" opacity="0.9" />
+      </svg>
+      <svg class="pull-quote-decor pull-quote-decor--right" viewBox="0 0 120 90" aria-hidden="true">
+        <path d="M10 28 C 38 20, 62 24, 82 38" fill="none" stroke="var(--text-secondary)" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.6" />
+        <path d="M116 30 L 88 44 L 116 58 Z" fill="var(--purple)" opacity="0.85" />
+      </svg>
+      <p class="pull-quote-text reveal-item reveal-delay-1">Keep what matters.</p>
     </section>
 
     <section class="bottom-signup reveal-surface" aria-label="Sign up for release updates" data-reveal>
-      <div class="bottom-signup-copy reveal-item reveal-delay-2">
-        <form class="signup-form signup-form--featured signup-form--bottom" data-signup-form>
-          <label for="bottom-email">Stay up to date with releases.</label>
-          <div class="signup-row">
-            <input id="bottom-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="bottom-signup-status" required />
-            <button type="submit" data-submit-button>Get notified</button>
-          </div>
-          <p id="bottom-signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
-        </form>
-      </div>
+      <form class="signup-form signup-form--featured signup-form--bottom reveal-item reveal-delay-1" data-signup-form>
+        <label for="bottom-email">Stay up to date with releases.</label>
+        <div class="signup-row">
+          <input id="bottom-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="bottom-signup-status" required />
+          <button type="submit" data-submit-button>Get notified</button>
+        </div>
+        <p id="bottom-signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
+      </form>
     </section>
 
-    <figure class="footer-illustration reveal-surface" aria-label="Image workflow from local archive to agent surfaces" data-reveal>
-      <img src="/images/footer-line-map.png" alt="" />
-    </figure>
-
     <footer class="site-footer">
-      <div class="site-footer-meta">
-        <p>Made in 🇪🇺 Berlin by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a></p>
-        <p class="footer-fineprint">No cookies, no cross-site tracking.</p>
+      <div class="site-footer-brand">
+        <img src="/images/cull-app-logo.png" alt="" />
       </div>
-      <nav aria-label="Footer links">
-        <a href="https://github.com/glebis/cull">Repository</a>
-        <a href="https://github.com/glebis">Gleb's Github</a>
-        <a href="https://t.me/glebkalinin">Telegram</a>
+      <nav class="site-footer-columns" aria-label="Footer links">
+        <div class="footer-col">
+          <p class="footer-col-title footer-col-title--product">product</p>
+          <a href="https://github.com/glebis/cull/releases/latest">Download</a>
+          <a href="https://github.com/glebis/cull/blob/main/CHANGELOG.md">Changelog</a>
+        </div>
+        <div class="footer-col">
+          <p class="footer-col-title footer-col-title--open">open source</p>
+          <a href="https://github.com/glebis/cull">Repository</a>
+          <a href="https://github.com/glebis/cull/issues">Issues</a>
+          <a href="https://github.com/glebis/cull/blob/main/LICENSE">License</a>
+        </div>
+        <div class="footer-col">
+          <p class="footer-col-title footer-col-title--community">community</p>
+          <a href="https://github.com/glebis">Gleb's GitHub</a>
+          <a href="https://t.me/glebkalinin">Telegram</a>
+          <a href="https://www.linkedin.com/in/glebkalinin/">LinkedIn</a>
+        </div>
       </nav>
+      <a class="footer-star-card" href="https://github.com/glebis/cull">
+        <span class="footer-star-title">&#9733; Star on GitHub</span>
+        <span class="footer-star-copy">Help the project grow. Every star counts.</span>
+      </a>
+      <div class="site-footer-bottom">
+        <p>Made in 🇪🇺 Berlin by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a> &middot; No cookies, no cross-site tracking.</p>
+        <a href="https://github.com/glebis/cull/blob/main/LICENSE">MIT License</a>
+      </div>
     </footer>
   </div>
 `;
@@ -203,12 +202,14 @@ brewCopyButton?.addEventListener("click", async () => {
   }
   try {
     await navigator.clipboard.writeText(command);
-    brewCopyButton.textContent = "Copied";
+    brewCopyButton.dataset.copied = "true";
+    brewCopyButton.setAttribute("aria-label", "Copied");
   } catch {
-    brewCopyButton.textContent = "Select & copy";
+    brewCopyButton.setAttribute("aria-label", "Copy failed - select the command manually");
   }
   window.setTimeout(() => {
-    brewCopyButton.textContent = "Copy";
+    delete brewCopyButton.dataset.copied;
+    brewCopyButton.setAttribute("aria-label", "Copy brew install command");
   }, 1800);
 });
 

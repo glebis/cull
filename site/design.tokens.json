@@ -1,0 +1,108 @@
+{
+  "bg": {
+    "$type": "color",
+    "$value": "#08080c"
+  },
+  "surface": {
+    "$type": "color",
+    "$value": "#0c0c12"
+  },
+  "border": {
+    "$type": "color",
+    "$value": "#1a1a2e"
+  },
+  "text": {
+    "$type": "color",
+    "$value": "#e0e0e0"
+  },
+  "text-secondary": {
+    "$type": "color",
+    "$value": "#7a7fa0"
+  },
+  "blue": {
+    "$type": "color",
+    "$value": "#7aa2f7"
+  },
+  "green": {
+    "$type": "color",
+    "$value": "#9ece6a"
+  },
+  "orange": {
+    "$type": "color",
+    "$value": "#e0af68"
+  },
+  "purple": {
+    "$type": "color",
+    "$value": "#bb9af7"
+  },
+  "red": {
+    "$type": "color",
+    "$value": "#f7768e"
+  },
+  "field-border": {
+    "$type": "color",
+    "$value": "#30324a"
+  },
+  "placeholder": {
+    "$type": "color",
+    "$value": "#8a8da3"
+  },
+  "spacing": {
+    "$type": "dimension",
+    "$value": {
+      "value": 8,
+      "unit": "px"
+    }
+  },
+  "radius": {
+    "$type": "dimension",
+    "$value": {
+      "value": 4,
+      "unit": "px"
+    }
+  },
+  "font": {
+    "$type": "fontFamily",
+    "$value": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+  },
+  "header-font": {
+    "$type": "fontFamily",
+    "$value": "\"Geist\", ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Helvetica Neue\", Arial, sans-serif"
+  },
+  "serif-font": {
+    "$type": "fontFamily",
+    "$value": "\"EB Garamond\", Georgia, \"Times New Roman\", serif"
+  },
+  "logo-bg": {
+    "$type": "color",
+    "$value": "#ffffff"
+  },
+  "primary": {
+    "$type": "color",
+    "$value": "{blue}"
+  },
+  "accent": {
+    "$type": "color",
+    "$value": "{purple}"
+  },
+  "background": {
+    "$type": "color",
+    "$value": "{bg}"
+  },
+  "success": {
+    "$type": "color",
+    "$value": "{green}"
+  },
+  "warning": {
+    "$type": "color",
+    "$value": "{orange}"
+  },
+  "danger": {
+    "$type": "color",
+    "$value": "{red}"
+  },
+  "muted": {
+    "$type": "color",
+    "$value": "{text-secondary}"
+  }
+}
