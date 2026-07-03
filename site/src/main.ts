@@ -53,7 +53,10 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <p class="brew-label">or install with Homebrew</p>
         <div class="brew-row">
           <code class="brew-command" id="brew-command">brew install --cask glebis/tap/cull</code>
-          <button class="brew-copy" type="button" data-brew-copy aria-label="Copy brew install command">Copy</button>
+          <button class="brew-copy" type="button" data-brew-copy aria-label="Copy brew install command">
+            <svg class="brew-copy-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg>
+            <svg class="brew-copy-icon brew-copy-icon--done" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5"/></svg>
+          </button>
         </div>
       </aside>
     </section>
@@ -199,12 +202,14 @@ brewCopyButton?.addEventListener("click", async () => {
   }
   try {
     await navigator.clipboard.writeText(command);
-    brewCopyButton.textContent = "Copied";
+    brewCopyButton.dataset.copied = "true";
+    brewCopyButton.setAttribute("aria-label", "Copied");
   } catch {
-    brewCopyButton.textContent = "Select & copy";
+    brewCopyButton.setAttribute("aria-label", "Copy failed - select the command manually");
   }
   window.setTimeout(() => {
-    brewCopyButton.textContent = "Copy";
+    delete brewCopyButton.dataset.copied;
+    brewCopyButton.setAttribute("aria-label", "Copy brew install command");
   }, 1800);
 });
 

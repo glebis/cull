@@ -517,15 +517,13 @@ h3 {
 }
 
 .brew-row {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--spacing) * 1.25);
+  position: relative;
 }
 
 .brew-command {
-  flex: 1;
+  display: block;
   min-width: 0;
-  padding: 10px 14px;
+  padding: 10px 44px 10px 14px;
   border: 1px solid var(--field-border);
   border-radius: var(--radius);
   background: var(--bg);
@@ -539,20 +537,48 @@ h3 {
 }
 
 .brew-copy {
-  min-height: 40px;
-  padding: 0 16px;
-  border: 1px solid var(--field-border);
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
   border-radius: var(--radius);
-  background: var(--surface);
+  background: transparent;
   color: var(--text-secondary);
-  font-family: var(--font);
-  font-size: 12px;
+  transform: translateY(-50%);
+}
+
+.brew-copy-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.brew-copy-icon--done {
+  display: none;
+  color: var(--green);
+}
+
+.brew-copy[data-copied] .brew-copy-icon {
+  display: none;
+}
+
+.brew-copy[data-copied] .brew-copy-icon--done {
+  display: block;
 }
 
 .brew-copy:hover:not(:disabled) {
-  border-color: var(--blue);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--field-border) 40%, transparent);
   color: var(--text);
+  transform: translateY(-50%);
+}
+
+.brew-copy:active:not(:disabled) {
+  transform: translateY(-50%) scale(0.96);
 }
 
 .signup-row {
