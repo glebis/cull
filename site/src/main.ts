@@ -34,7 +34,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <p class="lede hero-step-3">A fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac.</p>
       </div>
       <figure class="product-shot hero-step-4">
-        <img src="/images/cull-state-preview.png" alt="Loupe view with an image selected, an agent context menu offering Regenerate, Select, and Review, and a pending agent proposal in the side rail" />
+        <img src="/images/cull-grid-real.png" alt="Cull's grid view with smart collections in the sidebar and a library of images with ratings" />
       </figure>
       <aside class="download-block hero-step-5" aria-label="Download Cull">
         <div class="download-header">
@@ -52,6 +52,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <li><span class="spec-icon" aria-hidden="true">&#9673;</span>macOS 11+ &middot; Apple Silicon</li>
           <li><span class="spec-icon" aria-hidden="true">&#9098;</span>v0.2.4 &middot; free &amp; open source</li>
         </ul>
+        <p class="brew-label">or install with Homebrew</p>
         <div class="brew-row">
           <code class="brew-command" id="brew-command">brew install --cask glebis/tap/cull</code>
           <button class="brew-copy" type="button" data-brew-copy aria-label="Copy brew install command">Copy</button>
@@ -97,8 +98,8 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <figure class="claim-illustration">
           <img src="/images/claim-agent-surface.png" alt="" />
         </figure>
-        <h2>AI can help when you want it</h2>
-        <p>Sort a folder yourself, or hand it to your agent through CLI or MCP when you want help.</p>
+        <h2>Agents when you want them</h2>
+        <p>Integrate via MCP or CLI. Let agents help you cull, tag, and organize &mdash; on your terms.</p>
       </div>
     </section>
 

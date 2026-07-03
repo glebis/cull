@@ -460,12 +460,20 @@ h3 {
   font-size: 13px;
 }
 
+.brew-label {
+  margin: 0 0 calc(var(--spacing) * -1.5);
+  padding-top: calc(var(--spacing) * 2);
+  border-top: 1px solid color-mix(in srgb, var(--field-border) 60%, transparent);
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 11.5px;
+  text-align: center;
+}
+
 .brew-row {
   display: flex;
   align-items: center;
   gap: calc(var(--spacing) * 1.25);
-  padding-top: calc(var(--spacing) * 2);
-  border-top: 1px solid color-mix(in srgb, var(--field-border) 60%, transparent);
 }
 
 .brew-command {
@@ -756,13 +764,13 @@ input:focus-visible {
   box-shadow: 0 8px 28px color-mix(in srgb, var(--claim-accent) 10%, transparent);
 }
 
-.claim h2::before {
-  content: "";
-  display: block;
-  width: 28px;
-  height: 2px;
-  margin-bottom: calc(var(--spacing) * 1.5);
-  background: var(--claim-accent);
+.claims .claim h2 {
+  color: var(--claim-accent);
+  font-family: var(--font);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.3;
 }
 
 .claim-illustration {
@@ -844,13 +852,13 @@ input:focus-visible {
 }
 
 .workflow article + article::before {
-  content: "\2192";
+  content: "\21E2";
   position: absolute;
   top: 48px;
-  left: calc(var(--spacing) * -3.5);
-  color: color-mix(in srgb, var(--text-secondary) 60%, transparent);
+  left: calc(var(--spacing) * -3.75);
+  color: color-mix(in srgb, var(--text-secondary) 70%, transparent);
   font-family: var(--font);
-  font-size: 18px;
+  font-size: 20px;
 }
 
 .workflow article::after {
@@ -999,6 +1007,7 @@ input:focus-visible {
 }
 
 .pull-quote {
+  position: relative;
   margin: calc(var(--spacing) * 4) 0;
   padding: calc(var(--spacing) * 10) calc(var(--spacing) * 4);
   border: 1px solid var(--border);
@@ -1007,6 +1016,30 @@ input:focus-visible {
     radial-gradient(120% 140% at 20% 0%, color-mix(in srgb, var(--purple) 7%, transparent), transparent 60%),
     var(--surface);
   text-align: center;
+  overflow: hidden;
+}
+
+.pull-quote::before {
+  content: "";
+  position: absolute;
+  left: 7%;
+  top: 42%;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--green) 78%, transparent);
+}
+
+.pull-quote::after {
+  content: "";
+  position: absolute;
+  right: 7%;
+  top: 38%;
+  width: 0;
+  height: 0;
+  border-top: 24px solid transparent;
+  border-bottom: 24px solid transparent;
+  border-right: 40px solid color-mix(in srgb, var(--purple) 72%, transparent);
 }
 
 .pull-quote-text {
