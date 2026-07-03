@@ -11,7 +11,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <img src="/images/cull-app-logo.png" alt="" />
           <span class="mark-name">CULL</span>
         </a>
-        <span class="topbar-tagline">local-first &times; agent-ready: mcp &times; cli &times; skill</span>
+        <span class="topbar-tagline">local-first <span class="tagline-x">&times;</span> agent-ready: <span class="tagline-tag tagline-tag--mcp">mcp</span> <span class="tagline-x">&times;</span> <span class="tagline-tag tagline-tag--cli">cli</span> <span class="tagline-x">&times;</span> <span class="tagline-tag tagline-tag--skill">skill</span></span>
       </div>
       <span class="release-note">
         <svg class="osi-mark" viewBox="0 0 24 24" role="img" aria-label="Open source" fill="currentColor"><path fill-rule="evenodd" d="M12 1.6C6.26 1.6 1.6 6.26 1.6 12c0 4.51 2.87 8.35 6.88 9.79l2.06-5.53a4.52 4.52 0 1 1 2.92 0l2.06 5.53A10.41 10.41 0 0 0 22.4 12c0-5.74-4.66-10.4-10.4-10.4Z"/></svg>
@@ -75,16 +75,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <h2 id="boring-title">The boring part of creative work, made fast</h2>
         <p>Most tools are built for editing. This is built for the moment before that, when you have hundreds of images and need to reach a final set.</p>
         <p>Look carefully, decide clearly, and make your work available to people and agents without friction.</p>
-      </div>
-    </section>
-
-    <section class="feature-note feature-note--artist reveal-surface" aria-labelledby="artist-title" data-reveal>
-      <figure class="feature-note-illustration reveal-item reveal-delay-0">
-        <img class="artist-founder-image artist-founder-image--camera" src="/images/artist-founder-camera-generated.png" alt="" />
-      </figure>
-      <div class="feature-note-copy reveal-item reveal-delay-2">
-        <h2 id="artist-title">Made by artists for artists</h2>
-        <p>I, <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a>, built this after getting tired of expensive, slow tools that made image work feel heavier than it needed to be. I wanted something <span class="founder-note-emphasis">open, local, and agent-friendly</span>: closer to Obsidian for images than another locked creative suite.</p>
       </div>
     </section>
 
@@ -152,6 +142,17 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       </div>
     </section>
 
+    <section class="feature-note feature-note--artist reveal-surface" aria-labelledby="artist-title" data-reveal>
+      <figure class="feature-note-illustration reveal-item reveal-delay-0">
+        <img class="artist-founder-image artist-founder-image--camera" src="/images/artist-founder-camera-generated.png" alt="" />
+      </figure>
+      <div class="feature-note-copy reveal-item reveal-delay-2">
+        <p class="eyebrow">who makes this</p>
+        <h2 id="artist-title">Made by artists for artists</h2>
+        <p>I, <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a>, built this after getting tired of expensive, slow tools that made image work feel heavier than it needed to be. I wanted something <span class="founder-note-emphasis">open, local, and agent-friendly</span>: closer to Obsidian for images than another locked creative suite.</p>
+      </div>
+    </section>
+
     <section class="open-source-note reveal-surface" aria-labelledby="open-source-title" data-reveal>
       <figure class="open-source-illustration reveal-item reveal-delay-0">
         <img src="/images/open-source-agents.png" alt="" />
@@ -162,6 +163,10 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <p>Free and open source. The code is public, your files stay on your machine, and no company can pull the tool away from you. Built with human direction and AI coding help, then reviewed and shipped by a person.</p>
         <p>Current repository history: <strong>653 commits</strong> and counting.</p>
       </div>
+    </section>
+
+    <section class="pull-quote reveal-surface" aria-label="Keep what matters" data-reveal>
+      <p class="pull-quote-text reveal-item reveal-delay-1">Keep what matters.</p>
     </section>
 
     <section class="bottom-signup reveal-surface" aria-label="Sign up for release updates" data-reveal>
@@ -186,10 +191,24 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <p>Made in 🇪🇺 Berlin by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a></p>
         <p class="footer-fineprint">No cookies, no cross-site tracking.</p>
       </div>
-      <nav aria-label="Footer links">
-        <a href="https://github.com/glebis/cull">Repository</a>
-        <a href="https://github.com/glebis">Gleb's Github</a>
-        <a href="https://t.me/glebkalinin">Telegram</a>
+      <nav class="site-footer-columns" aria-label="Footer links">
+        <div class="footer-col">
+          <p class="footer-col-title footer-col-title--product">product</p>
+          <a href="https://github.com/glebis/cull/releases/latest">Download</a>
+          <a href="https://github.com/glebis/cull/blob/main/CHANGELOG.md">Changelog</a>
+        </div>
+        <div class="footer-col">
+          <p class="footer-col-title footer-col-title--open">open source</p>
+          <a href="https://github.com/glebis/cull">Repository</a>
+          <a href="https://github.com/glebis/cull/issues">Issues</a>
+          <a href="https://github.com/glebis/cull/blob/main/LICENSE">License</a>
+        </div>
+        <div class="footer-col">
+          <p class="footer-col-title footer-col-title--community">community</p>
+          <a href="https://github.com/glebis">Gleb's GitHub</a>
+          <a href="https://t.me/glebkalinin">Telegram</a>
+          <a href="https://www.linkedin.com/in/glebkalinin/">LinkedIn</a>
+        </div>
       </nav>
     </footer>
   </div>
