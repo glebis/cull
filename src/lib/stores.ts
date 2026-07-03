@@ -216,6 +216,22 @@ export const exportImageOnly = writable<boolean>(false);
 export const loupeScale = writable<number>(1);
 export const loupePanX = writable<number>(0);
 export const loupePanY = writable<number>(0);
+export const canvasZoom = writable<number>(1);
+
+export interface CanvasZoomRequest {
+    id: number;
+    zoom: number;
+}
+
+let canvasZoomRequestId = 0;
+export const canvasZoomRequest = writable<CanvasZoomRequest | null>(null);
+
+export function requestCanvasZoom(zoom: number) {
+    canvasZoomRequest.set({
+        id: ++canvasZoomRequestId,
+        zoom,
+    });
+}
 
 export function resetLoupeTransform() {
     loupeScale.set(1);
