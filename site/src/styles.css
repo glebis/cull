@@ -757,48 +757,63 @@ input:focus-visible {
   position: relative;
   grid-column: 2 / span 2;
   grid-row: 1 / span 2;
-  margin: 0;
+  margin: 30px 0 0;
   width: 100%;
   max-width: 100%;
   min-width: 0;
   border: 0;
   border-radius: var(--radius-panel);
   background: transparent;
-  overflow: hidden;
 }
 
-.product-shot::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  background:
-    linear-gradient(
-      115deg,
-      transparent 0 42%,
-      color-mix(in srgb, var(--blue) 20%, transparent) 47%,
-      transparent 52% 100%
-    );
-  opacity: 0;
-  transform: translate3d(-18%, 0, 0);
-  pointer-events: none;
+.slideshow-track {
+  display: grid;
 }
 
-.product-shot img {
+.slideshow-slide {
+  grid-area: 1 / 1;
   display: block;
   width: 100%;
   max-width: 100%;
   height: auto;
+  border-radius: var(--radius-panel);
+  opacity: 0;
+  transition: opacity 480ms var(--ease-out-quart);
 }
 
-.product-shot:hover {
-  border-color: color-mix(in srgb, var(--blue) 45%, var(--border));
-  transform: translate3d(0, -2px, 0);
-}
-
-.product-shot:hover::before {
+.slideshow-slide.is-current {
   opacity: 1;
-  transform: translate3d(18%, 0, 0);
+}
+
+.slideshow-dots {
+  display: flex;
+  justify-content: center;
+  gap: calc(var(--spacing) * 1.25);
+  padding-top: calc(var(--spacing) * 2);
+}
+
+.slideshow-dots button {
+  width: 8px;
+  height: 8px;
+  min-height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text-secondary) 40%, transparent);
+  transition: background-color 180ms var(--ease-out-quart), transform 180ms var(--ease-out-quart);
+}
+
+.slideshow-dots button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-secondary) 70%, transparent);
+  transform: none;
+}
+
+.slideshow-dots button:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+.slideshow-dots button.is-current {
+  background: var(--blue);
 }
 
 .claims {

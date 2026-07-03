@@ -31,8 +31,19 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         </h1>
         <p class="lede hero-step-3">A fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac.</p>
       </div>
-      <figure class="product-shot hero-step-4">
-        <img src="/images/cull-grid-real.png" alt="Cull's grid view with smart collections in the sidebar and a library of images with ratings" />
+      <figure class="product-shot hero-step-4" data-slideshow>
+        <div class="slideshow-track">
+          <img class="slideshow-slide is-current" src="/images/cull-grid-real.png" alt="Cull's grid view with smart collections in the sidebar and a library of images with ratings" />
+          <img class="slideshow-slide" src="/images/cull-agent-real.png" alt="Cull's AI Agent panel proposing a portfolio selection next to the image grid" loading="lazy" />
+          <img class="slideshow-slide" src="/images/cull-lineage-real.png" alt="Cull's lineage view grouping images by generation run" loading="lazy" />
+          <img class="slideshow-slide" src="/images/cull-export-real.png" alt="Cull's export master with client delivery presets and a slide preview" loading="lazy" />
+        </div>
+        <div class="slideshow-dots" role="tablist" aria-label="Screenshots">
+          <button type="button" role="tab" aria-selected="true" aria-label="Screenshot 1" data-slide-dot="0" class="is-current"></button>
+          <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 2" data-slide-dot="1"></button>
+          <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 3" data-slide-dot="2"></button>
+          <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 4" data-slide-dot="3"></button>
+        </div>
       </figure>
       <aside class="download-block hero-step-5" aria-label="Download Cull">
         <div class="download-header">
@@ -214,6 +225,50 @@ brewCopyButton?.addEventListener("click", async () => {
 });
 
 const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+const slideshow = document.querySelector<HTMLElement>("[data-slideshow]");
+if (slideshow) {
+  const slides = [...slideshow.querySelectorAll<HTMLImageElement>(".slideshow-slide")];
+  const dots = [...slideshow.querySelectorAll<HTMLButtonElement>("[data-slide-dot]")];
+  let currentSlide = 0;
+  let slideshowTimer: number | undefined;
+  let autoAdvance = !motionQuery.matches;
+
+  const showSlide = (index: number) => {
+    currentSlide = (index + slides.length) % slides.length;
+    slides.forEach((slide, i) => slide.classList.toggle("is-current", i === currentSlide));
+    dots.forEach((dot, i) => {
+      dot.classList.toggle("is-current", i === currentSlide);
+      dot.setAttribute("aria-selected", i === currentSlide ? "true" : "false");
+    });
+  };
+
+  const stopSlideshow = () => {
+    if (slideshowTimer !== undefined) {
+      window.clearInterval(slideshowTimer);
+      slideshowTimer = undefined;
+    }
+  };
+
+  const startSlideshow = () => {
+    stopSlideshow();
+    if (autoAdvance) {
+      slideshowTimer = window.setInterval(() => showSlide(currentSlide + 1), 5000);
+    }
+  };
+
+  for (const dot of dots) {
+    dot.addEventListener("click", () => {
+      autoAdvance = false;
+      stopSlideshow();
+      showSlide(Number(dot.dataset.slideDot));
+    });
+  }
+
+  slideshow.addEventListener("mouseenter", stopSlideshow);
+  slideshow.addEventListener("mouseleave", startSlideshow);
+  startSlideshow();
+}
 const pageShell = document.querySelector<HTMLElement>(".page-shell");
 
 if (pageShell) {
