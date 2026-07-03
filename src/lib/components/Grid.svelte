@@ -10,6 +10,7 @@
     import { resolveLibraryViewState, scopeEmptyCopy, type LibraryScopeKind } from '$lib/library-view-state';
     import {
         computeGridClickSelection,
+        computeAnchoredGridScrollTop,
         computeGridLayout,
         computeVisibleItems,
         computeScrollDirection,
@@ -27,6 +28,16 @@
     let containerHeight = $state(600);
     let scrollTop = $state(0);
     let scrollRestoreSeq = 0;
+    let pendingZoomAnchor: { x: number; y: number } | null = null;
+    let previousZoomLayout: {
+        size: number;
+        gap: number;
+        cols: number;
+        cellSize: number;
+        scrollTop: number;
+        containerWidth: number;
+        containerHeight: number;
+    } | null = null;
 
     let size = $state(160);
     thumbnailSize.subscribe(v => size = v);
@@ -128,32 +139,21 @@
         });
         if (!intent || intent.type !== 'zoom') return;
         e.preventDefault();
-        applyThumbnailZoom(intent.factor, e.clientY);
+        applyThumbnailZoom(intent.factor, e.clientX, e.clientY);
     }
 
-    function applyThumbnailZoom(factor: number, clientY: number) {
+    function applyThumbnailZoom(factor: number, clientX: number, clientY: number) {
         if (!containerEl) return;
         const rect = containerEl.getBoundingClientRect();
+        const pointerX = clientX - rect.left;
         const pointerY = clientY - rect.top;
-        const oldCellSize = size + gap;
-        const oldScrollTop = containerEl.scrollTop;
         const next = gridGestureZoom({ size, gap, preset: $gridPreset }, factor, GRID_PRESETS);
         if (next.size === size && next.gap === gap && next.preset === $gridPreset) return;
 
-        const anchorRow = oldCellSize > 0 ? (oldScrollTop + pointerY) / oldCellSize : 0;
-        const nextScrollTop = Math.max(0, anchorRow * (next.size + next.gap) - pointerY);
-
+        pendingZoomAnchor = { x: pointerX, y: pointerY };
         thumbnailSize.set(next.size);
         gridPreset.set(next.preset);
         gridGap.set(next.gap);
-        gridScrollTop.set(nextScrollTop);
-
-        requestAnimationFrame(() => {
-            if (!containerEl) return;
-            containerEl.scrollTop = nextScrollTop;
-            scrollTop = containerEl.scrollTop;
-            prevScrollTop = scrollTop;
-        });
     }
 
     function handleClick(index: number, event: MouseEvent | KeyboardEvent) {
@@ -202,6 +202,51 @@
         $imageLoadState.loadingMore;
         maybeLoadMore();
         warmPrefetch();
+    });
+
+    $effect(() => {
+        if (!containerEl) return;
+        const current = {
+            size,
+            gap,
+            cols,
+            cellSize,
+            scrollTop,
+            containerWidth,
+            containerHeight,
+        };
+        const previous = previousZoomLayout;
+        previousZoomLayout = current;
+        if (!previous || (previous.size === size && previous.gap === gap)) {
+            pendingZoomAnchor = null;
+            return;
+        }
+
+        const anchor = pendingZoomAnchor ?? {
+            x: containerWidth / 2,
+            y: containerHeight / 2,
+        };
+        pendingZoomAnchor = null;
+        const nextScrollTop = computeAnchoredGridScrollTop({
+            oldScrollTop: previous.scrollTop,
+            viewportWidth: previous.containerWidth,
+            viewportHeight: previous.containerHeight,
+            anchorX: anchor.x,
+            anchorY: anchor.y,
+            oldCols: previous.cols,
+            oldCellSize: previous.cellSize,
+            newCols: cols,
+            newCellSize: cellSize,
+            totalItems: $images.length,
+        });
+
+        gridScrollTop.set(nextScrollTop);
+        requestAnimationFrame(() => {
+            if (!containerEl) return;
+            containerEl.scrollTop = nextScrollTop;
+            scrollTop = containerEl.scrollTop;
+            prevScrollTop = scrollTop;
+        });
     });
 
     $effect(() => {

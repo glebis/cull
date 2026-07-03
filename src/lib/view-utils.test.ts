@@ -4,6 +4,7 @@ import {
     getThumbnailBorderClass,
     buildRangeSelectionIds,
     buildThumbnailAriaLabel,
+    computeAnchoredGridScrollTop,
     computeGridClickSelection,
     computeGridLayout,
     computeVisibleItems,
@@ -317,6 +318,61 @@ describe('computeGridLayout', () => {
         const layout = computeGridLayout(800, 100, -5, 20);
         expect(layout.cols).toBe(8);
         expect(layout.cellSize).toBe(95);
+    });
+});
+
+describe('computeAnchoredGridScrollTop', () => {
+    it('keeps the same anchor image at the same viewport position when zooming in changes columns', () => {
+        const scrollTop = computeAnchoredGridScrollTop({
+            oldScrollTop: 164,
+            viewportWidth: 800,
+            viewportHeight: 600,
+            anchorX: 400,
+            anchorY: 300,
+            oldCols: 4,
+            oldCellSize: 164,
+            newCols: 2,
+            newCellSize: 288,
+            totalItems: 100,
+        });
+
+        // Old anchor: row 2, col 2 => item 10. New layout puts item 10 in row 5,
+        // preserving the anchor's fractional offset inside that cell.
+        expect(scrollTop).toBeCloseTo(1378.8293, 4);
+    });
+
+    it('keeps the same anchor image in view when zooming out adds columns', () => {
+        const scrollTop = computeAnchoredGridScrollTop({
+            oldScrollTop: 1378.8293,
+            viewportWidth: 800,
+            viewportHeight: 600,
+            anchorX: 400,
+            anchorY: 300,
+            oldCols: 2,
+            oldCellSize: 288,
+            newCols: 4,
+            newCellSize: 164,
+            totalItems: 100,
+        });
+
+        expect(scrollTop).toBeCloseTo(164, 0);
+    });
+
+    it('clamps anchored scroll to the new layout bounds', () => {
+        const scrollTop = computeAnchoredGridScrollTop({
+            oldScrollTop: 4000,
+            viewportWidth: 800,
+            viewportHeight: 600,
+            anchorX: 400,
+            anchorY: 300,
+            oldCols: 4,
+            oldCellSize: 164,
+            newCols: 8,
+            newCellSize: 82,
+            totalItems: 40,
+        });
+
+        expect(scrollTop).toBe(0);
     });
 });
 
