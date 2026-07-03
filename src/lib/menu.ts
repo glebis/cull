@@ -13,6 +13,7 @@ import {
     renameImage,
     shareImages,
     trashImages,
+    listCollections,
     listFolders,
     updateMenuState,
     openPreviewDisplay,
@@ -55,6 +56,7 @@ import {
     navigateTo,
     showToast,
     requestTextInput,
+    collections,
     folders,
     undoHistoryOpen,
     type ViewMode,
@@ -193,6 +195,7 @@ async function reloadAfterImageRemoval(ids: string[]) {
     if (get(focusedIndex) >= get(images).length) {
         focusedIndex.set(Math.max(0, get(images).length - 1));
     }
+    collections.set(await listCollections());
 }
 
 async function handleImageShare() {

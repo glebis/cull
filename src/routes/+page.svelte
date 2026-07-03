@@ -37,7 +37,7 @@
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
     import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel, agentPanelPinned, agentPanelVisible, agentVisualLevel, activeAgentProposalId, activeAgentSelectionPresetId, cycleAgentVisualLevel } from '$lib/stores';
-    import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ClaudeAgentStreamEvent, type ImageWithFile, type PreviewState } from '$lib/api';
+    import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listCollections, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ClaudeAgentStreamEvent, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
     import { loadInstalledPlugins, activateBundledPlugins } from '$lib/plugins/loader';
@@ -115,6 +115,14 @@
         focusedIndex.set(clampFocusIndexToList(plannedFocusIndex, nextLength));
     }
 
+    async function refreshCollectionCountsAfterRemoval(context: string) {
+        try {
+            collections.set(await listCollections());
+        } catch (e) {
+            console.error(`Failed to refresh collection counts after ${context}:`, e);
+        }
+    }
+
     async function executeTrash() {
         const imgs = $images;
         const idx = $focusedIndex;
@@ -128,6 +136,7 @@
             invalidateImageCache();
             removeVisibleImageById(img.image.id, nextFocusIndex);
             refreshImageCount().catch(e => console.error('Failed to refresh image count after trash:', e));
+            refreshCollectionCountsAfterRemoval('trash');
         }
     }
 
@@ -170,6 +179,7 @@
             invalidateImageCache();
             removeVisibleImageById(img.image.id, nextFocusIndexAfterFocusedRemoval(idx, imgs.length));
             refreshImageCount().catch(e => console.error('Failed to refresh image count after delete:', e));
+            refreshCollectionCountsAfterRemoval('delete');
         }
     }
 
@@ -537,6 +547,7 @@
             images.update(list => list.filter(item => !trashed.has(item.image.id)));
             invalidateImageCache();
             refreshImageCount().catch(e => console.error('Failed to refresh image count after proposal trash:', e));
+            refreshCollectionCountsAfterRemoval('proposal trash');
             showToast('Trash proposal applied', {
                 detail: `${trashResult.succeeded} moved to Trash, ${trashResult.failed} failed`,
                 type: trashResult.failed > 0 ? 'warning' : 'info',

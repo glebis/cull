@@ -40,6 +40,7 @@ vi.mock('./api', () => ({
     renameImage: vi.fn(),
     shareImages: vi.fn(),
     trashImages: vi.fn(),
+    listCollections: vi.fn().mockResolvedValue([]),
     listFolders: vi.fn(),
     updateMenuState: mocks.updateMenuState,
     openPreviewDisplay: vi.fn(),

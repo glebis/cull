@@ -1727,6 +1727,54 @@ mod tests {
     }
 
     #[test]
+    fn list_collections_counts_only_live_images_once() {
+        let db = test_db();
+        let collection_id = db.create_collection("C1").unwrap();
+        insert_test_image_at_path(&db, "live", "h-live", "/lib/live.png");
+        insert_test_image_at_path(&db, "missing", "h-missing", "/lib/missing.png");
+        insert_test_image_at_path(&db, "duplicate", "h-duplicate", "/lib/duplicate-a.png");
+        db.insert_image_file(&ImageFile {
+            id: "f-duplicate-extra".to_string(),
+            image_id: "duplicate".to_string(),
+            path: "/lib/duplicate-b.png".to_string(),
+            last_seen_at: "2026-05-07T00:00:00Z".to_string(),
+            missing_at: None,
+            last_seen_size: None,
+            last_seen_mtime: None,
+        })
+        .unwrap();
+
+        db.add_to_collection(&collection_id, &["live", "missing", "duplicate"])
+            .unwrap();
+        db.mark_file_missing("/lib/missing.png").unwrap();
+
+        let collections = db.list_collections().unwrap();
+        let count = collections
+            .iter()
+            .find(|(id, _, _)| id == &collection_id)
+            .map(|(_, _, count)| *count);
+        assert_eq!(count, Some(2));
+    }
+
+    #[test]
+    fn list_collections_recounts_after_collection_removal() {
+        let db = test_db();
+        let collection_id = db.create_collection("C1").unwrap();
+        insert_test_image(&db, "a", "h-a");
+        insert_test_image(&db, "b", "h-b");
+
+        db.add_to_collection(&collection_id, &["a", "b"]).unwrap();
+        db.remove_from_collection(&collection_id, "b").unwrap();
+
+        let collections = db.list_collections().unwrap();
+        let count = collections
+            .iter()
+            .find(|(id, _, _)| id == &collection_id)
+            .map(|(_, _, count)| *count);
+        assert_eq!(count, Some(1));
+    }
+
+    #[test]
     fn list_images_in_scope_collection_paginates_completely() {
         let db = test_db();
         let col = db.create_collection("C1").unwrap();
