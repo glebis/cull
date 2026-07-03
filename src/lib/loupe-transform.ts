@@ -26,7 +26,7 @@ const FIT_EPSILON = 0.02;
 export function computeLoupeActualSizeScale(viewport: LoupeViewport, image: LoupeImageSize): number {
     const scale = fitScale(viewport, image);
     if (!Number.isFinite(scale) || scale <= 0) return 1;
-    return clamp(1 / scale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
+    return clamp(Math.max(1, 1 / scale), DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
 }
 
 export function computeLoupeFocalZoom(

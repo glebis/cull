@@ -296,4 +296,35 @@ describe('native menu bridge', () => {
             })
         );
     });
+
+    it('routes native Loupe zoom mode actions', async () => {
+        let handler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, next) => {
+            handler = next as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+
+        const [{ initMenu }, stores] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+
+        stores.viewMode.set('loupe');
+        stores.loupeScale.set(2);
+        stores.loupePanX.set(30);
+        stores.loupePanY.set(-20);
+
+        void initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        await flushMicrotasks();
+
+        handler?.({ payload: 'actual_size' });
+        expect(get(stores.loupeZoomRequest)?.mode).toBe('actual-size');
+        expect(get(stores.loupeScale)).toBe(2);
+
+        handler?.({ payload: 'fit_in' });
+        expect(get(stores.loupeZoomRequest)?.mode).toBe('fit-in');
+        expect(get(stores.loupeScale)).toBe(1);
+        expect(get(stores.loupePanX)).toBe(0);
+        expect(get(stores.loupePanY)).toBe(0);
+    });
 });

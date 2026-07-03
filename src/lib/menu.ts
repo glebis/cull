@@ -44,7 +44,8 @@ import {
     loupeScale,
     loupePanX,
     loupePanY,
-    resetLoupeTransform,
+    requestLoupeActualSize,
+    requestLoupeFitIn,
     settingsOpen,
     staticPublishingEnabled,
     pluginsEnabled,
@@ -746,7 +747,10 @@ function handleMenuAction(action: string) {
             });
             break;
         case 'actual_size':
-            resetLoupeTransform();
+            requestLoupeActualSize();
+            break;
+        case 'fit_in':
+            requestLoupeFitIn();
             break;
         case 'settings':
             settingsOpen.set(true);

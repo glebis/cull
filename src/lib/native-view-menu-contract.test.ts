@@ -52,6 +52,7 @@ const customViewMenuActions = [
     'zoom_in',
     'zoom_out',
     'actual_size',
+    'fit_in',
 ];
 
 describe('native window reveal contract', () => {

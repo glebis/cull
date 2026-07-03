@@ -528,6 +528,13 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         true,
         Some::<&str>("CmdOrCtrl+0"),
     )?)?;
+    view_menu.append(&MenuItem::with_id(
+        app,
+        "fit_in",
+        "Fit In",
+        true,
+        None::<&str>,
+    )?)?;
     view_menu.append(&PredefinedMenuItem::separator(app)?)?;
     view_menu.append(&PredefinedMenuItem::fullscreen(app, None)?)?;
     menu.append(&view_menu)?;
@@ -1083,6 +1090,7 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
         | "zoom_in"
         | "zoom_out"
         | "actual_size"
+        | "fit_in"
         | AGENT_SKILLS_ID
         | "github_wiki" => {
             let _ = app.emit("menu-action", id);

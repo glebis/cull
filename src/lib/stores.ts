@@ -232,11 +232,30 @@ export function requestCanvasZoom(zoom: number) {
         zoom,
     });
 }
+export type LoupeZoomRequestMode = 'actual-size' | 'fit-in';
+export interface LoupeZoomRequest {
+    id: number;
+    mode: LoupeZoomRequestMode;
+}
+
+let loupeZoomRequestId = 0;
+export const loupeZoomRequest = writable<LoupeZoomRequest | null>(null);
 
 export function resetLoupeTransform() {
     loupeScale.set(1);
     loupePanX.set(0);
     loupePanY.set(0);
+}
+
+export function requestLoupeActualSize() {
+    if (get(viewMode) !== 'loupe') return;
+    loupeZoomRequest.set({ id: ++loupeZoomRequestId, mode: 'actual-size' });
+}
+
+export function requestLoupeFitIn() {
+    resetLoupeTransform();
+    if (get(viewMode) !== 'loupe') return;
+    loupeZoomRequest.set({ id: ++loupeZoomRequestId, mode: 'fit-in' });
 }
 
 export const folders = writable<[string, number][]>([]);

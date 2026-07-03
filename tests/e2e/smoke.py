@@ -717,15 +717,17 @@ def test_loupe_zoom(page: Page) -> None:
     # Actual Size with Cmd+0
     dispatch_key(page, "0", meta=True)
     img_style = page.locator(".loupe-container img").first.get_attribute("style") or ""
-    assert "scale(1)" in img_style, f"Cmd+0 should reset zoom to 1x, got: {img_style}"
+    actual_scale_match = re.search(r"scale\(([\d.]+)\)", img_style)
+    assert actual_scale_match, f"Cmd+0 should set an explicit zoom scale, got: {img_style}"
+    assert float(actual_scale_match.group(1)) > 1, f"Cmd+0 should zoom to actual size, got: {img_style}"
 
     # Zoom in again before checking Home reset
     press(page, "+")
 
-    # Reset zoom with Home
+    # Fit In with Home
     press(page, "Home")
     img_style = page.locator(".loupe-container img").first.get_attribute("style") or ""
-    assert "scale(1)" in img_style, f"Home should reset zoom to 1x, got: {img_style}"
+    assert "scale(1)" in img_style, f"Home should fit the image in, got: {img_style}"
 
     press(page, "Escape")
     wait_mode(page, "grid")

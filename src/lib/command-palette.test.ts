@@ -234,8 +234,11 @@ describe('command palette helpers', () => {
         const items = getCommandPaletteItems('commands');
         const exportView = items.find(i => i.id === 'view.export');
         const actualSize = items.find(i => i.id === 'view.actual-size');
+        const fitIn = items.find(i => i.id === 'view.fit-in');
 
         expect(actualSize?.defaultShortcut).toBe('Cmd+0');
+        expect(fitIn?.title).toBe('Fit In');
+        expect(fitIn?.defaultShortcut).toBeUndefined();
         expect(exportView?.defaultShortcut).toBe('Cmd+7');
         expect(getShortcutConflict('Cmd+0', 'view.grid', items, {})).toBe('Actual Size');
         expect(getShortcutConflict('Cmd+7', 'view.grid', items, {})).toBe('Export View');

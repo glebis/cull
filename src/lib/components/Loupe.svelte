@@ -3,7 +3,7 @@
     import { onMount } from 'svelte';
     import ContextMenu from './ContextMenu.svelte';
     import PromptResubmitDialog from './PromptResubmitDialog.svelte';
-    import { images, focusedIndex, focusedImage, showLoupeHistogram, loupeScale, loupePanX, loupePanY, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
+    import { images, focusedIndex, focusedImage, showLoupeHistogram, loupeScale, loupePanX, loupePanY, loupeZoomRequest, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
     import {
         getDetections,
         getVisionMetadata,
@@ -31,7 +31,7 @@
     import { recordImageLoadFailure } from '$lib/diagnostics';
     import { histogramExposureWarnings, histogramPolyline } from '$lib/histogram-utils';
     import { classifySwipe, wheelGestureIntent } from '$lib/gesture-interactions';
-    import { clampLoupePan, computeLoupeFocalZoom } from '$lib/loupe-transform';
+    import { clampLoupePan, computeLoupeActualSizeScale, computeLoupeFocalZoom } from '$lib/loupe-transform';
 
     let dragging = $state(false);
     let dragStartX = $state(0);
@@ -504,6 +504,31 @@
         loupePanX.set(transform.panX);
         loupePanY.set(transform.panY);
     }
+
+    let handledZoomRequestId = $state(0);
+    $effect(() => {
+        const request = $loupeZoomRequest;
+        if (!request || request.id === handledZoomRequestId) return;
+
+        if (request.mode === 'fit-in') {
+            handledZoomRequestId = request.id;
+            applyLoupeTransform({ scale: 1, panX: 0, panY: 0 });
+            return;
+        }
+
+        if (!image || !loupeEl) return;
+        handledZoomRequestId = request.id;
+        const rect = loupeEl.getBoundingClientRect();
+        const scale = computeLoupeActualSizeScale(
+            { width: rect.width, height: rect.height },
+            { width: image.image.width, height: image.image.height },
+        );
+        applyLoupeTransform(clampLoupePan(
+            { scale, panX: 0, panY: 0 },
+            { width: rect.width, height: rect.height },
+            { width: image.image.width, height: image.image.height },
+        ));
+    });
 
     function moveLoupeFocus(delta: number) {
         const total = $images.length;

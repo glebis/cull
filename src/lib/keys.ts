@@ -6,7 +6,7 @@ import {
     collections, collectMode, collectModeTarget, activeCollection,
     showDetectionBoxes, showDetectionInspector, nsfwMode,
     navigateTo, navigateBack, searchOpen, shortcutsOpen, undoHistoryOpen, focusedImage, activeSession,
-    requestTextInput, requestCollectionTarget, selectionAnchorIndex, resetLoupeTransform,
+    requestTextInput, requestCollectionTarget, selectionAnchorIndex, requestLoupeActualSize, requestLoupeFitIn,
     activeFolder,
 } from './stores';
 import { tabCycleOrder } from './plugins/tab-registry';
@@ -271,7 +271,7 @@ function comparePrevPair() {
 // ---- Loupe helpers ----
 
 function resetLoupeZoom() {
-    resetLoupeTransform();
+    requestLoupeFitIn();
 }
 
 function moveLoupeFocus(delta: number) {
@@ -439,7 +439,7 @@ export function handleKeydown(e: KeyboardEvent) {
 
     if (e.metaKey && e.key === '0' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
         e.preventDefault();
-        resetLoupeZoom();
+        requestLoupeActualSize();
         return;
     }
 
