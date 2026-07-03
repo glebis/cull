@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+    canvasZoomFromPosition,
+    canvasZoomPositionFromZoom,
     computeCanvasItemDragPosition,
     computeCanvasResize,
     computeCanvasWheelZoom,
     computeCanvasZoomAtPoint,
+    computeCanvasZoomToLevel,
     isCanvasSpacePanKey,
     worldToCanvasScreen,
 } from './canvas-interactions';
@@ -33,6 +36,24 @@ describe('canvas interactions', () => {
         );
 
         expect(next).toEqual({ panX: -80, panY: -40, zoom: 2 });
+    });
+
+    it('zooms canvas to an explicit level around a pointer', () => {
+        const next = computeCanvasZoomToLevel(
+            { panX: 10, panY: 20, zoom: 1 },
+            { x: 100, y: 80 },
+            2,
+        );
+
+        expect(next).toEqual({ panX: -80, panY: -40, zoom: 2 });
+    });
+
+    it('maps the canvas zoom slider across the allowed zoom range', () => {
+        expect(canvasZoomFromPosition(0)).toBeCloseTo(0.1, 5);
+        expect(canvasZoomFromPosition(100)).toBeCloseTo(5, 5);
+
+        const position = canvasZoomPositionFromZoom(2);
+        expect(canvasZoomFromPosition(position)).toBeCloseTo(2, 5);
     });
 
     it('maps dragged item coordinates through pan and zoom', () => {

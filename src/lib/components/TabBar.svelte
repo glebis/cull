@@ -1,7 +1,11 @@
 <script lang="ts">
     import { openPreviewDisplay } from '$lib/api';
-    import { viewMode, thumbnailSize, navigateTo, showToast } from '$lib/stores';
+    import { viewMode, thumbnailSize, canvasZoom, navigateTo, requestCanvasZoom, showToast } from '$lib/stores';
     import type { ViewMode } from '$lib/stores';
+    import {
+        canvasZoomFromPosition,
+        canvasZoomPositionFromZoom,
+    } from '$lib/canvas-interactions';
     import { maybeShowShortcutReminder, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from '$lib/shortcut-reminders';
     import { visibleViewTabs } from '$lib/view-tabs';
     import { tabRegistry } from '$lib/plugins/tab-registry';
@@ -18,12 +22,22 @@
     thumbnailSize.subscribe(v => {
         zoomPosition = zoomPositionFromThumbnailSize(v);
     });
+    let canvasZoomPosition = $state(canvasZoomPositionFromZoom(1));
+    canvasZoom.subscribe(v => {
+        canvasZoomPosition = canvasZoomPositionFromZoom(v);
+    });
 
     function setSize(e: Event) {
         const position = parseFloat((e.target as HTMLInputElement).value);
         const val = thumbnailSizeFromZoomPosition(position);
         zoomPosition = position;
         thumbnailSize.set(val);
+    }
+
+    function setCanvasZoom(e: Event) {
+        const position = parseFloat((e.target as HTMLInputElement).value);
+        canvasZoomPosition = position;
+        requestCanvasZoom(canvasZoomFromPosition(position));
     }
 
     function selectTab(mode: ViewMode) {
@@ -103,6 +117,22 @@
                     />
                 </div>
                 <span class="slider-icon">▪</span>
+            </div>
+        {:else if $viewMode === 'canvas'}
+            <div class="slider-group">
+                <span class="slider-icon">-</span>
+                <div class="slider-track">
+                    <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={canvasZoomPosition}
+                        oninput={setCanvasZoom}
+                        aria-label="Canvas zoom"
+                    />
+                </div>
+                <span class="slider-icon">+</span>
             </div>
         {/if}
     </div>
