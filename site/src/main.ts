@@ -29,7 +29,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
             <span data-rotating-line-value="to">20 keepers</span>
           </button>
         </h1>
-        <p class="lede hero-step-3">A fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac.</p>
+        <p class="lede hero-step-3">A fast free and open source image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac.</p>
       </div>
       <figure class="product-shot hero-step-4" data-slideshow>
         <div class="slideshow-track">
@@ -59,7 +59,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         </a>
         <ul class="download-specs-list">
           <li><span class="spec-icon" aria-hidden="true">&#9673;</span>macOS 11+ &middot; Apple Silicon</li>
-          <li><span class="spec-icon" aria-hidden="true">&#9098;</span>v0.2.4 &middot; free &amp; open source</li>
+          <li><span class="spec-icon" aria-hidden="true">&#9098;</span>v0.2.4</li>
         </ul>
         <p class="brew-label">or install with Homebrew</p>
         <div class="brew-row">
@@ -278,6 +278,53 @@ if (slideshow) {
       stopSlideshow();
       showSlide(Number(dot.dataset.slideDot));
     });
+  }
+
+  const advance = (direction: number) => {
+    autoAdvance = false;
+    stopSlideshow();
+    showSlide(currentSlide + direction);
+  };
+
+  const track = slideshow.querySelector<HTMLElement>(".slideshow-track");
+  if (track) {
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let suppressClick = false;
+
+    track.addEventListener("click", () => {
+      if (suppressClick) {
+        return;
+      }
+      advance(1);
+    });
+
+    track.addEventListener(
+      "touchstart",
+      (event) => {
+        const touch = event.changedTouches[0];
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+      },
+      { passive: true },
+    );
+
+    track.addEventListener(
+      "touchend",
+      (event) => {
+        const touch = event.changedTouches[0];
+        const deltaX = touch.clientX - touchStartX;
+        const deltaY = touch.clientY - touchStartY;
+        if (Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY)) {
+          suppressClick = true;
+          advance(deltaX < 0 ? 1 : -1);
+          window.setTimeout(() => {
+            suppressClick = false;
+          }, 400);
+        }
+      },
+      { passive: true },
+    );
   }
 
   slideshow.addEventListener("mouseenter", stopSlideshow);

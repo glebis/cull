@@ -405,11 +405,7 @@ h3 {
   gap: calc(var(--spacing) * 2.5);
   width: 100%;
   margin-top: 0;
-  padding: calc(var(--spacing) * 3.5);
-  border: 1px solid color-mix(in srgb, var(--blue) 45%, var(--border));
-  border-radius: var(--radius-panel);
-  background: color-mix(in srgb, var(--surface) 94%, var(--blue) 6%);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+  padding: 0;
 }
 
 .download-header {
@@ -768,6 +764,8 @@ input:focus-visible {
 
 .slideshow-track {
   display: grid;
+  cursor: pointer;
+  touch-action: pan-y;
 }
 
 .slideshow-slide {
@@ -1582,6 +1580,17 @@ input:focus-visible {
     max-width: none;
   }
 
+  .claim,
+  .workflow,
+  .feature-note,
+  .artist-panel,
+  .pull-quote,
+  .signup-form--featured,
+  .footer-star-card {
+    border: 0;
+    box-shadow: none;
+  }
+
   .topbar {
     align-items: flex-start;
     padding-top: calc(var(--spacing) * 2);
@@ -1666,8 +1675,8 @@ input:focus-visible {
   }
 
   .site-footer-columns {
-    grid-template-columns: 1fr;
-    gap: calc(var(--spacing) * 3);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: calc(var(--spacing) * 3) calc(var(--spacing) * 2.5);
   }
 
   .workflow,
