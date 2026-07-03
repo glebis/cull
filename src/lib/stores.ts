@@ -324,6 +324,7 @@ function cancelActiveTextInputDialog() {
 export function requestTextInput(options: TextInputDialogOptions): Promise<string | null> {
     cancelActiveCollectionTargetDialog();
     cancelActiveTextInputDialog();
+    cancelActiveConfirmDialog();
     return new Promise(resolve => {
         textInputDialog.set({
             id: ++textInputDialogId,
@@ -343,6 +344,7 @@ export function resolveTextInputDialog(value: string | null) {
 export function requestCollectionTarget(options: CollectionTargetDialogOptions): Promise<CollectionTargetDialogResult | null> {
     cancelActiveTextInputDialog();
     cancelActiveCollectionTargetDialog();
+    cancelActiveConfirmDialog();
     return new Promise(resolve => {
         collectionTargetDialog.set({
             id: ++collectionTargetDialogId,
@@ -357,6 +359,51 @@ export function resolveCollectionTargetDialog(value: CollectionTargetDialogResul
     const active = get(collectionTargetDialog);
     if (!active) return;
     collectionTargetDialog.set(null);
+    active.resolve(value);
+}
+
+export interface ConfirmDialogOptions {
+    title: string;
+    description?: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    /** Styles the confirm button as destructive (red). */
+    danger?: boolean;
+}
+
+export interface ConfirmDialogRequest extends ConfirmDialogOptions {
+    id: number;
+    resolve: (value: boolean) => void;
+}
+
+export const confirmDialog = writable<ConfirmDialogRequest | null>(null);
+
+let confirmDialogId = 0;
+
+function cancelActiveConfirmDialog() {
+    const active = get(confirmDialog);
+    if (!active) return;
+    confirmDialog.set(null);
+    active.resolve(false);
+}
+
+export function requestConfirm(options: ConfirmDialogOptions): Promise<boolean> {
+    cancelActiveTextInputDialog();
+    cancelActiveCollectionTargetDialog();
+    cancelActiveConfirmDialog();
+    return new Promise(resolve => {
+        confirmDialog.set({
+            id: ++confirmDialogId,
+            ...options,
+            resolve,
+        });
+    });
+}
+
+export function resolveConfirmDialog(value: boolean) {
+    const active = get(confirmDialog);
+    if (!active) return;
+    confirmDialog.set(null);
     active.resolve(value);
 }
 

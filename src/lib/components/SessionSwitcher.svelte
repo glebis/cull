@@ -7,6 +7,25 @@
     let search = $state('');
     let creating = $state(false);
     let newName = $state('');
+    let rootEl = $state<HTMLDivElement | undefined>();
+
+    function close() {
+        open = false;
+        search = '';
+        creating = false;
+    }
+
+    function handleDocumentPointerdown(e: PointerEvent) {
+        if (!open) return;
+        if (rootEl && e.target instanceof Node && !rootEl.contains(e.target)) close();
+    }
+
+    function handleKeydown(e: KeyboardEvent) {
+        if (e.key === 'Escape' && open) {
+            e.stopPropagation();
+            close();
+        }
+    }
 
     let filtered = $derived(
         $sessions.filter(s =>
@@ -55,8 +74,16 @@
     }
 </script>
 
-<div class="session-switcher">
-    <button class="session-toggle" onclick={() => open = !open}>
+<svelte:document onpointerdown={handleDocumentPointerdown} />
+
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="session-switcher" bind:this={rootEl} onkeydown={handleKeydown}>
+    <button
+        class="session-toggle"
+        onclick={() => open ? close() : open = true}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+    >
         <span class="session-label">
             {$activeSession?.name ?? 'All Images'}
         </span>
