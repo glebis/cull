@@ -317,6 +317,8 @@
             invalidateCache: true,
             minItems: remainingLoadedCount,
         });
+        const c = await listCollections();
+        collections.set(c);
         if ($focusedIndex >= $images.length) focusedIndex.set(Math.max(0, $images.length - 1));
     }
 

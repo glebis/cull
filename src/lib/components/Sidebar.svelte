@@ -742,7 +742,7 @@
         {#if $pinnedCollection}
             {@const pinnedName = $collections.find(([id]) => id === $pinnedCollection)?.[1] ?? 'Unknown'}
             <div class="pinned-indicator">
-                <span class="pin-icon">📌</span>
+                <span class="pin-icon generated-pin" aria-hidden="true"></span>
                 <span class="pin-name">{pinnedName}</span>
                 <button class="pin-action" onclick={unpinCollection}>Unpin</button>
             </div>
@@ -772,7 +772,7 @@
                         aria-label={$pinnedCollection === id ? `Unpin collection: ${name}` : `Pin collection as active: ${name}`}
                         aria-pressed={$pinnedCollection === id}
                     >
-                        {$pinnedCollection === id ? '📌' : '📎'}
+                        <span class="generated-pin" aria-hidden="true"></span>
                     </button>
                     <button
                         class="delete-btn"
@@ -1314,7 +1314,7 @@
         border: 1px solid var(--green);
         font-size: 12px;
     }
-    .pin-icon { font-size: 14px; }
+    .pin-icon { flex: none; }
     .pin-name { color: var(--text); flex: 1; }
     .pin-action {
         background: none;
@@ -1329,16 +1329,63 @@
         align-items: center;
         background: none;
         border: none;
+        color: var(--text-secondary);
         cursor: pointer;
         display: inline-flex;
-        font-size: 11px;
         height: 24px;
         justify-content: center;
-        opacity: 0.4;
+        opacity: 0;
         padding: 0;
+        pointer-events: none;
+        transition: color 0.12s ease, opacity 0.12s ease;
         width: 24px;
     }
-    .pin-btn:hover, .pin-btn.active { opacity: 1; }
+    .folder-row:hover .pin-btn,
+    .folder-row:focus-within .pin-btn {
+        opacity: 0.7;
+        pointer-events: auto;
+    }
+    .pin-btn:hover,
+    .pin-btn:focus-visible,
+    .pin-btn.active {
+        opacity: 1;
+        pointer-events: auto;
+    }
+    .pin-btn:hover,
+    .pin-btn:focus-visible {
+        color: var(--blue);
+    }
+    .pin-btn.active {
+        color: var(--green);
+    }
+    .generated-pin {
+        display: inline-block;
+        height: 13px;
+        position: relative;
+        transform: rotate(35deg);
+        width: 10px;
+    }
+    .generated-pin::before {
+        background: color-mix(in srgb, currentColor 12%, transparent);
+        border: 1px solid currentColor;
+        border-radius: 1px;
+        content: '';
+        height: 6px;
+        left: 1px;
+        position: absolute;
+        top: 0;
+        width: 7px;
+    }
+    .generated-pin::after {
+        background: currentColor;
+        box-shadow: 0 7px 0 -0.5px currentColor;
+        content: '';
+        height: 9px;
+        left: 5px;
+        position: absolute;
+        top: 6px;
+        width: 1px;
+    }
     .sr-only {
         border: 0;
         clip: rect(0 0 0 0);
