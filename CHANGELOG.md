@@ -8,6 +8,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 No changes yet.
 
+## [0.2.5] - 2026-07-03
+
+### Added
+
+- Canvas edits now persist across scopes, with broader view-model coverage for
+  saved canvas state.
+- Undo history gained a dedicated panel, expanded event coverage, and a clearer
+  empty state.
+- The Cull site now presents a fuller screenshot tour with real app imagery,
+  social sharing metadata, and latest-release download resolution.
+
+### Changed
+
+- The site download block, Homebrew install row, and hero slideshow were
+  tightened for desktop, tablet, and mobile layouts.
+- Site interaction polish now covers download buttons, slideshow dots, claim
+  cards, footer cards, and footer links.
+
+### Fixed
+
+- Loupe actual-size/full-quality rendering uses originals more reliably.
+- Collection counts and pinned collection actions reflect the current library
+  state more accurately.
+- Grid viewport position is preserved when layout column counts change.
+
 ## [0.2.4] - 2026-07-02
 
 ### Added

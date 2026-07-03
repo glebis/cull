@@ -58,7 +58,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         </a>
         <ul class="download-specs-list">
           <li><span class="spec-icon" aria-hidden="true">&#9673;</span>macOS 11+ &middot; Apple Silicon</li>
-          <li><span class="spec-icon" aria-hidden="true">&#9098;</span>v0.2.4</li>
+          <li><span class="spec-icon" aria-hidden="true">&#9098;</span>v0.2.5</li>
         </ul>
         <p class="brew-label">or install with Homebrew</p>
         <div class="brew-row">
