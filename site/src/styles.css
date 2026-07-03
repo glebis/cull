@@ -1511,7 +1511,7 @@ input:focus-visible {
   }
 }
 
-@media (min-width: 621px) and (max-width: 900px) {
+@media (min-width: 621px) and (max-width: 1000px) {
   .hero {
     grid-template-columns: 1fr;
     min-height: auto;
