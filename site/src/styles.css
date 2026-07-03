@@ -355,6 +355,7 @@ h3 {
 
 .download-block {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: calc(var(--spacing) * 2.5);
   width: 100%;
   margin-top: 0;
