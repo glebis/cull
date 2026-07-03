@@ -55,6 +55,7 @@ import {
     showToast,
     requestTextInput,
     folders,
+    undoHistoryOpen,
     type ViewMode,
 } from './stores';
 import {
@@ -577,6 +578,9 @@ function handleMenuAction(action: string) {
             break;
         case 'command_palette':
             openCommandPalette('commands');
+            break;
+        case 'undo_history':
+            undoHistoryOpen.set(true);
             break;
         case 'image_share':
             handleImageShare();

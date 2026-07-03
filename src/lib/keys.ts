@@ -5,7 +5,7 @@ import {
     sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode, compareImageOnly, exportImageOnly,
     collections, collectMode, collectModeTarget, activeCollection,
     showDetectionBoxes, showDetectionInspector, nsfwMode,
-    navigateTo, navigateBack, searchOpen, shortcutsOpen, focusedImage, activeSession,
+    navigateTo, navigateBack, searchOpen, shortcutsOpen, undoHistoryOpen, focusedImage, activeSession,
     requestTextInput, requestCollectionTarget, selectionAnchorIndex, resetLoupeTransform,
     activeFolder,
 } from './stores';
@@ -304,6 +304,12 @@ export function handleKeydown(e: KeyboardEvent) {
     if (e.key.toLowerCase() === 'p' && e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         openCommandPalette('commands');
+        return;
+    }
+
+    if (e.key.toLowerCase() === 'h' && e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        undoHistoryOpen.set(true);
         return;
     }
 

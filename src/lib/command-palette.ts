@@ -25,6 +25,7 @@ import {
     searchOpen,
     selectedIds,
     sessions,
+    undoHistoryOpen,
     shortcutsOpen,
     sessionCanvases,
     settingsOpen,
@@ -106,6 +107,7 @@ export const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
     'Cmd+B': 'Toggle sidebar',
     'Cmd+Z': 'Undo',
     'Cmd+Shift+Z': 'Redo',
+    'Cmd+Shift+H': 'Open action history',
     'Cmd+1': 'Grid view',
     'Cmd+2': 'Loupe view',
     'Cmd+3': 'Compare view',
@@ -809,6 +811,18 @@ function commandItems(): CommandPaletteItem[] {
                     showToast(`Redone: ${label}`, { type: 'info', duration: 4000 });
                     window.dispatchEvent(new CustomEvent('reload-images'));
                 }
+            },
+        },
+        {
+            id: 'edit.undo_history',
+            title: 'Action History',
+            subtitle: 'View recent undoable actions',
+            category: 'Edit',
+            kind: 'command',
+            keywords: ['history', 'undo', 'redo'],
+            defaultShortcut: 'Cmd+Shift+H',
+            run: () => {
+                undoHistoryOpen.set(true);
             },
         },
         {
