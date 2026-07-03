@@ -226,6 +226,21 @@ brewCopyButton?.addEventListener("click", async () => {
 
 const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 
+const downloadButton = document.querySelector<HTMLAnchorElement>("[data-download-button]");
+if (downloadButton) {
+  fetch("https://api.github.com/repos/glebis/cull/releases/latest")
+    .then((response) => (response.ok ? response.json() : Promise.reject(new Error(String(response.status)))))
+    .then((release: { assets?: { name: string; browser_download_url: string }[] }) => {
+      const dmg = release.assets?.find((asset) => asset.name.endsWith(".dmg"));
+      if (dmg) {
+        downloadButton.href = dmg.browser_download_url;
+      }
+    })
+    .catch(() => {
+      /* keep the releases page fallback */
+    });
+}
+
 const slideshow = document.querySelector<HTMLElement>("[data-slideshow]");
 if (slideshow) {
   const slides = [...slideshow.querySelectorAll<HTMLImageElement>(".slideshow-slide")];
