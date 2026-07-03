@@ -737,7 +737,9 @@ export async function listImagesByFolder(folder: string, limit: number, offset: 
 }
 
 export async function deleteFolder(folder: string): Promise<number> {
-    return invoke('delete_folder', { folder });
+    const result = await invoke<number>('delete_folder', { folder });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function listImagesFiltered(minWidth: number | null, minHeight: number | null, limit: number, offset: number): Promise<ImageWithFile[]> {
@@ -745,7 +747,9 @@ export async function listImagesFiltered(minWidth: number | null, minHeight: num
 }
 
 export async function createCollection(name: string): Promise<string> {
-    return invoke('create_collection', { name });
+    const result = await invoke<string>('create_collection', { name });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function listCollections(): Promise<[string, string, number][]> {
@@ -753,7 +757,8 @@ export async function listCollections(): Promise<[string, string, number][]> {
 }
 
 export async function addToCollection(collectionId: string, imageIds: string[]): Promise<void> {
-    return invoke('add_to_collection', { collectionId, imageIds });
+    await invoke('add_to_collection', { collectionId, imageIds });
+    emitSessionEventsRefresh();
 }
 
 export async function listCollectionImages(collectionId: string, limit?: number, offset?: number): Promise<ImageWithFile[]> {
@@ -761,11 +766,13 @@ export async function listCollectionImages(collectionId: string, limit?: number,
 }
 
 export async function removeFromCollection(collectionId: string, imageIds: string[]): Promise<void> {
-    return invoke('remove_from_collection', { collectionId, imageIds });
+    await invoke('remove_from_collection', { collectionId, imageIds });
+    emitSessionEventsRefresh();
 }
 
 export async function deleteCollectionApi(collectionId: string): Promise<void> {
-    return invoke('delete_collection', { collectionId });
+    await invoke('delete_collection', { collectionId });
+    emitSessionEventsRefresh();
 }
 
 export interface ExportImagesParams {
@@ -820,7 +827,8 @@ export interface ClientFeedback {
 
 // Client feedback is stored separately from curator selections.
 export async function setClientFeedback(imageId: string, favorite: boolean, comment: string | null): Promise<void> {
-    return invoke('set_client_feedback', { imageId, favorite, comment: comment ?? null });
+    await invoke('set_client_feedback', { imageId, favorite, comment: comment ?? null });
+    emitSessionEventsRefresh();
 }
 
 export async function getClientFeedback(imageId: string): Promise<ClientFeedback | null> {
@@ -891,7 +899,9 @@ export async function createSmartCollection(
     filterJson: string,
     nlQuery?: string,
 ): Promise<string> {
-    return invoke('create_smart_collection', { name, filterJson, nlQuery });
+    const result = await invoke<string>('create_smart_collection', { name, filterJson, nlQuery });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function evaluateSmartCollection(filterJson: string, limit?: number, offset?: number): Promise<ImageWithFile[]> {
@@ -903,7 +913,8 @@ export async function countSmartCollection(filterJson: string): Promise<number> 
 }
 
 export async function deleteSmartCollectionApi(id: string): Promise<void> {
-    return invoke('delete_smart_collection', { id });
+    await invoke('delete_smart_collection', { id });
+    emitSessionEventsRefresh();
 }
 
 export async function updateSmartCollectionApi(
@@ -912,7 +923,8 @@ export async function updateSmartCollectionApi(
     filterJson: string,
     nlQuery?: string,
 ): Promise<void> {
-    return invoke('update_smart_collection', { id, name, filterJson, nlQuery });
+    await invoke('update_smart_collection', { id, name, filterJson, nlQuery });
+    emitSessionEventsRefresh();
 }
 
 export async function parseNlQuery(query: string): Promise<string> {
@@ -1261,15 +1273,21 @@ export interface TrashImagesDetailedResult {
 }
 
 export async function trashImages(imageIds: string[]): Promise<number> {
-    return invoke('trash_images', { imageIds });
+    const result = await invoke<number>('trash_images', { imageIds });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function trashImagesDetailed(imageIds: string[]): Promise<TrashImagesDetailedResult> {
-    return invoke<TrashImagesDetailedResult>('trash_images_detailed', { imageIds });
+    const result = await invoke<TrashImagesDetailedResult>('trash_images_detailed', { imageIds });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function deleteImagesPermanently(imageIds: string[]): Promise<number> {
-    return invoke('delete_images_permanently', { imageIds });
+    const result = await invoke<number>('delete_images_permanently', { imageIds });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function createActionProposal(request: CreateActionProposalRequest): Promise<AgentActionProposal> {
@@ -1517,11 +1535,15 @@ export async function getMcpAuditLog(limit: number): Promise<McpAuditEntry[]> {
 }
 
 export async function cropImage(imageId: string, x: number, y: number, width: number, height: number): Promise<string> {
-    return invoke<string>('crop_image', { imageId, x, y, width, height });
+    const result = await invoke<string>('crop_image', { imageId, x, y, width, height });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function rotateImage(imageId: string, degrees: number): Promise<string> {
-    return invoke<string>('rotate_image', { imageId, degrees });
+    const result = await invoke<string>('rotate_image', { imageId, degrees });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function getGenerationRun(imageId: string): Promise<GenerationRun | null> {
@@ -1620,8 +1642,8 @@ export async function createSession(name: string): Promise<Session> {
 export async function listSessions(): Promise<Session[]> {
     return invoke<Session[]>('list_sessions');
 }
-export async function getActivityContext(sessionId?: string | null): Promise<ActivityContext> {
-    return invoke<ActivityContext>('get_activity_context', { sessionId: sessionId ?? null });
+export async function getActivityContext(sessionId?: string | null, limit?: number | null): Promise<ActivityContext> {
+    return invoke<ActivityContext>('get_activity_context', { sessionId: sessionId ?? null, limit: limit ?? null });
 }
 export async function getSession(sessionId: string): Promise<Session> {
     return invoke<Session>('get_session', { sessionId });
@@ -1657,19 +1679,27 @@ export async function pasteImageFromClipboard(
     destinationFolder: string,
     sessionId: string | null = null,
 ): Promise<PastedImageResult> {
-    return invoke<PastedImageResult>('paste_image_from_clipboard', { destinationFolder, sessionId });
+    const result = await invoke<PastedImageResult>('paste_image_from_clipboard', { destinationFolder, sessionId });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function moveImage(imageId: string, destinationFolder: string): Promise<string> {
-    return invoke<string>('move_image', { imageId, destinationFolder });
+    const result = await invoke<string>('move_image', { imageId, destinationFolder });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function renameImage(imageId: string, newName: string): Promise<string> {
-    return invoke<string>('rename_image', { imageId, newName });
+    const result = await invoke<string>('rename_image', { imageId, newName });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function createSubfolder(parentPath: string, name: string): Promise<string> {
-    return invoke<string>('create_subfolder', { parentPath, name });
+    const result = await invoke<string>('create_subfolder', { parentPath, name });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function shareImages(imageIds: string[]): Promise<void> {

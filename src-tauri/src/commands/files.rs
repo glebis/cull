@@ -1,3 +1,4 @@
+use crate::commands::log_library_event;
 use crate::db_core::db::Database;
 use crate::AppState;
 use serde::Serialize;
@@ -519,6 +520,21 @@ pub async fn paste_image_from_clipboard(
 
     let _ = app.emit("images:changed", ());
 
+    if let Some(image_id) = image_id.as_ref() {
+        log_library_event(
+            &state,
+            "clipboard_image_pasted",
+            Some("image"),
+            Some(image_id.clone()),
+            serde_json::json!({
+                "image_id": image_id,
+                "path": target_str.clone(),
+                "destination_folder": destination_folder,
+                "session_id": session_id,
+            }),
+        );
+    }
+
     Ok(PastedImageResult {
         path: target_str,
         image_id,
@@ -601,6 +617,19 @@ pub async fn move_image(
 
     let _ = app.emit("images:changed", ());
 
+    log_library_event(
+        &state,
+        "image_moved",
+        Some("image"),
+        Some(image_id.clone()),
+        serde_json::json!({
+            "image_id": image_id,
+            "old_path": old_path.to_string_lossy(),
+            "new_path": new_path_str.clone(),
+            "destination_folder": destination_folder,
+        }),
+    );
+
     Ok(new_path_str)
 }
 
@@ -659,6 +688,19 @@ pub async fn rename_image(
 
     let _ = app.emit("images:changed", ());
 
+    log_library_event(
+        &state,
+        "image_renamed",
+        Some("image"),
+        Some(image_id.clone()),
+        serde_json::json!({
+            "image_id": image_id,
+            "old_path": old_path.to_string_lossy(),
+            "new_path": new_path_str.clone(),
+            "new_name": new_name,
+        }),
+    );
+
     Ok(new_path_str)
 }
 
@@ -698,7 +740,20 @@ pub async fn create_subfolder(
 
     let _ = app.emit("folders:changed", ());
 
-    Ok(new_folder.to_string_lossy().to_string())
+    let new_folder_str = new_folder.to_string_lossy().to_string();
+    log_library_event(
+        &state,
+        "folder_created",
+        Some("folder"),
+        Some(new_folder_str.clone()),
+        serde_json::json!({
+            "parent_path": parent_path,
+            "name": name,
+            "path": new_folder_str.clone(),
+        }),
+    );
+
+    Ok(new_folder_str)
 }
 
 #[tauri::command]

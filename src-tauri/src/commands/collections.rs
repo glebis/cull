@@ -1,3 +1,4 @@
+use crate::commands::log_library_event;
 use crate::db_core::models::{ImageWithFile, NewSessionEvent};
 use crate::services::curation as svc;
 use crate::services::{Pagination, ServiceContext};
@@ -77,7 +78,15 @@ pub async fn remove_from_collection(
 ) -> Result<(), String> {
     let ctx = ServiceContext::from_app_state(&state, None);
     let refs: Vec<&str> = image_ids.iter().map(|s| s.as_str()).collect();
-    svc::remove_from_collection(&ctx, &collection_id, &refs).map_err(|e| e.to_string())
+    svc::remove_from_collection(&ctx, &collection_id, &refs).map_err(|e| e.to_string())?;
+    log_library_event(
+        &state,
+        "collection_items_removed",
+        Some("collection"),
+        Some(collection_id),
+        serde_json::json!({ "image_count": image_ids.len() }),
+    );
+    Ok(())
 }
 
 #[tauri::command]

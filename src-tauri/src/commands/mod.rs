@@ -36,6 +36,27 @@ pub mod undo;
 pub mod vision;
 pub mod window;
 
+use crate::db_core::models::NewSessionEvent;
+use crate::AppState;
+
+pub(crate) fn log_library_event(
+    state: &AppState,
+    event_type: &str,
+    subject_type: Option<&str>,
+    subject_id: Option<String>,
+    payload: serde_json::Value,
+) {
+    let _ = state.db.log_session_event(&NewSessionEvent {
+        session_id: None,
+        event_type: event_type.to_string(),
+        actor_type: "user".to_string(),
+        actor_id: None,
+        subject_type: subject_type.map(str::to_string),
+        subject_id,
+        payload_json: payload.to_string(),
+    });
+}
+
 pub fn resolve_image_path_for_ml(
     img: &crate::db_core::models::ImageWithFile,
     app_data_dir: &std::path::Path,

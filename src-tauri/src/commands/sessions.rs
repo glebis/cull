@@ -46,10 +46,11 @@ pub async fn list_session_events(
 pub async fn get_activity_context(
     state: State<'_, AppState>,
     session_id: Option<String>,
+    limit: Option<u32>,
 ) -> Result<ActivityContext, String> {
     state
         .db
-        .get_activity_context(session_id.as_deref(), 25)
+        .get_activity_context(session_id.as_deref(), limit.unwrap_or(25))
         .map_err(|e| e.to_string())
 }
 

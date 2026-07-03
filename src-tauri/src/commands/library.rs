@@ -1,3 +1,4 @@
+use crate::commands::log_library_event;
 use crate::db_core::models::{ImageWithFile, TrashImageResult, TrashImagesDetailedResult};
 use crate::services::library as svc;
 use crate::services::{Pagination, ServiceContext};
@@ -34,10 +35,23 @@ pub async fn list_images(
 
 #[tauri::command]
 pub async fn delete_folder(state: State<'_, AppState>, folder: String) -> Result<u32, String> {
-    state
+    let deleted = state
         .db
         .delete_images_by_folder(&folder)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if deleted > 0 {
+        log_library_event(
+            &state,
+            "folder_removed_from_library",
+            Some("folder"),
+            Some(folder.clone()),
+            serde_json::json!({
+                "folder": folder,
+                "image_count": deleted,
+            }),
+        );
+    }
+    Ok(deleted)
 }
 
 #[tauri::command]
@@ -122,6 +136,17 @@ pub async fn trash_images(
                             .and_then(|n| n.to_str())
                             .unwrap_or("file")
                             .to_string();
+                        log_library_event(
+                            &state,
+                            "image_moved_to_trash",
+                            Some("image"),
+                            Some(image_id.clone()),
+                            serde_json::json!({
+                                "image_id": image_id,
+                                "path": &img.path,
+                                "filename": filename.clone(),
+                            }),
+                        );
                         let _ = state.action_manager.record_action(
                             &state.db,
                             "trash_image",
@@ -185,6 +210,17 @@ pub async fn trash_images_detailed(
                     .and_then(|n| n.to_str())
                     .unwrap_or("file")
                     .to_string();
+                log_library_event(
+                    &state,
+                    "image_moved_to_trash",
+                    Some("image"),
+                    Some(image_id.clone()),
+                    serde_json::json!({
+                        "image_id": image_id,
+                        "path": &img.path,
+                        "filename": filename.clone(),
+                    }),
+                );
                 let _ = state.action_manager.record_action(
                     &state.db,
                     "trash_image",
@@ -240,6 +276,22 @@ pub async fn delete_images_permanently(
             if path.exists() && std::fs::remove_file(path).is_ok() {
                 let _ = state.db.mark_file_missing(&img.path);
                 deleted += 1;
+                let filename = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("file")
+                    .to_string();
+                log_library_event(
+                    &state,
+                    "image_deleted_permanently",
+                    Some("image"),
+                    Some(image_id.clone()),
+                    serde_json::json!({
+                        "image_id": image_id,
+                        "path": &img.path,
+                        "filename": filename,
+                    }),
+                );
             }
         }
     }

@@ -1,12 +1,13 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { undo, redo, listUndoHistory, type UndoRecord } from '$lib/api';
+    import { undo, redo, listUndoHistory, getActivityContext, type SessionEvent, type UndoRecord } from '$lib/api';
     import { showToast, undoHistoryOpen } from '$lib/stores';
 
     let loading = $state(false);
     let loadingAction: 'undo' | 'redo' | null = $state(null);
     let error = $state<string | null>(null);
-    let history = $state<UndoRecord[]>([]);
+    let undoHistory = $state<UndoRecord[]>([]);
+    let activityEvents = $state<SessionEvent[]>([]);
     let expanded = $state<string | null>(null);
 
     function closeHistory() {
@@ -42,6 +43,64 @@
         return entry.label?.trim() || actionLabel(entry.action_type || 'unknown_action');
     }
 
+    function parsePayload(payload: string): Record<string, unknown> {
+        try {
+            const parsed = JSON.parse(payload);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch {
+            return {};
+        }
+    }
+
+    function eventTypeLabel(eventType: string): string {
+        const labels: Record<string, string> = {
+            rating_set: 'Set rating',
+            decision_set: 'Set decision',
+            client_feedback_set: 'Client feedback',
+            collection_created: 'Create collection',
+            collection_items_added: 'Add to collection',
+            collection_items_removed: 'Remove from collection',
+            collection_deleted: 'Delete collection',
+            smart_collection_created: 'Create smart collection',
+            smart_collection_updated: 'Update smart collection',
+            smart_collection_deleted: 'Delete smart collection',
+            import_completed: 'Import completed',
+            image_moved_to_trash: 'Move to Trash',
+            image_deleted_permanently: 'Permanent delete',
+            folder_removed_from_library: 'Remove folder',
+            image_moved: 'Move file',
+            image_renamed: 'Rename file',
+            folder_created: 'Create folder',
+            clipboard_image_pasted: 'Paste image',
+            image_cropped: 'Crop image',
+            image_rotated: 'Rotate image',
+            agent_proposal_created: 'Agent proposal',
+            agent_proposal_applied: 'Apply proposal',
+            agent_proposal_dismissed: 'Dismiss proposal',
+            session_created: 'Create session',
+            session_deleted: 'Delete session',
+            session_converted_to_collection: 'Convert session',
+            canvas_created: 'Create canvas',
+            canvas_layout_updated: 'Update canvas',
+            canvas_deleted: 'Delete canvas',
+        };
+        return labels[eventType] ?? eventType.replace(/_/g, ' ');
+    }
+
+    function eventLabel(event: SessionEvent): string {
+        const payload = parsePayload(event.payload_json);
+        const candidate = payload.filename ?? payload.name ?? payload.new_name ?? payload.path ?? payload.source;
+        if (typeof candidate === 'string' && candidate.trim()) return candidate;
+        return event.subject_id ?? eventTypeLabel(event.event_type);
+    }
+
+    function eventCount(event: SessionEvent): string {
+        const payload = parsePayload(event.payload_json);
+        const count = payload.image_count ?? payload.imported ?? payload.approved_image_count;
+        if (typeof count === 'number') return `${count} image${count === 1 ? '' : 's'}`;
+        return event.subject_type ?? 'event';
+    }
+
     function formatJson(payload: string): string {
         try {
             return JSON.stringify(JSON.parse(payload), null, 2);
@@ -58,7 +117,12 @@
         loading = true;
         error = null;
         try {
-            history = await listUndoHistory(40);
+            const [undoRows, activity] = await Promise.all([
+                listUndoHistory(40),
+                getActivityContext(null, 40),
+            ]);
+            undoHistory = undoRows;
+            activityEvents = activity.recent_events;
         } catch (e) {
             error = String(e);
         } finally {
@@ -121,8 +185,10 @@
             }
         };
         window.addEventListener('reload-images', onReload);
+        window.addEventListener('session-events-refresh', onReload);
         return () => {
             window.removeEventListener('reload-images', onReload);
+            window.removeEventListener('session-events-refresh', onReload);
         };
     });
 </script>
@@ -166,7 +232,7 @@
                 <p class="history-state">Loading history…</p>
             {:else if error}
                 <p class="history-state error">Failed to load history: {error}</p>
-            {:else if history.length === 0}
+            {:else if undoHistory.length === 0 && activityEvents.length === 0}
                 <div class="history-empty" role="status">
                     <svg
                         class="history-empty-image"
@@ -188,49 +254,95 @@
                 </div>
             {:else}
                 <div class="history-list" role="list">
-                    {#each history as entry (entry.id)}
-                        <article class="history-item" role="listitem">
-                            <button class="history-row" type="button" onclick={() => toggleExpanded(entry.id)}>
-                                <span class="history-type">{actionLabel(entry.action_type)}</span>
-                                <span class="history-label" title={displayLabel(entry)}>{displayLabel(entry)}</span>
-                                <span class="history-meta">{formatTime(entry.created_at)}</span>
-                                <span class="history-count">{affectedCount(entry.affected_image_ids)} image{affectedCount(entry.affected_image_ids) === 1 ? '' : 's'}</span>
-                                <span class="history-chevron">{expanded === entry.id ? '▼' : '▶'}</span>
-                            </button>
-                            {#if expanded === entry.id}
-                                <div class="history-details">
-                                    <div class="detail-grid">
-                                        <div class="detail-item">
-                                            <span class="detail-key">Seq</span>
-                                            <span class="detail-value">#{entry.seq}</span>
+                    {#if undoHistory.length > 0}
+                        <h3 class="history-section-title">Undoable actions</h3>
+                        {#each undoHistory as entry (entry.id)}
+                            <article class="history-item" role="listitem">
+                                <button class="history-row" type="button" onclick={() => toggleExpanded(`undo:${entry.id}`)}>
+                                    <span class="history-type">{actionLabel(entry.action_type)}</span>
+                                    <span class="history-label" title={displayLabel(entry)}>{displayLabel(entry)}</span>
+                                    <span class="history-meta">{formatTime(entry.created_at)}</span>
+                                    <span class="history-count">{affectedCount(entry.affected_image_ids)} image{affectedCount(entry.affected_image_ids) === 1 ? '' : 's'}</span>
+                                    <span class="history-chevron">{expanded === `undo:${entry.id}` ? '▼' : '▶'}</span>
+                                </button>
+                                {#if expanded === `undo:${entry.id}`}
+                                    <div class="history-details">
+                                        <div class="detail-grid">
+                                            <div class="detail-item">
+                                                <span class="detail-key">Seq</span>
+                                                <span class="detail-value">#{entry.seq}</span>
+                                            </div>
+                                            <div class="detail-item">
+                                                <span class="detail-key">Action ID</span>
+                                                <span class="detail-value">{entry.id}</span>
+                                            </div>
+                                            <div class="detail-item">
+                                                <span class="detail-key">File backup</span>
+                                                <span class="detail-value">{entry.has_file_backup ? 'Yes' : 'No'}</span>
+                                            </div>
+                                            <div class="detail-item">
+                                                <span class="detail-key">Affected image IDs</span>
+                                                <span class="detail-value">{entry.affected_image_ids ?? 'None'}</span>
+                                            </div>
                                         </div>
-                                        <div class="detail-item">
-                                            <span class="detail-key">Action ID</span>
-                                            <span class="detail-value">{entry.id}</span>
-                                        </div>
-                                        <div class="detail-item">
-                                            <span class="detail-key">File backup</span>
-                                            <span class="detail-value">{entry.has_file_backup ? 'Yes' : 'No'}</span>
-                                        </div>
-                                        <div class="detail-item">
-                                            <span class="detail-key">Affected image IDs</span>
-                                            <span class="detail-value">{entry.affected_image_ids ?? 'None'}</span>
+                                        <div class="history-json-block">
+                                            <div class="history-json-col">
+                                                <h4>Before</h4>
+                                                <pre>{formatJson(entry.before_json)}</pre>
+                                            </div>
+                                            <div class="history-json-col">
+                                                <h4>After</h4>
+                                                <pre>{formatJson(entry.after_json)}</pre>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div class="history-json-block">
-                                        <div class="history-json-col">
-                                            <h4>Before</h4>
-                                            <pre>{formatJson(entry.before_json)}</pre>
+                                {/if}
+                            </article>
+                        {/each}
+                    {/if}
+
+                    {#if activityEvents.length > 0}
+                        <h3 class="history-section-title">Critical activity</h3>
+                        {#each activityEvents as event (event.id)}
+                            <article class="history-item" role="listitem">
+                                <button class="history-row" type="button" onclick={() => toggleExpanded(`event:${event.id}`)}>
+                                    <span class="history-type">{eventTypeLabel(event.event_type)}</span>
+                                    <span class="history-label" title={eventLabel(event)}>{eventLabel(event)}</span>
+                                    <span class="history-meta">{formatTime(event.created_at)}</span>
+                                    <span class="history-count">{eventCount(event)}</span>
+                                    <span class="history-chevron">{expanded === `event:${event.id}` ? '▼' : '▶'}</span>
+                                </button>
+                                {#if expanded === `event:${event.id}`}
+                                    <div class="history-details">
+                                        <div class="detail-grid">
+                                            <div class="detail-item">
+                                                <span class="detail-key">Event ID</span>
+                                                <span class="detail-value">{event.id}</span>
+                                            </div>
+                                            <div class="detail-item">
+                                                <span class="detail-key">Actor</span>
+                                                <span class="detail-value">{event.actor_type}</span>
+                                            </div>
+                                            <div class="detail-item">
+                                                <span class="detail-key">Subject</span>
+                                                <span class="detail-value">{event.subject_type ?? 'None'}</span>
+                                            </div>
+                                            <div class="detail-item">
+                                                <span class="detail-key">Subject ID</span>
+                                                <span class="detail-value">{event.subject_id ?? 'None'}</span>
+                                            </div>
                                         </div>
-                                        <div class="history-json-col">
-                                            <h4>After</h4>
-                                            <pre>{formatJson(entry.after_json)}</pre>
+                                        <div class="history-json-block single">
+                                            <div class="history-json-col">
+                                                <h4>Payload</h4>
+                                                <pre>{formatJson(event.payload_json)}</pre>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            {/if}
-                        </article>
-                    {/each}
+                                {/if}
+                            </article>
+                        {/each}
+                    {/if}
                 </div>
             {/if}
         </section>
@@ -427,6 +539,15 @@
         min-height: 0;
     }
 
+    .history-section-title {
+        margin: 4px 0 0;
+        color: var(--text-secondary);
+        font-size: 10px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+
     .history-item {
         border: 1px solid var(--border);
         border-radius: var(--radius);
@@ -514,6 +635,10 @@
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
+    }
+
+    .history-json-block.single {
+        grid-template-columns: 1fr;
     }
 
     .history-json-col h4 {
