@@ -453,6 +453,8 @@ export const commandPaletteOpen = writable<boolean>(false);
 export const commandPaletteMode = writable<CommandPaletteMode>('all');
 // Searchable keyboard-shortcuts reference / customization panel.
 export const shortcutsOpen = writable<boolean>(false);
+// Undo history side panel (read-only action history).
+export const undoHistoryOpen = writable<boolean>(false);
 // Collection/scope export-to-folder dialog.
 export const exportFolderOpen = writable<boolean>(false);
 // Contact sheet export dialog.

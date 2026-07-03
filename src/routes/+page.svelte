@@ -24,6 +24,7 @@
     import LineageView from '$lib/components/LineageView.svelte';
     import Tinder from '$lib/components/Tinder.svelte';
     import McpSettings from '$lib/components/McpSettings.svelte';
+    import UndoHistoryPanel from '$lib/components/UndoHistoryPanel.svelte';
     import AboutDialog from '$lib/components/AboutDialog.svelte';
     import AgentSkillsDialog from '$lib/components/AgentSkillsDialog.svelte';
     import AgentProposalDock from '$lib/components/AgentProposalDock.svelte';
@@ -864,6 +865,7 @@
     <ExportFolderDialog />
     <ContactSheetDialog />
     <GroupRankingDialog />
+    <UndoHistoryPanel />
 
     {#if $settingsOpen}
         <McpSettings onclose={() => settingsOpen.set(false)} />

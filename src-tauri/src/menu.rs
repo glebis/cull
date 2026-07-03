@@ -86,6 +86,13 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         true,
         Some::<&str>("CmdOrCtrl+Shift+Z"),
     )?)?;
+    edit_menu.append(&MenuItem::with_id(
+        app,
+        "undo_history",
+        "Action History…",
+        true,
+        Some::<&str>("CmdOrCtrl+Shift+H"),
+    )?)?;
     edit_menu.append(&PredefinedMenuItem::separator(app)?)?;
     edit_menu.append(&PredefinedMenuItem::cut(app, None)?)?;
     edit_menu.append(&PredefinedMenuItem::copy(app, None)?)?;

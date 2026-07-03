@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { viewMode, totalCount, images, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections, activeFolder, folders, activeSmartCollection, activeDetectedClass, imageLoadState, showDetectionBoxes, nsfwMode, shortcutsOpen, agentPanelPinned, agentPanelVisible } from '$lib/stores';
+    import { viewMode, totalCount, images, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections, activeFolder, folders, activeSmartCollection, activeDetectedClass, imageLoadState, showDetectionBoxes, nsfwMode, shortcutsOpen, undoHistoryOpen, agentPanelPinned, agentPanelVisible } from '$lib/stores';
     import { previewDisplayBlanked, previewDisplayFrozen, previewDisplayWebStreamStatus } from '$lib/preview-display-store';
     import { previewDisplayStatusLabel } from '$lib/preview-display';
     import { openCommandPalette } from '$lib/command-palette';
@@ -50,6 +50,10 @@
 
     function openCommands() {
         openCommandPalette('commands');
+    }
+
+    function openUndoHistory() {
+        undoHistoryOpen.set(true);
     }
 
     function toggleAgentPanel() {
@@ -105,6 +109,16 @@
         >
             <kbd>AI</kbd>
             <span>Agent</span>
+        </button>
+        <button
+            class="shortcut-button"
+            type="button"
+            onclick={openUndoHistory}
+            title="Cmd+Shift+H: history"
+            aria-label="Open undo history"
+        >
+            <kbd>Cmd+Shift+H</kbd>
+            <span>History</span>
         </button>
         <button class="shortcut-button" type="button" onclick={openShortcuts} title="?:help" aria-label="Open keyboard shortcuts">
             <kbd>?</kbd>
