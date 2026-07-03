@@ -15,10 +15,12 @@
 
     function formatTime(ts: string): string {
         const d = new Date(ts);
-        return `${d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })} ${d.toLocaleTimeString([], {
+        if (Number.isNaN(d.getTime())) return 'Unknown time';
+        return `${d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} ${d.toLocaleTimeString('en-GB', {
             hour: '2-digit',
             minute: '2-digit',
             second: '2-digit',
+            hour12: false,
         })}`;
     }
 
@@ -29,9 +31,15 @@
     }
 
     function actionLabel(actionType: string): string {
+        if (!actionType) return 'Unknown action';
         if (actionType === 'set_rating') return 'Set rating';
         if (actionType === 'set_decision') return 'Set decision';
+        if (actionType === 'trash_image') return 'Move to Trash';
         return actionType.replace(/_/g, ' ');
+    }
+
+    function displayLabel(entry: UndoRecord): string {
+        return entry.label?.trim() || actionLabel(entry.action_type || 'unknown_action');
     }
 
     function formatJson(payload: string): string {
@@ -159,14 +167,32 @@
             {:else if error}
                 <p class="history-state error">Failed to load history: {error}</p>
             {:else if history.length === 0}
-                <p class="history-state">No action history yet.</p>
+                <div class="history-empty" role="status">
+                    <svg
+                        class="history-empty-image"
+                        viewBox="0 0 160 112"
+                        role="img"
+                        aria-label="Empty action timeline"
+                    >
+                        <rect class="empty-frame" x="18" y="18" width="124" height="76" rx="4" />
+                        <path class="empty-line" d="M46 36h68M46 56h48M46 76h58" />
+                        <circle class="empty-node primary" cx="34" cy="36" r="5" />
+                        <circle class="empty-node" cx="34" cy="56" r="5" />
+                        <circle class="empty-node" cx="34" cy="76" r="5" />
+                        <path class="empty-spark" d="M118 36l8-10 8 10-8 10z" />
+                    </svg>
+                    <div class="history-empty-copy">
+                        <h3>No undoable actions yet</h3>
+                        <p>Recorded actions will appear here.</p>
+                    </div>
+                </div>
             {:else}
                 <div class="history-list" role="list">
                     {#each history as entry (entry.id)}
                         <article class="history-item" role="listitem">
                             <button class="history-row" type="button" onclick={() => toggleExpanded(entry.id)}>
                                 <span class="history-type">{actionLabel(entry.action_type)}</span>
-                                <span class="history-label" title={entry.label}>{entry.label}</span>
+                                <span class="history-label" title={displayLabel(entry)}>{displayLabel(entry)}</span>
                                 <span class="history-meta">{formatTime(entry.created_at)}</span>
                                 <span class="history-count">{affectedCount(entry.affected_image_ids)} image{affectedCount(entry.affected_image_ids) === 1 ? '' : 's'}</span>
                                 <span class="history-chevron">{expanded === entry.id ? '▼' : '▶'}</span>
@@ -321,6 +347,76 @@
 
     .history-state.error {
         color: var(--red);
+    }
+
+    .history-empty {
+        min-height: 280px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        text-align: center;
+        color: var(--text-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg);
+    }
+
+    .history-empty-image {
+        width: min(180px, 48vw);
+        height: auto;
+        color: var(--blue);
+    }
+
+    .empty-frame {
+        fill: var(--surface);
+        stroke: var(--border);
+        stroke-width: 2;
+    }
+
+    .empty-line {
+        fill: none;
+        stroke: var(--text-secondary);
+        stroke-width: 3;
+        stroke-linecap: round;
+        opacity: 0.8;
+    }
+
+    .empty-node {
+        fill: var(--surface);
+        stroke: var(--purple);
+        stroke-width: 2;
+    }
+
+    .empty-node.primary {
+        stroke: var(--green);
+    }
+
+    .empty-spark {
+        fill: var(--surface);
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linejoin: round;
+    }
+
+    .history-empty-copy {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .history-empty-copy h3 {
+        margin: 0;
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 500;
+    }
+
+    .history-empty-copy p {
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: 11px;
     }
 
     .history-list {
