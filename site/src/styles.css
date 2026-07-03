@@ -28,8 +28,8 @@
   --field-border: #30324a;
   --placeholder: #8a8da3;
   --spacing: 8px;
-  --radius: 6px;
-  --radius-panel: 14px;
+  --radius: 3px;
+  --radius-panel: 3px;
   --font: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --header-font: "Geist", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --serif-font: "EB Garamond", Georgia, "Times New Roman", serif;
@@ -158,9 +158,9 @@ input {
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(330px, 0.58fr) minmax(460px, 1.42fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: start;
-  column-gap: calc(var(--spacing) * 4);
+  column-gap: calc(var(--spacing) * 3);
   row-gap: calc(var(--spacing) * 4);
   padding: calc(var(--spacing) * 6) 0 calc(var(--spacing) * 4);
   min-width: 0;
@@ -729,15 +729,15 @@ input:focus-visible {
 
 .product-shot {
   position: relative;
-  grid-column: 2;
+  grid-column: 2 / span 2;
   grid-row: 1 / span 2;
   margin: 0;
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius-panel);
-  background: var(--surface);
+  background: transparent;
   overflow: hidden;
 }
 
