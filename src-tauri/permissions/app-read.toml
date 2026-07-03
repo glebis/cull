@@ -16,6 +16,7 @@ commands.allow = [
   "get_catalog_suggestion_job",
   "get_image_by_path",
   "get_image_count",
+  "get_image_file_bytes",
   "get_image_histogram",
   "get_images_by_ids",
   "get_iteration_siblings",
