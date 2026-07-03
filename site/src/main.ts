@@ -84,18 +84,16 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
 
     <section class="feature-note feature-note--agent-sdk reveal-surface" aria-labelledby="agent-sdk-title" data-reveal>
       <figure class="feature-note-illustration reveal-item reveal-delay-0">
-        <img src="/images/agent-sdk-generated.png" alt="A person at a desk while a small robot assistant sorts a stream of pictures into two neat stacks" loading="lazy" />
+        <img src="/images/agent-sdk-mono.png" alt="A person at a desk directing a stream of pictures that sorts itself into keep and reject stacks" loading="lazy" />
       </figure>
       <div class="feature-note-copy reveal-item reveal-delay-2">
-        <p class="eyebrow">new / claude agent sdk</p>
         <h2 id="agent-sdk-title">Ask Claude to do the first pass</h2>
         <p>Cull now ships with a built-in agent chat powered by the Claude Agent SDK. Describe what you want in plain language — "pick the sharpest shot from every series", "shortlist the warm portraits" — and Claude works through your library.</p>
         <p>Nothing changes without you: the agent proposes a selection, you see exactly which images are affected and what it costs, then approve or reject. Prefer your own setup? The same surface is open to any agent over MCP or the headless CLI.</p>
       </div>
     </section>
 
-    <section class="workflow reveal-surface" aria-labelledby="workflow-title" data-reveal>
-      <p class="eyebrow reveal-item reveal-delay-0" id="workflow-title">a faster review workflow</p>
+    <section class="workflow reveal-surface" aria-label="From folder to final set" data-reveal>
       <div class="workflow-list">
         <article class="reveal-item reveal-delay-1" data-command="import folder">
           <figure class="workflow-illustration"><img src="/images/workflow-folder.png" alt="" loading="lazy" /></figure>
