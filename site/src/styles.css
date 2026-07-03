@@ -423,11 +423,22 @@ h3 {
   font-size: 17px;
   font-weight: 700;
   text-decoration: none;
-  transition: filter 160ms var(--ease-out-quart);
+  transition:
+    transform 220ms var(--ease-out-quart),
+    box-shadow 220ms var(--ease-out-quart),
+    filter 160ms var(--ease-out-quart);
 }
 
 .download-button:hover {
-  filter: brightness(1.08);
+  filter: brightness(1.05);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--blue) 34%, transparent);
+}
+
+.download-button:active {
+  transform: translateY(0) scale(0.985);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--blue) 26%, transparent);
+  transition-duration: 110ms;
 }
 
 .download-button:focus-visible {
@@ -758,9 +769,12 @@ input:focus-visible {
   min-height: 8px;
   padding: 0;
   border: 0;
-  border-radius: 50%;
+  border-radius: 999px;
   background: color-mix(in srgb, var(--text-secondary) 40%, transparent);
-  transition: background-color 180ms var(--ease-out-quart), transform 180ms var(--ease-out-quart);
+  transition:
+    width 280ms var(--ease-out-quint),
+    background-color 180ms var(--ease-out-quart),
+    transform 180ms var(--ease-out-quart);
 }
 
 .slideshow-dots button:hover:not(:disabled) {
@@ -773,6 +787,7 @@ input:focus-visible {
 }
 
 .slideshow-dots button.is-current {
+  width: 22px;
   background: var(--blue);
 }
 
@@ -795,7 +810,8 @@ input:focus-visible {
   background: var(--surface);
   transition:
     border-color 220ms var(--ease-out-quart),
-    box-shadow 220ms var(--ease-out-quart);
+    box-shadow 220ms var(--ease-out-quart),
+    transform 260ms var(--ease-out-quint);
 }
 
 .claim:nth-child(1) {
@@ -812,7 +828,8 @@ input:focus-visible {
 
 .claim:hover {
   border-color: color-mix(in srgb, var(--claim-accent) 45%, var(--border));
-  box-shadow: 0 8px 28px color-mix(in srgb, var(--claim-accent) 10%, transparent);
+  box-shadow: 0 14px 34px color-mix(in srgb, var(--claim-accent) 12%, transparent);
+  transform: translateY(-4px);
 }
 
 .claims .claim h2 {
@@ -1219,10 +1236,21 @@ input:focus-visible {
   border-radius: var(--radius-panel);
   background: var(--surface);
   text-decoration: none;
+  transition:
+    border-color 200ms var(--ease-out-quart),
+    box-shadow 220ms var(--ease-out-quart),
+    transform 260ms var(--ease-out-quint);
 }
 
 .footer-star-card:hover {
   border-color: color-mix(in srgb, var(--orange) 50%, var(--border));
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--orange) 12%, transparent);
+  transform: translateY(-3px);
+}
+
+.footer-star-card:active {
+  transform: translateY(-1px);
+  transition-duration: 110ms;
 }
 
 .footer-star-title {
@@ -1307,10 +1335,16 @@ input:focus-visible {
   color: var(--text);
   text-decoration-color: var(--field-border);
   text-underline-offset: 4px;
+  transition:
+    color 160ms var(--ease-out-quart),
+    text-decoration-color 160ms var(--ease-out-quart),
+    text-underline-offset 200ms var(--ease-out-quart);
 }
 
 .site-footer a:hover {
   color: var(--blue);
+  text-decoration-color: color-mix(in srgb, var(--blue) 60%, transparent);
+  text-underline-offset: 6px;
 }
 
 .hero-step-1 {
