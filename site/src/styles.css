@@ -442,8 +442,10 @@ h3 {
 }
 
 .download-specs-list {
-  display: grid;
-  gap: calc(var(--spacing) * 1);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--spacing) * 1) calc(var(--spacing) * 2.5);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -465,9 +467,7 @@ h3 {
 }
 
 .brew-label {
-  margin: 0 0 calc(var(--spacing) * -1.5);
-  padding-top: calc(var(--spacing) * 2);
-  border-top: 1px solid color-mix(in srgb, var(--field-border) 60%, transparent);
+  margin: calc(var(--spacing) * 4) 0 calc(var(--spacing) * -1.5);
   color: var(--text-secondary);
   font-family: var(--font);
   font-size: 11.5px;
