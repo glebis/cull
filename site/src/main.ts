@@ -54,13 +54,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         </div>
       </figure>
       <aside class="download-block hero-step-5" aria-label="Download Cull">
-        <div class="download-header">
-          <img class="download-app-icon" src="/images/cull-app-logo.png" alt="" />
-          <div class="download-copy">
-            <p class="download-title">Download Cull</p>
-            <p class="download-subtitle">Local-first image review, ready for you and your agents.</p>
-          </div>
-        </div>
         <a class="download-button" href="https://github.com/glebis/cull/releases/latest" data-download-button>
           <svg class="apple-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.98 12.62c-.03-2.5 2.04-3.7 2.13-3.76-1.16-1.7-2.97-1.93-3.61-1.96-1.54-.16-3 .9-3.78.9-.77 0-1.98-.88-3.25-.86-1.67.03-3.21.97-4.07 2.47-1.74 3.01-.44 7.46 1.25 9.9.83 1.2 1.81 2.54 3.1 2.49 1.25-.05 1.72-.8 3.22-.8 1.5 0 1.93.8 3.25.78 1.34-.03 2.19-1.21 3-2.42a10.8 10.8 0 0 0 1.36-2.79c-.03-.02-2.6-1-2.6-3.95ZM14.5 5.27c.68-.83 1.15-1.98 1.02-3.12-.99.04-2.18.66-2.89 1.48-.63.73-1.19 1.9-1.04 3.02 1.1.09 2.22-.56 2.91-1.38Z"/></svg>
           Download for macOS

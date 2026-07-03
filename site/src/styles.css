@@ -408,44 +408,6 @@ h3 {
   padding: 0;
 }
 
-.download-header {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--spacing) * 2);
-  padding-bottom: calc(var(--spacing) * 2);
-  border-bottom: 1px solid color-mix(in srgb, var(--field-border) 60%, transparent);
-}
-
-.download-app-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 10px;
-  flex-shrink: 0;
-}
-
-.download-copy {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.download-title {
-  margin: 0;
-  color: var(--text);
-  font-family: var(--header-font);
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1.2;
-}
-
-.download-subtitle {
-  margin: 0;
-  color: var(--text-secondary);
-  font-family: var(--font);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
 .download-button {
   display: flex;
   align-items: center;
