@@ -6,13 +6,11 @@ inject();
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <div class="page-shell">
     <header class="topbar">
-      <div class="topbar-brand">
-        <a class="mark" href="/" aria-label="Cull home">
-          <img src="/images/cull-app-logo.png" alt="" />
-          <span class="mark-name">CULL</span>
-        </a>
-        <span class="topbar-tagline">local-first <span class="tagline-x">&times;</span> agent-ready: <span class="tagline-tag tagline-tag--mcp">mcp</span> <span class="tagline-x">&times;</span> <span class="tagline-tag tagline-tag--cli">cli</span> <span class="tagline-x">&times;</span> <span class="tagline-tag tagline-tag--skill">skill</span></span>
-      </div>
+      <a class="mark" href="/" aria-label="Cull home">
+        <img src="/images/cull-app-logo.png" alt="" />
+        <span class="mark-name">CULL</span>
+      </a>
+      <span class="topbar-tagline">local-first <span class="tagline-x">&times;</span> agent-ready: <span class="tagline-tag tagline-tag--mcp">mcp</span> <span class="tagline-x">&times;</span> <span class="tagline-tag tagline-tag--cli">cli</span> <span class="tagline-x">&times;</span> <span class="tagline-tag tagline-tag--skill">skill</span></span>
       <span class="release-note">
         <svg class="osi-mark" viewBox="0 0 24 24" role="img" aria-label="Open source" fill="currentColor"><path fill-rule="evenodd" d="M12 1.6C6.26 1.6 1.6 6.26 1.6 12c0 4.51 2.87 8.35 6.88 9.79l2.06-5.53a4.52 4.52 0 1 1 2.92 0l2.06 5.53A10.41 10.41 0 0 0 22.4 12c0-5.74-4.66-10.4-10.4-10.4Z"/></svg>
         open source
@@ -58,25 +56,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <button class="brew-copy" type="button" data-brew-copy aria-label="Copy brew install command">Copy</button>
         </div>
       </aside>
-      <form class="signup-form signup-form--featured hero-step-6" data-signup-form>
-        <label for="email">Stay up to date with releases.</label>
-        <div class="signup-row">
-          <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="signup-status" required />
-          <button type="submit" data-submit-button>Get notified</button>
-        </div>
-        <p id="signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
-      </form>
-    </section>
-
-    <section class="feature-note feature-note--boring reveal-surface" aria-labelledby="boring-title" data-reveal>
-      <figure class="feature-note-illustration reveal-item reveal-delay-0">
-        <img src="/images/boring-work-generated.png" alt="Photos, artwork, contact sheets, and color swatches being sorted into a portfolio box" />
-      </figure>
-      <div class="feature-note-copy reveal-item reveal-delay-2">
-        <h2 id="boring-title">The boring part of creative work, made fast</h2>
-        <p>Most tools are built for editing. This is built for the moment before that, when you have hundreds of images and need to reach a final set.</p>
-        <p>Look carefully, decide clearly, and make your work available to people and agents without friction.</p>
-      </div>
     </section>
 
     <section class="claims reveal-surface" aria-label="Core claims" data-reveal>
@@ -116,9 +95,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     </section>
 
     <section class="workflow reveal-surface" aria-labelledby="workflow-title" data-reveal>
-      <div class="reveal-item reveal-delay-0">
-        <h2 id="workflow-title">From folder to final set</h2>
-      </div>
+      <p class="eyebrow reveal-item reveal-delay-0" id="workflow-title">a faster review workflow</p>
       <div class="workflow-list">
         <article class="reveal-item reveal-delay-1" data-command="import folder">
           <figure class="workflow-illustration"><img src="/images/workflow-folder.png" alt="" loading="lazy" /></figure>
@@ -143,27 +120,18 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       </div>
     </section>
 
-    <section class="feature-note feature-note--artist reveal-surface" aria-labelledby="artist-title" data-reveal>
-      <figure class="feature-note-illustration reveal-item reveal-delay-0">
-        <img class="artist-founder-image artist-founder-image--camera" src="/images/artist-founder-camera-generated.png" alt="" />
-      </figure>
-      <div class="feature-note-copy reveal-item reveal-delay-2">
-        <p class="eyebrow">who makes this</p>
+    <section class="artist-panel reveal-surface" aria-labelledby="artist-title" data-reveal>
+      <div class="artist-panel-copy reveal-item reveal-delay-1">
         <h2 id="artist-title">Made by artists for artists</h2>
         <p>I, <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a>, built this after getting tired of expensive, slow tools that made image work feel heavier than it needed to be. I wanted something <span class="founder-note-emphasis">open, local, and agent-friendly</span>: closer to Obsidian for images than another locked creative suite.</p>
+        <p>Free and open source. The code is public, your files stay on your machine, and no company can pull the tool away from you.</p>
+        <p class="artist-panel-links">
+          <a href="https://github.com/glebis/cull">GitHub</a><span class="tagline-x">|</span><a href="https://t.me/glebkalinin">Telegram</a><span class="tagline-x">|</span><a href="https://www.linkedin.com/in/glebkalinin/">LinkedIn</a>
+        </p>
       </div>
-    </section>
-
-    <section class="open-source-note reveal-surface" aria-labelledby="open-source-title" data-reveal>
-      <figure class="open-source-illustration reveal-item reveal-delay-0">
-        <img src="/images/open-source-agents.png" alt="" />
+      <figure class="artist-panel-illustration reveal-item reveal-delay-2">
+        <img class="artist-founder-image artist-founder-image--camera" src="/images/artist-founder-camera-generated.png" alt="" />
       </figure>
-      <div class="open-source-copy reveal-item reveal-delay-2">
-        <p class="eyebrow">built in the open</p>
-        <h2 id="open-source-title">Open source by design</h2>
-        <p>Free and open source. The code is public, your files stay on your machine, and no company can pull the tool away from you. Built with human direction and AI coding help, then reviewed and shipped by a person.</p>
-        <p>Current repository history: <strong>653 commits</strong> and counting.</p>
-      </div>
     </section>
 
     <section class="pull-quote reveal-surface" aria-label="Keep what matters" data-reveal>
@@ -183,14 +151,9 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       </div>
     </section>
 
-    <figure class="footer-illustration reveal-surface" aria-label="Image workflow from local archive to agent surfaces" data-reveal>
-      <img src="/images/footer-line-map.png" alt="" />
-    </figure>
-
     <footer class="site-footer">
-      <div class="site-footer-meta">
-        <p>Made in 🇪🇺 Berlin by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a></p>
-        <p class="footer-fineprint">No cookies, no cross-site tracking.</p>
+      <div class="site-footer-brand">
+        <img src="/images/cull-app-logo.png" alt="" />
       </div>
       <nav class="site-footer-columns" aria-label="Footer links">
         <div class="footer-col">
@@ -211,6 +174,14 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <a href="https://www.linkedin.com/in/glebkalinin/">LinkedIn</a>
         </div>
       </nav>
+      <a class="footer-star-card" href="https://github.com/glebis/cull">
+        <span class="footer-star-title">&#9733; Star on GitHub</span>
+        <span class="footer-star-copy">Help the project grow. Every star counts.</span>
+      </a>
+      <div class="site-footer-bottom">
+        <p>Made in 🇪🇺 Berlin by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a> &middot; No cookies, no cross-site tracking.</p>
+        <a href="https://github.com/glebis/cull/blob/main/LICENSE">MIT License</a>
+      </div>
     </footer>
   </div>
 `;
