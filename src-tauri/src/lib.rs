@@ -618,6 +618,7 @@ pub fn run() {
             commands::sessions::update_canvas_layout,
             commands::sessions::delete_canvas,
             commands::files::copy_image_to_clipboard,
+            commands::files::get_image_file_bytes,
             commands::files::paste_image_from_clipboard,
             commands::files::move_image,
             commands::files::rename_image,

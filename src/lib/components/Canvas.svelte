@@ -3,6 +3,8 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import {
         activeCanvas,
+        canvasZoom,
+        canvasZoomRequest,
         focusedImage,
         focusedIndex,
         images,
@@ -18,6 +20,7 @@
         computeCanvasItemDragPosition,
         computeCanvasPanDrag,
         computeCanvasResize,
+        computeCanvasZoomToLevel,
         computeCanvasZoomAtPoint,
         isCanvasSpacePanKey,
     } from '$lib/canvas-interactions';
@@ -88,6 +91,7 @@
     let cropModeItemId = $state<string | null>(null);
     let cropDraft = $state<CropDraft | null>(null);
     let loadedCanvasKey = $state('');
+    let appliedCanvasZoomRequestId = 0;
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
     // Viewport culling + render cap (P2): only mount items intersecting the viewport.
@@ -520,6 +524,32 @@
             queueCanvasSave();
         }
     }
+
+    function applyCanvasZoomRequest(nextZoom: number) {
+        const width = viewportWidth || canvasEl?.clientWidth || 0;
+        const height = viewportHeight || canvasEl?.clientHeight || 0;
+        const nextViewport = computeCanvasZoomToLevel(
+            { panX, panY, zoom },
+            { x: width / 2, y: height / 2 },
+            nextZoom,
+        );
+        if (nextViewport.panX === panX && nextViewport.panY === panY && nextViewport.zoom === zoom) return;
+        panX = nextViewport.panX;
+        panY = nextViewport.panY;
+        zoom = nextViewport.zoom;
+        queueCanvasSave();
+    }
+
+    $effect(() => {
+        canvasZoom.set(zoom);
+    });
+
+    $effect(() => {
+        const request = $canvasZoomRequest;
+        if (!request || request.id === appliedCanvasZoomRequestId) return;
+        appliedCanvasZoomRequestId = request.id;
+        applyCanvasZoomRequest(request.zoom);
+    });
 
     function handleCanvasKeydown(e: KeyboardEvent) {
         if (e.key === 'Escape' && cropModeItemId) {

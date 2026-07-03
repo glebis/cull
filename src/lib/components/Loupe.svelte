@@ -9,6 +9,7 @@
         getVisionMetadata,
         cropImage,
         getImagesByIds,
+        getImageFileBytes,
         getGenerationRun,
         getImageHistogram,
         isRawFormat,
@@ -26,6 +27,7 @@
         resizeCropRectFromHandle
     } from '$lib/view-utils';
     import type { CropPoint, CropRect, CropResizeHandle } from '$lib/view-utils';
+    import { isAssetProtocolSafePath } from '$lib/view-utils';
     import { recordImageLoadFailure } from '$lib/diagnostics';
     import { histogramExposureWarnings, histogramPolyline } from '$lib/histogram-utils';
     import { classifySwipe, wheelGestureIntent } from '$lib/gesture-interactions';
@@ -74,7 +76,10 @@
             )
             : null
     );
-    let src = $derived(previewPath ? convertFileSrc(previewPath) : '');
+    let blobSrc = $state('');
+    let activeBlobUrl = '';
+    let blobRequestSeq = 0;
+    let src = $derived(blobSrc || (previewPath && isAssetProtocolSafePath(previewPath) ? convertFileSrc(previewPath) : ''));
     let format = $derived(image?.image.format ?? '');
     let rating = $derived(image?.selection?.star_rating ?? 0);
     let decision = $derived(image?.selection?.decision ?? 'undecided');
@@ -184,11 +189,52 @@
         window.addEventListener('loupe-pdf-page-next', handlePdfPageNext);
 
         return () => {
+            clearBlobSrc();
             window.removeEventListener('toggle-loupe-overlays', toggleOverlays);
             window.removeEventListener('image-updated', handleImageUpdated);
             window.removeEventListener('enter-crop-mode', enterCropMode);
             window.removeEventListener('loupe-pdf-page-prev', handlePdfPagePrev);
             window.removeEventListener('loupe-pdf-page-next', handlePdfPageNext);
+        };
+    });
+
+    function clearBlobSrc() {
+        if (activeBlobUrl) {
+            URL.revokeObjectURL(activeBlobUrl);
+            activeBlobUrl = '';
+        }
+        blobSrc = '';
+    }
+
+    $effect(() => {
+        const current = image;
+        const currentPreviewPath = previewPath;
+        const currentIsPdf = isPdf;
+        const currentIsRaw = isRaw;
+        const failed = sourceLoadFailed;
+        const seq = ++blobRequestSeq;
+
+        clearBlobSrc();
+
+        if (!current || !currentPreviewPath || currentIsPdf || currentIsRaw || failed || currentPreviewPath !== current.path) {
+            return;
+        }
+
+        let revoked = false;
+        getImageFileBytes(current.image.id).then(payload => {
+            if (seq !== blobRequestSeq || revoked || image?.image.id !== current.image.id) return;
+            const bytes = new Uint8Array(payload.bytes);
+            const url = URL.createObjectURL(new Blob([bytes], { type: payload.mime_type || 'application/octet-stream' }));
+            activeBlobUrl = url;
+            blobSrc = url;
+        }).catch(() => {
+            if (seq === blobRequestSeq && !revoked && image?.image.id === current.image.id) {
+                sourceLoadFailed = true;
+            }
+        });
+
+        return () => {
+            revoked = true;
         };
     });
 
@@ -368,7 +414,7 @@
 
         const currentPath = chooseLoupeImagePathWithPdf(current, isRaw, sourceLoadFailed, isPdf, pdfPages, pdfPageIndex);
         const thumbnailWasShown = !!current.thumbnail_path && currentPath === current.thumbnail_path;
-        const canFallbackToThumbnail = isPdf && current.thumbnail_path !== null && currentPath !== current.thumbnail_path;
+        const canFallbackToThumbnail = current.thumbnail_path !== null && currentPath !== current.thumbnail_path;
         recordImageLoadFailure({
             view: 'loupe',
             image: current,
