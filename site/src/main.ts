@@ -40,7 +40,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <img class="slideshow-slide" src="/images/cull-canvas-real.png" alt="Cull's canvas view arranging dozens of images into a freeform moodboard" loading="lazy" />
           <img class="slideshow-slide" src="/images/cull-agent-real.png" alt="Cull's AI Agent panel proposing a portfolio selection next to the image grid" loading="lazy" />
           <img class="slideshow-slide" src="/images/cull-export-real.png" alt="Cull's export master with client delivery presets and a slide preview" loading="lazy" />
-          <img class="slideshow-slide" src="/images/cull-publish-real.png" alt="Cull's publish view packaging a collection into a shareable static site" loading="lazy" />
         </div>
         <div class="slideshow-dots" role="tablist" aria-label="Screenshots">
           <button type="button" role="tab" aria-selected="true" aria-label="Screenshot 1" data-slide-dot="0" class="is-current"></button>
@@ -50,7 +49,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 5" data-slide-dot="4"></button>
           <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 6" data-slide-dot="5"></button>
           <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 7" data-slide-dot="6"></button>
-          <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 8" data-slide-dot="7"></button>
         </div>
       </figure>
       <aside class="download-block hero-step-5" aria-label="Download Cull">
