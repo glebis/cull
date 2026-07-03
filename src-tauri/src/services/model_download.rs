@@ -328,32 +328,6 @@ where
     .await
 }
 
-pub async fn write_stream_to_model_file_verified_controlled<S, E, F>(
-    destination: &Path,
-    resume_from: u64,
-    total: Option<u64>,
-    stream: S,
-    verification: &ModelDownloadVerification,
-    control: &DownloadControl,
-    progress: F,
-) -> Result<u64, String>
-where
-    S: Stream<Item = Result<Bytes, E>> + Unpin,
-    E: Display,
-    F: FnMut(ModelDownloadProgress),
-{
-    write_stream_to_model_file_inner(
-        destination,
-        resume_from,
-        total,
-        stream,
-        Some(verification),
-        control,
-        progress,
-    )
-    .await
-}
-
 async fn write_stream_to_model_file_inner<S, E, F>(
     destination: &Path,
     resume_from: u64,
@@ -520,12 +494,12 @@ mod tests {
             expected_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
         };
 
-        let result = write_stream_to_model_file_verified_controlled(
+        let result = write_stream_to_model_file_inner(
             &final_path,
             0,
             Some(11),
             stream,
-            &verification,
+            Some(&verification),
             &DownloadControl::default(),
             |_| {},
         )
@@ -548,12 +522,12 @@ mod tests {
             expected_sha256: "90ba33786887ce4234ec0081512cce01a0b1b4aa05c4bf71c473e744e05db0f8",
         };
 
-        let result = write_stream_to_model_file_verified_controlled(
+        let result = write_stream_to_model_file_inner(
             &final_path,
             0,
             Some(11),
             stream,
-            &verification,
+            Some(&verification),
             &DownloadControl::default(),
             |_| {},
         )

@@ -16,13 +16,6 @@ use crate::db_core::models::{Canvas, TokenScope};
 use crate::services::tokens;
 use crate::AppState;
 
-fn redact_path(path: &str) -> String {
-    std::path::Path::new(path)
-        .file_name()
-        .map(|f| f.to_string_lossy().to_string())
-        .unwrap_or_else(|| "[redacted]".to_string())
-}
-
 fn can_expose_private_metadata(auth: &AuthContext) -> bool {
     match auth {
         AuthContext::Local => true,
@@ -1167,39 +1160,6 @@ mod tests {
     use super::AuthContext;
     use crate::db_core::models::{Canvas, McpToken, TokenScope};
     use crate::services::tokens;
-
-    // --- Path redaction (tests production `redact_path`) ---
-
-    #[test]
-    fn test_redact_path_extracts_filename() {
-        assert_eq!(
-            super::redact_path("/Users/gleb/art/midjourney/image_001.png"),
-            "image_001.png"
-        );
-    }
-
-    #[test]
-    fn test_redact_path_preserves_extension() {
-        assert_eq!(super::redact_path("/some/deep/path/photo.CR2"), "photo.CR2");
-    }
-
-    #[test]
-    fn test_redact_path_handles_root() {
-        assert_eq!(super::redact_path("/"), "[redacted]");
-    }
-
-    #[test]
-    fn test_redact_path_handles_empty() {
-        assert_eq!(super::redact_path(""), "[redacted]");
-    }
-
-    #[test]
-    fn test_redact_path_handles_spaces() {
-        assert_eq!(
-            super::redact_path("/Users/gleb/My Art/image 001.png"),
-            "image 001.png"
-        );
-    }
 
     #[test]
     fn test_scoped_generation_run_redacts_private_fields_by_default() {
