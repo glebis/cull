@@ -212,6 +212,11 @@ export interface PastedImageResult {
     image_id: string | null;
 }
 
+export interface ImageFileBytes {
+    bytes: number[];
+    mime_type: string;
+}
+
 export interface AgentSnapshotPackage {
     snapshot_id: string;
     package_dir: string;
@@ -713,6 +718,10 @@ export async function getImagesByIds(imageIds: string[]): Promise<ImageWithFile[
 
 export async function getImageByPath(path: string): Promise<ImageWithFile | null> {
     return invoke<ImageWithFile | null>('get_image_by_path', { path });
+}
+
+export async function getImageFileBytes(imageId: string): Promise<ImageFileBytes> {
+    return invoke<ImageFileBytes>('get_image_file_bytes', { imageId });
 }
 
 export async function getIterationSiblings(parentId: string): Promise<ImageWithFile[]> {

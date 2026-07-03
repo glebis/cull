@@ -218,9 +218,10 @@ export function chooseLoupeImagePath(
     isRaw: boolean,
     sourceLoadFailed: boolean
 ): string | null {
-    void isRaw;
-    void sourceLoadFailed;
-    return safeAssetPreviewPath(image);
+    if (isRaw || sourceLoadFailed) {
+        return safeAssetPreviewPath(image);
+    }
+    return image.path || safeAssetPreviewPath(image);
 }
 
 export function computeGridLayout(

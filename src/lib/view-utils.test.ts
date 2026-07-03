@@ -200,8 +200,8 @@ describe('chooseLoupeImagePath', () => {
         thumbnail_path: '/Users/test/Library/Application Support/com.glebkalinin.cull/thumbnails/img-1.jpg',
     };
 
-    it('uses the thumbnail when available because imported originals are outside asset scope', () => {
-        expect(chooseLoupeImagePath(item, false, false)).toBe(item.thumbnail_path);
+    it('uses the original path for regular Loupe images', () => {
+        expect(chooseLoupeImagePath(item, false, false)).toBe(item.path);
     });
 
     it('falls back to the thumbnail after a source load failure', () => {
@@ -212,11 +212,19 @@ describe('chooseLoupeImagePath', () => {
         expect(chooseLoupeImagePath(item, true, false)).toBe(item.thumbnail_path);
     });
 
-    it('does not fall back to an imported original when no asset-safe preview exists', () => {
+    it('does not fall back to an imported original after source load failure', () => {
         expect(chooseLoupeImagePath({
             path: '/Users/test/Pictures/imported/full.png',
             thumbnail_path: null,
-        }, false, false)).toBeNull();
+        }, false, true)).toBeNull();
+    });
+
+    it('allows imported originals when no thumbnail exists for Loupe full-quality loading', () => {
+        const original = '/Users/test/Pictures/imported/full.png';
+        expect(chooseLoupeImagePath({
+            path: original,
+            thumbnail_path: null,
+        }, false, false)).toBe(original);
     });
 
     it('allows app-owned generated images when no thumbnail exists', () => {
