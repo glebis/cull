@@ -58,7 +58,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         </a>
         <ul class="download-specs-list">
           <li><span class="spec-icon" aria-hidden="true">&#9673;</span>macOS 11+ &middot; Apple Silicon</li>
-          <li><span class="spec-icon" aria-hidden="true">&#9098;</span>v0.2.5</li>
+          <li><span class="spec-icon" aria-hidden="true">&#9098;</span><span data-release-version>latest release</span></li>
         </ul>
         <p class="brew-label">or install with Homebrew</p>
         <div class="brew-row">
@@ -226,10 +226,14 @@ brewCopyButton?.addEventListener("click", async () => {
 const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 const downloadButton = document.querySelector<HTMLAnchorElement>("[data-download-button]");
+const releaseVersion = document.querySelector<HTMLElement>("[data-release-version]");
 if (downloadButton) {
   fetch("https://api.github.com/repos/glebis/cull/releases/latest")
     .then((response) => (response.ok ? response.json() : Promise.reject(new Error(String(response.status)))))
-    .then((release: { assets?: { name: string; browser_download_url: string }[] }) => {
+    .then((release: { tag_name?: string; assets?: { name: string; browser_download_url: string }[] }) => {
+      if (release.tag_name && releaseVersion) {
+        releaseVersion.textContent = release.tag_name;
+      }
       const dmg = release.assets?.find((asset) => asset.name.endsWith(".dmg"));
       if (dmg) {
         downloadButton.href = dmg.browser_download_url;
