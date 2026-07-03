@@ -41,13 +41,20 @@ export function createCanvasDocumentForImages(
 ): CanvasDocument {
     const layout = gridLayout(images);
     const existingItems = new Map(baseDocument.items.map(item => [item.imageId, item]));
-    const items = images.map((image, index) => {
-        const existing = existingItems.get(image.image.id);
-        if (existing) {
-            return refreshCanvasItemSource(existing, image);
+    const visibleImages = new Map(images.map(image => [image.image.id, image]));
+    const items = baseDocument.items.map(item => {
+        const visibleImage = visibleImages.get(item.imageId);
+        if (visibleImage) {
+            return refreshCanvasItemSource(item, visibleImage);
         }
-        return createCanvasItem(image, layout[index], index);
+        return item;
     });
+    const maxZ = items.reduce((highest, item) => Math.max(highest, item.z), -1);
+
+    for (const [index, image] of images.entries()) {
+        if (existingItems.has(image.image.id)) continue;
+        items.push(createCanvasItem(image, layout[index], maxZ + index + 1));
+    }
 
     return sanitizeCanvasDocumentReferences({
         ...baseDocument,
@@ -121,45 +128,57 @@ export function updateCanvasDocumentFromViewItems(
     viewItems: CanvasViewItem[],
     viewport: CanvasViewport,
 ): CanvasDocument {
-    const existingItems = new Map(document.items.map(item => [item.id, item]));
-    const items = viewItems.map((viewItem) => {
-        const existing = existingItems.get(viewItem.id);
-        const fallback = createCanvasItem(viewItem.image, {
-            x: viewItem.x,
-            y: viewItem.y,
-            width: viewItem.width,
-            height: viewItem.height,
-        }, viewItem.z);
-        const baseItem = existing ?? fallback;
-        return {
-            ...baseItem,
-            id: viewItem.id,
-            imageId: viewItem.imageId,
-            x: viewItem.x,
-            y: viewItem.y,
-            width: viewItem.width,
-            height: viewItem.height,
-            z: viewItem.z,
-            hidden: viewItem.hidden,
-            label: viewItem.label,
-            groupId: viewItem.groupId,
-            transform: {
-                ...baseItem.transform,
-                crop: normalizeCrop(viewItem.crop),
-                rotationDegrees: normalizeRotation(viewItem.rotationDegrees),
-            },
-            source: {
-                contentHash: viewItem.image.image.sha256_hash,
-                lastKnownPath: viewItem.image.path,
-            },
-        };
+    const viewItemsById = new Map(viewItems.map(item => [item.id, item]));
+    const updatedItemIds = new Set<string>();
+    const items = document.items.map((item) => {
+        const viewItem = viewItemsById.get(item.id);
+        if (!viewItem) return item;
+        updatedItemIds.add(viewItem.id);
+        return canvasItemFromViewItem(viewItem, item);
     });
+
+    for (const viewItem of viewItems) {
+        if (updatedItemIds.has(viewItem.id)) continue;
+        items.push(canvasItemFromViewItem(viewItem));
+    }
 
     return sanitizeCanvasDocumentReferences({
         ...document,
         viewport,
         items,
     });
+}
+
+function canvasItemFromViewItem(viewItem: CanvasViewItem, existing?: CanvasItem): CanvasItem {
+    const baseItem = existing ?? createCanvasItem(viewItem.image, {
+        x: viewItem.x,
+        y: viewItem.y,
+        width: viewItem.width,
+        height: viewItem.height,
+    }, viewItem.z);
+
+    return {
+        ...baseItem,
+        id: viewItem.id,
+        imageId: viewItem.imageId,
+        x: viewItem.x,
+        y: viewItem.y,
+        width: viewItem.width,
+        height: viewItem.height,
+        z: viewItem.z,
+        hidden: viewItem.hidden,
+        label: viewItem.label,
+        groupId: viewItem.groupId,
+        transform: {
+            ...baseItem.transform,
+            crop: normalizeCrop(viewItem.crop),
+            rotationDegrees: normalizeRotation(viewItem.rotationDegrees),
+        },
+        source: {
+            contentHash: viewItem.image.image.sha256_hash,
+            lastKnownPath: viewItem.image.path,
+        },
+    };
 }
 
 function createCanvasItem(
