@@ -17,6 +17,7 @@ import {
     moveCropRect,
     resizeCropRectFromHandle,
     chooseLoupeImagePath,
+    chooseLoupeDisplayPath,
     isAssetProtocolSafePath,
     safeAssetPreviewPath,
     pickThumbnailVariant,
@@ -233,6 +234,31 @@ describe('chooseLoupeImagePath', () => {
             path: generated,
             thumbnail_path: null,
         }, false, false)).toBe(generated);
+    });
+});
+
+describe('chooseLoupeDisplayPath', () => {
+    it('uses a safe thumbnail while an imported original is loading through the blob path', () => {
+        const thumbnail = '/Users/test/Library/Application Support/com.glebkalinin.cull/thumbnails/img-1.jpg';
+        expect(chooseLoupeDisplayPath({
+            path: '/Users/test/Pictures/imported/full.png',
+            thumbnail_path: thumbnail,
+        }, '/Users/test/Pictures/imported/full.png')).toBe(thumbnail);
+    });
+
+    it('keeps safe preferred paths unchanged', () => {
+        const generated = '/Users/test/Library/Application Support/com.glebkalinin.cull/generated/img.png';
+        expect(chooseLoupeDisplayPath({
+            path: generated,
+            thumbnail_path: null,
+        }, generated)).toBe(generated);
+    });
+
+    it('returns null when neither preferred path nor thumbnail can be rendered directly', () => {
+        expect(chooseLoupeDisplayPath({
+            path: '/Users/test/Pictures/imported/full.png',
+            thumbnail_path: null,
+        }, '/Users/test/Pictures/imported/full.png')).toBeNull();
     });
 });
 

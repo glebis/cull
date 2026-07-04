@@ -224,6 +224,15 @@ export function chooseLoupeImagePath(
     return image.path || safeAssetPreviewPath(image);
 }
 
+export function chooseLoupeDisplayPath(
+    image: LoupeImagePathCandidate | null,
+    preferredPath: string | null
+): string | null {
+    if (!image || !preferredPath) return null;
+    if (isAssetProtocolSafePath(preferredPath)) return preferredPath;
+    return safeAssetPreviewPath(image);
+}
+
 export function computeGridLayout(
     containerWidth: number,
     thumbSize: number,
