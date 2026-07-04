@@ -8,7 +8,6 @@ transition checklist and the evidence used for the current release decision.
 ## License Metadata
 
 - `LICENSE`: conventional Apache License 2.0 text for GitHub and distribution tooling.
-- `LICENSE.md`: Markdown copy of the Apache License 2.0 text for existing links.
 - `NOTICE`: project notice, AI-assistance note, and third-party model boundary.
 - `package.json`: `Apache-2.0`.
 - `package-lock.json`: root package `Apache-2.0`.
@@ -19,7 +18,7 @@ Verification:
 
 ```bash
 rg -n "BUSL-1.1|Business Source License|Commercial use requires" \
-  LICENSE.md README.md package.json package-lock.json src-tauri/Cargo.toml src/lib src-tauri/src
+  LICENSE README.md package.json package-lock.json src-tauri/Cargo.toml src/lib src-tauri/src
 ```
 
 Expected result: no matches in the active license files or application source.
