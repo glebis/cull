@@ -125,7 +125,7 @@ Tauri 2, Rust, Svelte 5, SQLite, ONNX Runtime, and a Tokyo Night-inspired interf
 
 Copyright 2026-present Gleb Kalinin.
 
-Cull is licensed under the Apache License 2.0. See [LICENSE.md](LICENSE.md) and [NOTICE](NOTICE).
+Cull is licensed under the Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 Implementation was assisted by AI coding tools under human architectural, product, and code-review direction. See [AUTHORSHIP.md](AUTHORSHIP.md) for the current authorship record.
 
