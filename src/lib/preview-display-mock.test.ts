@@ -13,7 +13,9 @@ describe('Preview Display E2E mock', () => {
 
         const updated = await invoke<any>('update_preview_state', {
             imageId: 'img-2',
+            imageIds: ['img-2', 'img-3'],
             displayMode: 'client_review',
+            layout: 'compare',
             overlay: {
                 ...DEFAULT_PREVIEW_OVERLAY,
                 showFilename: true,
@@ -26,14 +28,18 @@ describe('Preview Display E2E mock', () => {
         });
         expect(updated).toMatchObject({
             image_id: 'img-2',
+            image_ids: ['img-2', 'img-3'],
             display_mode: 'client_review',
+            layout: 'compare',
             frozen: true,
             blanked: false,
         });
 
         await expect(invoke('get_preview_state')).resolves.toMatchObject({
             image_id: 'img-2',
+            image_ids: ['img-2', 'img-3'],
             display_mode: 'client_review',
+            layout: 'compare',
         });
     });
 });

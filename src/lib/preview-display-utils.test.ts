@@ -31,7 +31,9 @@ function image(id: string, format = 'png', thumbnailPath: string | null = '/thum
 
 const metadataState: PreviewState = {
     image_id: 'old',
+    image_ids: ['old'],
     display_mode: 'metadata_review',
+    layout: 'grid',
     overlay: {
         ...DEFAULT_PREVIEW_OVERLAY,
         showFilename: true,
@@ -57,7 +59,9 @@ describe('Preview Display utilities', () => {
     it('builds a focus sync payload while preserving display mode and overlays', () => {
         expect(nextPreviewFocusPayload(image('new'), metadataState)).toEqual({
             imageId: 'new',
+            imageIds: ['new'],
             displayMode: 'metadata_review',
+            layout: 'grid',
             overlay: metadataState.overlay,
         });
     });
@@ -65,7 +69,9 @@ describe('Preview Display utilities', () => {
     it('falls back to the default image-only overlay without current preview state', () => {
         expect(nextPreviewFocusPayload(null, null)).toEqual({
             imageId: null,
+            imageIds: [],
             displayMode: 'image_only',
+            layout: 'single',
             overlay: DEFAULT_PREVIEW_OVERLAY,
         });
     });

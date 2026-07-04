@@ -246,11 +246,13 @@ export interface MenuStatePayload {
     previewDisplayBlanked: boolean;
     previewDisplayAlwaysOnTop: boolean;
     previewDisplayMode: PreviewDisplayMode;
+    previewDisplayLayout: PreviewDisplayLayout;
     previewDisplayOverlay: PreviewOverlayConfig;
     previewDisplayWebStreamActive: boolean;
 }
 
 export type PreviewDisplayMode = 'image_only' | 'client_review' | 'metadata_review';
+export type PreviewDisplayLayout = 'single' | 'compare' | 'grid';
 export type PreviewRailSide = 'left' | 'right';
 export type PreviewRailWidth = 'narrow' | 'medium' | 'wide';
 export type PreviewRailTextSize = 'small' | 'medium' | 'large';
@@ -273,7 +275,9 @@ export interface PreviewOverlayConfig {
 
 export interface PreviewState {
     image_id: string | null;
+    image_ids: string[];
     display_mode: PreviewDisplayMode;
+    layout: PreviewDisplayLayout;
     overlay: PreviewOverlayConfig;
     frozen: boolean;
     blanked: boolean;
@@ -357,11 +361,15 @@ export async function updatePreviewState(
     displayMode: PreviewDisplayMode,
     overlay: PreviewOverlayConfig,
     frozen?: boolean,
-    blanked?: boolean
+    blanked?: boolean,
+    layout?: PreviewDisplayLayout,
+    imageIds?: string[],
 ): Promise<PreviewState> {
     return invoke<PreviewState>('update_preview_state', {
         imageId,
+        imageIds: imageIds ?? (imageId ? [imageId] : []),
         displayMode,
+        layout: layout ?? 'single',
         overlay,
         frozen,
         blanked,

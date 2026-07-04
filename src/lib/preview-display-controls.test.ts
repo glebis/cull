@@ -5,9 +5,10 @@ import {
     overlayForPreviewDisplayMode,
     previewDisplayStatusLabel,
     previewSyncImageId,
+    previewSyncImageIds,
     withPreviewDisplayField,
 } from './preview-display';
-import { parsePreviewDisplayOverlay } from './preview-display-store';
+import { parsePreviewDisplayLayout, parsePreviewDisplayOverlay } from './preview-display-store';
 import type { ImageWithFile, PreviewState } from './api';
 
 function image(id: string): ImageWithFile {
@@ -34,7 +35,9 @@ function image(id: string): ImageWithFile {
 
 const frozenState: PreviewState = {
     image_id: 'held',
+    image_ids: ['held'],
     display_mode: 'client_review',
+    layout: 'single',
     overlay: {
         showFilename: true,
         showRating: true,
@@ -119,6 +122,10 @@ describe('Preview Display controls', () => {
     });
 
     it('parses persisted field toggles and bounds invalid rail options', () => {
+        expect(parsePreviewDisplayLayout('compare')).toBe('compare');
+        expect(parsePreviewDisplayLayout('grid')).toBe('grid');
+        expect(parsePreviewDisplayLayout('poster')).toBe('single');
+
         expect(parsePreviewDisplayOverlay(JSON.stringify({
             showFilename: true,
             showDimensions: true,
@@ -150,6 +157,18 @@ describe('Preview Display controls', () => {
         expect(previewSyncImageId(image('current'), frozenState, true, false)).toBe('held');
         expect(previewSyncImageId(image('current'), frozenState, false, true)).toBeNull();
         expect(previewSyncImageId(image('current'), frozenState, false, false)).toBe('current');
+    });
+
+    it('builds layout image sets from focus, selection, and loaded neighbours', () => {
+        const loaded = [image('a'), image('b'), image('c'), image('d'), image('e')];
+
+        expect(previewSyncImageIds(loaded[1], loaded, new Set(), null, false, false, 'compare')).toEqual(['b', 'c']);
+        expect(previewSyncImageIds(loaded[1], loaded, new Set(['d', 'a']), null, false, false, 'grid')).toEqual(['b', 'a', 'd']);
+        expect(previewSyncImageIds(loaded[1], loaded, new Set(), {
+            ...frozenState,
+            image_ids: ['x', 'y'],
+        }, true, false, 'grid')).toEqual(['x', 'y']);
+        expect(previewSyncImageIds(loaded[1], loaded, new Set(), null, false, true, 'grid')).toEqual([]);
     });
 
     it('summarizes active safety state for the main app indicator', () => {

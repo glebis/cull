@@ -1,7 +1,9 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { listen } from '@tauri-apps/api/event';
-    import { onMount } from 'svelte';
+    import { save as saveDialog } from '@tauri-apps/plugin-dialog';
+    import { onMount, tick } from 'svelte';
+    import { toPng } from 'html-to-image';
     import {
         getGenerationRun,
         getImageHistogram,
@@ -9,15 +11,18 @@
         getPreviewState,
         isRawFormat,
         listImageTags,
+        savePngToPath,
         setAppSetting,
         updatePreviewState,
         type GenerationRun,
         type ImageHistogram,
         type ImageTag,
         type ImageWithFile,
+        type PreviewDisplayLayout,
         type PreviewDisplayMode,
         type PreviewState,
     } from '$lib/api';
+    import { buildHtmlToImageOptions, formatExportError } from '$lib/export-renderer';
     import { histogramPolyline } from '$lib/histogram-utils';
     import {
         isPreviewDisplayPresetCycleShortcut,
@@ -25,26 +30,33 @@
         overlayForPreviewDisplayMode,
         previewDisplayImageSourcePath,
         previewDisplayRailVisible,
+        previewStateImageIds,
     } from '$lib/preview-display';
     import { PREVIEW_DISPLAY_MODE_SETTING, PREVIEW_DISPLAY_OVERLAY_SETTING } from '$lib/preview-display-store';
 
     type DisplayLoadState = 'loading' | 'empty' | 'ready' | 'missing' | 'error' | 'blanked';
+    type CaptureDestination = 'clipboard' | 'png';
 
     let previewState = $state<PreviewState | null>(null);
     let image = $state<ImageWithFile | null>(null);
+    let displayImages = $state<ImageWithFile[]>([]);
     let generationRun = $state<GenerationRun | null>(null);
     let tags = $state<ImageTag[]>([]);
     let histogram = $state<ImageHistogram | null>(null);
     let loadState = $state<DisplayLoadState>('loading');
-    let sourceLoadFailed = $state(false);
+    let sourceLoadFailures = $state<Record<string, boolean>>({});
     let requestSeq = 0;
     let headerVisible = $state(true);
     let pointerOverHeader = $state(false);
     let blankMessageVisible = $state(false);
+    let capturing = $state(false);
+    let captureStatus = $state('');
+    let captureStatusTimer: ReturnType<typeof setTimeout> | null = null;
     let headerHideTimer: ReturnType<typeof setTimeout> | null = null;
     let blankMessageTimer: ReturnType<typeof setTimeout> | null = null;
+    let captureRoot: HTMLDivElement;
 
-    let imageSrc = $derived(image ? convertFileSrc(previewDisplayImageSourcePath(image, sourceLoadFailed)) : '');
+    let imageSrc = $derived(image ? displayImageSrc(image) : '');
     let filename = $derived(image?.path.split('/').pop() ?? '');
     let rating = $derived(image?.selection?.star_rating ?? 0);
     let decision = $derived(image?.selection?.decision ?? 'undecided');
@@ -61,6 +73,20 @@
     let redPoints = $derived(histogram ? histogramPolyline(histogram.red, 64) : '');
     let greenPoints = $derived(histogram ? histogramPolyline(histogram.green, 64) : '');
     let bluePoints = $derived(histogram ? histogramPolyline(histogram.blue, 64) : '');
+
+    function displayImageSrc(img: ImageWithFile): string {
+        return convertFileSrc(previewDisplayImageSourcePath(img, sourceLoadFailures[img.image.id] === true));
+    }
+
+    function displayFilename(img: ImageWithFile): string {
+        return img.path.split('/').pop() ?? img.path;
+    }
+
+    function layoutLabel(layout: PreviewDisplayLayout): string {
+        if (layout === 'compare') return 'Compare';
+        if (layout === 'grid') return 'Grid';
+        return 'Single';
+    }
 
     function resetDetails() {
         generationRun = null;
@@ -107,6 +133,21 @@
         blankMessageTimer = null;
     }
 
+    function clearCaptureStatusTimer() {
+        if (!captureStatusTimer) return;
+        clearTimeout(captureStatusTimer);
+        captureStatusTimer = null;
+    }
+
+    function showCaptureStatus(message: string) {
+        clearCaptureStatusTimer();
+        captureStatus = message;
+        captureStatusTimer = setTimeout(() => {
+            captureStatus = '';
+            captureStatusTimer = null;
+        }, 3000);
+    }
+
     function hideBlankMessage() {
         clearBlankMessageTimer();
         blankMessageVisible = false;
@@ -141,12 +182,13 @@
 
     async function applyPreviewState(next: PreviewState) {
         previewState = next;
-        sourceLoadFailed = false;
+        sourceLoadFailures = {};
         resetDetails();
 
         if (next.blanked) {
             requestSeq++;
             image = null;
+            displayImages = [];
             loadState = 'blanked';
             showBlankMessageTemporarily();
             return;
@@ -154,9 +196,11 @@
 
         hideBlankMessage();
 
-        if (!next.image_id) {
+        const requestedIds = previewStateImageIds(next);
+        if (requestedIds.length === 0) {
             requestSeq++;
             image = null;
+            displayImages = [];
             loadState = 'empty';
             return;
         }
@@ -165,9 +209,13 @@
         loadState = 'loading';
 
         try {
-            const records = await getImagesByIds([next.image_id]);
+            const records = await getImagesByIds(requestedIds);
             if (seq !== requestSeq) return;
-            image = records[0] ?? null;
+            const byId = new Map(records.map((record) => [record.image.id, record]));
+            displayImages = requestedIds
+                .map((id) => byId.get(id))
+                .filter((record): record is ImageWithFile => record !== undefined);
+            image = displayImages[0] ?? null;
             loadState = image ? 'ready' : 'missing';
             if (image) {
                 await loadDetails(next, image.image.id, seq);
@@ -176,18 +224,75 @@
             if (seq !== requestSeq) return;
             console.error('Failed to load Preview Display image:', e);
             image = null;
+            displayImages = [];
             loadState = 'error';
         }
     }
 
-    function handleImageError() {
-        if (!image) return;
-        const canFallback = !sourceLoadFailed && !isRawFormat(image.image.format) && !!image.thumbnail_path;
+    function handleImageError(img: ImageWithFile) {
+        const canFallback = !sourceLoadFailures[img.image.id] && !isRawFormat(img.image.format) && !!img.thumbnail_path;
         if (canFallback) {
-            sourceLoadFailed = true;
+            sourceLoadFailures = { ...sourceLoadFailures, [img.image.id]: true };
             return;
         }
-        loadState = 'error';
+        if (displayImages.length <= 1) loadState = 'error';
+    }
+
+    function pngBase64(dataUrl: string): string {
+        return dataUrl.split(',')[1] ?? '';
+    }
+
+    async function capturePreviewPng(): Promise<string> {
+        if (!captureRoot || loadState !== 'ready') {
+            throw new Error('Preview Display has no rendered content to capture');
+        }
+        capturing = true;
+        await tick();
+        try {
+            return await toPng(
+                captureRoot,
+                buildHtmlToImageOptions(window.innerWidth, window.innerHeight)
+            );
+        } finally {
+            capturing = false;
+        }
+    }
+
+    async function copyPreviewToClipboard(dataUrl: string) {
+        if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+            throw new Error('Image clipboard write is unavailable in this webview');
+        }
+        const blob = await (await fetch(dataUrl)).blob();
+        await navigator.clipboard.write([
+            new ClipboardItem({ [blob.type || 'image/png']: blob }),
+        ]);
+    }
+
+    async function exportPreviewPng(dataUrl: string) {
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const target = await saveDialog({
+            title: 'Export Preview Display',
+            defaultPath: `cull-preview-display-${stamp}.png`,
+            filters: [{ name: 'PNG Image', extensions: ['png'] }],
+        });
+        if (!target) return;
+        const written = await savePngToPath(target, pngBase64(dataUrl));
+        showCaptureStatus(`Exported ${written.split('/').pop() ?? written}`);
+    }
+
+    async function handleCaptureRequest(destination: CaptureDestination) {
+        try {
+            const dataUrl = await capturePreviewPng();
+            if (destination === 'clipboard') {
+                await copyPreviewToClipboard(dataUrl);
+                showCaptureStatus('Copied Monitor Image');
+                return;
+            }
+            await exportPreviewPng(dataUrl);
+        } catch (e) {
+            showCaptureStatus(`Capture failed: ${formatExportError(e)}`);
+            console.error('Failed to capture Preview Display:', e);
+        }
     }
 
     async function applyPreviewPreset(displayMode: PreviewDisplayMode) {
@@ -198,7 +303,9 @@
             displayMode,
             overlay,
             previewState.frozen,
-            previewState.blanked
+            previewState.blanked,
+            previewState.layout,
+            previewStateImageIds(previewState)
         );
         await applyPreviewState(next);
         try {
@@ -233,12 +340,19 @@
                 loadState = 'error';
             });
         });
+        const captureUnlisten = listen<{ destination: CaptureDestination }>('preview-display:capture-request', (event) => {
+            handleCaptureRequest(event.payload.destination).catch((e) => {
+                console.error('Failed to handle Preview Display capture request:', e);
+            });
+        });
         scheduleHeaderHide();
 
         return () => {
             stateUnlisten.then((fn) => fn());
+            captureUnlisten.then((fn) => fn());
             clearHeaderHideTimer();
             clearBlankMessageTimer();
+            clearCaptureStatusTimer();
         };
     });
 </script>
@@ -247,7 +361,9 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
+    bind:this={captureRoot}
     class="preview-display"
+    class:capturing
     data-state={loadState}
     onpointermove={handlePreviewPointerMove}
 >
@@ -264,13 +380,46 @@
     </header>
     <main class="preview-stage">
         {#if loadState === 'ready' && image}
-            <img
-                class="preview-image"
-                src={imageSrc}
-                alt={filename}
-                draggable="false"
-                onerror={handleImageError}
-            />
+            {#if previewState?.layout === 'single' || displayImages.length === 1}
+                <img
+                    class="preview-image"
+                    src={imageSrc}
+                    alt={filename}
+                    draggable="false"
+                    onerror={() => handleImageError(image!)}
+                />
+            {:else}
+                <div
+                    class="preview-layout"
+                    data-layout={previewState?.layout}
+                    aria-label={`Preview Display ${layoutLabel(previewState?.layout ?? 'single')} layout`}
+                >
+                    {#each displayImages as displayImage (displayImage.image.id)}
+                        <figure class="preview-tile">
+                            <img
+                                class="preview-tile-image"
+                                src={displayImageSrc(displayImage)}
+                                alt={displayFilename(displayImage)}
+                                draggable="false"
+                                onerror={() => handleImageError(displayImage)}
+                            />
+                            {#if previewState?.overlay.showFilename || previewState?.overlay.showRating || previewState?.overlay.showDecision}
+                                <figcaption class="preview-tile-caption">
+                                    {#if previewState?.overlay.showFilename}
+                                        <span>{displayFilename(displayImage)}</span>
+                                    {/if}
+                                    {#if previewState?.overlay.showRating}
+                                        <span>{displayImage.selection?.star_rating ? `${displayImage.selection.star_rating} stars` : 'Unrated'}</span>
+                                    {/if}
+                                    {#if previewState?.overlay.showDecision}
+                                        <span>{displayImage.selection?.decision ?? 'undecided'}</span>
+                                    {/if}
+                                </figcaption>
+                            {/if}
+                        </figure>
+                    {/each}
+                </div>
+            {/if}
             {#if previewState?.overlay.showFilename || previewState?.overlay.showRating || previewState?.overlay.showDecision || railVisible}
                 <aside
                     class="preview-info"
@@ -346,6 +495,9 @@
         {:else}
             <div class="preview-message">No image selected</div>
         {/if}
+        {#if captureStatus}
+            <div class="capture-status">{captureStatus}</div>
+        {/if}
     </main>
 </div>
 
@@ -386,6 +538,10 @@
         transform: translateY(calc(-1 * var(--macos-titlebar-safe-area)));
     }
 
+    .preview-display.capturing .preview-header {
+        opacity: 0;
+    }
+
     .preview-title {
         color: var(--text-secondary);
         font-size: 11px;
@@ -413,11 +569,93 @@
         user-select: none;
     }
 
+    .preview-layout {
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        padding: 16px;
+        box-sizing: border-box;
+        display: grid;
+        gap: 8px;
+    }
+
+    .preview-layout[data-layout="compare"] {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: minmax(0, 1fr);
+    }
+
+    .preview-layout[data-layout="grid"] {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: repeat(2, minmax(0, 1fr));
+    }
+
+    .preview-tile {
+        min-width: 0;
+        min-height: 0;
+        margin: 0;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        display: grid;
+        grid-template-rows: minmax(0, 1fr) auto;
+        overflow: hidden;
+    }
+
+    .preview-tile-image {
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        object-fit: contain;
+        user-select: none;
+    }
+
+    .preview-tile-caption {
+        min-height: 32px;
+        padding: 6px 8px;
+        border-top: 1px solid var(--border);
+        color: var(--text-secondary);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        font-size: 11px;
+        line-height: 1.25;
+        overflow: hidden;
+    }
+
+    .preview-tile-caption span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
     .preview-message {
         color: var(--text-secondary);
         font-size: 13px;
         text-transform: uppercase;
         letter-spacing: 0;
+    }
+
+    .capture-status {
+        position: absolute;
+        left: 16px;
+        top: calc(var(--macos-titlebar-safe-area) + 12px);
+        z-index: 25;
+        max-width: min(520px, calc(100vw - 32px));
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        color: var(--text);
+        font-size: 12px;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+    }
+
+    .preview-display.capturing .capture-status {
+        display: none;
     }
 
     .preview-info {

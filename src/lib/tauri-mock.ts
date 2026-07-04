@@ -109,7 +109,9 @@ let previewWebStreamStatus = {
 
 let previewState = {
   image_id: null as string | null,
+  image_ids: [] as string[],
   display_mode: 'image_only',
+  layout: 'single',
   overlay: {
     showFilename: false,
     showRating: false,
@@ -301,6 +303,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   },
 
   save_export_image: () => '/mock/exported-slide.png',
+  save_png_to_path: (_: any, args: { outputPath: string }) => args.outputPath,
   assemble_export_pdf: () => '/mock/exported.pdf',
   export_static_publish_package: () => ({
     export_dir: '/mock/static-publishing/client-review',
@@ -352,9 +355,12 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   place_preview_display: () => 'preview-display',
   get_preview_state: () => previewState,
   update_preview_state: (_: any, args: any) => {
+    const imageIds = args.imageIds ?? (args.imageId ? [args.imageId] : []);
     previewState = {
-      image_id: args.imageId ?? null,
+      image_id: args.imageId ?? imageIds[0] ?? null,
+      image_ids: imageIds,
       display_mode: args.displayMode ?? previewState.display_mode,
+      layout: args.layout ?? previewState.layout,
       overlay: args.overlay ? { ...previewState.overlay, ...args.overlay } : previewState.overlay,
       frozen: args.frozen ?? previewState.frozen,
       blanked: args.blanked ?? previewState.blanked,

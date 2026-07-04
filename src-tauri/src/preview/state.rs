@@ -12,6 +12,14 @@ pub enum PreviewDisplayMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum PreviewDisplayLayout {
+    Single,
+    Compare,
+    Grid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PreviewRailSide {
     Left,
     Right,
@@ -74,7 +82,9 @@ impl Default for PreviewOverlayConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreviewState {
     pub image_id: Option<String>,
+    pub image_ids: Vec<String>,
     pub display_mode: PreviewDisplayMode,
+    pub layout: PreviewDisplayLayout,
     pub overlay: PreviewOverlayConfig,
     pub frozen: bool,
     pub blanked: bool,
@@ -86,7 +96,9 @@ impl Default for PreviewState {
     fn default() -> Self {
         Self {
             image_id: None,
+            image_ids: Vec::new(),
             display_mode: PreviewDisplayMode::ImageOnly,
+            layout: PreviewDisplayLayout::Single,
             overlay: PreviewOverlayConfig::default(),
             frozen: false,
             blanked: false,
@@ -109,14 +121,20 @@ impl PreviewStateStore {
     pub fn update(
         &self,
         image_id: Option<String>,
+        image_ids: Option<Vec<String>>,
         display_mode: PreviewDisplayMode,
+        layout: Option<PreviewDisplayLayout>,
         overlay: PreviewOverlayConfig,
         frozen: Option<bool>,
         blanked: Option<bool>,
     ) -> PreviewState {
         let mut state = self.state.lock();
-        state.image_id = image_id;
+        state.image_ids = image_ids.unwrap_or_else(|| image_id.iter().cloned().collect());
+        state.image_id = image_id.or_else(|| state.image_ids.first().cloned());
         state.display_mode = display_mode;
+        if let Some(layout) = layout {
+            state.layout = layout;
+        }
         state.overlay = overlay;
         if let Some(frozen) = frozen {
             state.frozen = frozen;
