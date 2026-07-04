@@ -1,7 +1,7 @@
 <script lang="ts">
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, showMissing, requestTextInput, clipboardMonitorStatus } from '$lib/stores';
+    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, showMissing, requestTextInput, requestConfirm, clipboardMonitorStatus } from '$lib/stores';
     import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, deleteCollectionApi, listSmartCollections, isYoloAvailable, isNudenetAvailable, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, SmartCollection } from '$lib/api';
@@ -15,6 +15,12 @@
     let importCurrent = $state(0);
     let importTotal = $state(0);
     let lastResult = $state('');
+    let lastResultKind = $state<'success' | 'error'>('success');
+
+    function setLastResult(text: string, kind: 'success' | 'error' = 'success') {
+        lastResult = text;
+        lastResultKind = kind;
+    }
     let regenerating = $state(false);
     let regenProgress = $state({ current: 0, total: 0 });
     let rescanning = $state(false);
@@ -154,12 +160,19 @@
             collections.set(c);
         } catch (e) {
             console.error('Failed to create collection:', e);
+            showToast('Failed to create collection', { detail: String(e), type: 'error', duration: 8000 });
         }
     }
 
     async function handleDeleteCollection(event: Event, collectionId: string, collectionName: string) {
         event.stopPropagation();
-        if (!window.confirm(`Delete collection "${collectionName}"?`)) return;
+        const confirmed = await requestConfirm({
+            title: 'Delete Collection',
+            description: `Delete collection "${collectionName}"? Images stay in the library.`,
+            confirmLabel: 'Delete',
+            danger: true,
+        });
+        if (!confirmed) return;
         try {
             await deleteCollectionApi(collectionId);
             if (get(activeCollection) === collectionId) {
@@ -171,22 +184,29 @@
             collections.set(c);
         } catch (e) {
             console.error('Failed to delete collection:', e);
+            showToast('Failed to delete collection', { detail: String(e), type: 'error', duration: 8000 });
         }
     }
 
     async function handleDeleteFolder(event: Event, folder: string) {
         event.stopPropagation();
         const name = folderName(folder);
-        if (!window.confirm(`Remove folder from library "${name}"? Cull records for images that only exist in this folder will be removed. Original files stay on disk.`)) return;
+        const confirmed = await requestConfirm({
+            title: 'Remove Folder from Library',
+            description: `Remove "${name}" from the library? Cull records for images that only exist in this folder will be removed. Original files stay on disk.`,
+            confirmLabel: 'Remove Folder',
+            danger: true,
+        });
+        if (!confirmed) return;
         try {
             const count = await apiDeleteFolder(folder);
-            lastResult = `Removed ${count} images from "${name}"`;
+            setLastResult(`Removed ${count} images from "${name}"`);
             if (get(activeFolder) === folder) {
                 activeFolder.set(null);
             }
             await refreshImages();
         } catch (e) {
-            lastResult = `Error: ${e}`;
+            setLastResult(`Error: ${e}`, 'error');
         }
     }
 
@@ -250,6 +270,16 @@
         }
     }
 
+    async function copyPublishUrl() {
+        if (!clipboardPublishResult) return;
+        try {
+            await navigator.clipboard.writeText(clipboardPublishResult.url);
+            showToast('Link copied', { detail: clipboardPublishResult.url, type: 'success', duration: 4000 });
+        } catch (e) {
+            showToast('Copy failed', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
     const SIZE_PRESETS = [
         { label: 'All', value: 0 },
         { label: '>64', value: 64 },
@@ -266,10 +296,10 @@
         rescanning = true;
         try {
             const count = await rescanSources();
-            lastResult = `Detected sources for ${count} images`;
+            setLastResult(`Detected sources for ${count} images`);
             await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
         } catch (e) {
-            lastResult = `Rescan error: ${e}`;
+            setLastResult(`Rescan error: ${e}`, 'error');
         } finally {
             rescanning = false;
         }
@@ -288,9 +318,9 @@
 
         try {
             const count = await regenerateThumbnails();
-            lastResult = `Regenerated ${count} thumbnails`;
+            setLastResult(`Regenerated ${count} thumbnails`);
         } catch (e) {
-            lastResult = `Thumbnail error: ${e}`;
+            setLastResult(`Thumbnail error: ${e}`, 'error');
         } finally {
             unlisten();
             regenerating = false;
@@ -304,7 +334,7 @@
         importing = true;
         importCurrent = 0;
         importTotal = 0;
-        lastResult = '';
+        setLastResult('');
 
         // Listen for progress events
         let lastRefresh = 0;
@@ -326,18 +356,19 @@
         try {
             const result = await apiImportFolder(selected as string);
             const folderName = (selected as string).split('/').filter(Boolean).pop() ?? selected;
-            lastResult = `+${result.imported} imported, ${result.skipped} skipped`;
+            let summary = `+${result.imported} imported, ${result.skipped} skipped`;
             if (result.errors.length > 0) {
-                lastResult += `, ${result.errors.length} errors`;
+                summary += `, ${result.errors.length} errors`;
             }
+            setLastResult(summary, result.errors.length > 0 ? 'error' : 'success');
             showToast(`Imported "${folderName}"`, {
-                detail: lastResult,
+                detail: summary,
                 type: 'success',
                 duration: 8000,
             });
             await refreshImages();
         } catch (e) {
-            lastResult = `Error: ${e}`;
+            setLastResult(`Error: ${e}`, 'error');
             showToast('Import failed', { detail: String(e), type: 'error', duration: 10000 });
         } finally {
             unlisten();
@@ -521,9 +552,9 @@
             </button>
 
             {#if foldersExpanded}
-                <div role="tree" aria-label="Folder hierarchy">
+                <div aria-label="Folder hierarchy">
                 {#each displayFolders as folder}
-                    <div class="folder-row" class:active={$activeFolder === folder.fullPath} style="padding-left: {folder.depth * 12}px" role="treeitem" aria-level={folder.depth + 1} {...(folder.hasChildren && folder.count === 0 ? { 'aria-expanded': 'true' } : {})}>
+                    <div class="folder-row" class:active={$activeFolder === folder.fullPath} style="padding-left: {folder.depth * 12}px">
                         {#if folder.count > 0}
                             <button
                                 class="section-item"
@@ -553,6 +584,130 @@
             {/if}
         {/if}
     </div>
+
+    <div class="section">
+        <div class="section-header">
+            COLLECTIONS
+            <button class="new-collection-btn" onclick={handleNewCollection} title="New Collection" aria-label="New collection">+</button>
+        </div>
+        {#if $pinnedCollection}
+            {@const pinnedName = $collections.find(([id]) => id === $pinnedCollection)?.[1] ?? 'Unknown'}
+            <div class="pinned-indicator">
+                <span class="pin-icon generated-pin" aria-hidden="true"></span>
+                <span class="pin-name">{pinnedName}</span>
+                <button class="pin-action" onclick={unpinCollection}>Unpin</button>
+            </div>
+        {/if}
+        {#if $collectMode && $collectModeTarget}
+            <div class="collect-indicator">Collecting into: {$collections.find(c => c[0] === $collectModeTarget)?.[1] ?? '...'}</div>
+        {/if}
+        {#if $collections.length === 0}
+            <div class="section-empty">No collections yet</div>
+        {:else}
+            {#each $collections as [id, name, count]}
+                <div class="folder-row" class:active={$activeCollection === id}>
+                    <button
+                        class="section-item"
+                        onclick={() => selectCollection(id)}
+                        aria-current={$activeCollection === id ? 'true' : undefined}
+                    >
+                        <span class="icon">&#9671;</span>
+                        <span class="item-label">{name}</span>
+                        <span class="count">{formatSidebarCount(count)}</span>
+                    </button>
+                    <button
+                        class="pin-btn"
+                        class:active={$pinnedCollection === id}
+                        onclick={(e: Event) => { e.stopPropagation(); $pinnedCollection === id ? unpinCollection() : pinCollection(id); }}
+                        title={$pinnedCollection === id ? 'Unpin' : 'Pin as active'}
+                        aria-label={$pinnedCollection === id ? `Unpin collection: ${name}` : `Pin collection as active: ${name}`}
+                        aria-pressed={$pinnedCollection === id}
+                    >
+                        <span class="generated-pin" aria-hidden="true"></span>
+                    </button>
+                    <button
+                        class="delete-btn"
+                        onclick={(e: Event) => handleDeleteCollection(e, id, name)}
+                        title="Delete collection"
+                        aria-label={`Delete collection: ${name}`}
+                    >&times;</button>
+                </div>
+            {/each}
+        {/if}
+    </div>
+
+    <div class="section clipboard-monitor">
+        <div class="section-header">CLIPBOARD MONITOR</div>
+        <button
+            class="section-item"
+            class:active={clipboardStatus?.running}
+            onclick={handleToggleClipboardMonitor}
+            disabled={clipboardMoving || clipboardPublishing}
+            aria-pressed={clipboardStatus?.running ?? false}
+        >
+            <span class="icon">{clipboardStatus?.running ? '■' : '▶'}</span>
+            {clipboardStatus?.running ? 'Stop Monitor' : 'Monitor Clipboard'}
+        </button>
+        {#if clipboardStatus}
+            <div class="section-meta">Access: {clipboardStatus.access_status}</div>
+            <div class="section-meta" title={clipboardStatus.capture_dir}>
+                Folder: {clipboardStatus.capture_dir.split('/').pop() || clipboardStatus.capture_dir}
+            </div>
+            {#if clipboardStatus.collection_name}
+                <div class="section-meta">Collection: {clipboardStatus.collection_name} · {clipboardStatus.captured_count}</div>
+            {/if}
+            <label class="clipboard-option">
+                <input
+                    type="checkbox"
+                    checked={clipboardStatus.capture_existing_on_start}
+                    onchange={handleClipboardCaptureExistingChange}
+                    disabled={clipboardMoving || clipboardPublishing}
+                />
+                <span>Capture current image on start</span>
+            </label>
+            <div class="section-actions">
+                <button
+                    class="section-item compact"
+                    onclick={handleMoveClipboardCaptureFolder}
+                    disabled={clipboardMoving}
+                >
+                    <span class="icon">↔</span>
+                    {clipboardMoving ? 'Moving...' : 'Move Folder'}
+                </button>
+                <button
+                    class="section-item compact"
+                    onclick={handlePublishClipboardCollection}
+                    disabled={!clipboardStatus.collection_id || clipboardPublishing}
+                >
+                    <span class="icon">↗</span>
+                    {clipboardPublishing ? 'Publishing...' : 'Publish clipboard collection'}
+                </button>
+            </div>
+            {#if clipboardPublishResult}
+                <button
+                    class="publish-url"
+                    onclick={copyPublishUrl}
+                    title={`Copy link: ${clipboardPublishResult.url}`}
+                >{clipboardPublishResult.url}</button>
+            {/if}
+        {/if}
+    </div>
+
+    {#if $smartCollections.length > 0}
+    <div class="section">
+        <div class="section-header">SMART</div>
+        {#each $smartCollections as sc}
+            <button class="section-item"
+                class:active={$activeSmartCollection?.id === sc.id}
+                onclick={() => selectSmartCollection(sc)}
+                aria-current={$activeSmartCollection?.id === sc.id ? 'true' : undefined}>
+                <span class="icon">&#9733;</span>
+                <span class="item-label">{sc.name}</span>
+                <span class="count">{formatSidebarCount(sc.image_count)}</span>
+            </button>
+        {/each}
+    </div>
+    {/if}
 
     <div class="section">
         <div class="section-header">FILTERS</div>
@@ -635,7 +790,7 @@
                     </div>
                     {#if yoloProcessed < $totalCount}
                         <button class="detect-btn" onclick={handleDetectRemaining} disabled={detectingBatch}>
-                            {detectingBatch ? 'Detecting...' : `Analyze uncatalogued images ${formatSidebarCount($totalCount - yoloProcessed)}`}
+                            {detectingBatch ? 'Detecting...' : `Detect objects (${formatSidebarCount($totalCount - yoloProcessed)} remaining)`}
                         </button>
                     {/if}
                 {/if}
@@ -647,7 +802,7 @@
                     </div>
                     {#if visionProcessed < $totalCount}
                         <button class="detect-btn" onclick={handleAnalyzeBatch} disabled={analyzingBatch}>
-                            {analyzingBatch ? 'Analyzing...' : `Analyze uncatalogued images ${formatSidebarCount($totalCount - visionProcessed)}`}
+                            {analyzingBatch ? 'Describing...' : `Describe images (${formatSidebarCount($totalCount - visionProcessed)} remaining)`}
                         </button>
                     {/if}
                 {/if}
@@ -664,131 +819,11 @@
             </div>
         {/if}
     </div>
-
-    {#if $smartCollections.length > 0}
-    <div class="section">
-        <div class="section-header">SMART</div>
-        {#each $smartCollections as sc}
-            <button class="section-item"
-                class:active={$activeSmartCollection?.id === sc.id}
-                onclick={() => selectSmartCollection(sc)}
-                aria-current={$activeSmartCollection?.id === sc.id ? 'true' : undefined}>
-                <span class="icon">&#9733;</span>
-                <span class="item-label">{sc.name}</span>
-                <span class="count">{formatSidebarCount(sc.image_count)}</span>
-            </button>
-        {/each}
-    </div>
-    {/if}
-
-    <div class="section clipboard-monitor">
-        <div class="section-header">CLIPBOARD MONITOR</div>
-        <button
-            class="section-item"
-            class:active={clipboardStatus?.running}
-            onclick={handleToggleClipboardMonitor}
-            disabled={clipboardMoving || clipboardPublishing}
-            aria-pressed={clipboardStatus?.running ?? false}
-        >
-            <span class="icon">{clipboardStatus?.running ? '■' : '▶'}</span>
-            {clipboardStatus?.running ? 'Stop Monitor' : 'Monitor Clipboard'}
-        </button>
-        {#if clipboardStatus}
-            <div class="section-meta">{clipboardStatus.access_status}</div>
-            <div class="section-meta" title={clipboardStatus.capture_dir}>
-                {clipboardStatus.capture_dir.split('/').pop() || clipboardStatus.capture_dir}
-            </div>
-            {#if clipboardStatus.collection_name}
-                <div class="section-meta">{clipboardStatus.collection_name} · {clipboardStatus.captured_count}</div>
-            {/if}
-            <label class="clipboard-option">
-                <input
-                    type="checkbox"
-                    checked={clipboardStatus.capture_existing_on_start}
-                    onchange={handleClipboardCaptureExistingChange}
-                    disabled={clipboardMoving || clipboardPublishing}
-                />
-                <span>Capture current image on start</span>
-            </label>
-            <div class="section-actions">
-                <button
-                    class="section-item compact"
-                    onclick={handleMoveClipboardCaptureFolder}
-                    disabled={clipboardMoving}
-                >
-                    <span class="icon">↔</span>
-                    {clipboardMoving ? 'Moving...' : 'Move Folder'}
-                </button>
-                <button
-                    class="section-item compact"
-                    onclick={handlePublishClipboardCollection}
-                    disabled={!clipboardStatus.collection_id || clipboardPublishing}
-                >
-                    <span class="icon">↗</span>
-                    {clipboardPublishing ? 'Publishing...' : 'Publish clipboard collection'}
-                </button>
-            </div>
-            {#if clipboardPublishResult}
-                <div class="section-meta" title={clipboardPublishResult.url}>{clipboardPublishResult.url}</div>
-            {/if}
-        {/if}
-    </div>
-
-    <div class="section">
-        <div class="section-header">
-            COLLECTIONS
-            <button class="new-collection-btn" onclick={handleNewCollection} title="New Collection" aria-label="New collection">+</button>
-        </div>
-        {#if $pinnedCollection}
-            {@const pinnedName = $collections.find(([id]) => id === $pinnedCollection)?.[1] ?? 'Unknown'}
-            <div class="pinned-indicator">
-                <span class="pin-icon generated-pin" aria-hidden="true"></span>
-                <span class="pin-name">{pinnedName}</span>
-                <button class="pin-action" onclick={unpinCollection}>Unpin</button>
-            </div>
-        {/if}
-        {#if $collectMode && $collectModeTarget}
-            <div class="collect-indicator">Collecting into: {$collections.find(c => c[0] === $collectModeTarget)?.[1] ?? '...'}</div>
-        {/if}
-        {#if $collections.length === 0}
-            <div class="section-empty">No collections yet</div>
-        {:else}
-            {#each $collections as [id, name, count]}
-                <div class="folder-row" class:active={$activeCollection === id}>
-                    <button
-                        class="section-item"
-                        onclick={() => selectCollection(id)}
-                        aria-current={$activeCollection === id ? 'true' : undefined}
-                    >
-                        <span class="icon">&#9671;</span>
-                        <span class="item-label">{name}</span>
-                        <span class="count">{formatSidebarCount(count)}</span>
-                    </button>
-                    <button
-                        class="pin-btn"
-                        class:active={$pinnedCollection === id}
-                        onclick={(e: Event) => { e.stopPropagation(); $pinnedCollection === id ? unpinCollection() : pinCollection(id); }}
-                        title={$pinnedCollection === id ? 'Unpin' : 'Pin as active'}
-                        aria-label={$pinnedCollection === id ? `Unpin collection: ${name}` : `Pin collection as active: ${name}`}
-                        aria-pressed={$pinnedCollection === id}
-                    >
-                        <span class="generated-pin" aria-hidden="true"></span>
-                    </button>
-                    <button
-                        class="delete-btn"
-                        onclick={(e: Event) => handleDeleteCollection(e, id, name)}
-                        title="Delete collection"
-                        aria-label={`Delete collection: ${name}`}
-                    >&times;</button>
-                </div>
-            {/each}
-        {/if}
-    </div>
     </div>
 
     <div class="sidebar-footer" aria-live="polite" aria-busy={importing || regenerating || rescanning}>
         {#if lastResult}
-            <div class="import-result">{lastResult}</div>
+            <div class="import-result" class:error={lastResultKind === 'error'}>{lastResult}</div>
         {/if}
         {#if importing}
             <div class="sr-only">
@@ -810,9 +845,9 @@
                     class="import-btn secondary"
                     onclick={handleRegenerateThumbnails}
                     disabled={importing || regenerating || rescanning}
-                    aria-label={regenerating ? `Regenerating thumbnails ${regenProgress.current} of ${regenProgress.total}` : 'Regenerate thumbnails'}
+                    aria-label={regenerating ? `Regenerating thumbnails ${regenProgress.current} of ${regenProgress.total}` : 'Rebuild thumbnails'}
                 >
-                    {regenerating ? `${regenProgress.current}/${regenProgress.total}` : 'Thumbnails'}
+                    {regenerating ? `${regenProgress.current}/${regenProgress.total}` : 'Rebuild thumbnails'}
                 </button>
                 <button
                     class="import-btn secondary"
@@ -820,7 +855,7 @@
                     disabled={importing || regenerating || rescanning}
                     aria-label={rescanning ? 'Rescanning sources' : 'Rescan sources'}
                 >
-                    {rescanning ? 'Scanning' : 'Sources'}
+                    {rescanning ? 'Scanning' : 'Rescan sources'}
                 </button>
             </div>
         </div>
@@ -906,6 +941,26 @@
         padding: 2px 8px;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+    .publish-url {
+        background: none;
+        border: none;
+        color: var(--blue);
+        cursor: pointer;
+        display: block;
+        font-family: inherit;
+        font-size: 10px;
+        max-width: 100%;
+        overflow: hidden;
+        padding: 2px 8px;
+        text-align: left;
+        text-decoration: underline;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        width: 100%;
+    }
+    .publish-url:hover {
+        color: var(--text);
     }
     .clipboard-option {
         align-items: flex-start;
@@ -1041,6 +1096,7 @@
     }
     .filter-presets {
         display: flex;
+        flex-wrap: wrap;
         gap: 2px;
     }
     .preset-btn {
@@ -1121,6 +1177,9 @@
         margin-bottom: 6px;
         word-break: break-word;
     }
+    .import-result.error {
+        color: var(--red);
+    }
     .footer-actions {
         display: grid;
         gap: 6px;
@@ -1163,7 +1222,8 @@
         background: color-mix(in srgb, var(--blue) 8%, transparent);
         font-size: 10px;
         min-height: 32px;
-        padding: 0 6px;
+        padding: 2px 6px;
+        white-space: normal;
     }
     /* AI Models section */
     .ai-models-content {
@@ -1196,21 +1256,6 @@
     .model-status.missing {
         color: var(--text-secondary);
     }
-    .model-status.downloading {
-        color: var(--orange);
-    }
-    .progress-bar {
-        height: 3px;
-        background: var(--border);
-        border-radius: 2px;
-        margin: 2px 0 4px;
-        overflow: hidden;
-    }
-    .progress-fill {
-        height: 100%;
-        background: var(--blue);
-        transition: width 0.3s;
-    }
     .model-download-row {
         display: flex;
         gap: 4px;
@@ -1240,24 +1285,6 @@
         border: 1px solid var(--border);
         border-radius: var(--radius);
         font-family: inherit;
-    }
-    .download-btn {
-        font-size: 10px;
-        padding: 2px 6px;
-        background: color-mix(in srgb, var(--blue) 15%, transparent);
-        color: var(--blue);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        cursor: pointer;
-        font-family: inherit;
-    }
-    .download-btn:hover {
-        background: color-mix(in srgb, var(--blue) 25%, transparent);
-        border-color: var(--blue);
-    }
-    .download-btn.full-width {
-        width: 100%;
-        margin: 2px 0 4px;
     }
     .processed-row {
         display: flex;
