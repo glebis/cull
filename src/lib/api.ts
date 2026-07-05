@@ -764,6 +764,11 @@ export async function listCollections(): Promise<[string, string, number][]> {
     return invoke('list_collections');
 }
 
+export async function renameCollectionApi(collectionId: string, name: string): Promise<void> {
+    await invoke('rename_collection', { collectionId, name });
+    emitSessionEventsRefresh();
+}
+
 export async function addToCollection(collectionId: string, imageIds: string[]): Promise<void> {
     await invoke('add_to_collection', { collectionId, imageIds });
     emitSessionEventsRefresh();

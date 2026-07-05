@@ -424,6 +424,8 @@ export const importBatchImageIds = writable<string[]>([]);
 
 // Pinned (active) collection — new imports auto-append here
 export const pinnedCollection = writable<string | null>(null);
+// Sidebar collection pins, ordered by the time they were pinned.
+export const pinnedCollections = writable<string[]>([]);
 
 // Lineage tab layout preference
 export type LineageLayout = 'timeline' | 'comparison';

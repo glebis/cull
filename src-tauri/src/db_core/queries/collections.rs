@@ -33,6 +33,17 @@ impl Database {
         rows.collect::<Result<Vec<_>>>()
     }
 
+    pub fn rename_collection(&self, collection_id: &str, name: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE projects
+             SET name = ?2
+             WHERE id = ?1 AND (collection_type IS NULL OR collection_type = 'manual')",
+            params![collection_id, name],
+        )?;
+        Ok(())
+    }
+
     pub fn add_to_collection(&self, collection_id: &str, image_ids: &[&str]) -> Result<()> {
         let conn = self.conn.lock();
         let max_pos: i64 = conn.query_row(

@@ -10,7 +10,19 @@ describe('collections sidebar UI contract', () => {
         expect(sidebar).toContain('class="generated-pin"');
         expect(sidebar).toContain('.folder-row:hover .pin-btn');
         expect(sidebar).toContain('.pin-btn.active');
+        expect(sidebar).toContain('buildPinnedCollectionRows');
+        expect(sidebar).not.toContain('pinned-indicator');
         expect(sidebar).not.toContain('📎');
         expect(sidebar).not.toContain('📌');
+    });
+
+    it('exposes collection preview and context actions', () => {
+        expect(sidebar).toContain('collection-preview-popover');
+        expect(sidebar).toContain('setTimeout(async () =>');
+        expect(sidebar).toContain('}, 1000)');
+        expect(sidebar).toContain('collection-context-menu');
+        expect(sidebar).toContain('Rename...');
+        expect(sidebar).toContain('Export to Folder...');
+        expect(sidebar).toContain('Use for Collect Mode');
     });
 });
