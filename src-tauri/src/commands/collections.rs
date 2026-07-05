@@ -30,6 +30,26 @@ pub async fn list_collections(
 }
 
 #[tauri::command]
+pub async fn rename_collection(
+    state: State<'_, AppState>,
+    collection_id: String,
+    name: String,
+) -> Result<(), String> {
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::rename_collection(&ctx, &collection_id, &name).map_err(|e| e.to_string())?;
+    let _ = state.db.log_session_event(&NewSessionEvent {
+        session_id: None,
+        event_type: "collection_renamed".to_string(),
+        actor_type: "user".to_string(),
+        actor_id: None,
+        subject_type: Some("collection".to_string()),
+        subject_id: Some(collection_id),
+        payload_json: serde_json::json!({ "name": name }).to_string(),
+    });
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn add_to_collection(
     state: State<'_, AppState>,
     collection_id: String,

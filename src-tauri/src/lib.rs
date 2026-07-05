@@ -484,6 +484,7 @@ pub fn run() {
             commands::deeplink::open_with_params,
             commands::collections::create_collection,
             commands::collections::list_collections,
+            commands::collections::rename_collection,
             commands::collections::add_to_collection,
             commands::collections::list_collection_images,
             commands::collections::remove_from_collection,

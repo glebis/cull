@@ -1,14 +1,16 @@
 <script lang="ts">
+    import { convertFileSrc } from '@tauri-apps/api/core';
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, showMissing, requestTextInput, requestConfirm, clipboardMonitorStatus } from '$lib/stores';
-    import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, deleteCollectionApi, listSmartCollections, isYoloAvailable, isNudenetAvailable, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
+    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen } from '$lib/stores';
+    import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, isYoloAvailable, isNudenetAvailable, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
-    import type { ClipboardMonitorStatus, ClipboardPublishResult, SmartCollection } from '$lib/api';
+    import type { ClipboardMonitorStatus, ClipboardPublishResult, ImageWithFile, SmartCollection } from '$lib/api';
     import { applyClipboardMonitorCollection } from '$lib/clipboard-monitor';
     import { MODEL_SETUP_GUIDE_URL, resolveAiSectionExpanded } from '$lib/onboarding';
+    import { safeAssetPreviewPath } from '$lib/view-utils';
     import { openUrl } from '@tauri-apps/plugin-opener';
-    import { onMount } from 'svelte';
+    import { onDestroy, onMount } from 'svelte';
     import { get } from 'svelte/store';
 
     let importing = $state(false);
@@ -29,18 +31,104 @@
     let clipboardMoving = $state(false);
     let clipboardPublishing = $state(false);
     let clipboardPublishResult = $state<ClipboardPublishResult | null>(null);
+    let collectionPreview = $state<{
+        collectionId: string;
+        name: string;
+        count: number;
+        images: ImageWithFile[];
+        loading: boolean;
+        x: number;
+        y: number;
+    } | null>(null);
+    let collectionContextMenu = $state<{
+        collectionId: string;
+        name: string;
+        count: number;
+        x: number;
+        y: number;
+    } | null>(null);
+    let collectionPreviewTimer: ReturnType<typeof setTimeout> | null = null;
+    let collectionPreviewRequest = 0;
 
     function setClipboardStatus(status: ClipboardMonitorStatus | null) {
         clipboardStatus = status;
         clipboardMonitorStatus.set(status);
     }
 
-    import { buildDisplayFolders, formatSidebarCount } from '$lib/sidebar-utils';
+    import { buildDisplayFolders, buildPinnedCollectionRows, formatSidebarCount } from '$lib/sidebar-utils';
     import SessionSwitcher from './SessionSwitcher.svelte';
     import { activeCanvas, activeSession, navigateTo, sessionCanvases } from '$lib/stores';
     import { createCanvas, type Canvas } from '$lib/api';
 
     let displayFolders = $derived(buildDisplayFolders($folders));
+    let displayCollections = $derived(buildPinnedCollectionRows($collections, $pinnedCollections));
+
+    function clearCollectionPreviewTimer() {
+        if (!collectionPreviewTimer) return;
+        clearTimeout(collectionPreviewTimer);
+        collectionPreviewTimer = null;
+    }
+
+    function collectionPreviewSrc(item: ImageWithFile): string {
+        const path = safeAssetPreviewPath(item, { displayPx: 76, dpr: typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1 });
+        return path ? convertFileSrc(path) : '';
+    }
+
+    function scheduleCollectionPreview(event: MouseEvent | FocusEvent, collectionId: string, name: string, count: number) {
+        clearCollectionPreviewTimer();
+        collectionPreviewRequest += 1;
+        if (count <= 0) {
+            collectionPreview = null;
+            return;
+        }
+
+        const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+        const x = rect.right + 8;
+        const y = Math.max(8, Math.min(rect.top, window.innerHeight - 172));
+        const requestId = collectionPreviewRequest;
+
+        collectionPreviewTimer = setTimeout(async () => {
+            collectionPreview = { collectionId, name, count, images: [], loading: true, x, y };
+            try {
+                const images = await listCollectionImages(collectionId, 4, 0);
+                if (requestId !== collectionPreviewRequest) return;
+                collectionPreview = { collectionId, name, count, images, loading: false, x, y };
+            } catch (e) {
+                if (requestId !== collectionPreviewRequest) return;
+                collectionPreview = null;
+                console.error('Failed to load collection preview:', e);
+            }
+        }, 1000);
+    }
+
+    function hideCollectionPreview(collectionId?: string) {
+        clearCollectionPreviewTimer();
+        collectionPreviewRequest += 1;
+        if (!collectionId || collectionPreview?.collectionId === collectionId) {
+            collectionPreview = null;
+        }
+    }
+
+    function openCollectionContextMenu(event: MouseEvent, collectionId: string, name: string, count: number) {
+        event.preventDefault();
+        event.stopPropagation();
+        hideCollectionPreview(collectionId);
+        collectionContextMenu = {
+            collectionId,
+            name,
+            count,
+            x: Math.min(event.clientX, window.innerWidth - 208),
+            y: Math.min(event.clientY, window.innerHeight - 224),
+        };
+    }
+
+    function closeCollectionContextMenu() {
+        collectionContextMenu = null;
+    }
+
+    onDestroy(() => {
+        clearCollectionPreviewTimer();
+    });
 
     onMount(async () => {
         try {
@@ -90,13 +178,72 @@
     }
 
     function pinCollection(collectionId: string) {
+        pinnedCollections.update(ids => ids.includes(collectionId) ? ids : [...ids, collectionId]);
         pinnedCollection.set(collectionId);
-        showToast('Collection pinned, new imports will be added here', { type: 'info', duration: 5000 });
+        showToast('Collection pinned', { detail: 'New imports will be added here', type: 'info', duration: 5000 });
     }
 
-    function unpinCollection() {
-        pinnedCollection.set(null);
+    function unpinCollection(collectionId: string) {
+        let nextIds: string[] = [];
+        pinnedCollections.update(ids => {
+            nextIds = ids.filter(id => id !== collectionId);
+            return nextIds;
+        });
+        if (get(pinnedCollection) === collectionId) {
+            pinnedCollection.set(nextIds[nextIds.length - 1] ?? null);
+        }
         showToast('Collection unpinned', { type: 'info', duration: 3000 });
+    }
+
+    function togglePinnedCollection(collectionId: string) {
+        if (get(pinnedCollections).includes(collectionId)) {
+            unpinCollection(collectionId);
+        } else {
+            pinCollection(collectionId);
+        }
+    }
+
+    async function handleRenameCollection(collectionId: string, currentName: string) {
+        closeCollectionContextMenu();
+        const name = await requestTextInput({
+            title: 'Rename Collection',
+            label: 'Collection name',
+            initialValue: currentName,
+            placeholder: 'Collection name',
+            confirmLabel: 'Rename',
+        });
+        if (!name || !name.trim() || name.trim() === currentName) return;
+        try {
+            await renameCollectionApi(collectionId, name.trim());
+            collections.set(await listCollections());
+            showToast('Collection renamed', { type: 'success', duration: 3000 });
+        } catch (e) {
+            console.error('Failed to rename collection:', e);
+            showToast('Failed to rename collection', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    async function handleExportCollection(collectionId: string) {
+        closeCollectionContextMenu();
+        await selectCollection(collectionId);
+        exportFolderOpen.set(true);
+    }
+
+    async function copyCollectionId(collectionId: string) {
+        closeCollectionContextMenu();
+        try {
+            await navigator.clipboard.writeText(collectionId);
+            showToast('Collection ID copied', { type: 'success', duration: 2500 });
+        } catch (e) {
+            showToast('Copy failed', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    function setCollectTarget(collectionId: string, name: string) {
+        closeCollectionContextMenu();
+        collectMode.set(true);
+        collectModeTarget.set(collectionId);
+        showToast('Collect mode enabled', { detail: name, type: 'info', duration: 5000 });
     }
 
     async function selectSmartCollection(sc: SmartCollection) {
@@ -166,6 +313,7 @@
 
     async function handleDeleteCollection(event: Event, collectionId: string, collectionName: string) {
         event.stopPropagation();
+        closeCollectionContextMenu();
         const confirmed = await requestConfirm({
             title: 'Delete Collection',
             description: `Delete collection "${collectionName}"? Images stay in the library.`,
@@ -175,6 +323,11 @@
         if (!confirmed) return;
         try {
             await deleteCollectionApi(collectionId);
+            pinnedCollections.update(ids => ids.filter(id => id !== collectionId));
+            if (get(pinnedCollection) === collectionId) {
+                const nextPinned = get(pinnedCollections);
+                pinnedCollection.set(nextPinned[nextPinned.length - 1] ?? null);
+            }
             if (get(activeCollection) === collectionId) {
                 activeCollection.set(null);
                 activeDetectedClass.set(null);
@@ -497,6 +650,11 @@
     }
 </script>
 
+<svelte:window
+    onclick={closeCollectionContextMenu}
+    onkeydown={(e) => { if (e.key === 'Escape') { closeCollectionContextMenu(); hideCollectionPreview(); } }}
+/>
+
 <aside class="sidebar" aria-label="Library sidebar">
     <div class="sidebar-scroll">
         <SessionSwitcher />
@@ -590,22 +748,26 @@
             COLLECTIONS
             <button class="new-collection-btn" onclick={handleNewCollection} title="New Collection" aria-label="New collection">+</button>
         </div>
-        {#if $pinnedCollection}
-            {@const pinnedName = $collections.find(([id]) => id === $pinnedCollection)?.[1] ?? 'Unknown'}
-            <div class="pinned-indicator">
-                <span class="pin-icon generated-pin" aria-hidden="true"></span>
-                <span class="pin-name">{pinnedName}</span>
-                <button class="pin-action" onclick={unpinCollection}>Unpin</button>
-            </div>
-        {/if}
         {#if $collectMode && $collectModeTarget}
             <div class="collect-indicator">Collecting into: {$collections.find(c => c[0] === $collectModeTarget)?.[1] ?? '...'}</div>
         {/if}
         {#if $collections.length === 0}
             <div class="section-empty">No collections yet</div>
         {:else}
-            {#each $collections as [id, name, count]}
-                <div class="folder-row" class:active={$activeCollection === id}>
+            {#each displayCollections as [id, name, count]}
+                {@const pinned = $pinnedCollections.includes(id)}
+                <div
+                    class="folder-row collection-row"
+                    class:active={$activeCollection === id}
+                    class:pinned
+                    onmouseenter={(e) => scheduleCollectionPreview(e, id, name, count)}
+                    onmouseleave={() => hideCollectionPreview(id)}
+                    onfocusin={(e) => scheduleCollectionPreview(e, id, name, count)}
+                    onfocusout={() => hideCollectionPreview(id)}
+                    oncontextmenu={(e) => openCollectionContextMenu(e, id, name, count)}
+                    role="group"
+                    aria-label={`Collection actions: ${name}`}
+                >
                     <button
                         class="section-item"
                         onclick={() => selectCollection(id)}
@@ -617,11 +779,11 @@
                     </button>
                     <button
                         class="pin-btn"
-                        class:active={$pinnedCollection === id}
-                        onclick={(e: Event) => { e.stopPropagation(); $pinnedCollection === id ? unpinCollection() : pinCollection(id); }}
-                        title={$pinnedCollection === id ? 'Unpin' : 'Pin as active'}
-                        aria-label={$pinnedCollection === id ? `Unpin collection: ${name}` : `Pin collection as active: ${name}`}
-                        aria-pressed={$pinnedCollection === id}
+                        class:active={pinned}
+                        onclick={(e: Event) => { e.stopPropagation(); togglePinnedCollection(id); }}
+                        title={pinned ? 'Unpin collection' : 'Pin collection'}
+                        aria-label={pinned ? `Unpin collection: ${name}` : `Pin collection: ${name}`}
+                        aria-pressed={pinned}
                     >
                         <span class="generated-pin" aria-hidden="true"></span>
                     </button>
@@ -820,6 +982,53 @@
         {/if}
     </div>
     </div>
+
+    {#if collectionPreview}
+        <div
+            class="collection-preview-popover"
+            style="left: {collectionPreview.x}px; top: {collectionPreview.y}px;"
+            aria-hidden="true"
+        >
+            <div class="collection-preview-header">
+                <span>{collectionPreview.name}</span>
+                <span>{formatSidebarCount(collectionPreview.count)}</span>
+            </div>
+            {#if collectionPreview.loading}
+                <div class="collection-preview-loading">Loading...</div>
+            {:else if collectionPreview.images.length > 0}
+                <div class="collection-preview-grid">
+                    {#each collectionPreview.images as item}
+                        {@const src = collectionPreviewSrc(item)}
+                        <div class="collection-preview-thumb">
+                            {#if src}
+                                <img src={src} alt="" loading="lazy" />
+                            {/if}
+                        </div>
+                    {/each}
+                </div>
+            {/if}
+        </div>
+    {/if}
+
+    {#if collectionContextMenu}
+        <div
+            class="collection-context-menu"
+            style="left: {collectionContextMenu.x}px; top: {collectionContextMenu.y}px;"
+            role="menu"
+            tabindex="-1"
+        >
+            <div class="context-menu-header">{collectionContextMenu.name}</div>
+            <button type="button" role="menuitem" onclick={() => { selectCollection(collectionContextMenu!.collectionId); closeCollectionContextMenu(); }}>Open Collection</button>
+            <button type="button" role="menuitem" onclick={() => handleRenameCollection(collectionContextMenu!.collectionId, collectionContextMenu!.name)}>Rename...</button>
+            <button type="button" role="menuitem" onclick={() => handleExportCollection(collectionContextMenu!.collectionId)} disabled={collectionContextMenu.count === 0}>Export to Folder...</button>
+            <button type="button" role="menuitem" onclick={() => setCollectTarget(collectionContextMenu!.collectionId, collectionContextMenu!.name)}>Use for Collect Mode</button>
+            <button type="button" role="menuitem" onclick={() => togglePinnedCollection(collectionContextMenu!.collectionId)}>
+                {$pinnedCollections.includes(collectionContextMenu.collectionId) ? 'Unpin Collection' : 'Pin Collection'}
+            </button>
+            <button type="button" role="menuitem" onclick={() => copyCollectionId(collectionContextMenu!.collectionId)}>Copy Collection ID</button>
+            <button type="button" role="menuitem" class="danger" onclick={(e) => handleDeleteCollection(e, collectionContextMenu!.collectionId, collectionContextMenu!.name)}>Delete Collection...</button>
+        </div>
+    {/if}
 
     <div class="sidebar-footer" aria-live="polite" aria-busy={importing || regenerating || rescanning}>
         {#if lastResult}
@@ -1330,33 +1539,14 @@
     .class-tag {
         color: var(--purple);
     }
-    .pinned-indicator {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 12px;
-        margin: 4px 8px;
-        background: var(--bg);
-        border-radius: 6px;
-        border: 1px solid var(--green);
-        font-size: 12px;
+    .collection-row.pinned .section-item {
+        color: var(--text);
     }
-    .pin-icon { flex: none; }
-    .pin-name { color: var(--text); flex: 1; }
-    .pin-action {
-        background: none;
-        border: none;
-        color: var(--text-secondary);
-        cursor: pointer;
-        font-size: 11px;
-        font-family: inherit;
-    }
-    .pin-action:hover { color: var(--text); }
     .pin-btn {
         align-items: center;
         background: none;
         border: none;
-        color: var(--text-secondary);
+        color: var(--text);
         cursor: pointer;
         display: inline-flex;
         height: 24px;
@@ -1380,10 +1570,10 @@
     }
     .pin-btn:hover,
     .pin-btn:focus-visible {
-        color: var(--blue);
+        color: var(--text);
     }
     .pin-btn.active {
-        color: var(--green);
+        color: var(--text);
     }
     .generated-pin {
         display: inline-block;
@@ -1412,6 +1602,98 @@
         position: absolute;
         top: 6px;
         width: 1px;
+    }
+    .collection-preview-popover {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: 0 12px 32px color-mix(in srgb, var(--bg) 80%, transparent);
+        padding: 8px;
+        position: fixed;
+        width: 176px;
+        z-index: var(--z-context-menu);
+    }
+    .collection-preview-header {
+        align-items: center;
+        color: var(--text-secondary);
+        display: flex;
+        font-size: 10px;
+        gap: 8px;
+        justify-content: space-between;
+        margin-bottom: 6px;
+        min-width: 0;
+    }
+    .collection-preview-header span:first-child {
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .collection-preview-loading {
+        color: var(--text-secondary);
+        font-size: 10px;
+        min-height: 72px;
+        padding-top: 28px;
+        text-align: center;
+    }
+    .collection-preview-grid {
+        display: grid;
+        gap: 4px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .collection-preview-thumb {
+        aspect-ratio: 1;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+    }
+    .collection-preview-thumb img {
+        display: block;
+        height: 100%;
+        object-fit: cover;
+        width: 100%;
+    }
+    .collection-context-menu {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: 0 12px 32px color-mix(in srgb, var(--bg) 80%, transparent);
+        display: grid;
+        min-width: 200px;
+        padding: 4px;
+        position: fixed;
+        z-index: var(--z-context-menu);
+    }
+    .context-menu-header {
+        color: var(--text-secondary);
+        font-size: 10px;
+        overflow: hidden;
+        padding: 6px 8px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .collection-context-menu button {
+        background: none;
+        border: none;
+        border-radius: var(--radius);
+        color: var(--text);
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 12px;
+        padding: 6px 8px;
+        text-align: left;
+    }
+    .collection-context-menu button:hover:not(:disabled),
+    .collection-context-menu button:focus-visible {
+        background: var(--border);
+    }
+    .collection-context-menu button:disabled {
+        color: var(--text-secondary);
+        cursor: default;
+    }
+    .collection-context-menu button.danger {
+        color: var(--red);
     }
     .sr-only {
         border: 0;
