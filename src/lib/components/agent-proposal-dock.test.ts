@@ -58,6 +58,13 @@ describe('AgentProposalDock source contract', () => {
         expect(source).toContain('Review and apply');
         expect(source).toContain('candidateCountLabel');
         expect(source).toContain('visibleImages');
+        expect(source).toContain('currentViewContext');
+        expect(source).toContain('parseAgentProposalSourceContext');
+        expect(source).toContain('proposalActorLabel');
+        expect(source).toContain('sourceContextIsStale');
+        expect(source).toContain('proposal-meta');
+        expect(source).toContain('class:stale={proposalIsStale}');
+        expect(source).toContain('Stale view');
         expect(source).toContain('candidate-preview');
         expect(source).toContain('safeAssetPreviewPath');
         expect(source).toContain('proposal-switcher');

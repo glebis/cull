@@ -38,6 +38,8 @@ pub struct ClaudeAgentChatTurnRequest {
     pub candidate_images: Vec<AgentChatImageContext>,
     pub selected_count: u32,
     pub visible_count: u32,
+    #[serde(default)]
+    pub view_context_json: Option<String>,
     pub model: Option<String>,
     pub max_budget_usd: Option<f64>,
 }
@@ -456,7 +458,22 @@ fn validate_request(request: &ClaudeAgentChatTurnRequest) -> Result<(), ServiceE
             "Agent chat requires candidate image context".to_string(),
         ));
     }
+    parse_optional_view_context_json(request.view_context_json.as_deref())?;
     Ok(())
+}
+
+fn parse_optional_view_context_json(value: Option<&str>) -> Result<Option<Value>, ServiceError> {
+    let Some(raw) = value.map(str::trim).filter(|raw| !raw.is_empty()) else {
+        return Ok(None);
+    };
+    let parsed: Value = serde_json::from_str(raw)
+        .map_err(|e| ServiceError::InvalidInput(format!("Invalid view_context_json: {}", e)))?;
+    if !parsed.is_object() {
+        return Err(ServiceError::InvalidInput(
+            "view_context_json must be a JSON object".to_string(),
+        ));
+    }
+    Ok(Some(parsed))
 }
 
 fn validate_model_alias(model: &str) -> Result<(), ServiceError> {
@@ -873,15 +890,33 @@ fn create_proposal_from_draft(
     }
     let usage_value: Value = serde_json::from_str(usage_json)
         .map_err(|e| ServiceError::Engine(format!("Invalid usage JSON: {}", e)))?;
-    let source_context_json = json!({
-        "source": runtime_source.as_str(),
-        "selected_count": request.selected_count,
-        "visible_count": request.visible_count,
-        "candidate_count": request.candidate_images.len(),
-        "active_preset_id": request.preset.as_ref().map(|preset| preset.id.as_str()),
-        "runtime": usage_value,
-    })
-    .to_string();
+    let mut source_context = serde_json::Map::from_iter([
+        ("source".to_string(), json!(runtime_source.as_str())),
+        ("selected_count".to_string(), json!(request.selected_count)),
+        ("visible_count".to_string(), json!(request.visible_count)),
+        (
+            "candidate_count".to_string(),
+            json!(request.candidate_images.len()),
+        ),
+        (
+            "active_preset_id".to_string(),
+            json!(request.preset.as_ref().map(|preset| preset.id.as_str())),
+        ),
+        (
+            "actor".to_string(),
+            json!({"type": "agent", "name": "Claude", "role": "copilot"}),
+        ),
+        ("runtime".to_string(), usage_value.clone()),
+    ]);
+    if let Some(view_context) =
+        parse_optional_view_context_json(request.view_context_json.as_deref())?
+    {
+        if let Some(label) = view_context.get("label").and_then(Value::as_str) {
+            source_context.insert("scope_label".to_string(), json!(label));
+        }
+        source_context.insert("view_context".to_string(), view_context);
+    }
+    let source_context_json = Value::Object(source_context).to_string();
     let estimated_input_tokens = estimated_input_tokens_from_usage(&usage_value);
     let estimated_output_tokens = estimated_output_tokens_from_usage(&usage_value);
     let estimated_cost_eur = estimated_cost_usd_from_usage(&usage_value, total_cost_usd)
@@ -1063,6 +1098,18 @@ mod tests {
             }],
             selected_count: 1,
             visible_count: 12,
+            view_context_json: Some(
+                json!({
+                    "kind": "folder",
+                    "id": null,
+                    "label": "Portfolio Picks",
+                    "path": "/art/portfolio",
+                    "view_mode": "grid",
+                    "selected_count": 1,
+                    "visible_count": 12,
+                })
+                .to_string(),
+            ),
             model: Some("haiku".to_string()),
             max_budget_usd: Some(0.05),
         }
@@ -1261,6 +1308,10 @@ if (process.env.CULL_FAKE_AGENT_ERROR_RESULT) {
         );
         let source_context: Value = serde_json::from_str(&proposal.source_context_json).unwrap();
         assert_eq!(source_context["source"], "claude_agent_sdk");
+        assert_eq!(source_context["actor"]["name"], "Claude");
+        assert_eq!(source_context["actor"]["role"], "copilot");
+        assert_eq!(source_context["view_context"]["kind"], "folder");
+        assert_eq!(source_context["view_context"]["label"], "Portfolio Picks");
     }
 
     #[tokio::test]

@@ -64,6 +64,7 @@
     import { invalidateImageCache, loadImagesForCurrentScope, refreshImageCount, type ImageLoadOptions } from '$lib/image-loading';
     import { clampFocusIndexToList, nextFocusIndexAfterFocusedRemoval } from '$lib/image-removal';
     import { buildAgentSnapshotManifest, collectVisibleImageTargets, drawAnnotatedSnapshot, type AgentSnapshotScope } from '$lib/agent-view-snapshot';
+    import { proposalViewContextKey, type AgentProposalViewContext } from '$lib/agent-proposal-context';
     import { estimateAgentBudget } from '$lib/agent-token-estimate';
     import { effectiveAgentVisualLevel } from '$lib/agent-visual-context';
     import { listen } from '@tauri-apps/api/event';
@@ -90,6 +91,7 @@
     let noSidebar = $derived(immersive || !$sidebarVisible);
     let reviewProposal = $derived(agentProposals.find(p => p.id === reviewProposalId) ?? null);
     let agentCandidateCount = $derived(proposalCandidateIds().length);
+    let agentProposalViewContext = $derived(currentAgentProposalViewContext());
 
     async function loadImages(options: ImageLoadOptions = {}) {
         await loadImagesForCurrentScope(options);
@@ -293,6 +295,32 @@
         return { kind: 'all', id: null, label: 'All Images', path: null };
     }
 
+    function currentAgentProposalViewContext(): AgentProposalViewContext {
+        const scope = currentAgentSnapshotScope();
+        return {
+            kind: scope.kind,
+            id: scope.id,
+            label: scope.label,
+            path: scope.path,
+            view_mode: $viewMode,
+            selected_count: $selectedIds.size,
+            visible_count: $images.length,
+        };
+    }
+
+    function agentProposalSourceContext(source: string, viewContext: AgentProposalViewContext, candidateCount: number) {
+        return {
+            source,
+            actor: { type: 'ui', name: 'Cull UI', role: 'copilot' },
+            selected_count: $selectedIds.size,
+            visible_count: $images.length,
+            candidate_count: candidateCount,
+            scope_key: proposalViewContextKey(viewContext),
+            scope_label: viewContext.label,
+            view_context: viewContext,
+        };
+    }
+
     async function captureAgentViewSnapshot(options: AgentSnapshotCaptureOptions = {}) {
         const snapshotId = options.snapshotId ?? createAgentSnapshotId();
         const clipboard = options.clipboard ?? false;
@@ -434,6 +462,7 @@
             instruction,
             visualLevel,
         });
+        const viewContext = currentAgentProposalViewContext();
         const items = ids.map((image_id, index) => ({
             image_id,
             reason: `${preset?.name ?? 'Manual preset'} candidate ${index + 1}: ${instruction}`,
@@ -449,11 +478,7 @@
             estimated_input_tokens: estimatedBudget.inputTokens,
             estimated_output_tokens: estimatedBudget.outputTokens,
             estimated_cost_eur: estimatedBudget.costEur,
-            source_context_json: JSON.stringify({
-                source: 'agent_chat_manual_seed',
-                selected_count: $selectedIds.size,
-                visible_count: $images.length,
-            }),
+            source_context_json: JSON.stringify(agentProposalSourceContext('agent_chat_manual_seed', viewContext, ids.length)),
             items_json: JSON.stringify(items),
             guard_results_json: JSON.stringify({ blocked: [] }),
         });
@@ -496,6 +521,7 @@
                 candidate_images: candidateImages,
                 selected_count: $selectedIds.size,
                 visible_count: $images.length,
+                view_context_json: JSON.stringify(currentAgentProposalViewContext()),
                 model: null,
                 max_budget_usd: null,
             });
@@ -935,6 +961,7 @@
                 activePresetId={$activeAgentSelectionPresetId}
                 activeProposalId={$activeAgentProposalId}
                 candidateCount={agentCandidateCount}
+                currentViewContext={agentProposalViewContext}
                 visibleImages={$images}
                 onreviewproposal={handleReviewAgentProposal}
                 ondismissproposal={handleDismissAgentProposal}
@@ -991,6 +1018,7 @@
     <ActionProposalReviewDialog
         proposal={reviewProposal}
         visible={reviewProposal !== null}
+        currentViewContext={agentProposalViewContext}
         visibleImages={$images}
         onapplyproposal={handleApplyAgentProposal}
         oncancelreview={() => reviewProposalId = null}
