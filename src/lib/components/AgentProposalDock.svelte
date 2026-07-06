@@ -38,6 +38,7 @@
         onselectpreset = () => {},
         onselectproposal = () => {},
         onvisuallevelcycle = () => {},
+        oncancelturn = () => {},
         onclose = () => {},
     }: {
         proposals: AgentActionProposal[];
@@ -61,6 +62,7 @@
         onselectpreset?: (presetId: string) => void;
         onselectproposal?: (proposalId: string) => void;
         onvisuallevelcycle?: () => void;
+        oncancelturn?: () => void;
         onclose?: () => void;
     } = $props();
 
@@ -335,9 +337,16 @@
                 rows="3"
                 onkeydown={handleInstructionKeydown}
             ></textarea>
-            <button class="primary" type="button" onclick={submitInstruction} disabled={!instruction.trim() || busy}>
-                {busy ? 'Thinking' : 'Send'}
-            </button>
+            <div class="chat-actions">
+                <button class="primary" type="button" onclick={submitInstruction} disabled={!instruction.trim() || busy}>
+                    {busy ? 'Thinking' : 'Send'}
+                </button>
+                {#if busy}
+                    <button class="stop-button" type="button" onclick={oncancelturn}>
+                        Stop
+                    </button>
+                {/if}
+            </div>
         </section>
 
         {#if !activeProposal}
@@ -376,6 +385,7 @@
     .agent-header,
     .header-actions,
     .proposal-actions,
+    .chat-actions,
     .editor-actions,
     .section-header,
     .proposal-topline,
@@ -387,6 +397,7 @@
 
     .agent-header,
     .proposal-actions,
+    .chat-actions,
     .editor-actions,
     .section-header,
     .proposal-topline,
@@ -508,6 +519,24 @@
 
     .primary {
         min-height: 32px;
+    }
+
+    .chat-actions {
+        align-items: stretch;
+    }
+
+    .chat-actions .primary {
+        flex: 1 1 auto;
+    }
+
+    .stop-button {
+        border-color: var(--red);
+        color: var(--red);
+        min-height: 32px;
+    }
+
+    .stop-button:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--red) 18%, transparent);
     }
 
     .candidate,

@@ -38,7 +38,7 @@
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
     import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel, agentPanelPinned, agentPanelVisible, agentVisualLevel, activeAgentProposalId, activeAgentSelectionPresetId, cycleAgentVisualLevel } from '$lib/stores';
-    import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listCollections, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ClaudeAgentStreamEvent, type ImageWithFile, type PreviewState } from '$lib/api';
+    import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listCollections, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, cancelClaudeAgentChatTurn, undo, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ClaudeAgentStreamEvent, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
     import { loadInstalledPlugins, activateBundledPlugins } from '$lib/plugins/loader';
@@ -83,6 +83,7 @@
     let lastAgentInstruction = $state<string | null>(null);
     let activeAgentRequestId = $state<string | null>(null);
     let agentStreamEvents = $state<ClaudeAgentStreamEvent[]>([]);
+    let cancelledAgentRequestIds = new Set<string>();
     let reviewProposalId = $state<string | null>(null);
 
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
@@ -92,6 +93,28 @@
 
     async function loadImages(options: ImageLoadOptions = {}) {
         await loadImagesForCurrentScope(options);
+    }
+
+    function appendAgentStreamEvent(payload: ClaudeAgentStreamEvent) {
+        agentStreamEvents = [
+            ...agentStreamEvents.filter(item => item.sequence !== payload.sequence),
+            payload,
+        ]
+            .sort((a, b) => a.sequence - b.sequence)
+            .slice(-24);
+    }
+
+    function appendLocalAgentEvent(requestId: string, phase: string, message: string) {
+        const sequence = (agentStreamEvents.at(-1)?.sequence ?? 0) + 1;
+        appendAgentStreamEvent({
+            request_id: requestId,
+            sequence,
+            phase,
+            message,
+            details: { source: 'ui' },
+            is_final: phase === 'cancelled',
+            is_error: false,
+        });
     }
 
     async function restoreSmartCollectionScope(restored: PersistedState | null) {
@@ -476,6 +499,10 @@
                 model: null,
                 max_budget_usd: null,
             });
+            if (cancelledAgentRequestIds.has(requestId)) {
+                lastAgentMessage = 'Request cancelled';
+                return;
+            }
             lastAgentMessage = result.message;
 
             if (result.proposal) {
@@ -500,10 +527,71 @@
                 showToast('Claude replied', { detail: result.message, type: 'info', duration: 6000 });
             }
         } catch (e) {
+            if (cancelledAgentRequestIds.has(requestId)) {
+                lastAgentMessage = 'Request cancelled';
+                return;
+            }
             showToast('Claude agent failed', { detail: String(e), type: 'error', duration: 9000 });
         } finally {
             agentChatBusy = false;
+            if (activeAgentRequestId === requestId) activeAgentRequestId = null;
+            cancelledAgentRequestIds.delete(requestId);
+        }
+    }
+
+    async function handleCancelAgentTurn() {
+        const requestId = activeAgentRequestId;
+        if (!requestId || !agentChatBusy) return;
+        cancelledAgentRequestIds.add(requestId);
+        try {
+            const cancelled = await cancelClaudeAgentChatTurn(requestId);
+            if (!cancelled) {
+                cancelledAgentRequestIds.delete(requestId);
+                showToast('Claude request already finished', {
+                    type: 'warning',
+                    duration: 4000,
+                });
+                return;
+            }
+            appendLocalAgentEvent(requestId, 'cancelled', 'Request cancelled');
+            lastAgentMessage = 'Request cancelled';
+            agentChatBusy = false;
             activeAgentRequestId = null;
+            showToast('Claude request cancelled', {
+                type: 'info',
+                duration: 4000,
+            });
+        } catch (e) {
+            cancelledAgentRequestIds.delete(requestId);
+            showToast('Could not cancel Claude request', {
+                detail: String(e),
+                type: 'warning',
+                duration: 6000,
+            });
+        }
+    }
+
+    async function undoLastTrashProposal() {
+        try {
+            const label = await undo();
+            if (!label) {
+                showToast('Nothing to undo', { type: 'warning', duration: 3000 });
+                return;
+            }
+            await loadImages({ resetFocus: false, force: true, invalidateCache: true });
+            refreshImageCount().catch(e => console.error('Failed to refresh image count after proposal undo:', e));
+            refreshCollectionCountsAfterRemoval('proposal trash undo');
+            showToast(`Undone: ${label}`, { type: 'info', duration: 4000 });
+        } catch (e) {
+            showToast('Undo failed', { detail: String(e), type: 'error', duration: 7000 });
+        }
+    }
+
+    function undoSelectionProposal() {
+        if (selectedIds.undo()) {
+            showToast('Selection restored', { type: 'info', duration: 3500 });
+        } else {
+            showToast('Nothing to undo', { type: 'warning', duration: 3000 });
         }
     }
 
@@ -553,6 +641,9 @@
                 detail: `${trashResult.succeeded} moved to Trash, ${trashResult.failed} failed`,
                 type: trashResult.failed > 0 ? 'warning' : 'info',
                 duration: 6000,
+                actions: [
+                    { label: 'Undo', onclick: () => { void undoLastTrashProposal(); } },
+                ],
             });
         } else {
             const visibleIds = new Set($images.map(item => item.image.id));
@@ -582,6 +673,9 @@
                     : `${visibleApprovedIds.length} selected, ${approvedImageIds.length - visibleApprovedIds.length} no longer visible`,
                 type: visibleApprovedIds.length === approvedImageIds.length ? 'success' : 'warning',
                 duration: 6000,
+                actions: [
+                    { label: 'Undo', onclick: undoSelectionProposal },
+                ],
             });
         }
         reviewProposalId = null;
@@ -716,12 +810,7 @@
 
         const agentStreamUnlisten = listen<ClaudeAgentStreamEvent>('claude-agent:stream-event', (event) => {
             if (event.payload.request_id !== activeAgentRequestId) return;
-            agentStreamEvents = [
-                ...agentStreamEvents.filter(item => item.sequence !== event.payload.sequence),
-                event.payload,
-            ]
-                .sort((a, b) => a.sequence - b.sequence)
-                .slice(-24);
+            appendAgentStreamEvent(event.payload);
         });
 
         const panicUnlisten = listen<{thread: string, location: string | null, message: string}>('rust-panic', (event) => {
@@ -854,6 +943,7 @@
                 onselectpreset={(presetId) => activeAgentSelectionPresetId.set(presetId)}
                 onselectproposal={(proposalId) => activeAgentProposalId.set(proposalId)}
                 onvisuallevelcycle={cycleAgentVisualLevel}
+                oncancelturn={handleCancelAgentTurn}
                 onclose={handleCloseAgentPanel}
             />
         </div>

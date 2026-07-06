@@ -83,4 +83,12 @@ describe('AgentProposalDock source contract', () => {
         expect(source).toContain('aria-live="polite"');
         expect(source).not.toContain('Streaming content_block_delta');
     });
+
+    it('shows a Stop control while the agent turn is running', () => {
+        expect(source).toContain('oncancelturn?: () => void');
+        expect(source).toContain('{#if busy}');
+        expect(source).toContain('class="stop-button"');
+        expect(source).toContain('onclick={oncancelturn}');
+        expect(source).toContain('Stop');
+    });
 });

@@ -111,6 +111,13 @@ pub async fn run_claude_agent_chat_turn(
     Ok(result)
 }
 
+#[tauri::command]
+pub async fn cancel_claude_agent_chat_turn(request_id: String) -> Result<bool, String> {
+    Ok(claude_svc::cancel_claude_agent_chat_turn_request(
+        &request_id,
+    ))
+}
+
 fn log_agent_proposal_event(
     state: &State<'_, AppState>,
     event_type: &str,
