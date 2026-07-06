@@ -117,8 +117,12 @@ pub async fn trash_images(
     state: State<'_, AppState>,
     image_ids: Vec<String>,
 ) -> Result<u32, String> {
+    trash_images_inner(&state, &image_ids)
+}
+
+fn trash_images_inner(state: &AppState, image_ids: &[String]) -> Result<u32, String> {
     let mut trashed = 0u32;
-    for image_id in &image_ids {
+    for image_id in image_ids {
         let id_refs: Vec<&str> = vec![image_id.as_str()];
         let found = state
             .db
@@ -137,7 +141,7 @@ pub async fn trash_images(
                             .unwrap_or("file")
                             .to_string();
                         log_library_event(
-                            &state,
+                            state,
                             "image_moved_to_trash",
                             Some("image"),
                             Some(image_id.clone()),
@@ -172,9 +176,16 @@ pub async fn trash_images_detailed(
     state: State<'_, AppState>,
     image_ids: Vec<String>,
 ) -> Result<TrashImagesDetailedResult, String> {
+    trash_images_detailed_inner(&state, &image_ids)
+}
+
+pub(crate) fn trash_images_detailed_inner(
+    state: &AppState,
+    image_ids: &[String],
+) -> Result<TrashImagesDetailedResult, String> {
     let mut results = Vec::new();
 
-    for image_id in &image_ids {
+    for image_id in image_ids {
         let id_refs: Vec<&str> = vec![image_id.as_str()];
         let found = state
             .db
@@ -211,7 +222,7 @@ pub async fn trash_images_detailed(
                     .unwrap_or("file")
                     .to_string();
                 log_library_event(
-                    &state,
+                    state,
                     "image_moved_to_trash",
                     Some("image"),
                     Some(image_id.clone()),
@@ -449,6 +460,74 @@ pub async fn check_library_health(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::db_core::db::Database;
+    use crate::db_core::detection::DetectionEngine;
+    use crate::db_core::embeddings::EmbeddingEngine;
+    use crate::db_core::models::{Image, ImageFile};
+    use crate::db_core::secrets::MemoryStore;
+    use crate::{services, watcher};
+    use std::path::Path;
+
+    fn test_state(tmp: &Path) -> AppState {
+        let db = Database::open(&tmp.join("test.db")).unwrap();
+        let app_data_dir = tmp.join("app-data");
+        let model_dir = tmp.join("models");
+        std::fs::create_dir_all(&app_data_dir).unwrap();
+
+        AppState {
+            db,
+            app_data_dir,
+            embedding_engine: parking_lot::Mutex::new(EmbeddingEngine::new(&model_dir)),
+            detection_engine: parking_lot::Mutex::new(DetectionEngine::new_yolo(&model_dir)),
+            safety_engine: parking_lot::Mutex::new(DetectionEngine::new_nudenet(&model_dir)),
+            secrets: Box::new(MemoryStore::new()),
+            jobs: services::jobs::JobRegistry::default(),
+            action_manager: services::undo::ActionManager::new(),
+            file_watcher: parking_lot::Mutex::new(watcher::FileWatcher::new()),
+            clipboard_monitor: parking_lot::Mutex::new(
+                services::clipboard_monitor::ClipboardMonitorState::default(),
+            ),
+            static_publish_server: parking_lot::Mutex::new(
+                crate::commands::static_publishing::StaticPublishServerState::default(),
+            ),
+            preview_state: crate::preview::state::PreviewStateStore::default(),
+            preview_web_stream: crate::preview::web_stream::PreviewWebStreamController::default(),
+            agent_snapshots: parking_lot::Mutex::new(
+                services::agent_snapshots::AgentSnapshotRegistry::default(),
+            ),
+            agent_snapshot_requests: parking_lot::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    fn insert_test_image(db: &Database, image_id: &str, file_path: &Path) {
+        let now = "2026-07-06T00:00:00Z".to_string();
+        let file_size = std::fs::metadata(file_path).unwrap().len();
+        db.insert_image(&Image {
+            id: image_id.to_string(),
+            sha256_hash: format!("hash-{image_id}"),
+            width: 1,
+            height: 1,
+            format: "png".to_string(),
+            file_size,
+            created_at: now.clone(),
+            imported_at: now.clone(),
+            ai_prompt: None,
+            raw_metadata: None,
+        })
+        .unwrap();
+        db.insert_image_file(&ImageFile {
+            id: format!("file-{image_id}"),
+            image_id: image_id.to_string(),
+            path: file_path.to_string_lossy().to_string(),
+            last_seen_at: now,
+            missing_at: None,
+            last_seen_size: Some(file_size),
+            last_seen_mtime: None,
+        })
+        .unwrap();
+    }
+
     /// Verify that the trash crate can handle filenames with special characters
     /// that would have caused AppleScript injection with the old implementation.
     #[test]
@@ -464,5 +543,77 @@ mod tests {
             !file_path.exists(),
             "file should no longer exist at original path"
         );
+    }
+
+    #[test]
+    fn trash_images_moves_file_marks_missing_and_records_audit_and_undo() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("trash-command-success.png");
+        std::fs::write(&file_path, b"fake image data").unwrap();
+        let state = test_state(dir.path());
+        insert_test_image(&state.db, "img-trash-success", &file_path);
+
+        let count = trash_images_inner(&state, &["img-trash-success".to_string()]).unwrap();
+
+        assert_eq!(count, 1);
+        assert!(
+            !file_path.exists(),
+            "file should be moved out of source path"
+        );
+        let image_file = state
+            .db
+            .get_image_file_by_path(&file_path.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert!(image_file.missing_at.is_some());
+
+        let events = state.db.list_session_events(None, 10).unwrap();
+        assert!(events.iter().any(|event| {
+            event.event_type == "image_moved_to_trash"
+                && event.subject_id.as_deref() == Some("img-trash-success")
+        }));
+
+        let undo_records = state.db.list_undo_records(10).unwrap();
+        assert_eq!(undo_records.len(), 1);
+        assert_eq!(undo_records[0].action_type, "trash_image");
+        assert!(undo_records[0].has_file_backup);
+    }
+
+    #[test]
+    fn trash_images_detailed_reports_partial_failures_without_stopping_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let existing_path = dir.path().join("trash-detailed-success.png");
+        let missing_path = dir.path().join("trash-detailed-missing.png");
+        std::fs::write(&existing_path, b"fake image data").unwrap();
+        std::fs::write(&missing_path, b"fake image data").unwrap();
+        let state = test_state(dir.path());
+        insert_test_image(&state.db, "img-trash-ok", &existing_path);
+        insert_test_image(&state.db, "img-trash-missing", &missing_path);
+        trash::delete(&missing_path).unwrap();
+
+        let result = trash_images_detailed_inner(
+            &state,
+            &[
+                "img-trash-ok".to_string(),
+                "img-trash-missing".to_string(),
+                "img-trash-unknown".to_string(),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(result.requested, 3);
+        assert_eq!(result.succeeded, 1);
+        assert_eq!(result.failed, 2);
+        assert_eq!(result.results[0].status, "trashed");
+        assert_eq!(result.results[1].status, "missing");
+        assert_eq!(result.results[2].status, "not_found");
+        assert!(!existing_path.exists());
+
+        let image_file = state
+            .db
+            .get_image_file_by_path(&existing_path.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert!(image_file.missing_at.is_some());
     }
 }

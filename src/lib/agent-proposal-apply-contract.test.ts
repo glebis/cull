@@ -5,6 +5,15 @@ import { describe, expect, it } from 'vitest';
 const pageSource = readFileSync(join(process.cwd(), 'src/routes/+page.svelte'), 'utf8');
 
 describe('agent proposal apply flow contract', () => {
+    it('moves approved Trash proposals before marking the proposal applied', () => {
+        const trashCall = pageSource.indexOf('const trashResult = await trashImagesDetailed(approvedImageIds)');
+        const applyCall = pageSource.indexOf('await applyActionProposal(proposalId, approvedImageIds, JSON.stringify(trashResult))');
+        expect(trashCall).toBeGreaterThan(-1);
+        expect(applyCall).toBeGreaterThan(-1);
+        expect(trashCall).toBeLessThan(applyCall);
+        expect(pageSource).toContain("trashResult.results.filter(item => item.status === 'trashed')");
+    });
+
     it('intersects selection proposals with currently loaded images before applying', () => {
         expect(pageSource).toContain('const visibleIds = new Set($images.map(item => item.image.id))');
         expect(pageSource).toContain('const visibleApprovedIds = approvedImageIds.filter(id => visibleIds.has(id))');

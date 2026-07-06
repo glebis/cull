@@ -1052,6 +1052,14 @@ pub(crate) fn validate_delete_folder_path(folder: &str) -> Result<()> {
             "folder path must be absolute".to_string(),
         ));
     }
+    if path
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(SqlError::InvalidParameterName(
+            "folder path must not contain parent directory traversal".to_string(),
+        ));
+    }
 
     let has_non_root_component = path.components().any(|component| {
         !matches!(
@@ -1863,6 +1871,31 @@ mod tests {
             .list_images_in_scope(&[], &[], &[], 100, 0)
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn validate_delete_folder_path_accepts_non_root_absolute_path() {
+        validate_delete_folder_path("/tmp/cull-library").unwrap();
+    }
+
+    #[test]
+    fn validate_delete_folder_path_rejects_empty_root_and_relative_paths() {
+        for folder in ["", "/", "tmp/cull-library"] {
+            assert!(
+                validate_delete_folder_path(folder).is_err(),
+                "{folder:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_delete_folder_path_rejects_parent_dir_traversal() {
+        let result = validate_delete_folder_path("/tmp/cull-library/../other");
+
+        assert!(
+            result.is_err(),
+            "parent directory traversal should be rejected before deletion query"
+        );
     }
 
     #[test]
