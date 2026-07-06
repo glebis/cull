@@ -213,10 +213,75 @@ pub fn upsert_agent_selection_preset_db(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db_core::detection::DetectionEngine;
+    use crate::db_core::embeddings::EmbeddingEngine;
+    use crate::db_core::models::{Image, ImageFile};
+    use crate::db_core::secrets::MemoryStore;
+    use crate::{services, watcher, AppState};
+    use std::path::Path;
 
     fn db() -> Database {
         let dir = tempfile::tempdir().unwrap();
         Database::open(&dir.path().join("test.db")).unwrap()
+    }
+
+    fn test_state(tmp: &Path) -> AppState {
+        let db = Database::open(&tmp.join("test.db")).unwrap();
+        let app_data_dir = tmp.join("app-data");
+        let model_dir = tmp.join("models");
+        std::fs::create_dir_all(&app_data_dir).unwrap();
+
+        AppState {
+            db,
+            app_data_dir,
+            embedding_engine: parking_lot::Mutex::new(EmbeddingEngine::new(&model_dir)),
+            detection_engine: parking_lot::Mutex::new(DetectionEngine::new_yolo(&model_dir)),
+            safety_engine: parking_lot::Mutex::new(DetectionEngine::new_nudenet(&model_dir)),
+            secrets: Box::new(MemoryStore::new()),
+            jobs: services::jobs::JobRegistry::default(),
+            action_manager: services::undo::ActionManager::new(),
+            file_watcher: parking_lot::Mutex::new(watcher::FileWatcher::new()),
+            clipboard_monitor: parking_lot::Mutex::new(
+                services::clipboard_monitor::ClipboardMonitorState::default(),
+            ),
+            static_publish_server: parking_lot::Mutex::new(
+                crate::commands::static_publishing::StaticPublishServerState::default(),
+            ),
+            preview_state: crate::preview::state::PreviewStateStore::default(),
+            preview_web_stream: crate::preview::web_stream::PreviewWebStreamController::default(),
+            agent_snapshots: parking_lot::Mutex::new(
+                services::agent_snapshots::AgentSnapshotRegistry::default(),
+            ),
+            agent_snapshot_requests: parking_lot::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    fn insert_test_image(db: &Database, image_id: &str, file_path: &Path) {
+        let now = "2026-07-06T00:00:00Z".to_string();
+        let file_size = std::fs::metadata(file_path).unwrap().len();
+        db.insert_image(&Image {
+            id: image_id.to_string(),
+            sha256_hash: format!("hash-{image_id}"),
+            width: 1,
+            height: 1,
+            format: "png".to_string(),
+            file_size,
+            created_at: now.clone(),
+            imported_at: now.clone(),
+            ai_prompt: None,
+            raw_metadata: None,
+        })
+        .unwrap();
+        db.insert_image_file(&ImageFile {
+            id: format!("file-{image_id}"),
+            image_id: image_id.to_string(),
+            path: file_path.to_string_lossy().to_string(),
+            last_seen_at: now,
+            missing_at: None,
+            last_seen_size: Some(file_size),
+            last_seen_mtime: None,
+        })
+        .unwrap();
     }
 
     #[test]
@@ -265,6 +330,118 @@ mod tests {
             proposal.selection_preset_id.as_deref(),
             Some(preset.id.as_str())
         );
+    }
+
+    #[test]
+    fn apply_action_proposal_db_records_only_approved_subset() {
+        let db = db();
+        let proposal = create_action_proposal_db(
+            &db,
+            CreateActionProposalRequest {
+                kind: "select_images".to_string(),
+                persona: "copilot".to_string(),
+                lens: Some("portfolio".to_string()),
+                criteria: "select portfolio candidates".to_string(),
+                visual_level: "text".to_string(),
+                selection_preset_id: None,
+                estimated_input_tokens: Some(300),
+                estimated_output_tokens: Some(100),
+                estimated_cost_eur: Some(0.002),
+                source_context_json: "{}".to_string(),
+                items_json: serde_json::json!([
+                    {"image_id":"img_a","reason":"strong"},
+                    {"image_id":"img_b","reason":"duplicate"},
+                    {"image_id":"img_c","reason":"coherent"}
+                ])
+                .to_string(),
+                guard_results_json: "{}".to_string(),
+            },
+        )
+        .unwrap();
+        let approved = vec!["img_a".to_string(), "img_c".to_string()];
+
+        let result = apply_action_proposal_db(
+            &db,
+            &proposal.id,
+            &approved,
+            &serde_json::json!({"selected": 2, "missing": 1}).to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(result.status, "applied");
+        assert_eq!(result.applied_count, 2);
+        let applied = db.get_action_proposal(&proposal.id).unwrap().unwrap();
+        assert_eq!(applied.status, "applied");
+        let undo: serde_json::Value =
+            serde_json::from_str(applied.undo_journal_json.as_deref().unwrap()).unwrap();
+        assert_eq!(undo["kind"], "select_images");
+        assert_eq!(undo["approved_image_ids"], serde_json::json!(approved));
+        assert!(!undo["approved_image_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == "img_b"));
+    }
+
+    #[test]
+    fn apply_action_proposal_db_records_destructive_trash_after_actual_effect() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(dir.path());
+        let file_path = dir.path().join("proposal-trash.png");
+        std::fs::write(&file_path, b"fake image data").unwrap();
+        insert_test_image(&state.db, "img_trash", &file_path);
+        let proposal = create_action_proposal_db(
+            &state.db,
+            CreateActionProposalRequest {
+                kind: "trash_images".to_string(),
+                persona: "copilot".to_string(),
+                lens: Some("cleanup".to_string()),
+                criteria: "move weak duplicate to Trash".to_string(),
+                visual_level: "tiny".to_string(),
+                selection_preset_id: None,
+                estimated_input_tokens: Some(100),
+                estimated_output_tokens: Some(20),
+                estimated_cost_eur: Some(0.001),
+                source_context_json: "{}".to_string(),
+                items_json: serde_json::json!([
+                    {"image_id":"img_trash","reason":"duplicate"}
+                ])
+                .to_string(),
+                guard_results_json: "{}".to_string(),
+            },
+        )
+        .unwrap();
+        let approved = vec!["img_trash".to_string()];
+
+        let trash_result =
+            crate::commands::library::trash_images_detailed_inner(&state, &approved).unwrap();
+        let apply_result = apply_action_proposal_db(
+            &state.db,
+            &proposal.id,
+            &approved,
+            &serde_json::to_string(&trash_result).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(trash_result.succeeded, 1);
+        assert!(!file_path.exists(), "proposal trash should move the file");
+        let image_file = state
+            .db
+            .get_image_file_by_path(&file_path.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert!(image_file.missing_at.is_some());
+        assert_eq!(apply_result.status, "applied");
+
+        let applied = state.db.get_action_proposal(&proposal.id).unwrap().unwrap();
+        assert_eq!(applied.status, "applied");
+        let apply_json: serde_json::Value =
+            serde_json::from_str(applied.apply_result_json.as_deref().unwrap()).unwrap();
+        assert_eq!(apply_json["succeeded"], 1);
+        let undo: serde_json::Value =
+            serde_json::from_str(applied.undo_journal_json.as_deref().unwrap()).unwrap();
+        assert_eq!(undo["kind"], "trash_images");
+        assert_eq!(undo["approved_image_ids"], serde_json::json!(approved));
     }
 
     #[test]

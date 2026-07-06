@@ -379,6 +379,7 @@ fn sanitize_stem(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db_core::models::{Image, ImageFile};
 
     #[test]
     fn preset_naming_keywords_still_work() {
@@ -435,6 +436,34 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let canon = std::fs::canonicalize(tmp.path()).unwrap();
         (tmp, canon)
+    }
+
+    fn insert_export_test_image(db: &Database, image_id: &str, source_path: &Path) {
+        let now = "2026-07-06T00:00:00Z".to_string();
+        let file_size = std::fs::metadata(source_path).unwrap().len();
+        db.insert_image(&Image {
+            id: image_id.to_string(),
+            sha256_hash: format!("hash-{image_id}"),
+            width: 1,
+            height: 1,
+            format: "png".to_string(),
+            file_size,
+            created_at: now.clone(),
+            imported_at: now.clone(),
+            ai_prompt: None,
+            raw_metadata: None,
+        })
+        .unwrap();
+        db.insert_image_file(&ImageFile {
+            id: format!("file-{image_id}"),
+            image_id: image_id.to_string(),
+            path: source_path.to_string_lossy().to_string(),
+            last_seen_at: now,
+            missing_at: None,
+            last_seen_size: Some(file_size),
+            last_seen_mtime: None,
+        })
+        .unwrap();
     }
 
     #[test]
@@ -509,6 +538,45 @@ mod tests {
         let result = export_images(&db, Path::new("/tmp"), params).unwrap();
         assert_eq!(result.exported, 0);
         assert!(out_dir.exists());
+    }
+
+    #[test]
+    fn export_deduplicates_filename_collision_without_overwriting_existing_file() {
+        let db = Database::open(Path::new(":memory:")).unwrap();
+        let (_source_guard, source_root) = canonical_tempdir();
+        let (_out_guard, out_root) = canonical_tempdir();
+        let source_path = source_root.join("collision.png");
+        let output_dir = out_root.join("exports");
+        let existing_output = output_dir.join("collision.png");
+        std::fs::create_dir_all(&output_dir).unwrap();
+        std::fs::write(&source_path, b"source image bytes").unwrap();
+        std::fs::write(&existing_output, b"existing output sentinel").unwrap();
+        insert_export_test_image(&db, "img-collision", &source_path);
+
+        let result = export_images(
+            &db,
+            Path::new("/tmp"),
+            ExportImagesParams {
+                image_ids: Some(vec!["img-collision".to_string()]),
+                collection_id: None,
+                folder_path: None,
+                output_dir: output_dir.to_string_lossy().to_string(),
+                format: Some("original".to_string()),
+                flatten: Some(true),
+                naming: Some("original".to_string()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.exported, 1);
+        assert_eq!(result.skipped, 0);
+        assert_eq!(
+            std::fs::read(&existing_output).unwrap(),
+            b"existing output sentinel"
+        );
+        let exported_path = PathBuf::from(&result.files[0].output_path);
+        assert_eq!(exported_path.file_name().unwrap(), "collision_2.png");
+        assert_eq!(std::fs::read(exported_path).unwrap(), b"source image bytes");
     }
 
     #[test]
