@@ -2,6 +2,13 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import ModalDialog from '$lib/components/ModalDialog.svelte';
     import type { AgentActionProposal, ImageWithFile } from '$lib/api';
+    import {
+        parseAgentProposalSourceContext,
+        proposalActorLabel,
+        sourceContextIsStale,
+        sourceContextScopeLabel,
+        type AgentProposalViewContext,
+    } from '$lib/agent-proposal-context';
     import { safeAssetPreviewPath } from '$lib/view-utils';
 
     type Candidate = { image_id: string; reason?: string };
@@ -9,12 +16,14 @@
     let {
         proposal,
         visible,
+        currentViewContext = null,
         visibleImages = [],
         onapplyproposal = () => {},
         oncancelreview = () => {},
     }: {
         proposal: AgentActionProposal | null;
         visible: boolean;
+        currentViewContext?: AgentProposalViewContext | null;
         visibleImages?: ImageWithFile[];
         onapplyproposal?: (proposalId: string, approvedImageIds: string[]) => void;
         oncancelreview?: () => void;
@@ -23,6 +32,11 @@
     let approvedIds = $state<Set<string>>(new Set());
     const candidates = $derived(parseCandidates(proposal?.items_json));
     const actionLabel = $derived(proposal?.kind === 'trash_images' ? 'Move approved to Trash' : 'Select approved');
+    const sourceContext = $derived(parseAgentProposalSourceContext(proposal?.source_context_json));
+    const proposalSourceLabel = $derived(proposal ? proposalActorLabel(sourceContext, proposal.persona) : '');
+    const proposalCreatedLabel = $derived(proposal ? formatProposalTimestamp(proposal.created_at) : '');
+    const proposalScopeLabel = $derived(sourceContextScopeLabel(sourceContext) ?? currentViewContext?.label ?? 'Unknown view');
+    const proposalIsStale = $derived(sourceContextIsStale(sourceContext, currentViewContext));
 
     $effect(() => {
         approvedIds = new Set(candidates.map(candidate => candidate.image_id));
@@ -60,6 +74,14 @@
         const image = imageForCandidate(imageId);
         return image?.path.split('/').pop() ?? imageId;
     }
+
+    function formatProposalTimestamp(timestamp: string) {
+        const date = new Date(timestamp);
+        if (Number.isNaN(date.getTime())) return timestamp;
+        const day = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+        return `${day} ${time}`;
+    }
 </script>
 
 {#if visible && proposal}
@@ -79,6 +101,15 @@
             </div>
             <button type="button" onclick={oncancelreview}>Cancel</button>
         </header>
+
+        <div class="proposal-meta" class:stale={proposalIsStale}>
+            <span>By {proposalSourceLabel}</span>
+            <span>{proposalCreatedLabel}</span>
+            <span>View: {proposalScopeLabel}</span>
+            {#if proposalIsStale}
+                <strong>Stale view</strong>
+            {/if}
+        </div>
 
         <div class="summary">
             <span>{approvedIds.size} of {candidates.length} approved</span>
@@ -153,7 +184,8 @@
 
     .dialog-header,
     .dialog-footer,
-    .summary {
+    .summary,
+    .proposal-meta {
         align-items: center;
         display: flex;
         gap: var(--spacing);
@@ -167,8 +199,21 @@
 
     p,
     small,
+    .proposal-meta,
     .summary {
         color: var(--text-secondary);
+    }
+
+    .proposal-meta {
+        flex-wrap: wrap;
+        font-size: 11px;
+        justify-content: flex-start;
+        line-height: 1.3;
+    }
+
+    .proposal-meta.stale,
+    .proposal-meta strong {
+        color: var(--orange);
     }
 
     button {

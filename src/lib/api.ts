@@ -543,6 +543,7 @@ export interface ClaudeAgentChatTurnRequest {
     candidate_images: AgentChatImageContext[];
     selected_count: number;
     visible_count: number;
+    view_context_json?: string | null;
     model: string | null;
     max_budget_usd: number | null;
 }
@@ -1541,6 +1542,8 @@ export async function rotateMcpToken(tokenId: string): Promise<string> {
 export interface McpAuditEntry {
     id: number;
     token_id: string | null;
+    token_name: string | null;
+    token_role: string | null;
     tool_name: string;
     params_json: string | null;
     result_status: string;

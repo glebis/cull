@@ -39,5 +39,14 @@ describe('agent proposal apply flow contract', () => {
     it('passes image context into the native proposal review dialog', () => {
         expect(pageSource).toContain('<ActionProposalReviewDialog');
         expect(pageSource).toContain('visibleImages={$images}');
+        expect(pageSource).toContain('currentViewContext={agentProposalViewContext}');
+    });
+
+    it('records the originating view context for manual and Claude proposals', () => {
+        expect(pageSource).toContain('currentAgentProposalViewContext');
+        expect(pageSource).toContain('agentProposalSourceContext');
+        expect(pageSource).toContain('proposalViewContextKey(viewContext)');
+        expect(pageSource).toContain("source_context_json: JSON.stringify(agentProposalSourceContext('agent_chat_manual_seed'");
+        expect(pageSource).toContain('view_context_json: JSON.stringify(currentAgentProposalViewContext())');
     });
 });

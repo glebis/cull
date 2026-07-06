@@ -19,7 +19,11 @@ describe('PrivacyDashboard MCP audit visibility', () => {
 
     it('renders an MCP audit section listing tool, status, and time', () => {
         expect(dashboard).toContain('Agent Access Log');
-        // Each row binds the audited tool name and result status.
+        // Each row binds the audited actor, tool name, and result status.
+        expect(api).toContain('token_name: string | null');
+        expect(api).toContain('token_role: string | null');
+        expect(dashboard).toContain('actorLabel(entry)');
+        expect(dashboard).toContain('actorRole(entry)');
         expect(dashboard).toContain('entry.tool_name');
         expect(dashboard).toContain('entry.result_status');
     });

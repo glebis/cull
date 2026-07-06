@@ -106,6 +106,7 @@ describe('agent proposal API wrappers', () => {
             }],
             selected_count: 1,
             visible_count: 12,
+            view_context_json: '{"kind":"folder","label":"Portfolio","path":"/art/portfolio"}',
             model: null,
             max_budget_usd: null,
         };

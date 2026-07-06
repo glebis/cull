@@ -115,6 +115,20 @@
         return name === '_auth_failed' ? 'auth failed' : name;
     }
 
+    function actorLabel(entry: McpAuditEntry): string {
+        if (entry.token_name) return entry.token_name;
+        if (entry.token_id?.startsWith('plugin:')) return `Plugin ${entry.token_id.slice('plugin:'.length)}`;
+        if (entry.token_id) return entry.token_id;
+        return entry.tool_name === '_auth_failed' ? 'Unknown token' : 'Cull UI';
+    }
+
+    function actorRole(entry: McpAuditEntry): string {
+        if (entry.token_role) return entry.token_role;
+        if (entry.token_id?.startsWith('plugin:')) return 'plugin';
+        if (entry.token_id) return 'token';
+        return entry.tool_name === '_auth_failed' ? 'unauthorized' : 'local';
+    }
+
     async function handleExport() {
         try {
             const json = await exportAuditLog();
@@ -279,6 +293,10 @@
                         {#each mcpAudit as entry}
                             <div class="agent-row" class:failed={entry.result_status !== 'ok'}>
                                 <span class="audit-time">{formatDate(entry.timestamp)} {formatTime(entry.timestamp)}</span>
+                                <span class="agent-actor">
+                                    <strong>{actorLabel(entry)}</strong>
+                                    <em>{actorRole(entry)}</em>
+                                </span>
                                 <span class="agent-tool" class:auth-failed={entry.tool_name === '_auth_failed'}>{toolLabel(entry.tool_name)}</span>
                                 <span class="agent-status" class:ok={entry.result_status === 'ok'}>{entry.result_status}</span>
                             </div>
@@ -386,6 +404,22 @@
         color: var(--text);
     }
     .agent-row.failed { color: var(--red); }
+    .agent-actor {
+        display: flex;
+        flex-direction: column;
+        min-width: 120px;
+    }
+    .agent-actor strong {
+        color: inherit;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .agent-actor em {
+        color: var(--text-secondary);
+        font-size: 10px;
+        font-style: normal;
+        text-transform: capitalize;
+    }
     .agent-tool { min-width: 140px; font-weight: 500; }
     .agent-tool.auth-failed { color: var(--red); }
     .agent-status { color: var(--text-secondary); font-size: 11px; text-transform: capitalize; }
