@@ -894,6 +894,10 @@ export async function listen<T>(event: string, handler: MockListener<T>, _option
   };
 }
 
+export async function emit<T = any>(event: string, payload?: T): Promise<void> {
+  emitMockEvent(event, payload);
+}
+
 export async function getCurrent(): Promise<string[]> {
   return [];
 }
