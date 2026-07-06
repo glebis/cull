@@ -100,9 +100,9 @@ describe('the palette and help are advertised (UX-07)', () => {
         expect(statusBar).toContain('?:help');
     });
 
-    it('status bar command control advertises Cmd+P:commands', () => {
+    it('status bar command control advertises ⌘+P:commands', () => {
         expect(statusBar).toContain("openCommandPalette('commands')");
-        expect(statusBar).toContain('Cmd+P:commands');
+        expect(statusBar).toContain('⌘+P:commands');
     });
 
     it('status bar advertises the agent panel toggle', () => {
