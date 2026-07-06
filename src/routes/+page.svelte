@@ -858,7 +858,7 @@
             />
         </div>
         {#if !$zenMode}
-            <StatusBar />
+            <StatusBar agentBusy={agentChatBusy} />
         {/if}
 
         <Toast />

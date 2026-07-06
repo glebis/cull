@@ -1505,6 +1505,14 @@ export interface TokenScope {
     tags?: string[];
 }
 
+export interface McpStatus {
+    active_connections: number;
+}
+
+export async function getMcpStatus(): Promise<McpStatus> {
+    return invoke('get_mcp_status');
+}
+
 export async function createMcpToken(name: string, role: string, scope?: TokenScope, expiresAt?: string): Promise<[McpToken, string]> {
     return invoke('create_mcp_token', { name, role, scope: scope || null, expiresAt: expiresAt || null });
 }
