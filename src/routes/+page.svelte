@@ -44,19 +44,23 @@
     import { loadInstalledPlugins, activateBundledPlugins } from '$lib/plugins/loader';
     import { registerCoreTabs, tabRegistry } from '$lib/plugins/tab-registry';
     import { BUNDLED_PLUGINS } from '$lib/plugins/bundled';
-    import { isPreviewDisplayRoute, nextPreviewFocusPayload, previewSyncImageId } from '$lib/preview-display';
+    import { isPreviewDisplayRoute, nextPreviewFocusPayload, previewSyncImageId, previewSyncImageIds } from '$lib/preview-display';
     import {
         PREVIEW_DISPLAY_ALWAYS_ON_TOP_SETTING,
+        PREVIEW_DISPLAY_LAYOUT_SETTING,
         PREVIEW_DISPLAY_MODE_SETTING,
         PREVIEW_DISPLAY_OVERLAY_SETTING,
+        parsePreviewDisplayLayout,
         parsePreviewDisplayMode,
         parsePreviewDisplayOverlay,
         previewDisplayAlwaysOnTop,
         previewDisplayBlanked,
         previewDisplayFrozen,
+        previewDisplayLayout,
         previewDisplayMode,
         previewDisplayOverlay,
         setPreviewDisplayAlwaysOnTop,
+        setPreviewDisplayLayout,
         setPreviewDisplayMode,
         setPreviewDisplayOverlay,
     } from '$lib/preview-display-store';
@@ -212,6 +216,7 @@
     async function restorePreviewDisplaySettings() {
         const mode = parsePreviewDisplayMode(await getAppSetting(PREVIEW_DISPLAY_MODE_SETTING));
         setPreviewDisplayMode(mode);
+        setPreviewDisplayLayout(parsePreviewDisplayLayout(await getAppSetting(PREVIEW_DISPLAY_LAYOUT_SETTING)));
         const overlay = parsePreviewDisplayOverlay(await getAppSetting(PREVIEW_DISPLAY_OVERLAY_SETTING));
         if (overlay) setPreviewDisplayOverlay(overlay);
         setPreviewDisplayAlwaysOnTop((await getAppSetting(PREVIEW_DISPLAY_ALWAYS_ON_TOP_SETTING)) === 'true');
@@ -220,9 +225,20 @@
     async function syncFocusedImageToPreviewDisplay(image: ImageWithFile | null) {
         const payload = nextPreviewFocusPayload(image, previewSyncState);
         const imageId = previewSyncImageId(image, previewSyncState, $previewDisplayFrozen, $previewDisplayBlanked);
+        const imageIds = previewSyncImageIds(
+            image,
+            $images,
+            $selectedIds,
+            previewSyncState,
+            $previewDisplayFrozen,
+            $previewDisplayBlanked,
+            $previewDisplayLayout
+        );
         const syncKey = JSON.stringify({
             imageId,
+            imageIds,
             displayMode: $previewDisplayMode,
+            layout: $previewDisplayLayout,
             overlay: $previewDisplayOverlay,
             frozen: $previewDisplayFrozen,
             blanked: $previewDisplayBlanked,
@@ -235,7 +251,9 @@
             $previewDisplayMode ?? payload.displayMode,
             $previewDisplayOverlay ?? payload.overlay,
             $previewDisplayFrozen,
-            $previewDisplayBlanked
+            $previewDisplayBlanked,
+            $previewDisplayLayout ?? payload.layout,
+            imageIds
         );
     }
 
@@ -715,13 +733,19 @@
         const blanked = $previewDisplayBlanked;
         const alwaysOnTop = $previewDisplayAlwaysOnTop;
         const mode = $previewDisplayMode;
+        const layout = $previewDisplayLayout;
         const overlay = $previewDisplayOverlay;
+        const selection = $selectedIds;
+        const loadedImages = $images;
         if (previewDisplayWindow) return;
         void frozen;
         void blanked;
         void alwaysOnTop;
         void mode;
+        void layout;
         void overlay;
+        void selection;
+        void loadedImages;
         syncFocusedImageToPreviewDisplay(image).catch((e) => {
             console.debug('Failed to sync Preview Display focus:', e);
         });

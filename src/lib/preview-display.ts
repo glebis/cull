@@ -1,5 +1,6 @@
 import type {
     ImageWithFile,
+    PreviewDisplayLayout,
     PreviewDisplayMode,
     PreviewOverlayConfig,
     PreviewRailSide,
@@ -27,6 +28,12 @@ export const DEFAULT_PREVIEW_OVERLAY: PreviewOverlayConfig = {
     railTextSize: 'medium',
 };
 
+export const PREVIEW_DISPLAY_LAYOUT_LIMITS: Record<PreviewDisplayLayout, number> = {
+    single: 1,
+    compare: 2,
+    grid: 4,
+};
+
 export function isPreviewDisplayRoute(search?: string): boolean {
     const query = search ?? (typeof window !== 'undefined' ? window.location.search : '');
     const params = new URLSearchParams(query);
@@ -38,7 +45,9 @@ export function isPreviewDisplayRoute(search?: string): boolean {
 export function nextPreviewFocusPayload(image: ImageWithFile | null, current: PreviewState | null) {
     return {
         imageId: image?.image.id ?? null,
+        imageIds: image ? [image.image.id] : [],
         displayMode: current?.display_mode ?? 'image_only',
+        layout: current?.layout ?? 'single',
         overlay: current?.overlay ?? DEFAULT_PREVIEW_OVERLAY,
     } as const;
 }
@@ -155,6 +164,53 @@ export function previewSyncImageId(
     if (blanked) return null;
     if (frozen) return current?.image_id ?? image?.image.id ?? null;
     return image?.image.id ?? null;
+}
+
+export function previewStateImageIds(state: PreviewState | null): string[] {
+    if (!state) return [];
+    if (state.image_ids?.length) return state.image_ids;
+    return state.image_id ? [state.image_id] : [];
+}
+
+export function previewSyncImageIds(
+    image: ImageWithFile | null,
+    allImages: ImageWithFile[],
+    selectedIds: Set<string>,
+    current: PreviewState | null,
+    frozen: boolean,
+    blanked: boolean,
+    layout: PreviewDisplayLayout
+): string[] {
+    if (blanked) return [];
+    if (frozen) {
+        const frozenIds = previewStateImageIds(current);
+        return frozenIds.length ? frozenIds : image ? [image.image.id] : [];
+    }
+    if (!image) return [];
+
+    const limit = PREVIEW_DISPLAY_LAYOUT_LIMITS[layout] ?? 1;
+    const ids: string[] = [image.image.id];
+    const append = (id: string) => {
+        if (ids.length >= limit || ids.includes(id)) return;
+        ids.push(id);
+    };
+
+    if (selectedIds.size > 0) {
+        for (const candidate of allImages) {
+            if (selectedIds.has(candidate.image.id)) append(candidate.image.id);
+        }
+        return ids;
+    }
+
+    const focusedIndex = allImages.findIndex((candidate) => candidate.image.id === image.image.id);
+    const ordered = focusedIndex === -1
+        ? allImages
+        : allImages.slice(focusedIndex + 1).concat(allImages.slice(0, focusedIndex));
+    for (const candidate of ordered) {
+        append(candidate.image.id);
+    }
+
+    return ids;
 }
 
 export function previewDisplayStatusLabel(frozen: boolean, blanked: boolean): string | null {

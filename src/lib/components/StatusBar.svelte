@@ -152,18 +152,18 @@
             class="shortcut-button"
             type="button"
             onclick={openUndoHistory}
-            title="Cmd+Shift+H: history"
+            title="⌘+Shift+H: history"
             aria-label="Open undo history"
         >
-            <kbd>Cmd+Shift+H</kbd>
+            <kbd>⌘+Shift+H</kbd>
             <span>History</span>
         </button>
         <button class="shortcut-button" type="button" onclick={openShortcuts} title="?:help" aria-label="Open keyboard shortcuts">
             <kbd>?</kbd>
             <span>Shortcuts</span>
         </button>
-        <button class="shortcut-button" type="button" onclick={openCommands} title="Cmd+P:commands" aria-label="Open command palette">
-            <kbd>Cmd+P</kbd>
+        <button class="shortcut-button" type="button" onclick={openCommands} title="⌘+P:commands" aria-label="Open command palette">
+            <kbd>⌘+P</kbd>
             <span>Commands</span>
         </button>
     </div>

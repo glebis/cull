@@ -44,13 +44,15 @@ describe('Preview Display native window contract', () => {
         expect(capability.permissions).toEqual([
             'core:default',
             'core:window:allow-start-dragging',
+            'dialog:default',
+            'dialog:allow-save',
             'opener:default',
             'app-read',
             'app-ui',
+            'app-export-publishing',
         ]);
         expect(capability.permissions).not.toContain('app-curation');
         expect(capability.permissions).not.toContain('app-file-access');
         expect(capability.permissions).not.toContain('app-ai-processing');
-        expect(capability.permissions).not.toContain('app-export-publishing');
     });
 });

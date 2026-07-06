@@ -21,13 +21,13 @@
     import {
         clientToImagePoint,
         chooseLoupeImagePath,
+        chooseLoupeDisplayPath,
         cropRectFromImagePoints,
         cropSelectionPercentFromImagePoints,
         moveCropRect,
         resizeCropRectFromHandle
     } from '$lib/view-utils';
     import type { CropPoint, CropRect, CropResizeHandle } from '$lib/view-utils';
-    import { isAssetProtocolSafePath } from '$lib/view-utils';
     import { recordImageLoadFailure } from '$lib/diagnostics';
     import { histogramExposureWarnings, histogramPolyline } from '$lib/histogram-utils';
     import { classifySwipe, wheelGestureIntent } from '$lib/gesture-interactions';
@@ -79,7 +79,8 @@
     let blobSrc = $state('');
     let activeBlobUrl = '';
     let blobRequestSeq = 0;
-    let src = $derived(blobSrc || (previewPath && isAssetProtocolSafePath(previewPath) ? convertFileSrc(previewPath) : ''));
+    let displayPath = $derived(chooseLoupeDisplayPath(image, previewPath));
+    let src = $derived(blobSrc || (displayPath ? convertFileSrc(displayPath) : ''));
     let format = $derived(image?.image.format ?? '');
     let rating = $derived(image?.selection?.star_rating ?? 0);
     let decision = $derived(image?.selection?.decision ?? 'undecided');
