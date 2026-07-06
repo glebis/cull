@@ -1323,6 +1323,10 @@ export async function runClaudeAgentChatTurn(request: ClaudeAgentChatTurnRequest
     return invoke<ClaudeAgentChatTurnResult>('run_claude_agent_chat_turn', { request });
 }
 
+export async function cancelClaudeAgentChatTurn(requestId: string): Promise<boolean> {
+    return invoke<boolean>('cancel_claude_agent_chat_turn', { requestId });
+}
+
 // Undo/Redo
 export interface UndoStatus {
     can_undo: boolean;

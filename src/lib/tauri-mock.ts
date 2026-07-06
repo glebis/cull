@@ -527,6 +527,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   set_decision: () => undefined,
   undo: () => 'rating',
   redo: () => 'rating',
+  cancel_claude_agent_chat_turn: () => true,
   trash_images: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   delete_images_permanently: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   rotate_image: (_: any, args: { imageId: string }) => `/mock/library/${args.imageId}_rotated.png`,

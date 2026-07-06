@@ -4,17 +4,18 @@ use crate::services::agent_proposals as proposals;
 use crate::services::ServiceError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{
     atomic::{AtomicU32, Ordering},
-    Arc,
+    Arc, LazyLock, Mutex,
 };
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
+use tokio_util::sync::CancellationToken;
 
 const DEFAULT_MODEL: &str = "haiku";
 const DEFAULT_MAX_BUDGET_USD: f64 = 0.50;
@@ -22,6 +23,10 @@ const USD_TO_EUR_DISPLAY_ESTIMATE: f64 = 0.93;
 const SDK_RUNNER_RESOURCE_NAME: &str = "claude-agent-sdk-runner.mjs";
 pub const CLAUDE_AGENT_STREAM_EVENT: &str = "claude-agent:stream-event";
 const SDK_EVENT_PREFIX: &str = "CULL_AGENT_EVENT ";
+const CANCELLED_MESSAGE: &str = "Claude request cancelled";
+
+static AGENT_REQUEST_CANCELLATIONS: LazyLock<Mutex<HashMap<String, CancellationToken>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClaudeAgentChatTurnRequest {
@@ -59,6 +64,43 @@ pub struct ClaudeAgentChatTurnResult {
     pub updated_preset: Option<AgentSelectionPreset>,
     pub usage_json: String,
     pub raw_result_json: String,
+}
+
+pub fn cancel_claude_agent_chat_turn_request(request_id: &str) -> bool {
+    let Some(token) = AGENT_REQUEST_CANCELLATIONS
+        .lock()
+        .unwrap()
+        .get(request_id)
+        .cloned()
+    else {
+        return false;
+    };
+    token.cancel();
+    true
+}
+
+fn register_agent_request_cancellation(request_id: &str) -> CancellationToken {
+    let token = CancellationToken::new();
+    AGENT_REQUEST_CANCELLATIONS
+        .lock()
+        .unwrap()
+        .insert(request_id.to_string(), token.clone());
+    token
+}
+
+fn unregister_agent_request_cancellation(request_id: &str) {
+    AGENT_REQUEST_CANCELLATIONS
+        .lock()
+        .unwrap()
+        .remove(request_id);
+}
+
+fn cancelled_error() -> ServiceError {
+    ServiceError::Engine(CANCELLED_MESSAGE.to_string())
+}
+
+fn is_cancelled_error(error: &ServiceError) -> bool {
+    matches!(error, ServiceError::Engine(message) if message == CANCELLED_MESSAGE)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -236,7 +278,8 @@ pub async fn run_claude_agent_chat_turn_db_with_events(
         .clone()
         .filter(|id| !id.trim().is_empty())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let emitter = app.map(|app| ClaudeAgentStreamEmitter::new(app, request_id));
+    let cancel_token = register_agent_request_cancellation(&request_id);
+    let emitter = app.map(|app| ClaudeAgentStreamEmitter::new(app, request_id.clone()));
     if let Some(emitter) = emitter.as_ref() {
         emitter.emit(
             "queued",
@@ -249,9 +292,19 @@ pub async fn run_claude_agent_chat_turn_db_with_events(
             }),
         );
     }
-    let result = run_claude_agent_chat_turn_inner(db, request, emitter.clone()).await;
+    let result =
+        run_claude_agent_chat_turn_inner(db, request, emitter.clone(), cancel_token.clone()).await;
+    unregister_agent_request_cancellation(&request_id);
     if let (Some(emitter), Err(error)) = (emitter.as_ref(), result.as_ref()) {
-        emitter.emit_error(error.to_string());
+        if is_cancelled_error(error) {
+            emitter.emit_final(
+                "cancelled",
+                "Request cancelled",
+                json!({ "request_id": request_id }),
+            );
+        } else {
+            emitter.emit_error(error.to_string());
+        }
     }
     result
 }
@@ -260,9 +313,13 @@ async fn run_claude_agent_chat_turn_inner(
     db: &Database,
     request: ClaudeAgentChatTurnRequest,
     emitter: Option<ClaudeAgentStreamEmitter>,
+    cancel_token: CancellationToken,
 ) -> Result<ClaudeAgentChatTurnResult, ServiceError> {
     validate_request(&request)?;
     let invocation = build_claude_invocation(&request)?;
+    if cancel_token.is_cancelled() {
+        return Err(cancelled_error());
+    }
     if let Some(emitter) = emitter.as_ref() {
         emitter.emit(
             "context",
@@ -278,7 +335,11 @@ async fn run_claude_agent_chat_turn_inner(
             }),
         );
     }
-    let (output, runtime_source) = run_claude_agent_runtime(invocation, emitter.clone()).await?;
+    let (output, runtime_source) =
+        run_claude_agent_runtime(invocation, emitter.clone(), cancel_token.clone()).await?;
+    if cancel_token.is_cancelled() {
+        return Err(cancelled_error());
+    }
     if let Some(emitter) = emitter.as_ref() {
         emitter.emit(
             "parse",
@@ -463,7 +524,10 @@ Cull context:
     ))
 }
 
-async fn run_claude_cli(invocation: ClaudeInvocation) -> Result<String, ServiceError> {
+async fn run_claude_cli(
+    invocation: ClaudeInvocation,
+    cancel_token: CancellationToken,
+) -> Result<String, ServiceError> {
     let mut command = Command::new("claude");
     command
         .args(&invocation.args)
@@ -478,10 +542,13 @@ async fn run_claude_cli(invocation: ClaudeInvocation) -> Result<String, ServiceE
             e
         ))
     })?;
-    let output = timeout(Duration::from_secs(120), child.wait_with_output())
-        .await
-        .map_err(|_| ServiceError::Engine("Claude timed out after 120 seconds".to_string()))?
-        .map_err(ServiceError::Io)?;
+    let output_future = timeout(Duration::from_secs(120), child.wait_with_output());
+    let output = tokio::select! {
+        _ = cancel_token.cancelled() => return Err(cancelled_error()),
+        output = output_future => output
+            .map_err(|_| ServiceError::Engine("Claude timed out after 120 seconds".to_string()))?
+            .map_err(ServiceError::Io)?,
+    };
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(ServiceError::Engine(format!(
@@ -500,12 +567,13 @@ async fn run_claude_cli(invocation: ClaudeInvocation) -> Result<String, ServiceE
 async fn run_claude_agent_runtime(
     invocation: ClaudeInvocation,
     emitter: Option<ClaudeAgentStreamEmitter>,
+    cancel_token: CancellationToken,
 ) -> Result<(String, ClaudeRuntimeSource), ServiceError> {
     if std::env::var("CULL_AGENT_RUNTIME").as_deref() == Ok("cli") {
         if let Some(emitter) = emitter.as_ref() {
             emitter.emit("runtime", "Starting Claude CLI fallback", Value::Null);
         }
-        return run_claude_cli(invocation)
+        return run_claude_cli(invocation, cancel_token)
             .await
             .map(|output| (output, ClaudeRuntimeSource::CliFallback));
     }
@@ -514,7 +582,7 @@ async fn run_claude_agent_runtime(
             if let Some(emitter) = emitter.as_ref() {
                 emitter.emit("runtime", "Starting Claude Agent SDK", Value::Null);
             }
-            run_claude_agent_sdk(path, &invocation.sdk_request_json, emitter)
+            run_claude_agent_sdk(path, &invocation.sdk_request_json, emitter, cancel_token)
                 .await
                 .map(|output| (output, ClaudeRuntimeSource::AgentSdk))
         }
@@ -522,7 +590,7 @@ async fn run_claude_agent_runtime(
             if let Some(emitter) = emitter.as_ref() {
                 emitter.emit("runtime", "Starting Claude CLI fallback", Value::Null);
             }
-            run_claude_cli(invocation)
+            run_claude_cli(invocation, cancel_token)
                 .await
                 .map(|output| (output, ClaudeRuntimeSource::CliFallback))
         }
@@ -533,6 +601,7 @@ async fn run_claude_agent_sdk(
     runner_path: &Path,
     request_json: &str,
     emitter: Option<ClaudeAgentStreamEmitter>,
+    cancel_token: CancellationToken,
 ) -> Result<String, ServiceError> {
     let mut command = Command::new("node");
     command
@@ -573,12 +642,21 @@ async fn run_claude_agent_sdk(
         Ok::<String, std::io::Error>(output)
     });
     let stderr_task = tokio::spawn(read_sdk_stderr_events(stderr, emitter));
-    let status = timeout(Duration::from_secs(120), child.wait())
-        .await
-        .map_err(|_| {
-            ServiceError::Engine("Claude Agent SDK timed out after 120 seconds".to_string())
-        })?
-        .map_err(ServiceError::Io)?;
+    let status_future = timeout(Duration::from_secs(120), child.wait());
+    let status = tokio::select! {
+        _ = cancel_token.cancelled() => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            let _ = stdout_task.await;
+            let _ = stderr_task.await;
+            return Err(cancelled_error());
+        }
+        status = status_future => status
+            .map_err(|_| {
+                ServiceError::Engine("Claude Agent SDK timed out after 120 seconds".to_string())
+            })?
+            .map_err(ServiceError::Io)?,
+    };
     let stdout = stdout_task
         .await
         .map_err(|e| ServiceError::Engine(format!("Claude Agent SDK stdout task failed: {}", e)))?
@@ -1020,12 +1098,15 @@ if (process.env.CULL_FAKE_AGENT_ERROR_RESULT) {
   }) + '\n');
   process.exit(0);
 }
-if (process.env.CULL_FAKE_AGENT_EXIT) {
-  console.error('CULL_AGENT_EVENT {"phase":"sdk_stream","message":"partial event"}');
-  console.error('runner failed after event');
-  process.exit(Number(process.env.CULL_FAKE_AGENT_EXIT));
-}
-process.stdout.write(JSON.stringify({
+	if (process.env.CULL_FAKE_AGENT_EXIT) {
+	  console.error('CULL_AGENT_EVENT {"phase":"sdk_stream","message":"partial event"}');
+	  console.error('runner failed after event');
+	  process.exit(Number(process.env.CULL_FAKE_AGENT_EXIT));
+	}
+	if (process.env.CULL_FAKE_AGENT_SLEEP_MS) {
+	  await new Promise(resolve => setTimeout(resolve, Number(process.env.CULL_FAKE_AGENT_SLEEP_MS)));
+	}
+	process.stdout.write(JSON.stringify({
   runtime: 'claude_agent_sdk',
   structured_output: structured,
   usage: { input_tokens: inputTokens, output_tokens: 64 },
@@ -1059,6 +1140,7 @@ process.stdout.write(JSON.stringify({
         std::env::remove_var("CULL_FAKE_AGENT_RESPONSE");
         std::env::remove_var("CULL_FAKE_AGENT_ERROR_RESULT");
         std::env::remove_var("CULL_FAKE_AGENT_EXIT");
+        std::env::remove_var("CULL_FAKE_AGENT_SLEEP_MS");
         std::env::remove_var("ANTHROPIC_API_KEY");
         result
     }
@@ -1314,6 +1396,7 @@ process.stdout.write(JSON.stringify({
                 .unwrap()
                 .sdk_request_json,
             None,
+            CancellationToken::new(),
         )
         .await
         .unwrap_err();
@@ -1322,6 +1405,44 @@ process.stdout.write(JSON.stringify({
 
         assert!(err.to_string().contains("runner failed after event"));
         assert!(!err.to_string().contains("partial event"));
+    }
+
+    #[tokio::test]
+    async fn sdk_turn_can_be_cancelled_by_request_id() {
+        let _guard = AGENT_ENV_LOCK.lock().await;
+        let db = test_db();
+        let dir = tempfile::tempdir().unwrap();
+        let runner_path = fake_sdk_runner(dir.path());
+        let request_id = "agent-cancel-test";
+        let mut request = sample_request();
+        request.request_id = Some(request_id.to_string());
+        std::env::set_var("CULL_AGENT_SDK_RUNNER", runner_path);
+        std::env::set_var(
+            "CULL_FAKE_AGENT_RESPONSE",
+            json!({"operation": "answer", "message": "too late"}).to_string(),
+        );
+        std::env::set_var("CULL_FAKE_AGENT_SLEEP_MS", "5000");
+
+        let mut run_future = Box::pin(run_claude_agent_chat_turn_db_with_events(
+            &db, request, None,
+        ));
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+            result = &mut run_future => panic!("agent turn completed before cancellation: {result:?}"),
+        }
+
+        assert!(cancel_claude_agent_chat_turn_request(request_id));
+        let err = run_future.await.unwrap_err();
+        std::env::remove_var("CULL_AGENT_SDK_RUNNER");
+        std::env::remove_var("CULL_FAKE_AGENT_RESPONSE");
+        std::env::remove_var("CULL_FAKE_AGENT_SLEEP_MS");
+
+        assert!(err.to_string().contains(CANCELLED_MESSAGE));
+        assert_eq!(db.list_action_proposals(None, 20).unwrap().len(), 0);
+        assert!(
+            !cancel_claude_agent_chat_turn_request(request_id),
+            "completed requests should be removed from the cancellation registry"
+        );
     }
 
     #[test]
