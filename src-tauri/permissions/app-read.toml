@@ -11,6 +11,7 @@ commands.allow = [
   "get_media_asset_for_image",
   "get_clipboard_monitor_status",
   "get_data_flow_status",
+  "get_mcp_status",
   "get_catalog_preset",
   "get_catalog_record",
   "get_catalog_suggestion_job",
