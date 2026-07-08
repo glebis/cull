@@ -7,6 +7,7 @@ import {
     showDetectionBoxes, showDetectionInspector, nsfwMode,
     navigateTo, navigateBack, searchOpen, shortcutsOpen, undoHistoryOpen, focusedImage, activeSession,
     requestTextInput, requestCollectionTarget, selectionAnchorIndex, requestLoupeActualSize, requestLoupeFitIn,
+    requestLoupeZoomIn, requestLoupeZoomOut,
     activeFolder,
 } from './stores';
 import { tabCycleOrder } from './plugins/tab-registry';
@@ -995,15 +996,11 @@ function handleLoupeKeys(e: KeyboardEvent) {
         case '+':
         case '=':
             e.preventDefault();
-            loupeScale.update(s => Math.min(20, s * 1.25));
+            requestLoupeZoomIn();
             break;
         case '-':
             e.preventDefault();
-            loupeScale.update(s => {
-                const next = Math.max(0.1, s / 1.25);
-                if (next <= 1) { loupePanX.set(0); loupePanY.set(0); }
-                return next;
-            });
+            requestLoupeZoomOut();
             break;
         case 's':
             e.preventDefault();

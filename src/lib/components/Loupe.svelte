@@ -1,6 +1,6 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
-    import { onMount } from 'svelte';
+    import { onMount, tick } from 'svelte';
     import ContextMenu from './ContextMenu.svelte';
     import PromptResubmitDialog from './PromptResubmitDialog.svelte';
     import { images, focusedIndex, focusedImage, showLoupeHistogram, loupeScale, loupePanX, loupePanY, loupeZoomRequest, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
@@ -31,7 +31,16 @@
     import { recordImageLoadFailure } from '$lib/diagnostics';
     import { histogramExposureWarnings, histogramPolyline } from '$lib/histogram-utils';
     import { classifySwipe, wheelGestureIntent } from '$lib/gesture-interactions';
-    import { clampLoupePan, computeLoupeActualSizeScale, computeLoupeFocalZoom } from '$lib/loupe-transform';
+    import { clampFloatingPosition } from '$lib/floating-position';
+    import {
+        LOUPE_NATURAL_ZOOM_PRESETS,
+        clampLoupePan,
+        computeLoupeActualSizeScale,
+        computeLoupeFocalZoom,
+        computeLoupeNaturalScale,
+        computeLoupeViewportScaleForNaturalScale,
+        nextLoupeNaturalZoomPreset,
+    } from '$lib/loupe-transform';
 
     let dragging = $state(false);
     let dragStartX = $state(0);
@@ -39,6 +48,9 @@
     let panStartX = $state(0);
     let panStartY = $state(0);
     let loupeEl: HTMLDivElement | undefined = $state();
+    let imageFrameEl: HTMLDivElement | undefined = $state();
+    let loupeViewportWidth = $state(0);
+    let loupeViewportHeight = $state(0);
 
     let image = $derived($focusedImage);
     let isRaw = $derived(isRawFormat(image?.image.format ?? ''));
@@ -84,6 +96,16 @@
     let format = $derived(image?.image.format ?? '');
     let rating = $derived(image?.selection?.star_rating ?? 0);
     let decision = $derived(image?.selection?.decision ?? 'undecided');
+    let naturalZoomScale = $derived(
+        image
+            ? computeLoupeNaturalScale(
+                { width: loupeViewportWidth, height: loupeViewportHeight },
+                { width: image.image.width, height: image.image.height },
+                $loupeScale,
+            )
+            : 1
+    );
+    let zoomLabel = $derived(`${Math.round(naturalZoomScale * 100)}%`);
 
     const SOURCE_DISPLAY: Record<string, string> = {
         gpt_image_2: 'GPT-image-2',
@@ -163,6 +185,23 @@
             setTimeout(() => { toastDecision = null; }, 800);
         }
         prevDecision = d;
+    });
+
+    $effect(() => {
+        const el = imageFrameEl ?? loupeEl;
+        if (!el) return;
+        const target = el;
+
+        function updateLoupeViewport() {
+            const rect = target.getBoundingClientRect();
+            loupeViewportWidth = rect.width;
+            loupeViewportHeight = rect.height;
+        }
+
+        updateLoupeViewport();
+        const observer = new ResizeObserver(updateLoupeViewport);
+        observer.observe(target);
+        return () => observer.disconnect();
     });
 
     onMount(() => {
@@ -409,6 +448,136 @@
         }
     });
 
+    type ZoomMenuState = {
+        visible: boolean;
+        x: number;
+        y: number;
+        anchorX: number;
+        anchorY: number;
+    };
+
+    let zoomMenu = $state<ZoomMenuState>({ visible: false, x: 0, y: 0, anchorX: 0, anchorY: 0 });
+    let zoomMenuEl: HTMLDivElement | undefined = $state();
+
+    $effect(() => {
+        if (!zoomMenu.visible) return;
+
+        function closeOnOutsideClick(e: MouseEvent) {
+            if (zoomMenuEl?.contains(e.target as Node)) return;
+            closeZoomMenu();
+        }
+
+        function closeOnEscape(e: KeyboardEvent) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closeZoomMenu();
+            }
+        }
+
+        function replaceOnResize() {
+            void placeZoomMenu();
+        }
+
+        window.addEventListener('click', closeOnOutsideClick);
+        window.addEventListener('keydown', closeOnEscape);
+        window.addEventListener('resize', replaceOnResize);
+        return () => {
+            window.removeEventListener('click', closeOnOutsideClick);
+            window.removeEventListener('keydown', closeOnEscape);
+            window.removeEventListener('resize', replaceOnResize);
+        };
+    });
+
+    $effect(() => {
+        if (!zoomMenu.visible || !zoomMenuEl) return;
+        void placeZoomMenu();
+    });
+
+    async function placeZoomMenu() {
+        await tick();
+        if (!zoomMenu.visible || !zoomMenuEl) return;
+
+        const rect = zoomMenuEl.getBoundingClientRect();
+        const next = clampFloatingPosition(
+            { x: zoomMenu.anchorX, y: zoomMenu.anchorY - rect.height - 6 },
+            { width: rect.width, height: rect.height },
+            { width: window.innerWidth, height: window.innerHeight },
+        );
+
+        if (Math.round(next.x) === Math.round(zoomMenu.x) && Math.round(next.y) === Math.round(zoomMenu.y)) {
+            return;
+        }
+
+        zoomMenu = { ...zoomMenu, x: next.x, y: next.y };
+    }
+
+    function openZoomMenu(e: MouseEvent) {
+        e.preventDefault();
+        e.stopPropagation();
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        zoomMenu = {
+            visible: true,
+            x: rect.left,
+            y: rect.top,
+            anchorX: rect.left,
+            anchorY: rect.top,
+        };
+        void placeZoomMenu();
+    }
+
+    function closeZoomMenu() {
+        zoomMenu = { ...zoomMenu, visible: false };
+    }
+
+    function currentLoupeViewport() {
+        if (loupeViewportWidth > 0 && loupeViewportHeight > 0) {
+            return { width: loupeViewportWidth, height: loupeViewportHeight };
+        }
+
+        const rect = (imageFrameEl ?? loupeEl)?.getBoundingClientRect();
+        return {
+            width: rect?.width ?? 0,
+            height: rect?.height ?? 0,
+        };
+    }
+
+    function currentImageSize() {
+        if (!image) return null;
+        return { width: image.image.width, height: image.image.height };
+    }
+
+    function applyLoupeNaturalScale(naturalScale: number, resetPan = false) {
+        const imageSize = currentImageSize();
+        if (!imageSize) return;
+
+        const viewport = currentLoupeViewport();
+        const scale = computeLoupeViewportScaleForNaturalScale(viewport, imageSize, naturalScale);
+        applyLoupeTransform(clampLoupePan(
+            { scale, panX: resetPan ? 0 : $loupePanX, panY: resetPan ? 0 : $loupePanY },
+            viewport,
+            imageSize,
+        ));
+    }
+
+    function applyLoupeZoomStep(direction: 1 | -1) {
+        const imageSize = currentImageSize();
+        if (!imageSize) return;
+
+        const viewport = currentLoupeViewport();
+        const current = computeLoupeNaturalScale(viewport, imageSize, $loupeScale);
+        applyLoupeNaturalScale(nextLoupeNaturalZoomPreset(current, direction));
+    }
+
+    function selectZoomPreset(scale: number) {
+        applyLoupeNaturalScale(scale, scale === 1);
+        closeZoomMenu();
+    }
+
+    function selectFitIn() {
+        applyLoupeTransform({ scale: 1, panX: 0, panY: 0 });
+        closeZoomMenu();
+    }
+
     function handleImageError() {
         const current = image;
         if (!current) return;
@@ -519,15 +688,26 @@
 
         if (!image || !loupeEl) return;
         handledZoomRequestId = request.id;
-        const rect = loupeEl.getBoundingClientRect();
-        const scale = computeLoupeActualSizeScale(
-            { width: rect.width, height: rect.height },
-            { width: image.image.width, height: image.image.height },
-        );
+        if (request.mode === 'zoom-in') {
+            applyLoupeZoomStep(1);
+            return;
+        }
+        if (request.mode === 'zoom-out') {
+            applyLoupeZoomStep(-1);
+            return;
+        }
+        if (request.mode === 'natural-scale') {
+            applyLoupeNaturalScale(request.scale ?? 1, request.scale === 1);
+            return;
+        }
+
+        const viewport = currentLoupeViewport();
+        const imageSize = { width: image.image.width, height: image.image.height };
+        const scale = computeLoupeActualSizeScale(viewport, imageSize);
         applyLoupeTransform(clampLoupePan(
             { scale, panX: 0, panY: 0 },
-            { width: rect.width, height: rect.height },
-            { width: image.image.width, height: image.image.height },
+            viewport,
+            imageSize,
         ));
     });
 
@@ -800,6 +980,7 @@
     {#if image}
         <div
             class="image-frame"
+            bind:this={imageFrameEl}
             data-agent-image-id={image.image.id}
             data-agent-filename={filename}
             data-agent-path={image.path}
@@ -1015,10 +1196,16 @@
                 {decision}
             </span>
         {/if}
-        {#if $loupeScale !== 1}
-            <span class="sep">|</span>
-            <span class="zoom">{Math.round($loupeScale * 100)}%</span>
-        {/if}
+        <span class="sep">|</span>
+        <button
+            class="zoom"
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={zoomMenu.visible}
+            title="Zoom"
+            onmousedown={(e) => e.stopPropagation()}
+            onclick={openZoomMenu}
+        >{zoomLabel}</button>
         {#if prompt}
             <span class="sep">|</span>
             <button class="prompt-toggle" onclick={() => promptExpanded = !promptExpanded}
@@ -1027,6 +1214,46 @@
             </button>
         {/if}
     </div>
+    {#if zoomMenu.visible}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+            class="zoom-menu"
+            style="left: {zoomMenu.x}px; top: {zoomMenu.y}px;"
+            role="menu"
+            tabindex="-1"
+            bind:this={zoomMenuEl}
+            onmousedown={(e) => e.stopPropagation()}
+            onclick={(e) => e.stopPropagation()}
+            onkeydown={(e) => e.stopPropagation()}
+        >
+            <button
+                class="zoom-menu-item"
+                class:active={Math.abs($loupeScale - 1) < 0.01}
+                onclick={selectFitIn}
+                role="menuitem"
+            >Fit In</button>
+            <button
+                class="zoom-menu-item"
+                class:active={Math.abs(naturalZoomScale - 1) < 0.01}
+                onclick={() => selectZoomPreset(1)}
+                role="menuitem"
+            >
+                <span>Actual Size</span>
+                <span class="zoom-menu-value">100%</span>
+            </button>
+            <div class="zoom-menu-separator"></div>
+            {#each LOUPE_NATURAL_ZOOM_PRESETS as preset}
+                {#if preset !== 1}
+                    <button
+                        class="zoom-menu-item"
+                        class:active={Math.abs(naturalZoomScale - preset) < 0.01}
+                        onclick={() => selectZoomPreset(preset)}
+                        role="menuitem"
+                    >{Math.round(preset * 100)}%</button>
+                {/if}
+            {/each}
+        </div>
+    {/if}
     {#if prompt && promptExpanded}
         <div class="prompt-panel">
             <div class="prompt-header">
@@ -1252,7 +1479,70 @@
         color: var(--red);
     }
     .zoom {
+        border: none;
+        background: transparent;
         color: var(--blue);
+        cursor: pointer;
+        font: inherit;
+        padding: 0;
+    }
+    .zoom:hover,
+    .zoom:focus {
+        color: var(--text);
+        outline: none;
+    }
+    .zoom-menu {
+        position: fixed;
+        z-index: var(--z-context-menu);
+        min-width: 168px;
+        padding: 4px 0;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: 0 4px 12px var(--bg);
+        font-family: var(--font);
+        font-size: 12px;
+    }
+    .zoom-menu-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        min-height: 28px;
+        box-sizing: border-box;
+        border: none;
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        font: inherit;
+        padding: 5px 12px;
+        text-align: left;
+        white-space: nowrap;
+    }
+    .zoom-menu-item:hover,
+    .zoom-menu-item:focus {
+        background: var(--blue);
+        color: var(--bg);
+        outline: none;
+    }
+    .zoom-menu-item.active {
+        color: var(--blue);
+    }
+    .zoom-menu-item.active:hover,
+    .zoom-menu-item.active:focus {
+        color: var(--bg);
+    }
+    .zoom-menu-value {
+        color: var(--text-secondary);
+    }
+    .zoom-menu-item:hover .zoom-menu-value,
+    .zoom-menu-item:focus .zoom-menu-value {
+        color: var(--bg);
+    }
+    .zoom-menu-separator {
+        height: 1px;
+        margin: 4px 0;
+        background: var(--border);
     }
     .prompt-toggle {
         background: none;
