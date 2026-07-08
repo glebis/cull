@@ -1,0 +1,19 @@
+/* tufte-report theme for Cull
+   Maps brand token roles onto /tufte-report's CSS variables (SKILL
+   CONVENTION, not DTCG). Paste into the report's :root, or hand to
+   /tufte-report as the palette. Roles with no matching token fall back
+   to tufte-report's own defaults. */
+:root {
+  --ink: #e0e0e0;   /* primary text (from token) */
+  --bg: #08080c;   /* dark app background (from token) */
+  --spark-primary: #7aa2f7;   /* primary data stream / effort (from token) */
+  --spark-secondary: #9ece6a;   /* growth / health signal (from token) */
+  --spark-tertiary: #bb9af7;   /* social / secondary stream (from token) */
+  --status-red: #f7768e;   /* alerts, negative trend (from token) */
+  --status-amber: #e0af68;   /* watch-level signal (from token) */
+  --status-green: #9ece6a;   /* healthy baseline (from token) */
+  --accent: #bb9af7;   /* aside markers, flyout diamonds (from token) */
+}
+
+/* tufte-report uses EB Garamond (text) + Monaspace Argon (numbers).
+   Brand fonts available to swap in: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace, "Geist", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif, "EB Garamond", Georgia, "Times New Roman", serif. */
