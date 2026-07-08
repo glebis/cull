@@ -2,7 +2,9 @@
 <!-- Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md. -->
 <script lang="ts">
     import { onMount } from 'svelte';
+    import { revealItemInDir } from '@tauri-apps/plugin-opener';
     import { getDataFlowStatus, getApiAuditLog, exportAuditLog, getMcpAuditLog } from '$lib/api';
+    import { showToast } from '$lib/stores';
     import type { DataFlowEntry, AuditLogEntry, McpAuditEntry } from '$lib/api';
 
     let flowStatus = $state<DataFlowEntry[]>([]);
@@ -131,16 +133,34 @@
 
     async function handleExport() {
         try {
-            const json = await exportAuditLog();
-            const blob = new Blob([json], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `cull-audit-log-${new Date().toISOString().slice(0, 10)}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
+            const path = await exportAuditLog();
+            const fileName = path.split(/[\\/]/).pop() ?? 'audit log';
+            const reveal = () => revealItemInDir(path);
+            const revealAction = () => {
+                void reveal();
+            };
+            try {
+                await reveal();
+                showToast('Audit log exported', {
+                    detail: fileName,
+                    type: 'success',
+                    actions: [{ label: 'Reveal', onclick: revealAction }],
+                });
+            } catch (revealError) {
+                showToast('Audit log exported', {
+                    detail: `${fileName}. Reveal failed: ${String(revealError)}`,
+                    type: 'warning',
+                    duration: 10000,
+                    actions: [{ label: 'Reveal', onclick: revealAction }],
+                });
+            }
         } catch (e) {
             console.error('Export error:', e);
+            showToast('Audit log export failed', {
+                detail: String(e),
+                type: 'error',
+                duration: 10000,
+            });
         }
     }
 </script>

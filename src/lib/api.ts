@@ -1798,6 +1798,7 @@ export async function getApiAuditLog(limit: number): Promise<AuditLogEntry[]> {
     return invoke('get_api_audit_log', { limit });
 }
 
+// Writes the JSON audit export to Downloads and returns the saved absolute path.
 export async function exportAuditLog(): Promise<string> {
     return invoke('export_audit_log');
 }

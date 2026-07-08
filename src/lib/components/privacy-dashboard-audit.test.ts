@@ -38,4 +38,13 @@ describe('PrivacyDashboard MCP audit visibility', () => {
         expect(dashboard).toContain("_auth_failed");
         expect(dashboard).toContain('authFailedCount');
     });
+
+    it('announces audit exports and reveals the saved JSON file', () => {
+        expect(api).toContain('Writes the JSON audit export to Downloads');
+        expect(dashboard).toContain("import { revealItemInDir } from '@tauri-apps/plugin-opener'");
+        expect(dashboard).toContain("showToast('Audit log exported'");
+        expect(dashboard).toContain('await reveal();');
+        expect(dashboard).not.toContain('URL.createObjectURL');
+        expect(dashboard).not.toContain('a.download = `cull-audit-log-');
+    });
 });
