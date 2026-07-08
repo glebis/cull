@@ -32,6 +32,18 @@ export function computeLoupeActualSizeScale(viewport: LoupeViewport, image: Loup
     return clamp(Math.max(1, 1 / scale), DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
 }
 
+export function computeLoupeFitSize(viewport: LoupeViewport, image: LoupeImageSize): LoupeImageSize {
+    if (viewport.width <= 0 || viewport.height <= 0 || image.width <= 0 || image.height <= 0) {
+        return { width: 0, height: 0 };
+    }
+
+    const scale = fitScale(viewport, image);
+    return {
+        width: image.width * scale,
+        height: image.height * scale,
+    };
+}
+
 export function computeLoupeNaturalScale(
     viewport: LoupeViewport,
     image: LoupeImageSize,

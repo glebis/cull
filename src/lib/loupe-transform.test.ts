@@ -3,6 +3,7 @@ import {
     clampLoupePan,
     computeLoupeActualSizeScale,
     computeLoupeFocalZoom,
+    computeLoupeFitSize,
     computeLoupeNaturalScale,
     computeLoupeViewportScaleForNaturalScale,
     computeLoupeSmartZoom,
@@ -19,6 +20,12 @@ describe('loupe transform helpers', () => {
 
     it('does not shrink images that already render at natural size', () => {
         expect(computeLoupeActualSizeScale(viewport, { width: 500, height: 400 })).toBe(1);
+    });
+
+    it('computes a stable fit box from metadata instead of loaded asset dimensions', () => {
+        expect(computeLoupeFitSize(viewport, image)).toEqual({ width: 1000, height: 800 });
+        expect(computeLoupeFitSize(viewport, { width: 500, height: 400 })).toEqual({ width: 500, height: 400 });
+        expect(computeLoupeFitSize({ width: 0, height: 800 }, image)).toEqual({ width: 0, height: 0 });
     });
 
     it('reports zoom relative to natural image pixels', () => {

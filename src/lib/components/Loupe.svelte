@@ -37,6 +37,7 @@
         clampLoupePan,
         computeLoupeActualSizeScale,
         computeLoupeFocalZoom,
+        computeLoupeFitSize,
         computeLoupeNaturalScale,
         computeLoupeViewportScaleForNaturalScale,
         nextLoupeNaturalZoomPreset,
@@ -51,6 +52,8 @@
     let imageFrameEl: HTMLDivElement | undefined = $state();
     let loupeViewportWidth = $state(0);
     let loupeViewportHeight = $state(0);
+    type LoupeViewSize = { mode: 'fit' } | { mode: 'natural'; scale: number };
+    let loupeViewSize = $state<LoupeViewSize>({ mode: 'fit' });
 
     let image = $derived($focusedImage);
     let isRaw = $derived(isRawFormat(image?.image.format ?? ''));
@@ -106,6 +109,23 @@
             : 1
     );
     let zoomLabel = $derived(`${Math.round(naturalZoomScale * 100)}%`);
+    let fittedImageSize = $derived(
+        image
+            ? computeLoupeFitSize(
+                { width: loupeViewportWidth, height: loupeViewportHeight },
+                { width: image.image.width, height: image.image.height },
+            )
+            : { width: 0, height: 0 }
+    );
+    let imageTransformStyle = $derived([
+        fittedImageSize.width > 0 && fittedImageSize.height > 0
+            ? `width: ${fittedImageSize.width}px; height: ${fittedImageSize.height}px`
+            : '',
+        `transform: scale(${$loupeScale}) translate(${$loupePanX / $loupeScale}px, ${$loupePanY / $loupeScale}px)`,
+    ].filter(Boolean).join('; '));
+    let overlayTransformStyle = $derived(
+        `transform: scale(${$loupeScale}) translate(${$loupePanX / $loupeScale}px, ${$loupePanY / $loupeScale}px);`
+    );
 
     const SOURCE_DISPLAY: Record<string, string> = {
         gpt_image_2: 'GPT-image-2',
@@ -436,15 +456,18 @@
         setPdfPage(1);
     }
 
-    // Reset pan (but keep zoom) when image changes
+    // Reset pan on image changes while preserving the user's chosen view size.
     let prevImageId = $state('');
     $effect(() => {
         const id = image?.image.id ?? '';
         if (id !== prevImageId) {
             prevImageId = id;
             sourceLoadFailed = false;
-            loupePanX.set(0);
-            loupePanY.set(0);
+            if (loupeViewSize.mode === 'fit') {
+                applyLoupeTransform({ scale: 1, panX: 0, panY: 0 });
+            } else {
+                applyLoupeNaturalScale(loupeViewSize.scale, true);
+            }
         }
     });
 
@@ -552,6 +575,7 @@
 
         const viewport = currentLoupeViewport();
         const scale = computeLoupeViewportScaleForNaturalScale(viewport, imageSize, naturalScale);
+        loupeViewSize = { mode: 'natural', scale: naturalScale };
         applyLoupeTransform(clampLoupePan(
             { scale, panX: resetPan ? 0 : $loupePanX, panY: resetPan ? 0 : $loupePanY },
             viewport,
@@ -574,6 +598,7 @@
     }
 
     function selectFitIn() {
+        loupeViewSize = { mode: 'fit' };
         applyLoupeTransform({ scale: 1, panX: 0, panY: 0 });
         closeZoomMenu();
     }
@@ -602,8 +627,8 @@
 
     function handleWheel(e: WheelEvent) {
         if (!image || cropMode) return;
-        const rect = loupeEl?.getBoundingClientRect();
-        if (!rect) return;
+        const surfaceRect = loupeEl?.getBoundingClientRect();
+        if (!surfaceRect) return;
         const intent = wheelGestureIntent({
             surface: 'loupe',
             deltaX: e.deltaX,
@@ -615,20 +640,27 @@
             metaKey: e.metaKey,
             altKey: e.altKey,
             shiftKey: e.shiftKey,
-            viewportHeight: rect.height,
+            viewportHeight: surfaceRect.height,
             target: e.target,
         });
         if (!intent) return;
 
         if (intent.type === 'zoom') {
             e.preventDefault();
+            const imageSize = { width: image.image.width, height: image.image.height };
+            const viewport = currentLoupeViewport();
+            const rect = (imageFrameEl ?? loupeEl)?.getBoundingClientRect() ?? surfaceRect;
             const next = computeLoupeFocalZoom(
                 { scale: $loupeScale, panX: $loupePanX, panY: $loupePanY },
-                { width: rect.width, height: rect.height },
-                { width: image.image.width, height: image.image.height },
+                viewport,
+                imageSize,
                 { x: e.clientX - rect.left, y: e.clientY - rect.top },
                 intent.factor,
             );
+            loupeViewSize = {
+                mode: 'natural',
+                scale: computeLoupeNaturalScale(viewport, imageSize, next.scale),
+            };
             applyLoupeTransform(next);
             resetWheelSwipe();
             return;
@@ -638,13 +670,14 @@
 
         if ($loupeScale > 1) {
             e.preventDefault();
+            const viewport = currentLoupeViewport();
             const next = clampLoupePan(
                 {
                     scale: $loupeScale,
                     panX: $loupePanX - intent.deltaX,
                     panY: $loupePanY - intent.deltaY,
                 },
-                { width: rect.width, height: rect.height },
+                viewport,
                 { width: image.image.width, height: image.image.height },
             );
             applyLoupeTransform(next);
@@ -682,6 +715,7 @@
 
         if (request.mode === 'fit-in') {
             handledZoomRequestId = request.id;
+            loupeViewSize = { mode: 'fit' };
             applyLoupeTransform({ scale: 1, panX: 0, panY: 0 });
             return;
         }
@@ -704,6 +738,7 @@
         const viewport = currentLoupeViewport();
         const imageSize = { width: image.image.width, height: image.image.height };
         const scale = computeLoupeActualSizeScale(viewport, imageSize);
+        loupeViewSize = { mode: 'natural', scale: 1 };
         applyLoupeTransform(clampLoupePan(
             { scale, panX: 0, panY: 0 },
             viewport,
@@ -1001,7 +1036,7 @@
                     class:blurred={shouldBlur}
                     class:unblurring={detectionsLoaded}
                     class:pixel-zoom={$loupeScale > 4}
-                    style="transform: scale({$loupeScale}) translate({$loupePanX / $loupeScale}px, {$loupePanY / $loupeScale}px);"
+                    style={imageTransformStyle}
                 />
             {:else}
                 <div class="preview-unavailable">Preview unavailable</div>
@@ -1022,7 +1057,7 @@
                         top: {imgEl.offsetTop}px;
                         width: {imgEl.offsetWidth}px;
                         height: {imgEl.offsetHeight}px;
-                        transform: scale({$loupeScale}) translate({$loupePanX / $loupeScale}px, {$loupePanY / $loupeScale}px);
+                        {overlayTransformStyle}
                     "
                 >
                     {#each [...detections, ...nsfwDetections] as det}
@@ -1066,7 +1101,7 @@
                             top: {imgEl.offsetTop}px;
                             width: {imgEl.offsetWidth}px;
                             height: {imgEl.offsetHeight}px;
-                            transform: scale({$loupeScale}) translate({$loupePanX / $loupeScale}px, {$loupePanY / $loupeScale}px);
+                            {overlayTransformStyle}
                         "
                     >
                         <!-- svelte-ignore a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
@@ -1228,13 +1263,13 @@
         >
             <button
                 class="zoom-menu-item"
-                class:active={Math.abs($loupeScale - 1) < 0.01}
+                class:active={loupeViewSize.mode === 'fit'}
                 onclick={selectFitIn}
                 role="menuitem"
             >Fit In</button>
             <button
                 class="zoom-menu-item"
-                class:active={Math.abs(naturalZoomScale - 1) < 0.01}
+                class:active={loupeViewSize.mode === 'natural' && Math.abs(naturalZoomScale - 1) < 0.01}
                 onclick={() => selectZoomPreset(1)}
                 role="menuitem"
             >
@@ -1246,7 +1281,7 @@
                 {#if preset !== 1}
                     <button
                         class="zoom-menu-item"
-                        class:active={Math.abs(naturalZoomScale - preset) < 0.01}
+                        class:active={loupeViewSize.mode === 'natural' && Math.abs(naturalZoomScale - preset) < 0.01}
                         onclick={() => selectZoomPreset(preset)}
                         role="menuitem"
                     >{Math.round(preset * 100)}%</button>
