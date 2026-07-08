@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import {
     images, selectedIds, focusedIndex, thumbnailSize, statusHint, viewMode,
-    compareActiveSide, compareImages, loupeScale, loupePanX, loupePanY,
+    compareActiveSide, compareImages,
     sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode, compareImageOnly, exportImageOnly,
     collections, collectMode, collectModeTarget, activeCollection,
     showDetectionBoxes, showDetectionInspector, nsfwMode,
@@ -284,7 +284,6 @@ function moveLoupeFocus(delta: number) {
         if (next >= total) next = total - 1;
         return next;
     });
-    resetLoupeZoom();
 }
 
 // ---- Main handler ----
