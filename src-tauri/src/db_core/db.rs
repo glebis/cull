@@ -207,14 +207,6 @@ pub(crate) fn map_catalog_value_event_row(
     })
 }
 
-fn catalog_field_def_id(stable_key: &str) -> String {
-    let sanitized = stable_key
-        .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
-        .collect::<String>();
-    format!("cfd_{}", sanitized)
-}
-
 pub(crate) fn catalog_work_image_id(work_id: &str, image_id: &str, role: &str) -> String {
     format!(
         "cwi_{}",
