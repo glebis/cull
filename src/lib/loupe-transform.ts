@@ -22,11 +22,47 @@ export interface LoupePoint {
 const DEFAULT_MIN_SCALE = 0.1;
 const DEFAULT_MAX_SCALE = 20;
 const FIT_EPSILON = 0.02;
+const ZOOM_STEP_EPSILON = 0.001;
+
+export const LOUPE_NATURAL_ZOOM_PRESETS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 4];
 
 export function computeLoupeActualSizeScale(viewport: LoupeViewport, image: LoupeImageSize): number {
     const scale = fitScale(viewport, image);
     if (!Number.isFinite(scale) || scale <= 0) return 1;
     return clamp(Math.max(1, 1 / scale), DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
+}
+
+export function computeLoupeNaturalScale(
+    viewport: LoupeViewport,
+    image: LoupeImageSize,
+    viewportScale: number,
+): number {
+    const scale = fitScale(viewport, image) * viewportScale;
+    return Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
+export function computeLoupeViewportScaleForNaturalScale(
+    viewport: LoupeViewport,
+    image: LoupeImageSize,
+    naturalScale: number,
+): number {
+    const scale = fitScale(viewport, image);
+    if (!Number.isFinite(scale) || scale <= 0) return 1;
+    return clamp(naturalScale / scale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
+}
+
+export function nextLoupeNaturalZoomPreset(currentScale: number, direction: 1 | -1): number {
+    if (!Number.isFinite(currentScale) || currentScale <= 0) {
+        return direction > 0 ? 1 : LOUPE_NATURAL_ZOOM_PRESETS[0];
+    }
+
+    if (direction > 0) {
+        return LOUPE_NATURAL_ZOOM_PRESETS.find(scale => scale > currentScale + ZOOM_STEP_EPSILON)
+            ?? LOUPE_NATURAL_ZOOM_PRESETS[LOUPE_NATURAL_ZOOM_PRESETS.length - 1];
+    }
+
+    return [...LOUPE_NATURAL_ZOOM_PRESETS].reverse().find(scale => scale < currentScale - ZOOM_STEP_EPSILON)
+        ?? LOUPE_NATURAL_ZOOM_PRESETS[0];
 }
 
 export function computeLoupeFocalZoom(
@@ -78,7 +114,7 @@ export function computeLoupeSmartZoom(
 }
 
 function fitScale(viewport: LoupeViewport, image: LoupeImageSize): number {
-    const scale = Math.min(viewport.width / image.width, viewport.height / image.height);
+    const scale = Math.min(1, viewport.width / image.width, viewport.height / image.height);
     return Number.isFinite(scale) && scale > 0 ? scale : 1;
 }
 

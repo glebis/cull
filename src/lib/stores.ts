@@ -232,10 +232,11 @@ export function requestCanvasZoom(zoom: number) {
         zoom,
     });
 }
-export type LoupeZoomRequestMode = 'actual-size' | 'fit-in';
+export type LoupeZoomRequestMode = 'actual-size' | 'fit-in' | 'natural-scale' | 'zoom-in' | 'zoom-out';
 export interface LoupeZoomRequest {
     id: number;
     mode: LoupeZoomRequestMode;
+    scale?: number;
 }
 
 let loupeZoomRequestId = 0;
@@ -256,6 +257,21 @@ export function requestLoupeFitIn() {
     resetLoupeTransform();
     if (get(viewMode) !== 'loupe') return;
     loupeZoomRequest.set({ id: ++loupeZoomRequestId, mode: 'fit-in' });
+}
+
+export function requestLoupeNaturalScale(scale: number) {
+    if (get(viewMode) !== 'loupe') return;
+    loupeZoomRequest.set({ id: ++loupeZoomRequestId, mode: 'natural-scale', scale });
+}
+
+export function requestLoupeZoomIn() {
+    if (get(viewMode) !== 'loupe') return;
+    loupeZoomRequest.set({ id: ++loupeZoomRequestId, mode: 'zoom-in' });
+}
+
+export function requestLoupeZoomOut() {
+    if (get(viewMode) !== 'loupe') return;
+    loupeZoomRequest.set({ id: ++loupeZoomRequestId, mode: 'zoom-out' });
 }
 
 export const folders = writable<[string, number][]>([]);

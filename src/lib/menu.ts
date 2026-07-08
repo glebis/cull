@@ -43,11 +43,10 @@ import {
     activeSmartCollection,
     activeDetectedClass,
     selectedIds,
-    loupeScale,
-    loupePanX,
-    loupePanY,
     requestLoupeActualSize,
     requestLoupeFitIn,
+    requestLoupeZoomIn,
+    requestLoupeZoomOut,
     settingsOpen,
     staticPublishingEnabled,
     pluginsEnabled,
@@ -776,19 +775,18 @@ function handleMenuAction(action: string) {
             persistPreviewDisplayOverlay(withPreviewDisplayRailTextSize(get(previewDisplayOverlay), 'large'));
             break;
         case 'zoom_in':
-            thumbnailSize.update((s) => Math.min(s + 40, 600));
-            loupeScale.update((s) => Math.min(s * 1.25, 20));
+            if (get(viewMode) === 'loupe') {
+                requestLoupeZoomIn();
+            } else {
+                thumbnailSize.update((s) => Math.min(s + 40, 600));
+            }
             break;
         case 'zoom_out':
-            thumbnailSize.update((s) => Math.max(s - 40, 40));
-            loupeScale.update((s) => {
-                const next = Math.max(s / 1.25, 0.1);
-                if (next <= 1) {
-                    loupePanX.set(0);
-                    loupePanY.set(0);
-                }
-                return next;
-            });
+            if (get(viewMode) === 'loupe') {
+                requestLoupeZoomOut();
+            } else {
+                thumbnailSize.update((s) => Math.max(s - 40, 40));
+            }
             break;
         case 'actual_size':
             requestLoupeActualSize();

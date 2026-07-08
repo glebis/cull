@@ -3,7 +3,10 @@ import {
     clampLoupePan,
     computeLoupeActualSizeScale,
     computeLoupeFocalZoom,
+    computeLoupeNaturalScale,
+    computeLoupeViewportScaleForNaturalScale,
     computeLoupeSmartZoom,
+    nextLoupeNaturalZoomPreset,
 } from './loupe-transform';
 
 describe('loupe transform helpers', () => {
@@ -16,6 +19,23 @@ describe('loupe transform helpers', () => {
 
     it('does not shrink images that already render at natural size', () => {
         expect(computeLoupeActualSizeScale(viewport, { width: 500, height: 400 })).toBe(1);
+    });
+
+    it('reports zoom relative to natural image pixels', () => {
+        expect(computeLoupeNaturalScale(viewport, image, 1)).toBeCloseTo(0.5);
+        expect(computeLoupeNaturalScale(viewport, image, 2)).toBeCloseTo(1);
+    });
+
+    it('converts natural pixel zoom back to the loupe viewport scale', () => {
+        expect(computeLoupeViewportScaleForNaturalScale(viewport, image, 1)).toBeCloseTo(2);
+        expect(computeLoupeViewportScaleForNaturalScale(viewport, image, 0.5)).toBeCloseTo(1);
+    });
+
+    it('steps through standard natural pixel zoom levels', () => {
+        expect(nextLoupeNaturalZoomPreset(1, 1)).toBe(1.25);
+        expect(nextLoupeNaturalZoomPreset(1.25, 1)).toBe(1.5);
+        expect(nextLoupeNaturalZoomPreset(1.56, 1)).toBe(2);
+        expect(nextLoupeNaturalZoomPreset(1.56, -1)).toBe(1.5);
     });
 
     it('preserves focal point when zooming', () => {
