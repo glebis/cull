@@ -27,8 +27,7 @@ the `plugin_invoke` capability bridge and written to the audit log as actor
 node scripts/build-plugin.mjs cull-publish
 ```
 
-This copies `entry.mjs` to `dist/plugin.js`, writes the bundle SHA-256 into
-`manifest.json`, and regenerates the local registry fixture at
+This writes the `entry.mjs` SHA-256 into `manifest.json` and regenerates the local registry fixture at
 `tests/fixtures/plugin-registry/registry.json` (a `file://` registry used by
 the end-to-end Rust proof test `proof_plugin_cull_publish_installs_end_to_end`
 and by manual testing via the `plugin_registry_url` app setting).

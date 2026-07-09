@@ -90,6 +90,21 @@ describe('Preview Display UI contract', () => {
         expect(component).toContain('event.preventDefault()');
     });
 
+    it('keeps Preview Display images fit by default but zoomable and pannable', () => {
+        const component = source('src/lib/components/PreviewDisplay.svelte');
+
+        expect(component).toContain('clampPreviewDisplayZoom');
+        expect(component).toContain('previewDisplayNormalizedFocus');
+        expect(component).toContain('previewDisplayPanForNormalizedFocus');
+        expect(component).toContain('bind:this={stageEl}');
+        expect(component).toContain('onwheel={handlePreviewWheel}');
+        expect(component).toContain('onpointerdown={handlePreviewPointerDown}');
+        expect(component).toContain('resetPreviewZoomToFit');
+        expect(component).toContain('max-width: 100%');
+        expect(component).toContain('max-height: 100%');
+        expect(component).toContain('transform-origin: center center');
+    });
+
     it('shows blanking text for only the first three seconds after blanking', () => {
         const component = source('src/lib/components/PreviewDisplay.svelte');
 
