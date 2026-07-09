@@ -6,7 +6,7 @@
     import type { ImageWithFile, OpenWithApplication } from '$lib/api';
     import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast, requestTextInput } from '$lib/stores';
     import { invalidateImageCache, loadImagesForCurrentScope } from '$lib/image-loading';
-    import { clampFloatingPosition } from '$lib/floating-position';
+    import { clampFloatingPosition, placeAdjacentSubmenu } from '$lib/floating-position';
     import { filterMoveFolders, folderDisplayName, folderParentPath } from '$lib/move-menu-utils';
     import { withDecision, withRating, type ImageDecision } from '$lib/selection-updates';
 
@@ -29,9 +29,15 @@
     let openWithLoading = $state(false);
     let openWithLoadedFor = $state<string | null>(null);
     let folderSearch = $state('');
+    let rateSubmenuEl: HTMLDivElement | undefined = $state();
     let collectionSubmenuEl: HTMLDivElement | undefined = $state();
+    let copySubmenuEl: HTMLDivElement | undefined = $state();
+    let openWithSubmenuEl: HTMLDivElement | undefined = $state();
     let moveSubmenuEl: HTMLDivElement | undefined = $state();
+    let rateSubmenuPlacement = $state('');
     let collectionSubmenuPlacement = $state('');
+    let copySubmenuPlacement = $state('');
+    let openWithSubmenuPlacement = $state('');
     let moveSubmenuPlacement = $state('');
     let menuX = $state(0);
     let menuY = $state(0);
@@ -92,12 +98,32 @@
     });
 
     $effect(() => {
+        if (openSubmenu !== 'rate') return;
+        rateSubmenuEl;
+        void placeRateSubmenu();
+    });
+
+    $effect(() => {
         if (openSubmenu !== 'collections') return;
         collectionSearch;
         collectionLoading;
         filteredCollectionList.length;
         collectionSubmenuEl;
         void placeCollectionSubmenu();
+    });
+
+    $effect(() => {
+        if (openSubmenu !== 'copy') return;
+        copySubmenuEl;
+        void placeCopySubmenu();
+    });
+
+    $effect(() => {
+        if (openSubmenu !== 'openwith') return;
+        openWithLoading;
+        openWithApps.length;
+        openWithSubmenuEl;
+        void placeOpenWithSubmenu();
     });
 
     $effect(() => {
@@ -114,8 +140,7 @@
         }
         function handleResize() {
             void placeMenu(x, y);
-            if (openSubmenu === 'collections') void placeCollectionSubmenu();
-            if (openSubmenu === 'moveto') void placeMoveSubmenu();
+            void placeOpenSubmenu();
         }
         setTimeout(() => {
             window.addEventListener('click', handleClickOutside);
@@ -199,38 +224,53 @@
         const parent = el.closest<HTMLElement>('.submenu-parent');
         if (!parent) return '';
 
-        const margin = 8;
         const parentRect = parent.getBoundingClientRect();
         const rect = el.getBoundingClientRect();
-        const maxHeight = Math.max(160, Math.min(preferredMaxHeight, window.innerHeight - margin * 2));
-        const height = Math.min(rect.height, maxHeight);
-        const minTop = margin - parentRect.top;
-        const maxTop = window.innerHeight - margin - parentRect.top - height;
-
-        let top = -4;
-        if (parentRect.top + top + height > window.innerHeight - margin) {
-            top = parentRect.height - height + 4;
-        }
-        top = maxTop < minTop ? minTop : Math.min(Math.max(top, minTop), maxTop);
-
-        let left = parentRect.width - 1;
-        if (
-            parentRect.left + parentRect.width + rect.width > window.innerWidth - margin &&
-            parentRect.left - rect.width >= margin
-        ) {
-            left = -rect.width + 1;
-        }
+        const placement = placeAdjacentSubmenu(
+            {
+                x: parentRect.left,
+                y: parentRect.top,
+                width: parentRect.width,
+                height: parentRect.height,
+            },
+            { width: rect.width, height: rect.height },
+            { width: window.innerWidth, height: window.innerHeight },
+            preferredMaxHeight,
+        );
 
         return [
-            `--submenu-left: ${Math.round(left)}px`,
-            `--submenu-top: ${Math.round(top)}px`,
-            `--submenu-max-height: ${Math.round(maxHeight)}px`,
+            `--submenu-left: ${placement.left}px`,
+            `--submenu-top: ${placement.top}px`,
+            `--submenu-max-height: ${placement.maxHeight}px`,
         ].join('; ');
+    }
+
+    function placeOpenSubmenu() {
+        if (openSubmenu === 'rate') return placeRateSubmenu();
+        if (openSubmenu === 'collections') return placeCollectionSubmenu();
+        if (openSubmenu === 'copy') return placeCopySubmenu();
+        if (openSubmenu === 'openwith') return placeOpenWithSubmenu();
+        if (openSubmenu === 'moveto') return placeMoveSubmenu();
+    }
+
+    async function placeRateSubmenu() {
+        await tick();
+        rateSubmenuPlacement = submenuPlacementStyle(rateSubmenuEl, 460);
     }
 
     async function placeCollectionSubmenu() {
         await tick();
         collectionSubmenuPlacement = submenuPlacementStyle(collectionSubmenuEl, 460);
+    }
+
+    async function placeCopySubmenu() {
+        await tick();
+        copySubmenuPlacement = submenuPlacementStyle(copySubmenuEl, 460);
+    }
+
+    async function placeOpenWithSubmenu() {
+        await tick();
+        openWithSubmenuPlacement = submenuPlacementStyle(openWithSubmenuEl, 460);
     }
 
     async function placeMoveSubmenu() {
@@ -548,7 +588,12 @@
             <span class="current-value">{currentRating > 0 ? '★'.repeat(currentRating) : '—'}</span>
         </button>
         {#if openSubmenu === 'rate'}
-            <div class="submenu" role="menu">
+            <div
+                class="submenu"
+                role="menu"
+                bind:this={rateSubmenuEl}
+                style={rateSubmenuPlacement}
+            >
                 <button class="context-menu-item" class:active={currentRating === 0} onclick={() => handleRate(0)} role="menuitem" tabindex="-1">☆ Unrated</button>
                 {#each [1, 2, 3, 4, 5] as n}
                     <button class="context-menu-item" class:active={currentRating === n} onclick={() => handleRate(n)} role="menuitem" tabindex="-1">{'★'.repeat(n)} {n} Star{n > 1 ? 's' : ''}</button>
@@ -686,7 +731,12 @@
             <span class="arrow">►</span>
         </button>
         {#if openSubmenu === 'copy'}
-            <div class="submenu" role="menu">
+            <div
+                class="submenu"
+                role="menu"
+                bind:this={copySubmenuEl}
+                style={copySubmenuPlacement}
+            >
                 <button class="context-menu-item" onclick={handleCopyPath} role="menuitem" tabindex="-1">Copy Path{multiCount > 1 ? 's' : ''}</button>
                 <button class="context-menu-item" onclick={handleCopyFilename} role="menuitem" tabindex="-1">Copy Filename{multiCount > 1 ? 's' : ''}</button>
                 <button class="context-menu-item" onclick={handleCopyFileUrl} role="menuitem" tabindex="-1">Copy File URL{multiCount > 1 ? 's' : ''}</button>
@@ -734,7 +784,12 @@
                 <span class="arrow">►</span>
             </button>
             {#if openSubmenu === 'openwith'}
-                <div class="submenu open-with-submenu" role="menu">
+                <div
+                    class="submenu open-with-submenu"
+                    role="menu"
+                    bind:this={openWithSubmenuEl}
+                    style={openWithSubmenuPlacement}
+                >
                     {#if openWithLoading}
                         <div class="context-menu-item empty-menu-item">Loading...</div>
                     {:else}
