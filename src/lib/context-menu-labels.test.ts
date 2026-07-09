@@ -28,4 +28,18 @@ describe('context menu decision labels', () => {
         expect(contextMenuSource).toContain('--submenu-top');
         expect(contextMenuSource).toContain('--submenu-max-height');
     });
+
+    it('positions every submenu through viewport-aware placement styles', () => {
+        expect(contextMenuSource).toContain('bind:this={rateSubmenuEl}');
+        expect(contextMenuSource).toContain('style={rateSubmenuPlacement}');
+        expect(contextMenuSource).toContain('bind:this={collectionSubmenuEl}');
+        expect(contextMenuSource).toContain('style={collectionSubmenuPlacement}');
+        expect(contextMenuSource).toContain('bind:this={copySubmenuEl}');
+        expect(contextMenuSource).toContain('style={copySubmenuPlacement}');
+        expect(contextMenuSource).toContain('bind:this={openWithSubmenuEl}');
+        expect(contextMenuSource).toContain('style={openWithSubmenuPlacement}');
+        expect(contextMenuSource).toContain('bind:this={moveSubmenuEl}');
+        expect(contextMenuSource).toContain('style={moveSubmenuPlacement}');
+        expect(contextMenuSource).toContain('placeAdjacentSubmenu');
+    });
 });
