@@ -530,7 +530,7 @@ Compare every section of `docs/superpowers/specs/2026-07-10-ai-settings-and-agen
 
 - [ ] **Step 2: Run full repository gates**
 
-Run: `CARGO_TARGET_DIR=/Users/glebkalinin/ai_projects/cull/src-tauri/target npm run preflight:full`  
+Run: `CARGO_TARGET_DIR="$HOME/.cache/cull-target" npm run preflight:full`  
 Expected: PASS. Existing clippy warnings may print but cannot introduce compilation/test/fmt failures.
 
 - [ ] **Step 3: Run the license audit and production build gate**
@@ -538,7 +538,7 @@ Expected: PASS. Existing clippy warnings may print but cannot introduce compilat
 Run: `npm run audit:licenses`  
 Expected: PASS.
 
-Run: `CARGO_TARGET_DIR=/Users/glebkalinin/ai_projects/cull/src-tauri/target npm run clean-machine-dmg-gate:build-install`  
+Run: `CARGO_TARGET_DIR="$HOME/.cache/cull-target" npm run clean-machine-dmg-gate:build-install`  
 Expected: build succeeds, DMG verification succeeds, `/Applications/Cull.app` is replaced from the built DMG, and launch smoke succeeds.
 
 - [ ] **Step 4: Runtime-smoke the installed app**
@@ -551,7 +551,7 @@ If fixes were required, rerun their focused tests and commit them. Otherwise lea
 
 - [ ] **Step 6: Land and push**
 
-Run: `CARGO_TARGET_DIR=/Users/glebkalinin/ai_projects/cull/src-tauri/target CULL_PREFLIGHT_SKIP_E2E=1 npm run land`  
+Run: `CARGO_TARGET_DIR="$HOME/.cache/cull-target" CULL_PREFLIGHT_SKIP_E2E=1 npm run land`  
 Expected: clean worktree, full gates pass, branch rebases, and push succeeds. E2E is skipped only here because it was run explicitly in Step 4.
 
 - [ ] **Step 7: Final completion audit**
