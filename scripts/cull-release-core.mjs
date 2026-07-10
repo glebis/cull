@@ -81,6 +81,32 @@ function configurationError(message, details) {
   return error;
 }
 
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function validateVersionFile(entry) {
+  if (!entry || typeof entry !== 'object'
+    || !isNonEmptyString(entry.id)
+    || !isNonEmptyString(entry.path)) {
+    throw configurationError('Malformed version file declaration');
+  }
+  if (entry.kind === 'json') {
+    if (!Array.isArray(entry.pointers) || entry.pointers.length === 0
+      || entry.pointers.some((pointer) => typeof pointer !== 'string'
+        || (pointer !== '' && !pointer.startsWith('/')))) {
+      throw configurationError('Malformed version file declaration', { id: entry.id });
+    }
+    return;
+  }
+  if ((entry.kind === 'toml-package-version'
+      || entry.kind === 'cargo-lock-package-version')
+    && isNonEmptyString(entry.package)) {
+    return;
+  }
+  throw configurationError('Malformed version file declaration', { id: entry.id });
+}
+
 export function loadReleaseConfig(repoRoot) {
   const path = join(repoRoot, 'release.config.json');
   let config;
@@ -89,10 +115,19 @@ export function loadReleaseConfig(repoRoot) {
   } catch (cause) {
     throw configurationError(`Unable to load ${path}`, { cause: cause.message });
   }
-  if (config.schemaVersion !== 1 || !Array.isArray(config.versionFiles)) {
+  if (config.schemaVersion !== 1 || !Array.isArray(config.versionFiles)
+    || config.versionFiles.length === 0) {
     throw configurationError('Unsupported release configuration', {
       schemaVersion: config.schemaVersion,
     });
+  }
+  if (!Number.isFinite(config.minimumFreeDiskGiB) || config.minimumFreeDiskGiB <= 0) {
+    throw configurationError('minimumFreeDiskGiB must be a positive finite number');
+  }
+  config.versionFiles.forEach(validateVersionFile);
+  const ids = config.versionFiles.map((entry) => entry.id);
+  if (new Set(ids).size !== ids.length) {
+    throw configurationError('Version file IDs must be unique', { ids });
   }
   return config;
 }

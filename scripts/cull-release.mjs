@@ -19,6 +19,13 @@ function inputError(message) {
   return error;
 }
 
+function externalFailure(message, details) {
+  const error = new Error(message);
+  error.code = 'EXTERNAL_FAILURE';
+  error.details = details;
+  return error;
+}
+
 function parseArgs(args) {
   const parsed = {};
   for (let index = 0; index < args.length; index += 1) {
@@ -34,12 +41,20 @@ function parseArgs(args) {
   }
   if (!parsed.json) throw inputError('--json is required');
   if (!parsed.bump) throw inputError('--bump is required');
+  if (!['patch', 'minor', 'major'].includes(parsed.bump)) {
+    throw inputError(`Unsupported bump ${parsed.bump}`);
+  }
   return parsed;
 }
 
 function git(...args) {
   try {
-    return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    return execFileSync('git', args, {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
   } catch (cause) {
     const error = new Error(`Git command failed: git ${args.join(' ')}`);
     error.code = 'EXTERNAL_FAILURE';
@@ -49,14 +64,37 @@ function git(...args) {
 }
 
 function rustVersion() {
+  if (process.env.CULL_RELEASE_TEST_MODE === '1') {
+    if (process.env.CULL_RELEASE_TEST_FAIL_PROBE === 'rust-missing') return null;
+    if (process.env.CULL_RELEASE_TEST_FAIL_PROBE === 'rust-failure') {
+      throw externalFailure('Rust toolchain probe failed', { code: 'RUSTC_FAILED' });
+    }
+  }
   const result = spawnSync('rustc', ['--version'], { encoding: 'utf8' });
-  if (result.status !== 0) return null;
+  if (result.error?.code === 'ENOENT') return null;
+  if (result.error) {
+    throw externalFailure('Rust toolchain probe failed', { code: result.error.code });
+  }
+  if (result.status !== 0) {
+    throw externalFailure('Rust toolchain probe failed', {
+      status: result.status,
+      signal: result.signal,
+    });
+  }
   return result.stdout.trim();
 }
 
 function availableDiskGiB(path) {
-  const stats = statfsSync(path, { bigint: true });
-  return Number(stats.bavail * stats.bsize) / (1024 ** 3);
+  try {
+    if (process.env.CULL_RELEASE_TEST_MODE === '1'
+      && process.env.CULL_RELEASE_TEST_FAIL_PROBE === 'statfs') {
+      throw new Error('Injected statfs failure');
+    }
+    const stats = statfsSync(path, { bigint: true });
+    return Number(stats.bavail * stats.bsize) / (1024 ** 3);
+  } catch (cause) {
+    throw externalFailure('Free disk space probe failed', { code: cause.code ?? 'STATFS_FAILED' });
+  }
 }
 
 function runCheck(args) {
