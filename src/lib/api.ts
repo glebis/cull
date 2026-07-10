@@ -1358,8 +1358,42 @@ export interface UndoRecord {
     created_at: string;
 }
 
+export interface HistoryTarget {
+    kind: string;
+    display_name: string;
+    context: string | null;
+    unavailable: boolean;
+}
+
+export interface HistoryImagePreview {
+    image_id: string;
+    display_name: string;
+    thumbnail_path: string | null;
+    missing: boolean;
+}
+
+export interface UndoHistoryEntry {
+    record: UndoRecord;
+    action_title: string;
+    target: HistoryTarget;
+    change_summary: string | null;
+    previews: HistoryImagePreview[];
+    affected_count: number;
+    can_undo: boolean;
+}
+
+export interface UndoManyResult {
+    requested: number;
+    completed: string[];
+    failure: string | null;
+}
+
 export async function undo(): Promise<string | null> {
     return invoke<string | null>('undo');
+}
+
+export async function undoMany(count: number): Promise<UndoManyResult> {
+    return invoke<UndoManyResult>('undo_many', { count });
 }
 
 export async function redo(): Promise<string | null> {
@@ -1370,8 +1404,8 @@ export async function getUndoStatus(): Promise<UndoStatus> {
     return invoke<UndoStatus>('get_undo_status');
 }
 
-export async function listUndoHistory(limit?: number | null): Promise<UndoRecord[]> {
-    return invoke<UndoRecord[]>('list_undo_history', { limit: limit ?? null });
+export async function listUndoHistory(limit?: number | null): Promise<UndoHistoryEntry[]> {
+    return invoke<UndoHistoryEntry[]>('list_undo_history', { limit: limit ?? null });
 }
 
 // Settings

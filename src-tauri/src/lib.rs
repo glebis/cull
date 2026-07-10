@@ -603,6 +603,7 @@ pub fn run() {
             commands::dictation::start_dictation,
             commands::dictation::stop_dictation,
             commands::undo::undo,
+            commands::undo::undo_many,
             commands::undo::redo,
             commands::undo::get_undo_status,
             commands::undo::list_undo_history,

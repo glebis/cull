@@ -14,6 +14,132 @@ pub struct UndoStatus {
     pub stack_depth: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UndoManyResult {
+    pub requested: u32,
+    pub completed: Vec<String>,
+    pub failure: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db_core::models::Image;
+
+    fn test_db() -> (tempfile::TempDir, Database) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("undo.db")).unwrap();
+        db.insert_image(&Image {
+            id: "img-1".to_string(),
+            sha256_hash: "hash-1".to_string(),
+            width: 100,
+            height: 100,
+            format: "jpg".to_string(),
+            file_size: 10,
+            created_at: "2026-07-10T12:00:00Z".to_string(),
+            imported_at: "2026-07-10T12:00:00Z".to_string(),
+            ai_prompt: None,
+            raw_metadata: None,
+        })
+        .unwrap();
+        (dir, db)
+    }
+
+    #[test]
+    fn undo_many_processes_newest_first_and_preserves_redo() {
+        let (_dir, db) = test_db();
+        let manager = ActionManager::new();
+        for rating in [3, 4, 5] {
+            manager
+                .execute(
+                    &db,
+                    Action::SetRating {
+                        image_id: "img-1".to_string(),
+                        rating,
+                    },
+                )
+                .unwrap();
+        }
+
+        let result = manager.undo_many(&db, 2).unwrap();
+
+        assert_eq!(result.requested, 2);
+        assert_eq!(result.completed, vec!["Set rating to 5", "Set rating to 4"]);
+        assert!(result.failure.is_none());
+        assert_eq!(
+            db.get_selection_for_image("img-1")
+                .unwrap()
+                .unwrap()
+                .star_rating,
+            Some(3)
+        );
+        assert!(manager.status(&db).can_redo);
+    }
+
+    #[test]
+    fn undo_many_rejects_zero_and_more_than_undoable_depth() {
+        let (_dir, db) = test_db();
+        let manager = ActionManager::new();
+        manager
+            .execute(
+                &db,
+                Action::SetRating {
+                    image_id: "img-1".to_string(),
+                    rating: 3,
+                },
+            )
+            .unwrap();
+
+        assert!(manager
+            .undo_many(&db, 0)
+            .unwrap_err()
+            .contains("at least 1"));
+        assert!(manager.undo_many(&db, 2).unwrap_err().contains("only 1"));
+    }
+
+    #[test]
+    fn undo_many_reports_partial_failure_and_stops() {
+        let (_dir, db) = test_db();
+        let manager = ActionManager::new();
+        manager
+            .execute(
+                &db,
+                Action::SetRating {
+                    image_id: "img-1".to_string(),
+                    rating: 3,
+                },
+            )
+            .unwrap();
+        manager
+            .record_action(
+                &db,
+                "set_rating",
+                "Broken rating".to_string(),
+                "not-json".to_string(),
+                "not-json".to_string(),
+                "img-1".to_string(),
+                false,
+            )
+            .unwrap();
+
+        let result = manager.undo_many(&db, 2).unwrap();
+
+        assert!(result.completed.is_empty());
+        assert!(result
+            .failure
+            .as_deref()
+            .unwrap()
+            .contains("Invalid undo state JSON"));
+        assert_eq!(
+            db.get_selection_for_image("img-1")
+                .unwrap()
+                .unwrap()
+                .star_rating,
+            Some(3)
+        );
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionResult {
     pub undo_record_id: String,
@@ -187,6 +313,55 @@ impl ActionManager {
         *cursor = Some(target_seq);
 
         Ok(Some(record.label))
+    }
+
+    pub fn undoable_count(&self, db: &Database) -> Result<u32, String> {
+        let cursor = *self.cursor_seq.lock().unwrap();
+        let conn = db.conn.lock();
+        let count: i64 = match cursor {
+            None => conn.query_row("SELECT COUNT(*) FROM undo_records", [], |row| row.get(0)),
+            Some(seq) => conn.query_row(
+                "SELECT COUNT(*) FROM undo_records WHERE seq < ?1",
+                rusqlite::params![seq],
+                |row| row.get(0),
+            ),
+        }
+        .map_err(|error| error.to_string())?;
+        u32::try_from(count).map_err(|_| "Undo history is too large".to_string())
+    }
+
+    pub fn undo_many(&self, db: &Database, count: u32) -> Result<UndoManyResult, String> {
+        if count == 0 {
+            return Err("Undo count must be at least 1".to_string());
+        }
+        let available = self.undoable_count(db)?;
+        if count > available {
+            return Err(format!(
+                "Cannot undo {count} actions; only {available} currently undoable"
+            ));
+        }
+
+        let mut completed = Vec::with_capacity(count as usize);
+        let mut failure = None;
+        for _ in 0..count {
+            match self.undo(db) {
+                Ok(Some(label)) => completed.push(label),
+                Ok(None) => {
+                    failure = Some("Undo history ended unexpectedly".to_string());
+                    break;
+                }
+                Err(error) => {
+                    failure = Some(error);
+                    break;
+                }
+            }
+        }
+
+        Ok(UndoManyResult {
+            requested: count,
+            completed,
+            failure,
+        })
     }
 
     pub fn redo(&self, db: &Database) -> Result<Option<String>, String> {
