@@ -103,7 +103,7 @@ describe('Settings -> Plugins section (source contract)', () => {
 
         // McpSettings mounts the tab and no longer carries the toggle/state.
         const content = mcpSettings();
-        expect(content).toContain("activeSettingsTab === 'plugins'");
+        expect(content).toContain("{ id: 'plugins', label: 'Plugins' }");
         expect(content).toContain('<PluginsSettings');
         expect(content).not.toContain('toggleModulePlugins');
         expect(content).not.toContain('{#if modulePlugins}');

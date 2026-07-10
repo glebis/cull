@@ -3,13 +3,11 @@
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen } from '$lib/stores';
-    import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, isYoloAvailable, isNudenetAvailable, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
+    import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, countByDetectedClass, regenerateThumbnails, rescanSources, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, ImageWithFile, SmartCollection } from '$lib/api';
     import { applyClipboardMonitorCollection } from '$lib/clipboard-monitor';
-    import { MODEL_SETUP_GUIDE_URL, resolveAiSectionExpanded } from '$lib/onboarding';
     import { safeAssetPreviewPath } from '$lib/view-utils';
-    import { openUrl } from '@tauri-apps/plugin-opener';
     import { onDestroy, onMount } from 'svelte';
     import { get } from 'svelte/store';
 
@@ -128,6 +126,7 @@
 
     onDestroy(() => {
         clearCollectionPreviewTimer();
+        window.removeEventListener('detected-classes-changed', handleDetectedClassesChanged);
     });
 
     onMount(async () => {
@@ -169,7 +168,8 @@
         } catch (e) {
             console.error('Failed to listen for clipboard monitor captures:', e);
         }
-        loadAiState().catch(e => console.error('Failed to load AI state:', e));
+        window.addEventListener('detected-classes-changed', handleDetectedClassesChanged);
+        loadDetectedClasses().catch(e => console.error('Failed to load detected classes:', e));
     });
 
     function folderName(path: string): string {
@@ -529,62 +529,9 @@
         }
     }
 
-    // AI Models state. Collapsed by default until the library has images
-    // so first-run users see content sections, not model jargon; a manual
-    // toggle always wins.
-    let aiToggled = $state<boolean | null>(null);
-    let aiExpanded = $derived(resolveAiSectionExpanded(aiToggled, $totalCount));
-    let yoloReady = $state(false);
-    let nudenetReady = $state(false);
-    let yoloProcessed = $state(0);
-    let nudenetProcessed = $state(0);
-    let selectedYoloVariant = $state('medium');
     let detectedClasses = $state<[string, number][]>([]);
-    let detectingBatch = $state(false);
-    let ollamaModels = $state<string[]>([]);
-    let ollamaReady = $derived(ollamaModels.length > 0);
-    let visionProcessed = $state(0);
-    let analyzingBatch = $state(false);
 
-    function openModelSetupGuide() {
-        openUrl(MODEL_SETUP_GUIDE_URL).catch(e => console.error('Failed to open setup guide:', e));
-    }
-
-    async function loadAiState() {
-        try {
-            yoloReady = await isYoloAvailable(selectedYoloVariant);
-            nudenetReady = await isNudenetAvailable();
-            if (yoloReady) {
-                const variantName = selectedYoloVariant === 'nano' ? 'yolo11n' : selectedYoloVariant === 'small' ? 'yolo11s' : 'yolo11m';
-                yoloProcessed = await getDetectionCount(variantName);
-            }
-            if (nudenetReady) {
-                nudenetProcessed = await getDetectionCount('nudenet');
-            }
-            await loadDetectedClasses();
-        } catch (_) {}
-        try {
-            ollamaModels = await checkOllama();
-            visionProcessed = await getVisionCount();
-        } catch (_) {
-            ollamaModels = [];
-        }
-    }
-
-    async function handleAnalyzeBatch() {
-        if (analyzingBatch) return;
-        analyzingBatch = true;
-        try {
-            const allIds = await listImageIds();
-            await analyzeImages(allIds);
-            await loadAiState();
-            await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
-        } catch (e) {
-            console.error('Vision analysis error:', e);
-        } finally {
-            analyzingBatch = false;
-        }
-    }
+    function handleDetectedClassesChanged() { void loadDetectedClasses(); }
 
     async function loadDetectedClasses() {
         const commonClasses = ['person', 'dog', 'cat', 'car', 'bicycle', 'bird', 'horse', 'chair', 'bottle', 'laptop', 'phone', 'book'];
@@ -598,22 +545,6 @@
         results.sort((a, b) => b[1] - a[1]);
         detectedClasses = results;
         detectedClassesStore.set(results);
-    }
-
-    async function handleDetectRemaining() {
-        if (detectingBatch) return;
-        detectingBatch = true;
-        try {
-            const allIds = await listImageIds();
-            if (yoloReady) await detectObjects(allIds, selectedYoloVariant);
-            if (nudenetReady) await detectNsfw(allIds);
-            await loadAiState();
-            await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
-        } catch (e) {
-            console.error('Batch detection error:', e);
-        } finally {
-            detectingBatch = false;
-        }
     }
 
     async function filterByClass(className: string) {
@@ -889,96 +820,14 @@
             <input type="checkbox" bind:checked={$showMissing} />
             Show missing files
         </label>
-    </div>
-
-    <div class="section">
-        <button
-            class="folders-toggle"
-            onclick={() => aiToggled = !aiExpanded}
-            aria-expanded={aiExpanded}
-        >
-            <span class="toggle-arrow">{aiExpanded ? '▾' : '▸'}</span>
-            <span class="folders-toggle-label">AI MODELS</span>
-        </button>
-
-        {#if aiExpanded}
-            <div class="ai-models-content">
-                <div class="model-row">
-                    <span class="model-name">Object detection YOLO</span>
-                    {#if yoloReady}
-                        <span class="model-status ready">ready</span>
-                    {:else}
-                        <span class="model-status missing">optional</span>
-                    {/if}
-                </div>
-
-                {#if !yoloReady}
-                    <div class="model-download-row">
-                        <select class="variant-select" bind:value={selectedYoloVariant}>
-                            <option value="nano">nano 6MB</option>
-                            <option value="small">small 22MB</option>
-                            <option value="medium">medium 50MB</option>
-                        </select>
-                        <button class="model-help-link" onclick={openModelSetupGuide}>Setup guide ↗</button>
-                    </div>
-                {/if}
-
-                <div class="model-row">
-                    <span class="model-name">Content filter NudeNet</span>
-                    {#if nudenetReady}
-                        <span class="model-status ready">ready</span>
-                    {:else}
-                        <span class="model-status missing">optional</span>
-                    {/if}
-                </div>
-
-                {#if !nudenetReady}
-                    <button class="model-help-link" onclick={openModelSetupGuide}>Setup guide ↗</button>
-                {/if}
-
-                <div class="model-row">
-                    <span class="model-name">Image descriptions Ollama</span>
-                    {#if ollamaReady}
-                        <span class="model-status ready">{ollamaModels.length} models</span>
-                    {:else}
-                        <span class="model-status missing">optional</span>
-                    {/if}
-                </div>
-
-                {#if yoloReady || nudenetReady}
-                    <div class="processed-row">
-                        <span class="processed-label">Detection</span>
-                        <span class="processed-count">{yoloProcessed}/{$totalCount}</span>
-                    </div>
-                    {#if yoloProcessed < $totalCount}
-                        <button class="detect-btn" onclick={handleDetectRemaining} disabled={detectingBatch}>
-                            {detectingBatch ? 'Detecting...' : `Detect objects (${formatSidebarCount($totalCount - yoloProcessed)} remaining)`}
-                        </button>
-                    {/if}
-                {/if}
-
-                {#if ollamaReady}
-                    <div class="processed-row">
-                        <span class="processed-label">Vision</span>
-                        <span class="processed-count">{visionProcessed}/{$totalCount}</span>
-                    </div>
-                    {#if visionProcessed < $totalCount}
-                        <button class="detect-btn" onclick={handleAnalyzeBatch} disabled={analyzingBatch}>
-                            {analyzingBatch ? 'Describing...' : `Describe images (${formatSidebarCount($totalCount - visionProcessed)} remaining)`}
-                        </button>
-                    {/if}
-                {/if}
-
-                {#if detectedClasses.length > 0}
-                    <div class="detected-header">DETECTED</div>
-                    {#each detectedClasses as [cls, count]}
-                        <button class="section-item detected-class" onclick={() => filterByClass(cls)}>
-                            <span class="class-tag">{cls}</span>
-                            <span class="count">{formatSidebarCount(count)}</span>
-                        </button>
-                    {/each}
-                {/if}
-            </div>
+        {#if detectedClasses.length > 0}
+            <div class="detected-header">DETECTED OBJECTS</div>
+            {#each detectedClasses as [cls, count]}
+                <button class="section-item detected-class" class:active={$activeDetectedClass === cls} onclick={() => filterByClass(cls)}>
+                    <span class="class-tag">{cls}</span>
+                    <span class="count">{formatSidebarCount(count)}</span>
+                </button>
+            {/each}
         {/if}
     </div>
     </div>
@@ -1433,98 +1282,6 @@
         min-height: 32px;
         padding: 2px 6px;
         white-space: normal;
-    }
-    /* AI Models section */
-    .ai-models-content {
-        padding: 0 0 0 8px;
-    }
-    .model-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 6px;
-        padding: 3px 0;
-        font-size: 11px;
-    }
-    .model-name {
-        color: var(--text);
-        font-weight: 600;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .model-status {
-        flex: none;
-        font-size: 10px;
-        white-space: nowrap;
-    }
-    .model-status.ready {
-        color: var(--green);
-    }
-    .model-status.missing {
-        color: var(--text-secondary);
-    }
-    .model-download-row {
-        display: flex;
-        gap: 4px;
-        margin: 2px 0 4px;
-    }
-    .model-help-link {
-        background: none;
-        border: none;
-        color: var(--blue);
-        cursor: pointer;
-        font-family: var(--font);
-        font-size: 10px;
-        min-height: 24px;
-        padding: 2px 0;
-        text-align: left;
-        text-decoration: underline;
-    }
-    .model-help-link:hover {
-        opacity: 0.8;
-    }
-    .variant-select {
-        flex: 1;
-        font-size: 10px;
-        padding: 2px 4px;
-        background: var(--bg);
-        color: var(--text);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        font-family: inherit;
-    }
-    .processed-row {
-        display: flex;
-        justify-content: space-between;
-        font-size: 10px;
-        color: var(--text-secondary);
-        padding: 4px 0 2px;
-    }
-    .processed-label {
-        color: var(--text-secondary);
-    }
-    .processed-count {
-        color: var(--text);
-    }
-    .detect-btn {
-        width: 100%;
-        font-size: 10px;
-        padding: 3px 6px;
-        background: none;
-        color: var(--blue);
-        border: none;
-        cursor: pointer;
-        font-family: inherit;
-        text-align: left;
-    }
-    .detect-btn:hover:not(:disabled) {
-        color: var(--text);
-    }
-    .detect-btn:disabled {
-        color: var(--text-secondary);
-        cursor: not-allowed;
     }
     .detected-header {
         font-size: 9px;

@@ -6,13 +6,13 @@ function source(path: string): string {
     return readFileSync(join(process.cwd(), path), 'utf8');
 }
 
-const settings = source('src/lib/components/McpSettings.svelte');
+const settings = source('src/lib/components/AgentAccessSettings.svelte');
 
 describe('McpSettings token-expiry create flow', () => {
     it('exposes an expiry control in the create-token form', () => {
         // A bindable expiry state and an explicit expiry input in the form.
         expect(settings).toContain('newExpiryDays');
-        expect(settings).toContain('class="expiry-select"');
+        expect(settings).toContain('aria-label="Token expiry"');
     });
 
     it('passes expires_at to createMcpToken when an expiry is chosen', () => {
@@ -28,9 +28,9 @@ describe('McpSettings token-expiry create flow', () => {
 
     it('colors the expiry-soon and expired states with design tokens', () => {
         // warn -> orange, expired -> red, per design system.
-        expect(settings).toContain('.token-expiry.warn');
+        expect(settings).toContain('.token-row span.warn');
         expect(settings).toContain('color: var(--orange)');
-        expect(settings).toContain('.token-expiry.expired');
+        expect(settings).toContain('.token-row span.expired');
         expect(settings).toContain('color: var(--red)');
     });
 });

@@ -33,10 +33,10 @@ describe('GitHub update system contract', () => {
     });
 
     it('exposes the default-on auto update toggle in Settings', () => {
-        const settingsSource = readProjectFile('src/lib/components/McpSettings.svelte');
+        const settingsSource = readProjectFile('src/lib/components/GeneralSettings.svelte');
 
         expect(settingsSource).toContain("getAppSetting('auto_update_enabled')");
-        expect(settingsSource).toContain("setAppSetting('auto_update_enabled'");
+        expect(settingsSource).toContain("toggle('auto_update_enabled'");
         expect(settingsSource).toContain('Auto update');
     });
 });

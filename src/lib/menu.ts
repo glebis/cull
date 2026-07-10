@@ -47,7 +47,6 @@ import {
     requestLoupeFitIn,
     requestLoupeZoomIn,
     requestLoupeZoomOut,
-    settingsOpen,
     staticPublishingEnabled,
     pluginsEnabled,
     activePluginIds,
@@ -61,6 +60,7 @@ import {
     undoHistoryOpen,
     type ViewMode,
 } from './stores';
+import { openSettings } from './settings-navigation';
 import {
     PREVIEW_DISPLAY_MODE_SETTING,
     PREVIEW_DISPLAY_LAYOUT_SETTING,
@@ -795,7 +795,7 @@ function handleMenuAction(action: string) {
             requestLoupeFitIn();
             break;
         case 'settings':
-            settingsOpen.set(true);
+            openSettings('general');
             break;
         case 'check_update':
             void checkForUpdates('manual');

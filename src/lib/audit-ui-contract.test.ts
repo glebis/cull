@@ -10,6 +10,8 @@ const compare = source('src/lib/components/Compare.svelte');
 const commandPalette = source('src/lib/components/CommandPalette.svelte');
 const trashDialog = source('src/lib/components/TrashConfirmDialog.svelte');
 const settings = source('src/lib/components/McpSettings.svelte');
+const generalSettings = source('src/lib/components/GeneralSettings.svelte');
+const agentAccessSettings = source('src/lib/components/AgentAccessSettings.svelte');
 const staticPublishing = source('src/lib/plugins/cull-publish/PublishView.svelte');
 const embeddingExplorer = source('src/lib/components/EmbeddingExplorer.svelte');
 const lineage = source('src/lib/components/LineageView.svelte');
@@ -18,6 +20,8 @@ const commandBar = source('src/lib/components/CommandBar.svelte');
 const ruleBuilder = source('src/lib/components/RuleBuilder.svelte');
 const tabBar = source('src/lib/components/TabBar.svelte');
 const sidebar = source('src/lib/components/Sidebar.svelte');
+const aiSettings = source('src/lib/components/AiSettings.svelte');
+const paletteRegistry = source('src/lib/command-palette.ts');
 const tauriConfig = JSON.parse(source('src-tauri/tauri.conf.json'));
 
 describe('impeccable audit UI contracts', () => {
@@ -54,9 +58,10 @@ describe('impeccable audit UI contracts', () => {
     });
 
     it('exposes toggle state through accessible button state', () => {
-        for (const state of ['closeToTray', 'confirmTrash', 'autoUpdate', 'httpEnabled', 'autoPurge']) {
-            expect(settings).toContain(`aria-pressed={${state}}`);
+        for (const state of ['closeToTray', 'confirmTrash', 'autoUpdate', 'autoPurge']) {
+            expect(generalSettings).toContain(`aria-pressed={${state}}`);
         }
+        expect(agentAccessSettings).toContain('aria-pressed={httpEnabled}');
         expect(staticPublishing).toContain('aria-pressed={indexable}');
         for (const state of ['largePreviewOpen', 'textOutputOpen', 'canvasLabelsOpen']) {
             expect(embeddingExplorer).toContain(`aria-pressed={${state}}`);
@@ -91,13 +96,13 @@ describe('impeccable audit UI contracts', () => {
         expect(sidebar).toContain('Remove folder from library');
         // Model setup must not imply an in-app auto-download (bd imageview-dkz.19
         // replaced the 'Install model manually' dead-end with a setup-guide link).
-        expect(sidebar).toContain('Setup guide');
-        expect(sidebar).not.toMatch(/Download model/i);
-        // Batch analysis actions are named distinctly (sidebar audit M6).
-        expect(sidebar).toContain('Detect objects');
-        expect(sidebar).toContain('Describe images');
+        expect(aiSettings).toContain('setup guide');
+        expect(aiSettings).not.toMatch(/Download model/i);
+        // Batch analysis actions are named distinctly in the command palette.
+        expect(paletteRegistry).toContain('Detect Objects in Library');
+        expect(paletteRegistry).toContain('Describe Images in Library');
         expect(sidebar).toContain('Publish clipboard collection');
-        expect(settings).toContain('Remote access settings');
+        expect(agentAccessSettings).toContain('MCP Connection');
         expect(staticPublishing).toContain('Allow search indexing');
         expect(staticPublishing).toContain('Start Local Preview');
     });
@@ -106,7 +111,7 @@ describe('impeccable audit UI contracts', () => {
         expect(sidebar).toContain('class="sidebar-scroll"');
         expect(sidebar).toContain('class="footer-secondary-actions"');
         expect(sidebar).toContain('aria-expanded={foldersExpanded}');
-        expect(sidebar).toContain('aria-expanded={aiExpanded}');
+        expect(sidebar).not.toContain('aria-expanded={aiExpanded}');
         expect(sidebar).not.toContain('aria-controls="sidebar-folder-tree"');
         expect(sidebar).not.toContain('aria-controls="sidebar-ai-models"');
         expect(sidebar).toContain('aria-pressed={clipboardStatus?.running ?? false}');

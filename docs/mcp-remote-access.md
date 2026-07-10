@@ -44,7 +44,7 @@ cull --mcp-http 8080     # custom port
 cull --mcp-http --mcp-http-host 0.0.0.0 --mcp-http-allow-remote
 ```
 
-Or toggle in **Settings > MCP Server > HTTP Server**.
+Or toggle in **Settings > Agent Access > MCP Connection**.
 
 Default bind: `127.0.0.1:9847` (localhost only). Non-loopback binds require
 the explicit `--mcp-http-allow-remote` flag or `mcp_http_allow_remote=true`
@@ -53,7 +53,7 @@ smallest practical role and content scope before starting the listener.
 
 ### Create a Token
 
-Open **Settings > MCP Server > Access Tokens > Create Token**. Pick a name and role. The secret is shown once — copy it immediately.
+Open **Settings > Agent Access > Access Tokens > Create Token**. Pick a name and role. The secret is shown once — copy it immediately.
 
 ### Connect
 

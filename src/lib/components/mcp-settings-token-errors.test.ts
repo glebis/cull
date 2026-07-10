@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 // hits console.error leaves the user believing access was removed. Each
 // handler's catch block must surface a visible error toast.
 describe('McpSettings token operation error surfacing', () => {
-    const src = readFileSync(join(process.cwd(), 'src/lib/components/McpSettings.svelte'), 'utf8');
+    const src = readFileSync(join(process.cwd(), 'src/lib/components/AgentAccessSettings.svelte'), 'utf8');
 
     function catchBlockOf(handler: string): string {
         const start = src.indexOf(`async function ${handler}`);
@@ -16,9 +16,9 @@ describe('McpSettings token operation error surfacing', () => {
     }
 
     for (const [handler, message] of [
-        ['handleCreate', 'Could not create token'],
-        ['handleRevoke', 'Could not revoke token'],
-        ['handleRotate', 'Could not rotate token'],
+        ['createToken', 'Could not create token'],
+        ['revoke', 'Could not revoke token'],
+        ['rotate', 'Could not rotate token'],
     ] as const) {
         it(`${handler} shows an error toast on failure`, () => {
             const block = catchBlockOf(handler);

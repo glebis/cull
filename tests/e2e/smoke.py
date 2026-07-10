@@ -928,6 +928,43 @@ def test_command_palette_arrows_and_favorite(page: Page) -> None:
     expect(page.locator(".palette-row .row-mark", has_text="*").first).to_be_visible()
 
     palette_input.press("Escape")
+
+
+def test_ai_settings_and_library_commands(page: Page) -> None:
+    """Settings owns AI configuration; library processing lives in the palette."""
+    press(page, "Meta+Shift+P")
+    set_input_value(page, ".palette-input", "open settings")
+    page.locator(".palette-input").press("Enter")
+    expect(page.get_by_role("dialog", name="Settings")).to_be_visible()
+
+    tabs = page.get_by_role("tab")
+    assert tabs.all_inner_texts() == ["General", "Appearance", "AI", "Agent Access", "Privacy", "Plugins"]
+
+    page.get_by_role("tab", name="AI", exact=True).click()
+    expect(page.get_by_role("tabpanel")).to_be_visible()
+    assert page.get_by_role("tabpanel").locator("h3").all_inner_texts() == [
+        "Provider Credentials", "Local Models", "Embedding Models"
+    ]
+    expect(page.get_by_role("tabpanel")).not_to_contain_text("Detect remaining")
+
+    page.get_by_role("tab", name="Agent Access", exact=True).click()
+    agent_panel = page.get_by_role("tabpanel")
+    expect(agent_panel.locator("h3").first).to_contain_text("Install the Cull Skill")
+    expect(agent_panel).to_contain_text("npx skills add glebis/claude-skills --skill cull")
+    page.get_by_role("button", name="Close settings").click()
+
+    expect(page.locator(".sidebar")).not_to_contain_text("AI MODELS")
+    expect(page.locator(".sidebar")).to_contain_text("DETECTED OBJECTS")
+
+    for title in [
+        "Detect Objects in Library",
+        "Scan Library for Sensitive Content",
+        "Describe Images in Library",
+    ]:
+        press(page, "Meta+Shift+P")
+        set_input_value(page, ".palette-input", title)
+        expect(page.locator(".palette-row .row-title").first).to_have_text(title)
+        page.locator(".palette-input").press("Escape")
     expect(page.locator(".palette-panel")).to_have_count(0)
 
 
@@ -1318,6 +1355,7 @@ def main() -> int:
         smoke.step("S19c command palette arrows and favorite", lambda: test_command_palette_arrows_and_favorite(page))
         smoke.step("S19d keyboard shortcuts panel", lambda: test_keyboard_shortcuts_panel(page))
         smoke.step("S19e palette does not hijack text input", lambda: test_palette_does_not_hijack_text_input(page))
+        smoke.step("S19f AI settings and library commands", lambda: test_ai_settings_and_library_commands(page))
         smoke.step("S27 context menu", lambda: test_context_menu(page))
         smoke.step("S27a context submenu right edge", lambda: test_context_submenu_flips_at_right_edge(page))
         smoke.step("S27b context menu Escape stays in Loupe", lambda: test_context_menu_escape_stays_in_loupe(page))

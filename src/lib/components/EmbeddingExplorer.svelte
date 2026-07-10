@@ -17,6 +17,7 @@
         type EmbeddingSpacePreset,
     } from '$lib/stores';
     import { get } from 'svelte/store';
+    import { openSettings } from '$lib/settings-navigation';
     import { computeScatterThumbSize, formatBytes, formatDownloadRateEta } from '$lib/embedding-utils';
     import {
         DEFAULT_MODEL_OPTIONS,
@@ -1721,7 +1722,7 @@
                 {:else}
                     <div class="section-header">{selectedModel.shortLabel.toUpperCase()} API KEY REQUIRED</div>
                     <p class="key-missing-text">Set your {selectedModel.shortLabel} API key in Settings.</p>
-                    <button class="settings-link-btn" onclick={() => settingsOpen.set(true)}>
+                    <button class="settings-link-btn" onclick={() => openSettings('ai')}>
                         Open Settings
                     </button>
                 {/if}
