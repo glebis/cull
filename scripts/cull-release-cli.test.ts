@@ -35,6 +35,12 @@ function createFixture() {
     schemaVersion: 1,
     minimumFreeDiskGiB: 0.000001,
     releaseBranch: 'main',
+    worktree: '.',
+    stateDir: '.release-state',
+    gate: [process.execPath, '-e', 'process.exit(0)'],
+    extraGate: [],
+    changelog: { path: 'CHANGELOG.md' },
+    compatibility: { path: 'docs/COMPATIBILITY.md' },
     versionFiles,
   }, null, 2));
   writeFixtureFile(root, 'package.json', '{\n  "name": "fixture",\n  "version": "1.2.3"\n}\n');
@@ -54,6 +60,9 @@ function createFixture() {
     'version = "8.8.8"',
     '',
   ].join('\n'));
+  writeFixtureFile(root, 'CHANGELOG.md', '# Changelog\n\n## [Unreleased]\n\nNo changes yet.\n\n## [1.2.3] - 2026-07-01\n');
+  writeFixtureFile(root, 'docs/COMPATIBILITY.md', '# Compatibility\n\nLast updated: 1.2.3 (2026-07-01)\n');
+  writeFixtureFile(root, 'untouched.txt', 'must stay untouched\n');
   writeFixtureFile(root, 'src-tauri/Cargo.lock', [
     'version = 4',
     '',
@@ -69,6 +78,8 @@ function createFixture() {
   ].join('\n'));
 
   execFileSync('git', ['init', '-b', 'main'], { cwd: root, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.name', 'Cull Test'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', 'cull@example.test'], { cwd: root });
   execFileSync('git', ['add', '.'], { cwd: root });
   execFileSync('git', ['-c', 'user.name=Cull Test', '-c', 'user.email=cull@example.test', 'commit', '-m', 'fixture'], {
     cwd: root,
@@ -84,6 +95,40 @@ function runCheck(fixture: string, options: { bump?: string; env?: NodeJS.Proces
     encoding: 'utf8',
     env: { ...process.env, CULL_RELEASE_TEST_MODE: '1', ...options.env },
   });
+}
+
+function run(
+  fixture: string,
+  command: string,
+  args: string[] = [],
+  env: NodeJS.ProcessEnv = {},
+) {
+  const execution = spawnSync(process.execPath, [cli, command, ...args, '--json'], {
+    cwd: fixture,
+    encoding: 'utf8',
+    env: { ...process.env, CULL_RELEASE_TEST_MODE: '1', ...env },
+  });
+  return { execution, output: JSON.parse(execution.stdout) };
+}
+
+function head(fixture: string) {
+  return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: fixture, encoding: 'utf8' }).trim();
+}
+
+function prepareArgs(fixture: string, source = head(fixture)) {
+  return [
+    '--bump', 'patch',
+    '--expected-source', source,
+    '--expected-version', '1.2.4',
+    '--request-json', JSON.stringify({
+      version: '1.2.4',
+      requestedBump: 'patch',
+      stableBreakingChange: false,
+      changedSurfaces: [],
+      reviewedBy: 'Gleb Kalinin',
+    }),
+    '--notes', '### Fixed\\n\\n- Release preparation is now guarded.',
+  ];
 }
 
 function expectConfigInvalid(result: ReturnType<typeof runCheck>) {
@@ -306,5 +351,164 @@ describe('Cull release readiness CLI', () => {
       result: { blockers: [{ code: 'WORKTREE_DIRTY' }] },
     });
     expect(readFileSync(join(fixture, 'package.json'), 'utf8')).toBe(before);
+  });
+});
+
+describe('Cull release prepare, resume, and state CLI', () => {
+  it('keeps prepare dry-run truly zero-write', () => {
+    const fixture = createFixture();
+    const before = repositorySnapshot(fixture);
+
+    const { execution, output } = run(fixture, 'prepare', [
+      ...prepareArgs(fixture), '--dry-run',
+    ]);
+
+    expect(execution.status).toBe(0);
+    expect(output.result.diff).toBe('');
+    expect(repositorySnapshot(fixture)).toEqual(before);
+  });
+
+  it('rejects source and version races before writing', () => {
+    const fixture = createFixture();
+    const before = repositorySnapshot(fixture);
+
+    const sourceMoved = run(fixture, 'prepare', prepareArgs(fixture, 'b'.repeat(40)));
+    expect(sourceMoved.execution.status).toBe(2);
+    expect(sourceMoved.output.code).toBe('SOURCE_MOVED');
+
+    const versionMoved = run(fixture, 'prepare', prepareArgs(fixture).map((value) => (
+      value === '1.2.4' ? '1.2.5' : value
+    )));
+    expect(versionMoved.execution.status).toBe(2);
+    expect(versionMoved.output.code).toBe('VERSION_MOVED');
+    expect(repositorySnapshot(fixture)).toEqual(before);
+  });
+
+  it('requires the named reviewer and a major bump for stable breaking changes', () => {
+    const fixture = createFixture();
+    const args = prepareArgs(fixture);
+    const requestIndex = args.indexOf('--request-json') + 1;
+    const review = JSON.parse(args[requestIndex]);
+    review.reviewedBy = 'Someone Else';
+    args[requestIndex] = JSON.stringify(review);
+
+    const wrongReviewer = run(fixture, 'prepare', [...args, '--dry-run']);
+    expect(wrongReviewer.execution.status).toBe(2);
+    expect(wrongReviewer.output.code).toBe('REVIEW_INVALID');
+
+    review.reviewedBy = 'Gleb Kalinin';
+    review.stableBreakingChange = true;
+    args[requestIndex] = JSON.stringify(review);
+    const breakingPatch = run(fixture, 'prepare', [...args, '--dry-run']);
+    expect(breakingPatch.execution.status).toBe(2);
+    expect(breakingPatch.output.code).toBe('INCOMPATIBLE_BUMP');
+  });
+
+  it('prepares exactly the declared files in one commit without tagging or pushing', () => {
+    const fixture = createFixture();
+    const oldHead = head(fixture);
+    const oldRemote = execFileSync('git', ['rev-parse', 'origin/main'], { cwd: fixture, encoding: 'utf8' }).trim();
+
+    const { execution, output } = run(fixture, 'prepare', prepareArgs(fixture), {
+      CULL_RELEASE_NOW: '2026-07-11T12:00:00.000Z',
+    });
+
+    expect(execution.status).toBe(0);
+    expect(output.result).toMatchObject({ version: '1.2.4', state: 'prepared' });
+    expect(head(fixture)).not.toBe(oldHead);
+    expect(execFileSync('git', ['show', '--format=', '--name-only', 'HEAD'], {
+      cwd: fixture, encoding: 'utf8',
+    }).trim().split('\n').sort()).toEqual([
+      'CHANGELOG.md',
+      'docs/COMPATIBILITY.md',
+      'package-lock.json',
+      'package.json',
+      'src-tauri/Cargo.lock',
+      'src-tauri/Cargo.toml',
+      'src-tauri/tauri.conf.json',
+    ].sort());
+    expect(execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: fixture, encoding: 'utf8' }).trim())
+      .toBe('chore(release): v1.2.4');
+    expect(execFileSync('git', ['tag', '--list'], { cwd: fixture, encoding: 'utf8' }).trim()).toBe('');
+    expect(execFileSync('git', ['rev-parse', 'origin/main'], { cwd: fixture, encoding: 'utf8' }).trim())
+      .toBe(oldRemote);
+    expect(readFileSync(join(fixture, 'untouched.txt'), 'utf8')).toBe('must stay untouched\n');
+    expect(readFileSync(join(fixture, 'CHANGELOG.md'), 'utf8'))
+      .toContain('## [1.2.4] - 2026-07-11\n\n### Fixed');
+    expect(readFileSync(join(fixture, 'docs/COMPATIBILITY.md'), 'utf8'))
+      .toContain('Last updated: 1.2.4 (2026-07-11)');
+    const statePath = join(fixture, '.release-state/1.2.4.json');
+    expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({
+      version: '1.2.4', state: 'prepared', releaseCommit: head(fixture),
+    });
+    expect(statSync(statePath).mode & 0o777).toBe(0o600);
+    expect(existsSync(`${statePath}.tmp`)).toBe(false);
+  });
+
+  it('atomically transitions and records failures in state', () => {
+    const fixture = createFixture();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'requested',
+      releaseCommit: head(fixture), tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+
+    const transitioned = run(fixture, 'state', [
+      'transition', '--version', '1.2.4', '--to', 'checked',
+      '--evidence-json', '{"readiness":"passed"}',
+    ], { CULL_RELEASE_NOW: '2026-07-11T12:01:00.000Z' });
+    expect(transitioned.execution.status).toBe(0);
+    const statePath = join(stateDir, '1.2.4.json');
+    expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({
+      state: 'checked', gates: { readiness: 'passed' },
+    });
+    expect(statSync(statePath).mode & 0o777).toBe(0o600);
+    expect(existsSync(`${statePath}.tmp`)).toBe(false);
+
+    const failed = run(fixture, 'state', [
+      'fail', '--version', '1.2.4', '--code', 'GATE_FAILED',
+      '--evidence-json', '{"gate":"preflight"}',
+    ], { CULL_RELEASE_NOW: '2026-07-11T12:02:00.000Z' });
+    expect(failed.execution.status).toBe(0);
+    expect(JSON.parse(readFileSync(statePath, 'utf8')).failure).toMatchObject({
+      code: 'GATE_FAILED', evidence: { gate: 'preflight' },
+    });
+  });
+
+  it('derives resume from evidence without rewriting stale local state', () => {
+    const fixture = createFixture();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    const statePath = join(stateDir, '1.2.4.json');
+    writeFileSync(statePath, JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'post-publish-verified',
+      releaseCommit: head(fixture), tag: 'v1.2.4', workflowRunId: 42,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+    const before = readFileSync(statePath, 'utf8');
+    const evidence = {
+      commit: true, tag: true, workflow: true, releaseAsset: true,
+      publishedRelease: false, tapCommit: false,
+    };
+
+    const resumed = run(fixture, 'resume', ['--version', '1.2.4'], {
+      CULL_RELEASE_TEST_EVIDENCE: JSON.stringify(evidence),
+    });
+    expect(resumed.execution.status).toBe(0);
+    expect(resumed.output.result).toEqual({
+      nextState: 'published', nextAction: 'publish-verified-artifacts', evidence,
+    });
+    expect(readFileSync(statePath, 'utf8')).toBe(before);
+
+    const shown = run(fixture, 'state', ['show', '--version', '1.2.4'], {
+      CULL_RELEASE_TEST_EVIDENCE: JSON.stringify(evidence),
+    });
+    expect(shown.execution.status).toBe(0);
+    expect(shown.output.result.derivedState).toBe('artifact-verified');
+    expect(readFileSync(statePath, 'utf8')).toBe(before);
   });
 });

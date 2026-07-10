@@ -4,31 +4,62 @@ Cull is released with the **`release` skill** (config-driven; lives in
 `glebis/claude-skills`). Config: `release.config.json`. Policy:
 `docs/COMPATIBILITY.md`. Contract tests: `docs/CONTRACTS.md`.
 
-## Normal release
-
-```
-/release <patch|minor|major>
-```
-
-The skill: checks preconditions → bumps the 3 version files → runs the readiness
-gate (`npm run preflight -- release` + the golden contract tests) → drafts the
-`CHANGELOG.md` section from conventional commits → walks the **compatibility
-review** (tiers / deprecations; a breaking change to a `stable` surface forces a
-`major`) → commits `chore(release): vX.Y.Z` → tags `vX.Y.Z` (→ `release.yml`
-signed artifacts) → reports closed bd issues since the last tag.
-
-Run `/release --dry-run <kind>` first if unsure — it previews without mutating.
-
-## By hand (no skill)
+## Repository release CLI
 
 ```bash
-python3 ../claude-skills/skills/release/scripts/release.py plan minor   # preview
+# Read-only readiness report
+npm run release:cull -- check --bump patch --json
+
+# Read-only preparation preview (the compatibility review is explicit JSON)
+npm run release:cull -- prepare --bump patch --expected-source "$(git rev-parse HEAD)" \
+  --expected-version 0.2.6 --request-json '{"version":"0.2.6","requestedBump":"patch","stableBreakingChange":false,"changedSurfaces":[],"reviewedBy":"Gleb Kalinin"}' \
+  --notes $'### Fixed\n\n- Curated release note.' --dry-run --json
+```
+
+Remove `--dry-run` only after reviewing the plan. Real preparation validates that
+HEAD and the expected next version have not moved, requires the configured clean
+release worktree, updates the five declared version locations, inserts the curated
+changelog notes, stamps the compatibility review date, runs the configured gates,
+and creates exactly one `chore(release): vX.Y.Z` commit. Preparation never tags or
+pushes. The release state cache is written to `.release-state/X.Y.Z.json` with
+owner-only permissions.
+
+The compatibility review is mandatory. Any breaking change to a `stable` surface
+requires a major bump.
+
+## Resume and recovery
+
+```bash
+npm run release:cull -- state show --version 0.2.6 --json
+npm run release:cull -- resume --version 0.2.6 --json
+```
+
+Both commands are read-only. They probe the release commit, tag, workflow,
+required release assets, published GitHub release, and Homebrew tap, then report
+the derived state. Local state is only a cache: stale state may derive backward,
+and read-only commands never rewrite it. `resume` returns the next action but does
+not execute it.
+
+State-writing automation may advance one step or record a stable failure:
+
+```bash
+npm run release:cull -- state transition --version 0.2.6 --to tagged \
+  --evidence-json '{"tag":"v0.2.6"}' --json
+npm run release:cull -- state fail --version 0.2.6 --code BUILD_FAILED \
+  --evidence-json '{"workflowRunId":123}' --json
+```
+
+## Legacy manual flow
+
+```bash
 CULL_PREFLIGHT_SKIP_E2E=1 npm run preflight -- release                  # gate
 cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden
 $EDITOR CHANGELOG.md docs/COMPATIBILITY.md                              # curate + stamp
-python3 ../claude-skills/skills/release/scripts/release.py bump minor   # write versions
-git commit -am "chore(release): vX.Y.Z" && git tag vX.Y.Z && git push --follow-tags
 ```
+
+Prefer the repository CLI for preparation because it guards source/version races
+and records resumable state. Tagging and publication remain separate, explicit
+steps after preparation and artifact verification.
 
 ## Release artifact gate checks
 

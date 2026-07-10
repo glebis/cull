@@ -1,4 +1,14 @@
-import { readFileSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 export const RELEASE_STATES = [
@@ -72,6 +82,193 @@ export function buildResumeAction(state) {
   const action = actions[state];
   if (!action) throw new Error(`Unknown release state ${state}`);
   return { nextState: action[0], nextAction: action[1] };
+}
+
+function releaseError(code, message, details) {
+  const error = new Error(message);
+  error.code = code;
+  error.details = details;
+  return error;
+}
+
+function setJsonPointer(document, pointer, value) {
+  const parts = decodeJsonPointer(pointer);
+  if (parts.length === 0) return value;
+  let parent = document;
+  for (const part of parts.slice(0, -1)) {
+    if (parent === null || typeof parent !== 'object' || !Object.hasOwn(parent, part)) {
+      throw configurationError(`Missing JSON pointer ${pointer}`);
+    }
+    parent = parent[part];
+  }
+  const key = parts.at(-1);
+  if (parent === null || typeof parent !== 'object' || !Object.hasOwn(parent, key)) {
+    throw configurationError(`Missing JSON pointer ${pointer}`);
+  }
+  parent[key] = value;
+  return document;
+}
+
+function editJson(contents, entry, version) {
+  let document = JSON.parse(contents);
+  for (const pointer of entry.pointers) document = setJsonPointer(document, pointer, version);
+  return `${JSON.stringify(document, null, 2)}\n`;
+}
+
+function editTomlPackage(contents, entry, version, lockfile = false) {
+  const sections = lockfile
+    ? contents.split(/(?=^\[\[package\]\]\s*$)/m)
+    : contents.split(/(?=^\s*\[)/m);
+  const index = sections.findIndex((section) => {
+    const expectedHeader = lockfile ? /^\s*\[\[package\]\]\s*$/m : /^\s*\[package\]\s*$/m;
+    return expectedHeader.test(section)
+      && /^\s*name\s*=\s*"([^"]+)"\s*$/m.exec(section)?.[1] === entry.package;
+  });
+  if (index < 0) throw configurationError(`Missing package ${entry.package} in ${entry.path}`);
+  let replacements = 0;
+  sections[index] = sections[index].replace(
+    /^([ \t]*version[ \t]*=[ \t]*)"[^"]+"([ \t]*)$/m,
+    (_match, prefix, suffix) => {
+      replacements += 1;
+      return `${prefix}"${version}"${suffix}`;
+    },
+  );
+  if (replacements !== 1) throw configurationError(`Missing package version in ${entry.path}`);
+  return sections.join('');
+}
+
+export function planVersionEdits(repoRoot, config, version) {
+  parseSemver(version);
+  return config.versionFiles.map((entry) => {
+    const path = join(repoRoot, entry.path);
+    const before = readFileSync(path, 'utf8');
+    let after;
+    if (entry.kind === 'json') after = editJson(before, entry, version);
+    else if (entry.kind === 'toml-package-version') {
+      after = editTomlPackage(before, entry, version, false);
+    } else if (entry.kind === 'cargo-lock-package-version') {
+      after = editTomlPackage(before, entry, version, true);
+    } else throw configurationError(`Unsupported version file kind ${entry.kind}`);
+    return { id: entry.id, path: entry.path, absolutePath: path, before, after };
+  });
+}
+
+export function applyVersionEdits(edits) {
+  for (const edit of edits) writeFileSync(edit.absolutePath, edit.after);
+}
+
+export function validateCompatibilityReview(review, currentVersion) {
+  if (!review || typeof review !== 'object'
+    || !isNonEmptyString(review.version)
+    || !BUMPS.has(review.requestedBump)
+    || typeof review.stableBreakingChange !== 'boolean'
+    || !Array.isArray(review.changedSurfaces)
+    || review.changedSurfaces.some((surface) => !isNonEmptyString(surface))
+    || review.reviewedBy !== 'Gleb Kalinin') {
+    throw releaseError('REVIEW_INVALID', 'A complete compatibility review is required');
+  }
+  const expected = nextVersion(currentVersion, review.requestedBump);
+  if (review.version !== expected) {
+    throw releaseError('VERSION_MOVED', `Expected next version ${expected}, got ${review.version}`);
+  }
+  if (review.stableBreakingChange && review.requestedBump !== 'major') {
+    throw releaseError('INCOMPATIBLE_BUMP', 'A stable breaking change requires a major bump');
+  }
+  return review;
+}
+
+function planChangelog(contents, version, notes, date) {
+  const marker = '## [Unreleased]';
+  const markerIndex = contents.indexOf(marker);
+  if (markerIndex < 0) throw releaseError('CHANGELOG_INVALID', 'Missing Unreleased changelog section');
+  const nextHeading = contents.indexOf('\n## [', markerIndex + marker.length);
+  const prefix = contents.slice(0, markerIndex + marker.length);
+  const suffix = nextHeading < 0 ? '\n' : contents.slice(nextHeading);
+  return `${prefix}\n\n## [${version}] - ${date}\n\n${notes.trim()}\n${suffix}`;
+}
+
+function planCompatibility(contents, version, date) {
+  const pattern = /^Last updated: .*$/m;
+  if (!pattern.test(contents)) {
+    throw releaseError('COMPATIBILITY_INVALID', 'Missing compatibility Last updated stamp');
+  }
+  return contents.replace(pattern, `Last updated: ${version} (${date})`);
+}
+
+export function prepareRelease({ repoRoot, config, request, notes, date, dryRun = false }) {
+  if (!isNonEmptyString(notes) || !/^- |^### /m.test(notes)) {
+    throw releaseError('NOTES_INVALID', 'Curated non-empty release notes are required');
+  }
+  const currentVersion = validateVersionAlignment(readVersionSnapshot(repoRoot, config));
+  validateCompatibilityReview(request, currentVersion);
+  const versionEdits = planVersionEdits(repoRoot, config, request.version);
+  const changelogPath = join(repoRoot, config.changelog.path);
+  const compatibilityPath = join(repoRoot, config.compatibility.path);
+  const changelogBefore = readFileSync(changelogPath, 'utf8');
+  const compatibilityBefore = readFileSync(compatibilityPath, 'utf8');
+  const edits = [
+    ...versionEdits,
+    {
+      path: config.changelog.path,
+      absolutePath: changelogPath,
+      before: changelogBefore,
+      after: planChangelog(changelogBefore, request.version, notes, date),
+    },
+    {
+      path: config.compatibility.path,
+      absolutePath: compatibilityPath,
+      before: compatibilityBefore,
+      after: planCompatibility(compatibilityBefore, request.version, date),
+    },
+  ];
+  if (!dryRun) applyVersionEdits(edits);
+  return { currentVersion, version: request.version, edits };
+}
+
+export function releaseStatePath(repoRoot, config, version) {
+  parseSemver(version);
+  return join(repoRoot, config.stateDir ?? '.release-state', `${version}.json`);
+}
+
+export function readReleaseRecord(repoRoot, config, version) {
+  const path = releaseStatePath(repoRoot, config, version);
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch (cause) {
+    throw releaseError('STATE_INVALID', `Unable to read release state for ${version}`, {
+      cause: cause.message,
+    });
+  }
+}
+
+export function writeReleaseRecordAtomic(repoRoot, config, record) {
+  const path = releaseStatePath(repoRoot, config, record.version);
+  const temporary = `${path}.tmp`;
+  mkdirSync(join(repoRoot, config.stateDir ?? '.release-state'), { recursive: true, mode: 0o700 });
+  const fd = openSync(temporary, 'w', 0o600);
+  try {
+    const bytes = Buffer.from(`${JSON.stringify(record, null, 2)}\n`);
+    let offset = 0;
+    while (offset < bytes.length) offset += writeSync(fd, bytes, offset, bytes.length - offset);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  chmodSync(temporary, 0o600);
+  renameSync(temporary, path);
+  chmodSync(path, 0o600);
+  return path;
+}
+
+export function deriveReleaseState(evidence) {
+  if (!evidence.commit) return 'requested';
+  if (!evidence.tag) return 'prepared';
+  if (!evidence.workflow) return 'tagged';
+  if (!evidence.releaseAsset) return 'draft-built';
+  if (!evidence.publishedRelease) return 'artifact-verified';
+  if (!evidence.tapCommit) return 'published';
+  if (!evidence.postPublishVerified) return 'homebrew-promoted';
+  return 'post-publish-verified';
 }
 
 function configurationError(message, details) {
