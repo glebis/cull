@@ -31,9 +31,28 @@ const proposal: AgentActionProposal = {
     applied_at: null,
 };
 
+const selectionProposal: AgentActionProposal = {
+    ...proposal,
+    id: 'proposal-2',
+    kind: 'select_images',
+};
+
 afterEach(() => cleanup());
 
 describe('ActionProposalReviewDialog rendered behavior', () => {
+    it('renders the selection-proposal title and apply action label', () => {
+        render(ActionProposalReviewDialog, {
+            proposal: selectionProposal,
+            visible: true,
+            visibleImages: [],
+            onapplyproposal: vi.fn(),
+            oncancelreview: vi.fn(),
+        });
+
+        expect(screen.getByRole('dialog', { name: 'Review selection proposal' })).toBeVisible();
+        expect(screen.getByRole('button', { name: 'Select approved' })).toBeEnabled();
+    });
+
     it('submits only checked proposal candidates', async () => {
         const user = userEvent.setup();
         const onapplyproposal = vi.fn();
