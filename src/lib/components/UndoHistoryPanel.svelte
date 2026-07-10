@@ -8,7 +8,12 @@
     let error = $state<string | null>(null);
     let undoHistory = $state<UndoRecord[]>([]);
     let activityEvents = $state<SessionEvent[]>([]);
-    let expanded = $state<string | null>(null);
+
+    const undoBackedEventTypes = new Set([
+        'rating_set',
+        'decision_set',
+        'image_moved_to_trash',
+    ]);
 
     function closeHistory() {
         undoHistoryOpen.set(false);
@@ -101,18 +106,6 @@
         return event.subject_type ?? 'event';
     }
 
-    function formatJson(payload: string): string {
-        try {
-            return JSON.stringify(JSON.parse(payload), null, 2);
-        } catch {
-            return payload;
-        }
-    }
-
-    function toggleExpanded(id: string) {
-        expanded = expanded === id ? null : id;
-    }
-
     async function loadHistory() {
         loading = true;
         error = null;
@@ -122,7 +115,7 @@
                 getActivityContext(null, 40),
             ]);
             undoHistory = undoRows;
-            activityEvents = activity.recent_events;
+            activityEvents = activity.recent_events.filter(event => !undoBackedEventTypes.has(event.event_type));
         } catch (e) {
             error = String(e);
         } finally {
@@ -258,45 +251,12 @@
                         <h3 class="history-section-title">Undoable actions</h3>
                         {#each undoHistory as entry (entry.id)}
                             <article class="history-item" role="listitem">
-                                <button class="history-row" type="button" onclick={() => toggleExpanded(`undo:${entry.id}`)}>
+                                <div class="history-summary">
                                     <span class="history-type">{actionLabel(entry.action_type)}</span>
                                     <span class="history-label" title={displayLabel(entry)}>{displayLabel(entry)}</span>
-                                    <span class="history-meta">{formatTime(entry.created_at)}</span>
                                     <span class="history-count">{affectedCount(entry.affected_image_ids)} image{affectedCount(entry.affected_image_ids) === 1 ? '' : 's'}</span>
-                                    <span class="history-chevron">{expanded === `undo:${entry.id}` ? '▼' : '▶'}</span>
-                                </button>
-                                {#if expanded === `undo:${entry.id}`}
-                                    <div class="history-details">
-                                        <div class="detail-grid">
-                                            <div class="detail-item">
-                                                <span class="detail-key">Seq</span>
-                                                <span class="detail-value">#{entry.seq}</span>
-                                            </div>
-                                            <div class="detail-item">
-                                                <span class="detail-key">Action ID</span>
-                                                <span class="detail-value">{entry.id}</span>
-                                            </div>
-                                            <div class="detail-item">
-                                                <span class="detail-key">File backup</span>
-                                                <span class="detail-value">{entry.has_file_backup ? 'Yes' : 'No'}</span>
-                                            </div>
-                                            <div class="detail-item">
-                                                <span class="detail-key">Affected image IDs</span>
-                                                <span class="detail-value">{entry.affected_image_ids ?? 'None'}</span>
-                                            </div>
-                                        </div>
-                                        <div class="history-json-block">
-                                            <div class="history-json-col">
-                                                <h4>Before</h4>
-                                                <pre>{formatJson(entry.before_json)}</pre>
-                                            </div>
-                                            <div class="history-json-col">
-                                                <h4>After</h4>
-                                                <pre>{formatJson(entry.after_json)}</pre>
-                                            </div>
-                                        </div>
-                                    </div>
-                                {/if}
+                                    <time class="history-time" datetime={entry.created_at}>{formatTime(entry.created_at)}</time>
+                                </div>
                             </article>
                         {/each}
                     {/if}
@@ -305,41 +265,12 @@
                         <h3 class="history-section-title">Critical activity</h3>
                         {#each activityEvents as event (event.id)}
                             <article class="history-item" role="listitem">
-                                <button class="history-row" type="button" onclick={() => toggleExpanded(`event:${event.id}`)}>
+                                <div class="history-summary">
                                     <span class="history-type">{eventTypeLabel(event.event_type)}</span>
                                     <span class="history-label" title={eventLabel(event)}>{eventLabel(event)}</span>
-                                    <span class="history-meta">{formatTime(event.created_at)}</span>
                                     <span class="history-count">{eventCount(event)}</span>
-                                    <span class="history-chevron">{expanded === `event:${event.id}` ? '▼' : '▶'}</span>
-                                </button>
-                                {#if expanded === `event:${event.id}`}
-                                    <div class="history-details">
-                                        <div class="detail-grid">
-                                            <div class="detail-item">
-                                                <span class="detail-key">Event ID</span>
-                                                <span class="detail-value">{event.id}</span>
-                                            </div>
-                                            <div class="detail-item">
-                                                <span class="detail-key">Actor</span>
-                                                <span class="detail-value">{event.actor_type}</span>
-                                            </div>
-                                            <div class="detail-item">
-                                                <span class="detail-key">Subject</span>
-                                                <span class="detail-value">{event.subject_type ?? 'None'}</span>
-                                            </div>
-                                            <div class="detail-item">
-                                                <span class="detail-key">Subject ID</span>
-                                                <span class="detail-value">{event.subject_id ?? 'None'}</span>
-                                            </div>
-                                        </div>
-                                        <div class="history-json-block single">
-                                            <div class="history-json-col">
-                                                <h4>Payload</h4>
-                                                <pre>{formatJson(event.payload_json)}</pre>
-                                            </div>
-                                        </div>
-                                    </div>
-                                {/if}
+                                    <time class="history-time" datetime={event.created_at}>{formatTime(event.created_at)}</time>
+                                </div>
                             </article>
                         {/each}
                     {/if}
@@ -555,19 +486,14 @@
         overflow: hidden;
     }
 
-    .history-row {
-        width: 100%;
-        border: none;
-        background: transparent;
-        color: inherit;
-        font: inherit;
+    .history-summary {
         display: grid;
-        grid-template-columns: 110px minmax(240px, 1fr) 190px 120px 24px;
+        grid-template-columns: 130px minmax(180px, 1fr) 100px 180px;
         gap: 10px;
         align-items: center;
-        padding: 8px 10px;
-        text-align: left;
-        cursor: pointer;
+        min-height: 42px;
+        padding: 9px 12px;
+        box-sizing: border-box;
     }
 
     .history-type {
@@ -584,7 +510,7 @@
         text-overflow: ellipsis;
     }
 
-    .history-meta,
+    .history-time,
     .history-count {
         color: var(--text-secondary);
         font-size: 11px;
@@ -593,74 +519,6 @@
 
     .history-count {
         text-align: left;
-    }
-
-    .history-chevron {
-        color: var(--text-secondary);
-    }
-
-    .history-details {
-        border-top: 1px solid var(--border);
-        padding: 10px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-    }
-
-    .detail-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 8px;
-    }
-
-    .detail-item {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        min-width: 0;
-    }
-
-    .detail-key {
-        color: var(--text-secondary);
-        font-size: 10px;
-    }
-
-    .detail-value {
-        font-size: 11px;
-        color: var(--text);
-        word-break: break-all;
-    }
-
-    .history-json-block {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 8px;
-    }
-
-    .history-json-block.single {
-        grid-template-columns: 1fr;
-    }
-
-    .history-json-col h4 {
-        margin: 0 0 6px;
-        color: var(--text-secondary);
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.3px;
-    }
-
-    .history-json-col pre {
-        margin: 0;
-        max-height: 130px;
-        overflow: auto;
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 6px;
-        font-size: 11px;
-        color: var(--text);
-        white-space: pre-wrap;
-        word-break: break-word;
     }
 
     @media (max-width: 880px) {
@@ -672,18 +530,13 @@
             padding: 10px;
         }
 
-        .history-row {
-            grid-template-columns: 80px minmax(120px, 1fr) auto 20px;
+        .history-summary {
+            grid-template-columns: 100px minmax(120px, 1fr) auto;
         }
 
         .history-count,
-        .history-meta {
+        .history-time {
             display: none;
-        }
-
-        .detail-grid,
-        .history-json-block {
-            grid-template-columns: 1fr;
         }
     }
 </style>
