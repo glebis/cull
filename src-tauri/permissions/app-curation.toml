@@ -37,6 +37,7 @@ commands.allow = [
   "set_catalog_draft_values",
   "suggest_catalog_values",
   "undo",
+  "undo_many",
   "update_canvas_layout",
   "upsert_agent_selection_preset",
   "update_smart_collection",
