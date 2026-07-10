@@ -50,6 +50,23 @@ describe('undo history panel contract', () => {
         expect(panel).toContain("window.addEventListener('session-events-refresh', onReload);");
     });
 
+    it('renders readable history rows without expandable diagnostic output', () => {
+        expect(panel).toContain('class="history-summary"');
+        expect(panel).toContain('class="history-time"');
+        expect(panel).not.toContain('class="history-row"');
+        expect(panel).not.toContain('class="history-details"');
+        expect(panel).not.toContain('<pre>{formatJson(');
+        expect(panel).not.toContain('Affected image IDs');
+        expect(panel).not.toContain('Event ID');
+    });
+
+    it('does not repeat undo-backed activity in the secondary activity section', () => {
+        expect(panel).toContain('const undoBackedEventTypes = new Set([');
+        expect(panel).toContain("'rating_set'");
+        expect(panel).toContain("'decision_set'");
+        expect(panel).toContain('activityEvents = activity.recent_events.filter');
+    });
+
     it('documents the commands that currently feed action history', () => {
         expect(selectionCommands).toContain('Action::SetRating');
         expect(selectionCommands).toContain('Action::SetDecision');
