@@ -28,7 +28,6 @@ import {
     undoHistoryOpen,
     shortcutsOpen,
     sessionCanvases,
-    settingsOpen,
     showDetectionBoxes,
     showDetectionInspector,
     showToast,
@@ -48,7 +47,7 @@ import {
     type ViewMode,
 } from './stores';
 import { invalidateImageCache, loadAllImages, loadImagesForCurrentScope } from './image-loading';
-import { addToCollection, createCollection, getClientFeedback, listCanvases, listClientFeedback, listCollections, redo, saveTextToPath, setClientFeedback, setDecision, setRating, undo, validateSessionFolder, type Canvas, type Session } from './api';
+import { addToCollection, analyzeImages, checkOllama, createCollection, detectNsfw, detectObjects, getAppSetting, getClientFeedback, getOllamaConfig, isNudenetAvailable, isYoloAvailable, listCanvases, listClientFeedback, listCollections, listImageIdsMissingDetection, listImageIdsMissingVision, redo, saveTextToPath, setClientFeedback, setDecision, setRating, undo, validateSessionFolder, type Canvas, type Session } from './api';
 import { withDecision, withRating, type ImageDecision } from './selection-updates';
 import { createWorkflow, readWorkflows, runWorkflow, type CommandWorkflow } from './workflows';
 import { buildDeliveryCsv, type DeliveryRow } from './delivery-csv';
@@ -56,6 +55,8 @@ import { loadSimilarImages } from './similarity';
 import { getPluginPaletteCommands } from './plugins/loader';
 import { tabRegistry } from './plugins/tab-registry';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { runAiLibraryJob, type AiLibraryJobKind } from './ai-library-jobs';
+import { openSettings } from './settings-navigation';
 
 export type CommandPaletteItemKind = 'command' | 'destination';
 
@@ -491,6 +492,27 @@ function toggleAgentPanel() {
     agentPanelPinned.set(!open);
 }
 
+async function runLibraryAiJob(kind: AiLibraryJobKind) {
+    await runAiLibraryJob(kind, {
+        getAppSetting,
+        isYoloAvailable,
+        isNudenetAvailable,
+        checkOllama,
+        getOllamaConfig,
+        listMissingDetection: listImageIdsMissingDetection,
+        listMissingVision: listImageIdsMissingVision,
+        detectObjects,
+        detectNsfw,
+        analyzeImages,
+        toast: showToast,
+        openAiSettings: () => openSettings('ai'),
+        refreshLibrary: async (detectionsChanged) => {
+            if (detectionsChanged) window.dispatchEvent(new CustomEvent('detected-classes-changed'));
+            await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
+        },
+    });
+}
+
 export const WORKFLOW_CREATE_COMMAND_ID = 'workflow.create-from-recents';
 
 async function executeWorkflow(workflow: CommandWorkflow) {
@@ -637,11 +659,11 @@ function commandItems(): CommandPaletteItem[] {
         {
             id: 'app.settings',
             title: 'Open Settings',
-            subtitle: 'MCP, publishing, and app settings',
+            subtitle: 'App, AI, agent access, privacy, and plugin settings',
             category: 'App',
             kind: 'command',
             keywords: ['preferences', 'configuration', 'mcp'],
-            run: () => settingsOpen.set(true),
+            run: () => openSettings('general'),
         },
         {
             id: WORKFLOW_CREATE_COMMAND_ID,
@@ -996,6 +1018,33 @@ function commandItems(): CommandPaletteItem[] {
                 }
                 setTimeout(() => statusHint.set(null), 2500);
             },
+        },
+        {
+            id: 'ai.detect-library',
+            title: 'Detect Objects in Library',
+            subtitle: 'Run the active YOLO model only on pending images',
+            category: 'AI',
+            kind: 'command',
+            keywords: ['yolo', 'objects', 'library', 'batch'],
+            run: () => runLibraryAiJob('objects'),
+        },
+        {
+            id: 'ai.scan-sensitive-library',
+            title: 'Scan Library for Sensitive Content',
+            subtitle: 'Run NudeNet only on pending images',
+            category: 'AI',
+            kind: 'command',
+            keywords: ['nudenet', 'nsfw', 'safety', 'library', 'batch'],
+            run: () => runLibraryAiJob('sensitive-content'),
+        },
+        {
+            id: 'ai.describe-library',
+            title: 'Describe Images in Library',
+            subtitle: 'Run the configured Ollama vision model only on pending images',
+            category: 'AI',
+            kind: 'command',
+            keywords: ['ollama', 'vision', 'describe', 'caption', 'library', 'batch'],
+            run: () => runLibraryAiJob('descriptions'),
         },
         {
             id: 'curation.best-of-group',

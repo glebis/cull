@@ -70,6 +70,9 @@ The palette keeps the last five commands launched through the palette at the top
 - **Result actions**: right-click a row (or press `Shift+F10`) for Run, Favorite/Unfavorite, Set Hotkey…, Add Alias…, Remove from Recents, Copy Command ID, and Open in Settings. Aliases add your own search terms to a command.
 - **Keyboard shortcuts**: run **View Keyboard Shortcuts** to browse every command's binding, search them, customize a hotkey (with conflict and reserved-key detection), or reset everything to defaults.
 - **Workflows**: run **Save Workflow from Recent Commands** to capture your recent command sequence as a reusable workflow. Saved workflows appear in the palette as runnable, favoritable items; rename or delete them from the row context menu. Workflows validate each step's context before running and confirm destructive steps.
+- **Library AI jobs**: run **Detect Objects in Library**, **Scan Library for Sensitive Content**, or **Describe Images in Library**. Cull processes only images still pending for the selected local model; configure credentials and models under **Settings → AI**.
+
+Settings separates application preferences from AI and agent integration. The **AI** tab contains provider credentials, local vision models, and embedding models. **Agent Access** begins with copyable Cull skill installation instructions for npx, Claude, Codex, or another agent, followed by optional MCP connection settings and access tokens. Cull copies installation text; it does not run installers.
 
 ## Preview Display
 

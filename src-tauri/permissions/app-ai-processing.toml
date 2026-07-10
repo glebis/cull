@@ -48,6 +48,8 @@ commands.allow = [
   "is_nudenet_available",
   "is_yolo_available",
   "list_embedding_providers",
+  "list_image_ids_missing_detection",
+  "list_image_ids_missing_vision",
   "list_images_by_color_bucket",
   "list_images_by_detected_class",
   "list_similarity_group_images",
