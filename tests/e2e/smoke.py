@@ -99,6 +99,10 @@ def thumb_filename(page: Page, index: int) -> str:
     return thumb_label(page, index).split(',', 1)[0].strip()
 
 
+def thumb_filenames(page: Page) -> list[str]:
+    return [thumb_filename(page, index) for index in range(page.locator(".thumb").count())]
+
+
 def last_thumb_label(page: Page) -> str:
     count = page.locator(".thumb").count()
     if count == 0:
@@ -681,26 +685,35 @@ def test_trash_escape_confirm_and_undo(page: Page) -> None:
     press(page, "Meta+1")
     wait_mode(page, "grid")
     press(page, "Home")
-    before = page.locator(".thumb").count()
+    before = thumb_filenames(page)
+    intended = focused_filename(page)
 
     page.keyboard.press("Backspace")
     dialog = page.get_by_role("dialog", name="Move to Trash")
     expect(dialog).to_be_visible()
     page.keyboard.press("Escape")
     expect(dialog).to_be_hidden()
-    assert page.locator(".thumb").count() == before
+
+    page.evaluate("window.dispatchEvent(new CustomEvent('reload-images'))")
+    page.wait_for_timeout(500)
+    expect(page.locator(".thumb")).to_have_count(len(before))
+    assert thumb_filenames(page) == before, "Escape changed thumbnail identity or order after reload"
 
     page.keyboard.press("Backspace")
     page.get_by_role("button", name="Move to Trash", exact=True).click()
-    expect(page.locator(".thumb")).to_have_count(before - 1)
+    expect(page.locator(".thumb")).to_have_count(len(before) - 1)
 
     # The removal must survive the same backend reload used by filesystem and undo events.
     page.evaluate("window.dispatchEvent(new CustomEvent('reload-images'))")
     page.wait_for_timeout(500)
-    expect(page.locator(".thumb")).to_have_count(before - 1)
+    expect(page.locator(".thumb")).to_have_count(len(before) - 1)
+    after_confirm = thumb_filenames(page)
+    assert intended not in after_confirm, f"Confirmed Trash did not remove {intended}"
+    assert after_confirm == [filename for filename in before if filename != intended]
 
     press(page, "Meta+z")
-    expect(page.locator(".thumb")).to_have_count(before)
+    expect(page.locator(".thumb")).to_have_count(len(before))
+    assert thumb_filenames(page) == before, "Undo did not restore the exact original thumbnail sequence"
 
 
 def test_loupe_enter_escape(page: Page) -> None:
@@ -975,11 +988,38 @@ def test_context_menu(page: Page) -> None:
     expect(page.locator(".context-menu")).to_contain_text("Rate")
     expect(page.locator(".context-menu")).to_contain_text("Copy")
 
+    page.locator('.context-menu button[data-submenu-key="rate"]').hover()
+    expect(page.locator(".context-menu .submenu").first).to_be_visible()
+
+    # Menu-local Escape closes the submenu first; the capture fallback must not
+    # collapse the entire menu while focus is inside it.
+    page.keyboard.press("Escape")
+    expect(page.locator(".context-menu")).to_be_visible()
+    expect(page.locator(".context-menu .submenu")).to_have_count(0)
+
     page.keyboard.press("Escape")
     expect(page.locator(".context-menu")).to_be_hidden()
 
     page.keyboard.press("ArrowRight")
     assert focused_label(page) != before, "Grid did not regain Arrow-key control after closing the context menu"
+
+
+def test_context_menu_escape_stays_in_loupe(page: Page) -> None:
+    """S27b — Escape dismisses an outside-focused context menu without leaving Loupe."""
+    press(page, "Meta+2")
+    wait_mode(page, "loupe")
+
+    page.locator(".loupe-container").click(button="right")
+    expect(page.locator(".context-menu")).to_be_visible()
+
+    # Reproduce the right-click/focus race: Escape may be targeted outside the
+    # menu before its first item receives focus.
+    page.evaluate("document.activeElement instanceof HTMLElement && document.activeElement.blur()")
+    page.keyboard.press("Escape")
+
+    expect(page.locator(".context-menu")).to_be_hidden()
+    wait_mode(page, "loupe")
+    expect(page.locator(".loupe-container")).to_be_visible()
 
 
 def test_context_submenu_flips_at_right_edge(page: Page) -> None:
@@ -1249,6 +1289,7 @@ def main() -> int:
         smoke.step("S19e palette does not hijack text input", lambda: test_palette_does_not_hijack_text_input(page))
         smoke.step("S27 context menu", lambda: test_context_menu(page))
         smoke.step("S27a context submenu right edge", lambda: test_context_submenu_flips_at_right_edge(page))
+        smoke.step("S27b context menu Escape stays in Loupe", lambda: test_context_menu_escape_stays_in_loupe(page))
         smoke.step("S16a search bar open/close", lambda: test_search_bar_open_close(page))
         smoke.step("S16b search NL query", lambda: test_search_nl_query(page))
         smoke.step("S32 detection toggle", lambda: test_detection_toggle(page))

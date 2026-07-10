@@ -139,13 +139,17 @@
             if (menuEl && !menuEl.contains(e.target as Node)) onclose();
         }
         function handleWindowKeydown(e: KeyboardEvent) {
-            if (e.key === 'Escape') handleMenuKeydown(e);
+            if (e.key !== 'Escape' || !menuEl) return;
+
+            const targetInsideMenu = e.target instanceof Node && menuEl.contains(e.target);
+            const focusInsideMenu = document.activeElement instanceof Node && menuEl.contains(document.activeElement);
+            if (!targetInsideMenu && !focusInsideMenu) handleMenuKeydown(e);
         }
         function handleResize() {
             void placeMenu(x, y);
             void placeOpenSubmenu();
         }
-        window.addEventListener('keydown', handleWindowKeydown);
+        window.addEventListener('keydown', handleWindowKeydown, true);
         setTimeout(() => {
             window.addEventListener('click', handleClickOutside);
             window.addEventListener('contextmenu', handleClickOutside);
@@ -154,7 +158,7 @@
         return () => {
             window.removeEventListener('click', handleClickOutside);
             window.removeEventListener('contextmenu', handleClickOutside);
-            window.removeEventListener('keydown', handleWindowKeydown);
+            window.removeEventListener('keydown', handleWindowKeydown, true);
             window.removeEventListener('resize', handleResize);
         };
     });
