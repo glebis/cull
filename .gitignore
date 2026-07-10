@@ -46,3 +46,6 @@ docs/internal/
 .impeccable/live/sessions/
 .worktrees/
 .tdd-state.json
+
+# Local release resumability cache; authoritative evidence lives in Git/GitHub.
+.release-state/
