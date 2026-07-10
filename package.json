@@ -25,6 +25,7 @@
     "tauri": "bash scripts/tauri-local.sh",
     "test": "vitest run",
     "test:release": "vitest run scripts/cull-release-core.test.ts scripts/cull-release-cli.test.ts scripts/release-gate.test.ts",
+    "release:cull": "node scripts/cull-release.mjs",
     "test:e2e": "bash tests/e2e/run-e2e.sh",
     "test:perf": "vitest run src/lib/view-utils.test.ts -t \"grid rendering performance budget\"",
     "test:watch": "vitest",

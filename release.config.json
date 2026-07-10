@@ -1,8 +1,13 @@
 {
+  "schemaVersion": 1,
+  "stateDir": ".release-state",
+  "minimumFreeDiskGiB": 15,
   "versionFiles": [
-    { "path": "package.json", "kind": "json", "pointer": "/version" },
-    { "path": "src-tauri/tauri.conf.json", "kind": "json", "pointer": "/version" },
-    { "path": "src-tauri/Cargo.toml", "kind": "toml", "key": "package.version" }
+    { "id": "package", "path": "package.json", "kind": "json", "pointers": ["/version"] },
+    { "id": "package-lock", "path": "package-lock.json", "kind": "json", "pointers": ["/version", "/packages//version"] },
+    { "id": "tauri", "path": "src-tauri/tauri.conf.json", "kind": "json", "pointers": ["/version"] },
+    { "id": "cargo", "path": "src-tauri/Cargo.toml", "kind": "toml-package-version", "package": "cull" },
+    { "id": "cargo-lock", "path": "src-tauri/Cargo.lock", "kind": "cargo-lock-package-version", "package": "cull" }
   ],
   "lockfiles": ["src-tauri/Cargo.lock"],
   "gate": "npm run preflight -- release",
@@ -19,5 +24,14 @@
   "releaseBranch": "main",
   "worktree": "../cull-main-landing",
   "tag": { "prefix": "v", "push": true },
-  "issueTracker": { "kind": "bd", "binEnv": "BD_BIN" }
+  "issueTracker": { "kind": "bd", "binEnv": "BD_BIN" },
+  "e2e": {
+    "exact": ["src/routes/+page.svelte", "src/lib/keys.ts", "src/lib/view-tabs.ts", "src/lib/api.ts", "src/lib/tauri-mock.ts", "vite.config.js"],
+    "prefixes": ["src/lib/components/", "tests/e2e/"]
+  },
+  "artifacts": {
+    "target": "aarch64-apple-darwin",
+    "required": ["Cull_{version}_aarch64.dmg", "Cull_aarch64.app.tar.gz", "Cull_aarch64.app.tar.gz.sig", "latest.json"]
+  },
+  "homebrew": { "repo": "glebis/homebrew-tap", "cask": "Casks/cull.rb" }
 }
