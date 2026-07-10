@@ -471,6 +471,7 @@
     }
 
     .history-section-title {
+        flex: 0 0 auto;
         margin: 4px 0 0;
         color: var(--text-secondary);
         font-size: 10px;
@@ -480,6 +481,7 @@
     }
 
     .history-item {
+        flex: 0 0 auto;
         border: 1px solid var(--border);
         border-radius: var(--radius);
         background: var(--bg);

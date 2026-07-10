@@ -53,6 +53,7 @@ describe('undo history panel contract', () => {
     it('renders readable history rows without expandable diagnostic output', () => {
         expect(panel).toContain('class="history-summary"');
         expect(panel).toContain('class="history-time"');
+        expect(panel).toContain('flex: 0 0 auto;');
         expect(panel).not.toContain('class="history-row"');
         expect(panel).not.toContain('class="history-details"');
         expect(panel).not.toContain('<pre>{formatJson(');
