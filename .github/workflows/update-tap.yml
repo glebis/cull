@@ -43,7 +43,7 @@ jobs:
           fi
 
       - name: Checkout tap
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: glebis/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
