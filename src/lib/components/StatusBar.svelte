@@ -1,9 +1,15 @@
 <script lang="ts">
-    import { viewMode, totalCount, images, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections, activeFolder, folders, activeSmartCollection, activeDetectedClass, imageLoadState, showDetectionBoxes, nsfwMode, shortcutsOpen, agentPanelPinned, agentPanelVisible } from '$lib/stores';
+    import { viewMode, totalCount, images, selectedCount, statusHint, gridPreset, GRID_PRESETS, activeCollection, collections, activeFolder, folders, activeSmartCollection, activeDetectedClass, imageLoadState, showDetectionBoxes, nsfwMode, shortcutsOpen, undoHistoryOpen, agentPanelPinned, agentPanelVisible } from '$lib/stores';
     import { previewDisplayBlanked, previewDisplayFrozen, previewDisplayWebStreamStatus } from '$lib/preview-display-store';
     import { previewDisplayStatusLabel } from '$lib/preview-display';
     import { openCommandPalette } from '$lib/command-palette';
+    import { getMcpStatus } from '$lib/api';
     import { derived } from 'svelte/store';
+    import { onMount } from 'svelte';
+
+    let { agentBusy = false }: { agentBusy?: boolean } = $props();
+    let mcpActiveConnections = $state(0);
+    let mcpStatusErrorLogged = false;
 
     const displayCount = derived(
         [images, totalCount, activeCollection, collections, activeFolder, folders, activeSmartCollection, activeDetectedClass, imageLoadState],
@@ -43,6 +49,16 @@
         [previewDisplayFrozen, previewDisplayBlanked],
         ([$frozen, $blanked]) => previewDisplayStatusLabel($frozen, $blanked)
     );
+    const agentConnectionState = $derived(agentBusy ? 'active' : mcpActiveConnections > 0 ? 'connected' : 'idle');
+    const agentStatusText = $derived(
+        agentConnectionState === 'active'
+            ? 'Active'
+            : agentConnectionState === 'connected'
+                ? `${mcpActiveConnections} connected`
+                : 'Idle'
+    );
+    const agentButtonTitle = $derived(`Toggle Claude Agent panel (${agentStatusText})`);
+    const agentButtonAriaLabel = $derived(`Toggle Claude Agent panel, status ${agentStatusText}`);
 
     function openShortcuts() {
         shortcutsOpen.set(true);
@@ -52,11 +68,33 @@
         openCommandPalette('commands');
     }
 
+    function openUndoHistory() {
+        undoHistoryOpen.set(true);
+    }
+
     function toggleAgentPanel() {
         const open = $agentPanelVisible || $agentPanelPinned;
         agentPanelVisible.set(!open);
         agentPanelPinned.set(!open);
     }
+
+    async function refreshMcpStatus() {
+        try {
+            const status = await getMcpStatus();
+            mcpActiveConnections = status.active_connections;
+        } catch (e) {
+            if (!mcpStatusErrorLogged) {
+                console.error('Failed to load MCP status:', e);
+                mcpStatusErrorLogged = true;
+            }
+        }
+    }
+
+    onMount(() => {
+        refreshMcpStatus();
+        const interval = window.setInterval(refreshMcpStatus, 2000);
+        return () => window.clearInterval(interval);
+    });
 </script>
 
 <div class="statusbar">
@@ -97,21 +135,35 @@
         <button
             class="shortcut-button agent-toggle"
             class:active={$agentPanelVisible || $agentPanelPinned}
+            class:connected={agentConnectionState === 'connected'}
+            class:busy={agentConnectionState === 'active'}
             type="button"
             onclick={toggleAgentPanel}
-            title="Toggle Claude Agent panel"
-            aria-label="Toggle Claude Agent panel"
+            title={agentButtonTitle}
+            aria-label={agentButtonAriaLabel}
             aria-pressed={$agentPanelVisible || $agentPanelPinned}
         >
+            <span class="agent-status-dot" aria-hidden="true"></span>
             <kbd>AI</kbd>
             <span>Agent</span>
+            <span class="agent-state">{agentStatusText}</span>
+        </button>
+        <button
+            class="shortcut-button"
+            type="button"
+            onclick={openUndoHistory}
+            title="⌘+Shift+H: history"
+            aria-label="Open undo history"
+        >
+            <kbd>⌘+Shift+H</kbd>
+            <span>History</span>
         </button>
         <button class="shortcut-button" type="button" onclick={openShortcuts} title="?:help" aria-label="Open keyboard shortcuts">
             <kbd>?</kbd>
             <span>Shortcuts</span>
         </button>
-        <button class="shortcut-button" type="button" onclick={openCommands} title="Cmd+P:commands" aria-label="Open command palette">
-            <kbd>Cmd+P</kbd>
+        <button class="shortcut-button" type="button" onclick={openCommands} title="⌘+P:commands" aria-label="Open command palette">
+            <kbd>⌘+P</kbd>
             <span>Commands</span>
         </button>
     </div>
@@ -201,6 +253,35 @@
     }
     .shortcut-button.active kbd {
         color: var(--green);
+    }
+    .agent-toggle {
+        min-width: 112px;
+    }
+    .agent-status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--text-secondary);
+        opacity: 0.75;
+        flex: none;
+    }
+    .agent-state {
+        color: var(--text-secondary);
+        font-size: 10px;
+    }
+    .agent-toggle.connected .agent-status-dot {
+        background: var(--green);
+        opacity: 1;
+    }
+    .agent-toggle.connected .agent-state {
+        color: var(--green);
+    }
+    .agent-toggle.busy .agent-status-dot {
+        background: var(--orange);
+        opacity: 1;
+    }
+    .agent-toggle.busy .agent-state {
+        color: var(--orange);
     }
     .active-hint {
         color: var(--green);

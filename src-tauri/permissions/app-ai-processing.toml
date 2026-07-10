@@ -7,6 +7,7 @@ commands.allow = [
   "analyze_images",
   "analyze_perceptual_hashes",
   "backfill_image_tags",
+  "cancel_claude_agent_chat_turn",
   "check_ollama",
   "check_ollama_embedding",
   "count_by_detected_class",

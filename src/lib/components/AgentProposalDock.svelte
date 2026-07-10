@@ -8,6 +8,13 @@
         ImageWithFile,
     } from '$lib/api';
     import { estimateAgentBudget } from '$lib/agent-token-estimate';
+    import {
+        parseAgentProposalSourceContext,
+        proposalActorLabel,
+        sourceContextIsStale,
+        sourceContextScopeLabel,
+        type AgentProposalViewContext,
+    } from '$lib/agent-proposal-context';
     import { safeAssetPreviewPath } from '$lib/view-utils';
 
     type Candidate = {
@@ -30,6 +37,7 @@
         activePresetId,
         activeProposalId = null,
         candidateCount = 0,
+        currentViewContext = null,
         visibleImages = [],
         onreviewproposal = () => {},
         ondismissproposal = () => {},
@@ -38,6 +46,7 @@
         onselectpreset = () => {},
         onselectproposal = () => {},
         onvisuallevelcycle = () => {},
+        oncancelturn = () => {},
         onclose = () => {},
     }: {
         proposals: AgentActionProposal[];
@@ -53,6 +62,7 @@
         activePresetId: string | null;
         activeProposalId?: string | null;
         candidateCount?: number;
+        currentViewContext?: AgentProposalViewContext | null;
         visibleImages?: ImageWithFile[];
         onreviewproposal?: (proposalId: string) => void;
         ondismissproposal?: (proposalId: string) => void;
@@ -61,6 +71,7 @@
         onselectpreset?: (presetId: string) => void;
         onselectproposal?: (proposalId: string) => void;
         onvisuallevelcycle?: () => void;
+        oncancelturn?: () => void;
         onclose?: () => void;
     } = $props();
 
@@ -104,6 +115,11 @@
     const showChatThread = $derived(Boolean(lastInstruction || assistantMessage || busy));
     const displayInputTokens = $derived(activeProposal?.estimated_input_tokens ?? draftEstimate.inputTokens);
     const displayCostEur = $derived(activeProposal?.estimated_cost_eur ?? draftEstimate.costEur);
+    const activeSourceContext = $derived(parseAgentProposalSourceContext(activeProposal?.source_context_json));
+    const proposalSourceLabel = $derived(activeProposal ? proposalActorLabel(activeSourceContext, activeProposal.persona) : '');
+    const proposalCreatedLabel = $derived(activeProposal ? formatProposalTimestamp(activeProposal.created_at) : '');
+    const proposalScopeLabel = $derived(sourceContextScopeLabel(activeSourceContext) ?? currentViewContext?.label ?? 'Unknown view');
+    const proposalIsStale = $derived(sourceContextIsStale(activeSourceContext, currentViewContext));
 
     function parseCandidates(itemsJson: string | undefined): Candidate[] {
         if (!itemsJson) return [];
@@ -125,6 +141,14 @@
 
     function shortImageId(imageId: string) {
         return imageId.slice(0, 8);
+    }
+
+    function formatProposalTimestamp(timestamp: string) {
+        const date = new Date(timestamp);
+        if (Number.isNaN(date.getTime())) return timestamp;
+        const day = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+        return `${day} ${time}`;
     }
 
     function startEditPreset(preset: AgentSelectionPreset) {
@@ -208,7 +232,7 @@
         </button>
 
         {#if activeProposal}
-            <section class="proposal-card" aria-label="Pending agent proposal">
+            <section class="proposal-card" class:stale={proposalIsStale} aria-label="Pending agent proposal">
                 <div class="proposal-topline">
                     <span>{activeProposal.kind === 'trash_images' ? 'Trash proposal' : 'Selection proposal'}</span>
                     <strong>Needs approval</strong>
@@ -228,6 +252,14 @@
                 <div class="proposal-headline">
                     <h3>{activeProposal.kind === 'trash_images' ? `${candidateCountLabel} proposed for Trash` : `${candidateCountLabel} proposed`}</h3>
                     <span>{contextLabel}</span>
+                </div>
+                <div class="proposal-meta" class:stale={proposalIsStale}>
+                    <span>By {proposalSourceLabel}</span>
+                    <span>{proposalCreatedLabel}</span>
+                    <span>View: {proposalScopeLabel}</span>
+                    {#if proposalIsStale}
+                        <strong>Stale view</strong>
+                    {/if}
                 </div>
                 {#if primaryCandidate}
                     <article class="candidate featured-candidate">
@@ -335,9 +367,16 @@
                 rows="3"
                 onkeydown={handleInstructionKeydown}
             ></textarea>
-            <button class="primary" type="button" onclick={submitInstruction} disabled={!instruction.trim() || busy}>
-                {busy ? 'Thinking' : 'Send'}
-            </button>
+            <div class="chat-actions">
+                <button class="primary" type="button" onclick={submitInstruction} disabled={!instruction.trim() || busy}>
+                    {busy ? 'Thinking' : 'Send'}
+                </button>
+                {#if busy}
+                    <button class="stop-button" type="button" onclick={oncancelturn}>
+                        Stop
+                    </button>
+                {/if}
+            </div>
         </section>
 
         {#if !activeProposal}
@@ -376,10 +415,12 @@
     .agent-header,
     .header-actions,
     .proposal-actions,
+    .chat-actions,
     .editor-actions,
     .section-header,
     .proposal-topline,
-    .proposal-headline {
+    .proposal-headline,
+    .proposal-meta {
         align-items: center;
         display: flex;
         gap: var(--spacing);
@@ -387,6 +428,7 @@
 
     .agent-header,
     .proposal-actions,
+    .chat-actions,
     .editor-actions,
     .section-header,
     .proposal-topline,
@@ -510,6 +552,24 @@
         min-height: 32px;
     }
 
+    .chat-actions {
+        align-items: stretch;
+    }
+
+    .chat-actions .primary {
+        flex: 1 1 auto;
+    }
+
+    .stop-button {
+        border-color: var(--red);
+        color: var(--red);
+        min-height: 32px;
+    }
+
+    .stop-button:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--red) 18%, transparent);
+    }
+
     .candidate,
     .empty,
     .chat-box,
@@ -526,6 +586,13 @@
         border-left: 3px solid var(--green);
         border-radius: var(--radius);
         padding: calc(var(--spacing) * 1);
+    }
+
+    .proposal-card.stale {
+        background:
+            linear-gradient(180deg, color-mix(in srgb, var(--orange) 12%, var(--surface)), var(--surface) 44%);
+        border-color: color-mix(in srgb, var(--orange) 70%, var(--border));
+        border-left-color: var(--orange);
     }
 
     .profile-box,
@@ -675,6 +742,23 @@
     .proposal-headline span {
         color: var(--text-secondary);
         font-size: 11px;
+    }
+
+    .proposal-meta {
+        color: var(--text-secondary);
+        flex-wrap: wrap;
+        font-size: 10px;
+        line-height: 1.3;
+    }
+
+    .proposal-meta.stale {
+        color: var(--orange);
+    }
+
+    .proposal-meta strong {
+        color: var(--orange);
+        font-size: 10px;
+        font-weight: 700;
     }
 
     .proposal-switcher {

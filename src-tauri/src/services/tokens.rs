@@ -423,18 +423,22 @@ pub fn get_recent_audit(
 ) -> Result<Vec<crate::db_core::models::AuditEntry>, ServiceError> {
     let conn = ctx.db.conn.lock();
     let mut stmt = conn.prepare(
-        "SELECT id, token_id, tool_name, params_json, result_status, timestamp
-         FROM mcp_audit_log ORDER BY id DESC LIMIT ?1",
+        "SELECT a.id, a.token_id, t.name, t.role, a.tool_name, a.params_json, a.result_status, a.timestamp
+         FROM mcp_audit_log a
+         LEFT JOIN mcp_tokens t ON t.id = a.token_id
+         ORDER BY a.id DESC LIMIT ?1",
     )?;
     let entries = stmt
         .query_map(rusqlite::params![limit], |row| {
             Ok(crate::db_core::models::AuditEntry {
                 id: row.get(0)?,
                 token_id: row.get(1)?,
-                tool_name: row.get(2)?,
-                params_json: row.get(3)?,
-                result_status: row.get(4)?,
-                timestamp: row.get(5)?,
+                token_name: row.get(2)?,
+                token_role: row.get(3)?,
+                tool_name: row.get(4)?,
+                params_json: row.get(5)?,
+                result_status: row.get(6)?,
+                timestamp: row.get(7)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1234,6 +1238,21 @@ mod tests {
         assert_eq!(entries[1].tool_name, "get_library_stats");
         assert!(entries[1].token_id.is_none());
         assert_eq!(entries[2].tool_name, "list_images");
+    }
+
+    #[test]
+    fn audit_log_includes_token_name_and_role_for_revoked_tokens() {
+        let (db, secrets, dir, ee, de, se, _tmp) = test_context();
+        let ctx = make_ctx(&db, &secrets, &dir, &ee, &de, &se);
+        let (token, _) = create_token(&ctx, "Review Agent", ROLE_CURATOR, None, None).unwrap();
+
+        revoke_token(&ctx, &token.id).unwrap();
+        log_audit(&ctx, Some(&token.id), "list_images", None, "ok").unwrap();
+
+        let entries = get_recent_audit(&ctx, 1).unwrap();
+        assert_eq!(entries[0].token_id.as_deref(), Some(token.id.as_str()));
+        assert_eq!(entries[0].token_name.as_deref(), Some("Review Agent"));
+        assert_eq!(entries[0].token_role.as_deref(), Some(ROLE_CURATOR));
     }
 
     #[test]

@@ -332,7 +332,7 @@
         position: fixed;
         bottom: 40px;
         right: 16px;
-        z-index: 900;
+        z-index: var(--z-panel);
         width: 320px;
         background: var(--surface);
         border: 1px solid var(--border);

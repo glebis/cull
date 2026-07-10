@@ -25,6 +25,7 @@ import {
     searchOpen,
     selectedIds,
     sessions,
+    undoHistoryOpen,
     shortcutsOpen,
     sessionCanvases,
     settingsOpen,
@@ -35,7 +36,8 @@ import {
     smartCollections,
     folders,
     statusHint,
-    resetLoupeTransform,
+    requestLoupeActualSize,
+    requestLoupeFitIn,
     clientToolsEnabled,
     cycleAgentVisualLevel,
     viewMode,
@@ -106,6 +108,7 @@ export const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
     'Cmd+B': 'Toggle sidebar',
     'Cmd+Z': 'Undo',
     'Cmd+Shift+Z': 'Redo',
+    'Cmd+Shift+H': 'Open action history',
     'Cmd+1': 'Grid view',
     'Cmd+2': 'Loupe view',
     'Cmd+3': 'Compare view',
@@ -761,12 +764,21 @@ function commandItems(): CommandPaletteItem[] {
         {
             id: 'view.actual-size',
             title: 'Actual Size',
-            subtitle: 'Reset loupe zoom and pan',
+            subtitle: 'Show the loupe image at 100%',
+            category: 'View',
+            kind: 'command',
+            keywords: ['zoom', '100', '1:1', 'loupe'],
+            defaultShortcut: 'Cmd+0',
+            run: () => requestLoupeActualSize(),
+        },
+        {
+            id: 'view.fit-in',
+            title: 'Fit In',
+            subtitle: 'Fit the loupe image inside the window',
             category: 'View',
             kind: 'command',
             keywords: ['zoom', 'fit', 'loupe', 'reset'],
-            defaultShortcut: 'Cmd+0',
-            run: () => resetLoupeTransform(),
+            run: () => requestLoupeFitIn(),
         },
         ...buildViewCommands()
             .map(({ mode, title, subtitle, shortcut }): CommandPaletteItem => ({
@@ -809,6 +821,18 @@ function commandItems(): CommandPaletteItem[] {
                     showToast(`Redone: ${label}`, { type: 'info', duration: 4000 });
                     window.dispatchEvent(new CustomEvent('reload-images'));
                 }
+            },
+        },
+        {
+            id: 'edit.undo_history',
+            title: 'Action History',
+            subtitle: 'View recent undoable actions',
+            category: 'Edit',
+            kind: 'command',
+            keywords: ['history', 'undo', 'redo'],
+            defaultShortcut: 'Cmd+Shift+H',
+            run: () => {
+                undoHistoryOpen.set(true);
             },
         },
         {

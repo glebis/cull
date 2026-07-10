@@ -109,7 +109,9 @@ let previewWebStreamStatus = {
 
 let previewState = {
   image_id: null as string | null,
+  image_ids: [] as string[],
   display_mode: 'image_only',
+  layout: 'single',
   overlay: {
     showFilename: false,
     showRating: false,
@@ -301,6 +303,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   },
 
   save_export_image: () => '/mock/exported-slide.png',
+  save_png_to_path: (_: any, args: { outputPath: string }) => args.outputPath,
   assemble_export_pdf: () => '/mock/exported.pdf',
   export_static_publish_package: () => ({
     export_dir: '/mock/static-publishing/client-review',
@@ -352,9 +355,12 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   place_preview_display: () => 'preview-display',
   get_preview_state: () => previewState,
   update_preview_state: (_: any, args: any) => {
+    const imageIds = args.imageIds ?? (args.imageId ? [args.imageId] : []);
     previewState = {
-      image_id: args.imageId ?? null,
+      image_id: args.imageId ?? imageIds[0] ?? null,
+      image_ids: imageIds,
       display_mode: args.displayMode ?? previewState.display_mode,
+      layout: args.layout ?? previewState.layout,
       overlay: args.overlay ? { ...previewState.overlay, ...args.overlay } : previewState.overlay,
       frozen: args.frozen ?? previewState.frozen,
       blanked: args.blanked ?? previewState.blanked,
@@ -527,6 +533,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   set_decision: () => undefined,
   undo: () => 'rating',
   redo: () => 'rating',
+  cancel_claude_agent_chat_turn: () => true,
   trash_images: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   delete_images_permanently: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   rotate_image: (_: any, args: { imageId: string }) => `/mock/library/${args.imageId}_rotated.png`,
@@ -850,6 +857,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   update_canvas_layout: () => undefined,
   delete_canvas: () => undefined,
   list_mcp_tokens: () => [],
+  get_mcp_status: () => ({ active_connections: 0 }),
   create_mcp_token: () => [
     { id: 'token-1', name: 'Smoke', role: 'viewer', scope_json: null, created_at: '2026-05-01T12:00:00Z', expires_at: '2026-07-30T12:00:00Z', last_used_at: null, revoked_at: null },
     'cull_test_secret',
@@ -886,6 +894,10 @@ export async function listen<T>(event: string, handler: MockListener<T>, _option
     listeners.delete(id);
     if (listeners.size === 0) mockListeners.delete(event);
   };
+}
+
+export async function emit<T = any>(event: string, payload?: T): Promise<void> {
+  emitMockEvent(event, payload);
 }
 
 export async function getCurrent(): Promise<string[]> {

@@ -54,8 +54,9 @@ describe('Help menu contract', () => {
         expect(menuSource).toContain('"Install Agent Skills..."');
         expect(frontendMenuSource).toContain("case 'agent_skills'");
         expect(pageSource).toContain('AgentSkillsDialog');
-        expect(dialogSource).toContain('"command": "cull"');
-        expect(dialogSource).toContain('"args": ["--mcp-stdio"]');
+        // The dialog renders the shared canonical config (see mcp-config.ts,
+        // which owns the "command"/"args" contract).
+        expect(dialogSource).toContain('MCP_CONFIG_SNIPPET');
         expect(dialogSource).toContain('docs/agents.md');
     });
 

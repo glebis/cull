@@ -370,9 +370,10 @@ async fn serve_preview_web_stream_request(
 struct PreviewWebStreamSnapshot {
     preview: PreviewState,
     image: Option<PreviewWebStreamImage>,
+    images: Vec<PreviewWebStreamImage>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct PreviewWebStreamImage {
     id: String,
     url: String,
@@ -397,63 +398,88 @@ fn preview_web_stream_snapshot(
 ) -> Result<PreviewWebStreamSnapshot, String> {
     let state = app.state::<AppState>();
     let preview = state.preview_state.get();
-    let image = if preview.blanked {
-        None
-    } else if let Some(image_id) = preview.image_id.as_deref() {
+    let images = if preview.blanked {
+        Vec::new()
+    } else {
+        let image_ids = if preview.image_ids.is_empty() {
+            preview
+                .image_id
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+        } else {
+            preview
+                .image_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+        };
         let images = state
             .db
-            .get_images_by_ids(&[image_id])
+            .get_images_by_ids(&image_ids)
             .map_err(|e| e.to_string())?;
-        images.first().map(|image| {
-            let tags = if preview.overlay.show_tags {
-                state
-                    .db
-                    .list_image_tags(&image.image.id)
-                    .map(|tags| tags.into_iter().map(|tag| tag.name).collect())
-                    .unwrap_or_default()
-            } else {
-                Vec::new()
-            };
-            let generation_run = if preview.overlay.show_prompt || preview.overlay.show_source {
-                state
-                    .db
-                    .get_generation_run_for_image(&image.image.id)
-                    .ok()
-                    .flatten()
-            } else {
-                None
-            };
-            let histogram = if preview.overlay.show_histogram {
-                state
-                    .preview_web_stream
-                    .histogram_for_image(image, &state.app_data_dir)
-                    .ok()
-            } else {
-                None
-            };
-            let prompt = generation_run
-                .as_ref()
-                .and_then(|run| run.prompt.clone())
-                .or_else(|| image.image.ai_prompt.clone());
-            let provider = generation_run.as_ref().and_then(|run| run.provider.clone());
-            let model = generation_run.as_ref().and_then(|run| run.model.clone());
-            preview_web_stream_image(
-                image,
-                &state.app_data_dir,
-                token,
-                preview.version,
-                tags,
-                prompt,
-                provider,
-                model,
-                histogram,
-            )
-        })
-    } else {
-        None
-    };
+        let by_id = images
+            .iter()
+            .map(|image| (image.image.id.as_str(), image))
+            .collect::<HashMap<_, _>>();
 
-    Ok(PreviewWebStreamSnapshot { preview, image })
+        image_ids
+            .iter()
+            .filter_map(|image_id| by_id.get(image_id).copied())
+            .map(|image| {
+                let tags = if preview.overlay.show_tags {
+                    state
+                        .db
+                        .list_image_tags(&image.image.id)
+                        .map(|tags| tags.into_iter().map(|tag| tag.name).collect())
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                let generation_run = if preview.overlay.show_prompt || preview.overlay.show_source {
+                    state
+                        .db
+                        .get_generation_run_for_image(&image.image.id)
+                        .ok()
+                        .flatten()
+                } else {
+                    None
+                };
+                let histogram = if preview.overlay.show_histogram {
+                    state
+                        .preview_web_stream
+                        .histogram_for_image(image, &state.app_data_dir)
+                        .ok()
+                } else {
+                    None
+                };
+                let prompt = generation_run
+                    .as_ref()
+                    .and_then(|run| run.prompt.clone())
+                    .or_else(|| image.image.ai_prompt.clone());
+                let provider = generation_run.as_ref().and_then(|run| run.provider.clone());
+                let model = generation_run.as_ref().and_then(|run| run.model.clone());
+                preview_web_stream_image(
+                    image,
+                    &state.app_data_dir,
+                    token,
+                    preview.version,
+                    tags,
+                    prompt,
+                    provider,
+                    model,
+                    histogram,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let image = images.first().cloned();
+
+    Ok(PreviewWebStreamSnapshot {
+        preview,
+        image,
+        images,
+    })
 }
 
 fn preview_web_stream_image(
@@ -591,6 +617,12 @@ html, body { margin: 0; width: 100%; height: 100%; background: var(--bg); color:
 #app { position: fixed; inset: 0; display: grid; grid-template-columns: 1fr auto; }
 #stage { position: relative; min-width: 0; min-height: 0; display: grid; place-items: center; background: var(--bg); }
 #image { max-width: 100vw; max-height: 100vh; width: auto; height: auto; object-fit: contain; }
+#layout { position: absolute; inset: 0; display: none; gap: 8px; padding: 16px; box-sizing: border-box; }
+#layout[data-layout="compare"] { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr); }
+#layout[data-layout="grid"] { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); }
+.tile { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; border: 1px solid var(--border); background: var(--surface); overflow: hidden; }
+.tile img { width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; }
+.tile figcaption { min-height: 32px; padding: 6px 8px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 11px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #empty { color: var(--text-secondary); font-size: 12px; letter-spacing: 0; }
 #overlay { position: absolute; left: 16px; bottom: 16px; display: flex; gap: 12px; align-items: center; padding: 8px 10px; background: rgba(12,12,18,.78); border: 1px solid var(--border); font-size: 12px; }
 #rail { width: 320px; display: none; border-left: 1px solid var(--border); background: var(--surface); padding: 16px; box-sizing: border-box; overflow: hidden; max-height: 100vh; }
@@ -610,6 +642,7 @@ html, body { margin: 0; width: 100%; height: 100%; background: var(--bg); color:
 <main id="app">
   <section id="stage">
     <img id="image" alt="">
+    <div id="layout"></div>
     <div id="empty">Waiting for Preview Display</div>
     <div id="overlay"></div>
   </section>
@@ -619,6 +652,7 @@ html, body { margin: 0; width: 100%; height: 100%; background: var(--bg); color:
 const params = new URLSearchParams(location.search);
 const token = params.get('token') || '';
 const image = document.getElementById('image');
+const layout = document.getElementById('layout');
 const empty = document.getElementById('empty');
 const overlay = document.getElementById('overlay');
 const rail = document.getElementById('rail');
@@ -635,12 +669,15 @@ function escapeHtml(value) {
 }
 function render(snapshot) {
   const preview = snapshot.preview;
-  const item = snapshot.image;
+  const items = snapshot.images && snapshot.images.length ? snapshot.images : (snapshot.image ? [snapshot.image] : []);
+  const item = items[0];
   if (preview.version === lastVersion && item && image.src.endsWith(item.url)) return;
   lastVersion = preview.version;
   if (!item || preview.blanked) {
     image.removeAttribute('src');
     image.style.display = 'none';
+    layout.style.display = 'none';
+    layout.innerHTML = '';
     empty.style.display = 'block';
     empty.textContent = preview.blanked ? 'Preview Display blanked' : 'Waiting for Preview Display';
     overlay.style.display = 'none';
@@ -648,8 +685,18 @@ function render(snapshot) {
     rail.innerHTML = '';
     return;
   }
-  image.src = item.url;
-  image.style.display = 'block';
+  if (preview.layout === 'single' || items.length === 1) {
+    image.src = item.url;
+    image.style.display = 'block';
+    layout.style.display = 'none';
+    layout.innerHTML = '';
+  } else {
+    image.removeAttribute('src');
+    image.style.display = 'none';
+    layout.dataset.layout = preview.layout || 'grid';
+    layout.style.display = 'grid';
+    layout.innerHTML = items.map((entry) => `<figure class="tile"><img src="${entry.url}" alt="${escapeHtml(entry.filename)}"><figcaption>${escapeHtml(entry.filename)}</figcaption></figure>`).join('');
+  }
   empty.style.display = 'none';
   const parts = [];
   if (preview.overlay.showFilename) parts.push(text(item.filename));
@@ -687,6 +734,7 @@ async function tick() {
     render(await response.json());
   } catch (error) {
     image.style.display = 'none';
+    layout.style.display = 'none';
     empty.style.display = 'block';
     empty.textContent = 'Preview Display stream unavailable';
     overlay.style.display = 'none';

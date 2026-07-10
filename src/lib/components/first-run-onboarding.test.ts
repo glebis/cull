@@ -31,6 +31,13 @@ describe('first-run onboarding (UX-03 + UX-04)', () => {
         it('no longer points users at the sidebar as the only path', () => {
             expect(grid).not.toContain('Use the sidebar to import a folder');
         });
+
+        it('uses a distinct clipboard monitor empty state for the active monitor collection', () => {
+            expect(grid).toContain("clipboardMonitorEmptySrc");
+            expect(grid).toContain("(libraryViewState === 'scope-empty' || libraryViewState === 'empty') && isClipboardMonitorEmpty");
+            expect(grid).toContain('Clipboard monitor is waiting');
+            expect(grid).toContain('Copied images will appear here as they arrive.');
+        });
     });
 
     describe('AI MODELS section defers to content on first run', () => {

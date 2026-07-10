@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+    clampPreviewDisplayPan,
+    clampPreviewDisplayZoom,
     isPreviewDisplayPresetCycleShortcut,
     nextPreviewDisplayPresetMode,
     overlayForPreviewDisplayMode,
+    previewDisplayFitSize,
+    previewDisplayNormalizedFocus,
+    previewDisplayPanForNormalizedFocus,
     previewDisplayStatusLabel,
     previewSyncImageId,
+    previewSyncImageIds,
     withPreviewDisplayField,
 } from './preview-display';
-import { parsePreviewDisplayOverlay } from './preview-display-store';
+import { parsePreviewDisplayLayout, parsePreviewDisplayOverlay } from './preview-display-store';
 import type { ImageWithFile, PreviewState } from './api';
 
 function image(id: string): ImageWithFile {
@@ -34,7 +40,9 @@ function image(id: string): ImageWithFile {
 
 const frozenState: PreviewState = {
     image_id: 'held',
+    image_ids: ['held'],
     display_mode: 'client_review',
+    layout: 'single',
     overlay: {
         showFilename: true,
         showRating: true,
@@ -119,6 +127,10 @@ describe('Preview Display controls', () => {
     });
 
     it('parses persisted field toggles and bounds invalid rail options', () => {
+        expect(parsePreviewDisplayLayout('compare')).toBe('compare');
+        expect(parsePreviewDisplayLayout('grid')).toBe('grid');
+        expect(parsePreviewDisplayLayout('poster')).toBe('single');
+
         expect(parsePreviewDisplayOverlay(JSON.stringify({
             showFilename: true,
             showDimensions: true,
@@ -152,6 +164,18 @@ describe('Preview Display controls', () => {
         expect(previewSyncImageId(image('current'), frozenState, false, false)).toBe('current');
     });
 
+    it('builds layout image sets from focus, selection, and loaded neighbours', () => {
+        const loaded = [image('a'), image('b'), image('c'), image('d'), image('e')];
+
+        expect(previewSyncImageIds(loaded[1], loaded, new Set(), null, false, false, 'compare')).toEqual(['b', 'c']);
+        expect(previewSyncImageIds(loaded[1], loaded, new Set(['d', 'a']), null, false, false, 'grid')).toEqual(['b', 'a', 'd']);
+        expect(previewSyncImageIds(loaded[1], loaded, new Set(), {
+            ...frozenState,
+            image_ids: ['x', 'y'],
+        }, true, false, 'grid')).toEqual(['x', 'y']);
+        expect(previewSyncImageIds(loaded[1], loaded, new Set(), null, false, true, 'grid')).toEqual([]);
+    });
+
     it('summarizes active safety state for the main app indicator', () => {
         expect(previewDisplayStatusLabel(false, false)).toBeNull();
         expect(previewDisplayStatusLabel(true, false)).toBe('Preview frozen');
@@ -168,5 +192,46 @@ describe('Preview Display controls', () => {
 
         expect(disabled.showPrompt).toBe(false);
         expect(disabled.showMetadataRail).toBe(false);
+    });
+
+    it('fits Preview Display images into the viewport before applying user zoom', () => {
+        expect(previewDisplayFitSize(
+            { width: 4000, height: 2000 },
+            { width: 1000, height: 1000 }
+        )).toEqual({ width: 1000, height: 500 });
+
+        expect(previewDisplayFitSize(
+            { width: 2000, height: 4000 },
+            { width: 1000, height: 1000 }
+        )).toEqual({ width: 500, height: 1000 });
+    });
+
+    it('bounds Preview Display zoom and clamps pan to visible image overflow', () => {
+        const imageSize = { width: 4000, height: 2000 };
+        const viewport = { width: 1000, height: 1000 };
+
+        expect(clampPreviewDisplayZoom(0.25)).toBe(1);
+        expect(clampPreviewDisplayZoom(100)).toBe(20);
+        expect(clampPreviewDisplayPan(imageSize, viewport, 1, { x: 500, y: 500 })).toEqual({ x: 0, y: 0 });
+        expect(clampPreviewDisplayPan(imageSize, viewport, 3, { x: 2000, y: -2000 })).toEqual({
+            x: 1000,
+            y: -250,
+        });
+    });
+
+    it('reapplies a saved Preview Display focus point to a different image when possible', () => {
+        const landscape = { width: 4000, height: 2000 };
+        const portrait = { width: 2000, height: 4000 };
+        const viewport = { width: 1000, height: 1000 };
+        const zoom = 3;
+        const pan = { x: -300, y: 100 };
+
+        const focus = previewDisplayNormalizedFocus(landscape, viewport, zoom, pan);
+        const nextPan = previewDisplayPanForNormalizedFocus(portrait, viewport, zoom, focus);
+        const restoredFocus = previewDisplayNormalizedFocus(portrait, viewport, zoom, nextPan);
+
+        expect(focus).toEqual({ x: 0.6, y: 0.43333333333333335 });
+        expect(restoredFocus.x).toBeCloseTo(focus.x);
+        expect(restoredFocus.y).toBeCloseTo(focus.y);
     });
 });

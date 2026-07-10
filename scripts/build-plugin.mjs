@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Build a plugin bundle from plugins/<id>/entry.mjs:
-//   1. copy entry.mjs -> plugins/<id>/dist/plugin.js (single-file ESM, no bundler)
-//   2. write the bundle SHA-256 into plugins/<id>/manifest.json
-//   3. regenerate tests/fixtures/plugin-registry/registry.json with a
+// Prepare a plugin fixture from plugins/<id>/entry.mjs:
+//   1. write the source SHA-256 into plugins/<id>/manifest.json
+//      (the installer writes these bytes to the manifest entry path)
+//   2. regenerate tests/fixtures/plugin-registry/registry.json with a
 //      repo-relative file:// download URL, so the end-to-end Rust proof test
 //      (and manual testing via the plugin_registry_url setting) installs the
 //      exact bytes the checksum describes.
@@ -18,20 +18,17 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pluginId = process.argv[2] ?? 'cull-publish';
 const pluginDir = join(repoRoot, 'plugins', pluginId);
 
-// 1. "Bundle": the plugin source is a single dependency-free ESM file.
+// The plugin source is a single dependency-free ESM file.
 const source = readFileSync(join(pluginDir, 'entry.mjs'));
-const distDir = join(pluginDir, 'dist');
-mkdirSync(distDir, { recursive: true });
-writeFileSync(join(distDir, 'plugin.js'), source);
 
-// 2. Checksum into the manifest.
+// 1. Checksum into the manifest.
 const checksum = `sha256:${createHash('sha256').update(source).digest('hex')}`;
 const manifestPath = join(pluginDir, 'manifest.json');
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 manifest.checksum = checksum;
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
-// 3. Registry fixture (schema cull.plugins.registry.v1). The download URL is
+// 2. Registry fixture (schema cull.plugins.registry.v1). The download URL is
 // repo-relative file://, resolved against the repo root by consumers of the
 // fixture. No `updated` field: the fixture must be deterministic.
 const registry = {
@@ -46,7 +43,7 @@ const registry = {
             minAppVersion: manifest.minAppVersion,
             checksum: manifest.checksum,
             repo: manifest.repo,
-            download: `file://plugins/${pluginId}/dist/plugin.js`,
+            download: `file://plugins/${pluginId}/entry.mjs`,
         },
     ],
 };
@@ -56,6 +53,6 @@ const registryPath = join(fixtureDir, 'registry.json');
 writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
 
 console.log(`built ${pluginId}`);
-console.log(`  bundle:   plugins/${pluginId}/dist/plugin.js (${source.length} bytes)`);
+console.log(`  source:   plugins/${pluginId}/entry.mjs (${source.length} bytes)`);
 console.log(`  checksum: ${checksum}`);
 console.log('  registry: tests/fixtures/plugin-registry/registry.json');

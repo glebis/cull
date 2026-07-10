@@ -6,8 +6,11 @@
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
+    "dialog:default",
+    "dialog:allow-save",
     "opener:default",
     "app-read",
-    "app-ui"
+    "app-ui",
+    "app-export-publishing"
   ]
 }

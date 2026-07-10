@@ -1,0 +1,74 @@
+name: Update Homebrew Tap
+
+# Fires when a GitHub Release is published (i.e. you publish the draft that
+# release.yml created). Bumps the cull cask in glebis/homebrew-tap to match,
+# so the tap version never lags behind the latest release.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to set in the cask (without leading v), e.g. 0.2.6'
+        required: true
+
+jobs:
+  update-cask:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${{ github.event.release.tag_name }}"
+          fi
+          VERSION="${VERSION#v}"
+          if [ -z "$VERSION" ]; then
+            echo "Could not resolve a version" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved cask version: $VERSION"
+
+      - name: Verify the aarch64 DMG exists for this version
+        run: |
+          URL="https://github.com/glebis/cull/releases/download/v${{ steps.ver.outputs.version }}/Cull_${{ steps.ver.outputs.version }}_aarch64.dmg"
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' -L "$URL")
+          echo "$URL -> $CODE"
+          if [ "$CODE" != "200" ]; then
+            echo "Release asset missing; refusing to bump the cask to a broken version." >&2
+            exit 1
+          fi
+
+      - name: Checkout tap
+        uses: actions/checkout@v6
+        with:
+          repository: glebis/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Bump cask version
+        run: |
+          CASK=tap/Casks/cull.rb
+          OLD=$(grep -oE 'version "[^"]+"' "$CASK" | head -1 | sed -E 's/version "(.*)"/\1/')
+          NEW="${{ steps.ver.outputs.version }}"
+          echo "Current: $OLD -> New: $NEW"
+          if [ "$OLD" = "$NEW" ]; then
+            echo "Cask already at $NEW; nothing to do."
+            echo "changed=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          sed -i -E "s/version \"$OLD\"/version \"$NEW\"/" "$CASK"
+          echo "changed=true" >> "$GITHUB_ENV"
+
+      - name: Commit and push
+        if: env.changed == 'true'
+        run: |
+          cd tap
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/cull.rb
+          git commit -m "chore(cull): bump cask to ${{ steps.ver.outputs.version }}"
+          git push

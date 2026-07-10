@@ -62,6 +62,14 @@
     --red: #f7768e;
     --spacing: 8px;
     --radius: 4px;
+    /* Overlay stacking scale — use these for anything fixed/floating at
+       overlay altitude. Toasts must stay above every other layer. */
+    --z-panel: 900;
+    --z-modal: 1000;
+    --z-context-menu: 1100;
+    --z-command-palette: 1200;
+    --z-toast: 1300;
+    --z-drag-overlay: 1400;
     --macos-titlebar-safe-area: 40px;
     --macos-window-controls-width: 78px;
     --font: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;

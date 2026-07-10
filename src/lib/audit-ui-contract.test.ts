@@ -93,7 +93,9 @@ describe('impeccable audit UI contracts', () => {
         // replaced the 'Install model manually' dead-end with a setup-guide link).
         expect(sidebar).toContain('Setup guide');
         expect(sidebar).not.toMatch(/Download model/i);
-        expect(sidebar).toContain('Analyze uncatalogued images');
+        // Batch analysis actions are named distinctly (sidebar audit M6).
+        expect(sidebar).toContain('Detect objects');
+        expect(sidebar).toContain('Describe images');
         expect(sidebar).toContain('Publish clipboard collection');
         expect(settings).toContain('Remote access settings');
         expect(staticPublishing).toContain('Allow search indexing');
@@ -109,7 +111,7 @@ describe('impeccable audit UI contracts', () => {
         expect(sidebar).not.toContain('aria-controls="sidebar-ai-models"');
         expect(sidebar).toContain('aria-pressed={clipboardStatus?.running ?? false}');
         expect(sidebar).toContain('aria-label={regenerating ?');
-        expect(sidebar).toContain('Regenerate thumbnails');
+        expect(sidebar).toContain('Rebuild thumbnails');
         expect(sidebar).toContain('aria-label={rescanning ?');
         expect(sidebar).toContain('Rescan sources');
         expect(sidebar).toContain('Regenerating thumbnails {regenProgress.current} of {regenProgress.total}');
