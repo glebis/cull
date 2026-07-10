@@ -8,14 +8,20 @@ import Harness from './ModalDialog.test-harness.svelte';
 afterEach(() => cleanup());
 
 describe('ModalDialog rendered accessibility behavior', () => {
-    it('exposes a named and described modal and isolates the app shell', async () => {
-        render(Harness, { onclose: vi.fn() });
+    it('exposes a named and described modal and restores the app shell exactly', async () => {
+        const view = render(Harness, { onclose: vi.fn(), visible: true });
         const dialog = screen.getByRole('dialog', { name: 'Accessible test dialog' });
+        const shell = screen.getByText('Background action').parentElement as HTMLElement & { inert: boolean };
         expect(dialog).toHaveAttribute('aria-modal', 'true');
         expect(dialog).toHaveAccessibleDescription('Modal behavior under test');
         await waitFor(() => expect(screen.getByRole('button', { name: 'First action' })).toHaveFocus());
-        expect(screen.getByText('Background action').parentElement)
-            .toHaveAttribute('aria-hidden', 'true');
+        expect(shell.inert).toBe(true);
+        expect(shell).toHaveAttribute('aria-hidden', 'true');
+
+        await view.rerender({ onclose: vi.fn(), visible: false });
+
+        expect(shell.inert).toBe(false);
+        expect(shell).toHaveAttribute('aria-hidden', 'false');
     });
 
     it('wraps Tab and Shift+Tab inside the modal', async () => {

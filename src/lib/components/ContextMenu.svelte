@@ -19,6 +19,11 @@
 
     let { image, x, y, onclose }: Props = $props();
 
+    const opener = typeof document !== 'undefined'
+        && document.activeElement instanceof HTMLElement
+        && document.activeElement !== document.body
+        ? document.activeElement
+        : null;
     let menuEl: HTMLDivElement | undefined = $state();
     let openSubmenu = $state<string | null>(null);
     let collectionList = $state<[string, string, number][]>([]);
@@ -63,6 +68,18 @@
             ? Array.from(menuEl.querySelectorAll<HTMLButtonElement>('button[data-menu-index]'))
             : []
     );
+
+    function restoreOpenerFocus() {
+        if (!opener?.isConnected) return;
+
+        const activeElement = document.activeElement;
+        const menuOwnsFocus = !!menuEl
+            && activeElement instanceof Node
+            && menuEl.contains(activeElement);
+        if (activeElement !== document.body && activeElement !== menuEl && !menuOwnsFocus) return;
+
+        opener.focus({ preventScroll: true });
+    }
 
     async function placeMenu(anchorX: number, anchorY: number) {
         const run = ++placementRun;
@@ -160,6 +177,7 @@
             window.removeEventListener('contextmenu', handleClickOutside);
             window.removeEventListener('keydown', handleWindowKeydown, true);
             window.removeEventListener('resize', handleResize);
+            restoreOpenerFocus();
         };
     });
 

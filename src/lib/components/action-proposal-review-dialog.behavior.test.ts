@@ -56,12 +56,13 @@ describe('ActionProposalReviewDialog rendered behavior', () => {
     it('submits only checked proposal candidates', async () => {
         const user = userEvent.setup();
         const onapplyproposal = vi.fn();
+        const oncancelreview = vi.fn();
         render(ActionProposalReviewDialog, {
             proposal,
             visible: true,
             visibleImages: [],
             onapplyproposal,
-            oncancelreview: vi.fn(),
+            oncancelreview,
         });
 
         expect(screen.getByRole('dialog', { name: 'Review Trash proposal' })).toBeVisible();
@@ -69,7 +70,9 @@ describe('ActionProposalReviewDialog rendered behavior', () => {
         await user.click(screen.getByRole('checkbox', { name: 'Include image-2' }));
         await user.click(screen.getByRole('button', { name: 'Move approved to Trash' }));
 
+        expect(onapplyproposal).toHaveBeenCalledOnce();
         expect(onapplyproposal).toHaveBeenCalledWith('proposal-1', ['image-1']);
+        expect(oncancelreview).not.toHaveBeenCalled();
     });
 
     it('cancels on Escape without applying the proposal', async () => {

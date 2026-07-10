@@ -981,24 +981,31 @@ def test_context_menu(page: Page) -> None:
     wait_mode(page, "grid")
     press(page, "Home")
     before = focused_label(page)
+    opener = page.locator(".thumb.focused")
+    opener.focus()
+    expect(opener).to_be_focused()
 
-    page.locator(".thumb").first.click(button="right")
-    expect(page.locator(".context-menu")).to_be_visible()
+    opener.click(button="right")
+    menu = page.locator(".context-menu")
+    expect(menu).to_be_visible()
 
-    expect(page.locator(".context-menu")).to_contain_text("Rate")
-    expect(page.locator(".context-menu")).to_contain_text("Copy")
+    expect(menu).to_contain_text("Rate")
+    expect(menu).to_contain_text("Copy")
+    menu.get_by_role("menuitem").first.focus()
+    expect(menu.get_by_role("menuitem").first).to_be_focused()
 
-    page.locator('.context-menu button[data-submenu-key="rate"]').hover()
-    expect(page.locator(".context-menu .submenu").first).to_be_visible()
+    menu.locator('button[data-submenu-key="rate"]').hover()
+    expect(menu.locator(".submenu").first).to_be_visible()
 
     # Menu-local Escape closes the submenu first; the capture fallback must not
     # collapse the entire menu while focus is inside it.
     page.keyboard.press("Escape")
-    expect(page.locator(".context-menu")).to_be_visible()
-    expect(page.locator(".context-menu .submenu")).to_have_count(0)
+    expect(menu).to_be_visible()
+    expect(menu.locator(".submenu")).to_have_count(0)
 
     page.keyboard.press("Escape")
-    expect(page.locator(".context-menu")).to_be_hidden()
+    expect(menu).to_be_hidden()
+    expect(opener).to_be_focused()
 
     page.keyboard.press("ArrowRight")
     assert focused_label(page) != before, "Grid did not regain Arrow-key control after closing the context menu"
