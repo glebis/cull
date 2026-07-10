@@ -65,8 +65,7 @@
 
     function findFocusableWithin(root: ParentNode): HTMLElement[] {
         return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-            .filter(isFocusable)
-            .filter(node => node.closest('[tabindex="-1"]') === null);
+            .filter(isFocusable);
     }
 
     function resolveInitialFocus(): HTMLElement | null {

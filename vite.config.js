@@ -1,5 +1,6 @@
 import { configDefaults, defineConfig } from "vitest/config";
 import { sveltekit } from "@sveltejs/kit/vite";
+import { svelteTesting } from "@testing-library/svelte/vite";
 
 const host = process.env.TAURI_DEV_HOST;
 const e2eMock = process.env.CULL_E2E_MOCK === "1";
@@ -16,7 +17,7 @@ const tauriMockAliases = [
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [sveltekit()],
+  plugins: [sveltekit(), svelteTesting()],
   resolve: e2eMock ? { alias: tauriMockAliases } : undefined,
   test: {
     exclude: [...configDefaults.exclude, "**/.worktrees/**", "**/.claude/worktrees/**"],

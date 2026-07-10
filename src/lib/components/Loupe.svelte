@@ -946,6 +946,7 @@
         if (!cropMode) return;
         function handleCropKeyDown(e: KeyboardEvent) {
             if (e.key === 'Escape') {
+                if (ctxMenu.visible) return;
                 e.preventDefault();
                 e.stopPropagation();
                 cancelCrop();

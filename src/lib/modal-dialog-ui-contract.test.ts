@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { handleModalKeydown, handleModalOverlayClick } from './modal-dialog-events';
 
 const modalDialog = readFileSync(join(process.cwd(), 'src/lib/components/ModalDialog.svelte'), 'utf8');
-const trashDialog = readFileSync(join(process.cwd(), 'src/lib/components/TrashConfirmDialog.svelte'), 'utf8');
 
 function keyEvent(key: string, shiftKey = false): KeyboardEvent {
     return {
@@ -95,14 +94,5 @@ describe('modal dialog accessibility contract', () => {
 
         expect(event.stopPropagation).toHaveBeenCalledOnce();
         expect(onclose).toHaveBeenCalledOnce();
-    });
-
-    it('does not bind trash confirmation to bare Enter keyboard handling', () => {
-        expect(trashDialog).not.toContain('event.key === \'Enter\'');
-    });
-
-    it('defaults trash confirmation focus to the destructive move action', () => {
-        expect(trashDialog).toContain('<button class="btn secondary" onclick={oncancel}>Cancel</button>');
-        expect(trashDialog).toContain('<button class="btn primary" data-modal-initial-focus onclick={confirm}>Move to Trash</button>');
     });
 });

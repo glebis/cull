@@ -75,6 +75,13 @@ function makeMockImage(i: number) {
   };
 }
 
+let mockImages = Array.from({ length: 20 }, (_, i) => makeMockImage(i));
+let lastTrashedImages: ReturnType<typeof makeMockImage>[] = [];
+
+function mockImageFixtureIndex(item: ReturnType<typeof makeMockImage>): number {
+  return Number(item.image.id.replace('img-', ''));
+}
+
 function mockImageDataUri(filePath: string): string {
   const filename = filePath.split('/').pop() || 'mock image';
   const hue = Array.from(filename).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360;
@@ -493,8 +500,8 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
       image_count: 5,
     },
   ],
-  list_images: () => Array.from({ length: 20 }, (_, i) => makeMockImage(i)),
-  get_image_count: () => 20,
+  list_images: () => mockImages,
+  get_image_count: () => mockImages.length,
   list_image_ids: () => Array.from({ length: 20 }, (_, i) => `img-${i}`),
   get_images_by_ids: (_: any, args: { imageIds: string[] }) =>
     args.imageIds.map(id => makeMockImage(Number(id.replace('img-', '')) || 0)),
@@ -531,10 +538,22 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   resume_job: () => undefined,
   set_rating: () => undefined,
   set_decision: () => undefined,
-  undo: () => 'rating',
+  undo: () => {
+    if (lastTrashedImages.length > 0) {
+      mockImages = [...mockImages, ...lastTrashedImages]
+        .sort((left, right) => mockImageFixtureIndex(left) - mockImageFixtureIndex(right));
+      lastTrashedImages = [];
+    }
+    return 'rating';
+  },
   redo: () => 'rating',
   cancel_claude_agent_chat_turn: () => true,
-  trash_images: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
+  trash_images: (_: any, args: { imageIds: string[] }) => {
+    const ids = new Set(args.imageIds);
+    lastTrashedImages = mockImages.filter(item => ids.has(item.image.id));
+    mockImages = mockImages.filter(item => !ids.has(item.image.id));
+    return lastTrashedImages.length;
+  },
   delete_images_permanently: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   rotate_image: (_: any, args: { imageId: string }) => `/mock/library/${args.imageId}_rotated.png`,
   crop_image: (_: any, args: { imageId: string }) => `/mock/library/${args.imageId}_crop.png`,

@@ -19,6 +19,11 @@
 
     let { image, x, y, onclose }: Props = $props();
 
+    const opener = typeof document !== 'undefined'
+        && document.activeElement instanceof HTMLElement
+        && document.activeElement !== document.body
+        ? document.activeElement
+        : null;
     let menuEl: HTMLDivElement | undefined = $state();
     let openSubmenu = $state<string | null>(null);
     let collectionList = $state<[string, string, number][]>([]);
@@ -63,6 +68,18 @@
             ? Array.from(menuEl.querySelectorAll<HTMLButtonElement>('button[data-menu-index]'))
             : []
     );
+
+    function restoreOpenerFocus() {
+        if (!opener?.isConnected) return;
+
+        const activeElement = document.activeElement;
+        const menuOwnsFocus = !!menuEl
+            && activeElement instanceof Node
+            && menuEl.contains(activeElement);
+        if (activeElement !== document.body && activeElement !== menuEl && !menuOwnsFocus) return;
+
+        opener.focus({ preventScroll: true });
+    }
 
     async function placeMenu(anchorX: number, anchorY: number) {
         const run = ++placementRun;
@@ -138,10 +155,18 @@
         function handleClickOutside(e: MouseEvent) {
             if (menuEl && !menuEl.contains(e.target as Node)) onclose();
         }
+        function handleWindowKeydown(e: KeyboardEvent) {
+            if (e.key !== 'Escape' || !menuEl) return;
+
+            const targetInsideMenu = e.target instanceof Node && menuEl.contains(e.target);
+            const focusInsideMenu = document.activeElement instanceof Node && menuEl.contains(document.activeElement);
+            if (!targetInsideMenu && !focusInsideMenu) handleMenuKeydown(e);
+        }
         function handleResize() {
             void placeMenu(x, y);
             void placeOpenSubmenu();
         }
+        window.addEventListener('keydown', handleWindowKeydown, true);
         setTimeout(() => {
             window.addEventListener('click', handleClickOutside);
             window.addEventListener('contextmenu', handleClickOutside);
@@ -150,7 +175,9 @@
         return () => {
             window.removeEventListener('click', handleClickOutside);
             window.removeEventListener('contextmenu', handleClickOutside);
+            window.removeEventListener('keydown', handleWindowKeydown, true);
             window.removeEventListener('resize', handleResize);
+            restoreOpenerFocus();
         };
     });
 
@@ -166,6 +193,17 @@
     });
 
     function handleMenuKeydown(e: KeyboardEvent) {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            if (openSubmenu !== null) {
+                openSubmenu = null;
+            } else {
+                onclose();
+            }
+            return;
+        }
+
         const items = flatItems;
         const count = items.length;
         if (count === 0) return;
@@ -192,7 +230,7 @@
                     else if (key === 'moveto') { loadFolders(); }
                 }
             }
-        } else if (e.key === 'ArrowLeft' || e.key === 'Escape') {
+        } else if (e.key === 'ArrowLeft') {
             e.preventDefault();
             if (openSubmenu !== null) {
                 openSubmenu = null;
