@@ -20,15 +20,28 @@ impl Database {
     pub fn list_collections(&self) -> Result<Vec<(String, String, u32)>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT p.id, p.name, COUNT(ci.image_id) as cnt
+            "SELECT p.id, p.name, COUNT(DISTINCT f.image_id) as cnt
              FROM projects p
              LEFT JOIN collection_items ci ON ci.collection_id = p.id
+             LEFT JOIN images i ON i.id = ci.image_id
+             LEFT JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              WHERE (p.collection_type IS NULL OR p.collection_type = 'manual')
              GROUP BY p.id
              ORDER BY p.created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
         rows.collect::<Result<Vec<_>>>()
+    }
+
+    pub fn rename_collection(&self, collection_id: &str, name: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE projects
+             SET name = ?2
+             WHERE id = ?1 AND (collection_type IS NULL OR collection_type = 'manual')",
+            params![collection_id, name],
+        )?;
+        Ok(())
     }
 
     pub fn add_to_collection(&self, collection_id: &str, image_ids: &[&str]) -> Result<()> {

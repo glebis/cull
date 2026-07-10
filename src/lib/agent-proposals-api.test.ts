@@ -7,6 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 import { invoke } from '@tauri-apps/api/core';
 import {
     applyActionProposal,
+    cancelClaudeAgentChatTurn,
     createActionProposal,
     listAgentSelectionPresets,
     listActionProposals,
@@ -105,6 +106,7 @@ describe('agent proposal API wrappers', () => {
             }],
             selected_count: 1,
             visible_count: 12,
+            view_context_json: '{"kind":"folder","label":"Portfolio","path":"/art/portfolio"}',
             model: null,
             max_budget_usd: null,
         };
@@ -119,5 +121,14 @@ describe('agent proposal API wrappers', () => {
 
         await runClaudeAgentChatTurn(request);
         expect(invoke).toHaveBeenCalledWith('run_claude_agent_chat_turn', { request });
+    });
+
+    it('invokes Claude agent chat turn cancellation by request id', async () => {
+        vi.mocked(invoke).mockResolvedValueOnce(true);
+
+        await expect(cancelClaudeAgentChatTurn('agent-request-1')).resolves.toBe(true);
+        expect(invoke).toHaveBeenCalledWith('cancel_claude_agent_chat_turn', {
+            requestId: 'agent-request-1',
+        });
     });
 });

@@ -4,11 +4,14 @@ Canvas editing is non-destructive. Canvas item geometry, display resize, crop, r
 
 Destructive source-image edits, such as file-level crop commands outside Canvas, remain separate workflows and must not be inferred from Canvas transforms.
 
+Canvas save paths must also follow the user data safety checklist in `docs/user-data-safety-checklist.md`.
+
 ## Saved Data
 
 - Display position and display resize live on `items[].x`, `items[].y`, `items[].width`, and `items[].height`.
 - Non-destructive crop and rotation live on `items[].transform.crop` and `items[].transform.rotationDegrees`.
 - Item notes/comments live in `annotations[]` with an item target.
+- Folder/search/collection scope is a render filter, not a delete signal. Saving a visible subset must preserve off-scope `items[]`, groups, connectors, annotations, viewport, and export settings.
 
 ## Export And Agents
 

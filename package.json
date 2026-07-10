@@ -1,6 +1,6 @@
 {
   "name": "cull",
-  "version": "0.2.3",
+  "version": "0.2.5",
   "description": "Local-first desktop image viewer for AI-generated art workflows.",
   "type": "module",
   "scripts": {
@@ -43,7 +43,7 @@
   },
   "homepage": "https://github.com/glebis/cull#readme",
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.186",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.200",
     "@fontsource/eb-garamond": "^5.2.7",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-deep-link": "^2.4.9",

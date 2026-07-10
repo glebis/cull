@@ -1,0 +1,27 @@
+:root {
+  --accent: #bb9af7;
+  --background: #08080c;
+  --bg: #08080c;
+  --blue: #7aa2f7;
+  --border: #1a1a2e;
+  --danger: #f7768e;
+  --field-border: #30324a;
+  --font: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --green: #9ece6a;
+  --header-font: "Geist", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --logo-bg: #ffffff;
+  --muted: #7a7fa0;
+  --orange: #e0af68;
+  --placeholder: #8a8da3;
+  --primary: #7aa2f7;
+  --purple: #bb9af7;
+  --radius: 4px;
+  --red: #f7768e;
+  --serif-font: "EB Garamond", Georgia, "Times New Roman", serif;
+  --spacing: 8px;
+  --success: #9ece6a;
+  --surface: #0c0c12;
+  --text: #e0e0e0;
+  --text-secondary: #7a7fa0;
+  --warning: #e0af68;
+}

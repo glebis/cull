@@ -3,6 +3,11 @@ use crate::services::{tokens, ServiceContext};
 use crate::AppState;
 use tauri::State;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct McpStatus {
+    pub active_connections: u32,
+}
+
 fn ui_op_status<T, E>(result: &Result<T, E>) -> &'static str {
     if result.is_ok() {
         "ok"
@@ -66,6 +71,17 @@ pub(crate) fn rotate_token_audited(ctx: &ServiceContext, token_id: &str) -> Resu
         ui_op_status(&result),
     );
     result.map_err(|e| e.to_string())
+}
+
+pub(crate) fn current_mcp_status() -> McpStatus {
+    McpStatus {
+        active_connections: crate::mcp::socket::active_connections(),
+    }
+}
+
+#[tauri::command]
+pub async fn get_mcp_status() -> Result<McpStatus, String> {
+    Ok(current_mcp_status())
 }
 
 #[tauri::command]
@@ -160,6 +176,16 @@ mod tests {
                 app_handle: None,
             }
         }
+    }
+
+    #[test]
+    fn mcp_status_reports_active_socket_connection_count() {
+        let status = current_mcp_status();
+
+        assert_eq!(
+            status.active_connections,
+            crate::mcp::socket::active_connections()
+        );
     }
 
     #[test]

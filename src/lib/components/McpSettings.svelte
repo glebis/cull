@@ -6,6 +6,7 @@
     import { clientToolsEnabled, navigateTo, showToast, staticPublishingEnabled, viewMode, voiceDictationEnabled } from '$lib/stores';
     import { CLIPBOARD_PASTE_DATE_FORMAT_SETTING, DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT } from '$lib/clipboard-actions';
     import { relativeExpiry, expiryState } from '$lib/token-expiry';
+    import { MCP_CONFIG_SNIPPET } from '$lib/mcp-config';
     import PrivacyDashboard from './PrivacyDashboard.svelte';
     import PluginsSettings from './PluginsSettings.svelte';
 
@@ -289,6 +290,7 @@
             newExpiryDays = '90';
         } catch (e) {
             console.error('Failed to create token:', e);
+            showToast('Could not create token', { detail: String(e), type: 'error', duration: 8000 });
         }
     }
 
@@ -298,6 +300,11 @@
             tokens = tokens.filter(t => t.id !== id);
         } catch (e) {
             console.error('Failed to revoke token:', e);
+            showToast('Could not revoke token', {
+                detail: `The token is still active. ${String(e)}`,
+                type: 'error',
+                duration: 10000,
+            });
         }
     }
 
@@ -311,6 +318,11 @@
             tokens = await listMcpTokens();
         } catch (e) {
             console.error('Failed to rotate token:', e);
+            showToast('Could not rotate token', {
+                detail: `The old secret is still valid. ${String(e)}`,
+                type: 'error',
+                duration: 10000,
+            });
         }
     }
 
@@ -339,16 +351,13 @@
         return `${days}d ago`;
     }
 
-    function copyConfig() {
-        const config = JSON.stringify({
-            mcpServers: {
-                cull: {
-                    command: "/Applications/Cull.app/Contents/MacOS/cull",
-                    args: ["--mcp-stdio"]
-                }
-            }
-        }, null, 2);
-        navigator.clipboard.writeText(config);
+    async function copyConfig() {
+        try {
+            await navigator.clipboard.writeText(MCP_CONFIG_SNIPPET);
+            showToast('Config copied', { type: 'success', duration: 3000 });
+        } catch (e) {
+            showToast('Config copy failed', { detail: String(e), type: 'error', duration: 8000 });
+        }
     }
 </script>
 
@@ -682,14 +691,7 @@
                     Claude Code Config
                     <button class="add-btn" onclick={copyConfig}>Copy</button>
                 </div>
-                <pre class="config-snippet">{`{
-  "mcpServers": {
-    "cull": {
-      "command": "cull",
-      "args": ["--mcp-stdio"]
-    }
-  }
-}`}</pre>
+                <pre class="config-snippet">{MCP_CONFIG_SNIPPET}</pre>
             </div>
         {/if}
     </div>
@@ -703,7 +705,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        z-index: 1000;
+        z-index: var(--z-modal);
     }
     .panel {
         background: var(--surface);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { folderName, buildDisplayFolders, formatImportResult, formatSidebarCount } from './sidebar-utils';
+import { folderName, buildDisplayFolders, buildPinnedCollectionRows, formatImportResult, formatSidebarCount } from './sidebar-utils';
 
 describe('folderName', () => {
     it('returns last segment of a path', () => {
@@ -146,5 +146,27 @@ describe('formatSidebarCount', () => {
     it('uses zero for missing counts', () => {
         expect(formatSidebarCount(null)).toBe('0');
         expect(formatSidebarCount(undefined)).toBe('0');
+    });
+});
+
+describe('buildPinnedCollectionRows', () => {
+    it('moves pinned collections to the top in pin order', () => {
+        const rows: [string, string, number][] = [
+            ['a', 'A', 1],
+            ['b', 'B', 2],
+            ['c', 'C', 3],
+            ['d', 'D', 4],
+        ];
+
+        expect(buildPinnedCollectionRows(rows, ['c', 'b']).map(([id]) => id)).toEqual(['c', 'b', 'a', 'd']);
+    });
+
+    it('ignores stale pinned collection ids', () => {
+        const rows: [string, string, number][] = [
+            ['a', 'A', 1],
+            ['b', 'B', 2],
+        ];
+
+        expect(buildPinnedCollectionRows(rows, ['missing', 'b']).map(([id]) => id)).toEqual(['b', 'a']);
     });
 });

@@ -19,7 +19,11 @@ describe('PrivacyDashboard MCP audit visibility', () => {
 
     it('renders an MCP audit section listing tool, status, and time', () => {
         expect(dashboard).toContain('Agent Access Log');
-        // Each row binds the audited tool name and result status.
+        // Each row binds the audited actor, tool name, and result status.
+        expect(api).toContain('token_name: string | null');
+        expect(api).toContain('token_role: string | null');
+        expect(dashboard).toContain('actorLabel(entry)');
+        expect(dashboard).toContain('actorRole(entry)');
         expect(dashboard).toContain('entry.tool_name');
         expect(dashboard).toContain('entry.result_status');
     });
@@ -33,5 +37,14 @@ describe('PrivacyDashboard MCP audit visibility', () => {
     it('surfaces a count of recent failed-auth events', () => {
         expect(dashboard).toContain("_auth_failed");
         expect(dashboard).toContain('authFailedCount');
+    });
+
+    it('announces audit exports and reveals the saved JSON file', () => {
+        expect(api).toContain('Writes the JSON audit export to Downloads');
+        expect(dashboard).toContain("import { revealItemInDir } from '@tauri-apps/plugin-opener'");
+        expect(dashboard).toContain("showToast('Audit log exported'");
+        expect(dashboard).toContain('await reveal();');
+        expect(dashboard).not.toContain('URL.createObjectURL');
+        expect(dashboard).not.toContain('a.download = `cull-audit-log-');
     });
 });

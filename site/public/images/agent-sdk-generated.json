@@ -1,0 +1,10 @@
+{
+  "output_path": "/Users/glebkalinin/ai_projects/cull/.claude/worktrees/audit-criticals/site/public/images/agent-sdk-generated.png",
+  "prompt": "Illustration in the exact same visual style as the references: very dark near-black background, elegant thin line-art drawing of a person sitting relaxed at a desk, seen in profile, hands off the keyboard, while a small friendly geometric robot assistant made of simple shapes sorts a floating stream of picture frames into two neat stacks. Sparse flat geometric accent shapes: one coral circle, one teal arc, one lime arc, one small purple triangle, a dotted curved line connecting the person to the robot. Minimal, calm, lots of empty dark space, no text.",
+  "model": "gemini-3-pro-image-preview",
+  "preset": null,
+  "platform": "slides",
+  "edit_source": null,
+  "timestamp": "2026-07-02T15:37:22.563280",
+  "duration_s": 20.94
+}

@@ -26,12 +26,18 @@ describe('Preview Display control contract', () => {
             'preview_display_preset_image_only',
             'preview_display_preset_client_review',
             'preview_display_preset_metadata_review',
+            'preview_display_layout_single',
+            'preview_display_layout_compare',
+            'preview_display_layout_grid',
+            'preview_display_copy_to_clipboard',
+            'preview_display_export_png',
         ]) {
             expect(menu).toContain(`"${id}"`);
         }
         expect(menu).toContain('preview_display_frozen');
         expect(menu).toContain('preview_display_blanked');
         expect(menu).toContain('preview_display_mode');
+        expect(menu).toContain('preview_display_layout');
     });
 
     it('adds View menu field toggles and bounded info rail controls', () => {
@@ -70,7 +76,10 @@ describe('Preview Display control contract', () => {
         expect(frontendMenu).toContain("case 'preview_display_freeze'");
         expect(frontendMenu).toContain("case 'preview_display_blank'");
         expect(frontendMenu).toContain("case 'preview_display_preset_client_review'");
+        expect(frontendMenu).toContain("case 'preview_display_layout_grid'");
+        expect(frontendMenu).toContain("case 'preview_display_export_png'");
         expect(frontendMenu).toContain('setPreviewDisplayMode');
+        expect(frontendMenu).toContain('setPreviewDisplayLayout');
         expect(frontendMenu).toContain('setAppSetting');
     });
 

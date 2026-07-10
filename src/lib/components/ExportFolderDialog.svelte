@@ -144,7 +144,7 @@
         align-items: flex-start;
         justify-content: center;
         padding-top: 12vh;
-        z-index: 1210;
+        z-index: var(--z-modal);
     }
     .export-panel {
         width: min(440px, 92vw);

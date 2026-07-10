@@ -6,7 +6,7 @@
     import type { ImageWithFile, OpenWithApplication } from '$lib/api';
     import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast, requestTextInput } from '$lib/stores';
     import { invalidateImageCache, loadImagesForCurrentScope } from '$lib/image-loading';
-    import { clampFloatingPosition } from '$lib/floating-position';
+    import { clampFloatingPosition, placeAdjacentSubmenu } from '$lib/floating-position';
     import { filterMoveFolders, folderDisplayName, folderParentPath } from '$lib/move-menu-utils';
     import { withDecision, withRating, type ImageDecision } from '$lib/selection-updates';
 
@@ -22,11 +22,23 @@
     let menuEl: HTMLDivElement | undefined = $state();
     let openSubmenu = $state<string | null>(null);
     let collectionList = $state<[string, string, number][]>([]);
+    let collectionSearch = $state('');
+    let collectionLoading = $state(false);
     let folderList = $state<[string, number][]>([]);
     let openWithApps = $state<OpenWithApplication[]>([]);
     let openWithLoading = $state(false);
     let openWithLoadedFor = $state<string | null>(null);
     let folderSearch = $state('');
+    let rateSubmenuEl: HTMLDivElement | undefined = $state();
+    let collectionSubmenuEl: HTMLDivElement | undefined = $state();
+    let copySubmenuEl: HTMLDivElement | undefined = $state();
+    let openWithSubmenuEl: HTMLDivElement | undefined = $state();
+    let moveSubmenuEl: HTMLDivElement | undefined = $state();
+    let rateSubmenuPlacement = $state('');
+    let collectionSubmenuPlacement = $state('');
+    let copySubmenuPlacement = $state('');
+    let openWithSubmenuPlacement = $state('');
+    let moveSubmenuPlacement = $state('');
     let menuX = $state(0);
     let menuY = $state(0);
     let menuReady = $state(false);
@@ -35,6 +47,7 @@
 
     let currentRating = $derived(image.selection?.star_rating ?? 0);
     let currentDecision = $derived(image.selection?.decision ?? 'undecided');
+    let filteredCollectionList = $derived(filterCollections(collectionList, collectionSearch));
     let filteredFolderList = $derived(filterMoveFolders(folderList, folderSearch));
 
     let targetIds = $derived(
@@ -84,12 +97,50 @@
         void placeMenu(x, y);
     });
 
+    $effect(() => {
+        if (openSubmenu !== 'rate') return;
+        rateSubmenuEl;
+        void placeRateSubmenu();
+    });
+
+    $effect(() => {
+        if (openSubmenu !== 'collections') return;
+        collectionSearch;
+        collectionLoading;
+        filteredCollectionList.length;
+        collectionSubmenuEl;
+        void placeCollectionSubmenu();
+    });
+
+    $effect(() => {
+        if (openSubmenu !== 'copy') return;
+        copySubmenuEl;
+        void placeCopySubmenu();
+    });
+
+    $effect(() => {
+        if (openSubmenu !== 'openwith') return;
+        openWithLoading;
+        openWithApps.length;
+        openWithSubmenuEl;
+        void placeOpenWithSubmenu();
+    });
+
+    $effect(() => {
+        if (openSubmenu !== 'moveto') return;
+        folderSearch;
+        filteredFolderList.length;
+        moveSubmenuEl;
+        void placeMoveSubmenu();
+    });
+
     onMount(() => {
         function handleClickOutside(e: MouseEvent) {
             if (menuEl && !menuEl.contains(e.target as Node)) onclose();
         }
         function handleResize() {
             void placeMenu(x, y);
+            void placeOpenSubmenu();
         }
         setTimeout(() => {
             window.addEventListener('click', handleClickOutside);
@@ -162,6 +213,71 @@
         };
     }
 
+    function filterCollections(list: [string, string, number][], query: string) {
+        const q = query.trim().toLowerCase();
+        if (!q) return list;
+        return list.filter(([, name]) => name.toLowerCase().includes(q));
+    }
+
+    function submenuPlacementStyle(el: HTMLElement | undefined, preferredMaxHeight: number) {
+        if (!el) return '';
+        const parent = el.closest<HTMLElement>('.submenu-parent');
+        if (!parent) return '';
+
+        const parentRect = parent.getBoundingClientRect();
+        const rect = el.getBoundingClientRect();
+        const placement = placeAdjacentSubmenu(
+            {
+                x: parentRect.left,
+                y: parentRect.top,
+                width: parentRect.width,
+                height: parentRect.height,
+            },
+            { width: rect.width, height: rect.height },
+            { width: window.innerWidth, height: window.innerHeight },
+            preferredMaxHeight,
+        );
+
+        return [
+            `--submenu-left: ${placement.left}px`,
+            `--submenu-top: ${placement.top}px`,
+            `--submenu-max-height: ${placement.maxHeight}px`,
+        ].join('; ');
+    }
+
+    function placeOpenSubmenu() {
+        if (openSubmenu === 'rate') return placeRateSubmenu();
+        if (openSubmenu === 'collections') return placeCollectionSubmenu();
+        if (openSubmenu === 'copy') return placeCopySubmenu();
+        if (openSubmenu === 'openwith') return placeOpenWithSubmenu();
+        if (openSubmenu === 'moveto') return placeMoveSubmenu();
+    }
+
+    async function placeRateSubmenu() {
+        await tick();
+        rateSubmenuPlacement = submenuPlacementStyle(rateSubmenuEl, 460);
+    }
+
+    async function placeCollectionSubmenu() {
+        await tick();
+        collectionSubmenuPlacement = submenuPlacementStyle(collectionSubmenuEl, 460);
+    }
+
+    async function placeCopySubmenu() {
+        await tick();
+        copySubmenuPlacement = submenuPlacementStyle(copySubmenuEl, 460);
+    }
+
+    async function placeOpenWithSubmenu() {
+        await tick();
+        openWithSubmenuPlacement = submenuPlacementStyle(openWithSubmenuEl, 460);
+    }
+
+    async function placeMoveSubmenu() {
+        await tick();
+        moveSubmenuPlacement = submenuPlacementStyle(moveSubmenuEl, 460);
+    }
+
     async function handleRate(n: number) {
         onclose();
         await setRating(image.image.id, n, $activeSession?.id ?? null);
@@ -179,8 +295,20 @@
     }
 
     async function loadCollections() {
+        const opening = openSubmenu !== 'collections';
         openSubmenu = 'collections';
-        collectionList = await listCollections();
+        if (opening) collectionSearch = '';
+        collectionLoading = true;
+        await placeCollectionSubmenu();
+        try {
+            collectionList = await listCollections();
+        } catch (e) {
+            collectionList = [];
+            showToast('Collection list unavailable', { detail: String(e), type: 'warning', duration: 8000 });
+        } finally {
+            collectionLoading = false;
+            await placeCollectionSubmenu();
+        }
     }
 
     async function handleAddToCollection(colId: string) {
@@ -317,6 +445,8 @@
             invalidateCache: true,
             minItems: remainingLoadedCount,
         });
+        const c = await listCollections();
+        collections.set(c);
         if ($focusedIndex >= $images.length) focusedIndex.set(Math.max(0, $images.length - 1));
     }
 
@@ -415,6 +545,17 @@
             folderSearch = '';
         }
     }
+
+    function handleCollectionSearchKeydown(e: KeyboardEvent) {
+        e.stopPropagation();
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            collectionSearch = '';
+        } else if (e.key === 'Enter' && filteredCollectionList.length > 0) {
+            e.preventDefault();
+            void handleAddToCollection(filteredCollectionList[0][0]);
+        }
+    }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -447,7 +588,12 @@
             <span class="current-value">{currentRating > 0 ? '★'.repeat(currentRating) : '—'}</span>
         </button>
         {#if openSubmenu === 'rate'}
-            <div class="submenu" role="menu">
+            <div
+                class="submenu"
+                role="menu"
+                bind:this={rateSubmenuEl}
+                style={rateSubmenuPlacement}
+            >
                 <button class="context-menu-item" class:active={currentRating === 0} onclick={() => handleRate(0)} role="menuitem" tabindex="-1">☆ Unrated</button>
                 {#each [1, 2, 3, 4, 5] as n}
                     <button class="context-menu-item" class:active={currentRating === n} onclick={() => handleRate(n)} role="menuitem" tabindex="-1">{'★'.repeat(n)} {n} Star{n > 1 ? 's' : ''}</button>
@@ -507,14 +653,41 @@
             <span class="arrow">►</span>
         </button>
         {#if openSubmenu === 'collections'}
-            <div class="submenu" role="menu">
-                {#each collectionList as [id, name, count]}
-                    <button class="context-menu-item" onclick={() => handleAddToCollection(id)} role="menuitem" tabindex="-1">
-                        {name} <span class="count">({count})</span>
-                    </button>
-                {/each}
+            <div
+                class="submenu collection-submenu"
+                role="menu"
+                bind:this={collectionSubmenuEl}
+                style={collectionSubmenuPlacement}
+            >
+                <button class="context-menu-item collection-new-item" onclick={handleNewCollection} role="menuitem" tabindex="-1">+ New Collection...</button>
                 <div class="separator"></div>
-                <button class="context-menu-item" onclick={handleNewCollection} role="menuitem" tabindex="-1">+ New Collection...</button>
+                <div class="collection-search-row">
+                    <input
+                        class="collection-search"
+                        type="search"
+                        placeholder="Filter collections"
+                        aria-label="Filter collections"
+                        bind:value={collectionSearch}
+                        onkeydown={handleCollectionSearchKeydown}
+                    />
+                </div>
+                <div class="collection-list">
+                    {#if collectionLoading}
+                        <div class="context-menu-item empty-menu-item">Loading...</div>
+                    {:else}
+                        {#each filteredCollectionList as [id, name, count]}
+                            <button class="context-menu-item collection-item" onclick={() => handleAddToCollection(id)} role="menuitem" tabindex="-1" title={name}>
+                                <span class="collection-name">{name}</span>
+                                <span class="count">({count})</span>
+                            </button>
+                        {/each}
+                        {#if filteredCollectionList.length === 0}
+                            <div class="context-menu-item empty-menu-item">
+                                {collectionList.length === 0 ? 'No collections' : 'No matching collections'}
+                            </div>
+                        {/if}
+                    {/if}
+                </div>
             </div>
         {/if}
     </div>
@@ -558,7 +731,12 @@
             <span class="arrow">►</span>
         </button>
         {#if openSubmenu === 'copy'}
-            <div class="submenu" role="menu">
+            <div
+                class="submenu"
+                role="menu"
+                bind:this={copySubmenuEl}
+                style={copySubmenuPlacement}
+            >
                 <button class="context-menu-item" onclick={handleCopyPath} role="menuitem" tabindex="-1">Copy Path{multiCount > 1 ? 's' : ''}</button>
                 <button class="context-menu-item" onclick={handleCopyFilename} role="menuitem" tabindex="-1">Copy Filename{multiCount > 1 ? 's' : ''}</button>
                 <button class="context-menu-item" onclick={handleCopyFileUrl} role="menuitem" tabindex="-1">Copy File URL{multiCount > 1 ? 's' : ''}</button>
@@ -606,7 +784,12 @@
                 <span class="arrow">►</span>
             </button>
             {#if openSubmenu === 'openwith'}
-                <div class="submenu open-with-submenu" role="menu">
+                <div
+                    class="submenu open-with-submenu"
+                    role="menu"
+                    bind:this={openWithSubmenuEl}
+                    style={openWithSubmenuPlacement}
+                >
                     {#if openWithLoading}
                         <div class="context-menu-item empty-menu-item">Loading...</div>
                     {:else}
@@ -652,7 +835,12 @@
             <span class="arrow">►</span>
         </button>
         {#if openSubmenu === 'moveto'}
-            <div class="submenu move-submenu" role="menu">
+            <div
+                class="submenu move-submenu"
+                role="menu"
+                bind:this={moveSubmenuEl}
+                style={moveSubmenuPlacement}
+            >
                 <button class="context-menu-item" onclick={handleChooseMoveFolder} role="menuitem" tabindex="-1">
                     Choose Folder...
                 </button>
@@ -702,7 +890,7 @@
 <style>
     .context-menu {
         position: fixed;
-        z-index: 10000;
+        z-index: var(--z-context-menu);
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: var(--radius);
@@ -718,6 +906,7 @@
         justify-content: space-between;
         align-items: center;
         width: 100%;
+        box-sizing: border-box;
         padding: 6px 12px;
         background: none;
         border: none;
@@ -727,6 +916,8 @@
         cursor: pointer;
         text-align: left;
         gap: 12px;
+        min-height: 30px;
+        white-space: nowrap;
     }
     .context-menu-item:hover,
     .context-menu-item:focus {
@@ -762,8 +953,8 @@
     }
     .submenu {
         position: absolute;
-        left: 100%;
-        top: -4px;
+        left: var(--submenu-left, 100%);
+        top: var(--submenu-top, -4px);
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: var(--radius);
@@ -771,21 +962,31 @@
         min-width: 180px;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
     }
+    .collection-submenu {
+        display: flex;
+        flex-direction: column;
+        min-width: 380px;
+        max-width: min(560px, calc(100vw - 32px));
+        max-height: var(--submenu-max-height, min(460px, calc(100vh - 16px)));
+        overflow: hidden;
+    }
     .move-submenu {
         display: flex;
         flex-direction: column;
         min-width: 340px;
         max-width: min(460px, calc(100vw - 32px));
-        max-height: min(420px, calc(100vh - 24px));
+        max-height: var(--submenu-max-height, min(420px, calc(100vh - 24px)));
         overflow: hidden;
     }
     .open-with-submenu {
         min-width: 240px;
         max-width: min(360px, calc(100vw - 32px));
     }
+    .collection-search-row,
     .folder-search-row {
         padding: 4px 8px 6px;
     }
+    .collection-search,
     .folder-search {
         box-sizing: border-box;
         width: 100%;
@@ -797,12 +998,30 @@
         font: inherit;
         outline: none;
     }
+    .collection-search:focus,
     .folder-search:focus {
         border-color: var(--blue);
     }
+    .collection-list,
     .folder-list {
         min-height: 0;
         overflow-y: auto;
+    }
+    .collection-item {
+        min-height: 30px;
+    }
+    .collection-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .collection-new-item {
+        color: var(--green);
+    }
+    .collection-new-item:hover,
+    .collection-new-item:focus {
+        color: var(--bg);
     }
     .folder-item {
         align-items: flex-start;

@@ -8,57 +8,67 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     <header class="topbar">
       <a class="mark" href="/" aria-label="Cull home">
         <img src="/images/cull-app-logo.png" alt="" />
+        <span class="mark-name">CULL</span>
       </a>
-      <span class="release-note">early release / open source</span>
+      <span class="topbar-tagline">local-first <span class="tagline-x">&times;</span> agent-ready: <span class="tagline-tag tagline-tag--mcp">mcp</span> <span class="tagline-x">&times;</span> <span class="tagline-tag tagline-tag--cli">cli</span> <span class="tagline-x">&times;</span> <span class="tagline-tag tagline-tag--skill">skill</span></span>
+      <span class="release-note">
+        <svg class="osi-mark" viewBox="0 0 24 24" role="img" aria-label="Open source" fill="currentColor"><path fill-rule="evenodd" d="M12 1.6C6.26 1.6 1.6 6.26 1.6 12c0 4.51 2.87 8.35 6.88 9.79l2.06-5.53a4.52 4.52 0 1 1 2.92 0l2.06 5.53A10.41 10.41 0 0 0 22.4 12c0-5.74-4.66-10.4-10.4-10.4Z"/></svg>
+        open source
+      </span>
     </header>
 
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <p class="eyebrow hero-step-1">local-first / agent-ready</p>
         <h1 id="hero-title" class="hero-step-2">
-          <span>Go from</span>
+          <span class="h1-connector">Go from</span>
           <button class="rotating-line-control" type="button" data-rotating-line="from" aria-label="Change starting material">
             <span data-rotating-line-value="from">500 images</span>
           </button>
-          <span>to</span>
+          <span class="h1-connector">to</span>
           <button class="rotating-line-control rotating-line-control--outcome" type="button" data-rotating-line="to" aria-label="Change finished outcome">
             <span data-rotating-line-value="to">20 keepers</span>
           </button>
         </h1>
-        <p class="lede hero-step-3">A fast image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac.</p>
+        <p class="lede hero-step-3">A fast free and open source image review tool for people who shoot, generate, or produce at volume. Your files stay on your Mac.</p>
       </div>
-      <figure class="product-shot hero-step-4">
-        <img src="/images/cull-state-preview.png" alt="App state with batch counts, image decisions, prompt metadata, and agent queue" />
-      </figure>
-      <form class="signup-form signup-form--featured hero-step-5" data-signup-form>
-        <label for="email">Get early builds and the open-source launch update.</label>
-        <div class="signup-row">
-          <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="signup-status" required />
-          <button type="submit" data-submit-button>Get notified</button>
+      <figure class="product-shot hero-step-4" data-slideshow>
+        <div class="slideshow-track">
+          <img class="slideshow-slide is-current" src="/images/cull-grid-real.png" alt="Cull's grid view with the search bar open, showing smart filters like Picks, Rejects, and GPT Images across a large library" />
+          <img class="slideshow-slide" src="/images/cull-loupe-real.png" alt="Cull's loupe view showing a single painterly landscape image full-screen" loading="lazy" />
+          <img class="slideshow-slide" src="/images/cull-compare-real.png" alt="Cull's side-by-side compare view weighing two poster variants against each other" loading="lazy" />
+          <img class="slideshow-slide" src="/images/cull-lineage-real.png" alt="Cull's lineage view grouping a generation series with charts and variant comparisons" loading="lazy" />
+          <img class="slideshow-slide" src="/images/cull-canvas-real.png" alt="Cull's canvas view arranging dozens of images into a freeform moodboard" loading="lazy" />
+          <img class="slideshow-slide" src="/images/cull-agent-real.png" alt="Cull's AI Agent panel proposing a portfolio selection next to the image grid" loading="lazy" />
+          <img class="slideshow-slide" src="/images/cull-export-real.png" alt="Cull's export master with client delivery presets and a slide preview" loading="lazy" />
         </div>
-        <p id="signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
-      </form>
-    </section>
-
-    <section class="feature-note feature-note--boring reveal-surface" aria-labelledby="boring-title" data-reveal>
-      <figure class="feature-note-illustration reveal-item reveal-delay-0">
-        <img src="/images/boring-work-generated.png" alt="Photos, artwork, contact sheets, and color swatches being sorted into a portfolio box" />
+        <div class="slideshow-dots" role="tablist" aria-label="Screenshots">
+          <button type="button" role="tab" aria-selected="true" aria-label="Screenshot 1" data-slide-dot="0" class="is-current"></button>
+          <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 2" data-slide-dot="1"></button>
+          <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 3" data-slide-dot="2"></button>
+          <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 4" data-slide-dot="3"></button>
+          <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 5" data-slide-dot="4"></button>
+          <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 6" data-slide-dot="5"></button>
+          <button type="button" role="tab" aria-selected="false" aria-label="Screenshot 7" data-slide-dot="6"></button>
+        </div>
       </figure>
-      <div class="feature-note-copy reveal-item reveal-delay-2">
-        <h2 id="boring-title">The boring part of creative work, made fast</h2>
-        <p>Most tools are built for editing. This is built for the moment before that, when you have hundreds of images and need to reach a final set.</p>
-        <p>Look carefully, decide clearly, and make your work available to people and agents without friction.</p>
-      </div>
-    </section>
-
-    <section class="feature-note feature-note--artist reveal-surface" aria-labelledby="artist-title" data-reveal>
-      <figure class="feature-note-illustration reveal-item reveal-delay-0">
-        <img class="artist-founder-image artist-founder-image--camera" src="/images/artist-founder-camera-generated.png" alt="" />
-      </figure>
-      <div class="feature-note-copy reveal-item reveal-delay-2">
-        <h2 id="artist-title">Made by artists for artists</h2>
-        <p>I, <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a>, built this after getting tired of expensive, slow tools that made image work feel heavier than it needed to be. I wanted something <span class="founder-note-emphasis">open, local, and agent-friendly</span>: closer to Obsidian for images than another locked creative suite.</p>
-      </div>
+      <aside class="download-block hero-step-5" aria-label="Download Cull">
+        <a class="download-button" href="https://github.com/glebis/cull/releases/latest" data-download-button>
+          <svg class="apple-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.98 12.62c-.03-2.5 2.04-3.7 2.13-3.76-1.16-1.7-2.97-1.93-3.61-1.96-1.54-.16-3 .9-3.78.9-.77 0-1.98-.88-3.25-.86-1.67.03-3.21.97-4.07 2.47-1.74 3.01-.44 7.46 1.25 9.9.83 1.2 1.81 2.54 3.1 2.49 1.25-.05 1.72-.8 3.22-.8 1.5 0 1.93.8 3.25.78 1.34-.03 2.19-1.21 3-2.42a10.8 10.8 0 0 0 1.36-2.79c-.03-.02-2.6-1-2.6-3.95ZM14.5 5.27c.68-.83 1.15-1.98 1.02-3.12-.99.04-2.18.66-2.89 1.48-.63.73-1.19 1.9-1.04 3.02 1.1.09 2.22-.56 2.91-1.38Z"/></svg>
+          Download for macOS
+        </a>
+        <ul class="download-specs-list">
+          <li><span class="spec-icon" aria-hidden="true">&#9673;</span>macOS 11+ &middot; Apple Silicon</li>
+          <li><span class="spec-icon" aria-hidden="true">&#9098;</span><span data-release-version>latest release</span></li>
+        </ul>
+        <p class="brew-label">or install with Homebrew</p>
+        <div class="brew-row">
+          <code class="brew-command" id="brew-command">brew install --cask glebis/tap/cull</code>
+          <button class="brew-copy" type="button" data-brew-copy aria-label="Copy brew install command">
+            <svg class="brew-copy-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg>
+            <svg class="brew-copy-icon brew-copy-icon--done" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5"/></svg>
+          </button>
+        </div>
+      </aside>
     </section>
 
     <section class="claims reveal-surface" aria-label="Core claims" data-reveal>
@@ -80,15 +90,23 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <figure class="claim-illustration">
           <img src="/images/claim-agent-surface.png" alt="" />
         </figure>
-        <h2>AI can help when you want it</h2>
-        <p>Sort a folder yourself, or hand it to your agent through CLI or MCP when you want help.</p>
+        <h2>Agents when you want them</h2>
+        <p>Integrate via MCP or CLI. Let agents help you cull, tag, and organize &mdash; on your terms.</p>
       </div>
     </section>
 
-    <section class="workflow reveal-surface" aria-labelledby="workflow-title" data-reveal>
-      <div class="reveal-item reveal-delay-0">
-        <h2 id="workflow-title">From folder to final set</h2>
+    <section class="feature-note feature-note--agent-sdk reveal-surface" aria-labelledby="agent-sdk-title" data-reveal>
+      <figure class="feature-note-illustration reveal-item reveal-delay-0">
+        <img src="/images/agent-sdk-mono.png" alt="A person at a desk directing a stream of pictures that sorts itself into keep and reject stacks" loading="lazy" />
+      </figure>
+      <div class="feature-note-copy reveal-item reveal-delay-2">
+        <h2 id="agent-sdk-title">Ask Claude to do the first pass</h2>
+        <p>Cull now ships with a built-in agent chat powered by the Claude Agent SDK. Describe what you want in plain language — "pick the sharpest shot from every series", "shortlist the warm portraits" — and Claude works through your library.</p>
+        <p>Nothing changes without you: the agent proposes a selection, you see exactly which images are affected and what it costs, then approve or reject. Prefer your own setup? The same surface is open to any agent over MCP or the headless CLI.</p>
       </div>
+    </section>
+
+    <section class="workflow reveal-surface" aria-label="From folder to final set" data-reveal>
       <div class="workflow-list">
         <article class="reveal-item reveal-delay-1" data-command="import folder">
           <figure class="workflow-illustration"><img src="/images/workflow-folder.png" alt="" loading="lazy" /></figure>
@@ -113,53 +131,209 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       </div>
     </section>
 
-    <section class="open-source-note reveal-surface" aria-labelledby="open-source-title" data-reveal>
-      <figure class="open-source-illustration reveal-item reveal-delay-0">
-        <img src="/images/open-source-agents.png" alt="" />
+    <section class="artist-panel reveal-surface" aria-labelledby="artist-title" data-reveal>
+      <div class="artist-panel-copy reveal-item reveal-delay-1">
+        <h2 id="artist-title">Made by artists for artists</h2>
+        <p>I, <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a>, built this after getting tired of expensive, slow tools that made image work feel heavier than it needed to be. I wanted something <span class="founder-note-emphasis">open, local, and agent-friendly</span>: closer to Obsidian for images than another locked creative suite.</p>
+        <p>Free and open source. The code is public, your files stay on your machine, and no company can pull the tool away from you.</p>
+        <p class="artist-panel-links">
+          <a href="https://github.com/glebis/cull">GitHub</a><span class="tagline-x">|</span><a href="https://t.me/glebkalinin">Telegram</a><span class="tagline-x">|</span><a href="https://www.linkedin.com/in/glebkalinin/">LinkedIn</a>
+        </p>
+      </div>
+      <figure class="artist-panel-illustration reveal-item reveal-delay-2">
+        <img class="artist-founder-image artist-founder-image--camera" src="/images/artist-founder-camera-generated.png" alt="" />
       </figure>
-      <div class="open-source-copy reveal-item reveal-delay-2">
-        <p class="eyebrow">built in the open</p>
-        <h2 id="open-source-title">Open source by design</h2>
-        <p>Free and open source. The code is public, your files stay on your machine, and no company can pull the tool away from you. Built with human direction and AI coding help, then reviewed and shipped by a person.</p>
-        <p>Current repository history: <strong>653 commits</strong> and counting.</p>
-      </div>
     </section>
 
-    <section class="bottom-signup reveal-surface" aria-labelledby="privacy-title" data-reveal>
-      <div class="reveal-item reveal-delay-0">
-        <h2 id="privacy-title">Be first when it ships</h2>
-      </div>
-      <div class="bottom-signup-copy reveal-item reveal-delay-2">
-        <form class="signup-form signup-form--featured signup-form--bottom" data-signup-form>
-          <label for="bottom-email">Get early builds and the open-source launch update.</label>
-          <div class="signup-row">
-            <input id="bottom-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="bottom-signup-status" required />
-            <button type="submit" data-submit-button>Get notified</button>
-          </div>
-          <p id="bottom-signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
-        </form>
-      </div>
+    <section class="pull-quote reveal-surface" aria-label="Keep what matters" data-reveal>
+      <svg class="pull-quote-decor pull-quote-decor--left" viewBox="0 0 120 90" aria-hidden="true">
+        <circle cx="26" cy="34" r="16" fill="var(--green)" opacity="0.85" />
+        <path d="M40 46 C 62 66, 84 70, 108 62" fill="none" stroke="var(--text-secondary)" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.6" />
+        <circle cx="112" cy="61" r="4" fill="var(--orange)" opacity="0.9" />
+      </svg>
+      <svg class="pull-quote-decor pull-quote-decor--right" viewBox="0 0 120 90" aria-hidden="true">
+        <path d="M10 28 C 38 20, 62 24, 82 38" fill="none" stroke="var(--text-secondary)" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.6" />
+        <path d="M116 30 L 88 44 L 116 58 Z" fill="var(--purple)" opacity="0.85" />
+      </svg>
+      <p class="pull-quote-text reveal-item reveal-delay-1">Keep what matters.</p>
     </section>
 
-    <figure class="footer-illustration reveal-surface" aria-label="Image workflow from local archive to agent surfaces" data-reveal>
-      <img src="/images/footer-line-map.png" alt="" />
-    </figure>
+    <section class="bottom-signup reveal-surface" aria-label="Sign up for release updates" data-reveal>
+      <form class="signup-form signup-form--featured signup-form--bottom reveal-item reveal-delay-1" data-signup-form>
+        <label for="bottom-email">Stay up to date with releases.</label>
+        <div class="signup-row">
+          <input id="bottom-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-describedby="bottom-signup-status" required />
+          <button type="submit" data-submit-button>Get notified</button>
+        </div>
+        <p id="bottom-signup-status" class="form-status" data-form-status aria-live="polite">One confirmation email. No lists, no noise.</p>
+      </form>
+    </section>
 
     <footer class="site-footer">
-      <div class="site-footer-meta">
-        <p>Made in 🇪🇺 Berlin by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a></p>
-        <p class="footer-fineprint">No cookies, no cross-site tracking.</p>
+      <div class="site-footer-brand">
+        <img src="/images/cull-app-logo.png" alt="" />
       </div>
-      <nav aria-label="Footer links">
-        <a href="https://github.com/glebis/cull">Repository</a>
-        <a href="https://github.com/glebis">Gleb's Github</a>
-        <a href="https://t.me/glebkalinin">Telegram</a>
+      <nav class="site-footer-columns" aria-label="Footer links">
+        <div class="footer-col">
+          <p class="footer-col-title footer-col-title--product">product</p>
+          <a href="https://github.com/glebis/cull/releases/latest">Download</a>
+          <a href="https://github.com/glebis/cull/blob/main/CHANGELOG.md">Changelog</a>
+        </div>
+        <div class="footer-col">
+          <p class="footer-col-title footer-col-title--open">open source</p>
+          <a href="https://github.com/glebis/cull">Repository</a>
+          <a href="https://github.com/glebis/cull/issues">Issues</a>
+          <a href="https://github.com/glebis/cull/blob/main/LICENSE">License</a>
+        </div>
+        <div class="footer-col">
+          <p class="footer-col-title footer-col-title--community">community</p>
+          <a href="https://github.com/glebis">Gleb's GitHub</a>
+          <a href="https://t.me/glebkalinin">Telegram</a>
+          <a href="https://www.linkedin.com/in/glebkalinin/">LinkedIn</a>
+        </div>
       </nav>
+      <a class="footer-star-card" href="https://github.com/glebis/cull">
+        <span class="footer-star-title">&#9733; Star on GitHub</span>
+        <span class="footer-star-copy">Help the project grow. Every star counts.</span>
+      </a>
+      <div class="site-footer-bottom">
+        <p>Made in 🇪🇺 Berlin by <a href="https://www.linkedin.com/in/glebkalinin/">Gleb Kalinin</a> &middot; No cookies, no cross-site tracking.</p>
+        <a href="https://github.com/glebis/cull/blob/main/LICENSE">MIT License</a>
+      </div>
     </footer>
   </div>
 `;
 
+const brewCopyButton = document.querySelector<HTMLButtonElement>("[data-brew-copy]");
+brewCopyButton?.addEventListener("click", async () => {
+  const command = document.getElementById("brew-command")?.textContent?.replace(/ /g, " ").trim();
+  if (!command) {
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(command);
+    brewCopyButton.dataset.copied = "true";
+    brewCopyButton.setAttribute("aria-label", "Copied");
+  } catch {
+    brewCopyButton.setAttribute("aria-label", "Copy failed - select the command manually");
+  }
+  window.setTimeout(() => {
+    delete brewCopyButton.dataset.copied;
+    brewCopyButton.setAttribute("aria-label", "Copy brew install command");
+  }, 1800);
+});
+
 const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+const downloadButton = document.querySelector<HTMLAnchorElement>("[data-download-button]");
+const releaseVersion = document.querySelector<HTMLElement>("[data-release-version]");
+if (downloadButton) {
+  fetch("https://api.github.com/repos/glebis/cull/releases/latest")
+    .then((response) => (response.ok ? response.json() : Promise.reject(new Error(String(response.status)))))
+    .then((release: { tag_name?: string; assets?: { name: string; browser_download_url: string }[] }) => {
+      if (release.tag_name && releaseVersion) {
+        releaseVersion.textContent = release.tag_name;
+      }
+      const dmg = release.assets?.find((asset) => asset.name.endsWith(".dmg"));
+      if (dmg) {
+        downloadButton.href = dmg.browser_download_url;
+      }
+    })
+    .catch(() => {
+      /* keep the releases page fallback */
+    });
+}
+
+const slideshow = document.querySelector<HTMLElement>("[data-slideshow]");
+if (slideshow) {
+  const slides = [...slideshow.querySelectorAll<HTMLImageElement>(".slideshow-slide")];
+  const dots = [...slideshow.querySelectorAll<HTMLButtonElement>("[data-slide-dot]")];
+  let currentSlide = 0;
+  let slideshowTimer: number | undefined;
+  let autoAdvance = !motionQuery.matches;
+
+  const showSlide = (index: number) => {
+    currentSlide = (index + slides.length) % slides.length;
+    slides.forEach((slide, i) => slide.classList.toggle("is-current", i === currentSlide));
+    dots.forEach((dot, i) => {
+      dot.classList.toggle("is-current", i === currentSlide);
+      dot.setAttribute("aria-selected", i === currentSlide ? "true" : "false");
+    });
+  };
+
+  const stopSlideshow = () => {
+    if (slideshowTimer !== undefined) {
+      window.clearInterval(slideshowTimer);
+      slideshowTimer = undefined;
+    }
+  };
+
+  const startSlideshow = () => {
+    stopSlideshow();
+    if (autoAdvance) {
+      slideshowTimer = window.setInterval(() => showSlide(currentSlide + 1), 5000);
+    }
+  };
+
+  for (const dot of dots) {
+    dot.addEventListener("click", () => {
+      autoAdvance = false;
+      stopSlideshow();
+      showSlide(Number(dot.dataset.slideDot));
+    });
+  }
+
+  const advance = (direction: number) => {
+    autoAdvance = false;
+    stopSlideshow();
+    showSlide(currentSlide + direction);
+  };
+
+  const track = slideshow.querySelector<HTMLElement>(".slideshow-track");
+  if (track) {
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let suppressClick = false;
+
+    track.addEventListener("click", () => {
+      if (suppressClick) {
+        return;
+      }
+      advance(1);
+    });
+
+    track.addEventListener(
+      "touchstart",
+      (event) => {
+        const touch = event.changedTouches[0];
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+      },
+      { passive: true },
+    );
+
+    track.addEventListener(
+      "touchend",
+      (event) => {
+        const touch = event.changedTouches[0];
+        const deltaX = touch.clientX - touchStartX;
+        const deltaY = touch.clientY - touchStartY;
+        if (Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY)) {
+          suppressClick = true;
+          advance(deltaX < 0 ? 1 : -1);
+          window.setTimeout(() => {
+            suppressClick = false;
+          }, 400);
+        }
+      },
+      { passive: true },
+    );
+  }
+
+  slideshow.addEventListener("mouseenter", stopSlideshow);
+  slideshow.addEventListener("mouseleave", startSlideshow);
+  startSlideshow();
+}
 const pageShell = document.querySelector<HTMLElement>(".page-shell");
 
 if (pageShell) {
@@ -365,7 +539,7 @@ function protectHangingWords(root: HTMLElement): void {
       if (!parent || !node.textContent?.trim()) {
         return NodeFilter.FILTER_REJECT;
       }
-      if (["SCRIPT", "STYLE", "TEXTAREA"].includes(parent.tagName)) {
+      if (["SCRIPT", "STYLE", "TEXTAREA", "CODE"].includes(parent.tagName)) {
         return NodeFilter.FILTER_REJECT;
       }
       return NodeFilter.FILTER_ACCEPT;

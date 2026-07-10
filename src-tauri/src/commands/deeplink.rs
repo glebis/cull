@@ -18,6 +18,9 @@ pub struct OpenParams {
     pub focus: Option<u32>,
     pub image_id: Option<String>,
     pub gap: Option<u32>,
+    pub drag_drop: Option<bool>,
+    pub drop_x: Option<f64>,
+    pub drop_y: Option<f64>,
 }
 
 /// Validate that a single path is safe for deep-link access.
@@ -100,6 +103,9 @@ pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams>
         focus: None,
         image_id: None,
         gap: None,
+        drag_drop: None,
+        drop_x: None,
+        drop_y: None,
     };
 
     validate_open_params(params).ok()
@@ -129,6 +135,13 @@ pub fn open_params_for_urls(urls: &[String]) -> Vec<OpenParams> {
 }
 
 pub fn open_params_for_drag_drop_paths(paths: &[PathBuf]) -> Vec<OpenParams> {
+    open_params_for_drag_drop_paths_at(paths, None)
+}
+
+pub fn open_params_for_drag_drop_paths_at(
+    paths: &[PathBuf],
+    drop_position: Option<(f64, f64)>,
+) -> Vec<OpenParams> {
     let dirs: Vec<String> = paths
         .iter()
         .filter(|p| p.is_dir())
@@ -144,6 +157,9 @@ pub fn open_params_for_drag_drop_paths(paths: &[PathBuf]) -> Vec<OpenParams> {
         return vec![OpenParams {
             folder: Some(dirs[0].clone()),
             view: Some("grid".to_string()),
+            drag_drop: Some(true),
+            drop_x: drop_position.map(|(x, _)| x),
+            drop_y: drop_position.map(|(_, y)| y),
             ..OpenParams::default()
         }];
     }
@@ -159,6 +175,9 @@ pub fn open_params_for_drag_drop_paths(paths: &[PathBuf]) -> Vec<OpenParams> {
             },
             paths: if file_count > 1 { Some(files) } else { None },
             view: Some(if file_count == 1 { "loupe" } else { "grid" }.to_string()),
+            drag_drop: Some(true),
+            drop_x: drop_position.map(|(x, _)| x),
+            drop_y: drop_position.map(|(_, y)| y),
             ..OpenParams::default()
         });
     }
@@ -166,6 +185,9 @@ pub fn open_params_for_drag_drop_paths(paths: &[PathBuf]) -> Vec<OpenParams> {
     if !params.is_empty() || dirs.len() > 1 {
         params.extend(dirs.into_iter().map(|folder| OpenParams {
             folder: Some(folder),
+            drag_drop: Some(true),
+            drop_x: drop_position.map(|(x, _)| x),
+            drop_y: drop_position.map(|(_, y)| y),
             ..OpenParams::default()
         }));
     }
@@ -214,6 +236,9 @@ pub async fn open_with_params(
         focus,
         image_id,
         gap,
+        drag_drop: None,
+        drop_x: None,
+        drop_y: None,
     };
     let validated = validate_open_params(params)?;
     emit_open_params(&app, validated).map_err(|e| e.to_string())
@@ -241,6 +266,9 @@ pub fn parse_deep_link(url: &str) -> Result<OpenParams, String> {
         focus: None,
         image_id: None,
         gap: None,
+        drag_drop: None,
+        drop_x: None,
+        drop_y: None,
     };
 
     // Extract the action from the URL (e.g., "open", "grid", "loupe")
@@ -559,6 +587,21 @@ mod tests {
             Some(folder.to_string_lossy().into_owned())
         );
         assert_eq!(params[0].view.as_deref(), Some("grid"));
+        assert_eq!(params[0].drag_drop, Some(true));
+    }
+
+    #[test]
+    fn drag_drop_paths_can_include_drop_position() {
+        let dir = home_tempdir("cull_drag_position_");
+        let folder = dir.path().join("Library");
+        std::fs::create_dir(&folder).unwrap();
+
+        let params = open_params_for_drag_drop_paths_at(&[folder], Some((120.5, 88.25)));
+
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].drag_drop, Some(true));
+        assert_eq!(params[0].drop_x, Some(120.5));
+        assert_eq!(params[0].drop_y, Some(88.25));
     }
 
     #[test]
