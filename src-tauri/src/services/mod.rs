@@ -26,6 +26,7 @@ pub mod ocr;
 pub mod sessions;
 pub mod tokens;
 pub mod undo;
+pub mod undo_history;
 
 use crate::db_core::db::Database;
 use crate::db_core::detection::DetectionEngine;
