@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 use uuid::Uuid;
 
-use super::db::Database;
+use super::db::{row_u64, Database};
 use super::models::ImageWithFile;
 
 // --- Filename stem extraction ---
@@ -255,7 +255,7 @@ impl Database {
                     width: row.get(2)?,
                     height: row.get(3)?,
                     format: row.get(4)?,
-                    file_size: row.get(5)?,
+                    file_size: row_u64(row, 5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
@@ -367,7 +367,7 @@ impl Database {
                     width: row.get(2)?,
                     height: row.get(3)?,
                     format: row.get(4)?,
-                    file_size: row.get(5)?,
+                    file_size: row_u64(row, 5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,

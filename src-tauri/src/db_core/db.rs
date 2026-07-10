@@ -42,6 +42,44 @@ pub struct Database {
     pub(crate) conn: Arc<Mutex<Connection>>,
 }
 
+pub(crate) fn sql_u64(value: u64) -> rusqlite::Result<i64> {
+    i64::try_from(value).map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))
+}
+
+pub(crate) fn sql_opt_u64(value: Option<u64>) -> rusqlite::Result<Option<i64>> {
+    value.map(sql_u64).transpose()
+}
+
+pub(crate) fn sql_usize(value: usize) -> rusqlite::Result<i64> {
+    i64::try_from(value).map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))
+}
+
+pub(crate) fn row_u64(row: &rusqlite::Row, idx: usize) -> rusqlite::Result<u64> {
+    let value: i64 = row.get(idx)?;
+    u64::try_from(value).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(
+            idx,
+            rusqlite::types::Type::Integer,
+            Box::new(err),
+        )
+    })
+}
+
+pub(crate) fn row_opt_u64(row: &rusqlite::Row, idx: usize) -> rusqlite::Result<Option<u64>> {
+    let value: Option<i64> = row.get(idx)?;
+    value
+        .map(|value| {
+            u64::try_from(value).map_err(|err| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    idx,
+                    rusqlite::types::Type::Integer,
+                    Box::new(err),
+                )
+            })
+        })
+        .transpose()
+}
+
 /// Map a row from the standard image+file+selection SELECT (the 16-column
 /// projection used by `list_images` and `list_images_in_scope`) into an
 /// `ImageWithFile`. Shared so the two list queries cannot drift apart.
@@ -57,7 +95,7 @@ pub(crate) fn map_image_with_file_row(row: &rusqlite::Row) -> rusqlite::Result<I
             width: row.get(2)?,
             height: row.get(3)?,
             format: row.get(4)?,
-            file_size: row.get(5)?,
+            file_size: row_u64(row, 5)?,
             created_at: row.get(6)?,
             imported_at: row.get(7)?,
             ai_prompt: row.get(13)?,
@@ -78,7 +116,7 @@ pub(crate) fn map_media_asset_row(row: &rusqlite::Row) -> rusqlite::Result<Media
         primary_image_id: row.get(2)?,
         sha256_hash: row.get(3)?,
         format: row.get(4)?,
-        file_size: row.get(5)?,
+        file_size: row_u64(row, 5)?,
         page_count: row.get(6)?,
         title: row.get(7)?,
         created_at: row.get(8)?,
@@ -93,7 +131,7 @@ pub(crate) fn map_media_file_row(row: &rusqlite::Row) -> rusqlite::Result<MediaF
         path: row.get(2)?,
         last_seen_at: row.get(3)?,
         missing_at: row.get(4)?,
-        last_seen_size: row.get(5)?,
+        last_seen_size: row_opt_u64(row, 5)?,
         last_seen_mtime: row.get(6)?,
     })
 }

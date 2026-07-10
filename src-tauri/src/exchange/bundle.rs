@@ -1,4 +1,4 @@
-use crate::db_core::db::Database;
+use crate::db_core::db::{row_u64, sql_u64, Database};
 use crate::db_core::models::{GenerationRun, Image, Selection};
 use crate::db_core::smart_collections::SmartCollection;
 use crate::exchange::xmp::{serialize_xmp, XmpMetadata};
@@ -117,7 +117,7 @@ pub fn build_manifest(
                     width: row.get(2)?,
                     height: row.get(3)?,
                     format: row.get(4)?,
-                    file_size: row.get(5)?,
+                    file_size: row_u64(row, 5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(8)?,
@@ -308,7 +308,21 @@ pub fn import_bundle(db: &Database, bundle_dir: &Path) -> Result<ExchangeImportR
         conn.execute(
             "INSERT OR IGNORE INTO images (id, sha256_hash, width, height, format, file_size, created_at, imported_at, ai_prompt, raw_metadata, source_label, source_evidence_json, generation_run_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-            params![item.image.id, item.image.sha256_hash, item.image.width, item.image.height, item.image.format, item.image.file_size, item.image.created_at, item.image.imported_at, item.image.ai_prompt, item.image.raw_metadata, item.source_label, item.source_evidence_json, item.generation_run_id],
+            params![
+                item.image.id,
+                item.image.sha256_hash,
+                item.image.width,
+                item.image.height,
+                item.image.format,
+                sql_u64(item.image.file_size).map_err(|e| e.to_string())?,
+                item.image.created_at,
+                item.image.imported_at,
+                item.image.ai_prompt,
+                item.image.raw_metadata,
+                item.source_label,
+                item.source_evidence_json,
+                item.generation_run_id
+            ],
         )
         .map_err(|e| e.to_string())?;
         conn.execute(
@@ -323,7 +337,12 @@ pub fn import_bundle(db: &Database, bundle_dir: &Path) -> Result<ExchangeImportR
         conn.execute(
             "INSERT OR REPLACE INTO image_files (id, image_id, path, last_seen_at, missing_at, last_seen_size, last_seen_mtime)
              VALUES (?1, ?2, ?3, datetime('now'), NULL, ?4, NULL)",
-            params![file_id, item.image.id, original.to_string_lossy(), item.image.file_size],
+            params![
+                file_id,
+                item.image.id,
+                original.to_string_lossy(),
+                sql_u64(item.image.file_size).map_err(|e| e.to_string())?
+            ],
         )
         .map_err(|e| e.to_string())?;
 

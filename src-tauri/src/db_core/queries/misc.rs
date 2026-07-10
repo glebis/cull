@@ -1,7 +1,7 @@
 // Copyright (c) 2026-present Gleb Kalinin. Architecture and design by author.
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
-use crate::db_core::db::Database;
+use crate::db_core::db::{row_u64, sql_usize, Database};
 use crate::db_core::models::*;
 use crate::db_core::perceptual_hash::hamming_distance_parts;
 use crate::db_core::tags::{normalize_tag_name, split_tag_list};
@@ -264,7 +264,7 @@ impl Database {
                     width: row.get(2)?,
                     height: row.get(3)?,
                     format: row.get(4)?,
-                    file_size: row.get(5)?,
+                    file_size: row_u64(row, 5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
@@ -775,7 +775,7 @@ impl Database {
                     width: row.get(2)?,
                     height: row.get(3)?,
                     format: row.get(4)?,
-                    file_size: row.get(5)?,
+                    file_size: row_u64(row, 5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
@@ -984,7 +984,7 @@ impl Database {
             "DELETE FROM undo_records WHERE seq NOT IN (
                 SELECT seq FROM undo_records ORDER BY seq DESC LIMIT ?1
             )",
-            params![keep_count],
+            params![sql_usize(keep_count)?],
         )?;
         Ok(())
     }

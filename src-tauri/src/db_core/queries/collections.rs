@@ -1,7 +1,7 @@
 // Copyright (c) 2026-present Gleb Kalinin. Architecture and design by author.
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
-use crate::db_core::db::Database;
+use crate::db_core::db::{row_u64, Database};
 use crate::db_core::models::*;
 use rusqlite::{params, Result};
 
@@ -105,7 +105,7 @@ impl Database {
                     width: row.get(2)?,
                     height: row.get(3)?,
                     format: row.get(4)?,
-                    file_size: row.get(5)?,
+                    file_size: row_u64(row, 5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
@@ -155,7 +155,7 @@ impl Database {
                     width: row.get(2)?,
                     height: row.get(3)?,
                     format: row.get(4)?,
-                    file_size: row.get(5)?,
+                    file_size: row_u64(row, 5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
