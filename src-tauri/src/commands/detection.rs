@@ -220,3 +220,12 @@ pub async fn get_detection_count(state: State<'_, AppState>, model: String) -> R
     let ctx = crate::services::ServiceContext::from_app_state(&state, None);
     crate::services::ai::get_detection_count(&ctx, &model).map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn list_image_ids_missing_detection(
+    state: State<'_, AppState>,
+    model: String,
+) -> Result<Vec<String>, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::get_pending_detection_ids(&ctx, &model).map_err(|e| e.to_string())
+}
