@@ -1022,6 +1022,30 @@ def test_context_menu_escape_stays_in_loupe(page: Page) -> None:
     expect(page.locator(".loupe-container")).to_be_visible()
 
 
+def test_crop_context_menu_escape_precedence(page: Page) -> None:
+    """S27c — Context-menu Escape precedes crop cancellation in Loupe."""
+    press(page, "Meta+2")
+    wait_mode(page, "loupe")
+
+    press(page, "c")
+    expect(page.locator(".crop-overlay")).to_be_visible()
+
+    page.locator(".crop-overlay").click(button="right")
+    menu = page.locator(".context-menu")
+    expect(menu).to_be_visible()
+    menu.get_by_role("menuitem").first.focus()
+
+    page.keyboard.press("Escape")
+    expect(menu).to_be_hidden()
+    expect(page.locator(".crop-overlay")).to_be_visible()
+    wait_mode(page, "loupe")
+
+    page.keyboard.press("Escape")
+    expect(page.locator(".crop-overlay")).to_have_count(0)
+    wait_mode(page, "loupe")
+    expect(page.locator(".loupe-container")).to_be_visible()
+
+
 def test_context_submenu_flips_at_right_edge(page: Page) -> None:
     """S27a — Submenus stay inside the viewport near the right edge."""
     press(page, "Meta+1")
@@ -1290,6 +1314,7 @@ def main() -> int:
         smoke.step("S27 context menu", lambda: test_context_menu(page))
         smoke.step("S27a context submenu right edge", lambda: test_context_submenu_flips_at_right_edge(page))
         smoke.step("S27b context menu Escape stays in Loupe", lambda: test_context_menu_escape_stays_in_loupe(page))
+        smoke.step("S27c crop context menu Escape precedence", lambda: test_crop_context_menu_escape_precedence(page))
         smoke.step("S16a search bar open/close", lambda: test_search_bar_open_close(page))
         smoke.step("S16b search NL query", lambda: test_search_nl_query(page))
         smoke.step("S32 detection toggle", lambda: test_detection_toggle(page))
