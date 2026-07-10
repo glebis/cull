@@ -676,6 +676,33 @@ def test_accept_reject_undecided(page: Page) -> None:
     expect(page.locator(".thumb.focused .badge")).to_have_count(0)
 
 
+def test_trash_escape_confirm_and_undo(page: Page) -> None:
+    """S26 — Trash requires confirmation, Escape cancels, and undo restores."""
+    press(page, "Meta+1")
+    wait_mode(page, "grid")
+    press(page, "Home")
+    before = page.locator(".thumb").count()
+
+    page.keyboard.press("Backspace")
+    dialog = page.get_by_role("dialog", name="Move to Trash")
+    expect(dialog).to_be_visible()
+    page.keyboard.press("Escape")
+    expect(dialog).to_be_hidden()
+    assert page.locator(".thumb").count() == before
+
+    page.keyboard.press("Backspace")
+    page.get_by_role("button", name="Move to Trash", exact=True).click()
+    expect(page.locator(".thumb")).to_have_count(before - 1)
+
+    # The removal must survive the same backend reload used by filesystem and undo events.
+    page.evaluate("window.dispatchEvent(new CustomEvent('reload-images'))")
+    page.wait_for_timeout(500)
+    expect(page.locator(".thumb")).to_have_count(before - 1)
+
+    press(page, "Meta+z")
+    expect(page.locator(".thumb")).to_have_count(before)
+
+
 def test_loupe_enter_escape(page: Page) -> None:
     """S03 — Enter from grid opens loupe, Escape returns to grid."""
     press(page, "Meta+1")
@@ -936,26 +963,23 @@ def test_palette_does_not_hijack_text_input(page: Page) -> None:
 
 
 def test_context_menu(page: Page) -> None:
-    """S27 — Right-click on thumbnail opens context menu."""
+    """S27 — Escape closes the thumbnail context menu and returns Grid control."""
     press(page, "Meta+1")
     wait_mode(page, "grid")
+    press(page, "Home")
+    before = focused_label(page)
 
-    # Right-click first thumbnail
     page.locator(".thumb").first.click(button="right")
-    page.wait_for_timeout(300)
-
-    # Context menu should appear
     expect(page.locator(".context-menu")).to_be_visible()
 
-    # Should contain rating options
     expect(page.locator(".context-menu")).to_contain_text("Rate")
-
-    # Should contain copy options
     expect(page.locator(".context-menu")).to_contain_text("Copy")
 
-    # Close by clicking elsewhere
-    page.locator(".grid-container").click(position={"x": 10, "y": 10})
-    page.wait_for_timeout(300)
+    page.keyboard.press("Escape")
+    expect(page.locator(".context-menu")).to_be_hidden()
+
+    page.keyboard.press("ArrowRight")
+    assert focused_label(page) != before, "Grid did not regain Arrow-key control after closing the context menu"
 
 
 def test_context_submenu_flips_at_right_edge(page: Page) -> None:
@@ -1211,6 +1235,7 @@ def main() -> int:
         smoke.step("S09b ratings in loupe", lambda: test_ratings_in_loupe(page))
         smoke.step("S10a accept/reject/undecided", lambda: test_accept_reject_undecided(page))
         smoke.step("S10b decisions in loupe", lambda: test_decisions_in_loupe(page))
+        smoke.step("S26 Trash Escape/confirm/undo", lambda: test_trash_escape_confirm_and_undo(page))
         smoke.step("S03a loupe Enter/Escape", lambda: test_loupe_enter_escape(page))
         smoke.step("S03b loupe zoom +/-/Home", lambda: test_loupe_zoom(page))
         smoke.step("S03c loupe arrow navigation", lambda: test_loupe_arrow_navigation(page))

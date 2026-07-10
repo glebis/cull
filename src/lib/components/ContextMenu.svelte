@@ -138,10 +138,14 @@
         function handleClickOutside(e: MouseEvent) {
             if (menuEl && !menuEl.contains(e.target as Node)) onclose();
         }
+        function handleWindowKeydown(e: KeyboardEvent) {
+            if (e.key === 'Escape') handleMenuKeydown(e);
+        }
         function handleResize() {
             void placeMenu(x, y);
             void placeOpenSubmenu();
         }
+        window.addEventListener('keydown', handleWindowKeydown);
         setTimeout(() => {
             window.addEventListener('click', handleClickOutside);
             window.addEventListener('contextmenu', handleClickOutside);
@@ -150,6 +154,7 @@
         return () => {
             window.removeEventListener('click', handleClickOutside);
             window.removeEventListener('contextmenu', handleClickOutside);
+            window.removeEventListener('keydown', handleWindowKeydown);
             window.removeEventListener('resize', handleResize);
         };
     });
@@ -166,6 +171,17 @@
     });
 
     function handleMenuKeydown(e: KeyboardEvent) {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            if (openSubmenu !== null) {
+                openSubmenu = null;
+            } else {
+                onclose();
+            }
+            return;
+        }
+
         const items = flatItems;
         const count = items.length;
         if (count === 0) return;
@@ -192,7 +208,7 @@
                     else if (key === 'moveto') { loadFolders(); }
                 }
             }
-        } else if (e.key === 'ArrowLeft' || e.key === 'Escape') {
+        } else if (e.key === 'ArrowLeft') {
             e.preventDefault();
             if (openSubmenu !== null) {
                 openSubmenu = null;
