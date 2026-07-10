@@ -153,3 +153,12 @@ pub async fn get_vision_count(
     let ctx = crate::services::ServiceContext::from_app_state(&state, None);
     crate::services::ai::get_vision_count(&ctx, source.as_deref()).map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn list_image_ids_missing_vision(
+    state: State<'_, AppState>,
+    source: String,
+) -> Result<Vec<String>, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::get_pending_vision_ids(&ctx, &source).map_err(|e| e.to_string())
+}

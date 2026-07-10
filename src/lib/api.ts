@@ -1162,6 +1162,10 @@ export async function getDetectionCount(model: string): Promise<number> {
     return invoke('get_detection_count', { model });
 }
 
+export async function listImageIdsMissingDetection(model: string): Promise<string[]> {
+    return invoke('list_image_ids_missing_detection', { model });
+}
+
 export async function openWithParams(params: {
     path?: string;
     paths?: string[];
@@ -1208,6 +1212,10 @@ export async function getVisionMetadata(imageId: string): Promise<[string, strin
 
 export async function getVisionCount(source?: string): Promise<number> {
     return invoke('get_vision_count', { source: source ?? null });
+}
+
+export async function listImageIdsMissingVision(source: string): Promise<string[]> {
+    return invoke('list_image_ids_missing_vision', { source });
 }
 
 export async function analyzeImageQuality(imageIds: string[]): Promise<number> {

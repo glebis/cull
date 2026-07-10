@@ -12,14 +12,15 @@ impl Database {
         model_name: &str,
         detections: &[crate::db_core::detection::Detection],
     ) -> Result<()> {
-        let conn = self.conn.lock();
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
         // Clear previous detections for this image+model
-        conn.execute(
+        tx.execute(
             "DELETE FROM detections WHERE image_id = ?1 AND model_name = ?2",
             params![image_id, model_name],
         )?;
         for det in detections {
-            conn.execute(
+            tx.execute(
                 "INSERT INTO detections (id, image_id, model_name, class_name, confidence, x, y, width, height, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
@@ -36,7 +37,14 @@ impl Database {
                 ],
             )?;
         }
-        Ok(())
+        tx.execute(
+            "INSERT INTO image_analysis_status (image_id, analysis_kind, model_name, completed_at)
+             VALUES (?1, 'detection', ?2, ?3)
+             ON CONFLICT(image_id, analysis_kind, model_name) DO UPDATE SET
+                completed_at = excluded.completed_at",
+            params![image_id, model_name, chrono::Utc::now().to_rfc3339()],
+        )?;
+        tx.commit()
     }
 
     pub fn get_detections(

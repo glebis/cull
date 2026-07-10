@@ -174,6 +174,13 @@ pub fn get_detection_count(ctx: &ServiceContext, model: &str) -> Result<u32, Ser
     Ok(ctx.db.detection_count(model)?)
 }
 
+pub fn get_pending_detection_ids(
+    ctx: &ServiceContext,
+    model: &str,
+) -> Result<Vec<String>, ServiceError> {
+    Ok(ctx.db.list_image_ids_missing_detection(model)?)
+}
+
 pub fn get_vision_metadata(
     ctx: &ServiceContext,
     image_id: &str,
@@ -184,6 +191,13 @@ pub fn get_vision_metadata(
 pub fn get_vision_count(ctx: &ServiceContext, source: Option<&str>) -> Result<u32, ServiceError> {
     let src = source.unwrap_or("minicpm-v");
     Ok(ctx.db.count_vision_processed(src)?)
+}
+
+pub fn get_pending_vision_ids(
+    ctx: &ServiceContext,
+    source: &str,
+) -> Result<Vec<String>, ServiceError> {
+    Ok(ctx.db.list_image_ids_missing_vision(source)?)
 }
 
 pub fn analyze_image_quality(
@@ -411,6 +425,43 @@ mod tests {
         let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
         let c = ctx(&db, &s, &d, &ee, &de, &se);
         assert_eq!(get_detection_count(&c, "yolov8m").unwrap(), 0);
+    }
+
+    #[test]
+    fn pending_detection_ids_are_exact_model_and_include_zero_result_scans() {
+        let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
+        insert_test_image(&db, "a");
+        insert_test_image(&db, "b");
+        insert_test_image(&db, "c");
+        db.mark_image_analysis_complete("a", "detection", "yolo11m")
+            .unwrap();
+        db.mark_image_analysis_complete("b", "detection", "yolo11s")
+            .unwrap();
+        let c = ctx(&db, &s, &d, &ee, &de, &se);
+
+        assert_eq!(
+            get_pending_detection_ids(&c, "yolo11m").unwrap(),
+            vec!["b".to_string(), "c".to_string()],
+        );
+    }
+
+    #[test]
+    fn pending_vision_ids_are_exact_source() {
+        let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
+        insert_test_image(&db, "a");
+        insert_test_image(&db, "b");
+        db.mark_image_analysis_complete("a", "vision", "minicpm-v")
+            .unwrap();
+        let c = ctx(&db, &s, &d, &ee, &de, &se);
+
+        assert_eq!(
+            get_pending_vision_ids(&c, "llava").unwrap(),
+            vec!["a".to_string(), "b".to_string()],
+        );
+        assert_eq!(
+            get_pending_vision_ids(&c, "minicpm-v").unwrap(),
+            vec!["b".to_string()],
+        );
     }
 
     #[test]

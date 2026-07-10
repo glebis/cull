@@ -7,7 +7,7 @@ use rusqlite::{ffi, params, Connection, Error as SqlError, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 25;
+const CURRENT_SCHEMA_VERSION: i64 = 26;
 
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, "initial_schema"),
@@ -35,6 +35,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (23, "reserved_schema_history_23"),
     (24, "reserved_schema_history_24"),
     (25, "agent_action_proposals"),
+    (26, "image_analysis_status"),
 ];
 
 #[derive(Clone)]
@@ -346,6 +347,11 @@ impl Database {
             self.seed_agent_selection_presets()?;
             Ok(())
         })?;
+        self.run_migration_step(26, "image_analysis_status", || {
+            let conn = self.conn.lock();
+            conn.execute_batch(image_analysis_status_schema())?;
+            Ok(())
+        })?;
 
         self.verify_schema_invariants()?;
         Ok(())
@@ -381,6 +387,7 @@ impl Database {
             "tags",
             "image_tags",
             "generation_runs",
+            "image_analysis_status",
             "agent_action_proposals",
             "agent_selection_presets",
             "schema_migrations",
@@ -1050,6 +1057,33 @@ fn agent_action_proposals_schema() -> &'static str {
     "#
 }
 
+fn image_analysis_status_schema() -> &'static str {
+    r#"
+        CREATE TABLE IF NOT EXISTS image_analysis_status (
+            image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+            analysis_kind TEXT NOT NULL CHECK (analysis_kind IN ('detection', 'vision')),
+            model_name TEXT NOT NULL,
+            completed_at TEXT NOT NULL,
+            PRIMARY KEY (image_id, analysis_kind, model_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_image_analysis_status_lookup
+            ON image_analysis_status (analysis_kind, model_name, image_id);
+
+        INSERT OR IGNORE INTO image_analysis_status
+            (image_id, analysis_kind, model_name, completed_at)
+        SELECT image_id, 'detection', model_name, MAX(created_at)
+        FROM detections
+        GROUP BY image_id, model_name;
+
+        INSERT OR IGNORE INTO image_analysis_status
+            (image_id, analysis_kind, model_name, completed_at)
+        SELECT image_id, 'vision', source, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        FROM image_metadata
+        GROUP BY image_id, source;
+
+    "#
+}
+
 fn migration_checksum(version: i64, name: &str) -> String {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in version
@@ -1388,6 +1422,67 @@ mod migration_safety_tests {
         let conn = db.conn.lock();
         assert!(table_exists(&conn, "images").unwrap());
         assert!(table_exists(&conn, "catalog_works").unwrap());
+    }
+
+    #[test]
+    fn test_version_26_backfills_existing_analysis_results() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("existing-v25.db");
+        {
+            let _ = Database::open(&db_path).unwrap();
+        }
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "
+                INSERT INTO images
+                    (id, sha256_hash, width, height, format, file_size, created_at, imported_at)
+                VALUES
+                    ('detected', 'hash-d', 100, 100, 'png', 100, '2026-01-01', '2026-01-01'),
+                    ('described', 'hash-v', 100, 100, 'png', 100, '2026-01-01', '2026-01-01');
+                INSERT INTO detections
+                    (id, image_id, model_name, class_name, confidence, x, y, width, height, created_at)
+                VALUES
+                    ('det-1', 'detected', 'yolo11m', 'person', 0.9, 0, 0, 1, 1, '2026-01-02');
+                INSERT INTO image_metadata (image_id, key, value, source)
+                VALUES ('described', 'description', 'A test image', 'minicpm-v');
+                DROP TABLE image_analysis_status;
+                DELETE FROM schema_migrations WHERE version = 26;
+                DELETE FROM schema_migration_steps WHERE version = 26;
+                PRAGMA user_version = 25;
+                ",
+            )
+            .unwrap();
+        }
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock();
+        let statuses: Vec<(String, String, String)> = conn
+            .prepare(
+                "SELECT image_id, analysis_kind, model_name
+                 FROM image_analysis_status
+                 ORDER BY image_id",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            statuses,
+            vec![
+                (
+                    "described".to_string(),
+                    "vision".to_string(),
+                    "minicpm-v".to_string(),
+                ),
+                (
+                    "detected".to_string(),
+                    "detection".to_string(),
+                    "yolo11m".to_string(),
+                ),
+            ]
+        );
     }
 
     #[test]

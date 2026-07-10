@@ -270,6 +270,17 @@ CREATE TABLE IF NOT EXISTS image_metadata (
     PRIMARY KEY (image_id, key, source)
 );
 
+CREATE TABLE IF NOT EXISTS image_analysis_status (
+    image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    analysis_kind TEXT NOT NULL CHECK (analysis_kind IN ('detection', 'vision')),
+    model_name TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    PRIMARY KEY (image_id, analysis_kind, model_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_image_analysis_status_lookup
+    ON image_analysis_status (analysis_kind, model_name, image_id);
+
 CREATE TABLE IF NOT EXISTS image_perceptual_hashes (
     image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
     algorithm TEXT NOT NULL,
