@@ -104,3 +104,21 @@ export function formatImportResult(imported: number, skipped: number, errorCount
 export function formatSidebarCount(count: number | null | undefined): string {
     return String(count ?? 0);
 }
+
+export type CollectionRow = [string, string, number];
+
+export function buildPinnedCollectionRows(
+    collections: CollectionRow[],
+    pinnedIds: string[]
+): CollectionRow[] {
+    if (collections.length === 0 || pinnedIds.length === 0) return collections;
+
+    const byId = new Map(collections.map(row => [row[0], row]));
+    const pinned = pinnedIds
+        .map(id => byId.get(id))
+        .filter((row): row is CollectionRow => row !== undefined);
+    const pinnedSet = new Set(pinned.map(([id]) => id));
+    const unpinned = collections.filter(([id]) => !pinnedSet.has(id));
+
+    return [...pinned, ...unpinned];
+}

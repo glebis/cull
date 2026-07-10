@@ -717,15 +717,17 @@ def test_loupe_zoom(page: Page) -> None:
     # Actual Size with Cmd+0
     dispatch_key(page, "0", meta=True)
     img_style = page.locator(".loupe-container img").first.get_attribute("style") or ""
-    assert "scale(1)" in img_style, f"Cmd+0 should reset zoom to 1x, got: {img_style}"
+    actual_scale_match = re.search(r"scale\(([\d.]+)\)", img_style)
+    assert actual_scale_match, f"Cmd+0 should set an explicit zoom scale, got: {img_style}"
+    assert float(actual_scale_match.group(1)) > 1, f"Cmd+0 should zoom to actual size, got: {img_style}"
 
     # Zoom in again before checking Home reset
     press(page, "+")
 
-    # Reset zoom with Home
+    # Fit In with Home
     press(page, "Home")
     img_style = page.locator(".loupe-container img").first.get_attribute("style") or ""
-    assert "scale(1)" in img_style, f"Home should reset zoom to 1x, got: {img_style}"
+    assert "scale(1)" in img_style, f"Home should fit the image in, got: {img_style}"
 
     press(page, "Escape")
     wait_mode(page, "grid")
@@ -956,6 +958,50 @@ def test_context_menu(page: Page) -> None:
     page.wait_for_timeout(300)
 
 
+def test_context_submenu_flips_at_right_edge(page: Page) -> None:
+    """S27a — Submenus stay inside the viewport near the right edge."""
+    press(page, "Meta+1")
+    wait_mode(page, "grid")
+
+    point = page.evaluate(
+        """() => {
+            const thumbs = Array.from(document.querySelectorAll('.thumb'));
+            const visible = thumbs
+                .map(el => el.getBoundingClientRect())
+                .filter(rect => rect.width > 0 && rect.height > 0);
+            if (visible.length === 0) throw new Error('no visible thumbnails');
+            const rect = visible.reduce((rightmost, current) =>
+                current.right > rightmost.right ? current : rightmost
+            );
+            return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        }"""
+    )
+    page.mouse.click(point["x"], point["y"], button="right")
+    expect(page.locator(".context-menu")).to_be_visible()
+
+    page.locator('.context-menu button[data-submenu-key="rate"]').hover()
+    expect(page.locator(".context-menu .submenu").first).to_be_visible()
+
+    metrics = page.evaluate(
+        """() => {
+            const menu = document.querySelector('.context-menu')?.getBoundingClientRect();
+            const submenu = document.querySelector('.context-menu .submenu')?.getBoundingClientRect();
+            if (!menu || !submenu) throw new Error('menu or submenu missing');
+            return {
+                menuLeft: menu.left,
+                submenuLeft: submenu.left,
+                submenuRight: submenu.right,
+                viewportWidth: window.innerWidth,
+            };
+        }"""
+    )
+    assert metrics["submenuRight"] <= metrics["viewportWidth"] - 8 + 1, metrics
+    assert metrics["submenuLeft"] < metrics["menuLeft"], metrics
+
+    page.locator(".grid-container").click(position={"x": 10, "y": 10})
+    page.wait_for_timeout(300)
+
+
 def test_search_bar_open_close(page: Page) -> None:
     """S16 — / opens search bar, Escape closes it."""
     press(page, "Meta+1")
@@ -1177,6 +1223,7 @@ def main() -> int:
         smoke.step("S19d keyboard shortcuts panel", lambda: test_keyboard_shortcuts_panel(page))
         smoke.step("S19e palette does not hijack text input", lambda: test_palette_does_not_hijack_text_input(page))
         smoke.step("S27 context menu", lambda: test_context_menu(page))
+        smoke.step("S27a context submenu right edge", lambda: test_context_submenu_flips_at_right_edge(page))
         smoke.step("S16a search bar open/close", lambda: test_search_bar_open_close(page))
         smoke.step("S16b search NL query", lambda: test_search_nl_query(page))
         smoke.step("S32 detection toggle", lambda: test_detection_toggle(page))

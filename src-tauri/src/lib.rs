@@ -30,8 +30,8 @@ pub mod test_support {
 }
 
 use crate::commands::deeplink::{
-    emit_open_params, open_params_for_drag_drop_paths, open_params_for_file_paths,
-    open_params_for_urls, parse_deep_link,
+    emit_open_params, open_params_for_drag_drop_paths, open_params_for_drag_drop_paths_at,
+    open_params_for_file_paths, open_params_for_urls, parse_deep_link,
 };
 use crate::db_core::db::Database;
 use crate::db_core::detection::DetectionEngine;
@@ -464,6 +464,7 @@ pub fn run() {
             commands::library::delete_folder,
             commands::library::list_images_filtered,
             commands::library::trash_images,
+            commands::library::trash_images_detailed,
             commands::library::delete_images_permanently,
             commands::library::get_app_setting,
             commands::library::set_app_setting,
@@ -473,9 +474,18 @@ pub fn run() {
             commands::selection::set_client_feedback,
             commands::selection::get_client_feedback,
             commands::selection::list_client_feedback,
+            commands::agent_proposals::create_action_proposal,
+            commands::agent_proposals::list_action_proposals,
+            commands::agent_proposals::dismiss_action_proposal,
+            commands::agent_proposals::apply_action_proposal,
+            commands::agent_proposals::list_agent_selection_presets,
+            commands::agent_proposals::upsert_agent_selection_preset,
+            commands::agent_proposals::run_claude_agent_chat_turn,
+            commands::agent_proposals::cancel_claude_agent_chat_turn,
             commands::deeplink::open_with_params,
             commands::collections::create_collection,
             commands::collections::list_collections,
+            commands::collections::rename_collection,
             commands::collections::add_to_collection,
             commands::collections::list_collection_images,
             commands::collections::remove_from_collection,
@@ -584,6 +594,7 @@ pub fn run() {
             commands::mcp::revoke_mcp_token,
             commands::mcp::rotate_mcp_token,
             commands::mcp::get_mcp_audit_log,
+            commands::mcp::get_mcp_status,
             commands::static_publishing::export_static_publish_package,
             commands::static_publishing::serve_static_publish_package,
             commands::static_publishing::stop_static_publish_server,
@@ -610,6 +621,7 @@ pub fn run() {
             commands::sessions::update_canvas_layout,
             commands::sessions::delete_canvas,
             commands::files::copy_image_to_clipboard,
+            commands::files::get_image_file_bytes,
             commands::files::paste_image_from_clipboard,
             commands::files::move_image,
             commands::files::rename_image,
@@ -719,10 +731,16 @@ pub fn run() {
                     tauri::DragDropEvent::Leave => {
                         let _ = app.emit("drag-hover", false);
                     }
-                    tauri::DragDropEvent::Drop { paths, .. } => {
+                    tauri::DragDropEvent::Drop { paths, position } => {
                         let _ = app.emit("drag-hover", false);
 
-                        for params in open_params_for_drag_drop_paths(paths) {
+                        let scale_factor = app
+                            .get_webview_window("main")
+                            .and_then(|window| window.scale_factor().ok())
+                            .unwrap_or(1.0);
+                        let logical_position = (position.x / scale_factor, position.y / scale_factor);
+
+                        for params in open_params_for_drag_drop_paths_at(paths, Some(logical_position)) {
                             let _ = emit_open_params(app, params);
                         }
                     }

@@ -4,7 +4,6 @@ use crate::db_core::sidecar;
 use crate::AppState;
 use std::path::Path;
 use tauri::State;
-use uuid::Uuid;
 
 #[tauri::command]
 pub async fn list_lineage_groups(state: State<'_, AppState>) -> Result<Vec<LineageGroup>, String> {

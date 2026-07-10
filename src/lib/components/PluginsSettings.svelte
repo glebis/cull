@@ -251,6 +251,7 @@
         width: 100%;
         box-sizing: border-box;
         margin-top: var(--spacing);
+        margin-bottom: calc(var(--spacing) * 0.5);
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: var(--radius);

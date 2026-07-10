@@ -218,8 +218,18 @@ export function chooseLoupeImagePath(
     isRaw: boolean,
     sourceLoadFailed: boolean
 ): string | null {
-    void isRaw;
-    void sourceLoadFailed;
+    if (isRaw || sourceLoadFailed) {
+        return safeAssetPreviewPath(image);
+    }
+    return image.path || safeAssetPreviewPath(image);
+}
+
+export function chooseLoupeDisplayPath(
+    image: LoupeImagePathCandidate | null,
+    preferredPath: string | null
+): string | null {
+    if (!image || !preferredPath) return null;
+    if (isAssetProtocolSafePath(preferredPath)) return preferredPath;
     return safeAssetPreviewPath(image);
 }
 
@@ -234,6 +244,63 @@ export function computeGridLayout(
     const rows = Math.ceil(totalItems / cols);
     const totalHeight = rows * cellSize;
     return { cols, rows, cellSize, totalHeight };
+}
+
+export interface GridScrollAnchorInput {
+    oldScrollTop: number;
+    viewportWidth: number;
+    viewportHeight: number;
+    anchorX: number;
+    anchorY: number;
+    oldCols: number;
+    oldCellSize: number;
+    newCols: number;
+    newCellSize: number;
+    totalItems: number;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+    return Math.min(Math.max(value, min), max);
+}
+
+export function computeAnchoredGridScrollTop({
+    oldScrollTop,
+    viewportWidth,
+    viewportHeight,
+    anchorX,
+    anchorY,
+    oldCols,
+    oldCellSize,
+    newCols,
+    newCellSize,
+    totalItems,
+}: GridScrollAnchorInput): number {
+    if (
+        totalItems <= 0 ||
+        oldCols <= 0 ||
+        newCols <= 0 ||
+        oldCellSize <= 0 ||
+        newCellSize <= 0 ||
+        viewportHeight <= 0
+    ) {
+        return Math.max(0, oldScrollTop);
+    }
+
+    const maxIndex = totalItems - 1;
+    const viewportX = clampNumber(anchorX, 0, Math.max(0, viewportWidth - 1));
+    const viewportY = clampNumber(anchorY, 0, Math.max(0, viewportHeight - 1));
+    const oldRow = Math.max(0, Math.floor((oldScrollTop + viewportY) / oldCellSize));
+    const oldCol = clampNumber(Math.floor(viewportX / oldCellSize), 0, oldCols - 1);
+    const anchorIndex = clampNumber(oldRow * oldCols + oldCol, 0, maxIndex);
+    const offsetWithinOldCell = oldScrollTop + viewportY - oldRow * oldCellSize;
+    const offsetRatio = clampNumber(offsetWithinOldCell / oldCellSize, 0, 1);
+
+    const newRow = Math.floor(anchorIndex / newCols);
+    const nextScrollTop = newRow * newCellSize + offsetRatio * newCellSize - viewportY;
+    const newRows = Math.ceil(totalItems / newCols);
+    const maxScrollTop = Math.max(0, newRows * newCellSize - viewportHeight);
+
+    return clampNumber(nextScrollTop, 0, maxScrollTop);
 }
 
 export interface VisibleItem {

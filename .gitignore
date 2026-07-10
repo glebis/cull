@@ -17,9 +17,6 @@ vite.config.ts.timestamp-*
 # Rust / Tauri
 target/
 dist/
-# Built plugin bundles ARE tracked: the registry fixture checksum points at
-# these exact bytes (see scripts/build-plugin.mjs).
-!plugins/*/dist/
 
 # Environment
 .env

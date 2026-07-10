@@ -19,6 +19,10 @@ describe('plugins settings tab', () => {
         expect(plugins).toMatch(/module_plugins/);
     });
 
+    it('renders PluginsSettings inside the shared settings section spacing', () => {
+        expect(mcp).toMatch(/activeSettingsTab === 'plugins'[\s\S]*<div class="section">[\s\S]*<PluginsSettings \/>/);
+    });
+
     it('lists Core bundled plugins with a Core badge', () => {
         expect(plugins).toMatch(/BUNDLED_PLUGINS/);
         expect(plugins).toMatch(/class="core-badge"/);

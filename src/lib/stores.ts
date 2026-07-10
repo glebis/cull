@@ -1,5 +1,5 @@
 import { writable, derived, get, type Writable } from 'svelte/store';
-import type { ImageWithFile, SmartCollection, Session, Canvas } from './api';
+import type { ClipboardMonitorStatus, ImageWithFile, SmartCollection, Session, Canvas } from './api';
 
 export type ViewMode = 'grid' | 'compare' | 'loupe' | 'canvas' | 'lineage' | 'embeddings' | 'publish' | 'export' | 'tinder';
 
@@ -179,6 +179,23 @@ export const pluginsEnabled = writable<boolean>(false);
 export const activePluginIds = writable<ReadonlySet<string>>(new Set());
 export const showLoupeHistogram = writable<boolean>(false);
 
+export type AgentVisualLevel = 'text' | 'tiny' | 'preview' | 'full';
+
+export const agentPanelPinned = writable<boolean>(false);
+export const agentPanelVisible = writable<boolean>(false);
+export const activeAgentProposalId = writable<string | null>(null);
+export const activeAgentSelectionPresetId = writable<string | null>('selpreset_portfolio');
+export const agentVisualLevel = writable<AgentVisualLevel>('tiny');
+
+const AGENT_VISUAL_LEVELS: AgentVisualLevel[] = ['tiny', 'preview', 'full', 'text'];
+
+export function cycleAgentVisualLevel() {
+    agentVisualLevel.update(current => {
+        const index = AGENT_VISUAL_LEVELS.indexOf(current);
+        return AGENT_VISUAL_LEVELS[(index + 1) % AGENT_VISUAL_LEVELS.length];
+    });
+}
+
 export const GRID_PRESETS = [
     { name: 'compact', size: 80, gap: 2 },
     { name: 'normal', size: 160, gap: 4 },
@@ -199,11 +216,62 @@ export const exportImageOnly = writable<boolean>(false);
 export const loupeScale = writable<number>(1);
 export const loupePanX = writable<number>(0);
 export const loupePanY = writable<number>(0);
+export const canvasZoom = writable<number>(1);
+
+export interface CanvasZoomRequest {
+    id: number;
+    zoom: number;
+}
+
+let canvasZoomRequestId = 0;
+export const canvasZoomRequest = writable<CanvasZoomRequest | null>(null);
+
+export function requestCanvasZoom(zoom: number) {
+    canvasZoomRequest.set({
+        id: ++canvasZoomRequestId,
+        zoom,
+    });
+}
+export type LoupeZoomRequestMode = 'actual-size' | 'fit-in' | 'natural-scale' | 'zoom-in' | 'zoom-out';
+export interface LoupeZoomRequest {
+    id: number;
+    mode: LoupeZoomRequestMode;
+    scale?: number;
+}
+
+let loupeZoomRequestId = 0;
+export const loupeZoomRequest = writable<LoupeZoomRequest | null>(null);
 
 export function resetLoupeTransform() {
     loupeScale.set(1);
     loupePanX.set(0);
     loupePanY.set(0);
+}
+
+export function requestLoupeActualSize() {
+    if (get(viewMode) !== 'loupe') return;
+    loupeZoomRequest.set({ id: ++loupeZoomRequestId, mode: 'actual-size' });
+}
+
+export function requestLoupeFitIn() {
+    resetLoupeTransform();
+    if (get(viewMode) !== 'loupe') return;
+    loupeZoomRequest.set({ id: ++loupeZoomRequestId, mode: 'fit-in' });
+}
+
+export function requestLoupeNaturalScale(scale: number) {
+    if (get(viewMode) !== 'loupe') return;
+    loupeZoomRequest.set({ id: ++loupeZoomRequestId, mode: 'natural-scale', scale });
+}
+
+export function requestLoupeZoomIn() {
+    if (get(viewMode) !== 'loupe') return;
+    loupeZoomRequest.set({ id: ++loupeZoomRequestId, mode: 'zoom-in' });
+}
+
+export function requestLoupeZoomOut() {
+    if (get(viewMode) !== 'loupe') return;
+    loupeZoomRequest.set({ id: ++loupeZoomRequestId, mode: 'zoom-out' });
 }
 
 export const folders = writable<[string, number][]>([]);
@@ -272,6 +340,7 @@ function cancelActiveTextInputDialog() {
 export function requestTextInput(options: TextInputDialogOptions): Promise<string | null> {
     cancelActiveCollectionTargetDialog();
     cancelActiveTextInputDialog();
+    cancelActiveConfirmDialog();
     return new Promise(resolve => {
         textInputDialog.set({
             id: ++textInputDialogId,
@@ -291,6 +360,7 @@ export function resolveTextInputDialog(value: string | null) {
 export function requestCollectionTarget(options: CollectionTargetDialogOptions): Promise<CollectionTargetDialogResult | null> {
     cancelActiveTextInputDialog();
     cancelActiveCollectionTargetDialog();
+    cancelActiveConfirmDialog();
     return new Promise(resolve => {
         collectionTargetDialog.set({
             id: ++collectionTargetDialogId,
@@ -308,11 +378,57 @@ export function resolveCollectionTargetDialog(value: CollectionTargetDialogResul
     active.resolve(value);
 }
 
+export interface ConfirmDialogOptions {
+    title: string;
+    description?: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    /** Styles the confirm button as destructive (red). */
+    danger?: boolean;
+}
+
+export interface ConfirmDialogRequest extends ConfirmDialogOptions {
+    id: number;
+    resolve: (value: boolean) => void;
+}
+
+export const confirmDialog = writable<ConfirmDialogRequest | null>(null);
+
+let confirmDialogId = 0;
+
+function cancelActiveConfirmDialog() {
+    const active = get(confirmDialog);
+    if (!active) return;
+    confirmDialog.set(null);
+    active.resolve(false);
+}
+
+export function requestConfirm(options: ConfirmDialogOptions): Promise<boolean> {
+    cancelActiveTextInputDialog();
+    cancelActiveCollectionTargetDialog();
+    cancelActiveConfirmDialog();
+    return new Promise(resolve => {
+        confirmDialog.set({
+            id: ++confirmDialogId,
+            ...options,
+            resolve,
+        });
+    });
+}
+
+export function resolveConfirmDialog(value: boolean) {
+    const active = get(confirmDialog);
+    if (!active) return;
+    confirmDialog.set(null);
+    active.resolve(value);
+}
+
 // Collections
 export const collections = writable<[string, string, number][]>([]); // [id, name, count]
 export const activeCollection = writable<string | null>(null);
 export const collectMode = writable<boolean>(false);
 export const collectModeTarget = writable<string | null>(null); // collection id being collected into
+export const clipboardMonitorStatus = writable<ClipboardMonitorStatus | null>(null);
 
 // Smart Collections
 export const smartCollections = writable<SmartCollection[]>([]);
@@ -324,6 +440,8 @@ export const importBatchImageIds = writable<string[]>([]);
 
 // Pinned (active) collection — new imports auto-append here
 export const pinnedCollection = writable<string | null>(null);
+// Sidebar collection pins, ordered by the time they were pinned.
+export const pinnedCollections = writable<string[]>([]);
 
 // Lineage tab layout preference
 export type LineageLayout = 'timeline' | 'comparison';
@@ -435,6 +553,8 @@ export const commandPaletteOpen = writable<boolean>(false);
 export const commandPaletteMode = writable<CommandPaletteMode>('all');
 // Searchable keyboard-shortcuts reference / customization panel.
 export const shortcutsOpen = writable<boolean>(false);
+// Undo history side panel (read-only action history).
+export const undoHistoryOpen = writable<boolean>(false);
 // Collection/scope export-to-folder dialog.
 export const exportFolderOpen = writable<boolean>(false);
 // Contact sheet export dialog.

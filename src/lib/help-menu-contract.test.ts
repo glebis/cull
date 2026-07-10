@@ -54,8 +54,9 @@ describe('Help menu contract', () => {
         expect(menuSource).toContain('"Install Agent Skills..."');
         expect(frontendMenuSource).toContain("case 'agent_skills'");
         expect(pageSource).toContain('AgentSkillsDialog');
-        expect(dialogSource).toContain('"command": "cull"');
-        expect(dialogSource).toContain('"args": ["--mcp-stdio"]');
+        // The dialog renders the shared canonical config (see mcp-config.ts,
+        // which owns the "command"/"args" contract).
+        expect(dialogSource).toContain('MCP_CONFIG_SNIPPET');
         expect(dialogSource).toContain('docs/agents.md');
     });
 
@@ -74,6 +75,18 @@ describe('Help menu contract', () => {
         const config = JSON.parse(readProjectFile('src-tauri/tauri.conf.json'));
 
         expect(config.bundle.macOS.files['Resources/Cull.help']).toBe('help/Cull.help');
+    });
+
+    it('bundles the Claude Agent SDK runtime into app resources', () => {
+        const config = JSON.parse(readProjectFile('src-tauri/tauri.conf.json'));
+
+        expect(config.bundle.resources['../scripts/claude-agent-sdk-runner.mjs']).toBe('claude-agent-sdk-runner.mjs');
+        expect(config.bundle.resources['../node_modules/@anthropic-ai/claude-agent-sdk']).toBe(
+            'node_modules/@anthropic-ai/claude-agent-sdk'
+        );
+        expect(projectFileExists('scripts/claude-agent-sdk-runner.mjs')).toBe(true);
+        expect(projectFileExists('node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs')).toBe(true);
+        expect(projectFileExists('node_modules/@anthropic-ai/claude-agent-sdk/package.json')).toBe(true);
     });
 
     it('ships the user guide as an indexed Apple Help Book', () => {

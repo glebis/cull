@@ -26,4 +26,5 @@ commands.allow = [
   "start_clipboard_monitor",
   "stop_clipboard_monitor",
   "trash_images",
+  "trash_images_detailed",
 ]

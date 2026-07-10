@@ -3,15 +3,46 @@ import {
     clampLoupePan,
     computeLoupeActualSizeScale,
     computeLoupeFocalZoom,
+    computeLoupeFitSize,
+    computeLoupeNaturalScale,
+    computeLoupeViewportScaleForNaturalScale,
     computeLoupeSmartZoom,
+    nextLoupeNaturalZoomPreset,
 } from './loupe-transform';
 
 describe('loupe transform helpers', () => {
     const viewport = { width: 1000, height: 800 };
-    const image = { width: 500, height: 400 };
+    const image = { width: 2000, height: 1600 };
 
-    it('computes actual size relative to fit scale', () => {
-        expect(computeLoupeActualSizeScale(viewport, image)).toBeCloseTo(0.5);
+    it('computes actual size as 100% pixels when fit view downscales the image', () => {
+        expect(computeLoupeActualSizeScale(viewport, image)).toBeCloseTo(2);
+    });
+
+    it('does not shrink images that already render at natural size', () => {
+        expect(computeLoupeActualSizeScale(viewport, { width: 500, height: 400 })).toBe(1);
+    });
+
+    it('computes a stable fit box from metadata instead of loaded asset dimensions', () => {
+        expect(computeLoupeFitSize(viewport, image)).toEqual({ width: 1000, height: 800 });
+        expect(computeLoupeFitSize(viewport, { width: 500, height: 400 })).toEqual({ width: 500, height: 400 });
+        expect(computeLoupeFitSize({ width: 0, height: 800 }, image)).toEqual({ width: 0, height: 0 });
+    });
+
+    it('reports zoom relative to natural image pixels', () => {
+        expect(computeLoupeNaturalScale(viewport, image, 1)).toBeCloseTo(0.5);
+        expect(computeLoupeNaturalScale(viewport, image, 2)).toBeCloseTo(1);
+    });
+
+    it('converts natural pixel zoom back to the loupe viewport scale', () => {
+        expect(computeLoupeViewportScaleForNaturalScale(viewport, image, 1)).toBeCloseTo(2);
+        expect(computeLoupeViewportScaleForNaturalScale(viewport, image, 0.5)).toBeCloseTo(1);
+    });
+
+    it('steps through standard natural pixel zoom levels', () => {
+        expect(nextLoupeNaturalZoomPreset(1, 1)).toBe(1.25);
+        expect(nextLoupeNaturalZoomPreset(1.25, 1)).toBe(1.5);
+        expect(nextLoupeNaturalZoomPreset(1.56, 1)).toBe(2);
+        expect(nextLoupeNaturalZoomPreset(1.56, -1)).toBe(1.5);
     });
 
     it('preserves focal point when zooming', () => {
@@ -28,7 +59,7 @@ describe('loupe transform helpers', () => {
     });
 
     it('clamps pan to zero when image fits viewport', () => {
-        expect(clampLoupePan({ scale: 1, panX: 200, panY: -200 }, viewport, image)).toEqual({
+        expect(clampLoupePan({ scale: 1, panX: 200, panY: -200 }, viewport, { width: 500, height: 400 })).toEqual({
             scale: 1,
             panX: 0,
             panY: 0,
@@ -37,7 +68,7 @@ describe('loupe transform helpers', () => {
 
     it('smart zoom toggles from fit to actual size and back', () => {
         const actual = computeLoupeSmartZoom({ scale: 1, panX: 0, panY: 0 }, viewport, image);
-        expect(actual.scale).toBeCloseTo(0.5);
+        expect(actual.scale).toBeCloseTo(2);
 
         const fit = computeLoupeSmartZoom(actual, viewport, image);
         expect(fit).toEqual({ scale: 1, panX: 0, panY: 0 });

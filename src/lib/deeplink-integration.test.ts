@@ -2,10 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockState = vi.hoisted(() => ({
     images: [] as any[],
+    viewMode: 'grid',
 }));
 
 vi.mock('./stores', () => ({
-    viewMode: { set: vi.fn() },
+    viewMode: {
+        set: vi.fn((value) => { mockState.viewMode = value; }),
+        subscribe: vi.fn((run) => { run(mockState.viewMode); return vi.fn(); }),
+    },
     thumbnailSize: { set: vi.fn() },
     focusedIndex: { set: vi.fn() },
     focusedImageOverride: { set: vi.fn() },
@@ -16,9 +20,11 @@ vi.mock('./stores', () => ({
     gridGap: { set: vi.fn() },
     loupeScale: { set: vi.fn() },
     activeFolder: { set: vi.fn() },
+    folders: { set: vi.fn() },
     activeCollection: { set: vi.fn(), subscribe: vi.fn((run) => { run(null); return vi.fn(); }) },
     activeSmartCollection: { set: vi.fn() },
     activeDetectedClass: { set: vi.fn() },
+    activeSession: { subscribe: vi.fn((run) => { run(null); return vi.fn(); }) },
     collections: { set: vi.fn() },
     windowName: { set: vi.fn() },
     windowLabel: { set: vi.fn() },
@@ -36,6 +42,7 @@ vi.mock('./api', () => ({
     addToCollection: vi.fn(),
     listCollections: vi.fn(),
     listFolders: vi.fn(),
+    listImagesByFolder: vi.fn(),
     getBatchImages: vi.fn(),
     getImagesByIds: vi.fn(),
     getImageByPath: vi.fn(),
@@ -63,7 +70,7 @@ vi.mock('@tauri-apps/plugin-deep-link', () => ({
 
 import { handleParams, initDeepLink } from './deeplink';
 import { thumbnailSize, focusedIndex, focusedImageOverride, images, gridGap, loupeScale, activeFolder, navigateTo } from './stores';
-import { importFolder, importFiles, getBatchImages, listFolders, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls } from './api';
+import { importFolder, importFiles, getBatchImages, listFolders, listImagesByFolder, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls } from './api';
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { listen } from '@tauri-apps/api/event';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
@@ -71,9 +78,11 @@ import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 beforeEach(() => {
     vi.clearAllMocks();
     mockState.images = [];
+    mockState.viewMode = 'grid';
     vi.mocked(importFolder).mockResolvedValue({ imported: 0, skipped: 0, errors: [], batch_id: null, image_ids: [] } as never);
     vi.mocked(importFiles).mockResolvedValue({ imported: 0, skipped: 0, errors: [], batch_id: null, image_ids: [] } as never);
     vi.mocked(listFolders).mockResolvedValue([] as never);
+    vi.mocked(listImagesByFolder).mockResolvedValue([] as never);
     vi.mocked(getImagesByIds).mockResolvedValue([] as never);
     vi.mocked(getImageByPath).mockResolvedValue(null as never);
     vi.mocked(drainPendingOpenParams).mockResolvedValue([] as never);
@@ -116,6 +125,61 @@ describe('handleParams', () => {
         expect(activeFolder.set).toHaveBeenCalledWith('/test');
         expect(loadImagesForCurrentScope).toHaveBeenCalled();
         expect(focusedIndex.set).toHaveBeenCalledWith(0);
+    });
+
+    it('routes dropped folders to canvas placement without switching to grid', async () => {
+        const folderImages = [
+            { image: { id: 'existing-1' }, path: '/test/a.png' },
+            { image: { id: 'new-1' }, path: '/test/b.png' },
+        ];
+        vi.mocked(importFolder).mockResolvedValue({ imported: 1, skipped: 1, errors: [], batch_id: 'batch-1', image_ids: ['new-1'] } as never);
+        vi.mocked(listImagesByFolder)
+            .mockResolvedValueOnce(folderImages as never)
+            .mockResolvedValueOnce([] as never);
+        vi.mocked(listFolders).mockResolvedValue([['/test', 2]] as never);
+        const dispatchSpy = vi.fn();
+        vi.stubGlobal('window', { dispatchEvent: dispatchSpy });
+
+        mockState.viewMode = 'canvas';
+        await handleParams({ folder: '/test', view: 'grid', drag_drop: true, drop_x: 140, drop_y: 220 });
+
+        expect(navigateTo).not.toHaveBeenCalledWith('grid');
+        expect(importFolder).toHaveBeenCalledWith('/test', null);
+        expect(listImagesByFolder).toHaveBeenCalledWith('/test', 250, 0);
+        expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'canvas-import-drop',
+            detail: expect.objectContaining({
+                images: folderImages,
+                folder: '/test',
+                dropX: 140,
+                dropY: 220,
+            }),
+        }));
+        vi.unstubAllGlobals();
+    });
+
+    it('routes dropped files to canvas placement and includes already imported paths', async () => {
+        const image = { image: { id: 'existing-1' }, path: '/test/a.png' };
+        vi.mocked(importFiles).mockResolvedValue({ imported: 0, skipped: 1, errors: [], batch_id: null, image_ids: [] } as never);
+        vi.mocked(getImageByPath).mockResolvedValue(image as never);
+        const dispatchSpy = vi.fn();
+        vi.stubGlobal('window', { dispatchEvent: dispatchSpy });
+
+        mockState.viewMode = 'canvas';
+        await handleParams({ path: '/test/a.png', view: 'loupe', drag_drop: true, drop_x: 10, drop_y: 20 });
+
+        expect(navigateTo).not.toHaveBeenCalledWith('loupe');
+        expect(importFiles).toHaveBeenCalledWith(['/test/a.png'], null);
+        expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'canvas-import-drop',
+            detail: expect.objectContaining({
+                images: [image],
+                paths: ['/test/a.png'],
+                dropX: 10,
+                dropY: 20,
+            }),
+        }));
+        vi.unstubAllGlobals();
     });
 
     it('imports single path and focuses the imported image', async () => {

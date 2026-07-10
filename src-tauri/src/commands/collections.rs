@@ -1,3 +1,4 @@
+use crate::commands::log_library_event;
 use crate::db_core::models::{ImageWithFile, NewSessionEvent};
 use crate::services::curation as svc;
 use crate::services::{Pagination, ServiceContext};
@@ -26,6 +27,26 @@ pub async fn list_collections(
 ) -> Result<Vec<(String, String, u32)>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
     svc::list_collections(&ctx).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn rename_collection(
+    state: State<'_, AppState>,
+    collection_id: String,
+    name: String,
+) -> Result<(), String> {
+    let ctx = ServiceContext::from_app_state(&state, None);
+    svc::rename_collection(&ctx, &collection_id, &name).map_err(|e| e.to_string())?;
+    let _ = state.db.log_session_event(&NewSessionEvent {
+        session_id: None,
+        event_type: "collection_renamed".to_string(),
+        actor_type: "user".to_string(),
+        actor_id: None,
+        subject_type: Some("collection".to_string()),
+        subject_id: Some(collection_id),
+        payload_json: serde_json::json!({ "name": name }).to_string(),
+    });
+    Ok(())
 }
 
 #[tauri::command]
@@ -77,7 +98,15 @@ pub async fn remove_from_collection(
 ) -> Result<(), String> {
     let ctx = ServiceContext::from_app_state(&state, None);
     let refs: Vec<&str> = image_ids.iter().map(|s| s.as_str()).collect();
-    svc::remove_from_collection(&ctx, &collection_id, &refs).map_err(|e| e.to_string())
+    svc::remove_from_collection(&ctx, &collection_id, &refs).map_err(|e| e.to_string())?;
+    log_library_event(
+        &state,
+        "collection_items_removed",
+        Some("collection"),
+        Some(collection_id),
+        serde_json::json!({ "image_count": image_ids.len() }),
+    );
+    Ok(())
 }
 
 #[tauri::command]

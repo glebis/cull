@@ -1,3 +1,4 @@
+use crate::commands::log_library_event;
 use crate::db_core::models::ImageWithFile;
 use crate::db_core::nl_parser::parse_query;
 use crate::db_core::smart_collections::SmartCollection;
@@ -14,8 +15,20 @@ pub async fn create_smart_collection(
     nl_query: Option<String>,
 ) -> Result<String, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::create_smart_collection(&ctx, &name, &filter_json, nl_query.as_deref())
-        .map_err(|e| e.to_string())
+    let id = svc::create_smart_collection(&ctx, &name, &filter_json, nl_query.as_deref())
+        .map_err(|e| e.to_string())?;
+    log_library_event(
+        &state,
+        "smart_collection_created",
+        Some("smart_collection"),
+        Some(id.clone()),
+        serde_json::json!({
+            "name": name,
+            "has_nl_query": nl_query.as_deref().is_some_and(|value| !value.trim().is_empty()),
+            "filter_bytes": filter_json.len(),
+        }),
+    );
+    Ok(id)
 }
 
 #[tauri::command]
@@ -58,7 +71,15 @@ pub async fn count_smart_collection(
 #[tauri::command]
 pub async fn delete_smart_collection(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::delete_smart_collection(&ctx, &id).map_err(|e| e.to_string())
+    svc::delete_smart_collection(&ctx, &id).map_err(|e| e.to_string())?;
+    log_library_event(
+        &state,
+        "smart_collection_deleted",
+        Some("smart_collection"),
+        Some(id),
+        serde_json::json!({}),
+    );
+    Ok(())
 }
 
 #[tauri::command]
@@ -71,7 +92,19 @@ pub async fn update_smart_collection(
 ) -> Result<(), String> {
     let ctx = ServiceContext::from_app_state(&state, None);
     svc::update_smart_collection(&ctx, &id, &name, &filter_json, nl_query.as_deref())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    log_library_event(
+        &state,
+        "smart_collection_updated",
+        Some("smart_collection"),
+        Some(id),
+        serde_json::json!({
+            "name": name,
+            "has_nl_query": nl_query.as_deref().is_some_and(|value| !value.trim().is_empty()),
+            "filter_bytes": filter_json.len(),
+        }),
+    );
+    Ok(())
 }
 
 #[tauri::command]

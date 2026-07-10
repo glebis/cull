@@ -2,6 +2,8 @@ import { get } from 'svelte/store';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ImageWithFile } from './api';
 import {
+    agentVisualLevel,
+    cycleAgentVisualLevel,
     focusedImage,
     focusedImageOverride,
     focusedIndex,
@@ -62,6 +64,21 @@ describe('focusedImage', () => {
         focusedIndex.update((index) => index + 1);
 
         expect(get(focusedImage)?.image.id).toBe('grid-2');
+    });
+});
+
+describe('agent visual level store', () => {
+    it('defaults to tiny and cycles through guarded visual levels', () => {
+        agentVisualLevel.set('tiny');
+        expect(get(agentVisualLevel)).toBe('tiny');
+        cycleAgentVisualLevel();
+        expect(get(agentVisualLevel)).toBe('preview');
+        cycleAgentVisualLevel();
+        expect(get(agentVisualLevel)).toBe('full');
+        cycleAgentVisualLevel();
+        expect(get(agentVisualLevel)).toBe('text');
+        cycleAgentVisualLevel();
+        expect(get(agentVisualLevel)).toBe('tiny');
     });
 });
 

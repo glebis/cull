@@ -1,6 +1,7 @@
 import { writable } from 'svelte/store';
 import type {
     PreviewDisplayMode,
+    PreviewDisplayLayout,
     PreviewOverlayConfig,
     PreviewRailSide,
     PreviewRailTextSize,
@@ -10,6 +11,7 @@ import type {
 import { DEFAULT_PREVIEW_OVERLAY, overlayForPreviewDisplayMode } from './preview-display';
 
 export const PREVIEW_DISPLAY_MODE_SETTING = 'preview_display_mode';
+export const PREVIEW_DISPLAY_LAYOUT_SETTING = 'preview_display_layout';
 export const PREVIEW_DISPLAY_OVERLAY_SETTING = 'preview_display_overlay';
 export const PREVIEW_DISPLAY_ALWAYS_ON_TOP_SETTING = 'preview_display_always_on_top';
 
@@ -17,6 +19,7 @@ export const previewDisplayFrozen = writable(false);
 export const previewDisplayBlanked = writable(false);
 export const previewDisplayAlwaysOnTop = writable(false);
 export const previewDisplayMode = writable<PreviewDisplayMode>('image_only');
+export const previewDisplayLayout = writable<PreviewDisplayLayout>('single');
 export const previewDisplayOverlay = writable<PreviewOverlayConfig>(DEFAULT_PREVIEW_OVERLAY);
 export const previewDisplayWebStreamStatus = writable<PreviewWebStreamStatus>({
     active: false,
@@ -44,6 +47,10 @@ export function setPreviewDisplayMode(mode: PreviewDisplayMode) {
     previewDisplayOverlay.set(overlayForPreviewDisplayMode(mode));
 }
 
+export function setPreviewDisplayLayout(layout: PreviewDisplayLayout) {
+    previewDisplayLayout.set(layout);
+}
+
 export function setPreviewDisplayOverlay(overlay: PreviewOverlayConfig) {
     previewDisplayOverlay.set(overlay);
 }
@@ -55,6 +62,11 @@ export function setPreviewDisplayWebStreamStatus(status: PreviewWebStreamStatus)
 export function parsePreviewDisplayMode(value: string | null): PreviewDisplayMode {
     if (value === 'client_review' || value === 'metadata_review') return value;
     return 'image_only';
+}
+
+export function parsePreviewDisplayLayout(value: string | null): PreviewDisplayLayout {
+    if (value === 'compare' || value === 'grid') return value;
+    return 'single';
 }
 
 export function parsePreviewDisplayOverlay(value: string | null): PreviewOverlayConfig | null {

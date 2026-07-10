@@ -24,35 +24,43 @@
     import LineageView from '$lib/components/LineageView.svelte';
     import Tinder from '$lib/components/Tinder.svelte';
     import McpSettings from '$lib/components/McpSettings.svelte';
+    import UndoHistoryPanel from '$lib/components/UndoHistoryPanel.svelte';
     import AboutDialog from '$lib/components/AboutDialog.svelte';
     import AgentSkillsDialog from '$lib/components/AgentSkillsDialog.svelte';
+    import AgentProposalDock from '$lib/components/AgentProposalDock.svelte';
+    import ActionProposalReviewDialog from '$lib/components/ActionProposalReviewDialog.svelte';
     import JobProgressPanel from '$lib/components/JobProgressPanel.svelte';
     import TrashConfirmDialog from '$lib/components/TrashConfirmDialog.svelte';
     import TextInputDialog from '$lib/components/TextInputDialog.svelte';
+    import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
     import CollectionTargetDialog from '$lib/components/CollectionTargetDialog.svelte';
     import GenerationResultsStrip from '$lib/components/GenerationResultsStrip.svelte';
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel } from '$lib/stores';
-    import { trashImages, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, type ImageWithFile, type PreviewState } from '$lib/api';
+    import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel, agentPanelPinned, agentPanelVisible, agentVisualLevel, activeAgentProposalId, activeAgentSelectionPresetId, cycleAgentVisualLevel } from '$lib/stores';
+    import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listCollections, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, cancelClaudeAgentChatTurn, undo, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ClaudeAgentStreamEvent, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
     import { loadInstalledPlugins, activateBundledPlugins } from '$lib/plugins/loader';
     import { registerCoreTabs, tabRegistry } from '$lib/plugins/tab-registry';
     import { BUNDLED_PLUGINS } from '$lib/plugins/bundled';
-    import { isPreviewDisplayRoute, nextPreviewFocusPayload, previewSyncImageId } from '$lib/preview-display';
+    import { isPreviewDisplayRoute, nextPreviewFocusPayload, previewSyncImageId, previewSyncImageIds } from '$lib/preview-display';
     import {
         PREVIEW_DISPLAY_ALWAYS_ON_TOP_SETTING,
+        PREVIEW_DISPLAY_LAYOUT_SETTING,
         PREVIEW_DISPLAY_MODE_SETTING,
         PREVIEW_DISPLAY_OVERLAY_SETTING,
+        parsePreviewDisplayLayout,
         parsePreviewDisplayMode,
         parsePreviewDisplayOverlay,
         previewDisplayAlwaysOnTop,
         previewDisplayBlanked,
         previewDisplayFrozen,
+        previewDisplayLayout,
         previewDisplayMode,
         previewDisplayOverlay,
         setPreviewDisplayAlwaysOnTop,
+        setPreviewDisplayLayout,
         setPreviewDisplayMode,
         setPreviewDisplayOverlay,
     } from '$lib/preview-display-store';
@@ -60,6 +68,9 @@
     import { invalidateImageCache, loadImagesForCurrentScope, refreshImageCount, type ImageLoadOptions } from '$lib/image-loading';
     import { clampFocusIndexToList, nextFocusIndexAfterFocusedRemoval } from '$lib/image-removal';
     import { buildAgentSnapshotManifest, collectVisibleImageTargets, drawAnnotatedSnapshot, type AgentSnapshotScope } from '$lib/agent-view-snapshot';
+    import { proposalViewContextKey, type AgentProposalViewContext } from '$lib/agent-proposal-context';
+    import { estimateAgentBudget } from '$lib/agent-token-estimate';
+    import { effectiveAgentVisualLevel } from '$lib/agent-visual-context';
     import { listen } from '@tauri-apps/api/event';
     import { onMount } from 'svelte';
 
@@ -70,12 +81,46 @@
     const previewDisplayWindow = isPreviewDisplayRoute();
     let previewSyncState = $state<PreviewState | null>(null);
     let lastPreviewSyncKey = $state('');
+    let agentProposals = $state<AgentActionProposal[]>([]);
+    let agentSelectionPresets = $state<AgentSelectionPreset[]>([]);
+    let agentChatBusy = $state(false);
+    let lastAgentMessage = $state<string | null>(null);
+    let lastAgentInstruction = $state<string | null>(null);
+    let activeAgentRequestId = $state<string | null>(null);
+    let agentStreamEvents = $state<ClaudeAgentStreamEvent[]>([]);
+    let cancelledAgentRequestIds = new Set<string>();
+    let reviewProposalId = $state<string | null>(null);
 
     let immersive = $derived($viewMode === 'loupe' || $viewMode === 'compare');
     let noSidebar = $derived(immersive || !$sidebarVisible);
+    let reviewProposal = $derived(agentProposals.find(p => p.id === reviewProposalId) ?? null);
+    let agentCandidateCount = $derived(proposalCandidateIds().length);
+    let agentProposalViewContext = $derived(currentAgentProposalViewContext());
 
     async function loadImages(options: ImageLoadOptions = {}) {
         await loadImagesForCurrentScope(options);
+    }
+
+    function appendAgentStreamEvent(payload: ClaudeAgentStreamEvent) {
+        agentStreamEvents = [
+            ...agentStreamEvents.filter(item => item.sequence !== payload.sequence),
+            payload,
+        ]
+            .sort((a, b) => a.sequence - b.sequence)
+            .slice(-24);
+    }
+
+    function appendLocalAgentEvent(requestId: string, phase: string, message: string) {
+        const sequence = (agentStreamEvents.at(-1)?.sequence ?? 0) + 1;
+        appendAgentStreamEvent({
+            request_id: requestId,
+            sequence,
+            phase,
+            message,
+            details: { source: 'ui' },
+            is_final: phase === 'cancelled',
+            is_error: false,
+        });
     }
 
     async function restoreSmartCollectionScope(restored: PersistedState | null) {
@@ -100,6 +145,14 @@
         focusedIndex.set(clampFocusIndexToList(plannedFocusIndex, nextLength));
     }
 
+    async function refreshCollectionCountsAfterRemoval(context: string) {
+        try {
+            collections.set(await listCollections());
+        } catch (e) {
+            console.error(`Failed to refresh collection counts after ${context}:`, e);
+        }
+    }
+
     async function executeTrash() {
         const imgs = $images;
         const idx = $focusedIndex;
@@ -113,6 +166,7 @@
             invalidateImageCache();
             removeVisibleImageById(img.image.id, nextFocusIndex);
             refreshImageCount().catch(e => console.error('Failed to refresh image count after trash:', e));
+            refreshCollectionCountsAfterRemoval('trash');
         }
     }
 
@@ -155,12 +209,14 @@
             invalidateImageCache();
             removeVisibleImageById(img.image.id, nextFocusIndexAfterFocusedRemoval(idx, imgs.length));
             refreshImageCount().catch(e => console.error('Failed to refresh image count after delete:', e));
+            refreshCollectionCountsAfterRemoval('delete');
         }
     }
 
     async function restorePreviewDisplaySettings() {
         const mode = parsePreviewDisplayMode(await getAppSetting(PREVIEW_DISPLAY_MODE_SETTING));
         setPreviewDisplayMode(mode);
+        setPreviewDisplayLayout(parsePreviewDisplayLayout(await getAppSetting(PREVIEW_DISPLAY_LAYOUT_SETTING)));
         const overlay = parsePreviewDisplayOverlay(await getAppSetting(PREVIEW_DISPLAY_OVERLAY_SETTING));
         if (overlay) setPreviewDisplayOverlay(overlay);
         setPreviewDisplayAlwaysOnTop((await getAppSetting(PREVIEW_DISPLAY_ALWAYS_ON_TOP_SETTING)) === 'true');
@@ -169,9 +225,20 @@
     async function syncFocusedImageToPreviewDisplay(image: ImageWithFile | null) {
         const payload = nextPreviewFocusPayload(image, previewSyncState);
         const imageId = previewSyncImageId(image, previewSyncState, $previewDisplayFrozen, $previewDisplayBlanked);
+        const imageIds = previewSyncImageIds(
+            image,
+            $images,
+            $selectedIds,
+            previewSyncState,
+            $previewDisplayFrozen,
+            $previewDisplayBlanked,
+            $previewDisplayLayout
+        );
         const syncKey = JSON.stringify({
             imageId,
+            imageIds,
             displayMode: $previewDisplayMode,
+            layout: $previewDisplayLayout,
             overlay: $previewDisplayOverlay,
             frozen: $previewDisplayFrozen,
             blanked: $previewDisplayBlanked,
@@ -184,7 +251,9 @@
             $previewDisplayMode ?? payload.displayMode,
             $previewDisplayOverlay ?? payload.overlay,
             $previewDisplayFrozen,
-            $previewDisplayBlanked
+            $previewDisplayBlanked,
+            $previewDisplayLayout ?? payload.layout,
+            imageIds
         );
     }
 
@@ -242,6 +311,32 @@
             return { kind: 'detected_class', id: null, label: $activeDetectedClass, path: null };
         }
         return { kind: 'all', id: null, label: 'All Images', path: null };
+    }
+
+    function currentAgentProposalViewContext(): AgentProposalViewContext {
+        const scope = currentAgentSnapshotScope();
+        return {
+            kind: scope.kind,
+            id: scope.id,
+            label: scope.label,
+            path: scope.path,
+            view_mode: $viewMode,
+            selected_count: $selectedIds.size,
+            visible_count: $images.length,
+        };
+    }
+
+    function agentProposalSourceContext(source: string, viewContext: AgentProposalViewContext, candidateCount: number) {
+        return {
+            source,
+            actor: { type: 'ui', name: 'Cull UI', role: 'copilot' },
+            selected_count: $selectedIds.size,
+            visible_count: $images.length,
+            candidate_count: candidateCount,
+            scope_key: proposalViewContextKey(viewContext),
+            scope_label: viewContext.label,
+            view_context: viewContext,
+        };
     }
 
     async function captureAgentViewSnapshot(options: AgentSnapshotCaptureOptions = {}) {
@@ -316,19 +411,341 @@
         }
     }
 
+    async function refreshAgentPanelData() {
+        const [proposals, presets] = await Promise.all([
+            listActionProposals('pending', 20),
+            listAgentSelectionPresets(),
+        ]);
+        agentProposals = proposals;
+        agentSelectionPresets = presets;
+        if (!$activeAgentSelectionPresetId && presets.length > 0) {
+            activeAgentSelectionPresetId.set(presets[0].id);
+        }
+    }
+
+    function proposalCandidateIds(): string[] {
+        const selected = Array.from($selectedIds);
+        if (selected.length > 0) return selected.slice(0, 24);
+        return $images.slice(0, 12).map(item => item.image.id);
+    }
+
+    function proposalCandidateImages(ids: string[]): ImageWithFile[] {
+        const wanted = new Set(ids);
+        return $images.filter(item => wanted.has(item.image.id));
+    }
+
+    function visualLevelForAgentRequest(candidateImages: ImageWithFile[]) {
+        return effectiveAgentVisualLevel({
+            requestedVisualLevel: $agentVisualLevel,
+            candidateCount: candidateImages.length,
+            thumbnailCount: candidateImages.filter(item => !!item.thumbnail_path).length,
+        });
+    }
+
+    function proposalKindForPreset(preset: AgentSelectionPreset | null, instruction: string) {
+        const text = `${preset?.purpose ?? ''} ${instruction}`.toLowerCase();
+        if (/\b(trash|cleanup|reject|remove)\b/.test(text)) return 'trash_images';
+        return 'select_images';
+    }
+
+    function imageContextForAgent(candidateImages: ImageWithFile[], visualLevel: AgentVisualLevel): AgentChatImageContext[] {
+        return candidateImages
+            .map(item => ({
+                image_id: item.image.id,
+                filename: item.path.split(/[\\/]/).pop() ?? null,
+                width: item.image.width ?? null,
+                height: item.image.height ?? null,
+                format: item.image.format ?? null,
+                star_rating: item.selection?.star_rating ?? null,
+                color_label: item.selection?.color_label ?? null,
+                decision: item.selection?.decision ?? null,
+                source_label: item.source_label ?? null,
+                thumbnail_path: visualLevel === 'text' ? null : item.thumbnail_path,
+            }));
+    }
+
+    async function createManualAgentProposal(presetId: string | null, instruction: string) {
+        const preset = agentSelectionPresets.find(item => item.id === presetId) ?? agentSelectionPresets[0] ?? null;
+        const ids = proposalCandidateIds();
+        if (ids.length === 0) {
+            showToast('No images available for proposal', { type: 'warning', duration: 5000 });
+            return;
+        }
+        const candidateImages = proposalCandidateImages(ids);
+        const visualLevel = visualLevelForAgentRequest(candidateImages);
+        if (visualLevel !== $agentVisualLevel) agentVisualLevel.set(visualLevel);
+        const kind = proposalKindForPreset(preset, instruction);
+        const estimatedBudget = estimateAgentBudget({
+            candidateCount: ids.length,
+            instruction,
+            visualLevel,
+        });
+        const viewContext = currentAgentProposalViewContext();
+        const items = ids.map((image_id, index) => ({
+            image_id,
+            reason: `${preset?.name ?? 'Manual preset'} candidate ${index + 1}: ${instruction}`,
+            confidence: 'manual',
+        }));
+        const proposal = await createActionProposal({
+            kind,
+            persona: 'copilot',
+            lens: preset?.purpose ?? 'selection',
+            criteria: `${preset?.prompt ?? 'Selection proposal'}\n\nUser: ${instruction}`,
+            visual_level: visualLevel,
+            selection_preset_id: preset?.id ?? null,
+            estimated_input_tokens: estimatedBudget.inputTokens,
+            estimated_output_tokens: estimatedBudget.outputTokens,
+            estimated_cost_eur: estimatedBudget.costEur,
+            source_context_json: JSON.stringify(agentProposalSourceContext('agent_chat_manual_seed', viewContext, ids.length)),
+            items_json: JSON.stringify(items),
+            guard_results_json: JSON.stringify({ blocked: [] }),
+        });
+        agentProposals = [proposal, ...agentProposals.filter(item => item.id !== proposal.id)];
+        activeAgentProposalId.set(proposal.id);
+        agentPanelVisible.set(true);
+        agentPanelPinned.set(true);
+        showToast('Agent proposal created', {
+            detail: kind === 'trash_images' ? 'Review before moving files to Trash' : 'Review before changing selection',
+            type: 'info',
+            duration: 5000,
+        });
+    }
+
+    async function handleCreateAgentProposal(presetId: string | null, instruction: string) {
+        if (agentChatBusy) return;
+        const preset = agentSelectionPresets.find(item => item.id === presetId) ?? agentSelectionPresets[0] ?? null;
+        const ids = proposalCandidateIds();
+        const rawCandidateImages = proposalCandidateImages(ids);
+        const visualLevel = visualLevelForAgentRequest(rawCandidateImages);
+        if (visualLevel !== $agentVisualLevel) agentVisualLevel.set(visualLevel);
+        const candidateImages = imageContextForAgent(rawCandidateImages, visualLevel);
+        if (candidateImages.length === 0) {
+            showToast('No images available for Claude', { type: 'warning', duration: 5000 });
+            return;
+        }
+
+        agentChatBusy = true;
+        lastAgentMessage = null;
+        lastAgentInstruction = instruction;
+        const requestId = crypto.randomUUID?.() ?? `agent-${Date.now()}`;
+        activeAgentRequestId = requestId;
+        agentStreamEvents = [];
+        try {
+            const result = await runClaudeAgentChatTurn({
+                request_id: requestId,
+                instruction,
+                visual_level: visualLevel,
+                preset,
+                candidate_images: candidateImages,
+                selected_count: $selectedIds.size,
+                visible_count: $images.length,
+                view_context_json: JSON.stringify(currentAgentProposalViewContext()),
+                model: null,
+                max_budget_usd: null,
+            });
+            if (cancelledAgentRequestIds.has(requestId)) {
+                lastAgentMessage = 'Request cancelled';
+                return;
+            }
+            lastAgentMessage = result.message;
+
+            if (result.proposal) {
+                agentProposals = [result.proposal, ...agentProposals.filter(item => item.id !== result.proposal?.id)];
+                activeAgentProposalId.set(result.proposal.id);
+                agentPanelVisible.set(true);
+                agentPanelPinned.set(true);
+                showToast('Claude proposal created', {
+                    detail: result.proposal.kind === 'trash_images' ? 'Review before moving files to Trash' : 'Review before changing selection',
+                    type: 'info',
+                    duration: 5000,
+                });
+            }
+
+            if (result.updated_preset) {
+                agentSelectionPresets = agentSelectionPresets.map(item => item.id === result.updated_preset?.id ? result.updated_preset : item);
+                activeAgentSelectionPresetId.set(result.updated_preset.id);
+                showToast('Claude updated preset', { detail: result.updated_preset.name, type: 'success', duration: 5000 });
+            }
+
+            if (!result.proposal && !result.updated_preset) {
+                showToast('Claude replied', { detail: result.message, type: 'info', duration: 6000 });
+            }
+        } catch (e) {
+            if (cancelledAgentRequestIds.has(requestId)) {
+                lastAgentMessage = 'Request cancelled';
+                return;
+            }
+            showToast('Claude agent failed', { detail: String(e), type: 'error', duration: 9000 });
+        } finally {
+            agentChatBusy = false;
+            if (activeAgentRequestId === requestId) activeAgentRequestId = null;
+            cancelledAgentRequestIds.delete(requestId);
+        }
+    }
+
+    async function handleCancelAgentTurn() {
+        const requestId = activeAgentRequestId;
+        if (!requestId || !agentChatBusy) return;
+        cancelledAgentRequestIds.add(requestId);
+        try {
+            const cancelled = await cancelClaudeAgentChatTurn(requestId);
+            if (!cancelled) {
+                cancelledAgentRequestIds.delete(requestId);
+                showToast('Claude request already finished', {
+                    type: 'warning',
+                    duration: 4000,
+                });
+                return;
+            }
+            appendLocalAgentEvent(requestId, 'cancelled', 'Request cancelled');
+            lastAgentMessage = 'Request cancelled';
+            agentChatBusy = false;
+            activeAgentRequestId = null;
+            showToast('Claude request cancelled', {
+                type: 'info',
+                duration: 4000,
+            });
+        } catch (e) {
+            cancelledAgentRequestIds.delete(requestId);
+            showToast('Could not cancel Claude request', {
+                detail: String(e),
+                type: 'warning',
+                duration: 6000,
+            });
+        }
+    }
+
+    async function undoLastTrashProposal() {
+        try {
+            const label = await undo();
+            if (!label) {
+                showToast('Nothing to undo', { type: 'warning', duration: 3000 });
+                return;
+            }
+            await loadImages({ resetFocus: false, force: true, invalidateCache: true });
+            refreshImageCount().catch(e => console.error('Failed to refresh image count after proposal undo:', e));
+            refreshCollectionCountsAfterRemoval('proposal trash undo');
+            showToast(`Undone: ${label}`, { type: 'info', duration: 4000 });
+        } catch (e) {
+            showToast('Undo failed', { detail: String(e), type: 'error', duration: 7000 });
+        }
+    }
+
+    function undoSelectionProposal() {
+        if (selectedIds.undo()) {
+            showToast('Selection restored', { type: 'info', duration: 3500 });
+        } else {
+            showToast('Nothing to undo', { type: 'warning', duration: 3000 });
+        }
+    }
+
+    async function handleUpdateAgentPreset(presetId: string, prompt: string) {
+        const preset = agentSelectionPresets.find(item => item.id === presetId);
+        if (!preset) return;
+        const updated = await upsertAgentSelectionPreset({
+            id: preset.id,
+            name: preset.name,
+            purpose: preset.purpose,
+            prompt,
+            criteria_json: preset.criteria_json,
+            sort_order: preset.sort_order,
+        });
+        agentSelectionPresets = agentSelectionPresets.map(item => item.id === updated.id ? updated : item);
+        showToast('Selection preset updated', { detail: updated.name, type: 'success', duration: 4000 });
+    }
+
+    async function handleDismissAgentProposal(proposalId: string) {
+        await dismissActionProposal(proposalId);
+        agentProposals = agentProposals.filter(item => item.id !== proposalId);
+        if ($activeAgentProposalId === proposalId) activeAgentProposalId.set(null);
+    }
+
+    function handleCloseAgentPanel() {
+        agentPanelVisible.set(false);
+        agentPanelPinned.set(false);
+    }
+
+    function handleReviewAgentProposal(proposalId: string) {
+        reviewProposalId = proposalId;
+        activeAgentProposalId.set(proposalId);
+    }
+
+    async function handleApplyAgentProposal(proposalId: string, approvedImageIds: string[]) {
+        const proposal = agentProposals.find(item => item.id === proposalId);
+        if (!proposal) return;
+        if (proposal.kind === 'trash_images') {
+            const trashResult = await trashImagesDetailed(approvedImageIds);
+            await applyActionProposal(proposalId, approvedImageIds, JSON.stringify(trashResult));
+            const trashed = new Set(trashResult.results.filter(item => item.status === 'trashed').map(item => item.image_id));
+            images.update(list => list.filter(item => !trashed.has(item.image.id)));
+            invalidateImageCache();
+            refreshImageCount().catch(e => console.error('Failed to refresh image count after proposal trash:', e));
+            refreshCollectionCountsAfterRemoval('proposal trash');
+            showToast('Trash proposal applied', {
+                detail: `${trashResult.succeeded} moved to Trash, ${trashResult.failed} failed`,
+                type: trashResult.failed > 0 ? 'warning' : 'info',
+                duration: 6000,
+                actions: [
+                    { label: 'Undo', onclick: () => { void undoLastTrashProposal(); } },
+                ],
+            });
+        } else {
+            const visibleIds = new Set($images.map(item => item.image.id));
+            const visibleApprovedIds = approvedImageIds.filter(id => visibleIds.has(id));
+            if (visibleApprovedIds.length === 0) {
+                showToast('Selection proposal no longer matches this view', {
+                    detail: 'None of the approved images are currently loaded',
+                    type: 'warning',
+                    duration: 6000,
+                });
+                return;
+            }
+            selectedIds.set(new Set(visibleApprovedIds));
+            const firstIndex = $images.findIndex(item => item.image.id === visibleApprovedIds[0]);
+            if (firstIndex >= 0) focusedIndex.set(firstIndex);
+            await applyActionProposal(
+                proposalId,
+                visibleApprovedIds,
+                JSON.stringify({
+                    selected: visibleApprovedIds.length,
+                    missing: approvedImageIds.length - visibleApprovedIds.length,
+                }),
+            );
+            showToast('Selection proposal applied', {
+                detail: approvedImageIds.length === visibleApprovedIds.length
+                    ? `${visibleApprovedIds.length} images selected`
+                    : `${visibleApprovedIds.length} selected, ${approvedImageIds.length - visibleApprovedIds.length} no longer visible`,
+                type: visibleApprovedIds.length === approvedImageIds.length ? 'success' : 'warning',
+                duration: 6000,
+                actions: [
+                    { label: 'Undo', onclick: undoSelectionProposal },
+                ],
+            });
+        }
+        reviewProposalId = null;
+        activeAgentProposalId.set(null);
+        await refreshAgentPanelData();
+    }
+
     $effect(() => {
         const image = $focusedImage;
         const frozen = $previewDisplayFrozen;
         const blanked = $previewDisplayBlanked;
         const alwaysOnTop = $previewDisplayAlwaysOnTop;
         const mode = $previewDisplayMode;
+        const layout = $previewDisplayLayout;
         const overlay = $previewDisplayOverlay;
+        const selection = $selectedIds;
+        const loadedImages = $images;
         if (previewDisplayWindow) return;
         void frozen;
         void blanked;
         void alwaysOnTop;
         void mode;
+        void layout;
         void overlay;
+        void selection;
+        void loadedImages;
         syncFocusedImageToPreviewDisplay(image).catch((e) => {
             console.debug('Failed to sync Preview Display focus:', e);
         });
@@ -365,6 +782,7 @@
             if (pluginsRuntimeEnabled) {
                 loadInstalledPlugins().catch((e) => console.error('[plugins] load failed:', e));
             }
+            await refreshAgentPanelData();
 
             try {
                 const health = await checkLibraryHealth();
@@ -401,6 +819,16 @@
         window.addEventListener('delete-focused-image', handlePermanentDelete);
         const handleReloadImages = () => loadImages({ resetFocus: false, force: true, invalidateCache: true }).catch(e => console.error('Failed to reload:', e));
         window.addEventListener('reload-images', handleReloadImages);
+        const handleCreateAgentTestProposal = () => {
+            createManualAgentProposal($activeAgentSelectionPresetId, 'Create a test proposal from the current selection')
+                .catch(e => console.error('Failed to create test proposal:', e));
+        };
+        window.addEventListener('create-agent-test-proposal', handleCreateAgentTestProposal);
+        const handleOpenAgentPanel = () => {
+            agentPanelVisible.set(true);
+            agentPanelPinned.set(true);
+        };
+        window.addEventListener('open-agent-panel', handleOpenAgentPanel);
         const handleAgentSnapshotCommand = (event: Event) => {
             const detail = event instanceof CustomEvent ? event.detail : {};
             captureAgentViewSnapshot({ clipboard: Boolean(detail?.clipboard) })
@@ -428,6 +856,11 @@
 
         const agentSnapshotSelectionUnlisten = listen<AgentSnapshotSelectionPayload>('agent-view-snapshot:select-images', (event) => {
             applyAgentViewSnapshotSelection(event.payload);
+        });
+
+        const agentStreamUnlisten = listen<ClaudeAgentStreamEvent>('claude-agent:stream-event', (event) => {
+            if (event.payload.request_id !== activeAgentRequestId) return;
+            appendAgentStreamEvent(event.payload);
         });
 
         const panicUnlisten = listen<{thread: string, location: string | null, message: string}>('rust-panic', (event) => {
@@ -475,12 +908,15 @@
             watcherUnlisten.then(fn => fn());
             agentSnapshotRequestUnlisten.then(fn => fn());
             agentSnapshotSelectionUnlisten.then(fn => fn());
+            agentStreamUnlisten.then(fn => fn());
             panicUnlisten.then(fn => fn());
             taskFailUnlisten.then(fn => fn());
             cloudUnlisten.then(fn => fn());
             window.removeEventListener('trash-focused-image', handleTrash);
             window.removeEventListener('delete-focused-image', handlePermanentDelete);
             window.removeEventListener('reload-images', handleReloadImages);
+            window.removeEventListener('create-agent-test-proposal', handleCreateAgentTestProposal);
+            window.removeEventListener('open-agent-panel', handleOpenAgentPanel);
             window.removeEventListener('capture-agent-view-snapshot', handleAgentSnapshotCommand);
             clearInterval(saveTimer);
             window.removeEventListener('beforeunload', handleBeforeUnload);
@@ -495,7 +931,7 @@
     <PreviewDisplay />
 {:else}
     <UpdateBanner />
-    <div class="app-shell" class:no-sidebar={noSidebar} class:zen={$zenMode}>
+    <div class="app-shell" class:no-sidebar={noSidebar} class:zen={$zenMode} class:agent-pinned={$agentPanelPinned && !$zenMode}>
         {#if !$zenMode}
             <TabBar />
         {/if}
@@ -534,8 +970,36 @@
                 <span class="placeholder-text">Coming soon</span>
             </div>
         {/if}
+        <div class="agent-dock-area">
+            <AgentProposalDock
+                proposals={agentProposals}
+                presets={agentSelectionPresets}
+                selectedCount={$selectedIds.size}
+                pinned={$agentPanelPinned}
+                visible={$agentPanelVisible}
+                busy={agentChatBusy}
+                lastMessage={lastAgentMessage}
+                lastInstruction={lastAgentInstruction}
+                streamEvents={agentStreamEvents}
+                visualLevel={$agentVisualLevel}
+                activePresetId={$activeAgentSelectionPresetId}
+                activeProposalId={$activeAgentProposalId}
+                candidateCount={agentCandidateCount}
+                currentViewContext={agentProposalViewContext}
+                visibleImages={$images}
+                onreviewproposal={handleReviewAgentProposal}
+                ondismissproposal={handleDismissAgentProposal}
+                oncreateproposal={handleCreateAgentProposal}
+                onupdatepreset={handleUpdateAgentPreset}
+                onselectpreset={(presetId) => activeAgentSelectionPresetId.set(presetId)}
+                onselectproposal={(proposalId) => activeAgentProposalId.set(proposalId)}
+                onvisuallevelcycle={cycleAgentVisualLevel}
+                oncancelturn={handleCancelAgentTurn}
+                onclose={handleCloseAgentPanel}
+            />
+        </div>
         {#if !$zenMode}
-            <StatusBar />
+            <StatusBar agentBusy={agentChatBusy} />
         {/if}
 
         <Toast />
@@ -554,6 +1018,7 @@
     <ExportFolderDialog />
     <ContactSheetDialog />
     <GroupRankingDialog />
+    <UndoHistoryPanel />
 
     {#if $settingsOpen}
         <McpSettings onclose={() => settingsOpen.set(false)} />
@@ -574,7 +1039,17 @@
         oncancel={() => trashConfirmVisible = false}
     />
 
+    <ActionProposalReviewDialog
+        proposal={reviewProposal}
+        visible={reviewProposal !== null}
+        currentViewContext={agentProposalViewContext}
+        visibleImages={$images}
+        onapplyproposal={handleApplyAgentProposal}
+        oncancelreview={() => reviewProposalId = null}
+    />
+
     <TextInputDialog />
+    <ConfirmDialog />
     <CollectionTargetDialog />
 {/if}
 
@@ -597,6 +1072,20 @@
             "main"
             "statusbar";
         grid-template-columns: 1fr;
+    }
+    .app-shell.agent-pinned {
+        grid-template-areas:
+            "tabbar tabbar tabbar"
+            "sidebar main agent"
+            "statusbar statusbar statusbar";
+        grid-template-columns: 220px minmax(0, 1fr) 360px;
+    }
+    .app-shell.no-sidebar.agent-pinned {
+        grid-template-areas:
+            "tabbar tabbar"
+            "main agent"
+            "statusbar statusbar";
+        grid-template-columns: minmax(0, 1fr) 360px;
     }
     .app-shell.zen {
         grid-template-areas: "main";
@@ -628,6 +1117,19 @@
         overflow-y: auto;
         background: var(--bg);
     }
+    .agent-dock-area {
+        display: contents;
+    }
+    .app-shell.agent-pinned .agent-dock-area {
+        display: block;
+        grid-area: agent;
+        min-width: 0;
+        overflow: hidden;
+    }
+    .app-shell.agent-pinned .agent-dock-area :global(.agent-dock) {
+        height: 100%;
+        min-width: 0;
+    }
     .drop-overlay {
         position: fixed;
         inset: 0;
@@ -636,7 +1138,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        z-index: 9999;
+        z-index: var(--z-drag-overlay);
         pointer-events: none;
     }
     .drop-label {

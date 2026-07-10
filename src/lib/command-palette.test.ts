@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { get } from 'svelte/store';
 import {
     canAssignCommandHotkey,
     eventMatchesShortcut,
@@ -25,6 +26,9 @@ import {
     activeDetectedClass,
     activeFolder,
     activeSmartCollection,
+    agentPanelPinned,
+    agentPanelVisible,
+    agentVisualLevel,
     collectMode,
     collectModeTarget,
     collections,
@@ -79,6 +83,9 @@ describe('command palette helpers', () => {
         collections.set([]);
         collectMode.set(false);
         collectModeTarget.set(null);
+        agentPanelPinned.set(false);
+        agentPanelVisible.set(false);
+        agentVisualLevel.set('tiny');
         clearPluginTabs();
         registerCoreTabs();
     }
@@ -227,8 +234,11 @@ describe('command palette helpers', () => {
         const items = getCommandPaletteItems('commands');
         const exportView = items.find(i => i.id === 'view.export');
         const actualSize = items.find(i => i.id === 'view.actual-size');
+        const fitIn = items.find(i => i.id === 'view.fit-in');
 
         expect(actualSize?.defaultShortcut).toBe('Cmd+0');
+        expect(fitIn?.title).toBe('Fit In');
+        expect(fitIn?.defaultShortcut).toBeUndefined();
         expect(exportView?.defaultShortcut).toBe('Cmd+7');
         expect(getShortcutConflict('Cmd+0', 'view.grid', items, {})).toBe('Actual Size');
         expect(getShortcutConflict('Cmd+7', 'view.grid', items, {})).toBe('Export View');
@@ -247,6 +257,21 @@ describe('command palette helpers', () => {
         });
         expect(getShortcutConflict('Cmd+Shift+C', 'view.grid', items, {})).toBe('Capture Agent Snapshot');
         expect(findDuplicateCommandHotkeys(items, {})).toEqual([]);
+    });
+
+    it('registers agent panel and proposal commands in the command palette', () => {
+        resetCommandContext();
+        const items = getCommandPaletteItems('commands');
+        const ids = items.map(i => i.id);
+
+        expect(ids).toContain('agent.toggle-panel');
+        expect(ids).toContain('agent.cycle-visual-level');
+        expect(ids).toContain('agent.create-test-proposal');
+        expect(items.find(i => i.id === 'agent.create-test-proposal')?.disabled).toBe(true);
+
+        items.find(i => i.id === 'agent.toggle-panel')?.run();
+        expect(get(agentPanelVisible)).toBe(true);
+        expect(get(agentPanelPinned)).toBe(true);
     });
 
     it('shows Publish View as a command only when a plugin registers the publish tab', () => {

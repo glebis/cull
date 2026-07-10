@@ -373,6 +373,8 @@ pub struct TokenScope {
 pub struct AuditEntry {
     pub id: i64,
     pub token_id: Option<String>,
+    pub token_name: Option<String>,
+    pub token_role: Option<String>,
     pub tool_name: String,
     pub params_json: Option<String>,
     pub result_status: String,
@@ -536,4 +538,81 @@ pub struct Canvas {
     pub sort_order: i32,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentActionProposal {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    pub persona: String,
+    pub lens: Option<String>,
+    pub criteria: String,
+    pub visual_level: String,
+    pub selection_preset_id: Option<String>,
+    pub estimated_input_tokens: Option<i64>,
+    pub estimated_output_tokens: Option<i64>,
+    pub estimated_cost_eur: Option<f64>,
+    pub source_context_json: String,
+    pub items_json: String,
+    pub guard_results_json: String,
+    pub apply_result_json: Option<String>,
+    pub undo_journal_json: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub applied_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateActionProposalDb {
+    pub kind: String,
+    pub persona: String,
+    pub lens: Option<String>,
+    pub criteria: String,
+    pub visual_level: String,
+    pub selection_preset_id: Option<String>,
+    pub estimated_input_tokens: Option<i64>,
+    pub estimated_output_tokens: Option<i64>,
+    pub estimated_cost_eur: Option<f64>,
+    pub source_context_json: String,
+    pub items_json: String,
+    pub guard_results_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSelectionPreset {
+    pub id: String,
+    pub name: String,
+    pub purpose: String,
+    pub prompt: String,
+    pub criteria_json: String,
+    pub sort_order: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpsertAgentSelectionPresetDb {
+    pub id: Option<String>,
+    pub name: String,
+    pub purpose: String,
+    pub prompt: String,
+    pub criteria_json: String,
+    pub sort_order: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrashImageResult {
+    pub image_id: String,
+    pub path: Option<String>,
+    pub status: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrashImagesDetailedResult {
+    pub requested: u32,
+    pub succeeded: u32,
+    pub failed: u32,
+    pub results: Vec<TrashImageResult>,
 }

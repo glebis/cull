@@ -1,6 +1,6 @@
 [package]
 name = "cull"
-version = "0.2.3"
+version = "0.2.5"
 description = "Local-first desktop image viewer for AI-generated art workflows."
 authors = ["Gleb Kalinin <glebis@gmail.com>"]
 license = "Apache-2.0"
@@ -44,7 +44,7 @@ ndarray = "0.17"
 reqwest = { version = "0.13", features = ["stream", "json"] }
 futures-util = "0.3"
 base64 = "0.22"
-tokio = { version = "1", features = ["time", "net", "io-util", "io-std", "rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["time", "net", "io-util", "io-std", "rt", "rt-multi-thread", "macros", "process"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
@@ -70,7 +70,7 @@ subtle = "2"
 hex = "0.4"
 dirs = "6"
 rsraw = "0.1"
-notify = "6"
+notify = "8"
 dashmap = "6"
 qrcode = "0.14"
 tempfile = "3"

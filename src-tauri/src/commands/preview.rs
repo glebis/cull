@@ -1,5 +1,7 @@
 use crate::preview::histogram::{load_image_histogram, ImageHistogram};
-use crate::preview::state::{PreviewDisplayMode, PreviewOverlayConfig, PreviewState};
+use crate::preview::state::{
+    PreviewDisplayLayout, PreviewDisplayMode, PreviewOverlayConfig, PreviewState,
+};
 use crate::preview::web_stream::{PreviewWebStreamStatus, PREVIEW_WEB_STREAM_CHANGED_EVENT};
 use crate::preview::window::{
     preview_display_window_spec, preview_monitor_key, PREVIEW_DISPLAY_LABEL,
@@ -39,15 +41,22 @@ pub async fn update_preview_state(
     app: AppHandle,
     state: State<'_, AppState>,
     image_id: Option<String>,
+    image_ids: Option<Vec<String>>,
     display_mode: PreviewDisplayMode,
+    layout: Option<PreviewDisplayLayout>,
     overlay: PreviewOverlayConfig,
     frozen: Option<bool>,
     blanked: Option<bool>,
 ) -> Result<PreviewState, String> {
-    let preview_state =
-        state
-            .preview_state
-            .update(image_id, display_mode, overlay, frozen, blanked);
+    let preview_state = state.preview_state.update(
+        image_id,
+        image_ids,
+        display_mode,
+        layout,
+        overlay,
+        frozen,
+        blanked,
+    );
     app.emit(PREVIEW_STATE_CHANGED_EVENT, preview_state.clone())
         .map_err(|e| format!("Failed to emit preview state update: {}", e))?;
     Ok(preview_state)

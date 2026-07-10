@@ -16,11 +16,27 @@ targets = [
 [advisories]
 version = 2
 yanked = "deny"
-# Note: the Linux-only gtk3/glib advisories (e.g. RUSTSEC-2024-0429 and the
-# related ~17 cargo-audit unmaintained warnings) are excluded from cargo-deny
-# scope by the [graph] targets restriction above; cargo-audit still reports
-# them against the full Cargo.lock as accepted, non-fatal warnings.
+# Note: the Linux-only gtk3/glib advisories are excluded from cargo-deny scope
+# by the [graph] targets restriction above; cargo-audit still scans the full
+# Cargo.lock, so the shared audit script forwards this same ignore list to
+# cargo-audit. Review before enabling Linux release targets.
 ignore = [
+    # Linux-only GTK3 stack pulled by Tauri/wry. Cull ships macOS bundles only;
+    # accepted until Linux release work replaces or scopes these dependencies.
+    "RUSTSEC-2024-0411", # gdkwayland-sys
+    "RUSTSEC-2024-0412", # gdk
+    "RUSTSEC-2024-0413", # atk
+    "RUSTSEC-2024-0414", # gdkx11-sys
+    "RUSTSEC-2024-0415", # gtk
+    "RUSTSEC-2024-0416", # atk-sys
+    "RUSTSEC-2024-0417", # gdkx11
+    "RUSTSEC-2024-0418", # gdk-sys
+    "RUSTSEC-2024-0419", # gtk3-macros
+    "RUSTSEC-2024-0420", # gtk-sys
+    "RUSTSEC-2024-0429", # glib
+    # proc-macro-error is a transitive build-time dependency; accepted until
+    # upstream codegen crates remove it.
+    "RUSTSEC-2024-0370", # proc-macro-error
     # Unmaintained unic-* crates: transitive build-time deps of tauri-codegen
     # (tauri-utils). No runtime exposure; accepted until Tauri replaces them.
     "RUSTSEC-2025-0075", # unic-char-range
@@ -28,6 +44,33 @@ ignore = [
     "RUSTSEC-2025-0081", # unic-char-property
     "RUSTSEC-2025-0098", # unic-ucd-version
     "RUSTSEC-2025-0100", # unic-ucd-ident
+    # lopdf: stack overflow via deeply nested PDF objects (SIGABRT, not
+    # catch_unwind-able). Transitive via printpdf 0.7 (our direct dep), which
+    # pins lopdf 0.31; no lopdf 0.31.x release backports the fix and the
+    # patched line (>=0.42.0) only ships behind printpdf >=0.9, a pre-1.0
+    # major bump (0.7 -> 0.9) we're not taking as a point fix. Exposure is
+    # limited to importing/parsing untrusted, attacker-supplied PDF files.
+    "RUSTSEC-2026-0187", # lopdf
+    # quick-xml: O(N^2) duplicate-attribute-name check on a single start tag
+    # (CPU-exhaustion DoS). Transitive via plist 1.9.0 (latest) <- tauri,
+    # which pins quick-xml to the 0.39 line; the fix ships only in >=0.41.0,
+    # outside plist's declared range, and plist is not a direct dependency we
+    # can bump ourselves. Exposure is limited to parsing untrusted XML/plist
+    # input.
+    "RUSTSEC-2026-0194", # quick-xml
+    # quick-xml: unbounded namespace-declaration allocation in NsReader
+    # (memory-exhaustion DoS). Same transitive path and same fixed-in-0.41.0
+    # constraint as RUSTSEC-2026-0194 above; plist has no newer release that
+    # picks up the fix. Exposure is limited to parsing untrusted XML with
+    # attacker-controlled namespace declarations.
+    "RUSTSEC-2026-0195", # quick-xml
+    # ttf-parser: upstream author declared the crate unmaintained; no CVE, no
+    # safe upgrade path per the advisory itself. Transitive via
+    # owned_ttf_parser <- printpdf 0.7 (our direct dep); not a direct
+    # dependency we control. Unmaintained-only warning, no known
+    # vulnerability; accepted until printpdf drops it or we switch PDF
+    # backends.
+    "RUSTSEC-2026-0192", # ttf-parser
 ]
 
 [licenses]

@@ -6,6 +6,9 @@ import {
     activeFolder,
     activeSession,
     activeSmartCollection,
+    agentPanelPinned,
+    agentPanelVisible,
+    agentVisualLevel,
     collectMode,
     collectModeTarget,
     collections,
@@ -22,6 +25,7 @@ import {
     searchOpen,
     selectedIds,
     sessions,
+    undoHistoryOpen,
     shortcutsOpen,
     sessionCanvases,
     settingsOpen,
@@ -32,8 +36,10 @@ import {
     smartCollections,
     folders,
     statusHint,
-    resetLoupeTransform,
+    requestLoupeActualSize,
+    requestLoupeFitIn,
     clientToolsEnabled,
+    cycleAgentVisualLevel,
     viewMode,
     zenMode,
     navigateBack,
@@ -102,6 +108,7 @@ export const BUILT_IN_SHORTCUT_LABELS: Record<string, string> = {
     'Cmd+B': 'Toggle sidebar',
     'Cmd+Z': 'Undo',
     'Cmd+Shift+Z': 'Redo',
+    'Cmd+Shift+H': 'Open action history',
     'Cmd+1': 'Grid view',
     'Cmd+2': 'Loupe view',
     'Cmd+3': 'Compare view',
@@ -478,6 +485,12 @@ async function addFocusedImageToCollectTarget() {
     statusHint.set('Added to collection. Space for next, B to exit');
 }
 
+function toggleAgentPanel() {
+    const open = get(agentPanelVisible) || get(agentPanelPinned);
+    agentPanelVisible.set(!open);
+    agentPanelPinned.set(!open);
+}
+
 export const WORKFLOW_CREATE_COMMAND_ID = 'workflow.create-from-recents';
 
 async function executeWorkflow(workflow: CommandWorkflow) {
@@ -679,6 +692,38 @@ function commandItems(): CommandPaletteItem[] {
             run: () => zenMode.update(value => !value),
         },
         {
+            id: 'agent.toggle-panel',
+            title: 'Toggle Claude Agent Panel',
+            subtitle: get(agentPanelVisible) || get(agentPanelPinned)
+                ? 'Hide agent chat and proposals'
+                : 'Show agent chat and proposals',
+            category: 'Agent',
+            kind: 'command',
+            keywords: ['agent', 'claude', 'chat', 'proposal', 'panel', 'assistant'],
+            run: toggleAgentPanel,
+        },
+        {
+            id: 'agent.cycle-visual-level',
+            title: 'Cycle Agent Visual Level',
+            subtitle: `Current context: ${get(agentVisualLevel)}`,
+            category: 'Agent',
+            kind: 'command',
+            keywords: ['agent', 'claude', 'context', 'visual', 'tokens', 'thumbnail', 'cost'],
+            run: cycleAgentVisualLevel,
+        },
+        {
+            id: 'agent.create-test-proposal',
+            title: 'Create Agent Proposal from Selection',
+            subtitle: selectedCount > 0 ? `${selectedCount} selected` : 'Select images first',
+            category: 'Agent',
+            kind: 'command',
+            keywords: ['agent', 'claude', 'proposal', 'selection', 'curate', 'trash'],
+            disabled: selectedCount === 0,
+            run: () => {
+                window.dispatchEvent(new CustomEvent('create-agent-test-proposal'));
+            },
+        },
+        {
             id: 'agent.capture-view-snapshot',
             title: 'Capture Agent Snapshot',
             subtitle: 'Save the current view for agent analysis',
@@ -719,12 +764,21 @@ function commandItems(): CommandPaletteItem[] {
         {
             id: 'view.actual-size',
             title: 'Actual Size',
-            subtitle: 'Reset loupe zoom and pan',
+            subtitle: 'Show the loupe image at 100%',
+            category: 'View',
+            kind: 'command',
+            keywords: ['zoom', '100', '1:1', 'loupe'],
+            defaultShortcut: 'Cmd+0',
+            run: () => requestLoupeActualSize(),
+        },
+        {
+            id: 'view.fit-in',
+            title: 'Fit In',
+            subtitle: 'Fit the loupe image inside the window',
             category: 'View',
             kind: 'command',
             keywords: ['zoom', 'fit', 'loupe', 'reset'],
-            defaultShortcut: 'Cmd+0',
-            run: () => resetLoupeTransform(),
+            run: () => requestLoupeFitIn(),
         },
         ...buildViewCommands()
             .map(({ mode, title, subtitle, shortcut }): CommandPaletteItem => ({
@@ -767,6 +821,18 @@ function commandItems(): CommandPaletteItem[] {
                     showToast(`Redone: ${label}`, { type: 'info', duration: 4000 });
                     window.dispatchEvent(new CustomEvent('reload-images'));
                 }
+            },
+        },
+        {
+            id: 'edit.undo_history',
+            title: 'Action History',
+            subtitle: 'View recent undoable actions',
+            category: 'Edit',
+            kind: 'command',
+            keywords: ['history', 'undo', 'redo'],
+            defaultShortcut: 'Cmd+Shift+H',
+            run: () => {
+                undoHistoryOpen.set(true);
             },
         },
         {

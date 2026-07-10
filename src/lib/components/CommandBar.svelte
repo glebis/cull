@@ -1,6 +1,5 @@
 <script lang="ts">
-    import { parseNlQuery, countSmartCollection, createSmartCollection, listSmartCollections } from '$lib/api';
-    import { invoke } from '@tauri-apps/api/core';
+    import { parseNlQuery, countSmartCollection, createSmartCollection, listSmartCollections, startDictation, stopDictation } from '$lib/api';
     import { listen } from '@tauri-apps/api/event';
     import { smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, searchOpen, viewMode, navigateTo, navigateBack, voiceDictationEnabled } from '$lib/stores';
     import type { FilterNode } from '$lib/api';
@@ -401,7 +400,7 @@
 
     async function startVoice() {
         try {
-            await invoke('start_dictation', { locale: dictationLocale });
+            await startDictation(dictationLocale);
         } catch (e) {
             console.error('Failed to start dictation:', e);
             isListening = false;
@@ -411,7 +410,7 @@
     async function stopVoice() {
         if (silenceTimer) clearTimeout(silenceTimer);
         try {
-            await invoke('stop_dictation');
+            await stopDictation();
         } catch (_) {}
         isListening = false;
     }
