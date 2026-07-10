@@ -942,7 +942,7 @@ def test_ai_settings_and_library_commands(page: Page) -> None:
 
     page.get_by_role("tab", name="AI", exact=True).click()
     expect(page.get_by_role("tabpanel")).to_be_visible()
-    assert page.get_by_role("tabpanel").locator("h3").all_inner_texts() == [
+    assert page.get_by_role("tabpanel").locator("h3").all_text_contents() == [
         "Provider Credentials", "Local Models", "Embedding Models"
     ]
     expect(page.get_by_role("tabpanel")).not_to_contain_text("Detect remaining")
