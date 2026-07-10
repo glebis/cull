@@ -1,5 +1,5 @@
-use crate::db_core::models::UndoRecord;
 use crate::services::undo::UndoStatus;
+use crate::services::undo_history::{enrich_undo_history, UndoHistoryEntry};
 use crate::AppState;
 use tauri::State;
 
@@ -22,6 +22,6 @@ pub async fn get_undo_status(state: State<'_, AppState>) -> Result<UndoStatus, S
 pub async fn list_undo_history(
     state: State<'_, AppState>,
     limit: Option<u32>,
-) -> Result<Vec<UndoRecord>, String> {
-    Ok(state.action_manager.history(&state.db, limit.unwrap_or(20)))
+) -> Result<Vec<UndoHistoryEntry>, String> {
+    enrich_undo_history(&state.db, &state.app_data_dir, limit.unwrap_or(20))
 }
