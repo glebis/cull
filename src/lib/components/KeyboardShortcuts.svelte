@@ -182,7 +182,7 @@
         align-items: flex-start;
         justify-content: center;
         padding-top: 8vh;
-        z-index: 1210;
+        z-index: var(--z-modal);
     }
     .shortcuts-panel {
         width: min(680px, 92vw);

@@ -4,6 +4,7 @@ import {
     getThumbnailBorderClass,
     buildRangeSelectionIds,
     buildThumbnailAriaLabel,
+    computeAnchoredGridScrollTop,
     computeGridClickSelection,
     computeGridLayout,
     computeVisibleItems,
@@ -16,6 +17,7 @@ import {
     moveCropRect,
     resizeCropRectFromHandle,
     chooseLoupeImagePath,
+    chooseLoupeDisplayPath,
     isAssetProtocolSafePath,
     safeAssetPreviewPath,
     pickThumbnailVariant,
@@ -199,8 +201,8 @@ describe('chooseLoupeImagePath', () => {
         thumbnail_path: '/Users/test/Library/Application Support/com.glebkalinin.cull/thumbnails/img-1.jpg',
     };
 
-    it('uses the thumbnail when available because imported originals are outside asset scope', () => {
-        expect(chooseLoupeImagePath(item, false, false)).toBe(item.thumbnail_path);
+    it('uses the original path for regular Loupe images', () => {
+        expect(chooseLoupeImagePath(item, false, false)).toBe(item.path);
     });
 
     it('falls back to the thumbnail after a source load failure', () => {
@@ -211,11 +213,19 @@ describe('chooseLoupeImagePath', () => {
         expect(chooseLoupeImagePath(item, true, false)).toBe(item.thumbnail_path);
     });
 
-    it('does not fall back to an imported original when no asset-safe preview exists', () => {
+    it('does not fall back to an imported original after source load failure', () => {
         expect(chooseLoupeImagePath({
             path: '/Users/test/Pictures/imported/full.png',
             thumbnail_path: null,
-        }, false, false)).toBeNull();
+        }, false, true)).toBeNull();
+    });
+
+    it('allows imported originals when no thumbnail exists for Loupe full-quality loading', () => {
+        const original = '/Users/test/Pictures/imported/full.png';
+        expect(chooseLoupeImagePath({
+            path: original,
+            thumbnail_path: null,
+        }, false, false)).toBe(original);
     });
 
     it('allows app-owned generated images when no thumbnail exists', () => {
@@ -224,6 +234,31 @@ describe('chooseLoupeImagePath', () => {
             path: generated,
             thumbnail_path: null,
         }, false, false)).toBe(generated);
+    });
+});
+
+describe('chooseLoupeDisplayPath', () => {
+    it('uses a safe thumbnail while an imported original is loading through the blob path', () => {
+        const thumbnail = '/Users/test/Library/Application Support/com.glebkalinin.cull/thumbnails/img-1.jpg';
+        expect(chooseLoupeDisplayPath({
+            path: '/Users/test/Pictures/imported/full.png',
+            thumbnail_path: thumbnail,
+        }, '/Users/test/Pictures/imported/full.png')).toBe(thumbnail);
+    });
+
+    it('keeps safe preferred paths unchanged', () => {
+        const generated = '/Users/test/Library/Application Support/com.glebkalinin.cull/generated/img.png';
+        expect(chooseLoupeDisplayPath({
+            path: generated,
+            thumbnail_path: null,
+        }, generated)).toBe(generated);
+    });
+
+    it('returns null when neither preferred path nor thumbnail can be rendered directly', () => {
+        expect(chooseLoupeDisplayPath({
+            path: '/Users/test/Pictures/imported/full.png',
+            thumbnail_path: null,
+        }, '/Users/test/Pictures/imported/full.png')).toBeNull();
     });
 });
 
@@ -317,6 +352,78 @@ describe('computeGridLayout', () => {
         const layout = computeGridLayout(800, 100, -5, 20);
         expect(layout.cols).toBe(8);
         expect(layout.cellSize).toBe(95);
+    });
+});
+
+describe('computeAnchoredGridScrollTop', () => {
+    it('keeps the same anchor image at the same viewport position when zooming in changes columns', () => {
+        const scrollTop = computeAnchoredGridScrollTop({
+            oldScrollTop: 164,
+            viewportWidth: 800,
+            viewportHeight: 600,
+            anchorX: 400,
+            anchorY: 300,
+            oldCols: 4,
+            oldCellSize: 164,
+            newCols: 2,
+            newCellSize: 288,
+            totalItems: 100,
+        });
+
+        // Old anchor: row 2, col 2 => item 10. New layout puts item 10 in row 5,
+        // preserving the anchor's fractional offset inside that cell.
+        expect(scrollTop).toBeCloseTo(1378.8293, 4);
+    });
+
+    it('keeps the same anchor image in view when zooming out adds columns', () => {
+        const scrollTop = computeAnchoredGridScrollTop({
+            oldScrollTop: 1378.8293,
+            viewportWidth: 800,
+            viewportHeight: 600,
+            anchorX: 400,
+            anchorY: 300,
+            oldCols: 2,
+            oldCellSize: 288,
+            newCols: 4,
+            newCellSize: 164,
+            totalItems: 100,
+        });
+
+        expect(scrollTop).toBeCloseTo(164, 0);
+    });
+
+    it('keeps the same anchor image when the viewport changes column count without zooming', () => {
+        const scrollTop = computeAnchoredGridScrollTop({
+            oldScrollTop: 820,
+            viewportWidth: 800,
+            viewportHeight: 600,
+            anchorX: 400,
+            anchorY: 300,
+            oldCols: 4,
+            oldCellSize: 164,
+            newCols: 5,
+            newCellSize: 164,
+            totalItems: 100,
+        });
+
+        expect(scrollTop).toBeCloseTo(656, 0);
+    });
+
+    it('clamps anchored scroll to the new layout bounds', () => {
+        const scrollTop = computeAnchoredGridScrollTop({
+            oldScrollTop: 4000,
+            viewportWidth: 800,
+            viewportHeight: 600,
+            anchorX: 400,
+            anchorY: 300,
+            oldCols: 4,
+            oldCellSize: 164,
+            newCols: 8,
+            newCellSize: 82,
+            totalItems: 40,
+        });
+
+        expect(scrollTop).toBe(0);
     });
 });
 

@@ -1,3 +1,4 @@
+use crate::commands::log_library_event;
 use crate::AppState;
 use image::{DynamicImage, GenericImageView, ImageFormat};
 use std::io::{BufWriter, Seek, Write};
@@ -130,7 +131,22 @@ pub async fn crop_image(
     width: u32,
     height: u32,
 ) -> Result<String, String> {
-    crop_image_inner(&state, &image_id, x, y, width, height)
+    let output_path = crop_image_inner(&state, &image_id, x, y, width, height)?;
+    log_library_event(
+        &state,
+        "image_cropped",
+        Some("image"),
+        Some(image_id.clone()),
+        serde_json::json!({
+            "image_id": image_id,
+            "output_path": output_path.clone(),
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+        }),
+    );
+    Ok(output_path)
 }
 
 fn rotate_image_inner(state: &AppState, image_id: &str, degrees: i32) -> Result<String, String> {
@@ -167,7 +183,19 @@ pub async fn rotate_image(
     image_id: String,
     degrees: i32,
 ) -> Result<String, String> {
-    rotate_image_inner(&state, &image_id, degrees)
+    let output_path = rotate_image_inner(&state, &image_id, degrees)?;
+    log_library_event(
+        &state,
+        "image_rotated",
+        Some("image"),
+        Some(image_id.clone()),
+        serde_json::json!({
+            "image_id": image_id,
+            "output_path": output_path.clone(),
+            "degrees": degrees,
+        }),
+    );
+    Ok(output_path)
 }
 
 #[cfg(test)]

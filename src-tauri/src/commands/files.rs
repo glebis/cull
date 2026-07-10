@@ -1,3 +1,5 @@
+use crate::commands::log_library_event;
+use crate::db_core::db::Database;
 use crate::AppState;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -19,6 +21,12 @@ pub struct OpenWithApplication {
 pub struct PastedImageResult {
     path: String,
     image_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImageFileBytes {
+    bytes: Vec<u8>,
+    mime_type: String,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +75,43 @@ fn rollback_disk_move(kind: DiskMove, old_path: &Path, new_path: &Path) {
             let _ = std::fs::remove_file(new_path);
         }
     }
+}
+
+fn mime_type_for_path(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "apng" | "png" => "image/png",
+        "avif" => "image/avif",
+        "bmp" => "image/bmp",
+        "gif" => "image/gif",
+        "ico" => "image/x-icon",
+        "jpg" | "jpeg" => "image/jpeg",
+        "svg" => "image/svg+xml",
+        "tif" | "tiff" => "image/tiff",
+        "webp" => "image/webp",
+        _ => "application/octet-stream",
+    }
+}
+
+fn image_file_bytes_for_id(db: &Database, image_id: &str) -> Result<ImageFileBytes, String> {
+    let images = db
+        .get_images_by_ids(&[image_id])
+        .map_err(|e| e.to_string())?;
+    let img = images
+        .first()
+        .ok_or_else(|| format!("Image '{}' not found", image_id))?;
+    let path = PathBuf::from(&img.path);
+    let bytes = std::fs::read(&path)
+        .map_err(|e| format!("Failed to read original image '{}': {}", image_id, e))?;
+    Ok(ImageFileBytes {
+        bytes,
+        mime_type: mime_type_for_path(&path).to_string(),
+    })
 }
 
 fn sanitize_extension(extension: &str) -> String {
@@ -407,6 +452,14 @@ pub async fn copy_image_to_clipboard(
 }
 
 #[tauri::command]
+pub async fn get_image_file_bytes(
+    state: State<'_, AppState>,
+    image_id: String,
+) -> Result<ImageFileBytes, String> {
+    image_file_bytes_for_id(&state.db, &image_id)
+}
+
+#[tauri::command]
 pub async fn paste_image_from_clipboard(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -466,6 +519,21 @@ pub async fn paste_image_from_clipboard(
     }
 
     let _ = app.emit("images:changed", ());
+
+    if let Some(image_id) = image_id.as_ref() {
+        log_library_event(
+            &state,
+            "clipboard_image_pasted",
+            Some("image"),
+            Some(image_id.clone()),
+            serde_json::json!({
+                "image_id": image_id,
+                "path": target_str.clone(),
+                "destination_folder": destination_folder,
+                "session_id": session_id,
+            }),
+        );
+    }
 
     Ok(PastedImageResult {
         path: target_str,
@@ -549,6 +617,19 @@ pub async fn move_image(
 
     let _ = app.emit("images:changed", ());
 
+    log_library_event(
+        &state,
+        "image_moved",
+        Some("image"),
+        Some(image_id.clone()),
+        serde_json::json!({
+            "image_id": image_id,
+            "old_path": old_path.to_string_lossy(),
+            "new_path": new_path_str.clone(),
+            "destination_folder": destination_folder,
+        }),
+    );
+
     Ok(new_path_str)
 }
 
@@ -607,6 +688,19 @@ pub async fn rename_image(
 
     let _ = app.emit("images:changed", ());
 
+    log_library_event(
+        &state,
+        "image_renamed",
+        Some("image"),
+        Some(image_id.clone()),
+        serde_json::json!({
+            "image_id": image_id,
+            "old_path": old_path.to_string_lossy(),
+            "new_path": new_path_str.clone(),
+            "new_name": new_name,
+        }),
+    );
+
     Ok(new_path_str)
 }
 
@@ -646,7 +740,20 @@ pub async fn create_subfolder(
 
     let _ = app.emit("folders:changed", ());
 
-    Ok(new_folder.to_string_lossy().to_string())
+    let new_folder_str = new_folder.to_string_lossy().to_string();
+    log_library_event(
+        &state,
+        "folder_created",
+        Some("folder"),
+        Some(new_folder_str.clone()),
+        serde_json::json!({
+            "parent_path": parent_path,
+            "name": name,
+            "path": new_folder_str.clone(),
+        }),
+    );
+
+    Ok(new_folder_str)
 }
 
 #[tauri::command]
@@ -938,6 +1045,7 @@ fn share_paths(_app: AppHandle, _window_label: String, _paths: Vec<PathBuf>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::{ImageBuffer, Rgba};
     use std::io::Write;
 
     /// Security regression guard for SECURITY.md's asset-protocol boundary:
@@ -1016,6 +1124,36 @@ mod tests {
         assert_eq!(kind, DiskMove::Rename);
         assert!(!source.exists());
         assert_eq!(std::fs::read(&dest).unwrap(), b"image");
+    }
+
+    #[test]
+    fn image_file_bytes_for_id_reads_original_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app_data_dir = tmp.path().join("app-data");
+        std::fs::create_dir(&app_data_dir).unwrap();
+        let image_path = tmp.path().join("full.png");
+        let image = ImageBuffer::from_fn(4, 4, |x, y| {
+            Rgba([(x * 32) as u8, (y * 32) as u8, 128, 255])
+        });
+        image.save(&image_path).unwrap();
+        let original_bytes = std::fs::read(&image_path).unwrap();
+
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let image_id = crate::db_core::import::import_file(&db, &image_path, &app_data_dir)
+            .unwrap()
+            .unwrap();
+
+        let payload = image_file_bytes_for_id(&db, &image_id).unwrap();
+
+        assert_eq!(payload.mime_type, "image/png");
+        assert_eq!(payload.bytes, original_bytes);
+    }
+
+    #[test]
+    fn image_file_bytes_for_id_rejects_unknown_image() {
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let err = image_file_bytes_for_id(&db, "missing").unwrap_err();
+        assert!(err.contains("Image 'missing' not found"));
     }
 
     #[test]

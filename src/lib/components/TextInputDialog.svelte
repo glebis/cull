@@ -119,7 +119,7 @@
         justify-content: center;
         padding: calc(var(--spacing) * 2);
         background: color-mix(in srgb, var(--bg) 78%, transparent);
-        z-index: 11000;
+        z-index: var(--z-modal);
     }
 
     .dialog {

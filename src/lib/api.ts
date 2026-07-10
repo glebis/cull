@@ -212,6 +212,11 @@ export interface PastedImageResult {
     image_id: string | null;
 }
 
+export interface ImageFileBytes {
+    bytes: number[];
+    mime_type: string;
+}
+
 export interface AgentSnapshotPackage {
     snapshot_id: string;
     package_dir: string;
@@ -241,11 +246,13 @@ export interface MenuStatePayload {
     previewDisplayBlanked: boolean;
     previewDisplayAlwaysOnTop: boolean;
     previewDisplayMode: PreviewDisplayMode;
+    previewDisplayLayout: PreviewDisplayLayout;
     previewDisplayOverlay: PreviewOverlayConfig;
     previewDisplayWebStreamActive: boolean;
 }
 
 export type PreviewDisplayMode = 'image_only' | 'client_review' | 'metadata_review';
+export type PreviewDisplayLayout = 'single' | 'compare' | 'grid';
 export type PreviewRailSide = 'left' | 'right';
 export type PreviewRailWidth = 'narrow' | 'medium' | 'wide';
 export type PreviewRailTextSize = 'small' | 'medium' | 'large';
@@ -268,7 +275,9 @@ export interface PreviewOverlayConfig {
 
 export interface PreviewState {
     image_id: string | null;
+    image_ids: string[];
     display_mode: PreviewDisplayMode;
+    layout: PreviewDisplayLayout;
     overlay: PreviewOverlayConfig;
     frozen: boolean;
     blanked: boolean;
@@ -352,11 +361,15 @@ export async function updatePreviewState(
     displayMode: PreviewDisplayMode,
     overlay: PreviewOverlayConfig,
     frozen?: boolean,
-    blanked?: boolean
+    blanked?: boolean,
+    layout?: PreviewDisplayLayout,
+    imageIds?: string[],
 ): Promise<PreviewState> {
     return invoke<PreviewState>('update_preview_state', {
         imageId,
+        imageIds: imageIds ?? (imageId ? [imageId] : []),
         displayMode,
+        layout: layout ?? 'single',
         overlay,
         frozen,
         blanked,
@@ -538,6 +551,7 @@ export interface ClaudeAgentChatTurnRequest {
     candidate_images: AgentChatImageContext[];
     selected_count: number;
     visible_count: number;
+    view_context_json?: string | null;
     model: string | null;
     max_budget_usd: number | null;
 }
@@ -715,6 +729,10 @@ export async function getImageByPath(path: string): Promise<ImageWithFile | null
     return invoke<ImageWithFile | null>('get_image_by_path', { path });
 }
 
+export async function getImageFileBytes(imageId: string): Promise<ImageFileBytes> {
+    return invoke<ImageFileBytes>('get_image_file_bytes', { imageId });
+}
+
 export async function getIterationSiblings(parentId: string): Promise<ImageWithFile[]> {
     return invoke<ImageWithFile[]>('get_iteration_siblings', { parentId });
 }
@@ -728,7 +746,9 @@ export async function listImagesByFolder(folder: string, limit: number, offset: 
 }
 
 export async function deleteFolder(folder: string): Promise<number> {
-    return invoke('delete_folder', { folder });
+    const result = await invoke<number>('delete_folder', { folder });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function listImagesFiltered(minWidth: number | null, minHeight: number | null, limit: number, offset: number): Promise<ImageWithFile[]> {
@@ -736,15 +756,23 @@ export async function listImagesFiltered(minWidth: number | null, minHeight: num
 }
 
 export async function createCollection(name: string): Promise<string> {
-    return invoke('create_collection', { name });
+    const result = await invoke<string>('create_collection', { name });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function listCollections(): Promise<[string, string, number][]> {
     return invoke('list_collections');
 }
 
+export async function renameCollectionApi(collectionId: string, name: string): Promise<void> {
+    await invoke('rename_collection', { collectionId, name });
+    emitSessionEventsRefresh();
+}
+
 export async function addToCollection(collectionId: string, imageIds: string[]): Promise<void> {
-    return invoke('add_to_collection', { collectionId, imageIds });
+    await invoke('add_to_collection', { collectionId, imageIds });
+    emitSessionEventsRefresh();
 }
 
 export async function listCollectionImages(collectionId: string, limit?: number, offset?: number): Promise<ImageWithFile[]> {
@@ -752,11 +780,13 @@ export async function listCollectionImages(collectionId: string, limit?: number,
 }
 
 export async function removeFromCollection(collectionId: string, imageIds: string[]): Promise<void> {
-    return invoke('remove_from_collection', { collectionId, imageIds });
+    await invoke('remove_from_collection', { collectionId, imageIds });
+    emitSessionEventsRefresh();
 }
 
 export async function deleteCollectionApi(collectionId: string): Promise<void> {
-    return invoke('delete_collection', { collectionId });
+    await invoke('delete_collection', { collectionId });
+    emitSessionEventsRefresh();
 }
 
 export interface ExportImagesParams {
@@ -811,7 +841,8 @@ export interface ClientFeedback {
 
 // Client feedback is stored separately from curator selections.
 export async function setClientFeedback(imageId: string, favorite: boolean, comment: string | null): Promise<void> {
-    return invoke('set_client_feedback', { imageId, favorite, comment: comment ?? null });
+    await invoke('set_client_feedback', { imageId, favorite, comment: comment ?? null });
+    emitSessionEventsRefresh();
 }
 
 export async function getClientFeedback(imageId: string): Promise<ClientFeedback | null> {
@@ -882,7 +913,9 @@ export async function createSmartCollection(
     filterJson: string,
     nlQuery?: string,
 ): Promise<string> {
-    return invoke('create_smart_collection', { name, filterJson, nlQuery });
+    const result = await invoke<string>('create_smart_collection', { name, filterJson, nlQuery });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function evaluateSmartCollection(filterJson: string, limit?: number, offset?: number): Promise<ImageWithFile[]> {
@@ -894,7 +927,8 @@ export async function countSmartCollection(filterJson: string): Promise<number> 
 }
 
 export async function deleteSmartCollectionApi(id: string): Promise<void> {
-    return invoke('delete_smart_collection', { id });
+    await invoke('delete_smart_collection', { id });
+    emitSessionEventsRefresh();
 }
 
 export async function updateSmartCollectionApi(
@@ -903,7 +937,8 @@ export async function updateSmartCollectionApi(
     filterJson: string,
     nlQuery?: string,
 ): Promise<void> {
-    return invoke('update_smart_collection', { id, name, filterJson, nlQuery });
+    await invoke('update_smart_collection', { id, name, filterJson, nlQuery });
+    emitSessionEventsRefresh();
 }
 
 export async function parseNlQuery(query: string): Promise<string> {
@@ -1252,15 +1287,21 @@ export interface TrashImagesDetailedResult {
 }
 
 export async function trashImages(imageIds: string[]): Promise<number> {
-    return invoke('trash_images', { imageIds });
+    const result = await invoke<number>('trash_images', { imageIds });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function trashImagesDetailed(imageIds: string[]): Promise<TrashImagesDetailedResult> {
-    return invoke<TrashImagesDetailedResult>('trash_images_detailed', { imageIds });
+    const result = await invoke<TrashImagesDetailedResult>('trash_images_detailed', { imageIds });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function deleteImagesPermanently(imageIds: string[]): Promise<number> {
-    return invoke('delete_images_permanently', { imageIds });
+    const result = await invoke<number>('delete_images_permanently', { imageIds });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function createActionProposal(request: CreateActionProposalRequest): Promise<AgentActionProposal> {
@@ -1289,6 +1330,10 @@ export async function upsertAgentSelectionPreset(request: UpsertAgentSelectionPr
 
 export async function runClaudeAgentChatTurn(request: ClaudeAgentChatTurnRequest): Promise<ClaudeAgentChatTurnResult> {
     return invoke<ClaudeAgentChatTurnResult>('run_claude_agent_chat_turn', { request });
+}
+
+export async function cancelClaudeAgentChatTurn(requestId: string): Promise<boolean> {
+    return invoke<boolean>('cancel_claude_agent_chat_turn', { requestId });
 }
 
 // Undo/Redo
@@ -1478,6 +1523,14 @@ export interface TokenScope {
     tags?: string[];
 }
 
+export interface McpStatus {
+    active_connections: number;
+}
+
+export async function getMcpStatus(): Promise<McpStatus> {
+    return invoke('get_mcp_status');
+}
+
 export async function createMcpToken(name: string, role: string, scope?: TokenScope, expiresAt?: string): Promise<[McpToken, string]> {
     return invoke('create_mcp_token', { name, role, scope: scope || null, expiresAt: expiresAt || null });
 }
@@ -1497,6 +1550,8 @@ export async function rotateMcpToken(tokenId: string): Promise<string> {
 export interface McpAuditEntry {
     id: number;
     token_id: string | null;
+    token_name: string | null;
+    token_role: string | null;
     tool_name: string;
     params_json: string | null;
     result_status: string;
@@ -1508,11 +1563,15 @@ export async function getMcpAuditLog(limit: number): Promise<McpAuditEntry[]> {
 }
 
 export async function cropImage(imageId: string, x: number, y: number, width: number, height: number): Promise<string> {
-    return invoke<string>('crop_image', { imageId, x, y, width, height });
+    const result = await invoke<string>('crop_image', { imageId, x, y, width, height });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function rotateImage(imageId: string, degrees: number): Promise<string> {
-    return invoke<string>('rotate_image', { imageId, degrees });
+    const result = await invoke<string>('rotate_image', { imageId, degrees });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function getGenerationRun(imageId: string): Promise<GenerationRun | null> {
@@ -1611,8 +1670,8 @@ export async function createSession(name: string): Promise<Session> {
 export async function listSessions(): Promise<Session[]> {
     return invoke<Session[]>('list_sessions');
 }
-export async function getActivityContext(sessionId?: string | null): Promise<ActivityContext> {
-    return invoke<ActivityContext>('get_activity_context', { sessionId: sessionId ?? null });
+export async function getActivityContext(sessionId?: string | null, limit?: number | null): Promise<ActivityContext> {
+    return invoke<ActivityContext>('get_activity_context', { sessionId: sessionId ?? null, limit: limit ?? null });
 }
 export async function getSession(sessionId: string): Promise<Session> {
     return invoke<Session>('get_session', { sessionId });
@@ -1648,19 +1707,27 @@ export async function pasteImageFromClipboard(
     destinationFolder: string,
     sessionId: string | null = null,
 ): Promise<PastedImageResult> {
-    return invoke<PastedImageResult>('paste_image_from_clipboard', { destinationFolder, sessionId });
+    const result = await invoke<PastedImageResult>('paste_image_from_clipboard', { destinationFolder, sessionId });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function moveImage(imageId: string, destinationFolder: string): Promise<string> {
-    return invoke<string>('move_image', { imageId, destinationFolder });
+    const result = await invoke<string>('move_image', { imageId, destinationFolder });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function renameImage(imageId: string, newName: string): Promise<string> {
-    return invoke<string>('rename_image', { imageId, newName });
+    const result = await invoke<string>('rename_image', { imageId, newName });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function createSubfolder(parentPath: string, name: string): Promise<string> {
-    return invoke<string>('create_subfolder', { parentPath, name });
+    const result = await invoke<string>('create_subfolder', { parentPath, name });
+    emitSessionEventsRefresh();
+    return result;
 }
 
 export async function shareImages(imageIds: string[]): Promise<void> {
@@ -1731,6 +1798,7 @@ export async function getApiAuditLog(limit: number): Promise<AuditLogEntry[]> {
     return invoke('get_api_audit_log', { limit });
 }
 
+// Writes the JSON audit export to Downloads and returns the saved absolute path.
 export async function exportAuditLog(): Promise<string> {
     return invoke('export_audit_log');
 }

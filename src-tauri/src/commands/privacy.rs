@@ -4,6 +4,7 @@
 use crate::services::audit;
 use crate::AppState;
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 use tauri::State;
 /// Check whether a URL points to a local address by extracting the hostname.
 /// Returns true only for exact matches: `localhost`, `127.0.0.1`, `::1`.
@@ -256,7 +257,34 @@ pub async fn get_api_audit_log(
 
 #[tauri::command]
 pub async fn export_audit_log(state: State<'_, AppState>) -> Result<String, String> {
-    audit::export_audit_log_json(&state.db).map_err(|e| e.to_string())
+    let json = audit::export_audit_log_json(&state.db).map_err(|e| e.to_string())?;
+    let downloads_dir = dirs::download_dir()
+        .or_else(|| dirs::home_dir().map(|home| home.join("Downloads")))
+        .ok_or_else(|| "Could not find the Downloads folder".to_string())?;
+    std::fs::create_dir_all(&downloads_dir)
+        .map_err(|e| format!("Could not create Downloads folder: {}", e))?;
+
+    let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let path = unique_audit_log_path(&downloads_dir, &date);
+    std::fs::write(&path, json).map_err(|e| format!("Could not write audit log: {}", e))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+fn unique_audit_log_path(downloads_dir: &Path, date: &str) -> PathBuf {
+    let base_name = format!("cull-audit-log-{}", date);
+    let first = downloads_dir.join(format!("{}.json", base_name));
+    if !first.exists() {
+        return first;
+    }
+
+    for index in 2.. {
+        let candidate = downloads_dir.join(format!("{}-{}.json", base_name, index));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    unreachable!("unbounded suffix search should always return a candidate")
 }
 
 #[cfg(test)]
@@ -296,5 +324,15 @@ mod tests {
     #[test]
     fn garbage_input_is_not_local() {
         assert!(!is_local_url("not-a-url"));
+    }
+
+    #[test]
+    fn audit_log_export_path_avoids_overwriting_existing_exports() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("cull-audit-log-2026-07-08.json");
+        let second = dir.path().join("cull-audit-log-2026-07-08-2.json");
+        std::fs::write(&first, b"previous export").unwrap();
+
+        assert_eq!(unique_audit_log_path(dir.path(), "2026-07-08"), second);
     }
 }

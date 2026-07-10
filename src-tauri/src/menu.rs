@@ -86,6 +86,13 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         true,
         Some::<&str>("CmdOrCtrl+Shift+Z"),
     )?)?;
+    edit_menu.append(&MenuItem::with_id(
+        app,
+        "undo_history",
+        "Action History…",
+        true,
+        Some::<&str>("CmdOrCtrl+Shift+H"),
+    )?)?;
     edit_menu.append(&PredefinedMenuItem::separator(app)?)?;
     edit_menu.append(&PredefinedMenuItem::cut(app, None)?)?;
     edit_menu.append(&PredefinedMenuItem::copy(app, None)?)?;
@@ -355,6 +362,49 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     )?)?;
     preview_display_menu.append(&preview_display_presets_menu)?;
 
+    let preview_display_layout_menu = Submenu::new(app, "Layout", true)?;
+    preview_display_layout_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_layout_single",
+        "Single Image",
+        true,
+        true,
+        None::<&str>,
+    )?)?;
+    preview_display_layout_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_layout_compare",
+        "Compare 2",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    preview_display_layout_menu.append(&CheckMenuItem::with_id(
+        app,
+        "preview_display_layout_grid",
+        "Grid 4",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    preview_display_menu.append(&preview_display_layout_menu)?;
+    preview_display_menu.append(&PredefinedMenuItem::separator(app)?)?;
+    preview_display_menu.append(&MenuItem::with_id(
+        app,
+        "preview_display_copy_to_clipboard",
+        "Copy Monitor Image",
+        true,
+        None::<&str>,
+    )?)?;
+    preview_display_menu.append(&MenuItem::with_id(
+        app,
+        "preview_display_export_png",
+        "Export Monitor PNG...",
+        true,
+        None::<&str>,
+    )?)?;
+    preview_display_menu.append(&PredefinedMenuItem::separator(app)?)?;
+
     let preview_display_fields_menu = Submenu::new(app, "Metadata Fields", true)?;
     preview_display_fields_menu.append(&CheckMenuItem::with_id(
         app,
@@ -521,6 +571,13 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         true,
         Some::<&str>("CmdOrCtrl+0"),
     )?)?;
+    view_menu.append(&MenuItem::with_id(
+        app,
+        "fit_in",
+        "Fit In",
+        true,
+        None::<&str>,
+    )?)?;
     view_menu.append(&PredefinedMenuItem::separator(app)?)?;
     view_menu.append(&PredefinedMenuItem::fullscreen(app, None)?)?;
     menu.append(&view_menu)?;
@@ -583,6 +640,8 @@ pub struct MenuStatePayload {
     preview_display_always_on_top: bool,
     #[serde(default = "default_preview_display_mode")]
     preview_display_mode: String,
+    #[serde(default = "default_preview_display_layout")]
+    preview_display_layout: String,
     #[serde(default)]
     preview_display_overlay: crate::preview::state::PreviewOverlayConfig,
     #[serde(default)]
@@ -591,6 +650,10 @@ pub struct MenuStatePayload {
 
 fn default_preview_display_mode() -> String {
     "image_only".to_string()
+}
+
+fn default_preview_display_layout() -> String {
+    "single".to_string()
 }
 
 #[tauri::command]
@@ -633,6 +696,21 @@ pub async fn update_menu_state(app: AppHandle, state: MenuStatePayload) -> Resul
         &app,
         "preview_display_preset_metadata_review",
         state.preview_display_mode == "metadata_review",
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_layout_single",
+        state.preview_display_layout == "single",
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_layout_compare",
+        state.preview_display_layout == "compare",
+    )?;
+    set_menu_item_checked(
+        &app,
+        "preview_display_layout_grid",
+        state.preview_display_layout == "grid",
     )?;
     set_menu_item_checked(
         &app,
@@ -1056,6 +1134,11 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
         | "preview_display_preset_image_only"
         | "preview_display_preset_client_review"
         | "preview_display_preset_metadata_review"
+        | "preview_display_layout_single"
+        | "preview_display_layout_compare"
+        | "preview_display_layout_grid"
+        | "preview_display_copy_to_clipboard"
+        | "preview_display_export_png"
         | "preview_display_field_filename"
         | "preview_display_field_rating"
         | "preview_display_field_decision"
@@ -1076,6 +1159,7 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
         | "zoom_in"
         | "zoom_out"
         | "actual_size"
+        | "fit_in"
         | AGENT_SKILLS_ID
         | "github_wiki" => {
             let _ = app.emit("menu-action", id);

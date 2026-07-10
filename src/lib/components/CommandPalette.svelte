@@ -507,7 +507,7 @@
     :global(.command-palette-overlay) {
         position: fixed;
         inset: 0;
-        z-index: 1200;
+        z-index: var(--z-command-palette);
         display: flex;
         align-items: flex-start;
         justify-content: center;
@@ -722,7 +722,7 @@
 
     .palette-context-menu {
         position: fixed;
-        z-index: 1220;
+        z-index: calc(var(--z-command-palette) + 20);
         width: 220px;
         padding: 4px;
         border: 1px solid var(--border);
@@ -757,7 +757,7 @@
     :global(.hotkey-modal-overlay) {
         position: fixed;
         inset: 0;
-        z-index: 1230;
+        z-index: calc(var(--z-command-palette) + 30);
         display: flex;
         align-items: center;
         justify-content: center;

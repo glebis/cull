@@ -25,6 +25,7 @@ commands.allow = [
   "redo",
   "remove_from_collection",
   "remove_from_lineage_group",
+  "rename_collection",
   "rename_lineage_group",
   "scan_lineage",
   "set_client_feedback",

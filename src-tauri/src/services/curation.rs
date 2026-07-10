@@ -23,6 +23,14 @@ pub fn list_collections(ctx: &ServiceContext) -> Result<Vec<(String, String, u32
     Ok(ctx.db.list_collections()?)
 }
 
+pub fn rename_collection(
+    ctx: &ServiceContext,
+    collection_id: &str,
+    name: &str,
+) -> Result<(), ServiceError> {
+    Ok(ctx.db.rename_collection(collection_id, name)?)
+}
+
 pub fn add_to_collection(
     ctx: &ServiceContext,
     collection_id: &str,
@@ -222,6 +230,17 @@ mod tests {
         let found = cols.iter().find(|(cid, _, _)| cid == &id);
         assert!(found.is_some());
         assert_eq!(found.unwrap().1, "My Collection");
+    }
+
+    #[test]
+    fn test_rename_collection() {
+        let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
+        let c = ctx(&db, &s, &d, &ee, &de, &se);
+        let id = create_collection(&c, "Before").unwrap();
+        rename_collection(&c, &id, "After").unwrap();
+        let cols = list_collections(&c).unwrap();
+        let found = cols.iter().find(|(cid, _, _)| cid == &id);
+        assert_eq!(found.unwrap().1, "After");
     }
 
     #[test]

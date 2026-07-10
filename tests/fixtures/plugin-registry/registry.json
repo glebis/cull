@@ -14,7 +14,7 @@
       "minAppVersion": "0.2.1",
       "checksum": "sha256:095aaffa6b17f57badb1f33590c4d1fdacc34e11168b31e0b6c2feab19d49b7e",
       "repo": "https://github.com/glebis/cull-plugins/tree/main/cull-publish",
-      "download": "file://plugins/cull-publish/dist/plugin.js"
+      "download": "file://plugins/cull-publish/entry.mjs"
     }
   ]
 }

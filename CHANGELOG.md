@@ -8,6 +8,56 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 No changes yet.
 
+## [0.2.5] - 2026-07-03
+
+### Added
+
+- Canvas edits now persist across scopes, with broader view-model coverage for
+  saved canvas state.
+- Undo history gained a dedicated panel, expanded event coverage, and a clearer
+  empty state.
+- The Cull site now presents a fuller screenshot tour with real app imagery,
+  social sharing metadata, and latest-release download resolution.
+
+### Changed
+
+- The site download block, Homebrew install row, and hero slideshow were
+  tightened for desktop, tablet, and mobile layouts.
+- Site interaction polish now covers download buttons, slideshow dots, claim
+  cards, footer cards, and footer links.
+
+### Fixed
+
+- Loupe actual-size/full-quality rendering uses originals more reliably.
+- Collection counts and pinned collection actions reflect the current library
+  state more accurately.
+- Grid viewport position is preserved when layout column counts change.
+
+## [0.2.4] - 2026-07-02
+
+### Added
+
+- Claude Agent SDK chat in the agent dock: streamed agent events, chat-driven
+  selection proposals, agent profiles, token/cost estimates, and visual context
+  for selected images.
+- Agent panel commands exposed in the command palette.
+
+### Fixed
+
+- Empty collections, folders, and filters now show scope-specific empty states
+  instead of claiming the whole library is empty (with a Clear Filters action
+  for filter views).
+- MCP settings: the copied Claude Code config now matches the displayed
+  snippet exactly, and token create/revoke/rotate failures surface visible
+  errors instead of failing silently.
+- Toasts always render above dialogs and context menus via a tokenized
+  z-index scale.
+- Sidebar footer fit and accessibility; DMG installer window scrollbars.
+- CI: Rust checks install node_modules (required by bundled agent-SDK
+  resources) and the supply-chain audit passes again (anyhow updated for
+  RUSTSEC-2026-0190; unresolvable transitive advisories documented in
+  deny.toml).
+
 ## [0.2.3] - 2026-06-18
 
 ### Fixed

@@ -52,7 +52,7 @@ Tokyo Night dark theme. All components MUST use these tokens, never hardcode col
 - Cull is true open source under Apache-2.0, not source-available. Do not
   reintroduce BSL/BUSL/source-available positioning in active product docs, app
   metadata, or UI.
-- Keep license metadata aligned across `LICENSE.md`, `NOTICE`, `package.json`,
+- Keep license metadata aligned across `LICENSE`, `NOTICE`, `package.json`,
   `package-lock.json`, `src-tauri/Cargo.toml`, README, and the About dialog.
 - Run `npm run audit:licenses` before publishing, before changing
   dependency/model download policy, and after adding dependencies.

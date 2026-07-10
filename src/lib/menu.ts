@@ -1,4 +1,4 @@
-import { listen } from '@tauri-apps/api/event';
+import { emit, listen } from '@tauri-apps/api/event';
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
 import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { get } from 'svelte/store';
@@ -13,6 +13,7 @@ import {
     renameImage,
     shareImages,
     trashImages,
+    listCollections,
     listFolders,
     updateMenuState,
     openPreviewDisplay,
@@ -24,6 +25,7 @@ import {
     getPreviewDisplayWebStreamStatus,
     setAppSetting,
     type ImageWithFile,
+    type PreviewDisplayLayout,
     type OpenWithApplication,
     type PreviewDisplayMode,
     type PreviewWebStreamStatus,
@@ -41,10 +43,10 @@ import {
     activeSmartCollection,
     activeDetectedClass,
     selectedIds,
-    loupeScale,
-    loupePanX,
-    loupePanY,
-    resetLoupeTransform,
+    requestLoupeActualSize,
+    requestLoupeFitIn,
+    requestLoupeZoomIn,
+    requestLoupeZoomOut,
     settingsOpen,
     staticPublishingEnabled,
     pluginsEnabled,
@@ -54,21 +56,26 @@ import {
     navigateTo,
     showToast,
     requestTextInput,
+    collections,
     folders,
+    undoHistoryOpen,
     type ViewMode,
 } from './stores';
 import {
     PREVIEW_DISPLAY_MODE_SETTING,
+    PREVIEW_DISPLAY_LAYOUT_SETTING,
     PREVIEW_DISPLAY_OVERLAY_SETTING,
     previewDisplayAlwaysOnTop,
     previewDisplayBlanked,
     previewDisplayFrozen,
+    previewDisplayLayout,
     previewDisplayMode,
     previewDisplayOverlay,
     previewDisplayWebStreamStatus,
     setPreviewDisplayBlanked,
     setPreviewDisplayAlwaysOnTop,
     setPreviewDisplayFrozen,
+    setPreviewDisplayLayout,
     setPreviewDisplayMode,
     setPreviewDisplayOverlay,
     setPreviewDisplayWebStreamStatus,
@@ -191,6 +198,7 @@ async function reloadAfterImageRemoval(ids: string[]) {
     if (get(focusedIndex) >= get(images).length) {
         focusedIndex.set(Math.max(0, get(images).length - 1));
     }
+    collections.set(await listCollections());
 }
 
 async function handleImageShare() {
@@ -427,6 +435,15 @@ async function handlePreviewDisplayPreset(mode: PreviewDisplayMode) {
     }
 }
 
+async function handlePreviewDisplayLayout(layout: PreviewDisplayLayout) {
+    setPreviewDisplayLayout(layout);
+    try {
+        await setAppSetting(PREVIEW_DISPLAY_LAYOUT_SETTING, layout);
+    } catch (e) {
+        showToast('Preview Display layout not saved', { detail: String(e), type: 'warning', duration: 6000 });
+    }
+}
+
 async function persistPreviewDisplayOverlay(overlay = get(previewDisplayOverlay)) {
     setPreviewDisplayOverlay(overlay);
     try {
@@ -439,6 +456,19 @@ async function persistPreviewDisplayOverlay(overlay = get(previewDisplayOverlay)
 function handlePreviewDisplayField(field: PreviewDisplayField) {
     const overlay = get(previewDisplayOverlay);
     persistPreviewDisplayOverlay(withPreviewDisplayField(overlay, field, !overlay[field]));
+}
+
+async function requestPreviewDisplayCapture(destination: 'clipboard' | 'png') {
+    try {
+        await openPreviewDisplay();
+        await emit('preview-display:capture-request', { destination });
+        showToast(destination === 'clipboard' ? 'Preview Display copy requested' : 'Preview Display export requested', {
+            type: 'info',
+            duration: 3000,
+        });
+    } catch (e) {
+        showToast('Preview Display capture failed', { detail: String(e), type: 'error', duration: 8000 });
+    }
 }
 
 function displayLabel(monitor: { name: string | null; width: number; height: number; primary: boolean }, index: number): string {
@@ -578,6 +608,9 @@ function handleMenuAction(action: string) {
         case 'command_palette':
             openCommandPalette('commands');
             break;
+        case 'undo_history':
+            undoHistoryOpen.set(true);
+            break;
         case 'image_share':
             handleImageShare();
             break;
@@ -675,6 +708,21 @@ function handleMenuAction(action: string) {
         case 'preview_display_preset_metadata_review':
             handlePreviewDisplayPreset('metadata_review');
             break;
+        case 'preview_display_layout_single':
+            handlePreviewDisplayLayout('single');
+            break;
+        case 'preview_display_layout_compare':
+            handlePreviewDisplayLayout('compare');
+            break;
+        case 'preview_display_layout_grid':
+            handlePreviewDisplayLayout('grid');
+            break;
+        case 'preview_display_copy_to_clipboard':
+            requestPreviewDisplayCapture('clipboard');
+            break;
+        case 'preview_display_export_png':
+            requestPreviewDisplayCapture('png');
+            break;
         case 'preview_display_field_filename':
             handlePreviewDisplayField('showFilename');
             break;
@@ -727,22 +775,24 @@ function handleMenuAction(action: string) {
             persistPreviewDisplayOverlay(withPreviewDisplayRailTextSize(get(previewDisplayOverlay), 'large'));
             break;
         case 'zoom_in':
-            thumbnailSize.update((s) => Math.min(s + 40, 600));
-            loupeScale.update((s) => Math.min(s * 1.25, 20));
+            if (get(viewMode) === 'loupe') {
+                requestLoupeZoomIn();
+            } else {
+                thumbnailSize.update((s) => Math.min(s + 40, 600));
+            }
             break;
         case 'zoom_out':
-            thumbnailSize.update((s) => Math.max(s - 40, 40));
-            loupeScale.update((s) => {
-                const next = Math.max(s / 1.25, 0.1);
-                if (next <= 1) {
-                    loupePanX.set(0);
-                    loupePanY.set(0);
-                }
-                return next;
-            });
+            if (get(viewMode) === 'loupe') {
+                requestLoupeZoomOut();
+            } else {
+                thumbnailSize.update((s) => Math.max(s - 40, 40));
+            }
             break;
         case 'actual_size':
-            resetLoupeTransform();
+            requestLoupeActualSize();
+            break;
+        case 'fit_in':
+            requestLoupeFitIn();
             break;
         case 'settings':
             settingsOpen.set(true);
@@ -824,6 +874,7 @@ function currentMenuStatePayload() {
         previewDisplayBlanked: get(previewDisplayBlanked),
         previewDisplayAlwaysOnTop: get(previewDisplayAlwaysOnTop),
         previewDisplayMode: get(previewDisplayMode),
+        previewDisplayLayout: get(previewDisplayLayout),
         previewDisplayOverlay: get(previewDisplayOverlay),
         previewDisplayWebStreamActive: get(previewDisplayWebStreamStatus).active,
     };
@@ -886,6 +937,7 @@ function startMenuStateSubscriptions() {
     previewDisplayBlanked.subscribe(queueMenuStateUpdate);
     previewDisplayAlwaysOnTop.subscribe(queueMenuStateUpdate);
     previewDisplayMode.subscribe(queueMenuStateUpdate);
+    previewDisplayLayout.subscribe(queueMenuStateUpdate);
     previewDisplayOverlay.subscribe(queueMenuStateUpdate);
     previewDisplayWebStreamStatus.subscribe(queueMenuStateUpdate);
     queueMenuStateUpdate();

@@ -373,6 +373,8 @@ pub struct TokenScope {
 pub struct AuditEntry {
     pub id: i64,
     pub token_id: Option<String>,
+    pub token_name: Option<String>,
+    pub token_role: Option<String>,
     pub tool_name: String,
     pub params_json: Option<String>,
     pub result_status: String,

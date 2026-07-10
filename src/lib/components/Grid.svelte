@@ -2,14 +2,15 @@
     import { onDestroy } from 'svelte';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { open } from '@tauri-apps/plugin-dialog';
-    import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState, showToast, totalCount, folders, gridPreset, GRID_PRESETS } from '$lib/stores';
+    import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState, showToast, totalCount, folders, gridPreset, GRID_PRESETS, activeSmartCollection, activeCollection, activeDetectedClass, activeFolder, minSizeFilter, clipboardMonitorStatus } from '$lib/stores';
     import { importFolder as apiImportFolder, getImageCount, listFolders } from '$lib/api';
     import { IMAGE_PAGE_SIZE, loadImagesForCurrentScope, loadMoreImagesForCurrentScope } from '$lib/image-loading';
     import { wheelGestureIntent } from '$lib/gesture-interactions';
     import { gridGestureZoom } from '$lib/grid-gesture-zoom';
-    import { resolveLibraryViewState } from '$lib/library-view-state';
+    import { resolveLibraryViewState, scopeEmptyCopy, type LibraryScopeKind } from '$lib/library-view-state';
     import {
         computeGridClickSelection,
+        computeAnchoredGridScrollTop,
         computeGridLayout,
         computeVisibleItems,
         computeScrollDirection,
@@ -19,6 +20,7 @@
         type ScrollDirection,
     } from '$lib/view-utils';
     import { createPrefetchCache } from '$lib/prefetch-cache';
+    import clipboardMonitorEmptySrc from '$lib/assets/clipboard-monitor-empty.png';
     import Thumbnail from './Thumbnail.svelte';
 
     let containerEl: HTMLDivElement | undefined = $state(undefined);
@@ -26,6 +28,16 @@
     let containerHeight = $state(600);
     let scrollTop = $state(0);
     let scrollRestoreSeq = 0;
+    let pendingGridAnchor: { x: number; y: number } | null = null;
+    let previousGridLayout: {
+        size: number;
+        gap: number;
+        cols: number;
+        cellSize: number;
+        scrollTop: number;
+        containerWidth: number;
+        containerHeight: number;
+    } | null = null;
 
     let size = $state(160);
     thumbnailSize.subscribe(v => size = v);
@@ -127,32 +139,21 @@
         });
         if (!intent || intent.type !== 'zoom') return;
         e.preventDefault();
-        applyThumbnailZoom(intent.factor, e.clientY);
+        applyThumbnailZoom(intent.factor, e.clientX, e.clientY);
     }
 
-    function applyThumbnailZoom(factor: number, clientY: number) {
+    function applyThumbnailZoom(factor: number, clientX: number, clientY: number) {
         if (!containerEl) return;
         const rect = containerEl.getBoundingClientRect();
+        const pointerX = clientX - rect.left;
         const pointerY = clientY - rect.top;
-        const oldCellSize = size + gap;
-        const oldScrollTop = containerEl.scrollTop;
         const next = gridGestureZoom({ size, gap, preset: $gridPreset }, factor, GRID_PRESETS);
         if (next.size === size && next.gap === gap && next.preset === $gridPreset) return;
 
-        const anchorRow = oldCellSize > 0 ? (oldScrollTop + pointerY) / oldCellSize : 0;
-        const nextScrollTop = Math.max(0, anchorRow * (next.size + next.gap) - pointerY);
-
+        pendingGridAnchor = { x: pointerX, y: pointerY };
         thumbnailSize.set(next.size);
         gridPreset.set(next.preset);
         gridGap.set(next.gap);
-        gridScrollTop.set(nextScrollTop);
-
-        requestAnimationFrame(() => {
-            if (!containerEl) return;
-            containerEl.scrollTop = nextScrollTop;
-            scrollTop = containerEl.scrollTop;
-            prevScrollTop = scrollTop;
-        });
     }
 
     function handleClick(index: number, event: MouseEvent | KeyboardEvent) {
@@ -205,6 +206,61 @@
 
     $effect(() => {
         if (!containerEl) return;
+        const current = {
+            size,
+            gap,
+            cols,
+            cellSize,
+            scrollTop,
+            containerWidth,
+            containerHeight,
+        };
+        const previous = previousGridLayout;
+        previousGridLayout = current;
+        if (!previous) {
+            pendingGridAnchor = null;
+            return;
+        }
+
+        const layoutChanged =
+            previous.size !== size ||
+            previous.gap !== gap ||
+            previous.cols !== cols ||
+            previous.cellSize !== cellSize;
+        if (!layoutChanged) {
+            pendingGridAnchor = null;
+            return;
+        }
+
+        const anchor = pendingGridAnchor ?? {
+            x: previous.containerWidth / 2,
+            y: previous.containerHeight / 2,
+        };
+        pendingGridAnchor = null;
+        const nextScrollTop = computeAnchoredGridScrollTop({
+            oldScrollTop: previous.scrollTop,
+            viewportWidth: previous.containerWidth,
+            viewportHeight: previous.containerHeight,
+            anchorX: anchor.x,
+            anchorY: anchor.y,
+            oldCols: previous.cols,
+            oldCellSize: previous.cellSize,
+            newCols: cols,
+            newCellSize: cellSize,
+            totalItems: $images.length,
+        });
+
+        gridScrollTop.set(nextScrollTop);
+        requestAnimationFrame(() => {
+            if (!containerEl) return;
+            containerEl.scrollTop = nextScrollTop;
+            scrollTop = containerEl.scrollTop;
+            prevScrollTop = scrollTop;
+        });
+    });
+
+    $effect(() => {
+        if (!containerEl) return;
         const target = $gridScrollTop;
         $images.length;
         if (Math.abs(containerEl.scrollTop - target) <= 1) {
@@ -222,12 +278,36 @@
         });
     });
 
+    // Same precedence as currentScope() in image-loading.ts, so the empty
+    // state describes what the user is actually looking at.
+    let scopeKind = $derived.by<LibraryScopeKind>(() => {
+        if ($activeSmartCollection?.filter_json) return 'smart';
+        if ($activeCollection) return 'collection';
+        if ($activeDetectedClass) return 'detected-class';
+        if ($activeFolder) return 'folder';
+        if ($minSizeFilter > 0) return 'filtered';
+        return 'all';
+    });
+
     let libraryViewState = $derived(resolveLibraryViewState({
         loading: $imageLoadState.loading,
         error: $imageLoadState.error,
         loaded: $imageLoadState.loaded,
         imageCount: $images.length,
+        scopeKind,
     }));
+    let isClipboardMonitorEmpty = $derived(Boolean(
+        $activeCollection && $clipboardMonitorStatus?.collection_id === $activeCollection,
+    ));
+
+    let scopeCopy = $derived(scopeEmptyCopy(scopeKind));
+
+    function clearFilters() {
+        activeDetectedClass.set(null);
+        minSizeFilter.set(0);
+        loadImagesForCurrentScope({ force: true })
+            .catch(e => console.error('Failed to reload after clearing filters:', e));
+    }
 
     function retryLoad() {
         loadImagesForCurrentScope({ force: true, invalidateCache: true })
@@ -291,6 +371,29 @@
     {:else if libraryViewState === 'loading'}
         <div class="empty" aria-live="polite">
             <div class="empty-text">Loading library&hellip;</div>
+        </div>
+    {:else if (libraryViewState === 'scope-empty' || libraryViewState === 'empty') && isClipboardMonitorEmpty}
+        <div class="empty clipboard-empty">
+            <img
+                class="clipboard-empty-image"
+                src={clipboardMonitorEmptySrc}
+                alt=""
+                aria-hidden="true"
+            />
+            <div class="empty-text">Clipboard monitor is waiting</div>
+            <div class="empty-hint">Copied images will appear here as they arrive.</div>
+            {#if $clipboardMonitorStatus?.collection_name}
+                <div class="empty-hint">Saving into {$clipboardMonitorStatus.collection_name}</div>
+            {/if}
+        </div>
+    {:else if libraryViewState === 'scope-empty'}
+        <div class="empty" data-testid="scope-empty-state">
+            <div class="empty-icon">&#9776;</div>
+            <div class="empty-text">{scopeCopy.title}</div>
+            {#if scopeCopy.clearFilters}
+                <button class="empty-import-btn" onclick={clearFilters}>Clear Filters</button>
+            {/if}
+            <div class="empty-hint">{scopeCopy.hint}</div>
         </div>
     {:else if libraryViewState === 'empty'}
         <div class="empty">
@@ -403,6 +506,20 @@
     .empty-icon {
         font-size: 48px;
         color: var(--border);
+    }
+    .clipboard-empty {
+        padding: calc(var(--spacing) * 3);
+        text-align: center;
+    }
+    .clipboard-empty-image {
+        width: min(54vw, 520px);
+        max-height: 42vh;
+        aspect-ratio: 1040 / 650;
+        object-fit: contain;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 8%, transparent);
     }
     .empty-import-btn {
         padding: var(--spacing) calc(var(--spacing) * 2);

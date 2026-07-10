@@ -30,8 +30,8 @@ export interface CanvasResizeInput {
     minWidth?: number;
 }
 
-const DEFAULT_MIN_ZOOM = 0.1;
-const DEFAULT_MAX_ZOOM = 5;
+export const DEFAULT_MIN_ZOOM = 0.1;
+export const DEFAULT_MAX_ZOOM = 5;
 const DEFAULT_MIN_ITEM_WIDTH = 50;
 
 export function computeCanvasWheelZoom(
@@ -62,6 +62,36 @@ export function computeCanvasZoomAtPoint(
         panY: pointer.y - (pointer.y - viewport.panY) * (newZoom / viewport.zoom),
         zoom: newZoom,
     };
+}
+
+export function computeCanvasZoomToLevel(
+    viewport: CanvasViewportTransform,
+    pointer: CanvasPoint,
+    zoom: number,
+    minZoom = DEFAULT_MIN_ZOOM,
+    maxZoom = DEFAULT_MAX_ZOOM,
+): CanvasViewportTransform {
+    const nextZoom = clamp(zoom, minZoom, maxZoom);
+    const currentZoom = viewport.zoom === 0 ? 1 : viewport.zoom;
+    return computeCanvasZoomAtPoint(viewport, pointer, nextZoom / currentZoom, minZoom, maxZoom);
+}
+
+export function canvasZoomFromPosition(
+    position: number,
+    minZoom = DEFAULT_MIN_ZOOM,
+    maxZoom = DEFAULT_MAX_ZOOM,
+): number {
+    const t = clamp(position, 0, 100) / 100;
+    return minZoom * Math.pow(maxZoom / minZoom, t);
+}
+
+export function canvasZoomPositionFromZoom(
+    zoom: number,
+    minZoom = DEFAULT_MIN_ZOOM,
+    maxZoom = DEFAULT_MAX_ZOOM,
+): number {
+    const clampedZoom = clamp(zoom, minZoom, maxZoom);
+    return Math.log(clampedZoom / minZoom) / Math.log(maxZoom / minZoom) * 100;
 }
 
 export function computeCanvasPanDrag(

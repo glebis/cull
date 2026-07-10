@@ -1,8 +1,10 @@
 <script lang="ts">
-    import { onDestroy } from 'svelte';
+    import { onDestroy, onMount } from 'svelte';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import {
         activeCanvas,
+        canvasZoom,
+        canvasZoomRequest,
         focusedImage,
         focusedIndex,
         images,
@@ -13,11 +15,12 @@
         showToast,
         statusHint,
     } from '$lib/stores';
-    import { updateCanvasLayout, type ImageWithFile } from '$lib/api';
+    import { updateCanvasLayout, type Canvas, type ImageWithFile } from '$lib/api';
     import {
         computeCanvasItemDragPosition,
         computeCanvasPanDrag,
         computeCanvasResize,
+        computeCanvasZoomToLevel,
         computeCanvasZoomAtPoint,
         isCanvasSpacePanKey,
     } from '$lib/canvas-interactions';
@@ -25,6 +28,7 @@
     import { serializeCanvasDocumentLayout, type CanvasDocument } from '$lib/canvas-document';
     import {
         addCanvasItemAnnotation,
+        addImagesToCanvasDocument,
         applyCanvasViewItemCrop,
         canvasItemAnnotations,
         createCanvasDocumentFromLayoutJson,
@@ -45,6 +49,20 @@
 
     type CropPoint = { x: number; y: number };
     type CropDraft = { itemId: string; anchor: CropPoint; current: CropPoint };
+    type PendingCanvasSave = { canvasId: string; layoutJson: string };
+    type CanvasImportDropDetail = {
+        images: ImageWithFile[];
+        folder?: string | null;
+        paths?: string[] | null;
+        dropX: number;
+        dropY: number;
+        importResult: {
+            imported: number;
+            skipped: number;
+            errors: string[];
+            image_ids: string[];
+        };
+    };
 
     const MIN_CROP_DRAG_SIZE = 0.02;
 
@@ -74,7 +92,10 @@
     let cropModeItemId = $state<string | null>(null);
     let cropDraft = $state<CropDraft | null>(null);
     let loadedCanvasKey = $state('');
+    let appliedCanvasZoomRequestId = 0;
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
+    let pendingCanvasSaves = new Map<string, PendingCanvasSave>();
+    let saveInFlight: Promise<void> | null = null;
 
     // Viewport culling + render cap (P2): only mount items intersecting the viewport.
     const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
@@ -104,7 +125,36 @@
     });
 
     onDestroy(() => {
-        if (saveTimer) clearTimeout(saveTimer);
+        void flushPendingCanvasSaves();
+    });
+
+    onMount(() => {
+        const handleCanvasImportDrop = (event: Event) => {
+            const detail = event instanceof CustomEvent ? detailFromCanvasImportDrop(event) : null;
+            if (!detail || detail.images.length === 0) {
+                showToast('No images found in drop', { type: 'info', duration: 5000 });
+                return;
+            }
+            placeImportedImagesOnCanvas(detail).catch(e => {
+                showToast('Canvas drop failed', { detail: String(e), type: 'error', duration: 10000 });
+            });
+        };
+        const flushForPageLifecycle = () => {
+            void flushPendingCanvasSaves();
+        };
+        const flushWhenHidden = () => {
+            if (document.visibilityState === 'hidden') flushForPageLifecycle();
+        };
+        window.addEventListener('canvas-import-drop', handleCanvasImportDrop);
+        window.addEventListener('pagehide', flushForPageLifecycle);
+        window.addEventListener('beforeunload', flushForPageLifecycle);
+        document.addEventListener('visibilitychange', flushWhenHidden);
+        return () => {
+            window.removeEventListener('canvas-import-drop', handleCanvasImportDrop);
+            window.removeEventListener('pagehide', flushForPageLifecycle);
+            window.removeEventListener('beforeunload', flushForPageLifecycle);
+            document.removeEventListener('visibilitychange', flushWhenHidden);
+        };
     });
 
     function handleResizeMouseDown(e: MouseEvent, item: CanvasViewItem) {
@@ -120,16 +170,21 @@
     $effect(() => {
         const imgs = $images;
         const canvas = $activeCanvas;
-        const key = [
-            canvas?.id ?? '__ephemeral__',
-            canvas?.layout_json ?? '{}',
-            imgs.map(i => i.image.id).join(','),
-        ].join('|');
+        const key = canvasLoadKey(canvas, imgs);
         if (key !== loadedCanvasKey) {
+            void flushPendingCanvasSaves();
             loadedCanvasKey = key;
             loadCanvasState(canvas?.layout_json ?? '{}', imgs);
         }
     });
+
+    function canvasLoadKey(canvas: Canvas | null, imgs: ImageWithFile[]) {
+        return [
+            canvas?.id ?? '__ephemeral__',
+            canvas?.layout_json ?? '{}',
+            imgs.map(i => i.image.id).join(','),
+        ].join('|');
+    }
 
     function loadCanvasState(layoutJson: string, imgs: ImageWithFile[]) {
         try {
@@ -145,15 +200,6 @@
     }
 
     function queueCanvasSave() {
-        if (!$activeCanvas || !canvasDocument) return;
-        if (saveTimer) clearTimeout(saveTimer);
-        saveTimer = setTimeout(() => {
-            saveTimer = null;
-            persistCanvasLayout();
-        }, 350);
-    }
-
-    async function persistCanvasLayout() {
         const canvas = $activeCanvas;
         if (!canvas || !canvasDocument) return;
 
@@ -165,14 +211,134 @@
 
         try {
             const layoutJson = serializeCanvasDocumentLayout(updatedDocument);
-            canvasDocument = updatedDocument;
-            await updateCanvasLayout(canvas.id, layoutJson);
             const updatedCanvas = { ...canvas, layout_json: layoutJson };
+
+            canvasDocument = updatedDocument;
+            loadedCanvasKey = canvasLoadKey(updatedCanvas, $images);
             activeCanvas.set(updatedCanvas);
             sessionCanvases.update(list => list.map(item => item.id === updatedCanvas.id ? updatedCanvas : item));
+            pendingCanvasSaves.set(updatedCanvas.id, { canvasId: updatedCanvas.id, layoutJson });
+            scheduleCanvasSaveFlush();
         } catch (e) {
             showToast('Canvas save failed', { detail: String(e), type: 'error', duration: 10000 });
         }
+    }
+
+    function scheduleCanvasSaveFlush(delay = 350) {
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+            saveTimer = null;
+            void flushPendingCanvasSaves();
+        }, delay);
+    }
+
+    async function flushPendingCanvasSaves(): Promise<void> {
+        if (saveTimer) {
+            clearTimeout(saveTimer);
+            saveTimer = null;
+        }
+        if (saveInFlight) {
+            await saveInFlight;
+            if (pendingCanvasSaves.size > 0) return flushPendingCanvasSaves();
+            return;
+        }
+
+        const saves = Array.from(pendingCanvasSaves.values());
+        if (saves.length === 0) return;
+
+        saveInFlight = (async () => {
+            for (const save of saves) {
+                const current = pendingCanvasSaves.get(save.canvasId);
+                if (!current || current.layoutJson !== save.layoutJson) continue;
+
+                pendingCanvasSaves.delete(save.canvasId);
+                try {
+                    await updateCanvasLayout(save.canvasId, save.layoutJson);
+                } catch (e) {
+                    if (!pendingCanvasSaves.has(save.canvasId)) {
+                        pendingCanvasSaves.set(save.canvasId, save);
+                    }
+                    showToast('Canvas save failed', { detail: String(e), type: 'error', duration: 10000 });
+                }
+            }
+        })();
+
+        try {
+            await saveInFlight;
+        } finally {
+            saveInFlight = null;
+        }
+    }
+
+    async function placeImportedImagesOnCanvas(detail: CanvasImportDropDetail) {
+        const mergedImages = mergeImageLists($images, detail.images);
+        const origin = canvasDropOrigin(detail);
+        const baseDocument = canvasDocument ?? createCanvasDocumentFromLayoutJson($activeCanvas?.layout_json ?? '{}', mergedImages);
+        const result = addImagesToCanvasDocument(baseDocument, detail.images, origin);
+
+        if (result.addedImageIds.length === 0) {
+            showToast('Images already on canvas', {
+                detail: `${result.skippedImageIds.length} image${result.skippedImageIds.length === 1 ? '' : 's'} already placed`,
+                type: 'info',
+                duration: 6000,
+            });
+            return;
+        }
+
+        const layoutJson = serializeCanvasDocumentLayout(result.document);
+        const updatedCanvas = $activeCanvas ? { ...$activeCanvas, layout_json: layoutJson } : null;
+
+        if (updatedCanvas) {
+            await updateCanvasLayout(updatedCanvas.id, layoutJson);
+            activeCanvas.set(updatedCanvas);
+            sessionCanvases.update(list => list.map(item => item.id === updatedCanvas.id ? updatedCanvas : item));
+        }
+
+        canvasDocument = result.document;
+        canvasItems = createCanvasViewItems(result.document, mergedImages);
+        images.set(mergedImages);
+        selectedIds.reset(new Set(result.addedImageIds));
+        focusFirstAddedImage(result.addedImageIds[0], mergedImages);
+
+        const sourceName = detail.folder
+            ? detail.folder.split('/').filter(Boolean).pop() ?? detail.folder
+            : 'dropped files';
+        const skippedDetail = detail.importResult.skipped > 0
+            ? `, ${detail.importResult.skipped} already imported`
+            : '';
+        showToast(`Added ${result.addedImageIds.length} to canvas`, {
+            detail: `${sourceName}: ${detail.importResult.imported} new${skippedDetail}`,
+            type: 'success',
+            duration: 8000,
+        });
+    }
+
+    function detailFromCanvasImportDrop(event: CustomEvent): CanvasImportDropDetail | null {
+        const detail = event.detail as CanvasImportDropDetail | null;
+        if (!detail || !Array.isArray(detail.images)) return null;
+        return detail;
+    }
+
+    function canvasDropOrigin(detail: CanvasImportDropDetail) {
+        const rect = canvasEl?.getBoundingClientRect();
+        if (!rect) return { x: 0, y: 0 };
+        return {
+            x: (detail.dropX - rect.left - panX) / zoom,
+            y: (detail.dropY - rect.top - panY) / zoom,
+        };
+    }
+
+    function mergeImageLists(existing: ImageWithFile[], incoming: ImageWithFile[]) {
+        const byId = new Map<string, ImageWithFile>();
+        for (const image of existing) byId.set(image.image.id, image);
+        for (const image of incoming) byId.set(image.image.id, image);
+        return Array.from(byId.values());
+    }
+
+    function focusFirstAddedImage(imageId: string | undefined, availableImages: ImageWithFile[]) {
+        if (!imageId) return;
+        const idx = availableImages.findIndex(image => image.image.id === imageId);
+        if (idx >= 0) focusedIndex.set(idx);
     }
 
     function handleCanvasMouseDown(e: MouseEvent) {
@@ -420,6 +586,32 @@
             queueCanvasSave();
         }
     }
+
+    function applyCanvasZoomRequest(nextZoom: number) {
+        const width = viewportWidth || canvasEl?.clientWidth || 0;
+        const height = viewportHeight || canvasEl?.clientHeight || 0;
+        const nextViewport = computeCanvasZoomToLevel(
+            { panX, panY, zoom },
+            { x: width / 2, y: height / 2 },
+            nextZoom,
+        );
+        if (nextViewport.panX === panX && nextViewport.panY === panY && nextViewport.zoom === zoom) return;
+        panX = nextViewport.panX;
+        panY = nextViewport.panY;
+        zoom = nextViewport.zoom;
+        queueCanvasSave();
+    }
+
+    $effect(() => {
+        canvasZoom.set(zoom);
+    });
+
+    $effect(() => {
+        const request = $canvasZoomRequest;
+        if (!request || request.id === appliedCanvasZoomRequestId) return;
+        appliedCanvasZoomRequestId = request.id;
+        applyCanvasZoomRequest(request.zoom);
+    });
 
     function handleCanvasKeydown(e: KeyboardEvent) {
         if (e.key === 'Escape' && cropModeItemId) {

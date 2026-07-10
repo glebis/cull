@@ -29,24 +29,69 @@ export interface CanvasViewItem {
     crop: CanvasCrop | null;
 }
 
+export interface AddImagesToCanvasDocumentResult {
+    document: CanvasDocument;
+    addedImageIds: string[];
+    skippedImageIds: string[];
+}
+
 export function createCanvasDocumentForImages(
     images: ImageWithFile[],
     baseDocument: CanvasDocument = createEmptyCanvasDocument(),
 ): CanvasDocument {
     const layout = gridLayout(images);
     const existingItems = new Map(baseDocument.items.map(item => [item.imageId, item]));
-    const items = images.map((image, index) => {
-        const existing = existingItems.get(image.image.id);
-        if (existing) {
-            return refreshCanvasItemSource(existing, image);
+    const visibleImages = new Map(images.map(image => [image.image.id, image]));
+    const items = baseDocument.items.map(item => {
+        const visibleImage = visibleImages.get(item.imageId);
+        if (visibleImage) {
+            return refreshCanvasItemSource(item, visibleImage);
         }
-        return createCanvasItem(image, layout[index], index);
+        return item;
     });
+    const maxZ = items.reduce((highest, item) => Math.max(highest, item.z), -1);
+
+    for (const [index, image] of images.entries()) {
+        if (existingItems.has(image.image.id)) continue;
+        items.push(createCanvasItem(image, layout[index], maxZ + index + 1));
+    }
 
     return sanitizeCanvasDocumentReferences({
         ...baseDocument,
         items,
     });
+}
+
+export function addImagesToCanvasDocument(
+    document: CanvasDocument,
+    images: ImageWithFile[],
+    origin: { x: number; y: number },
+): AddImagesToCanvasDocumentResult {
+    const existingImageIds = new Set(document.items.map(item => item.imageId));
+    const uniqueImages = uniqueImagesById(images);
+    const imagesToAdd = uniqueImages.filter(image => !existingImageIds.has(image.image.id));
+    const skippedImageIds = uniqueImages
+        .filter(image => existingImageIds.has(image.image.id))
+        .map(image => image.image.id);
+
+    if (imagesToAdd.length === 0) {
+        return { document, addedImageIds: [], skippedImageIds };
+    }
+
+    const layout = compactGridLayout(imagesToAdd, origin);
+    const maxZ = document.items.reduce((highest, item) => Math.max(highest, item.z), -1);
+    const additions = imagesToAdd.map((image, index) =>
+        createCanvasItem(image, layout[index], maxZ + index + 1)
+    );
+
+    return {
+        document: sanitizeCanvasDocumentReferences({
+            ...document,
+            items: [...document.items, ...additions],
+        }),
+        addedImageIds: additions.map(item => item.imageId),
+        skippedImageIds,
+    };
 }
 
 export function createCanvasDocumentFromLayoutJson(layoutJson: string, images: ImageWithFile[]): CanvasDocument {
@@ -83,45 +128,57 @@ export function updateCanvasDocumentFromViewItems(
     viewItems: CanvasViewItem[],
     viewport: CanvasViewport,
 ): CanvasDocument {
-    const existingItems = new Map(document.items.map(item => [item.id, item]));
-    const items = viewItems.map((viewItem) => {
-        const existing = existingItems.get(viewItem.id);
-        const fallback = createCanvasItem(viewItem.image, {
-            x: viewItem.x,
-            y: viewItem.y,
-            width: viewItem.width,
-            height: viewItem.height,
-        }, viewItem.z);
-        const baseItem = existing ?? fallback;
-        return {
-            ...baseItem,
-            id: viewItem.id,
-            imageId: viewItem.imageId,
-            x: viewItem.x,
-            y: viewItem.y,
-            width: viewItem.width,
-            height: viewItem.height,
-            z: viewItem.z,
-            hidden: viewItem.hidden,
-            label: viewItem.label,
-            groupId: viewItem.groupId,
-            transform: {
-                ...baseItem.transform,
-                crop: normalizeCrop(viewItem.crop),
-                rotationDegrees: normalizeRotation(viewItem.rotationDegrees),
-            },
-            source: {
-                contentHash: viewItem.image.image.sha256_hash,
-                lastKnownPath: viewItem.image.path,
-            },
-        };
+    const viewItemsById = new Map(viewItems.map(item => [item.id, item]));
+    const updatedItemIds = new Set<string>();
+    const items = document.items.map((item) => {
+        const viewItem = viewItemsById.get(item.id);
+        if (!viewItem) return item;
+        updatedItemIds.add(viewItem.id);
+        return canvasItemFromViewItem(viewItem, item);
     });
+
+    for (const viewItem of viewItems) {
+        if (updatedItemIds.has(viewItem.id)) continue;
+        items.push(canvasItemFromViewItem(viewItem));
+    }
 
     return sanitizeCanvasDocumentReferences({
         ...document,
         viewport,
         items,
     });
+}
+
+function canvasItemFromViewItem(viewItem: CanvasViewItem, existing?: CanvasItem): CanvasItem {
+    const baseItem = existing ?? createCanvasItem(viewItem.image, {
+        x: viewItem.x,
+        y: viewItem.y,
+        width: viewItem.width,
+        height: viewItem.height,
+    }, viewItem.z);
+
+    return {
+        ...baseItem,
+        id: viewItem.id,
+        imageId: viewItem.imageId,
+        x: viewItem.x,
+        y: viewItem.y,
+        width: viewItem.width,
+        height: viewItem.height,
+        z: viewItem.z,
+        hidden: viewItem.hidden,
+        label: viewItem.label,
+        groupId: viewItem.groupId,
+        transform: {
+            ...baseItem.transform,
+            crop: normalizeCrop(viewItem.crop),
+            rotationDegrees: normalizeRotation(viewItem.rotationDegrees),
+        },
+        source: {
+            contentHash: viewItem.image.image.sha256_hash,
+            lastKnownPath: viewItem.image.path,
+        },
+    };
 }
 
 function createCanvasItem(
@@ -162,6 +219,17 @@ function refreshCanvasItemSource(item: CanvasItem, image: ImageWithFile): Canvas
     };
 }
 
+function uniqueImagesById(images: ImageWithFile[]): ImageWithFile[] {
+    const seen = new Set<string>();
+    const unique: ImageWithFile[] = [];
+    for (const image of images) {
+        if (seen.has(image.image.id)) continue;
+        seen.add(image.image.id);
+        unique.push(image);
+    }
+    return unique;
+}
+
 function gridLayout(images: ImageWithFile[]) {
     const cols = Math.ceil(Math.sqrt(images.length));
     const colWidths = new Array(cols).fill(0);
@@ -183,6 +251,31 @@ function gridLayout(images: ImageWithFile[]) {
             x: colX[col],
             y: row * (ITEM_HEIGHT + ITEM_GAP),
             width: ITEM_HEIGHT * aspect,
+            height: ITEM_HEIGHT,
+        };
+    });
+}
+
+function compactGridLayout(images: ImageWithFile[], origin: { x: number; y: number }) {
+    const cols = Math.max(1, Math.ceil(Math.sqrt(images.length)));
+    const colWidths = new Array(cols).fill(ITEM_HEIGHT);
+    for (let index = 0; index < images.length; index++) {
+        const col = index % cols;
+        colWidths[col] = Math.max(colWidths[col], ITEM_HEIGHT * safeAspect(images[index]));
+    }
+
+    const colX = [origin.x];
+    for (let col = 1; col < cols; col++) {
+        colX[col] = colX[col - 1] + colWidths[col - 1] + ITEM_GAP;
+    }
+
+    return images.map((image, index) => {
+        const col = index % cols;
+        const row = Math.floor(index / cols);
+        return {
+            x: colX[col],
+            y: origin.y + row * (ITEM_HEIGHT + ITEM_GAP),
+            width: ITEM_HEIGHT * safeAspect(image),
             height: ITEM_HEIGHT,
         };
     });
