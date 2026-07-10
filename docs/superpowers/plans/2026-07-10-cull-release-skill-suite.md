@@ -11,8 +11,8 @@
 ## Global Constraints
 
 - Implement this plan only after the Cull release automation foundation plan exposes the documented JSON CLI.
-- Canonical source is `/Users/glebkalinin/ai_projects/claude-skills/`.
-- Codex discovery is `/Users/glebkalinin/.agents/skills/` through symlinks.
+- Canonical source is `$HOME/ai_projects/claude-skills/`.
+- Codex discovery is `$HOME/.agents/skills/` through symlinks.
 - The skills repository is currently dirty; implementation must use a new worktree from `origin/main` and preserve all existing changes.
 - The complete release always requires an explicit `patch`, `minor`, or `major` request.
 - That complete request authorizes automatic publication after every mandatory gate passes; do not ask for a second publication confirmation.
@@ -64,7 +64,7 @@ All phase skills locate Cull in this order:
 
 1. Current Git repository when `git remote get-url origin` matches `glebis/cull`.
 2. `CULL_REPO`, when set to an absolute Cull checkout.
-3. `/Users/glebkalinin/ai_projects/cull`.
+3. `$HOME/ai_projects/cull`.
 
 Before mutating, require the repository CLI:
 
@@ -90,8 +90,8 @@ logs. Exit codes are `2` input/config, `3` blocked gate, `4` external action, an
 - [ ] **Step 1: Create an isolated worktree without touching dirty `main`**
 
 ```bash
-git -C /Users/glebkalinin/ai_projects/claude-skills fetch origin main
-git -C /Users/glebkalinin/ai_projects/claude-skills worktree add \
+git -C "$HOME/ai_projects/claude-skills" fetch origin main
+git -C "$HOME/ai_projects/claude-skills" worktree add \
   /tmp/claude-skills-cull-release -b codex/cull-release-skills origin/main
 ```
 
@@ -100,7 +100,7 @@ Expected: the existing dirty checkout remains unchanged; the temp worktree is cl
 - [ ] **Step 2: Initialize the public orchestrator**
 
 ```bash
-SC=/Users/glebkalinin/.codex/skills/.system/skill-creator/scripts
+SC="$HOME/.codex/skills/.system/skill-creator/scripts"
 python3 "$SC/init_skill.py" cull-release \
   --path /tmp/claude-skills-cull-release \
   --resources scripts,references \
@@ -165,7 +165,7 @@ Set `allow_implicit_invocation: true` only for `cull-release-check` and
 - [ ] **Step 5: Validate generated skeletons**
 
 ```bash
-SC=/Users/glebkalinin/.codex/skills/.system/skill-creator/scripts
+SC="$HOME/.codex/skills/.system/skill-creator/scripts"
 for skill in cull-release cull-release-check cull-release-prepare cull-release-publish cull-release-verify cull-release-recover; do
   python3 "$SC/quick_validate.py" "/tmp/claude-skills-cull-release/$skill"
 done
@@ -227,7 +227,7 @@ command. If either changes, return `CHECK_MUTATED_REPOSITORY` and stop.
 - [ ] **Step 3: Regenerate metadata and validate**
 
 ```bash
-SC=/Users/glebkalinin/.codex/skills/.system/skill-creator/scripts
+SC="$HOME/.codex/skills/.system/skill-creator/scripts"
 python3 "$SC/generate_openai_yaml.py" /tmp/claude-skills-cull-release/cull-release-check \
   --interface display_name="Cull Release Check" \
   --interface short_description="Audit Cull release readiness safely" \
@@ -304,7 +304,7 @@ or update Homebrew even when invoked by the full orchestrator.
 Run:
 
 ```bash
-SC=/Users/glebkalinin/.codex/skills/.system/skill-creator/scripts
+SC="$HOME/.codex/skills/.system/skill-creator/scripts"
 python3 "$SC/generate_openai_yaml.py" /tmp/claude-skills-cull-release/cull-release-prepare \
   --interface display_name="Cull Release Prepare" \
   --interface short_description="Prepare Cull release metadata and commit" \
@@ -377,7 +377,7 @@ published assets, or force a workflow state.
 Run:
 
 ```bash
-SC=/Users/glebkalinin/.codex/skills/.system/skill-creator/scripts
+SC="$HOME/.codex/skills/.system/skill-creator/scripts"
 python3 "$SC/generate_openai_yaml.py" /tmp/claude-skills-cull-release/cull-release-publish \
   --interface display_name="Cull Release Publish" \
   --interface short_description="Publish verified Cull release artifacts" \
@@ -450,7 +450,7 @@ future release checks. Never delete or move a tag/release and never publish the 
 Run:
 
 ```bash
-SC=/Users/glebkalinin/.codex/skills/.system/skill-creator/scripts
+SC="$HOME/.codex/skills/.system/skill-creator/scripts"
 python3 "$SC/generate_openai_yaml.py" /tmp/claude-skills-cull-release/cull-release-verify \
   --interface display_name="Cull Release Verify" \
   --interface short_description="Verify Cull artifacts and distribution" \
@@ -535,7 +535,7 @@ artifact, updater, and Homebrew gates are stricter than this generic workflow.
 Run:
 
 ```bash
-SC=/Users/glebkalinin/.codex/skills/.system/skill-creator/scripts
+SC="$HOME/.codex/skills/.system/skill-creator/scripts"
 python3 "$SC/generate_openai_yaml.py" /tmp/claude-skills-cull-release/cull-release \
   --interface display_name="Cull Release" \
   --interface short_description="Orchestrate Cull's guarded release cycle" \
@@ -635,7 +635,7 @@ git -C /tmp/claude-skills-cull-release commit -m "feat: install Cull release ski
 - [ ] **Step 1: Run structural validation**
 
 ```bash
-SC=/Users/glebkalinin/.codex/skills/.system/skill-creator/scripts
+SC="$HOME/.codex/skills/.system/skill-creator/scripts"
 for skill in cull-release cull-release-check cull-release-prepare cull-release-publish cull-release-verify cull-release-recover; do
   python3 "$SC/quick_validate.py" "/tmp/claude-skills-cull-release/$skill"
 done
@@ -709,7 +709,7 @@ compare envelope schema, exit codes, states, and evidence fields exactly.
 - [ ] **Step 2: Merge and install the skills branch**
 
 Use the skills repository’s normal review/landing workflow. After merge, run the
-installer from `/Users/glebkalinin/ai_projects/claude-skills/cull-release/scripts/install-suite.sh`
+installer from `$HOME/ai_projects/claude-skills/cull-release/scripts/install-suite.sh`
 so symlinks target the canonical checkout rather than the temp worktree.
 
 - [ ] **Step 3: Run a complete dry release**
