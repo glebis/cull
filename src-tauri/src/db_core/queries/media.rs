@@ -2,7 +2,9 @@
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
 use crate::db_core::db::Database;
-use crate::db_core::db::{map_media_asset_row, map_media_file_row, map_pdf_page_row};
+use crate::db_core::db::{
+    map_media_asset_row, map_media_file_row, map_pdf_page_row, sql_opt_u64, sql_u64,
+};
 
 use crate::db_core::models::*;
 use rusqlite::{params, OptionalExtension, Result};
@@ -21,7 +23,7 @@ impl Database {
                 asset.primary_image_id,
                 asset.sha256_hash,
                 asset.format,
-                asset.file_size,
+                sql_u64(asset.file_size)?,
                 asset.page_count,
                 asset.title,
                 asset.created_at,
@@ -75,7 +77,7 @@ impl Database {
                 file.path,
                 file.last_seen_at,
                 file.missing_at,
-                file.last_seen_size,
+                sql_opt_u64(file.last_seen_size)?,
                 file.last_seen_mtime,
             ],
         )?;

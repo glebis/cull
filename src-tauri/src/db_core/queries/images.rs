@@ -1,5 +1,8 @@
 // Copyright (c) 2026-present Gleb Kalinin. Architecture and design by author.
-use crate::db_core::db::{map_image_with_file_row, validate_delete_folder_path};
+use crate::db_core::db::{
+    map_image_with_file_row, row_opt_u64, row_u64, sql_opt_u64, sql_u64,
+    validate_delete_folder_path,
+};
 
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
@@ -14,7 +17,7 @@ impl Database {
             "INSERT OR IGNORE INTO images (id, sha256_hash, width, height, format, file_size, created_at, imported_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![image.id, image.sha256_hash, image.width, image.height,
-                    image.format, image.file_size, image.created_at, image.imported_at],
+                    image.format, sql_u64(image.file_size)?, image.created_at, image.imported_at],
         )?;
         let media_type = if image.format.eq_ignore_ascii_case("pdf") {
             "pdf"
@@ -42,7 +45,7 @@ impl Database {
                 media_asset.primary_image_id,
                 media_asset.sha256_hash,
                 media_asset.format,
-                media_asset.file_size,
+                sql_u64(media_asset.file_size)?,
                 media_asset.page_count,
                 media_asset.title,
                 media_asset.created_at,
@@ -65,7 +68,7 @@ impl Database {
                 width: row.get(2)?,
                 height: row.get(3)?,
                 format: row.get(4)?,
-                file_size: row.get(5)?,
+                file_size: row_u64(row, 5)?,
                 created_at: row.get(6)?,
                 imported_at: row.get(7)?,
                 ai_prompt: row.get(8)?,
@@ -206,7 +209,7 @@ impl Database {
                     width: row.get(2)?,
                     height: row.get(3)?,
                     format: row.get(4)?,
-                    file_size: row.get(5)?,
+                    file_size: row_u64(row, 5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
@@ -288,7 +291,7 @@ impl Database {
                     width: row.get(2)?,
                     height: row.get(3)?,
                     format: row.get(4)?,
-                    file_size: row.get(5)?,
+                    file_size: row_u64(row, 5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
@@ -366,7 +369,7 @@ impl Database {
                     width: row.get(2)?,
                     height: row.get(3)?,
                     format: row.get(4)?,
-                    file_size: row.get(5)?,
+                    file_size: row_u64(row, 5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
@@ -410,7 +413,7 @@ impl Database {
                     width: row.get(2)?,
                     height: row.get(3)?,
                     format: row.get(4)?,
-                    file_size: row.get(5)?,
+                    file_size: row_u64(row, 5)?,
                     created_at: row.get(6)?,
                     imported_at: row.get(7)?,
                     ai_prompt: row.get(13)?,
@@ -632,7 +635,7 @@ impl Database {
                 path: row.get(2)?,
                 last_seen_at: row.get(3)?,
                 missing_at: row.get(4)?,
-                last_seen_size: row.get(5)?,
+                last_seen_size: row_opt_u64(row, 5)?,
                 last_seen_mtime: row.get(6)?,
             })
         })?;
@@ -701,7 +704,15 @@ impl Database {
         conn.execute(
             "INSERT OR REPLACE INTO image_files (id, image_id, path, last_seen_at, missing_at, last_seen_size, last_seen_mtime)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![file.id, file.image_id, file.path, file.last_seen_at, file.missing_at, file.last_seen_size, file.last_seen_mtime],
+            params![
+                file.id,
+                file.image_id,
+                file.path,
+                file.last_seen_at,
+                file.missing_at,
+                sql_opt_u64(file.last_seen_size)?,
+                file.last_seen_mtime
+            ],
         )?;
 
         let media_asset_id = conn
@@ -723,7 +734,7 @@ impl Database {
                     file.path,
                     file.last_seen_at,
                     file.missing_at,
-                    file.last_seen_size,
+                    sql_opt_u64(file.last_seen_size)?,
                     file.last_seen_mtime,
                 ],
             )?;
