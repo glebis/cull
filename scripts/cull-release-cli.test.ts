@@ -2,9 +2,11 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -165,9 +167,16 @@ function prepareSafetySnapshot(fixture: string) {
     cwd: fixture, encoding: 'utf8',
   }).trim();
   return {
-    files: Object.fromEntries(PREPARE_TRACKED_PATHS.map((path) => [
-      path, readFileSync(join(fixture, path)),
-    ])),
+    files: Object.fromEntries(PREPARE_TRACKED_PATHS.map((path) => {
+      const absolutePath = join(fixture, path);
+      const stat = lstatSync(absolutePath);
+      return [path, {
+        bytes: readFileSync(absolutePath),
+        mode: stat.mode & 0o777,
+        regular: stat.isFile(),
+        symlink: stat.isSymbolicLink(),
+      }];
+    })),
     index: readFileSync(resolve(fixture, indexPath)),
   };
 }
@@ -448,6 +457,10 @@ describe('Cull release prepare, resume, and state CLI', () => {
 
   it('prepares exactly the declared files in one commit without tagging or pushing', () => {
     const fixture = createReleaseFixture();
+    const expectedModes = Object.fromEntries(PREPARE_TRACKED_PATHS.map((path) => {
+      const mode = lstatSync(join(fixture, path)).mode;
+      return [path, mode & 0o111 ? '100755' : '100644'];
+    }));
     const oldHead = head(fixture);
     const oldRemote = execFileSync('git', ['rev-parse', 'origin/main'], { cwd: fixture, encoding: 'utf8' }).trim();
 
@@ -474,6 +487,11 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(execFileSync('git', ['tag', '--list'], { cwd: fixture, encoding: 'utf8' }).trim()).toBe('');
     expect(execFileSync('git', ['rev-parse', 'origin/main'], { cwd: fixture, encoding: 'utf8' }).trim())
       .toBe(oldRemote);
+    for (const [path, expectedMode] of Object.entries(expectedModes)) {
+      expect(execFileSync('git', ['ls-tree', 'HEAD', '--', path], {
+        cwd: fixture, encoding: 'utf8',
+      }).split(/\s/, 1)[0]).toBe(expectedMode);
+    }
     expect(readFileSync(join(fixture, 'untouched.txt'), 'utf8')).toBe('must stay untouched\n');
     expect(readFileSync(join(fixture, 'CHANGELOG.md'), 'utf8'))
       .toContain('## [1.2.4] - 2026-07-11\n\n### Fixed');
@@ -517,6 +535,54 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(head(fixture)).toBe(execFileSync('git', ['rev-parse', 'origin/main'], {
       cwd: fixture, encoding: 'utf8',
     }).trim());
+    if (_name === 'unrelated staged file') expect(existsSync(join(fixture, 'gate-extra.txt'))).toBe(false);
+  });
+
+  it('rejects a gate mode change and restores the original regular file mode and bytes', () => {
+    const fixture = createReleaseFixture({
+      gateCode: "require('fs').chmodSync('package.json', 0o755)",
+    });
+    const before = prepareSafetySnapshot(fixture);
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture));
+
+    expect(result.execution.status).not.toBe(0);
+    expect(result.output.code).toBe('PLAN_MUTATED');
+    expect(prepareSafetySnapshot(fixture)).toEqual(before);
+  });
+
+  it('rejects an owned-file symlink replacement and restores without writing through it', () => {
+    const victim = join(mkdtempSync(join(tmpdir(), 'cull-release-symlink-victim-')), 'victim.json');
+    writeFileSync(victim, 'victim must not change\n');
+    const gateCode = [
+      "require('fs').renameSync('package.json', 'gate-backup.json')",
+      `require('fs').symlinkSync(${JSON.stringify(victim)}, 'package.json')`,
+    ].join(';');
+    const fixture = createReleaseFixture({ gateCode });
+    const before = prepareSafetySnapshot(fixture);
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture));
+
+    expect(result.execution.status).not.toBe(0);
+    expect(result.output.code).toBe('PLAN_MUTATED');
+    expect(readFileSync(victim, 'utf8')).toBe('victim must not change\n');
+    expect(existsSync(join(fixture, 'gate-backup.json'))).toBe(false);
+    expect(prepareSafetySnapshot(fixture)).toEqual(before);
+  });
+
+  it.each([
+    ['tracked modification', "require('fs').appendFileSync('untouched.txt', 'gate change\\n')", 'untouched.txt'],
+    ['new untracked path', "require('fs').writeFileSync('gate-extra.txt', 'gate extra\\n')", 'gate-extra.txt'],
+  ])('rejects and safely cleans an unrelated gate %s', (_name, gateCode, path) => {
+    const fixture = createReleaseFixture({ gateCode });
+    const original = path === 'untouched.txt' ? readFileSync(join(fixture, path)) : null;
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture));
+
+    expect(result.execution.status).not.toBe(0);
+    expect(result.output.code).toBe('PREPARE_RACE');
+    if (original) expect(readFileSync(join(fixture, path))).toEqual(original);
+    else expect(existsSync(join(fixture, path))).toBe(false);
   });
 
   it('restores exact task files and index when a gate moves HEAD', () => {
@@ -533,6 +599,7 @@ describe('Cull release prepare, resume, and state CLI', () => {
 
     expect(result.execution.status).not.toBe(0);
     expect(result.output.code).toBe('SOURCE_MOVED');
+    expect(result.output.details.sideEffects).toContain('gate-commit.txt');
     expect(prepareSafetySnapshot(fixture)).toEqual(before);
     expect(head(fixture)).not.toBe(source);
   });
@@ -735,6 +802,21 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(result.execution.status).toBe(0);
     expect(readFileSync(victim, 'utf8')).toBe('do not follow\n');
     expect(statSync(statePath).mode & 0o777).toBe(0o600);
+  });
+
+  it('removes only its unique temp and leaves no final state after an injected pre-fsync failure', () => {
+    const fixture = createReleaseFixture();
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture), {
+      CULL_RELEASE_NOW: '2026-07-11T12:00:00.000Z',
+      CULL_RELEASE_TEST_FAIL_STATE_WRITE: 'before-fsync',
+    });
+
+    expect(result.execution.status).toBe(5);
+    expect(result.output.code).toBe('INCONSISTENT_RECOVERY');
+    const stateDir = join(fixture, '.release-state');
+    expect(existsSync(join(stateDir, '1.2.4.json'))).toBe(false);
+    expect(readdirSync(stateDir)).toEqual([]);
   });
 
   it('rejects a symlinked state record instead of following it', () => {

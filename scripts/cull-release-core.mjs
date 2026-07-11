@@ -9,6 +9,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
   writeSync,
 } from 'node:fs';
@@ -341,14 +342,33 @@ export function writeReleaseRecordAtomic(repoRoot, config, record) {
     constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
     0o600,
   );
+  let writeFailure;
   try {
     fchmodSync(fd, 0o600);
     const bytes = Buffer.from(`${JSON.stringify(record, null, 2)}\n`);
     let offset = 0;
     while (offset < bytes.length) offset += writeSync(fd, bytes, offset, bytes.length - offset);
+    if (process.env.CULL_RELEASE_TEST_MODE === '1'
+      && process.env.CULL_RELEASE_TEST_FAIL_STATE_WRITE === 'before-fsync') {
+      throw new Error('Injected state write failure before fsync');
+    }
     fsyncSync(fd);
+  } catch (cause) {
+    writeFailure = cause;
   } finally {
     closeSync(fd);
+  }
+  if (writeFailure) {
+    try {
+      unlinkSync(temporary);
+    } catch (cleanupCause) {
+      throw releaseError('STATE_INVALID', 'State write failed and its unique temp could not be removed', {
+        cause: writeFailure.message,
+        cleanupCause: cleanupCause.message,
+        temporary,
+      });
+    }
+    throw writeFailure;
   }
   chmodSync(temporary, 0o600);
   renameSync(temporary, path);

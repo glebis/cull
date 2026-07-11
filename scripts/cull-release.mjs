@@ -1,6 +1,20 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, statfsSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  fchmodSync,
+  fsyncSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readlinkSync,
+  statfsSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
 import { resolve } from 'node:path';
 import {
   buildReadinessReport,
@@ -192,18 +206,157 @@ function assertDedicatedWorktree(config) {
   }
 }
 
-function capturePrepareSnapshot(edits) {
+function snapshotPath(relativePath, regularOnly = false) {
+  const absolutePath = resolve(repoRoot, relativePath);
+  const stat = lstatSync(absolutePath);
+  if (stat.isSymbolicLink()) {
+    if (regularOnly) throw commandError('PLAN_INVALID', `Release-owned path must be a regular file: ${relativePath}`);
+    return { relativePath, absolutePath, type: 'symlink', target: readlinkSync(absolutePath) };
+  }
+  if (!stat.isFile()) throw commandError('PLAN_INVALID', `Tracked path must be a regular file or symlink: ${relativePath}`);
+  const fd = openSync(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    return {
+      relativePath,
+      absolutePath,
+      type: 'file',
+      mode: stat.mode & 0o7777,
+      bytes: readFileSync(fd),
+    };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function readRegularBytesNoFollow(absolutePath) {
+  const fd = openSync(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    return readFileSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function captureOwnedPaths(config) {
+  const paths = [
+    ...config.versionFiles.map((entry) => entry.path),
+    config.changelog.path,
+    config.compatibility.path,
+  ];
+  if (new Set(paths).size !== paths.length) {
+    throw commandError('CONFIG_INVALID', 'Release-owned paths must be unique');
+  }
+  return paths.map((path) => snapshotPath(path, true));
+}
+
+function capturePrepareSnapshot(ownedFiles) {
   const indexPath = resolve(repoRoot, git('rev-parse', '--git-path', 'index'));
+  const trackedPaths = gitBytes('ls-files', '-z').toString('utf8').split('\0').filter(Boolean);
+  const owned = new Set(ownedFiles.map((file) => file.relativePath));
   return {
-    files: edits.map((edit) => ({ path: edit.absolutePath, bytes: readFileSync(edit.absolutePath) })),
+    files: ownedFiles,
+    tracked: trackedPaths.filter((path) => !owned.has(path)).map((path) => snapshotPath(path)),
+    untracked: new Set(gitBytes('ls-files', '--others', '--exclude-standard', '-z')
+      .toString('utf8').split('\0').filter(Boolean)),
     indexPath,
     index: readFileSync(indexPath),
   };
 }
 
-function restorePrepareSnapshot(snapshot) {
-  for (const file of snapshot.files) writeFileSync(file.path, file.bytes);
-  writeFileSync(snapshot.indexPath, snapshot.index);
+function pathMatches(snapshot) {
+  try {
+    const stat = lstatSync(snapshot.absolutePath);
+    if (snapshot.type === 'symlink') {
+      return stat.isSymbolicLink() && readlinkSync(snapshot.absolutePath) === snapshot.target;
+    }
+    return stat.isFile()
+      && !stat.isSymbolicLink()
+      && (stat.mode & 0o7777) === snapshot.mode
+      && readRegularBytesNoFollow(snapshot.absolutePath).equals(snapshot.bytes);
+  } catch {
+    return false;
+  }
+}
+
+function safelyRemovePath(absolutePath) {
+  if (process.env.CULL_RELEASE_TEST_MODE === '1') {
+    const stat = lstatSync(absolutePath);
+    if (stat.isDirectory() && !stat.isSymbolicLink()) {
+      execFileSync('trash', [absolutePath], { stdio: 'ignore' });
+    } else unlinkSync(absolutePath);
+    return;
+  }
+  execFileSync('trash', [absolutePath], { stdio: 'ignore' });
+}
+
+function restorePath(snapshot) {
+  if (pathMatches(snapshot)) return;
+  let exists = true;
+  try { lstatSync(snapshot.absolutePath); } catch (cause) {
+    if (cause.code === 'ENOENT') exists = false;
+    else throw cause;
+  }
+  if (snapshot.type === 'symlink') {
+    if (exists) safelyRemovePath(snapshot.absolutePath);
+    symlinkSync(snapshot.target, snapshot.absolutePath);
+    return;
+  }
+  if (exists) {
+    const current = lstatSync(snapshot.absolutePath);
+    if (!current.isFile() || current.isSymbolicLink()) safelyRemovePath(snapshot.absolutePath);
+  }
+  const flags = exists && (() => {
+    try {
+      const current = lstatSync(snapshot.absolutePath);
+      return current.isFile() && !current.isSymbolicLink();
+    } catch { return false; }
+  })()
+    ? constants.O_WRONLY | constants.O_TRUNC | constants.O_NOFOLLOW
+    : constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+  const fd = openSync(snapshot.absolutePath, flags, snapshot.mode);
+  try {
+    fchmodSync(fd, snapshot.mode);
+    let offset = 0;
+    while (offset < snapshot.bytes.length) {
+      offset += writeSync(fd, snapshot.bytes, offset, snapshot.bytes.length - offset);
+    }
+    fsyncSync(fd);
+    fchmodSync(fd, snapshot.mode);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function restorePrepareSnapshot(snapshot, source) {
+  const failures = [];
+  const unsafeSideEffects = [];
+  for (const file of snapshot.files) {
+    try { restorePath(file); } catch { failures.push(file.relativePath); }
+  }
+  try { writeFileSync(snapshot.indexPath, snapshot.index); } catch { failures.push('.git/index'); }
+  if (git('rev-parse', 'HEAD') === source) {
+    for (const file of snapshot.tracked) {
+      if (!pathMatches(file)) {
+        try { restorePath(file); } catch { failures.push(file.relativePath); }
+      }
+    }
+    const currentUntracked = gitBytes('ls-files', '--others', '--exclude-standard', '-z')
+      .toString('utf8').split('\0').filter(Boolean);
+    for (const path of currentUntracked) {
+      if (!snapshot.untracked.has(path)) {
+        try { safelyRemovePath(resolve(repoRoot, path)); } catch { failures.push(path); }
+      }
+    }
+  } else {
+    unsafeSideEffects.push(...gitBytes('ls-files', '--others', '--exclude-standard', '-z')
+      .toString('utf8').split('\0').filter((path) => path && !snapshot.untracked.has(path)));
+  }
+  if (failures.length > 0) {
+    throw commandError('PREPARE_SIDE_EFFECT', 'Preparation side effects require manual cleanup', {
+      paths: [...new Set(failures)].sort(),
+    });
+  }
+  return [...new Set(unsafeSideEffects)].sort();
 }
 
 function assertPreCommitPlan(plan, source, snapshot) {
@@ -213,8 +366,18 @@ function assertPreCommitPlan(plan, source, snapshot) {
   if (!readFileSync(snapshot.indexPath).equals(snapshot.index)) {
     throw commandError('PREPARE_RACE', 'Release gates modified the Git index');
   }
+  const originals = new Map(snapshot.files.map((file) => [file.relativePath, file]));
   for (const edit of plan.edits) {
-    if (!readFileSync(edit.absolutePath).equals(Buffer.from(edit.after))) {
+    const original = originals.get(edit.path);
+    let valid = false;
+    try {
+      const stat = lstatSync(edit.absolutePath);
+      valid = stat.isFile()
+        && !stat.isSymbolicLink()
+        && (stat.mode & 0o7777) === original.mode
+        && readRegularBytesNoFollow(edit.absolutePath).equals(Buffer.from(edit.after));
+    } catch { valid = false; }
+    if (!valid) {
       throw commandError('PLAN_MUTATED', `Release gate changed planned bytes for ${edit.path}`);
     }
   }
@@ -233,16 +396,22 @@ function assertPreCommitPlan(plan, source, snapshot) {
   }
 }
 
-function verifyReleaseCommit(plan, source, subject) {
+function verifyReleaseCommit(plan, source, subject, snapshot) {
   const releaseCommit = git('rev-parse', 'HEAD');
   const parent = git('rev-parse', `${releaseCommit}^`);
   const actualSubject = git('show', '-s', '--format=%s', releaseCommit);
   const changedPaths = git('diff-tree', '--no-commit-id', '--name-only', '-r', releaseCommit)
     .split('\n').filter(Boolean).sort();
   const expectedPaths = plan.edits.map((edit) => edit.path).sort();
-  const exactTree = plan.edits.every((edit) => (
-    gitBytes('show', `${releaseCommit}:${edit.path}`).equals(Buffer.from(edit.after))
-  ));
+  const originals = new Map(snapshot.files.map((file) => [file.relativePath, file]));
+  const exactTree = plan.edits.every((edit) => {
+    const tree = git('ls-tree', releaseCommit, '--', edit.path);
+    const mode = tree.split(/\s/, 1)[0];
+    const original = originals.get(edit.path);
+    const expectedMode = original.mode & 0o111 ? '100755' : '100644';
+    return mode === expectedMode
+      && gitBytes('show', `${releaseCommit}:${edit.path}`).equals(Buffer.from(edit.after));
+  });
   if (parent !== source
     || actualSubject !== subject
     || JSON.stringify(changedPaths) !== JSON.stringify(expectedPaths)
@@ -268,6 +437,11 @@ function runPrepare(args) {
       expected: args.expectedSource, actual: source,
     });
   }
+  if (git('status', '--porcelain').length !== 0) {
+    throw commandError('BLOCKED', 'Prepare requires a clean worktree');
+  }
+  assertDedicatedWorktree(config);
+  const ownedFiles = captureOwnedPaths(config);
   const currentVersion = validateVersionAlignment(readVersionSnapshot(repoRoot, config));
   const targetVersion = nextVersion(currentVersion, args.bump);
   if (args.expectedVersion !== targetVersion || request.version !== targetVersion) {
@@ -276,10 +450,6 @@ function runPrepare(args) {
     });
   }
   if (request.requestedBump !== args.bump) throw inputError('Request bump does not match --bump');
-  if (git('status', '--porcelain').length !== 0) {
-    throw commandError('BLOCKED', 'Prepare requires a clean worktree');
-  }
-  assertDedicatedWorktree(config);
   const timestamp = now();
   const plan = prepareRelease({
     repoRoot,
@@ -292,7 +462,7 @@ function runPrepare(args) {
   if (args.dryRun) {
     return { version: plan.version, files: plan.edits.map((edit) => edit.path), diff: '' };
   }
-  const snapshot = capturePrepareSnapshot(plan.edits);
+  const snapshot = capturePrepareSnapshot(ownedFiles);
   let committed = false;
   let releaseCommit;
   try {
@@ -308,9 +478,14 @@ function runPrepare(args) {
       : ['-c', 'core.hooksPath=/dev/null'];
     git(...hookIsolation, 'commit', '--no-verify', '--only', '-m', subject, '--', ...plan.edits.map((edit) => edit.path));
     committed = true;
-    releaseCommit = verifyReleaseCommit(plan, source, subject);
+    releaseCommit = verifyReleaseCommit(plan, source, subject, snapshot);
   } catch (error) {
-    if (!committed) restorePrepareSnapshot(snapshot);
+    if (!committed) {
+      const sideEffects = restorePrepareSnapshot(snapshot, source);
+      if (sideEffects.length > 0) {
+        error.details = { ...(error.details ?? {}), sideEffects };
+      }
+    }
     throw error;
   }
   let record = createReleaseRecord({
