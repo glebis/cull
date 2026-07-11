@@ -475,6 +475,7 @@ describe('release gate', () => {
     expect(verifyJob).toContain('release-provenance.json');
     expect(verifyJob).toContain('checksums.txt');
     expect(verifyJob).toContain('verification.log');
+    expect(verifyJob).not.toContain('--tag-object-sha');
   });
 
   it('defines a pinned four-stage release workflow with immutable tag dispatch', () => {
@@ -563,10 +564,13 @@ describe('release gate', () => {
     expect(verifyJob).toContain('gh api "repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID"');
     expect(verifyJob).toContain('artifact.workflow_run?.id');
     expect(verifyJob).toContain('artifact.workflow_run?.head_sha');
+    expect(verifyJob).toContain('EXPECTED_INVOCATION_SHA: ${{ github.sha }}');
+    expect(verifyJob).not.toContain('EXPECTED_SHA: ${{ needs.release-gate.outputs.sha }}');
     expect(verifyJob).toContain('artifact.expired !== false');
     expect(verifyJob).toContain('artifact.digest !== expectedDigest');
     expect(verifyJob).toContain('bash scripts/verify-release-artifacts.sh');
     expect(verifyJob).toContain('--run-id "${{ github.run_id }}"');
+    expect(verifyJob).toContain('--tag-object-sha "${{ needs.release-gate.outputs.tag-object-sha }}"');
     expect(verifyJob).toContain('name: cull-verified-${{ github.run_id }}-${{ needs.release-gate.outputs.sha }}');
     expect(verifyJob).toContain('artifact-id: ${{ steps.upload_verified.outputs.artifact-id }}');
     expect(verifyJob).toContain('artifact-digest: ${{ steps.upload_verified.outputs.artifact-digest }}');
@@ -588,6 +592,8 @@ describe('release gate', () => {
     expect(publishJob).toContain('gh api "repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID"');
     expect(publishJob).toContain('artifact.workflow_run?.id');
     expect(publishJob).toContain('artifact.workflow_run?.head_sha');
+    expect(publishJob).toContain('EXPECTED_INVOCATION_SHA: ${{ github.sha }}');
+    expect(publishJob).not.toContain('EXPECTED_SHA: ${{ needs.release-gate.outputs.sha }}');
     expect(publishJob).toContain('artifact.expired !== false');
     expect(publishJob).toContain('artifact.digest !== expectedDigest');
     expect(publishJob).toContain("schema !== 'cull.release.gate.v1'");
@@ -595,6 +601,7 @@ describe('release gate', () => {
     expect(publishJob).toContain("gate.event !== 'tag' && gate.event !== 'dispatch'");
     expect(publishJob).toContain('gate.tagObjectSha !== process.env.TAG_OBJECT_SHA');
     expect(publishJob).toContain("schema !== 'cull.release.provenance.v1'");
+    expect(publishJob).toContain('provenance.tagObjectSha !== process.env.TAG_OBJECT_SHA');
     expect(publishJob).toContain("'stapledNotarization'");
     expect(publishJob).toContain('Object.keys(provenance.checks).sort()');
     expect(publishJob).toContain('provenance.checks[name] !== true');
@@ -615,5 +622,21 @@ describe('release gate', () => {
     expect(releaseDocs).toContain('29156442963');
     expect(releaseDocs).toContain('Apple notarization returned HTTP 403');
     expect(releaseDocs).toContain('Task 10 tag rules');
+  });
+
+  it('binds dispatch artifacts to the workflow invocation while evidence binds the selected tag commit', () => {
+    const workflow = readFileSync(releaseWorkflowPath, 'utf8');
+    const invocation = {
+      workflowDispatchSha: '1111111111111111111111111111111111111111',
+      inputTagCommit: '2222222222222222222222222222222222222222',
+    };
+    const verifyJob = workflowJob(workflow, 'verify-artifact');
+    const publishJob = workflowJob(workflow, 'publish');
+
+    expect(invocation.workflowDispatchSha).not.toBe(invocation.inputTagCommit);
+    expect(verifyJob).toContain('EXPECTED_INVOCATION_SHA: ${{ github.sha }}');
+    expect(publishJob).toContain('EXPECTED_INVOCATION_SHA: ${{ github.sha }}');
+    expect(verifyJob).toContain('COMMIT: ${{ needs.release-gate.outputs.sha }}');
+    expect(publishJob).toContain('COMMIT: ${{ needs.release-gate.outputs.sha }}');
   });
 });

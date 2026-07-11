@@ -67,6 +67,9 @@ default branch, dispatch it from GitHub Actions and inspect all three jobs plus
 the evidence artifact. Canary dispatch is an explicit enablement operation;
 repository-local checks do not dispatch it.
 
+Canary verifier provenance records `tagObjectSha: null` because it intentionally
+does not represent a publishable annotated tag identity.
+
 ## Verified automatic publication
 
 `.github/workflows/release.yml` accepts only a pushed `vX.Y.Z` tag or a manual
@@ -80,10 +83,10 @@ immutable commit and runs four ordered jobs:
    record says `publishEligible: true`; it builds and uploads a private exact
    inventory without creating a release.
 3. `verify-artifact` is secret-free. It downloads the build by immutable artifact
-   ID only after the Actions REST metadata matches the expected name, run, commit,
-   expiry state, and upload digest. It verifies the signed DMG/updater inventory
-   and uploads the exact verified files, checksums, provenance, log, and gate
-   record as a new run-bound artifact.
+   ID only after the Actions REST metadata matches the expected name, run,
+   workflow invocation commit, expiry state, and upload digest. It verifies the
+   signed DMG/updater inventory and uploads the exact verified files, checksums,
+   provenance, log, and gate record as a new run-bound artifact.
 4. `publish` has the workflow's only `contents: write` permission and is protected
    by the `release-publish` environment. It validates both evidence records,
    hashes, file identities, artifact/run binding, and the matching curated
@@ -103,6 +106,15 @@ external agreement and complete the Task 10 canary before creating the variable.
 Task 10 tag rules must also protect release tag creation and updates before
 enablement; the workflow's before/after identity checks detect a race but cannot
 substitute for repository tag protection.
+
+A manual dispatch is launched from the default-branch workflow and may select an
+older annotated tag, so the workflow invocation SHA can legitimately differ from
+the selected tag's peeled commit. Actions artifact metadata is therefore bound to
+`github.sha` (the invocation), while gate evidence, artifact contents, verifier
+provenance, and release validation remain bound separately to the selected
+release commit. Publishable provenance also records the exact annotated tag
+object SHA; the public provenance, remote object, peeled commit, and gate record
+must all agree.
 
 A failed build or verification publishes nothing. A publication failure leaves
 the existing tag and any draft intact for explicit recovery; automation never

@@ -320,7 +320,7 @@ jobs:
           ARTIFACT_NAME: ${{ needs.signed-build.outputs.artifact-name }}
           ARTIFACT_DIGEST: ${{ needs.signed-build.outputs.artifact-digest }}
           EXPECTED_RUN_ID: ${{ github.run_id }}
-          EXPECTED_SHA: ${{ needs.release-gate.outputs.sha }}
+          EXPECTED_INVOCATION_SHA: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -335,7 +335,7 @@ jobs:
           const expectedDigest = `sha256:${process.env.ARTIFACT_DIGEST}`;
           if (String(artifact.id) !== process.env.ARTIFACT_ID || artifact.name !== process.env.ARTIFACT_NAME ||
               String(artifact.workflow_run?.id) !== process.env.EXPECTED_RUN_ID ||
-              artifact.workflow_run?.head_sha !== process.env.EXPECTED_SHA || artifact.expired !== false ||
+              artifact.workflow_run?.head_sha !== process.env.EXPECTED_INVOCATION_SHA || artifact.expired !== false ||
               artifact.digest !== expectedDigest) process.exit(2);
           NODE
 
@@ -382,6 +382,7 @@ jobs:
             --version "$VERSION" \
             --tag "$TAG" \
             --commit "$COMMIT" \
+            --tag-object-sha "${{ needs.release-gate.outputs.tag-object-sha }}" \
             --run-id "${{ github.run_id }}" \
             --out "$evidence"
           install -m 600 "$RUNNER_TEMP/cull-release-gate/release-gate.json" "$verified/release-gate.json"
@@ -456,7 +457,7 @@ jobs:
           ARTIFACT_NAME: ${{ needs.verify-artifact.outputs.artifact-name }}
           ARTIFACT_DIGEST: ${{ needs.verify-artifact.outputs.artifact-digest }}
           EXPECTED_RUN_ID: ${{ github.run_id }}
-          EXPECTED_SHA: ${{ needs.release-gate.outputs.sha }}
+          EXPECTED_INVOCATION_SHA: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -471,7 +472,7 @@ jobs:
           const expectedDigest = `sha256:${process.env.ARTIFACT_DIGEST}`;
           if (String(artifact.id) !== process.env.ARTIFACT_ID || artifact.name !== process.env.ARTIFACT_NAME ||
               String(artifact.workflow_run?.id) !== process.env.EXPECTED_RUN_ID ||
-              artifact.workflow_run?.head_sha !== process.env.EXPECTED_SHA || artifact.expired !== false ||
+              artifact.workflow_run?.head_sha !== process.env.EXPECTED_INVOCATION_SHA || artifact.expired !== false ||
               artifact.digest !== expectedDigest) process.exit(2);
           NODE
 
@@ -524,6 +525,7 @@ jobs:
           const provenance = JSON.parse(fs.readFileSync(path.join(process.env.PACKAGE, 'release-provenance.json'), 'utf8'));
           if (provenance.schema !== 'cull.release.provenance.v1' || provenance.version !== process.env.VERSION ||
               provenance.tag !== process.env.TAG || provenance.commit !== process.env.COMMIT ||
+              provenance.tagObjectSha !== process.env.TAG_OBJECT_SHA ||
               provenance.workflowRunId !== process.env.EXPECTED_RUN_ID) process.exit(2);
           if (JSON.stringify(Object.keys(provenance.assets).sort()) !== JSON.stringify([...expectedAssets].sort())) process.exit(2);
           const expectedChecks = [
