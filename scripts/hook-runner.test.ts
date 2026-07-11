@@ -11,6 +11,13 @@ function git(...args: string[]): string {
 }
 
 describe('hook runner Git environment isolation', () => {
+  it('parses Git local variable names without unquoted word splitting', () => {
+    const runner = readFileSync(resolve(import.meta.dirname, 'hook-runner.sh'), 'utf8');
+
+    expect(runner).toContain('while IFS= read -r git_local_env_var; do');
+    expect(runner).not.toContain('for git_local_env_var in $git_local_env_vars');
+  });
+
   it('scrubs repository-local Git variables before preflight commands', () => {
     const sandbox = mkdtempSync(join(tmpdir(), 'cull-hook-env-'));
     const bin = join(sandbox, 'bin');
