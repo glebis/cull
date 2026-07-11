@@ -337,13 +337,14 @@ export function writeReleaseRecordAtomic(repoRoot, config, record) {
   }
   chmodSync(stateDir, 0o700);
   const temporary = `${path}.tmp-${process.pid}-${randomBytes(12).toString('hex')}`;
-  const fd = openSync(
-    temporary,
-    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-    0o600,
-  );
-  let writeFailure;
+  let fd;
+  let renamed = false;
   try {
+    fd = openSync(
+      temporary,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
     fchmodSync(fd, 0o600);
     const bytes = Buffer.from(`${JSON.stringify(record, null, 2)}\n`);
     let offset = 0;
@@ -353,33 +354,49 @@ export function writeReleaseRecordAtomic(repoRoot, config, record) {
       throw new Error('Injected state write failure before fsync');
     }
     fsyncSync(fd);
-  } catch (cause) {
-    writeFailure = cause;
-  } finally {
     closeSync(fd);
-  }
-  if (writeFailure) {
+    fd = undefined;
+    chmodSync(temporary, 0o600);
+    if (process.env.CULL_RELEASE_TEST_MODE === '1'
+      && process.env.CULL_RELEASE_TEST_FAIL_STATE_WRITE === 'rename') {
+      throw new Error('Injected state rename failure');
+    }
+    renameSync(temporary, path);
+    renamed = true;
+    chmodSync(path, 0o600);
+    const directoryFd = openSync(stateDir, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
-      unlinkSync(temporary);
-    } catch (cleanupCause) {
-      throw releaseError('STATE_INVALID', 'State write failed and its unique temp could not be removed', {
-        cause: writeFailure.message,
-        cleanupCause: cleanupCause.message,
-        temporary,
+      fsyncSync(directoryFd);
+    } finally {
+      closeSync(directoryFd);
+    }
+    return path;
+  } catch (cause) {
+    let closeFailure;
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch (error) { closeFailure = error; }
+    }
+    if (!renamed) {
+      try {
+        unlinkSync(temporary);
+      } catch (cleanupCause) {
+        if (cleanupCause.code !== 'ENOENT') {
+          throw releaseError('STATE_INVALID', 'State write failed and its unique temp could not be removed', {
+            cause: cause.message,
+            closeCause: closeFailure?.message,
+            cleanupCause: cleanupCause.message,
+            temporary,
+          });
+        }
+      }
+    }
+    if (closeFailure) {
+      throw releaseError('STATE_INVALID', 'State write failed while closing its unique temp', {
+        cause: cause.message, closeCause: closeFailure.message,
       });
     }
-    throw writeFailure;
+    throw cause;
   }
-  chmodSync(temporary, 0o600);
-  renameSync(temporary, path);
-  chmodSync(path, 0o600);
-  const directoryFd = openSync(stateDir, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    fsyncSync(directoryFd);
-  } finally {
-    closeSync(directoryFd);
-  }
-  return path;
 }
 
 export function deriveReleaseState(evidence) {

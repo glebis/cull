@@ -570,6 +570,25 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(prepareSafetySnapshot(fixture)).toEqual(before);
   });
 
+  it('restores an owned hard-link replacement without changing the victim inode', () => {
+    const victim = join(mkdtempSync(join(tmpdir(), 'cull-release-hardlink-victim-')), 'victim.json');
+    writeFileSync(victim, 'hard-link victim must not change\n');
+    const gateCode = [
+      "require('fs').renameSync('package.json', 'gate-backup.json')",
+      `require('fs').linkSync(${JSON.stringify(victim)}, 'package.json')`,
+    ].join(';');
+    const fixture = createReleaseFixture({ gateCode });
+    const before = prepareSafetySnapshot(fixture);
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture));
+
+    expect(result.execution.status).not.toBe(0);
+    expect(result.output.code).toBe('PLAN_MUTATED');
+    expect(readFileSync(victim, 'utf8')).toBe('hard-link victim must not change\n');
+    expect(existsSync(join(fixture, 'gate-backup.json'))).toBe(false);
+    expect(prepareSafetySnapshot(fixture)).toEqual(before);
+  });
+
   it.each([
     ['tracked modification', "require('fs').appendFileSync('untouched.txt', 'gate change\\n')", 'untouched.txt'],
     ['new untracked path', "require('fs').writeFileSync('gate-extra.txt', 'gate extra\\n')", 'gate-extra.txt'],
@@ -583,6 +602,20 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(result.output.code).toBe('PREPARE_RACE');
     if (original) expect(readFileSync(join(fixture, path))).toEqual(original);
     else expect(existsSync(join(fixture, path))).toBe(false);
+  });
+
+  it('removes gate-created empty directories while leaving pre-existing directories untouched', () => {
+    const fixture = createReleaseFixture({
+      gateCode: "require('fs').mkdirSync('gate-empty/a/b', {recursive:true})",
+    });
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture));
+
+    expect(result.execution.status).not.toBe(0);
+    expect(result.output.code).toBe('PREPARE_RACE');
+    expect(existsSync(join(fixture, 'gate-empty'))).toBe(false);
+    expect(existsSync(join(fixture, 'docs'))).toBe(true);
+    expect(existsSync(join(fixture, 'src-tauri'))).toBe(true);
   });
 
   it('restores exact task files and index when a gate moves HEAD', () => {
@@ -601,6 +634,29 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(result.output.code).toBe('SOURCE_MOVED');
     expect(result.output.details.sideEffects).toContain('gate-commit.txt');
     expect(prepareSafetySnapshot(fixture)).toEqual(before);
+    expect(head(fixture)).not.toBe(source);
+  });
+
+  it('reports every moved-HEAD tracked divergence and new path without creating a release commit', () => {
+    const gateCode = [
+      "require('fs').appendFileSync('untouched.txt', 'committed gate change\\n')",
+      "require('fs').unlinkSync('docs/COMPATIBILITY.md')",
+      "require('fs').writeFileSync('gate-commit.txt', 'gate commit')",
+      "require('child_process').execFileSync('git', ['add', '-A'])",
+      "require('child_process').execFileSync('git', ['commit', '-m', 'gate moved head with side effects'], {stdio:'ignore'})",
+    ].join(';');
+    const fixture = createReleaseFixture({ gateCode });
+    const source = head(fixture);
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture, source));
+
+    expect(result.execution.status).not.toBe(0);
+    expect(result.output.code).toBe('SOURCE_MOVED');
+    expect(result.output.details.sideEffects).toEqual(expect.arrayContaining([
+      'docs/COMPATIBILITY.md', 'gate-commit.txt', 'untouched.txt',
+    ]));
+    expect(execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: fixture, encoding: 'utf8' }).trim())
+      .toBe('gate moved head with side effects');
     expect(head(fixture)).not.toBe(source);
   });
 
@@ -810,6 +866,21 @@ describe('Cull release prepare, resume, and state CLI', () => {
     const result = run(fixture, 'prepare', prepareArgs(fixture), {
       CULL_RELEASE_NOW: '2026-07-11T12:00:00.000Z',
       CULL_RELEASE_TEST_FAIL_STATE_WRITE: 'before-fsync',
+    });
+
+    expect(result.execution.status).toBe(5);
+    expect(result.output.code).toBe('INCONSISTENT_RECOVERY');
+    const stateDir = join(fixture, '.release-state');
+    expect(existsSync(join(stateDir, '1.2.4.json'))).toBe(false);
+    expect(readdirSync(stateDir)).toEqual([]);
+  });
+
+  it('removes its unique temp and leaves no final state after an injected rename failure', () => {
+    const fixture = createReleaseFixture();
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture), {
+      CULL_RELEASE_NOW: '2026-07-11T12:00:00.000Z',
+      CULL_RELEASE_TEST_FAIL_STATE_WRITE: 'rename',
     });
 
     expect(result.execution.status).toBe(5);

@@ -8,14 +8,16 @@ import {
   lstatSync,
   openSync,
   readFileSync,
+  readdirSync,
   readlinkSync,
+  rmdirSync,
   statfsSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
   writeSync,
 } from 'node:fs';
-import { resolve } from 'node:path';
+import { relative, resolve } from 'node:path';
 import {
   buildReadinessReport,
   applyVersionEdits,
@@ -258,9 +260,26 @@ function capturePrepareSnapshot(ownedFiles) {
     tracked: trackedPaths.filter((path) => !owned.has(path)).map((path) => snapshotPath(path)),
     untracked: new Set(gitBytes('ls-files', '--others', '--exclude-standard', '-z')
       .toString('utf8').split('\0').filter(Boolean)),
+    directories: snapshotDirectories(),
     indexPath,
     index: readFileSync(indexPath),
   };
+}
+
+function snapshotDirectories() {
+  const directories = new Set();
+  const pending = [repoRoot];
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (directory === repoRoot && entry.name === '.git') continue;
+      if (!entry.isDirectory()) continue;
+      const absolutePath = resolve(directory, entry.name);
+      directories.add(relative(repoRoot, absolutePath));
+      pending.push(absolutePath);
+    }
+  }
+  return directories;
 }
 
 function pathMatches(snapshot) {
@@ -282,7 +301,7 @@ function safelyRemovePath(absolutePath) {
   if (process.env.CULL_RELEASE_TEST_MODE === '1') {
     const stat = lstatSync(absolutePath);
     if (stat.isDirectory() && !stat.isSymbolicLink()) {
-      execFileSync('trash', [absolutePath], { stdio: 'ignore' });
+      rmdirSync(absolutePath);
     } else unlinkSync(absolutePath);
     return;
   }
@@ -301,19 +320,12 @@ function restorePath(snapshot) {
     symlinkSync(snapshot.target, snapshot.absolutePath);
     return;
   }
-  if (exists) {
-    const current = lstatSync(snapshot.absolutePath);
-    if (!current.isFile() || current.isSymbolicLink()) safelyRemovePath(snapshot.absolutePath);
-  }
-  const flags = exists && (() => {
-    try {
-      const current = lstatSync(snapshot.absolutePath);
-      return current.isFile() && !current.isSymbolicLink();
-    } catch { return false; }
-  })()
-    ? constants.O_WRONLY | constants.O_TRUNC | constants.O_NOFOLLOW
-    : constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
-  const fd = openSync(snapshot.absolutePath, flags, snapshot.mode);
+  if (exists) safelyRemovePath(snapshot.absolutePath);
+  const fd = openSync(
+    snapshot.absolutePath,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    snapshot.mode,
+  );
   try {
     fchmodSync(fd, snapshot.mode);
     let offset = 0;
@@ -333,8 +345,8 @@ function restorePrepareSnapshot(snapshot, source) {
   for (const file of snapshot.files) {
     try { restorePath(file); } catch { failures.push(file.relativePath); }
   }
-  try { writeFileSync(snapshot.indexPath, snapshot.index); } catch { failures.push('.git/index'); }
   if (git('rev-parse', 'HEAD') === source) {
+    try { writeFileSync(snapshot.indexPath, snapshot.index); } catch { failures.push('.git/index'); }
     for (const file of snapshot.tracked) {
       if (!pathMatches(file)) {
         try { restorePath(file); } catch { failures.push(file.relativePath); }
@@ -347,9 +359,25 @@ function restorePrepareSnapshot(snapshot, source) {
         try { safelyRemovePath(resolve(repoRoot, path)); } catch { failures.push(path); }
       }
     }
+    const newDirectories = [...snapshotDirectories()]
+      .filter((path) => !snapshot.directories.has(path))
+      .sort((left, right) => right.split('/').length - left.split('/').length);
+    for (const path of newDirectories) {
+      try { safelyRemovePath(resolve(repoRoot, path)); } catch (cause) {
+        if (cause.code !== 'ENOENT') failures.push(path);
+      }
+    }
   } else {
-    unsafeSideEffects.push(...gitBytes('ls-files', '--others', '--exclude-standard', '-z')
-      .toString('utf8').split('\0').filter((path) => path && !snapshot.untracked.has(path)));
+    const movedHead = gitBytes('diff', '--name-only', '-z', source, 'HEAD', '--')
+      .toString('utf8').split('\0').filter(Boolean);
+    const unstaged = gitBytes('diff', '--name-only', '-z', 'HEAD', '--')
+      .toString('utf8').split('\0').filter(Boolean);
+    const staged = gitBytes('diff', '--cached', '--name-only', '-z', 'HEAD', '--')
+      .toString('utf8').split('\0').filter(Boolean);
+    const untracked = gitBytes('ls-files', '--others', '--exclude-standard', '-z')
+      .toString('utf8').split('\0').filter((path) => path && !snapshot.untracked.has(path));
+    unsafeSideEffects.push(...movedHead, ...unstaged, ...staged, ...untracked);
+    try { writeFileSync(snapshot.indexPath, snapshot.index); } catch { failures.push('.git/index'); }
   }
   if (failures.length > 0) {
     throw commandError('PREPARE_SIDE_EFFECT', 'Preparation side effects require manual cleanup', {
@@ -393,6 +421,12 @@ function assertPreCommitPlan(plan, source, snapshot) {
   }
   if (actual.size !== expected.size || [...actual].some((path) => !expected.has(path))) {
     throw commandError('PREPARE_RACE', 'Repository changes no longer match the release plan');
+  }
+  const newDirectories = [...snapshotDirectories()].filter((path) => !snapshot.directories.has(path));
+  if (newDirectories.length > 0) {
+    throw commandError('PREPARE_RACE', 'Release gates created unexpected directories', {
+      sideEffects: newDirectories.sort(),
+    });
   }
 }
 
