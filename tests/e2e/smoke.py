@@ -21,17 +21,26 @@ BROWSER_EXECUTABLE = os.environ.get("CULL_E2E_BROWSER", DEFAULT_CHROME_BETA)
 
 
 class Smoke:
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, page_errors: list[str]) -> None:
         self.page = page
+        self.page_errors = page_errors
         self.failures: list[str] = []
 
     def step(self, name: str, fn: Callable[[], None]) -> None:
+        error_count = len(self.page_errors)
         try:
             wait_for_app(self.page)
             fn()
+            new_errors = self.page_errors[error_count:]
+            if new_errors:
+                raise AssertionError("browser page error:\n" + "\n\n".join(new_errors))
             print(f"  PASS {name}")
         except Exception as exc:
-            self.failures.append(f"{name}: {exc}")
+            new_errors = self.page_errors[error_count:]
+            details = str(exc)
+            if new_errors and "browser page error:" not in details:
+                details += "\nBrowser page errors:\n" + "\n\n".join(new_errors)
+            self.failures.append(f"{name}: {details}")
             screenshot = SHOTS / f"{len(self.failures):02d}-{slug(name)}.png"
             self.page.screenshot(path=str(screenshot), full_page=True)
             print(f"  FAIL {name}")
@@ -72,7 +81,8 @@ def press(page: Page, shortcut: str) -> None:
 
 
 def wait_mode(page: Page, mode: str) -> None:
-    expect(page.locator(".statusbar .mode")).to_have_text(mode, timeout=5_000)
+    visible_label = "Speed Review" if mode == "tinder" else mode
+    expect(page.locator(".statusbar .mode")).to_have_text(visible_label, timeout=5_000)
 
 
 def focused_label(page: Page) -> str:
@@ -205,9 +215,9 @@ def test_view_switching(page: Page) -> None:
     expect(page.locator(".tinder-container")).to_be_visible(timeout=5_000)
 
     press(page, "Meta+1")
-    press(page, "Tab")
+    press(page, "Control+Tab")
     wait_mode(page, "loupe")
-    press(page, "Shift+Tab")
+    press(page, "Control+Shift+Tab")
     wait_mode(page, "grid")
 
 
@@ -294,7 +304,7 @@ def test_compare_shift_period_cycles_to_image_only(page: Page) -> None:
 def test_export_shift_period_cycles_to_image_only(page: Page) -> None:
     press(page, "Meta+7")
     wait_mode(page, "export")
-    expect(page.locator(".export-toolbar")).to_be_visible(timeout=10_000)
+    expect(page.locator(".master-panel")).to_be_visible(timeout=10_000)
     expect(page.locator(".preview-card").first).to_be_visible(timeout=10_000)
 
     def metrics() -> dict:
@@ -308,7 +318,7 @@ def test_export_shift_period_cycles_to_image_only(page: Page) -> None:
                 return {
                     imageOnly: view?.classList.contains('images-only') ?? false,
                     statusbarCount: document.querySelectorAll('.statusbar').length,
-                    toolbarCount: document.querySelectorAll('.export-toolbar').length,
+                    masterPanelCount: document.querySelectorAll('.master-panel').length,
                     buttonCount: document.querySelectorAll('.export-view button').length,
                     selectCount: document.querySelectorAll('.export-view select').length,
                     labelCount: document.querySelectorAll('.export-view .preview-label').length,
@@ -327,14 +337,14 @@ def test_export_shift_period_cycles_to_image_only(page: Page) -> None:
     zen = metrics()
     assert zen["statusbarCount"] == 0, zen
     assert zen["imageOnly"] is False, zen
-    assert zen["toolbarCount"] == 1, zen
+    assert zen["masterPanelCount"] == 1, zen
     assert zen["labelCount"] > 0, zen
 
     press(page, "Shift+.")
     image_only = metrics()
     assert image_only["statusbarCount"] == 0, image_only
     assert image_only["imageOnly"] is True, image_only
-    assert image_only["toolbarCount"] == 0, image_only
+    assert image_only["masterPanelCount"] == 0, image_only
     assert image_only["buttonCount"] == 0, image_only
     assert image_only["selectCount"] == 0, image_only
     assert image_only["labelCount"] == 0, image_only
@@ -348,7 +358,7 @@ def test_export_shift_period_cycles_to_image_only(page: Page) -> None:
     wait_mode(page, "export")
     normal = metrics()
     assert normal["imageOnly"] is False, normal
-    assert normal["toolbarCount"] == 1, normal
+    assert normal["masterPanelCount"] == 1, normal
     assert normal["labelCount"] > 0, normal
 
 
@@ -387,13 +397,13 @@ def test_loupe_navigation(page: Page) -> None:
     press(page, "Enter")
     wait_mode(page, "loupe")
     ensure_nsfw_mode(page, "show")
-    expect(page.locator(".statusbar")).to_contain_text("image-0.png | 1920x1080 | png")
+    expect(page.locator(".overlay-bar")).to_contain_text("image-0.png | 1920x1080 | png")
 
     press(page, "ArrowRight")
-    expect(page.locator(".statusbar")).to_contain_text("image-1.png | 1920x1080 | png")
+    expect(page.locator(".overlay-bar")).to_contain_text("image-1.png | 1920x1080 | png")
 
     press(page, "+")
-    expect(page.locator(".loupe-container img").first).to_have_attribute("style", re.compile(r"scale\(1\.25\)"))
+    expect(page.locator(".overlay-bar .zoom")).to_have_text("100%")
 
     press(page, "Home")
     expect(page.locator(".loupe-container img").first).to_have_attribute("style", re.compile(r"scale\(1\)"))
@@ -542,24 +552,24 @@ def test_tab_cycling(page: Page) -> None:
     press(page, "Meta+1")
     wait_mode(page, "grid")
 
-    # Tab cycles forward: grid -> loupe -> compare -> canvas -> ...
-    press(page, "Tab")
+    # Ctrl+Tab cycles forward: grid -> loupe -> compare -> canvas -> ...
+    press(page, "Control+Tab")
     wait_mode(page, "loupe")
 
-    press(page, "Tab")
+    press(page, "Control+Tab")
     wait_mode(page, "compare")
 
-    press(page, "Tab")
+    press(page, "Control+Tab")
     wait_mode(page, "canvas")
 
-    # Shift+Tab cycles backward: canvas -> compare
-    press(page, "Shift+Tab")
+    # Ctrl+Shift+Tab cycles backward: canvas -> compare
+    press(page, "Control+Shift+Tab")
     wait_mode(page, "compare")
 
-    press(page, "Shift+Tab")
+    press(page, "Control+Shift+Tab")
     wait_mode(page, "loupe")
 
-    press(page, "Shift+Tab")
+    press(page, "Control+Shift+Tab")
     wait_mode(page, "grid")
 
 
@@ -725,7 +735,7 @@ def test_loupe_enter_escape(page: Page) -> None:
     press(page, "Enter")
     wait_mode(page, "loupe")
     expect(page.locator(".loupe-container")).to_be_visible()
-    expect(page.locator(".statusbar")).to_contain_text("image-0.png")
+    expect(page.locator(".overlay-bar")).to_contain_text("image-0.png")
 
     press(page, "Escape")
     wait_mode(page, "grid")
@@ -742,24 +752,19 @@ def test_loupe_zoom(page: Page) -> None:
 
     # Zoom in
     press(page, "+")
-    img_style = page.locator(".loupe-container img").first.get_attribute("style") or ""
-    assert "scale(1.25)" in img_style, f"Expected scale(1.25) in style, got: {img_style}"
+    expect(page.locator(".overlay-bar .zoom")).to_have_text("100%")
 
     # Zoom in further
     press(page, "+")
-    img_style = page.locator(".loupe-container img").first.get_attribute("style") or ""
-    # 1.25 * 1.25 = 1.5625
-    assert "scale(1)" not in img_style or "scale(1.5" in img_style, "Should be zoomed past 1x"
+    expect(page.locator(".overlay-bar .zoom")).to_have_text("125%")
 
     # Zoom out
     press(page, "-")
+    expect(page.locator(".overlay-bar .zoom")).to_have_text("100%")
 
     # Actual Size with Cmd+0
     dispatch_key(page, "0", meta=True)
-    img_style = page.locator(".loupe-container img").first.get_attribute("style") or ""
-    actual_scale_match = re.search(r"scale\(([\d.]+)\)", img_style)
-    assert actual_scale_match, f"Cmd+0 should set an explicit zoom scale, got: {img_style}"
-    assert float(actual_scale_match.group(1)) > 1, f"Cmd+0 should zoom to actual size, got: {img_style}"
+    expect(page.locator(".overlay-bar .zoom")).to_have_text("100%")
 
     # Zoom in again before checking Home reset
     press(page, "+")
@@ -779,16 +784,16 @@ def test_loupe_arrow_navigation(page: Page) -> None:
     press(page, "Home")
     press(page, "Enter")
     wait_mode(page, "loupe")
-    expect(page.locator(".statusbar")).to_contain_text("image-0.png")
+    expect(page.locator(".overlay-bar")).to_contain_text("image-0.png")
 
     press(page, "ArrowRight")
-    expect(page.locator(".statusbar")).to_contain_text("image-1.png")
+    expect(page.locator(".overlay-bar")).to_contain_text("image-1.png")
 
     press(page, "ArrowRight")
-    expect(page.locator(".statusbar")).to_contain_text("image-2.png")
+    expect(page.locator(".overlay-bar")).to_contain_text("image-2.png")
 
     press(page, "ArrowLeft")
-    expect(page.locator(".statusbar")).to_contain_text("image-1.png")
+    expect(page.locator(".overlay-bar")).to_contain_text("image-1.png")
 
     press(page, "Escape")
 
@@ -1280,10 +1285,9 @@ def main() -> int:
         page = browser.new_page(viewport={"width": 1440, "height": 960})
         page.add_init_script("window.localStorage.clear(); window.sessionStorage.clear();")
         page_errors: list[str] = []
-        page.on("pageerror", lambda error: page_errors.append(str(error)))
+        page.on("pageerror", lambda error: page_errors.append(getattr(error, "stack", None) or str(error)))
 
-        smoke = Smoke(page)
-        wait_for_app(page)
+        smoke = Smoke(page, page_errors)
         smoke.step("S01 view switching", lambda: test_view_switching(page))
         smoke.step("S01c compare layout bounded by status bar", lambda: test_compare_statusbar_does_not_resize_layout(page))
         smoke.step("S01d compare Shift+. image-only mode", lambda: test_compare_shift_period_cycles_to_image_only(page))
@@ -1328,13 +1332,14 @@ def main() -> int:
         smoke.step("S11a selection Space toggle", lambda: test_grid_selection_space(page))
         smoke.step("S11b Shift+click range select", lambda: test_grid_shift_click_range_select(page))
 
-        browser.close()
         if page_errors:
             print("\nPage errors:")
             for error in page_errors:
                 print(f"  - {error}")
-            return 1
+            if not smoke.failures:
+                smoke.failures.append("Browser page errors:\n" + "\n\n".join(page_errors))
         smoke.finish()
+        browser.close()
     return 0
 
 
