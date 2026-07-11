@@ -119,8 +119,32 @@ must all agree.
 A failed build or verification publishes nothing. A publication failure leaves
 the existing tag and any draft intact for explicit recovery; automation never
 deletes or rewrites a tag/release and never uses asset clobbering. A partial draft
-with assets fails closed instead of silently replacing them. Homebrew promotion
-is a separate post-publication workflow and is not dispatched by this stage.
+with assets fails closed instead of silently replacing them.
+
+## SHA-pinned Homebrew promotion
+
+After the guarded draft becomes public, `release.yml` dispatches
+`update-tap.yml` with the verified version, DMG SHA-256, and public
+`release-provenance.json` URL. The promotion workflow also accepts a public
+GitHub `release.published` event; that path fetches the provenance asset from the
+published release. Manual dispatch requires all three inputs and accepts only the
+canonical public asset URL for that version.
+
+The workflow has no tap credential while it fetches and validates the public
+release, exact provenance schema, version, tag, release commit, annotated tag
+object, asset inventory, verification checks, and DMG entry. It then downloads
+the public DMG and compares its computed SHA-256 with provenance (and with the
+manual input when dispatched). Only after those checks pass does the tap checkout
+receive `HOMEBREW_TAP_TOKEN`.
+
+Promotion changes exactly the cask's single `version` and quoted `sha256` lines.
+`sha256 :no_check`, duplicate or missing fields, an unexpected cask diff, or a
+digest mismatch fails closed. Before any push, the macOS runner executes
+`brew audit --cask cull`, installs the cask into an isolated runner directory,
+checks the installed bundle version, and launches it. When the tap already has
+the exact version and SHA, the workflow still validates it but succeeds without a
+commit. Every run retains `homebrew-promotion.json`; a failed run records a stable
+stage code so promotion can be resumed without rebuilding or republishing Cull.
 
 ## Resume and recovery
 
@@ -143,6 +167,15 @@ npm run release:cull -- state transition --version 0.2.6 --to tagged \
 npm run release:cull -- state fail --version 0.2.6 --code BUILD_FAILED \
   --evidence-json '{"workflowRunId":123}' --json
 ```
+
+Failure codes are a stable allowlist rather than free-form text. A valid public
+release whose tap is stale resumes with `promote-homebrew`; it does not rebuild or
+replace release assets. `POST_PUBLISH_VERIFY_FAILED` is different because users
+may already have received a bad release: `state fail` creates or updates one P0
+bd incident through `npm run bd --`, stores its identifier and evidence, and
+blocks later readiness checks. `resume` then returns `prepare-patch-plan`.
+Recovery never deletes a release, rewrites a tag, force-pushes, or silently
+publishes the patch; a new explicit release request is required for that patch.
 
 ## Legacy manual flow
 

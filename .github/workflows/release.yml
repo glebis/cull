@@ -440,7 +440,7 @@ jobs:
     environment: release-publish
     permissions:
       contents: write
-      actions: read
+      actions: write
     steps:
       - name: Checkout gate-approved release source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -654,3 +654,26 @@ jobs:
             echo "CRITICAL: remote annotated tag identity changed while publishing $TAG" >&2
             exit 2
           fi
+
+      - name: Dispatch provenance-bound Homebrew promotion
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.release-gate.outputs.version }}
+          TAG: ${{ needs.release-gate.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG_SHA256=$(VERSION="$VERSION" PROVENANCE="$RUNNER_TEMP/cull-verified/release-provenance.json" node <<'NODE'
+          const fs = require('node:fs');
+          const provenance = JSON.parse(fs.readFileSync(process.env.PROVENANCE, 'utf8'));
+          const name = `Cull_${process.env.VERSION}_aarch64.dmg`;
+          const digest = provenance.assets?.[name]?.sha256;
+          if (!/^[0-9a-f]{64}$/.test(digest || '')) process.exit(2);
+          process.stdout.write(digest);
+          NODE
+          )
+          PROVENANCE_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/release-provenance.json"
+          gh workflow run update-tap.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f "version=$VERSION" \
+            -f "dmg_sha256=$DMG_SHA256" \
+            -f "provenance_url=$PROVENANCE_URL"

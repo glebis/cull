@@ -39,6 +39,15 @@ const repoRoot = process.cwd();
 const argv = process.argv.slice(2);
 const command = argv[0] ?? null;
 
+const RELEASE_FAILURE_CODES = new Set([
+  'GATE_FAILED',
+  'BUILD_FAILED',
+  'ARTIFACT_INVALID',
+  'PUBLISH_FAILED',
+  'HOMEBREW_PROMOTION_FAILED',
+  'POST_PUBLISH_VERIFY_FAILED',
+]);
+
 function commandError(code, message, details) {
   const error = new Error(message);
   error.code = code;
@@ -145,7 +154,7 @@ function runCheck(args) {
   const source = git('rev-parse', 'HEAD');
   const clean = git('status', '--porcelain').length === 0;
   const syncedWithOriginMain = source === git('rev-parse', 'origin/main');
-  return buildReadinessReport({
+  const report = buildReadinessReport({
     currentVersion,
     targetVersion: nextVersion(currentVersion, args.bump),
     source,
@@ -157,6 +166,54 @@ function runCheck(args) {
     nodeVersion: process.version,
     rustVersion: rustVersion(),
   });
+  return { ...report, blockers: [...report.blockers, ...releaseIncidentBlockers(config)] };
+}
+
+function releaseIncidentBlockers(config) {
+  const stateDirectory = resolve(repoRoot, config.stateDir ?? '.release-state');
+  let entries;
+  try {
+    const stat = lstatSync(stateDirectory);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      return ['Release state directory is invalid'];
+    }
+    entries = readdirSync(stateDirectory);
+  } catch (cause) {
+    if (cause.code === 'ENOENT') return [];
+    return ['Release incident state could not be inspected'];
+  }
+  const blockers = [];
+  for (const entry of entries.sort()) {
+    const match = /^(\d+\.\d+\.\d+)\.json$/.exec(entry);
+    if (!match) continue;
+    try {
+      const record = readReleaseRecord(repoRoot, config, match[1]);
+      if (record.failure?.code === 'POST_PUBLISH_VERIFY_FAILED') {
+        const incident = record.failure.incidentId ?? `for Cull ${record.version}`;
+        if (!record.failure.incidentId || releaseIncidentIsOpen(record.failure.incidentId)) {
+          blockers.push(`Unresolved P0 release incident ${incident} blocks later releases`);
+        }
+      }
+    } catch {
+      blockers.push(`Release incident state ${entry} is invalid`);
+    }
+  }
+  return blockers;
+}
+
+function releaseIncidentIsOpen(incidentId) {
+  try {
+    const output = execFileSync('npm', [
+      'run', '--silent', 'bd', '--', 'show', incidentId, '--json',
+    ], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const issue = JSON.parse(output);
+    const value = Array.isArray(issue) ? issue[0] : issue;
+    return value?.id !== incidentId
+      || !['closed'].includes(value.status)
+      || ![0, '0', 'P0'].includes(value.priority);
+  } catch {
+    return true;
+  }
 }
 
 function normalizeCommand(commandValue) {
@@ -572,7 +629,7 @@ function probeRelease(record) {
   return tryGh('release', 'view', '--json', 'isDraft,assets', '--', record.tag);
 }
 
-function probeTapCommit(record, config) {
+function probeTapCommit(record, config, provenance) {
   const repo = config.homebrew?.repo;
   const cask = config.homebrew?.cask;
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo ?? '')
@@ -580,25 +637,34 @@ function probeTapCommit(record, config) {
     || cask.startsWith('-')
     || cask.split('/').includes('..')) return false;
   const response = tryGh('api', `repos/${repo}/contents/${cask}`);
-  if (!response?.content) return false;
+  if (!response?.content || !provenance) return false;
   const contents = Buffer.from(response.content, 'base64').toString('utf8');
-  return new RegExp(`^version "${record.version.replaceAll('.', '\\.')}"$`, 'm').test(contents);
+  return new RegExp(`^version "${record.version.replaceAll('.', '\\.')}"$`, 'm').test(contents)
+    && new RegExp(`^sha256 "${provenance.dmgSha256}"$`, 'm').test(contents);
 }
 
-function probePostPublishProvenance(record) {
+function probePublishedProvenance(record, config) {
   try {
     const raw = execFileSync('gh', [
       'release', 'download', '--pattern', 'release-provenance.json', '--output', '-',
       '--', record.tag,
     ], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     const provenance = JSON.parse(raw);
-    return provenance.schema === 'cull.release.provenance.v1'
+    const dmgName = config.artifacts?.required
+      ?.map((name) => name.replace('{version}', record.version))
+      .find((name) => name.endsWith('.dmg'));
+    const dmgSha256 = provenance.assets?.[dmgName]?.sha256;
+    if (provenance.schema === 'cull.release.provenance.v1'
       && provenance.version === record.version
       && provenance.tag === record.tag
-      && provenance.releaseCommit === record.releaseCommit
-      && provenance.postPublishVerified === true;
+      && provenance.commit === record.releaseCommit
+      && typeof dmgName === 'string'
+      && /^[0-9a-f]{64}$/.test(dmgSha256 ?? '')) {
+      return { ...provenance, dmgName, dmgSha256 };
+    }
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -612,7 +678,8 @@ function probeEvidence(record, config) {
   const required = config.artifacts?.required?.map((name) => name.replace('{version}', record.version)) ?? [];
   const names = new Set(release?.assets?.map((asset) => asset.name) ?? []);
   const publishedRelease = release !== null && release.isDraft === false;
-  const tapCommit = probeTapCommit(record, config);
+  const provenance = publishedRelease ? probePublishedProvenance(record, config) : null;
+  const tapCommit = publishedRelease && probeTapCommit(record, config, provenance);
   return {
     commit: probeCommit(record),
     tag: probeTag(record),
@@ -620,7 +687,7 @@ function probeEvidence(record, config) {
     releaseAsset: required.length > 0 && required.every((name) => names.has(name)),
     publishedRelease,
     tapCommit,
-    postPublishVerified: publishedRelease && tapCommit && probePostPublishProvenance(record),
+    postPublishVerified: publishedRelease && tapCommit && provenance?.postPublishVerified === true,
   };
 }
 
@@ -658,18 +725,90 @@ function runState(subcommand, args) {
     updated = transitionReleaseRecord(record, args.to, parseJsonOption(args.evidenceJson, '--evidence-json'), now());
   } else if (subcommand === 'fail') {
     requireArgs(args, ['code', 'evidenceJson']);
+    if (!RELEASE_FAILURE_CODES.has(args.code)) {
+      throw inputError(`Unsupported release failure code ${args.code}`);
+    }
+    const evidence = parseJsonOption(args.evidenceJson, '--evidence-json');
+    const incidentId = args.code === 'POST_PUBLISH_VERIFY_FAILED'
+      ? ensurePostPublishIncident(record, evidence)
+      : undefined;
     updated = recordFailure(record, {
       code: args.code,
-      evidence: parseJsonOption(args.evidenceJson, '--evidence-json'),
+      evidence,
+      ...(incidentId === undefined ? {} : { incidentId }),
     }, now());
   } else throw inputError(`Unknown state command ${subcommand}`);
   writeReleaseRecordAtomic(repoRoot, config, updated);
   return updated;
 }
 
+function ensurePostPublishIncident(record, evidence) {
+  const title = `Post-publish verification failed for Cull ${record.version}`;
+  const description = [
+    `Release ${record.tag} is already public and failed post-publish verification.`,
+    'The next Cull release is blocked until this P0 is resolved.',
+    `Evidence: ${JSON.stringify(evidence)}`,
+  ].join(' ');
+  let existing = record.failure?.code === 'POST_PUBLISH_VERIFY_FAILED'
+    ? record.failure.incidentId
+    : null;
+  const externalRef = `cull-release-${record.version}-post-publish`;
+  if (!existing) {
+    try {
+      const output = execFileSync('npm', [
+        'run', '--silent', 'bd', '--', 'list', '--json', '--limit', '0',
+      ], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const issues = JSON.parse(output);
+      const matches = (Array.isArray(issues) ? issues : []).filter((issue) =>
+        (issue.external_ref ?? issue.externalRef) === externalRef);
+      if (matches.length > 1) throw new Error('multiple release incidents share one external reference');
+      if (matches.length === 1) existing = matches[0].id;
+    } catch (cause) {
+      if (process.env.CULL_RELEASE_TEST_MODE !== '1') {
+        throw externalFailure('Unable to inspect existing P0 release incidents', {
+          code: 'BD_INCIDENT_LOOKUP_FAILED', status: cause.status,
+        });
+      }
+      throw cause;
+    }
+  }
+  const args = existing
+    ? ['run', 'bd', '--', 'update', existing, '--status', 'open', '-p', 'P0', '-d', description]
+    : [
+      'run', 'bd', '--', 'create', '--type', 'task', '-p', 'P0',
+      '--external-ref', externalRef,
+      '--acceptance', 'A verified patch plan exists and the public release incident is resolved.',
+      '-d', description, '--silent', title,
+    ];
+  try {
+    const output = execFileSync('npm', args, {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+    const incidentId = existing ?? output.split(/\s+/).filter(Boolean).at(-1);
+    if (!/^[A-Za-z0-9._-]+$/.test(incidentId ?? '')) {
+      throw new Error('bd did not return a valid issue identifier');
+    }
+    return incidentId;
+  } catch (cause) {
+    throw externalFailure('Unable to create or update the P0 release incident', {
+      code: 'BD_INCIDENT_FAILED', status: cause.status,
+    });
+  }
+}
+
 function runResume(args) {
   requireArgs(args, ['version']);
-  const { evidence, derivedState } = readDerived(args.version);
+  const { record, evidence, derivedState } = readDerived(args.version);
+  if (record.failure?.code === 'POST_PUBLISH_VERIFY_FAILED') {
+    return {
+      nextState: null,
+      nextAction: 'prepare-patch-plan',
+      evidence,
+      failure: record.failure,
+    };
+  }
   return { ...buildResumeAction(derivedState), evidence };
 }
 

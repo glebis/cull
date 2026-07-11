@@ -802,6 +802,126 @@ describe('Cull release prepare, resume, and state CLI', () => {
     });
   });
 
+  it('rejects unstable release failure codes', () => {
+    const fixture = createFixture();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'published',
+      releaseCommit: head(fixture), tag: 'v1.2.4', workflowRunId: 42,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+
+    const failed = run(fixture, 'state', [
+      'fail', '--version', '1.2.4', '--code', 'whatever happened',
+      '--evidence-json', '{"stage":"verify"}',
+    ]);
+
+    expect(failed.execution.status).toBe(2);
+    expect(failed.output.code).toBe('INPUT_INVALID');
+  });
+
+  it('files one P0 incident, updates it idempotently, and prepares a patch plan after public verification fails', () => {
+    const fixture = createFixture();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    const statePath = join(stateDir, '1.2.4.json');
+    writeFileSync(statePath, JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'homebrew-promoted',
+      releaseCommit: head(fixture), tag: 'v1.2.4', workflowRunId: 42,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+    const bin = mkdtempSync(join(tmpdir(), 'cull-release-npm-wrapper-'));
+    const log = join(bin, 'npm.jsonl');
+    const fakeNpm = join(bin, 'npm');
+    writeFileSync(fakeNpm, [
+      '#!/usr/bin/env node',
+      "const fs = require('node:fs');",
+      "fs.appendFileSync(process.env.CULL_TEST_BD_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');",
+      "if (process.argv.includes('list')) process.stdout.write('[]\\n');",
+      "else if (process.argv.includes('show')) process.stdout.write(JSON.stringify({id:'imageview-release-p0',status:'open',priority:0}) + '\\n');",
+      "if (process.argv.includes('create')) process.stdout.write('imageview-release-p0\\n');",
+      '',
+    ].join('\n'));
+    chmodSync(fakeNpm, 0o755);
+    const env = { PATH: `${bin}:${process.env.PATH}`, CULL_TEST_BD_LOG: log };
+
+    const first = run(fixture, 'state', [
+      'fail', '--version', '1.2.4', '--code', 'POST_PUBLISH_VERIFY_FAILED',
+      '--evidence-json', '{"check":"homebrew-launch","runId":42}',
+    ], env);
+    expect(first.execution.status).toBe(0);
+    expect(first.output.result.failure).toMatchObject({
+      code: 'POST_PUBLISH_VERIFY_FAILED',
+      incidentId: 'imageview-release-p0',
+      evidence: { check: 'homebrew-launch', runId: 42 },
+    });
+
+    const second = run(fixture, 'state', [
+      'fail', '--version', '1.2.4', '--code', 'POST_PUBLISH_VERIFY_FAILED',
+      '--evidence-json', '{"check":"homebrew-launch","runId":43}',
+    ], env);
+    expect(second.execution.status).toBe(0);
+    expect(second.output.result.failure.incidentId).toBe('imageview-release-p0');
+    expect(readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line))).toEqual([
+      expect.arrayContaining(['run', 'bd', '--', 'list', '--json']),
+      expect.arrayContaining(['run', 'bd', '--', 'create', '--type', 'task', '-p', 'P0']),
+      expect.arrayContaining(['run', 'bd', '--', 'update', 'imageview-release-p0', '--status', 'open']),
+    ]);
+
+    const evidence = {
+      commit: true, tag: true, workflow: true, releaseAsset: true,
+      publishedRelease: true, tapCommit: true, postPublishVerified: false,
+    };
+    const resumed = run(fixture, 'resume', ['--version', '1.2.4'], {
+      ...env, CULL_RELEASE_TEST_EVIDENCE: JSON.stringify(evidence),
+    });
+    expect(resumed.execution.status).toBe(0);
+    expect(resumed.output.result).toMatchObject({
+      nextState: null,
+      nextAction: 'prepare-patch-plan',
+      evidence,
+      failure: { code: 'POST_PUBLISH_VERIFY_FAILED', incidentId: 'imageview-release-p0' },
+    });
+
+    const checked = runCheck(fixture, { env });
+    expect(checked.status).toBe(3);
+    expect(JSON.parse(checked.stdout).result.blockers).toContain(
+      'Unresolved P0 release incident imageview-release-p0 blocks later releases',
+    );
+    expect(JSON.parse(readFileSync(log, 'utf8').trim().split('\n').at(-1)!)).toEqual(
+      expect.arrayContaining(['run', 'bd', '--', 'show', 'imageview-release-p0', '--json']),
+    );
+    expect(readFileSync(statePath, 'utf8')).toContain('POST_PUBLISH_VERIFY_FAILED');
+  });
+
+  it('resumes at Homebrew promotion when a valid public release is ahead of the tap', () => {
+    const fixture = createFixture();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'requested',
+      releaseCommit: head(fixture), tag: 'v1.2.4', workflowRunId: 42,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+    const evidence = {
+      commit: true, tag: true, workflow: true, releaseAsset: true,
+      publishedRelease: true, tapCommit: false, postPublishVerified: false,
+    };
+
+    const resumed = run(fixture, 'resume', ['--version', '1.2.4'], {
+      CULL_RELEASE_TEST_EVIDENCE: JSON.stringify(evidence),
+    });
+
+    expect(resumed.execution.status).toBe(0);
+    expect(resumed.output.result).toEqual({
+      nextState: 'homebrew-promoted', nextAction: 'promote-homebrew', evidence,
+    });
+  });
+
   it('derives resume from evidence without rewriting stale local state', () => {
     const fixture = createFixture();
     const stateDir = join(fixture, '.release-state');
@@ -953,7 +1073,8 @@ describe('Cull release prepare, resume, and state CLI', () => {
     }));
     const bin = mkdtempSync(join(tmpdir(), 'cull-release-gh-probes-'));
     const fakeGh = join(bin, 'gh');
-    const cask = Buffer.from('version "1.2.4"\n').toString('base64');
+    const dmgSha256 = 'a'.repeat(64);
+    const cask = Buffer.from(`version "1.2.4"\nsha256 "${dmgSha256}"\n`).toString('base64');
     writeFileSync(fakeGh, [
       '#!/usr/bin/env node',
       `const releaseCommit = ${JSON.stringify(releaseCommit)};`,
@@ -962,7 +1083,7 @@ describe('Cull release prepare, resume, and state CLI', () => {
       "if (args[0] === 'run') console.log(JSON.stringify({conclusion:'success'}));",
       "else if (args[0] === 'api') console.log(JSON.stringify({content:cask}));",
       "else if (args[0] === 'release' && args[1] === 'view') console.log(JSON.stringify({isDraft:false,assets:[{name:'Cull_1.2.4.dmg'}]}));",
-      "else if (args[0] === 'release' && args[1] === 'download') console.log(JSON.stringify({schema:'cull.release.provenance.v1',version:'1.2.4',tag:'v1.2.4',releaseCommit,postPublishVerified:true}));",
+      "else if (args[0] === 'release' && args[1] === 'download') console.log(JSON.stringify({schema:'cull.release.provenance.v1',version:'1.2.4',tag:'v1.2.4',commit:releaseCommit,postPublishVerified:true,assets:{'Cull_1.2.4.dmg':{sha256:'a'.repeat(64)}}}));",
       'else process.exit(9);',
       '',
     ].join('\n'));
@@ -978,6 +1099,52 @@ describe('Cull release prepare, resume, and state CLI', () => {
 
     expect(result.execution.status).toBe(0);
     expect(result.output.result).toEqual({ nextState: null, nextAction: 'complete', evidence });
+  });
+
+  it('treats a same-version tap with the wrong DMG SHA as behind the published release', () => {
+    const fixture = createFixture();
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(release): v1.2.4'], {
+      cwd: fixture, stdio: 'ignore',
+    });
+    const releaseCommit = head(fixture);
+    execFileSync('git', ['tag', 'v1.2.4'], { cwd: fixture });
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'requested',
+      releaseCommit, tag: 'v1.2.4', workflowRunId: 42,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+    const bin = mkdtempSync(join(tmpdir(), 'cull-release-wrong-tap-sha-'));
+    const fakeGh = join(bin, 'gh');
+    const cask = Buffer.from(`version "1.2.4"\nsha256 "${'b'.repeat(64)}"\n`).toString('base64');
+    const provenance = {
+      schema: 'cull.release.provenance.v1', version: '1.2.4', tag: 'v1.2.4',
+      commit: releaseCommit, postPublishVerified: true,
+      assets: { 'Cull_1.2.4.dmg': { sha256: 'a'.repeat(64) } },
+    };
+    writeFileSync(fakeGh, [
+      '#!/usr/bin/env node',
+      `const cask = ${JSON.stringify(cask)};`,
+      `const provenance = ${JSON.stringify(provenance)};`,
+      "const args = process.argv.slice(2);",
+      "if (args[0] === 'run') console.log(JSON.stringify({conclusion:'success'}));",
+      "else if (args[0] === 'api') console.log(JSON.stringify({content:cask}));",
+      "else if (args[0] === 'release' && args[1] === 'view') console.log(JSON.stringify({isDraft:false,assets:[{name:'Cull_1.2.4.dmg'}]}));",
+      "else if (args[0] === 'release' && args[1] === 'download') console.log(JSON.stringify(provenance));",
+      'else process.exit(9);',
+      '',
+    ].join('\n'));
+    chmodSync(fakeGh, 0o755);
+
+    const result = run(fixture, 'resume', ['--version', '1.2.4'], {
+      PATH: `${bin}:${process.env.PATH}`,
+    });
+
+    expect(result.execution.status).toBe(0);
+    expect(result.output.result.nextAction).toBe('promote-homebrew');
+    expect(result.output.result.evidence).toMatchObject({ publishedRelease: true, tapCommit: false });
   });
 
   it('rejects duplicate options, option-looking values, and invalid evidence JSON', () => {

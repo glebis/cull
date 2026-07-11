@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 const gate = resolve(import.meta.dirname, 'release-gate.mjs');
 const canaryWorkflowPath = resolve(import.meta.dirname, '../.github/workflows/release-canary.yml');
 const releaseWorkflowPath = resolve(import.meta.dirname, '../.github/workflows/release.yml');
+const tapWorkflowPath = resolve(import.meta.dirname, '../.github/workflows/update-tap.yml');
 const DB_CONTRACT = 'cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden';
 const EXPORT_CONTRACT = 'cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test export_compat_golden';
 
@@ -638,5 +639,57 @@ describe('release gate', () => {
     expect(publishJob).toContain('EXPECTED_INVOCATION_SHA: ${{ github.sha }}');
     expect(verifyJob).toContain('COMMIT: ${{ needs.release-gate.outputs.sha }}');
     expect(publishJob).toContain('COMMIT: ${{ needs.release-gate.outputs.sha }}');
+  });
+
+  it('validates public provenance and the exact DMG digest before exposing the tap token', () => {
+    const workflow = readFileSync(tapWorkflowPath, 'utf8');
+    const job = workflowJob(workflow, 'update-cask');
+
+    expect(workflow).toMatch(/workflow_dispatch:\n\s+inputs:\n\s+version:[\s\S]*?dmg_sha256:[\s\S]*?provenance_url:/);
+    expect(workflow.match(/required: true/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(job).toContain("schema !== 'cull.release.provenance.v1'");
+    expect(job).toContain('provenance.version !== process.env.VERSION');
+    expect(job).toContain('provenance.tag !== `v${process.env.VERSION}`');
+    expect(job).toContain("!/^[0-9a-f]{40}$/.test(provenance.commit)");
+    expect(job).toContain('Object.keys(provenance.assets).sort()');
+    expect(job).toContain('Object.keys(provenance.checks).sort()');
+    expect(job).toContain('provenance.checks[name] !== true');
+    expect(job).toContain('provenance.assets[dmgName]?.sha256');
+    expect(job).toContain('shasum -a 256');
+    expect(job).toContain('DMG_SHA_MISMATCH');
+
+    const verified = job.indexOf('Verify public provenance and DMG before tap access');
+    const token = job.indexOf('${{ secrets.HOMEBREW_TAP_TOKEN }}');
+    expect(verified).toBeGreaterThan(-1);
+    expect(token).toBeGreaterThan(verified);
+  });
+
+  it('pins exactly version and SHA, rejects no_check, and makes equal promotion idempotent', () => {
+    const workflow = readFileSync(tapWorkflowPath, 'utf8');
+    const job = workflowJob(workflow, 'update-cask');
+
+    expect(job).toContain('sha256 :no_check');
+    expect(job).toContain('CASK_NO_CHECK');
+    expect(job).toContain('CASK_ALREADY_CURRENT');
+    expect(job).toContain('versionMatches.length !== 1');
+    expect(job).toContain('shaMatches.length !== 1');
+    expect(job).toContain('brew audit --cask cull');
+    expect(job).toContain('--appdir="$RUNNER_TEMP/cull-apps"');
+    expect(job).toContain('open -na "$app"');
+    expect(job).toContain('git -C tap diff --exit-code');
+    expect(job).not.toContain('sha256 :no_check\nsed');
+    expect(job).not.toContain('git push --force');
+  });
+
+  it('dispatches Homebrew promotion from verified public provenance after publication', () => {
+    const releaseWorkflow = readFileSync(releaseWorkflowPath, 'utf8');
+    const publishJob = workflowJob(releaseWorkflow, 'publish');
+
+    expect(publishJob).toContain('gh workflow run update-tap.yml');
+    expect(publishJob).toContain('-f "version=$VERSION"');
+    expect(publishJob).toContain('-f "dmg_sha256=$DMG_SHA256"');
+    expect(publishJob).toContain('-f "provenance_url=$PROVENANCE_URL"');
+    expect(publishJob.indexOf('gh release edit "$TAG" --draft=false'))
+      .toBeLessThan(publishJob.indexOf('gh workflow run update-tap.yml'));
   });
 });
