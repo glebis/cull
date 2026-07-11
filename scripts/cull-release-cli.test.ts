@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readFileSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,7 +22,14 @@ function writeFixtureFile(root: string, path: string, contents: string) {
   writeFileSync(destination, contents);
 }
 
-function createFixture() {
+function createFixture(options: {
+  gateCode?: string;
+  changelog?: string;
+  packageJson?: string;
+  packageLock?: string;
+  tauriJson?: string;
+  gate?: string | string[];
+} = {}) {
   const root = mkdtempSync(join(tmpdir(), 'cull-release-cli-'));
   const versionFiles = [
     { id: 'package', path: 'package.json', kind: 'json', pointers: ['/version'] },
@@ -37,17 +45,19 @@ function createFixture() {
     releaseBranch: 'main',
     worktree: '.',
     stateDir: '.release-state',
-    gate: [process.execPath, '-e', 'process.exit(0)'],
+    gate: options.gate ?? [process.execPath, '-e', options.gateCode ?? 'process.exit(0)'],
     extraGate: [],
     changelog: { path: 'CHANGELOG.md' },
     compatibility: { path: 'docs/COMPATIBILITY.md' },
+    artifacts: { required: ['Cull_{version}.dmg'] },
+    homebrew: { repo: 'glebis/homebrew-tap', cask: 'Casks/cull.rb' },
     versionFiles,
   }, null, 2));
-  writeFixtureFile(root, 'package.json', '{\n  "name": "fixture",\n  "version": "1.2.3"\n}\n');
-  writeFixtureFile(root, 'package-lock.json', JSON.stringify({
+  writeFixtureFile(root, 'package.json', options.packageJson ?? '{\n  "name": "fixture",\n  "version": "1.2.3"\n}\n');
+  writeFixtureFile(root, 'package-lock.json', options.packageLock ?? JSON.stringify({
     name: 'fixture', version: '1.2.3', packages: { '': { name: 'fixture', version: '1.2.3' } },
   }, null, 2));
-  writeFixtureFile(root, 'src-tauri/tauri.conf.json', '{ "version": "1.2.3" }\n');
+  writeFixtureFile(root, 'src-tauri/tauri.conf.json', options.tauriJson ?? '{ "version": "1.2.3" }\n');
   writeFixtureFile(root, 'src-tauri/Cargo.toml', [
     '[workspace.package]',
     'version = "9.9.9"',
@@ -60,7 +70,7 @@ function createFixture() {
     'version = "8.8.8"',
     '',
   ].join('\n'));
-  writeFixtureFile(root, 'CHANGELOG.md', '# Changelog\n\n## [Unreleased]\n\nNo changes yet.\n\n## [1.2.3] - 2026-07-01\n');
+  writeFixtureFile(root, 'CHANGELOG.md', options.changelog ?? '# Changelog\n\n## [Unreleased]\n\nNo changes yet.\n\n## [1.2.3] - 2026-07-01\n');
   writeFixtureFile(root, 'docs/COMPATIBILITY.md', '# Compatibility\n\nLast updated: 1.2.3 (2026-07-01)\n');
   writeFixtureFile(root, 'untouched.txt', 'must stay untouched\n');
   writeFixtureFile(root, 'src-tauri/Cargo.lock', [
@@ -87,6 +97,15 @@ function createFixture() {
   });
   execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: root });
   return root;
+}
+
+function createReleaseFixture(options: Parameters<typeof createFixture>[0] = {}) {
+  const checkout = createFixture(options);
+  execFileSync('git', ['branch', 'fixture-holder'], { cwd: checkout });
+  execFileSync('git', ['switch', 'fixture-holder'], { cwd: checkout, stdio: 'ignore' });
+  const releaseWorktree = `${checkout}-release`;
+  execFileSync('git', ['worktree', 'add', releaseWorktree, 'main'], { cwd: checkout, stdio: 'ignore' });
+  return releaseWorktree;
 }
 
 function runCheck(fixture: string, options: { bump?: string; env?: NodeJS.ProcessEnv } = {}) {
@@ -131,6 +150,28 @@ function prepareArgs(fixture: string, source = head(fixture)) {
   ];
 }
 
+const PREPARE_TRACKED_PATHS = [
+  'package.json',
+  'package-lock.json',
+  'src-tauri/tauri.conf.json',
+  'src-tauri/Cargo.toml',
+  'src-tauri/Cargo.lock',
+  'CHANGELOG.md',
+  'docs/COMPATIBILITY.md',
+];
+
+function prepareSafetySnapshot(fixture: string) {
+  const indexPath = execFileSync('git', ['rev-parse', '--git-path', 'index'], {
+    cwd: fixture, encoding: 'utf8',
+  }).trim();
+  return {
+    files: Object.fromEntries(PREPARE_TRACKED_PATHS.map((path) => [
+      path, readFileSync(join(fixture, path)),
+    ])),
+    index: readFileSync(resolve(fixture, indexPath)),
+  };
+}
+
 function expectConfigInvalid(result: ReturnType<typeof runCheck>) {
   expect(result.status).toBe(2);
   expect(JSON.parse(result.stdout)).toMatchObject({
@@ -157,7 +198,8 @@ function repositorySnapshot(fixture: string) {
   } as const;
   const head = execFileSync('git', ['rev-parse', 'HEAD'], gitOptions);
   const porcelain = execFileSync('git', ['status', '--porcelain'], gitOptions);
-  const index = statSync(join(fixture, '.git/index'), { bigint: true });
+  const indexPath = execFileSync('git', ['rev-parse', '--git-path', 'index'], gitOptions).trim();
+  const index = statSync(resolve(fixture, indexPath), { bigint: true });
   return {
     metadata: Object.fromEntries(metadataPaths.map((path) => [
       path,
@@ -356,7 +398,7 @@ describe('Cull release readiness CLI', () => {
 
 describe('Cull release prepare, resume, and state CLI', () => {
   it('keeps prepare dry-run truly zero-write', () => {
-    const fixture = createFixture();
+    const fixture = createReleaseFixture();
     const before = repositorySnapshot(fixture);
 
     const { execution, output } = run(fixture, 'prepare', [
@@ -369,7 +411,7 @@ describe('Cull release prepare, resume, and state CLI', () => {
   });
 
   it('rejects source and version races before writing', () => {
-    const fixture = createFixture();
+    const fixture = createReleaseFixture();
     const before = repositorySnapshot(fixture);
 
     const sourceMoved = run(fixture, 'prepare', prepareArgs(fixture, 'b'.repeat(40)));
@@ -385,7 +427,7 @@ describe('Cull release prepare, resume, and state CLI', () => {
   });
 
   it('requires the named reviewer and a major bump for stable breaking changes', () => {
-    const fixture = createFixture();
+    const fixture = createReleaseFixture();
     const args = prepareArgs(fixture);
     const requestIndex = args.indexOf('--request-json') + 1;
     const review = JSON.parse(args[requestIndex]);
@@ -405,7 +447,7 @@ describe('Cull release prepare, resume, and state CLI', () => {
   });
 
   it('prepares exactly the declared files in one commit without tagging or pushing', () => {
-    const fixture = createFixture();
+    const fixture = createReleaseFixture();
     const oldHead = head(fixture);
     const oldRemote = execFileSync('git', ['rev-parse', 'origin/main'], { cwd: fixture, encoding: 'utf8' }).trim();
 
@@ -445,6 +487,164 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(existsSync(`${statePath}.tmp`)).toBe(false);
   });
 
+  it('rejects an ordinary checkout and accepts only a linked main release worktree', () => {
+    const ordinary = createFixture();
+    const rejected = run(ordinary, 'prepare', [...prepareArgs(ordinary), '--dry-run']);
+    expect(rejected.execution.status).toBe(3);
+    expect(rejected.output.code).toBe('BLOCKED');
+
+    const linked = createReleaseFixture();
+    const accepted = run(linked, 'prepare', [...prepareArgs(linked), '--dry-run']);
+    expect(accepted.execution.status).toBe(0);
+  });
+
+  it.each([
+    ['gate mutation', "require('fs').appendFileSync('package.json', ' ')", 'PLAN_MUTATED'],
+    ['gate failure', 'process.exit(17)', 'BLOCKED'],
+    ['unrelated staged file', [
+      "require('fs').writeFileSync('gate-extra.txt', 'extra')",
+      "require('child_process').execFileSync('git', ['add', '--', 'gate-extra.txt'])",
+    ].join(';'), 'PREPARE_RACE'],
+  ])('restores exact task files and index after %s', (_name, gateCode, errorCode) => {
+    const fixture = createReleaseFixture({ gateCode });
+    const before = prepareSafetySnapshot(fixture);
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture));
+
+    expect(result.execution.status).not.toBe(0);
+    expect(result.output.code).toBe(errorCode);
+    expect(prepareSafetySnapshot(fixture)).toEqual(before);
+    expect(head(fixture)).toBe(execFileSync('git', ['rev-parse', 'origin/main'], {
+      cwd: fixture, encoding: 'utf8',
+    }).trim());
+  });
+
+  it('restores exact task files and index when a gate moves HEAD', () => {
+    const gateCode = [
+      "require('fs').writeFileSync('gate-commit.txt', 'gate commit')",
+      "require('child_process').execFileSync('git', ['add', '--', 'gate-commit.txt'])",
+      "require('child_process').execFileSync('git', ['commit', '-m', 'gate moved head'], {stdio:'ignore'})",
+    ].join(';');
+    const fixture = createReleaseFixture({ gateCode });
+    const before = prepareSafetySnapshot(fixture);
+    const source = head(fixture);
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture, source));
+
+    expect(result.execution.status).not.toBe(0);
+    expect(result.output.code).toBe('SOURCE_MOVED');
+    expect(prepareSafetySnapshot(fixture)).toEqual(before);
+    expect(head(fixture)).not.toBe(source);
+  });
+
+  it('preserves all existing Unreleased content when inserting curated notes', () => {
+    const existing = [
+      '# Changelog', '', '## [Unreleased]', '', '### Added', '',
+      '- Existing unreleased feature.', '', '### Fixed', '', '- Existing unreleased fix.', '',
+      '## [1.2.3] - 2026-07-01', '',
+    ].join('\n');
+    const fixture = createReleaseFixture({ changelog: existing });
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture), {
+      CULL_RELEASE_NOW: '2026-07-11T12:00:00.000Z',
+    });
+
+    expect(result.execution.status).toBe(0);
+    const changelog = readFileSync(join(fixture, 'CHANGELOG.md'), 'utf8');
+    expect(changelog).toContain('- Existing unreleased feature.');
+    expect(changelog).toContain('- Existing unreleased fix.');
+    expect(changelog).toContain('- Release preparation is now guarded.');
+  });
+
+  it('preserves JSON bytes outside the three declared pointer values', () => {
+    const packageJson = '{\n\t"name" : "fixture",\n\t"note": "1.2.3\\u0020",\n\t"version" : "1.2.3"\n}';
+    const packageLock = '{"name":"fixture","version" : "1.2.3","note":"1.2.3","packages":{"":{"name":"fixture","version":"1.2.3"}}}';
+    const tauriJson = '{\r\n  "identifier": "fixture",\r\n  "version"  :  "1.2.3"\r\n}\r\n';
+    const fixture = createReleaseFixture({ packageJson, packageLock, tauriJson });
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture), {
+      CULL_RELEASE_NOW: '2026-07-11T12:00:00.000Z',
+    });
+
+    expect(result.execution.status).toBe(0);
+    expect(readFileSync(join(fixture, 'package.json'), 'utf8'))
+      .toBe(packageJson.replace('"version" : "1.2.3"', '"version" : "1.2.4"'));
+    expect(readFileSync(join(fixture, 'package-lock.json'), 'utf8')).toBe(
+      packageLock
+        .replace('"version" : "1.2.3"', '"version" : "1.2.4"')
+        .replace('"version":"1.2.3"', '"version":"1.2.4"'),
+    );
+    expect(readFileSync(join(fixture, 'src-tauri/tauri.conf.json'), 'utf8'))
+      .toBe(tauriJson.replace('"version"  :  "1.2.3"', '"version"  :  "1.2.4"'));
+  });
+
+  it('creates an exact focused commit even when a hook would stage an extra file', () => {
+    const fixture = createReleaseFixture();
+    const hookPath = resolve(fixture, execFileSync('git', ['rev-parse', '--git-path', 'hooks/pre-commit'], {
+      cwd: fixture, encoding: 'utf8',
+    }).trim());
+    writeFixtureFile(dirname(hookPath), 'pre-commit', [
+      '#!/bin/sh',
+      'echo hook > hook-extra.txt',
+      'git add -- hook-extra.txt',
+      '',
+    ].join('\n'));
+    chmodSync(hookPath, 0o755);
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture), {
+      CULL_RELEASE_NOW: '2026-07-11T12:00:00.000Z',
+    });
+
+    expect(result.execution.status).toBe(0);
+    expect(existsSync(join(fixture, 'hook-extra.txt'))).toBe(false);
+    expect(execFileSync('git', ['show', '--format=', '--name-only', 'HEAD'], {
+      cwd: fixture, encoding: 'utf8',
+    }).trim().split('\n').sort()).toEqual([...PREPARE_TRACKED_PATHS].sort());
+  });
+
+  it('preserves a verified commit and reports recovery when state-cache creation fails', () => {
+    const fixture = createReleaseFixture();
+    const victim = mkdtempSync(join(tmpdir(), 'cull-release-state-victim-'));
+    const hookPath = resolve(fixture, execFileSync('git', ['rev-parse', '--git-path', 'hooks/post-commit'], {
+      cwd: fixture, encoding: 'utf8',
+    }).trim());
+    writeFixtureFile(dirname(hookPath), 'post-commit', [
+      '#!/bin/sh',
+      `ln -s '${victim}' .release-state`,
+      '',
+    ].join('\n'));
+    chmodSync(hookPath, 0o755);
+    const source = head(fixture);
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture), {
+      CULL_RELEASE_NOW: '2026-07-11T12:00:00.000Z',
+      CULL_RELEASE_TEST_ALLOW_POST_COMMIT_HOOK: '1',
+    });
+
+    expect(result.execution.status).toBe(5);
+    expect(result.output.code).toBe('INCONSISTENT_RECOVERY');
+    expect(result.output.details).toMatchObject({ version: '1.2.4', releaseCommit: head(fixture) });
+    expect(head(fixture)).not.toBe(source);
+    expect(execFileSync('git', ['show', '--format=', '--name-only', 'HEAD'], {
+      cwd: fixture, encoding: 'utf8',
+    }).trim().split('\n').sort()).toEqual([...PREPARE_TRACKED_PATHS].sort());
+  });
+
+  it('accepts a simple legacy gate string and rejects shell-like legacy syntax', () => {
+    const safe = createReleaseFixture({ gate: `${process.execPath} --version` });
+    expect(run(safe, 'prepare', prepareArgs(safe), {
+      CULL_RELEASE_NOW: '2026-07-11T12:00:00.000Z',
+    }).execution.status).toBe(0);
+
+    const unsafe = createReleaseFixture({ gate: `${process.execPath} --version && touch owned.txt` });
+    const before = prepareSafetySnapshot(unsafe);
+    const rejected = run(unsafe, 'prepare', prepareArgs(unsafe));
+    expect(rejected.execution.status).toBe(2);
+    expect(rejected.output.code).toBe('CONFIG_INVALID');
+    expect(existsSync(join(unsafe, 'owned.txt'))).toBe(false);
+    expect(prepareSafetySnapshot(unsafe)).toEqual(before);
+  });
+
   it('atomically transitions and records failures in state', () => {
     const fixture = createFixture();
     const stateDir = join(fixture, '.release-state');
@@ -466,6 +666,7 @@ describe('Cull release prepare, resume, and state CLI', () => {
       state: 'checked', gates: { readiness: 'passed' },
     });
     expect(statSync(statePath).mode & 0o777).toBe(0o600);
+    expect(statSync(stateDir).mode & 0o777).toBe(0o700);
     expect(existsSync(`${statePath}.tmp`)).toBe(false);
 
     const failed = run(fixture, 'state', [
@@ -510,5 +711,147 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(shown.execution.status).toBe(0);
     expect(shown.output.result.derivedState).toBe('artifact-verified');
     expect(readFileSync(statePath, 'utf8')).toBe(before);
+  });
+
+  it('uses unique no-follow temp files and never follows a malicious fixed temp symlink', () => {
+    const fixture = createFixture();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    const statePath = join(stateDir, '1.2.4.json');
+    writeFileSync(statePath, JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'requested',
+      releaseCommit: head(fixture), tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+    const victim = join(fixture, 'victim.txt');
+    writeFileSync(victim, 'do not follow\n');
+    symlinkSync(victim, `${statePath}.tmp`);
+
+    const result = run(fixture, 'state', [
+      'transition', '--version', '1.2.4', '--to', 'checked', '--evidence-json', '{}',
+    ]);
+
+    expect(result.execution.status).toBe(0);
+    expect(readFileSync(victim, 'utf8')).toBe('do not follow\n');
+    expect(statSync(statePath).mode & 0o777).toBe(0o600);
+  });
+
+  it('rejects a symlinked state record instead of following it', () => {
+    const fixture = createFixture();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    const victim = join(fixture, 'victim-state.json');
+    writeFileSync(victim, JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'requested',
+      releaseCommit: head(fixture), tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+    symlinkSync(victim, join(stateDir, '1.2.4.json'));
+
+    const result = run(fixture, 'resume', ['--version', '1.2.4'], {
+      CULL_RELEASE_TEST_EVIDENCE: JSON.stringify({ commit: true }),
+    });
+
+    expect(result.execution.status).toBe(2);
+    expect(result.output.code).toBe('STATE_INVALID');
+    expect(readFileSync(victim, 'utf8')).toContain('"state":"requested"');
+  });
+
+  it.each([
+    ['tag', { tag: '--upload-pack=evil' }],
+    ['release SHA', { releaseCommit: '--help' }],
+    ['state', { state: 'teleported' }],
+    ['version', { version: '../1.2.4' }],
+  ])('validates cached record %s before running probes', (_name, override) => {
+    const fixture = createFixture();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'requested',
+      releaseCommit: head(fixture), tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null, ...override,
+    }));
+
+    const result = run(fixture, 'resume', ['--version', '1.2.4'], {
+      CULL_RELEASE_TEST_EVIDENCE: '{"postPublishVerified":true}',
+    });
+
+    expect(result.execution.status).toBe(2);
+    expect(result.output.code).toBe('STATE_INVALID');
+  });
+
+  it('reaches the terminal state from production commit, tag, public, tap, and provenance probes', () => {
+    const fixture = createFixture();
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(release): v1.2.4'], {
+      cwd: fixture, stdio: 'ignore',
+    });
+    const releaseCommit = head(fixture);
+    execFileSync('git', ['tag', 'v1.2.4'], { cwd: fixture });
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'requested',
+      releaseCommit, tag: 'v1.2.4', workflowRunId: 42,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+    const bin = mkdtempSync(join(tmpdir(), 'cull-release-gh-probes-'));
+    const fakeGh = join(bin, 'gh');
+    const cask = Buffer.from('version "1.2.4"\n').toString('base64');
+    writeFileSync(fakeGh, [
+      '#!/usr/bin/env node',
+      `const releaseCommit = ${JSON.stringify(releaseCommit)};`,
+      `const cask = ${JSON.stringify(cask)};`,
+      "const args = process.argv.slice(2);",
+      "if (args[0] === 'run') console.log(JSON.stringify({conclusion:'success'}));",
+      "else if (args[0] === 'api') console.log(JSON.stringify({content:cask}));",
+      "else if (args[0] === 'release' && args[1] === 'view') console.log(JSON.stringify({isDraft:false,assets:[{name:'Cull_1.2.4.dmg'}]}));",
+      "else if (args[0] === 'release' && args[1] === 'download') console.log(JSON.stringify({schema:'cull.release.provenance.v1',version:'1.2.4',tag:'v1.2.4',releaseCommit,postPublishVerified:true}));",
+      'else process.exit(9);',
+      '',
+    ].join('\n'));
+    chmodSync(fakeGh, 0o755);
+    const evidence = {
+      commit: true, tag: true, workflow: true, releaseAsset: true,
+      publishedRelease: true, tapCommit: true, postPublishVerified: true,
+    };
+
+    const result = run(fixture, 'resume', ['--version', '1.2.4'], {
+      PATH: `${bin}:${process.env.PATH}`,
+    });
+
+    expect(result.execution.status).toBe(0);
+    expect(result.output.result).toEqual({ nextState: null, nextAction: 'complete', evidence });
+  });
+
+  it('rejects duplicate options, option-looking values, and invalid evidence JSON', () => {
+    const fixture = createFixture();
+    const duplicate = run(fixture, 'check', ['--bump', 'patch', '--bump', 'minor']);
+    expect(duplicate.execution.status).toBe(2);
+    expect(duplicate.output.code).toBe('INPUT_INVALID');
+    expect(duplicate.output.message).toContain('Duplicate option');
+
+    const missing = run(fixture, 'check', ['--bump', '--version']);
+    expect(missing.execution.status).toBe(2);
+    expect(missing.output.code).toBe('INPUT_INVALID');
+    expect(missing.output.message).toContain('Missing value for --bump');
+
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'requested',
+      releaseCommit: head(fixture), tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+    const invalidJson = run(fixture, 'state', [
+      'transition', '--version', '1.2.4', '--to', 'checked', '--evidence-json', '{oops',
+    ]);
+    expect(invalidJson.execution.status).toBe(2);
+    expect(invalidJson.output.code).toBe('INPUT_INVALID');
+    expect(invalidJson.output.message).toContain('Invalid --evidence-json');
   });
 });

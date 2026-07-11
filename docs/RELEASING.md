@@ -24,6 +24,17 @@ and creates exactly one `chore(release): vX.Y.Z` commit. Preparation never tags 
 pushes. The release state cache is written to `.release-state/X.Y.Z.json` with
 owner-only permissions.
 
+Preparation must run on `main` in the configured linked release worktree; an
+ordinary checkout, detached worktree, or submodule is rejected. Gate commands are
+preferably configured as JSON argument arrays. The legacy string form accepts
+only simple whitespace-separated commands and rejects shell syntax.
+
+If a gate, concurrent Git operation, or staging race occurs before the commit,
+the CLI restores every release-owned file and the Git index byte-for-byte. After
+commit, the CLI verifies the parent, subject, exact seven-file path set, and exact
+planned bytes. A state-cache failure after that verified commit is reported as
+`INCONSISTENT_RECOVERY`; the valid commit remains the recovery anchor.
+
 The compatibility review is mandatory. Any breaking change to a `stable` surface
 requires a major bump.
 

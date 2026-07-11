@@ -1,7 +1,10 @@
 import {
   chmodSync,
   closeSync,
+  constants,
+  fchmodSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -9,7 +12,8 @@ import {
   writeFileSync,
   writeSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { dirname, join } from 'node:path';
 
 export const RELEASE_STATES = [
   'requested',
@@ -91,28 +95,76 @@ function releaseError(code, message, details) {
   return error;
 }
 
-function setJsonPointer(document, pointer, value) {
-  const parts = decodeJsonPointer(pointer);
-  if (parts.length === 0) return value;
-  let parent = document;
-  for (const part of parts.slice(0, -1)) {
-    if (parent === null || typeof parent !== 'object' || !Object.hasOwn(parent, part)) {
-      throw configurationError(`Missing JSON pointer ${pointer}`);
-    }
-    parent = parent[part];
-  }
-  const key = parts.at(-1);
-  if (parent === null || typeof parent !== 'object' || !Object.hasOwn(parent, key)) {
-    throw configurationError(`Missing JSON pointer ${pointer}`);
-  }
-  parent[key] = value;
-  return document;
-}
-
 function editJson(contents, entry, version) {
-  let document = JSON.parse(contents);
-  for (const pointer of entry.pointers) document = setJsonPointer(document, pointer, version);
-  return `${JSON.stringify(document, null, 2)}\n`;
+  JSON.parse(contents);
+  const strings = new Map();
+  let cursor = 0;
+  const whitespace = () => {
+    while (/\s/.test(contents[cursor] ?? '')) cursor += 1;
+  };
+  const stringToken = () => {
+    const start = cursor;
+    if (contents[cursor] !== '"') throw configurationError(`Expected JSON string in ${entry.path}`);
+    cursor += 1;
+    while (cursor < contents.length) {
+      if (contents[cursor] === '\\') cursor += 2;
+      else if (contents[cursor++] === '"') break;
+    }
+    const raw = contents.slice(start, cursor);
+    return { start, end: cursor, value: JSON.parse(raw) };
+  };
+  const parseValue = (path) => {
+    whitespace();
+    if (contents[cursor] === '"') {
+      const token = stringToken();
+      strings.set(`/${path.map((part) => part.replaceAll('~', '~0').replaceAll('/', '~1')).join('/')}`, token);
+      return;
+    }
+    if (contents[cursor] === '{') {
+      cursor += 1;
+      whitespace();
+      while (contents[cursor] !== '}') {
+        const key = stringToken().value;
+        whitespace();
+        if (contents[cursor++] !== ':') throw configurationError(`Invalid JSON object in ${entry.path}`);
+        parseValue([...path, key]);
+        whitespace();
+        if (contents[cursor] === ',') {
+          cursor += 1;
+          whitespace();
+        } else break;
+      }
+      if (contents[cursor++] !== '}') throw configurationError(`Invalid JSON object in ${entry.path}`);
+      return;
+    }
+    if (contents[cursor] === '[') {
+      cursor += 1;
+      whitespace();
+      let index = 0;
+      while (contents[cursor] !== ']') {
+        parseValue([...path, String(index++)]);
+        whitespace();
+        if (contents[cursor] === ',') {
+          cursor += 1;
+          whitespace();
+        } else break;
+      }
+      if (contents[cursor++] !== ']') throw configurationError(`Invalid JSON array in ${entry.path}`);
+      return;
+    }
+    while (cursor < contents.length && !/[\s,}\]]/.test(contents[cursor])) cursor += 1;
+  };
+  parseValue([]);
+  const replacements = entry.pointers.map((pointer) => {
+    const token = strings.get(pointer);
+    if (!token) throw configurationError(`Missing JSON pointer ${pointer} in ${entry.path}`);
+    return token;
+  }).sort((left, right) => right.start - left.start);
+  let edited = contents;
+  for (const token of replacements) {
+    edited = `${edited.slice(0, token.start)}${JSON.stringify(version)}${edited.slice(token.end)}`;
+  }
+  return edited;
 }
 
 function editTomlPackage(contents, entry, version, lockfile = false) {
@@ -183,8 +235,10 @@ function planChangelog(contents, version, notes, date) {
   if (markerIndex < 0) throw releaseError('CHANGELOG_INVALID', 'Missing Unreleased changelog section');
   const nextHeading = contents.indexOf('\n## [', markerIndex + marker.length);
   const prefix = contents.slice(0, markerIndex + marker.length);
+  const unreleased = contents.slice(markerIndex + marker.length, nextHeading < 0 ? contents.length : nextHeading).trim();
+  const preserved = unreleased === 'No changes yet.' ? '' : unreleased;
   const suffix = nextHeading < 0 ? '\n' : contents.slice(nextHeading);
-  return `${prefix}\n\n## [${version}] - ${date}\n\n${notes.trim()}\n${suffix}`;
+  return `${prefix}\n\n## [${version}] - ${date}\n\n${notes.trim()}${preserved ? `\n\n${preserved}` : ''}\n${suffix}`;
 }
 
 function planCompatibility(contents, version, date) {
@@ -233,20 +287,62 @@ export function releaseStatePath(repoRoot, config, version) {
 export function readReleaseRecord(repoRoot, config, version) {
   const path = releaseStatePath(repoRoot, config, version);
   try {
-    return JSON.parse(readFileSync(path, 'utf8'));
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error('State path is not a regular file');
+    const record = JSON.parse(readFileSync(path, {
+      encoding: 'utf8', flag: constants.O_RDONLY | constants.O_NOFOLLOW,
+    }));
+    return validateReleaseRecord(record, version);
   } catch (cause) {
+    if (cause.code === 'STATE_INVALID') throw cause;
     throw releaseError('STATE_INVALID', `Unable to read release state for ${version}`, {
       cause: cause.message,
     });
   }
 }
 
+export function validateReleaseRecord(record, expectedVersion = record?.version) {
+  const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+  const validTimestamp = (value) => typeof value === 'string' && Number.isFinite(Date.parse(value));
+  if (!object(record)
+    || record.schema !== 'cull.release.v1'
+    || typeof record.version !== 'string'
+    || record.version !== expectedVersion
+    || !/^\d+\.\d+\.\d+$/.test(record.version)
+    || !BUMPS.has(record.bump)
+    || !RELEASE_STATES.includes(record.state)
+    || !/^[0-9a-f]{40}$/.test(record.releaseCommit)
+    || record.tag !== `v${record.version}`
+    || !(record.workflowRunId === null
+      || (Number.isSafeInteger(record.workflowRunId) && record.workflowRunId > 0))
+    || !validTimestamp(record.requestedAt)
+    || !validTimestamp(record.updatedAt)
+    || !object(record.gates)
+    || !object(record.assets)
+    || !(record.failure === null || object(record.failure))) {
+    throw releaseError('STATE_INVALID', 'Release state record failed schema validation');
+  }
+  return record;
+}
+
 export function writeReleaseRecordAtomic(repoRoot, config, record) {
+  validateReleaseRecord(record);
   const path = releaseStatePath(repoRoot, config, record.version);
-  const temporary = `${path}.tmp`;
-  mkdirSync(join(repoRoot, config.stateDir ?? '.release-state'), { recursive: true, mode: 0o700 });
-  const fd = openSync(temporary, 'w', 0o600);
+  const stateDir = dirname(path);
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  const directoryStat = lstatSync(stateDir);
+  if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) {
+    throw releaseError('STATE_INVALID', 'Release state directory must be a regular directory');
+  }
+  chmodSync(stateDir, 0o700);
+  const temporary = `${path}.tmp-${process.pid}-${randomBytes(12).toString('hex')}`;
+  const fd = openSync(
+    temporary,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    0o600,
+  );
   try {
+    fchmodSync(fd, 0o600);
     const bytes = Buffer.from(`${JSON.stringify(record, null, 2)}\n`);
     let offset = 0;
     while (offset < bytes.length) offset += writeSync(fd, bytes, offset, bytes.length - offset);
@@ -257,6 +353,12 @@ export function writeReleaseRecordAtomic(repoRoot, config, record) {
   chmodSync(temporary, 0o600);
   renameSync(temporary, path);
   chmodSync(path, 0o600);
+  const directoryFd = openSync(stateDir, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    fsyncSync(directoryFd);
+  } finally {
+    closeSync(directoryFd);
+  }
   return path;
 }
 

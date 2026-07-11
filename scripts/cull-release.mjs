@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { statfsSync } from 'node:fs';
+import { readFileSync, statfsSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   buildReadinessReport,
+  applyVersionEdits,
   buildResumeAction,
   createReleaseRecord,
   deriveReleaseState,
@@ -46,12 +47,14 @@ function parseArgs(args) {
   const parsed = {};
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index];
+    const key = token.slice(2).replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
+    if (Object.hasOwn(parsed, key)) throw inputError(`Duplicate option ${token}`);
     if (token === '--json') parsed.json = true;
     else if (token === '--dry-run') parsed.dryRun = true;
     else if (VALUE_OPTIONS.has(token)) {
       const value = args[index += 1];
-      if (value === undefined) throw inputError(`Missing value for ${token}`);
-      parsed[token.slice(2).replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase())] = value;
+      if (value === undefined || value.startsWith('--')) throw inputError(`Missing value for ${token}`);
+      parsed[key] = value;
     } else throw inputError(`Unknown argument ${token}`);
   }
   if (!parsed.json) throw inputError('--json is required');
@@ -72,6 +75,18 @@ function git(...args) {
       env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
       stdio: ['ignore', 'pipe', 'pipe'],
     }).trim();
+  } catch (cause) {
+    throw externalFailure(`Git command failed: git ${args.join(' ')}`, { status: cause.status });
+  }
+}
+
+function gitBytes(...args) {
+  try {
+    return execFileSync('git', args, {
+      cwd: repoRoot,
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
   } catch (cause) {
     throw externalFailure(`Git command failed: git ${args.join(' ')}`, { status: cause.status });
   }
@@ -129,14 +144,20 @@ function runCheck(args) {
 }
 
 function normalizeCommand(commandValue) {
-  if (Array.isArray(commandValue)
-    && commandValue.length > 0
-    && commandValue.every((part) => typeof part === 'string')) return commandValue;
+  if (Array.isArray(commandValue)) {
+    if (commandValue.length === 0
+      || commandValue.some((part) => typeof part !== 'string' || part.length === 0 || part.includes('\0'))
+      || commandValue[0].startsWith('-')) {
+      throw commandError('CONFIG_INVALID', 'Release gate command array contains invalid argv');
+    }
+    return commandValue;
+  }
   if (typeof commandValue === 'string') {
-    const parts = commandValue.match(/"[^"]*"|'[^']*'|\S+/g)?.map((part) => (
-      (/^(['"]).*\1$/.test(part) ? part.slice(1, -1) : part)
-    ));
-    if (parts?.length) return parts;
+    if (/[;&|<>$`()"'\\\n\r\0]/.test(commandValue)) {
+      throw commandError('CONFIG_INVALID', 'Legacy release gate contains unsafe shell-like syntax');
+    }
+    const parts = commandValue.trim().split(/\s+/);
+    if (parts.length > 0 && parts[0] && !parts[0].startsWith('-')) return parts;
   }
   throw commandError('CONFIG_INVALID', 'Release gates must be non-empty command arrays or strings');
 }
@@ -154,6 +175,83 @@ function runGate(commandValue) {
 
 function now() {
   return process.env.CULL_RELEASE_NOW ?? new Date().toISOString();
+}
+
+function assertDedicatedWorktree(config) {
+  const gitDir = resolve(repoRoot, git('rev-parse', '--git-dir'));
+  const commonDir = resolve(repoRoot, git('rev-parse', '--git-common-dir'));
+  const topLevel = resolve(git('rev-parse', '--show-toplevel'));
+  const superproject = git('rev-parse', '--show-superproject-working-tree');
+  const branch = git('branch', '--show-current');
+  if (gitDir === commonDir
+    || topLevel !== resolve(repoRoot)
+    || superproject !== ''
+    || branch !== config.releaseBranch
+    || resolve(repoRoot, config.worktree ?? '.') !== resolve(repoRoot)) {
+    throw commandError('BLOCKED', 'Prepare must run on the configured branch in a dedicated linked release worktree');
+  }
+}
+
+function capturePrepareSnapshot(edits) {
+  const indexPath = resolve(repoRoot, git('rev-parse', '--git-path', 'index'));
+  return {
+    files: edits.map((edit) => ({ path: edit.absolutePath, bytes: readFileSync(edit.absolutePath) })),
+    indexPath,
+    index: readFileSync(indexPath),
+  };
+}
+
+function restorePrepareSnapshot(snapshot) {
+  for (const file of snapshot.files) writeFileSync(file.path, file.bytes);
+  writeFileSync(snapshot.indexPath, snapshot.index);
+}
+
+function assertPreCommitPlan(plan, source, snapshot) {
+  if (git('rev-parse', 'HEAD') !== source) {
+    throw commandError('SOURCE_MOVED', 'HEAD moved while release gates were running');
+  }
+  if (!readFileSync(snapshot.indexPath).equals(snapshot.index)) {
+    throw commandError('PREPARE_RACE', 'Release gates modified the Git index');
+  }
+  for (const edit of plan.edits) {
+    if (!readFileSync(edit.absolutePath).equals(Buffer.from(edit.after))) {
+      throw commandError('PLAN_MUTATED', `Release gate changed planned bytes for ${edit.path}`);
+    }
+  }
+  const entries = gitBytes('status', '--porcelain=v1', '-z', '--untracked-files=all')
+    .toString('utf8').split('\0').filter(Boolean);
+  const expected = new Set(plan.edits.map((edit) => edit.path));
+  const actual = new Set();
+  for (const entry of entries) {
+    if (!entry.startsWith(' M ')) {
+      throw commandError('PREPARE_RACE', `Unexpected repository change during preparation: ${entry}`);
+    }
+    actual.add(entry.slice(3));
+  }
+  if (actual.size !== expected.size || [...actual].some((path) => !expected.has(path))) {
+    throw commandError('PREPARE_RACE', 'Repository changes no longer match the release plan');
+  }
+}
+
+function verifyReleaseCommit(plan, source, subject) {
+  const releaseCommit = git('rev-parse', 'HEAD');
+  const parent = git('rev-parse', `${releaseCommit}^`);
+  const actualSubject = git('show', '-s', '--format=%s', releaseCommit);
+  const changedPaths = git('diff-tree', '--no-commit-id', '--name-only', '-r', releaseCommit)
+    .split('\n').filter(Boolean).sort();
+  const expectedPaths = plan.edits.map((edit) => edit.path).sort();
+  const exactTree = plan.edits.every((edit) => (
+    gitBytes('show', `${releaseCommit}:${edit.path}`).equals(Buffer.from(edit.after))
+  ));
+  if (parent !== source
+    || actualSubject !== subject
+    || JSON.stringify(changedPaths) !== JSON.stringify(expectedPaths)
+    || !exactTree) {
+    throw commandError('INCONSISTENT_RECOVERY', 'Created release commit did not match the verified plan', {
+      releaseCommit,
+    });
+  }
+  return releaseCommit;
 }
 
 function runPrepare(args) {
@@ -181,9 +279,7 @@ function runPrepare(args) {
   if (git('status', '--porcelain').length !== 0) {
     throw commandError('BLOCKED', 'Prepare requires a clean worktree');
   }
-  if (resolve(repoRoot, config.worktree ?? '.') !== resolve(repoRoot)) {
-    throw commandError('BLOCKED', 'Prepare must run in the configured dedicated release worktree');
-  }
+  assertDedicatedWorktree(config);
   const timestamp = now();
   const plan = prepareRelease({
     repoRoot,
@@ -191,16 +287,32 @@ function runPrepare(args) {
     request,
     notes: args.notes.replaceAll('\\n', '\n'),
     date: timestamp.slice(0, 10),
-    dryRun: args.dryRun,
+    dryRun: true,
   });
   if (args.dryRun) {
     return { version: plan.version, files: plan.edits.map((edit) => edit.path), diff: '' };
   }
-  runGate(config.gate);
-  for (const gate of config.extraGate ?? []) runGate(gate);
-  git('add', '--', ...plan.edits.map((edit) => edit.path));
-  git('commit', '-m', `chore(release): v${plan.version}`);
-  const releaseCommit = git('rev-parse', 'HEAD');
+  const snapshot = capturePrepareSnapshot(plan.edits);
+  let committed = false;
+  let releaseCommit;
+  try {
+    applyVersionEdits(plan.edits);
+    runGate(config.gate);
+    for (const gate of config.extraGate ?? []) runGate(gate);
+    assertPreCommitPlan(plan, source, snapshot);
+    const subject = `chore(release): v${plan.version}`;
+    git('add', '--', ...plan.edits.map((edit) => edit.path));
+    const hookIsolation = process.env.CULL_RELEASE_TEST_MODE === '1'
+      && process.env.CULL_RELEASE_TEST_ALLOW_POST_COMMIT_HOOK === '1'
+      ? []
+      : ['-c', 'core.hooksPath=/dev/null'];
+    git(...hookIsolation, 'commit', '--no-verify', '--only', '-m', subject, '--', ...plan.edits.map((edit) => edit.path));
+    committed = true;
+    releaseCommit = verifyReleaseCommit(plan, source, subject);
+  } catch (error) {
+    if (!committed) restorePrepareSnapshot(snapshot);
+    throw error;
+  }
   let record = createReleaseRecord({
     version: plan.version,
     bump: args.bump,
@@ -209,7 +321,15 @@ function runPrepare(args) {
   });
   record = transitionReleaseRecord(record, 'checked', { readiness: 'passed' }, timestamp);
   record = transitionReleaseRecord(record, 'prepared', { preparation: 'committed' }, timestamp);
-  writeReleaseRecordAtomic(repoRoot, config, record);
+  try {
+    writeReleaseRecordAtomic(repoRoot, config, record);
+  } catch (cause) {
+    throw commandError(
+      'INCONSISTENT_RECOVERY',
+      'Release commit succeeded but the local state cache could not be written',
+      { version: plan.version, releaseCommit, cause: cause.message },
+    );
+  }
   return { version: plan.version, state: record.state, releaseCommit, files: plan.edits.map((edit) => edit.path) };
 }
 
@@ -226,34 +346,55 @@ function tryGh(...args) {
 }
 
 function probeCommit(record) {
-  return tryGit('show', '-s', '--format=%s', record.releaseCommit) === `chore(release): v${record.version}`;
+  return tryGit('show', '-s', '--format=%s', '--end-of-options', record.releaseCommit)
+    === `chore(release): v${record.version}`;
 }
 
 function probeTag(record) {
-  return tryGit('rev-list', '-n', '1', record.tag) === record.releaseCommit;
+  return tryGit('rev-parse', '--verify', '--end-of-options', `${record.tag}^{commit}`) === record.releaseCommit;
 }
 
 function probeWorkflow(record) {
   if (!record.workflowRunId) return false;
-  return tryGh('run', 'view', String(record.workflowRunId), '--json', 'conclusion')?.conclusion === 'success';
+  return tryGh('run', 'view', '--json', 'conclusion', '--', String(record.workflowRunId))?.conclusion === 'success';
 }
 
 function probeRelease(record) {
-  return tryGh('release', 'view', record.tag, '--json', 'isDraft,assets');
+  return tryGh('release', 'view', '--json', 'isDraft,assets', '--', record.tag);
 }
 
 function probeTapCommit(record, config) {
   const repo = config.homebrew?.repo;
   const cask = config.homebrew?.cask;
-  if (!repo || !cask) return false;
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo ?? '')
+    || !/^[A-Za-z0-9_./-]+$/.test(cask ?? '')
+    || cask.startsWith('-')
+    || cask.split('/').includes('..')) return false;
   const response = tryGh('api', `repos/${repo}/contents/${cask}`);
   if (!response?.content) return false;
   const contents = Buffer.from(response.content, 'base64').toString('utf8');
   return new RegExp(`^version "${record.version.replaceAll('.', '\\.')}"$`, 'm').test(contents);
 }
 
+function probePostPublishProvenance(record) {
+  try {
+    const raw = execFileSync('gh', [
+      'release', 'download', '--pattern', 'release-provenance.json', '--output', '-',
+      '--', record.tag,
+    ], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const provenance = JSON.parse(raw);
+    return provenance.schema === 'cull.release.provenance.v1'
+      && provenance.version === record.version
+      && provenance.tag === record.tag
+      && provenance.releaseCommit === record.releaseCommit
+      && provenance.postPublishVerified === true;
+  } catch {
+    return false;
+  }
+}
+
 function probeEvidence(record, config) {
-  if (process.env.CULL_RELEASE_TEST_EVIDENCE) {
+  if (process.env.CULL_RELEASE_TEST_MODE === '1' && process.env.CULL_RELEASE_TEST_EVIDENCE) {
     try { return JSON.parse(process.env.CULL_RELEASE_TEST_EVIDENCE); } catch (cause) {
       throw inputError(`Invalid CULL_RELEASE_TEST_EVIDENCE: ${cause.message}`);
     }
@@ -261,14 +402,29 @@ function probeEvidence(record, config) {
   const release = probeRelease(record);
   const required = config.artifacts?.required?.map((name) => name.replace('{version}', record.version)) ?? [];
   const names = new Set(release?.assets?.map((asset) => asset.name) ?? []);
+  const publishedRelease = release !== null && release.isDraft === false;
+  const tapCommit = probeTapCommit(record, config);
   return {
     commit: probeCommit(record),
     tag: probeTag(record),
     workflow: probeWorkflow(record),
     releaseAsset: required.length > 0 && required.every((name) => names.has(name)),
-    publishedRelease: release !== null && release.isDraft === false,
-    tapCommit: probeTapCommit(record, config),
+    publishedRelease,
+    tapCommit,
+    postPublishVerified: publishedRelease && tapCommit && probePostPublishProvenance(record),
   };
+}
+
+function parseJsonOption(value, option) {
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('expected a JSON object');
+    }
+    return parsed;
+  } catch (cause) {
+    throw inputError(`Invalid ${option}: ${cause.message}`);
+  }
 }
 
 function readDerived(version) {
@@ -290,10 +446,13 @@ function runState(subcommand, args) {
   let updated;
   if (subcommand === 'transition') {
     requireArgs(args, ['to', 'evidenceJson']);
-    updated = transitionReleaseRecord(record, args.to, JSON.parse(args.evidenceJson), now());
+    updated = transitionReleaseRecord(record, args.to, parseJsonOption(args.evidenceJson, '--evidence-json'), now());
   } else if (subcommand === 'fail') {
     requireArgs(args, ['code', 'evidenceJson']);
-    updated = recordFailure(record, { code: args.code, evidence: JSON.parse(args.evidenceJson) }, now());
+    updated = recordFailure(record, {
+      code: args.code,
+      evidence: parseJsonOption(args.evidenceJson, '--evidence-json'),
+    }, now());
   } else throw inputError(`Unknown state command ${subcommand}`);
   writeReleaseRecordAtomic(repoRoot, config, updated);
   return updated;
