@@ -150,11 +150,18 @@ cleanup() {
   if [[ $attach_attempted -eq 1 ]]; then
     if hdiutil detach "$mount_dir" -quiet >>"$log_file" 2>&1; then
       attach_attempted=0
-    elif mount | grep -F " on $mount_dir (" >/dev/null 2>&1; then
-      printf 'artifact verification cleanup failed: active mount remains at %s; retaining private workdir %s\n' "$mount_dir" "$work_dir" >&2
     else
-      printf 'artifact verification cleanup: detach returned nonzero but no active mount remains at %s\n' "$mount_dir" >&2
-      attach_attempted=0
+      local mount_inventory=""
+      if mount_inventory="$(mount 2>>"$log_file")"; then
+        if grep -F " on $mount_dir (" <<<"$mount_inventory" >/dev/null 2>&1; then
+          printf 'artifact verification cleanup failed: active mount remains at %s; retaining private workdir %s\n' "$mount_dir" "$work_dir" >&2
+        else
+          printf 'artifact verification cleanup: detach returned nonzero but successful mount inventory proves no active mount remains at %s\n' "$mount_dir" >&2
+          attach_attempted=0
+        fi
+      else
+        printf 'artifact verification cleanup failed: mount inventory command failed; retaining private workdir %s\n' "$work_dir" >&2
+      fi
     fi
   fi
   if [[ $verification_complete -ne 1 && -f "$published_manifest" ]]; then
@@ -368,7 +375,10 @@ NODE
 safe_cleanup_private "$work_dir" "$(dirname "$work_dir")" 'cull-release-verify.'
 
 publish_ok=0
-trap '' INT TERM
+publish_node_ok=0
+pending_signal=0
+trap 'pending_signal=130' INT
+trap 'pending_signal=143' TERM
 if node - "$evidence_stage" "$OUT_DIR" "$published_manifest" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
@@ -377,6 +387,7 @@ const names = ['checksums.txt', 'release-provenance.json', 'verification.log'];
 const testMode = process.env.CULL_RELEASE_TEST_MODE === '1';
 const raceName = testMode ? process.env.CULL_VERIFY_TEST_RACE_PUBLISHED_NAME : '';
 const signalName = testMode ? process.env.CULL_VERIFY_TEST_SIGNAL_DURING_PUBLISH : '';
+const raceDestinationName = testMode ? process.env.CULL_VERIFY_TEST_RACE_DESTINATION_NAME : '';
 const reservations = [];
 const published = [];
 const identity = stat => ({ dev: String(stat.dev), ino: String(stat.ino) });
@@ -384,6 +395,7 @@ const matches = (stat, expected) => stat.isFile() && !stat.isSymbolicLink() && s
   String(stat.dev) === expected.dev && String(stat.ino) === expected.ino;
 try {
   const outStat = fs.lstatSync(outDir, { bigint: true });
+  if (raceDestinationName) fs.mkdirSync(path.join(outDir, raceDestinationName));
   for (const name of names) {
     const source = path.join(stageDir, name);
     const sourceStat = fs.lstatSync(source, { bigint: true });
@@ -429,12 +441,20 @@ try {
 }
 NODE
 then
-  if safe_cleanup_private "$evidence_stage" "$OUT_DIR" '.cull-release-evidence.'; then
-    verification_complete=1
-    publish_ok=1
-  fi
+  publish_node_ok=1
+fi
+if [[ $publish_node_ok -eq 1 && $pending_signal -eq 0 ]]; then
+  verification_complete=1
+  publish_ok=1
 fi
 trap 'exit 130' INT
 trap 'exit 143' TERM
+if [[ $pending_signal -ne 0 ]]; then
+  printf 'artifact verification cancelled after deferred signal; rolling back published evidence\n' >&2
+  exit "$pending_signal"
+fi
+if [[ $publish_ok -eq 1 ]] && ! safe_cleanup_private "$evidence_stage" "$OUT_DIR" '.cull-release-evidence.'; then
+  printf 'artifact verification cleanup failed: claimed evidence staging was retained\n' >&2
+fi
 [[ $publish_ok -eq 1 ]] || die 'evidence destinations changed, cleanup failed, or atomic publication failed'
 printf 'artifact verification passed for %s (%s)\n' "$TAG" "$COMMIT"

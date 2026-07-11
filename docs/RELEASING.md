@@ -88,10 +88,12 @@ modifies the system app directory.
 
 Private verification and staging directories are retired with the user's
 `trash` command when available. Minimal CI runners do not need that nonstandard
-tool: the safe-cleanup helper instead atomically moves only validated,
-invocation-owned directories to `.cull-cleanup-quarantine` beneath
-`$RUNNER_TEMP` (or `$TMPDIR`) for runner-level cleanup. It never recursively
-deletes, follows symlinks, crosses filesystems, or moves an active DMG mount.
+tool: the safe-cleanup helper first atomically claims the exact validated inode
+inside a unique mode-0700 sibling container on the same filesystem. Without
+`trash`, that uniquely named `.cull-cleanup-claim.*` container is retained for
+runner/worktree cleanup. The helper never recursively deletes, acts on a
+replaced basename, follows symlinks, crosses filesystems, or moves an active
+DMG mount.
 
 ## Notes
 

@@ -4,7 +4,9 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 verifier="$repo_root/scripts/verify-release-artifacts.sh"
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/cull-artifact-test.XXXXXX")"
-trap 'trash "$tmp_root" >/dev/null 2>&1 || true' EXIT
+# shellcheck source=scripts/safe-cleanup-private.sh
+source "$repo_root/scripts/safe-cleanup-private.sh"
+trap 'safe_cleanup_private "$tmp_root" "$(dirname "$tmp_root")" "cull-artifact-test." >/dev/null 2>&1 || true' EXIT
 real_node="$(command -v node)"
 
 pass_count=0
@@ -65,6 +67,7 @@ EOF
 if [[ "${FAKE_MOUNT_ACTIVE:-0}" == 1 && -s "$FAKE_MOUNT_PATH_FILE" ]]; then
   printf '/dev/disk-test on %s (apfs, local, read-only)\n' "$(cat "$FAKE_MOUNT_PATH_FILE")"
 fi
+exit "${FAKE_MOUNT_STATUS:-0}"
 EOF
   cat >"$bin_dir/plutil" <<'EOF'
 #!/usr/bin/env bash
@@ -98,15 +101,6 @@ if [[ "${FAKE_MUTATE_SOURCE:-0}" == 1 ]]; then
   printf 'mutated-after-snapshot\n' >"$FAKE_SOURCE_DIR/Cull_aarch64.app.tar.gz"
 fi
 exit "${FAKE_MINISIGN_STATUS:-0}"
-EOF
-  cat >"$bin_dir/trash" <<'EOF'
-#!/usr/bin/env bash
-for path in "$@"; do
-  if [[ "${FAKE_RACE_EVIDENCE:-0}" == 1 && "$path" == *'/cull-release-verify.'* ]]; then
-    mkdir -p "$FAKE_RACE_EVIDENCE_OUT/checksums.txt"
-  fi
-  find "$path" -depth -delete
-done
 EOF
   ln -s "$real_node" "$bin_dir/node"
   for required_tool in bash shasum stat awk wc tr grep dirname mktemp mkdir cat git date cp find; do
@@ -158,11 +152,7 @@ run_case() {
   make_tools "$bin_dir"
   make_artifacts "$artifacts"
   "$setup" "$artifacts" "$output"
-  local case_path="$bin_dir:$PATH"
-  if [[ "${CASE_NO_TRASH:-0}" == 1 ]]; then
-    trash "$bin_dir/trash"
-    case_path="$bin_dir"
-  fi
+  local case_path="$bin_dir"
 
   set +e
   PATH="$case_path" \
@@ -178,13 +168,13 @@ run_case() {
     FAKE_DETACH_MARKER="$case_dir/detach-marker" \
     FAKE_MUTATE_SOURCE="${CASE_MUTATE_SOURCE:-0}" \
     FAKE_SOURCE_DIR="$artifacts" \
-    FAKE_RACE_EVIDENCE="${CASE_RACE_EVIDENCE:-0}" \
-    FAKE_RACE_EVIDENCE_OUT="$output" \
     FAKE_MOUNT_ACTIVE="${CASE_MOUNT_ACTIVE:-0}" \
+    FAKE_MOUNT_STATUS="${CASE_MOUNT_STATUS:-0}" \
     FAKE_MOUNT_PATH_FILE="$case_dir/mount-path" \
     CULL_RELEASE_TEST_MODE=1 \
     CULL_VERIFY_TEST_RACE_PUBLISHED_NAME="${CASE_RACE_PUBLISHED_NAME:-}" \
     CULL_VERIFY_TEST_SIGNAL_DURING_PUBLISH="${CASE_SIGNAL_DURING_PUBLISH:-}" \
+    CULL_VERIFY_TEST_RACE_DESTINATION_NAME="${CASE_RACE_DESTINATION_NAME:-}" \
     bash "$verifier" \
       --artifact-dir "$artifacts" \
       --version 0.2.6 \
@@ -193,6 +183,7 @@ run_case() {
       --run-id 123 \
       --out "$output" >"$case_dir/stdout" 2>"$case_dir/stderr"
   local status=$?
+  printf '%s\n' "$status" >"$case_dir/status"
   set -e
 
   if [[ "$expected" == pass && $status -ne 0 ]]; then
@@ -210,7 +201,7 @@ run_case() {
 }
 
 setup_valid() { :; }
-setup_missing_signature() { trash "$1/Cull_aarch64.app.tar.gz.sig"; }
+setup_missing_signature() { unlink "$1/Cull_aarch64.app.tar.gz.sig"; }
 setup_extra_asset() { printf 'unexpected\n' >"$1/extra.zip"; }
 setup_stale_metadata() {
   node - "$1/latest.json" <<'NODE'
@@ -247,13 +238,13 @@ setup_log_symlink() {
 setup_symlink_asset() {
   local outside="$tmp_root/outside.dmg"
   printf 'outside\n' >"$outside"
-  trash "$1/Cull_0.2.6_aarch64.dmg"
+  unlink "$1/Cull_0.2.6_aarch64.dmg"
   ln -s "$outside" "$1/Cull_0.2.6_aarch64.dmg"
 }
 setup_hardlink_asset() {
   local outside="$tmp_root/outside-archive"
   printf 'outside\n' >"$outside"
-  trash "$1/Cull_aarch64.app.tar.gz"
+  unlink "$1/Cull_aarch64.app.tar.gz"
   ln "$outside" "$1/Cull_aarch64.app.tar.gz"
 }
 setup_hardlink_evidence() {
@@ -294,6 +285,9 @@ fi
 CASE_ATTACH_STATUS=1 CASE_DETACH_STATUS=1 CASE_MOUNT_ACTIVE=1 run_case active-partial-mount-retained fail setup_valid
 find "$tmp_root/active-partial-mount-retained/runner-temp" -maxdepth 1 -type d -name 'cull-release-verify.*' | grep -q . || fail 'active partial mount workdir was not retained'
 rg -q 'active mount.*retaining|retaining.*active mount' "$tmp_root/active-partial-mount-retained/stderr" || fail 'active mount retention was not reported'
+CASE_ATTACH_STATUS=1 CASE_DETACH_STATUS=1 CASE_MOUNT_STATUS=1 run_case mount-inventory-failure-retained fail setup_valid
+find "$tmp_root/mount-inventory-failure-retained/runner-temp" -maxdepth 1 -type d -name 'cull-release-verify.*' | grep -q . || fail 'mount inventory failure did not retain workdir'
+rg -q 'mount inventory.*failed|failed.*mount inventory' "$tmp_root/mount-inventory-failure-retained/stderr" || fail 'mount inventory failure was not reported'
 CASE_ALLOW_EXISTING_EVIDENCE=1 run_case preexisting-evidence fail setup_preexisting_evidence
 [[ "$(cat "$tmp_root/preexisting-evidence/output/release-provenance.json")" == 'old provenance' ]] || fail 'preexisting provenance was modified'
 [[ "$(cat "$tmp_root/preexisting-evidence/output/checksums.txt")" == 'old checksums' ]] || fail 'preexisting checksums were modified'
@@ -306,16 +300,44 @@ CASE_ALLOW_EXISTING_EVIDENCE=1 run_case hardlink-evidence fail setup_hardlink_ev
 CASE_MUTATE_SOURCE=1 run_case source-mutation-after-snapshot pass setup_valid
 expected_archive_sha="$(printf 'archive\n' | shasum -a 256 | awk '{print $1}')"
 rg -q "^${expected_archive_sha}  Cull_aarch64.app.tar.gz$" "$tmp_root/source-mutation-after-snapshot/output/checksums.txt" || fail 'evidence did not hash acquired snapshot'
-CASE_ALLOW_EXISTING_EVIDENCE=1 CASE_RACE_EVIDENCE=1 run_case evidence-destination-race fail setup_valid
+CASE_ALLOW_EXISTING_EVIDENCE=1 CASE_RACE_DESTINATION_NAME=checksums.txt run_case evidence-destination-race fail setup_valid
 [[ -d "$tmp_root/evidence-destination-race/output/checksums.txt" ]] || fail 'raced evidence directory was overwritten or moved into'
 CASE_ALLOW_EXISTING_EVIDENCE=1 CASE_RACE_PUBLISHED_NAME=checksums.txt run_case post-rename-inode-race fail setup_valid
 [[ "$(cat "$tmp_root/post-rename-inode-race/output/checksums.txt")" == 'raced replacement' ]] || fail 'post-rename replacement was overwritten or accepted'
-CASE_NO_TRASH=1 run_case cleanup-without-trash pass setup_valid
+run_case cleanup-without-trash pass setup_valid
 if find "$tmp_root/cleanup-without-trash/runner-temp" -maxdepth 1 -type d -name 'cull-release-verify.*' | grep -q .; then
   fail 'fallback cleanup left invocation-owned workdir in place'
 fi
-find "$tmp_root/cleanup-without-trash/runner-temp/.cull-cleanup-quarantine" -mindepth 1 -maxdepth 1 -type d | grep -q . || fail 'fallback cleanup did not quarantine the private workdir'
-CASE_SIGNAL_DURING_PUBLISH=SIGTERM run_case signal-during-evidence-publish pass setup_valid
+find "$tmp_root/cleanup-without-trash/runner-temp" -mindepth 1 -maxdepth 1 -type d -name '.cull-cleanup-claim.*' | grep -q . || fail 'fallback cleanup did not atomically claim the private workdir'
+CASE_SIGNAL_DURING_PUBLISH=SIGTERM run_case signal-during-evidence-publish fail setup_valid
+[[ "$(cat "$tmp_root/signal-during-evidence-publish/status")" == 143 ]] || fail 'deferred SIGTERM did not exit 143'
+
+helper_parent="$tmp_root/helper-races"
+mkdir -p "$helper_parent/cull-private.candidate" "$helper_parent/replacement"
+printf 'original\n' >"$helper_parent/cull-private.candidate/value"
+printf 'replacement\n' >"$helper_parent/replacement/value"
+set +e
+PATH="$tmp_root/valid/bin" CULL_RELEASE_TEST_MODE=1 CULL_SAFE_CLEANUP_TEST_SWAP_WITH="$helper_parent/replacement" \
+  bash "$repo_root/scripts/safe-cleanup-private.sh" "$helper_parent/cull-private.candidate" "$helper_parent" 'cull-private.'
+helper_status=$?
+set -e
+[[ $helper_status -ne 0 ]] || fail 'basename swap cleanup race unexpectedly succeeded'
+[[ "$(cat "$helper_parent/cull-private.candidate/value")" == 'replacement' ]] || fail 'basename swap replacement was not preserved'
+rg --hidden -l '^original$' "$helper_parent" >/dev/null || fail 'basename swap original was not preserved in claim container'
+pass_count=$((pass_count + 1))
+printf 'ok %d - cleanup-basename-swap-race\n' "$pass_count"
+
+mkdir -p "$helper_parent/cull-private.container-race"
+printf 'container-original\n' >"$helper_parent/cull-private.container-race/value"
+set +e
+PATH="$tmp_root/valid/bin" CULL_RELEASE_TEST_MODE=1 CULL_SAFE_CLEANUP_TEST_RACE_CONTAINER=1 \
+  bash "$repo_root/scripts/safe-cleanup-private.sh" "$helper_parent/cull-private.container-race" "$helper_parent" 'cull-private.'
+helper_status=$?
+set -e
+[[ $helper_status -ne 0 ]] || fail 'container replacement race unexpectedly succeeded'
+[[ "$(cat "$helper_parent/cull-private.container-race/value")" == 'container-original' ]] || fail 'container race touched candidate'
+pass_count=$((pass_count + 1))
+printf 'ok %d - cleanup-container-race\n' "$pass_count"
 
 wrapper_case="$tmp_root/wrapper-cleanup"
 wrapper_source="$wrapper_case/source"
@@ -325,7 +347,6 @@ wrapper_bin="$wrapper_case/bin"
 mkdir -p "$wrapper_runner_temp"
 make_tools "$wrapper_bin"
 make_artifacts "$wrapper_source" 0.2.5
-trash "$wrapper_bin/trash"
 PATH="$wrapper_bin" RUNNER_TEMP="$wrapper_runner_temp" FAKE_BUNDLE_VERSION=0.2.5 \
   FAKE_MOUNT_PATH_FILE="$wrapper_case/mount-path" \
   bash "$repo_root/scripts/clean-machine-dmg-gate.sh" \
