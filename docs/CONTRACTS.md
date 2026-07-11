@@ -56,14 +56,31 @@ Retained fixture provenance:
 | --- | --- | --- |
 | v21 | `e9bd555e24f28acd2f0f22c2abc739826b30651f` | retained historical fixture |
 | v22 | `a0a577ae5f96194d2e6424833399f5fb2308eb0b` | reconstructed with that commit's ignored generator |
-| v23 | none | blocked: no commit or release tag produced schema 23 |
+| v23 | `84b9630361b236d65bec7c7e2ed7a17c14c7c617` | reconstructed crash-reachable boundary; SHA-256 `d645eeaf688027d8abcc5a36e07dcd7b9ca497788876d49019a1f4f4a3a17368` |
 | v24 | `84b9630361b236d65bec7c7e2ed7a17c14c7c617` | reconstructed with that commit's ignored generator |
 
-Schema 23 and 24 were introduced atomically by the v24 producer commit. Until
-P0 issue `imageview-ua01.5` establishes whether v23 was an unreachable internal
-migration boundary or supplies independently verifiable producer evidence,
-automatic release publication must remain disabled. A v23 fixture must not be
-fabricated from current code.
+Schema 23 and 24 were introduced by the same producer commit, but not in one
+transaction. `run_migration_step(23, "media_assets", ...)` commits its transaction,
+records the successful step, and advances `PRAGMA user_version` to 23 before
+`run_migration_step(24, "catalog_schema", ...)` begins. A crash in that interval
+therefore leaves a persistent, reachable schema-23 database that current code must
+continue to migrate.
+
+The retained v23 fixture was reconstructed in a detached temporary worktree at
+the producer commit. The only source patch inserted
+`std::process::exit(23);` immediately after the authentic migration-23 call
+returned and immediately before migration 24. That commit's ignored
+`regenerate_db_fixture` test then opened a fresh database through the production
+migration chain and exited with status 23 at the injected boundary. Before the
+fixture alone was copied out and the worktree removed, SQLite reported:
+
+- `PRAGMA user_version = 23` and `PRAGMA integrity_check = ok`;
+- migration 23 (`media_assets`) recorded as succeeded, with no migration-24 row;
+- v23 tables `media_assets`, `media_files`, and `pdf_pages` present;
+- zero `catalog_%` tables, proving migration 24 had not started.
+
+This is a fault-injected historical artifact, not a database fabricated from
+current code or hand-authored SQL. The live Cull database was not accessed.
 
 ## Stable static package (`exports`, mode `forward-compatible`)
 

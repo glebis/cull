@@ -106,6 +106,15 @@ fn open_retained_fixture(schema: i64, src: &Path) -> Result<(), String> {
 #[test]
 fn retained_db_fixtures_open_and_satisfy_invariants() {
     let fixtures = retained_fixture_paths(&fixture_dir()).expect("discover retained DB fixtures");
+    let retained_schemas = fixtures
+        .iter()
+        .map(|(schema, _)| *schema)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        retained_schemas,
+        vec![21, 22, 23, 24],
+        "the transitive DB contract requires every retained reachable schema"
+    );
     for (schema, src) in fixtures {
         open_retained_fixture(schema, &src).unwrap_or_else(|error| panic!("{error}"));
     }
