@@ -1,301 +1,137 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-fail_count=0
-
-command_exists() {
-  command -v "$1" >/dev/null 2>&1
-}
-
-require_cmd() {
-  local cmd=$1
-  if ! command_exists "$cmd"; then
-    echo "$cmd is required" >&2
-    fail_count=$((fail_count + 1))
-    return 1
-  fi
-}
-
 usage() {
   cat <<'USAGE'
-Usage: ./scripts/clean-machine-dmg-gate.sh [--build] [--install] [--app-path PATH] [--dmg-path PATH] [--out-dir PATH]
+Usage: scripts/clean-machine-dmg-gate.sh [--build] [--install] [--artifact-dir DIR] [--dmg-path PATH] [--archive-path PATH] [--signature-path PATH] [--out-dir DIR]
 
-Runs the clean-machine style release verification for a local DMG build.
+Builds or stages a local signed Cull release, then delegates all inventory,
+updater, mounted-app, signature, notarization, and architecture checks to
+scripts/verify-release-artifacts.sh. The optional launch copy is isolated under
+$RUNNER_TEMP/install; this command never writes to the system app directory.
 
 Options:
-  --build                Run npm run tauri build before checks.
-  --install              Reinstall the built app to /Applications for a local smoke run.
-  --allow-local-dev      Continue if trust checks fail for unsigned/notarized local builds.
-  --app-path PATH        Override the signed app path (default: src-tauri/target/release/bundle/macos/Cull.app).
-  --dmg-path PATH        Override DMG path (supports glob-like matches in default directory).
-  --out-dir PATH         Write checksums/provenance into this dir (default: docs/release-audit-2026-06-09).
-  --help                 Show this help text.
+  --build                 Run npm run tauri build before verification.
+  --install               Copy the verified mounted app to an isolated temp path and launch it.
+  --artifact-dir DIR      Verify an already-normalized four-file artifact directory.
+  --dmg-path PATH         Override the locally built DMG path.
+  --archive-path PATH     Override the locally built updater archive path.
+  --signature-path PATH   Override the updater signature path.
+  --out-dir DIR           Evidence output (default: docs/release-audit-2026-06-09).
+  --help                  Show this help.
 USAGE
+}
+
+die() {
+  printf 'clean-machine-dmg-gate: %s\n' "$*" >&2
+  exit 1
 }
 
 BUILD=0
 INSTALL=0
-ALLOW_LOCAL_DEV=0
-APP_PATH=""
+ARTIFACT_DIR=""
 DMG_PATH=""
+ARCHIVE_PATH=""
+SIGNATURE_PATH=""
 OUT_DIR="docs/release-audit-2026-06-09"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --build)
-      BUILD=1
-      shift
-      ;;
-    --install)
-      INSTALL=1
-      shift
-      ;;
-    --allow-local-dev)
-      ALLOW_LOCAL_DEV=1
-      shift
-      ;;
-    --app-path)
-      APP_PATH="$2"
+    --build) BUILD=1; shift ;;
+    --install) INSTALL=1; shift ;;
+    --artifact-dir|--dmg-path|--archive-path|--signature-path|--out-dir)
+      [[ $# -ge 2 ]] || die "missing value for $1"
+      case "$1" in
+        --artifact-dir) ARTIFACT_DIR=$2 ;;
+        --dmg-path) DMG_PATH=$2 ;;
+        --archive-path) ARCHIVE_PATH=$2 ;;
+        --signature-path) SIGNATURE_PATH=$2 ;;
+        --out-dir) OUT_DIR=$2 ;;
+      esac
       shift 2
       ;;
-    --dmg-path)
-      DMG_PATH="$2"
-      shift 2
-      ;;
-    --out-dir)
-      OUT_DIR="$2"
-      shift 2
-      ;;
-    --help|-h)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Unknown arg: $1" >&2
-      usage
-      exit 2
-      ;;
+    --allow-local-dev) die '--allow-local-dev was removed because release trust checks cannot be bypassed' ;;
+    --app-path) die '--app-path was removed; verification always uses Cull.app mounted from the DMG' ;;
+    --help|-h) usage; exit 0 ;;
+    *) usage >&2; die "unknown argument: $1" ;;
   esac
 done
 
-require_cmd shasum
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$repo_root"
 
 if [[ $BUILD -eq 1 ]]; then
-  if ! command_exists npm; then
-    echo "npm is required for --build" >&2
-    fail_count=$((fail_count + 1))
-  else
-    npm run tauri build
-  fi
+  npm run tauri build -- --target aarch64-apple-darwin
 fi
 
-if [[ -z "$APP_PATH" ]]; then
-  APP_PATH="src-tauri/target/release/bundle/macos/Cull.app"
+version="$(node -e "process.stdout.write(require('./package.json').version)")"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'package.json version is not X.Y.Z'
+tag="v$version"
+commit="$(git rev-parse HEAD)"
+run_id="${GITHUB_RUN_ID:-$(date +%s)}"
+
+if [[ -z "$ARTIFACT_DIR" ]]; then
+  dmg_name="Cull_${version}_aarch64.dmg"
+  archive_name="Cull_aarch64.app.tar.gz"
+
+  if [[ -z "$DMG_PATH" ]]; then
+    for candidate in \
+      "src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/$dmg_name" \
+      "src-tauri/target/release/bundle/dmg/$dmg_name"; do
+      if [[ -f "$candidate" && ! -L "$candidate" ]]; then
+        DMG_PATH=$candidate
+        break
+      fi
+    done
+  fi
+  if [[ -z "$ARCHIVE_PATH" ]]; then
+    for candidate in \
+      "src-tauri/target/aarch64-apple-darwin/release/bundle/macos/$archive_name" \
+      "src-tauri/target/release/bundle/macos/$archive_name"; do
+      if [[ -f "$candidate" && ! -L "$candidate" ]]; then
+        ARCHIVE_PATH=$candidate
+        break
+      fi
+    done
+  fi
+  [[ -n "$SIGNATURE_PATH" ]] || SIGNATURE_PATH="${ARCHIVE_PATH}.sig"
+  for path in "$DMG_PATH" "$ARCHIVE_PATH" "$SIGNATURE_PATH"; do
+    [[ -n "$path" && -f "$path" && ! -L "$path" ]] || die "local signed artifact not found or unsafe: ${path:-<unset>}"
+  done
+
+  staging_root="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/cull-local-artifacts.${run_id}.XXXXXX")"
+  ARTIFACT_DIR="$staging_root/artifacts"
+  mkdir "$ARTIFACT_DIR"
+  cp "$DMG_PATH" "$ARTIFACT_DIR/$dmg_name"
+  cp "$ARCHIVE_PATH" "$ARTIFACT_DIR/$archive_name"
+  cp "$SIGNATURE_PATH" "$ARTIFACT_DIR/$archive_name.sig"
+  node - "$ARTIFACT_DIR/latest.json" "$version" "$tag" "$ARTIFACT_DIR/$archive_name.sig" <<'NODE'
+const fs = require('node:fs');
+const [output, version, tag, signaturePath] = process.argv.slice(2);
+const signature = fs.readFileSync(signaturePath, 'utf8').trim();
+const metadata = {
+  version,
+  notes: 'Local clean-machine verification',
+  pub_date: '1970-01-01T00:00:00Z',
+  platforms: {
+    'darwin-aarch64': {
+      signature,
+      url: `https://github.com/glebis/cull/releases/download/${tag}/Cull_aarch64.app.tar.gz`
+    }
+  }
+};
+fs.writeFileSync(output, JSON.stringify(metadata, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+NODE
 fi
 
-if [[ -z "$DMG_PATH" ]]; then
-  DMG_DIR="src-tauri/target/release/bundle/dmg"
-  shopt -s nullglob
-  DMGS=($(find "$DMG_DIR" -maxdepth 1 -name '*.dmg' -print0 | xargs -0 ls -1t))
-  shopt -u nullglob
-  if [[ ${#DMGS[@]} -eq 0 ]]; then
-    echo "No DMG found in $DMG_DIR. Run with --build or pass --dmg-path." >&2
-    exit 1
-  fi
-  DMG_PATH="${DMGS[0]}"
-fi
+args=(
+  --artifact-dir "$ARTIFACT_DIR"
+  --version "$version"
+  --tag "$tag"
+  --commit "$commit"
+  --run-id "$run_id"
+  --out "$OUT_DIR"
+)
+[[ $INSTALL -eq 0 ]] || args+=(--launch)
 
-if [[ ! -d "$APP_PATH" ]]; then
-  echo "App bundle not found at $APP_PATH" >&2
-  fail_count=$((fail_count + 1))
-fi
-if [[ ! -f "$DMG_PATH" ]]; then
-  echo "DMG not found at $DMG_PATH" >&2
-  fail_count=$((fail_count + 1))
-fi
-if [[ $fail_count -gt 0 ]]; then
-  echo "Aborting before checks. Fix the errors above." >&2
-  exit 1
-fi
-
-mkdir -p "$OUT_DIR"
-TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
-PROVENANCE_FILE="$OUT_DIR/provenance.md"
-CHECKSUM_FILE="$OUT_DIR/checksums.txt"
-RUN_LOG="$OUT_DIR/clean-machine-gate-${TIMESTAMP}.log"
-APP_CHECK_FAIL=0
-SPCTL_CHECK_FAIL=0
-STAPLER_CHECK_FAIL=0
-DAMAGED_DMG=0
-
-run_check() {
-  local label=$1
-  local code=$2
-  local ok_msg=$3
-  local fail_msg=$4
-  shift 4
-  local tmp_log="$RUN_LOG.${label}.log"
-
-  if "$@" >"$tmp_log" 2>&1; then
-    echo "$ok_msg" | tee -a "$RUN_LOG"
-    echo "[$label]-OK" >> "$RUN_LOG"
-    return 0
-  fi
-  local status=$?
-  cat "$tmp_log" | tee -a "$RUN_LOG"
-  echo "$fail_msg (status $status)" | tee -a "$RUN_LOG"
-  if [[ $ALLOW_LOCAL_DEV -eq 1 ]]; then
-    echo "ALLOW_LOCAL_DEV=1: continuing despite $label failure" | tee -a "$RUN_LOG"
-  else
-    fail_count=$((fail_count + 1))
-  fi
-  return "$code"
-}
-
-if ! command_exists xcrun; then
-  echo "xcrun not available" | tee -a "$RUN_LOG"
-fi
-
-{
-  echo "[clean-machine-gate] $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo "app_path: $APP_PATH"
-  echo "dmg_path: $DMG_PATH"
-  echo "out_dir: $OUT_DIR"
-  echo "allow_local_dev: $ALLOW_LOCAL_DEV"
-  echo
-} >> "$RUN_LOG"
-
-echo "=== Trust chain checks (app: $APP_PATH)" | tee -a "$RUN_LOG"
-if command_exists codesign; then
-  run_check "codesign" 1 "CODESIGN-OK" "CODESIGN-FAIL" \
-    codesign --verify --deep --strict "$APP_PATH" || APP_CHECK_FAIL=1
-else
-  echo "codesign not available" | tee -a "$RUN_LOG"
-fi
-
-if command -v spctl >/dev/null 2>&1; then
-  run_check "spctl" 1 "SPCTL-OK" "SPCTL-FAIL (notarization may be pending for local build)" \
-    spctl --assess --type execute "$APP_PATH" || SPCTL_CHECK_FAIL=1
-else
-  echo "spctl not available" | tee -a "$RUN_LOG"
-fi
-
-if command -v xcrun >/dev/null 2>&1; then
-  run_check "stapler" 1 "STAPLER-OK" "STAPLER-PENDING (notarization ticket may not exist for local build)" \
-    xcrun stapler validate "$APP_PATH" || STAPLER_CHECK_FAIL=1
-else
-  echo "xcrun not available" | tee -a "$RUN_LOG"
-fi
-
-run_check "dmg-sha256" 0 "DMG_CHECKSUM-OK" "DMG_CHECKSUM-FAIL" \
-  shasum -a 256 "$DMG_PATH" >> "$RUN_LOG" || DAMAGED_DMG=1
-
-{
-  echo "# Build Provenance — clean-machine verification ${TIMESTAMP}"
-  echo
-  echo "**Generated by:** scripts/clean-machine-dmg-gate.sh"
-  echo "**Scope:** Local clean-machine verification pass; trust-chain pass/fail messages are still authoritative for local artifacts."
-  echo
-  echo "## Toolchain"
-  echo "- commit: $(git rev-parse HEAD)"
-  echo "- rustc: $(rustc --version 2>/dev/null || echo missing)"
-  echo "- node: $(node --version 2>/dev/null || echo missing)"
-  echo "- tauri-cli: $(npx --yes tauri --version 2>/dev/null || echo missing)"
-  echo "- command: npm run tauri build"
-  echo "- app: $APP_PATH"
-  echo "- dmg: $DMG_PATH"
-  echo
-  echo "## Trust-chain notes"
-  echo "- codesign output: $(if [[ $APP_CHECK_FAIL -eq 0 ]]; then echo OK; else echo FAIL; fi)"
-  echo "- spctl output: $(if [[ $SPCTL_CHECK_FAIL -eq 0 ]]; then echo OK; else echo FAIL; fi)"
-  echo "- stapler output: $(if [[ $STAPLER_CHECK_FAIL -eq 0 ]]; then echo OK; else echo pending-or-fail; fi)"
-} > "$PROVENANCE_FILE"
-
-{
-  echo "# Clean-machine checksums ${TIMESTAMP}"
-  shasum -a 256 "$DMG_PATH"
-  echo
-} | tee "$CHECKSUM_FILE"
-
-restore_app() {
-  if [[ -n "${BACKUP_PATH:-}" && -d "/Applications/Cull.app.backup-${TIMESTAMP}" ]]; then
-    rm -rf /Applications/Cull.app 2>/dev/null || true
-    mv "/Applications/Cull.app.backup-${TIMESTAMP}" /Applications/Cull.app 2>/dev/null || true
-  fi
-}
-
-trap restore_app EXIT
-
-if [[ $INSTALL -eq 1 ]]; then
-  echo "=== Local app reinstall smoke (may require GUI access) ===" | tee -a "$RUN_LOG"
-  if [[ $(uname) != "Darwin" ]]; then
-    echo "--install requires macOS" | tee -a "$RUN_LOG"
-    exit 1
-  fi
-  require_cmd hdiutil
-  require_cmd osascript
-  if [[ $fail_count -gt 0 ]]; then
-    echo "Aborting install step due prerequisite tool errors." >&2
-    exit 1
-  fi
-
-  BACKUP_PATH="/Applications/Cull.app.backup-${TIMESTAMP}"
-  if [[ -d /Applications/Cull.app ]]; then
-    mv /Applications/Cull.app "$BACKUP_PATH"
-    echo "Backed up prior /Applications/Cull.app to $BACKUP_PATH" | tee -a "$RUN_LOG"
-  fi
-
-  osascript -e 'quit app "Cull"' >/dev/null 2>&1 || true
-  sleep 2
-
-  TMP_DMG_MOUNT="$(mktemp -d)"
-  ATTACH_LOG="$OUT_DIR/clean-machine-hdiattach-${TIMESTAMP}.log"
-  if ! hdiutil attach "$DMG_PATH" -nobrowse -readonly -mountpoint "$TMP_DMG_MOUNT" >"$ATTACH_LOG" 2>&1; then
-    cat "$ATTACH_LOG" | tee -a "$RUN_LOG"
-    echo "Failed to mount DMG for install smoke." | tee -a "$RUN_LOG"
-    fail_count=$((fail_count + 1))
-    exit 1
-  fi
-  trap 'hdiutil detach "$TMP_DMG_MOUNT" -quiet || true; restore_app' EXIT
-
-  DMG_APP_PATH="$(find "$TMP_DMG_MOUNT" -maxdepth 3 -name '*.app' -print | head -n 1)"
-  if [[ -z "$DMG_APP_PATH" ]]; then
-    echo "No .app found in mounted DMG $DMG_PATH" | tee -a "$RUN_LOG"
-    fail_count=$((fail_count + 1))
-    exit 1
-  fi
-
-  ditto --rsrc "$DMG_APP_PATH" /Applications/Cull.app
-  echo "Copied DMG-installed app into /Applications/Cull.app" | tee -a "$RUN_LOG"
-  hdiutil detach "$TMP_DMG_MOUNT" -quiet
-
-  open -a /Applications/Cull.app
-  sleep 8
-
-  if pgrep -x "Cull" >/dev/null 2>&1; then
-    echo "LAUNCH-OK" | tee -a "$RUN_LOG"
-  else
-    echo "LAUNCH-FAILED (process not running after open)" | tee -a "$RUN_LOG"
-    fail_count=$((fail_count + 1))
-  fi
-
-  osascript -e 'tell application "Cull" to quit' >/dev/null 2>&1 || true
-  sleep 1
-  restore_app
-  BACKUP_PATH=""
-  if [[ -n "$TMP_DMG_MOUNT" && -d "$TMP_DMG_MOUNT" ]]; then
-    rmdir "$TMP_DMG_MOUNT" 2>/dev/null || true
-  fi
-fi
-
-echo "Logs:"
-echo "  $RUN_LOG"
-echo "  $PROVENANCE_FILE"
-echo "  $CHECKSUM_FILE"
-
-if [[ $fail_count -gt 0 ]]; then
-  echo "clean-machine-dmg-gate FAILED with $fail_count check(s)." >&2
-  exit 1
-fi
-
-echo "clean-machine-dmg-gate completed"
+exec "$repo_root/scripts/verify-release-artifacts.sh" "${args[@]}"
