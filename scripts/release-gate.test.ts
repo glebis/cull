@@ -89,6 +89,14 @@ function fixture() {
   return { root, baseSha, sha };
 }
 
+function untaggedMainCanaryFixture() {
+  const { root, baseSha, sha: taggedSha } = fixture();
+  write(root, 'src/lib/api.ts', `${readFileSync(join(root, 'src/lib/api.ts'), 'utf8')}\nexport const canary = true;\n`);
+  const sha = commit(root, 'untagged main after release');
+  git(root, 'update-ref', 'refs/remotes/origin/main', sha);
+  return { root, baseSha, taggedSha, sha };
+}
+
 function run(root: string, options: Partial<{
   tag: string;
   sha: string;
@@ -125,6 +133,8 @@ describe('release gate', () => {
     const output = JSON.parse(result.execution.stdout);
     expect(output).toEqual({
       schema: 'cull.release.gate.v1',
+      event: 'tag',
+      publishEligible: true,
       version: '1.2.4',
       tag: 'v1.2.4',
       sha,
@@ -243,6 +253,57 @@ describe('release gate', () => {
   it('requires existing tag identity for manual dispatch', () => {
     const { root } = fixture();
     expectRejected(run(root, { tag: 'v1.2.5', event: 'dispatch' }), 'TAG_NOT_FOUND');
+  });
+
+  it('accepts untagged current main only as explicit non-publishing canary evidence', () => {
+    const { root, taggedSha, sha } = untaggedMainCanaryFixture();
+    const workflowOutput = join(root, 'github-output');
+    const result = run(root, {
+      sha,
+      baseTag: 'v1.2.4',
+      event: 'canary',
+      env: { GITHUB_OUTPUT: workflowOutput },
+    });
+
+    expect(taggedSha).not.toBe(sha);
+    expect(result.execution.status).toBe(0);
+    expect(JSON.parse(result.execution.stdout)).toMatchObject({
+      schema: 'cull.release.gate.v1',
+      event: 'canary',
+      publishEligible: false,
+      version: '1.2.4',
+      tag: 'v1.2.4',
+      sha,
+      baseTag: 'v1.2.4',
+      mainAncestor: true,
+      e2e: { required: true, matchedPaths: ['src/lib/api.ts'] },
+    });
+    expect(readFileSync(workflowOutput, 'utf8')).toContain('event=canary\npublish_eligible=false\n');
+  });
+
+  it('keeps dispatch tag binding strict for the same untagged main SHA', () => {
+    const { root, sha } = untaggedMainCanaryFixture();
+
+    expectRejected(run(root, { sha, baseTag: 'v1.2.3', event: 'dispatch' }), 'TAG_SHA_MISMATCH');
+  });
+
+  it('rejects an injected lower canary base that would narrow the canonical diff', () => {
+    const { root, sha } = untaggedMainCanaryFixture();
+    git(root, 'tag', '-f', 'v1.2.3', sha);
+
+    expectRejected(run(root, { sha, baseTag: 'v1.2.3', event: 'canary' }), 'BASE_TAG_MISMATCH');
+  });
+
+  it('marks bound manual dispatch evidence publish eligible only after tag identity succeeds', () => {
+    const { root } = fixture();
+    const result = run(root, { event: 'dispatch' });
+
+    expect(result.execution.status).toBe(0);
+    expect(JSON.parse(result.execution.stdout)).toMatchObject({
+      event: 'dispatch',
+      publishEligible: true,
+      tag: 'v1.2.4',
+    });
   });
 
   it('rejects the JSON artifact and workflow output as the same normalized destination', () => {
@@ -364,8 +425,21 @@ describe('release gate', () => {
     expect(buildJob).toContain('--target aarch64-apple-darwin --bundles dmg');
     expect(buildJob).not.toContain('--bundles dmg,updater');
     expect(gateJob).toContain('node scripts/release-gate.mjs');
+    expect(gateJob).toContain('--event canary');
+    expect(gateJob).not.toContain('--event dispatch');
     expect(gateJob).toContain("if: steps.release_gate.outputs.e2e_required == 'true'");
     expect(gateJob).toContain('bash tests/e2e/run-e2e.sh');
+    expect(workflow).toContain('event: ${{ steps.release_gate.outputs.event }}');
+    expect(workflow).toContain('publish_eligible: ${{ steps.release_gate.outputs.publish_eligible }}');
+    expect(buildJob).not.toContain("if: needs.gate.outputs.event == 'canary' && needs.gate.outputs.publish_eligible == 'false'");
+    expect(buildJob).toContain('GATE_EVENT: ${{ needs.gate.outputs.event }}');
+    expect(buildJob).toContain('PUBLISH_ELIGIBLE: ${{ needs.gate.outputs.publish_eligible }}');
+    expect(buildJob).toContain('test "$GATE_EVENT" = canary');
+    expect(buildJob).toContain('test "$PUBLISH_ELIGIBLE" = false');
+    const evidenceCheck = buildJob.indexOf('Assert non-publishing canary evidence');
+    const firstSecret = buildJob.indexOf('${{ secrets.');
+    expect(evidenceCheck).toBeGreaterThan(-1);
+    expect(firstSecret).toBeGreaterThan(evidenceCheck);
   });
 
   it('passes the private signed inventory to a secret-free exact verifier', () => {

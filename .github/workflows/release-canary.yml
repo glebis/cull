@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Existing tagged release commit to build without publishing
+        description: Main-reachable release source to build without publishing
         required: true
         default: main
         type: string
@@ -26,6 +26,8 @@ jobs:
       sha: ${{ steps.release_gate.outputs.sha }}
       base-tag: ${{ steps.release_gate.outputs.base_tag }}
       e2e-required: ${{ steps.release_gate.outputs.e2e_required }}
+      event: ${{ steps.release_gate.outputs.event }}
+      publish_eligible: ${{ steps.release_gate.outputs.publish_eligible }}
     steps:
       - name: Checkout requested release source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -58,23 +60,37 @@ jobs:
           sha=$(git rev-parse HEAD)
           version=$(node -p "require('./package.json').version")
           tag="v$version"
-          base_tag=""
-          while IFS= read -r candidate; do
-            case "$candidate" in
-              v[0-9]*.[0-9]*.[0-9]*)
-                if [ "$candidate" != "$tag" ]; then
-                  base_tag=$candidate
-                  break
-                fi
-                ;;
-            esac
-          done < <(git for-each-ref --merged="$sha" --sort=-version:refname --format='%(refname:short)' refs/tags)
+          base_tag=$(
+            TARGET_TAG="$tag" TARGET_SHA="$sha" node <<'NODE'
+          const { execFileSync } = require('node:child_process');
+          const exact = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+          const tuple = (tag) => exact.exec(tag)?.slice(1).map(Number);
+          const compare = (left, right) => {
+            for (let index = 0; index < 3; index += 1) {
+              if (left[index] !== right[index]) return left[index] - right[index];
+            }
+            return 0;
+          };
+          const target = tuple(process.env.TARGET_TAG);
+          if (!target) process.exit(2);
+          const names = execFileSync('git', [
+            'for-each-ref', `--merged=${process.env.TARGET_SHA}`,
+            '--format=%(refname:short)', 'refs/tags',
+          ], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+          const candidates = names.map((name) => ({ name, version: tuple(name) }))
+            .filter(({ version }) => version && compare(version, target) <= 0)
+            .sort((left, right) => compare(right.version, left.version)
+              || left.name.localeCompare(right.name));
+          if (candidates.length === 0) process.exit(2);
+          process.stdout.write(candidates[0].name);
+          NODE
+          )
           test -n "$base_tag"
           node scripts/release-gate.mjs \
             --tag "$tag" \
             --sha "$sha" \
             --base-tag "$base_tag" \
-            --event dispatch \
+            --event canary \
             --json-out "$RUNNER_TEMP/release-gate.json"
 
       - name: Audit source and dependency licences
@@ -118,6 +134,14 @@ jobs:
     needs: gate
     runs-on: macos-14
     steps:
+      - name: Assert non-publishing canary evidence
+        env:
+          GATE_EVENT: ${{ needs.gate.outputs.event }}
+          PUBLISH_ELIGIBLE: ${{ needs.gate.outputs.publish_eligible }}
+        run: |
+          test "$GATE_EVENT" = canary
+          test "$PUBLISH_ELIGIBLE" = false
+
       - name: Checkout gate-approved commit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:

@@ -49,13 +49,23 @@ inventory through GitHub Actions artifacts. The signed inventory is retained for
 one day; gate evidence and verifier provenance, checksums, and logs are retained
 for 14 days.
 
-The `ref` input defaults to `main`, but convenience is not authority: the release
-gate requires that the resolved commit already match its immutable `vX.Y.Z` tag,
-version files, changelog and compatibility stamps, and `origin/main` ancestry.
-An untagged or moved `main` fails before any signing secret is exposed. After the
-workflow is present on the default branch, dispatch it from GitHub Actions and
-inspect all three jobs plus the evidence artifact. Canary dispatch is an explicit
-enablement operation; repository-local checks do not dispatch it.
+The `ref` input defaults to `main`, but convenience is not authority. Canary mode
+requires the resolved commit to be reachable from `origin/main` and validates its
+version files, changelog and compatibility stamps, stable contracts, and changed
+path classification. Its canonical diff base is the highest reachable exact
+stable SemVer tag at or below the target version. This intentionally permits an
+untagged `main` commit after `vX.Y.Z` while the package still reports `X.Y.Z`; the
+same-version ancestor tag remains the immutable diff base. A caller-supplied
+older or injected tag cannot narrow or widen that diff.
+
+Gate evidence records both `event` and `publishEligible`. Canary evidence is
+always `event: canary` and `publishEligible: false`; the signed job checks both
+values before any secret-bearing step. Tag and manual-dispatch evidence remains
+publish-eligible only after exact tag-to-SHA binding succeeds, so canary evidence
+cannot be reused as release approval. After the workflow is present on the
+default branch, dispatch it from GitHub Actions and inspect all three jobs plus
+the evidence artifact. Canary dispatch is an explicit enablement operation;
+repository-local checks do not dispatch it.
 
 ## Resume and recovery
 
