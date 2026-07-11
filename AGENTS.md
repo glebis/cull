@@ -163,7 +163,7 @@ npm run hooks:install # Install bd hooks plus Cull pre-commit/pre-push checks
 npm run preflight:hook    # Fast commit-time checks
 npm run preflight:quick   # Frontend check and tests
 npm run preflight:full    # Full pre-push checks
-npm run preflight:release # Full + license audit + production build
+npm run preflight:release # Full + policy audits + compatibility + production build
 npm run land              # Verify, sync/rebase/push, and print final status
 ```
 
@@ -212,8 +212,7 @@ Hard-won pitfalls when doing TDD + per-issue-branch + merge work in this repo:
   only after a slow round-trip — cheaper to run the whole lib suite locally first.
 - **Pre-push `full` runs fmt + clippy + the whole test suite** (`scripts/preflight.sh full`);
   clippy is `cargo clippy --all-targets` *without* `-D warnings`, so pre-existing
-  warnings don't fail the push, but a new compile/test/fmt failure does. Use
-  `CULL_PREFLIGHT_SKIP_E2E=1 git push` to skip only the manual browser E2E gate.
+  warnings don't fail the push, but a new compile/test/fmt failure does.
 - **macOS path-canonicalization in tests:** `tempfile::tempdir()` returns
   `/var/folders/...` which `std::fs::canonicalize` resolves to `/private/var/...`.
   Any test that compares a canonicalized path against a tempdir prefix must
@@ -284,7 +283,6 @@ managed sections is preserved.
 - Use `CULL_HOOK_SKIP_CHECKS=1` sparingly, and mention it in handoff when used.
 - Use `CULL_PREFLIGHT_DRY_RUN=1` to print planned preflight commands without
   executing them.
-- Use `CULL_PREFLIGHT_SKIP_E2E=1` to skip browser E2E inside the release tier.
 
 ## Branch And Merge Safety
 

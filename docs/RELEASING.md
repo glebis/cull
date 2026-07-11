@@ -63,8 +63,7 @@ npm run release:cull -- state fail --version 0.2.6 --code BUILD_FAILED \
 ## Legacy manual flow
 
 ```bash
-CULL_PREFLIGHT_SKIP_E2E=1 npm run preflight -- release                  # gate
-cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden
+npm run preflight -- release                                           # deterministic local gate
 $EDITOR CHANGELOG.md docs/COMPATIBILITY.md                              # curate + stamp
 ```
 

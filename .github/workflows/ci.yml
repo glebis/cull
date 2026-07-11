@@ -6,6 +6,13 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend:
     name: Frontend checks
@@ -37,8 +44,40 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
       - name: Rust checks
         run: bash scripts/check-ci.sh rust
+
+  site:
+    name: Site checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run check
+
+      - name: Test
+        run: npm test -- --run
+
+      - name: Build
+        run: npm run build
 
   supply-chain:
     name: Supply-chain audit
@@ -48,6 +87,11 @@ jobs:
 
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@1.95.0
+
+      - name: Cache Rust audit tools
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
 
       - name: Install cargo-deny and cargo-audit
         uses: taiki-e/install-action@v2

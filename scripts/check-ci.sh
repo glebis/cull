@@ -7,11 +7,20 @@ target="${1:-all}"
 
 run_frontend() {
   npm ci
-  (cd site && npm ci)
   npm run lint:issues
   npm run check
   npm test
   npm run build
+}
+
+run_site() {
+  (
+    cd site
+    npm ci
+    npm run check
+    npm test -- --run
+    npm run build
+  )
 }
 
 run_rust() {
@@ -31,6 +40,7 @@ case "$target" in
   all)
     run_frontend
     run_rust
+    run_site
     ;;
   frontend)
     run_frontend
@@ -38,8 +48,11 @@ case "$target" in
   rust)
     run_rust
     ;;
+  site)
+    run_site
+    ;;
   *)
-    echo "Usage: $0 [all|frontend|rust]" >&2
+    echo "Usage: $0 [all|frontend|rust|site]" >&2
     exit 2
     ;;
 esac
