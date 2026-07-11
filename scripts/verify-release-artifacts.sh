@@ -66,6 +66,8 @@ done
 
 ARTIFACT_DIR="$(cd "$ARTIFACT_DIR" && pwd -P)"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=scripts/safe-cleanup-private.sh
+source "$repo_root/scripts/safe-cleanup-private.sh"
 
 dmg_name="Cull_${VERSION}_aarch64.dmg"
 archive_name="Cull_aarch64.app.tar.gz"
@@ -124,7 +126,7 @@ for (const name of ['release-provenance.json', 'checksums.txt', 'verification.lo
 }
 NODE
 
-for command_name in node shasum codesign spctl xcrun hdiutil plutil lipo minisign trash; do
+for command_name in node shasum codesign spctl xcrun hdiutil plutil lipo minisign mount; do
   require_command "$command_name"
 done
 if [[ $LAUNCH -eq 1 ]]; then
@@ -148,6 +150,11 @@ cleanup() {
   if [[ $attach_attempted -eq 1 ]]; then
     if hdiutil detach "$mount_dir" -quiet >>"$log_file" 2>&1; then
       attach_attempted=0
+    elif mount | grep -F " on $mount_dir (" >/dev/null 2>&1; then
+      printf 'artifact verification cleanup failed: active mount remains at %s; retaining private workdir %s\n' "$mount_dir" "$work_dir" >&2
+    else
+      printf 'artifact verification cleanup: detach returned nonzero but no active mount remains at %s\n' "$mount_dir" >&2
+      attach_attempted=0
     fi
   fi
   if [[ $verification_complete -ne 1 && -f "$published_manifest" ]]; then
@@ -165,9 +172,13 @@ for (const item of JSON.parse(fs.readFileSync(manifestPath, 'utf8')).reverse()) 
 }
 NODE
   fi
-  [[ ! -d "$evidence_stage" ]] || trash "$evidence_stage" >/dev/null 2>&1 || true
+  if [[ -d "$evidence_stage" ]] && ! safe_cleanup_private "$evidence_stage" "$OUT_DIR" '.cull-release-evidence.'; then
+    printf 'artifact verification cleanup failed: could not safely retire evidence staging %s\n' "$evidence_stage" >&2
+  fi
   if [[ $attach_attempted -eq 0 && -d "$work_dir" ]]; then
-    trash "$work_dir" >/dev/null 2>&1 || true
+    if ! safe_cleanup_private "$work_dir" "$(dirname "$work_dir")" 'cull-release-verify.'; then
+      printf 'artifact verification cleanup failed: could not safely retire private workdir %s\n' "$work_dir" >&2
+    fi
   fi
 }
 trap cleanup EXIT
@@ -354,13 +365,18 @@ const provenance = {
 fs.writeFileSync(output, JSON.stringify(provenance, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
 NODE
 
-trash "$work_dir"
+safe_cleanup_private "$work_dir" "$(dirname "$work_dir")" 'cull-release-verify.'
 
-node - "$evidence_stage" "$OUT_DIR" "$published_manifest" <<'NODE' || die 'evidence destinations changed or atomic publication failed'
+publish_ok=0
+trap '' INT TERM
+if node - "$evidence_stage" "$OUT_DIR" "$published_manifest" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
 const [stageDir, outDir, manifestPath] = process.argv.slice(2);
 const names = ['checksums.txt', 'release-provenance.json', 'verification.log'];
+const testMode = process.env.CULL_RELEASE_TEST_MODE === '1';
+const raceName = testMode ? process.env.CULL_VERIFY_TEST_RACE_PUBLISHED_NAME : '';
+const signalName = testMode ? process.env.CULL_VERIFY_TEST_SIGNAL_DURING_PUBLISH : '';
 const reservations = [];
 const published = [];
 const identity = stat => ({ dev: String(stat.dev), ino: String(stat.ino) });
@@ -379,15 +395,20 @@ try {
     const reserved = fs.fstatSync(fd, { bigint: true });
     fs.closeSync(fd);
     if (!reserved.isFile() || reserved.nlink !== 1n) throw new Error('unsafe reservation');
-    reservations.push({ name, source, destination, ...identity(reserved), consumed: false });
+    reservations.push({ name, source, destination, reservation: identity(reserved), sourceIdentity: identity(sourceStat), consumed: false });
   }
   for (const item of reservations) {
     const current = fs.lstatSync(item.destination, { bigint: true });
-    if (!matches(current, item)) throw new Error('reservation raced');
+    if (!matches(current, item.reservation)) throw new Error('reservation raced');
     fs.renameSync(item.source, item.destination);
     item.consumed = true;
+    if (raceName === item.name) {
+      fs.renameSync(item.destination, path.join(stageDir, `.original-${item.name}`));
+      fs.writeFileSync(item.destination, 'raced replacement\n', { flag: 'wx', mode: 0o600 });
+    }
+    if (signalName && published.length === 0) process.kill(process.ppid, signalName);
     const finalStat = fs.lstatSync(item.destination, { bigint: true });
-    if (!finalStat.isFile() || finalStat.isSymbolicLink() || finalStat.nlink !== 1n) throw new Error('unsafe published evidence');
+    if (!matches(finalStat, item.sourceIdentity)) throw new Error('published inode differs from staged evidence');
     published.push({ name: item.name, destination: item.destination, ...identity(finalStat) });
   }
   fs.writeFileSync(manifestPath, JSON.stringify(published), { flag: 'wx', mode: 0o600 });
@@ -401,15 +422,19 @@ try {
   for (const item of reservations.filter(item => !item.consumed)) {
     try {
       const current = fs.lstatSync(item.destination, { bigint: true });
-      if (matches(current, item)) fs.renameSync(item.destination, path.join(stageDir, `.reservation-${item.name}`));
+      if (matches(current, item.reservation)) fs.renameSync(item.destination, path.join(stageDir, `.reservation-${item.name}`));
     } catch {}
   }
   process.exit(1);
 }
 NODE
-if trash "$evidence_stage"; then
-  verification_complete=1
-else
-  die 'could not trash private evidence staging after publication'
+then
+  if safe_cleanup_private "$evidence_stage" "$OUT_DIR" '.cull-release-evidence.'; then
+    verification_complete=1
+    publish_ok=1
+  fi
 fi
+trap 'exit 130' INT
+trap 'exit 143' TERM
+[[ $publish_ok -eq 1 ]] || die 'evidence destinations changed, cleanup failed, or atomic publication failed'
 printf 'artifact verification passed for %s (%s)\n' "$TAG" "$COMMIT"

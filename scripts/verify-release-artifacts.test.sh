@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 verifier="$repo_root/scripts/verify-release-artifacts.sh"
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/cull-artifact-test.XXXXXX")"
 trap 'trash "$tmp_root" >/dev/null 2>&1 || true' EXIT
+real_node="$(command -v node)"
 
 pass_count=0
 
@@ -44,6 +45,7 @@ if [[ "$1" == "attach" ]]; then
       shift
     fi
   done
+  printf '%s\n' "$mountpoint" >"$FAKE_MOUNT_PATH_FILE"
   mkdir -p "$mountpoint/Cull.app/Contents/MacOS"
   : >"$mountpoint/Cull.app/Contents/Info.plist"
   : >"$mountpoint/Cull.app/Contents/MacOS/Cull"
@@ -57,6 +59,12 @@ if [[ "$1" == "detach" ]]; then
   exit "${FAKE_DETACH_STATUS:-0}"
 fi
 exit 1
+EOF
+  cat >"$bin_dir/mount" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${FAKE_MOUNT_ACTIVE:-0}" == 1 && -s "$FAKE_MOUNT_PATH_FILE" ]]; then
+  printf '/dev/disk-test on %s (apfs, local, read-only)\n' "$(cat "$FAKE_MOUNT_PATH_FILE")"
+fi
 EOF
   cat >"$bin_dir/plutil" <<'EOF'
 #!/usr/bin/env bash
@@ -100,6 +108,12 @@ for path in "$@"; do
   find "$path" -depth -delete
 done
 EOF
+  ln -s "$real_node" "$bin_dir/node"
+  for required_tool in bash shasum stat awk wc tr grep dirname mktemp mkdir cat git date cp find; do
+    if [[ ! -e "$bin_dir/$required_tool" ]]; then
+      ln -s "$(command -v "$required_tool")" "$bin_dir/$required_tool"
+    fi
+  done
   chmod +x "$bin_dir"/*
 }
 
@@ -139,13 +153,20 @@ run_case() {
   local artifacts="$case_dir/artifacts"
   local output="$case_dir/output"
   local bin_dir="$case_dir/bin"
-  mkdir -p "$case_dir"
+  local runner_temp="$case_dir/runner-temp"
+  mkdir -p "$case_dir" "$runner_temp"
   make_tools "$bin_dir"
   make_artifacts "$artifacts"
   "$setup" "$artifacts" "$output"
+  local case_path="$bin_dir:$PATH"
+  if [[ "${CASE_NO_TRASH:-0}" == 1 ]]; then
+    trash "$bin_dir/trash"
+    case_path="$bin_dir"
+  fi
 
   set +e
-  PATH="$bin_dir:$PATH" \
+  PATH="$case_path" \
+    RUNNER_TEMP="$runner_temp" \
     FAKE_CODESIGN_STATUS="${CASE_CODESIGN_STATUS:-0}" \
     FAKE_SPCTL_STATUS="${CASE_SPCTL_STATUS:-0}" \
     FAKE_MINISIGN_STATUS="${CASE_MINISIGN_STATUS:-0}" \
@@ -159,6 +180,11 @@ run_case() {
     FAKE_SOURCE_DIR="$artifacts" \
     FAKE_RACE_EVIDENCE="${CASE_RACE_EVIDENCE:-0}" \
     FAKE_RACE_EVIDENCE_OUT="$output" \
+    FAKE_MOUNT_ACTIVE="${CASE_MOUNT_ACTIVE:-0}" \
+    FAKE_MOUNT_PATH_FILE="$case_dir/mount-path" \
+    CULL_RELEASE_TEST_MODE=1 \
+    CULL_VERIFY_TEST_RACE_PUBLISHED_NAME="${CASE_RACE_PUBLISHED_NAME:-}" \
+    CULL_VERIFY_TEST_SIGNAL_DURING_PUBLISH="${CASE_SIGNAL_DURING_PUBLISH:-}" \
     bash "$verifier" \
       --artifact-dir "$artifacts" \
       --version 0.2.6 \
@@ -260,8 +286,14 @@ CASE_CODESIGN_STATUS=1 run_case failed-codesign fail setup_valid
 CASE_SPCTL_STATUS=1 run_case failed-gatekeeper fail setup_valid
 CASE_STAPLER_STATUS=1 run_case failed-stapler fail setup_valid
 CASE_DETACH_STATUS=1 run_case failed-detach fail setup_valid
-CASE_ATTACH_STATUS=1 run_case partial-attach-failure fail setup_valid
+CASE_ATTACH_STATUS=1 CASE_DETACH_STATUS=1 run_case partial-attach-failure fail setup_valid
 [[ -s "$tmp_root/partial-attach-failure/detach-marker" ]] || fail 'partial attach failure did not attempt detach'
+if find "$tmp_root/partial-attach-failure/runner-temp" -maxdepth 1 -type d -name 'cull-release-verify.*' | grep -q .; then
+  fail 'unmounted partial attach retained its private workdir'
+fi
+CASE_ATTACH_STATUS=1 CASE_DETACH_STATUS=1 CASE_MOUNT_ACTIVE=1 run_case active-partial-mount-retained fail setup_valid
+find "$tmp_root/active-partial-mount-retained/runner-temp" -maxdepth 1 -type d -name 'cull-release-verify.*' | grep -q . || fail 'active partial mount workdir was not retained'
+rg -q 'active mount.*retaining|retaining.*active mount' "$tmp_root/active-partial-mount-retained/stderr" || fail 'active mount retention was not reported'
 CASE_ALLOW_EXISTING_EVIDENCE=1 run_case preexisting-evidence fail setup_preexisting_evidence
 [[ "$(cat "$tmp_root/preexisting-evidence/output/release-provenance.json")" == 'old provenance' ]] || fail 'preexisting provenance was modified'
 [[ "$(cat "$tmp_root/preexisting-evidence/output/checksums.txt")" == 'old checksums' ]] || fail 'preexisting checksums were modified'
@@ -276,6 +308,14 @@ expected_archive_sha="$(printf 'archive\n' | shasum -a 256 | awk '{print $1}')"
 rg -q "^${expected_archive_sha}  Cull_aarch64.app.tar.gz$" "$tmp_root/source-mutation-after-snapshot/output/checksums.txt" || fail 'evidence did not hash acquired snapshot'
 CASE_ALLOW_EXISTING_EVIDENCE=1 CASE_RACE_EVIDENCE=1 run_case evidence-destination-race fail setup_valid
 [[ -d "$tmp_root/evidence-destination-race/output/checksums.txt" ]] || fail 'raced evidence directory was overwritten or moved into'
+CASE_ALLOW_EXISTING_EVIDENCE=1 CASE_RACE_PUBLISHED_NAME=checksums.txt run_case post-rename-inode-race fail setup_valid
+[[ "$(cat "$tmp_root/post-rename-inode-race/output/checksums.txt")" == 'raced replacement' ]] || fail 'post-rename replacement was overwritten or accepted'
+CASE_NO_TRASH=1 run_case cleanup-without-trash pass setup_valid
+if find "$tmp_root/cleanup-without-trash/runner-temp" -maxdepth 1 -type d -name 'cull-release-verify.*' | grep -q .; then
+  fail 'fallback cleanup left invocation-owned workdir in place'
+fi
+find "$tmp_root/cleanup-without-trash/runner-temp/.cull-cleanup-quarantine" -mindepth 1 -maxdepth 1 -type d | grep -q . || fail 'fallback cleanup did not quarantine the private workdir'
+CASE_SIGNAL_DURING_PUBLISH=SIGTERM run_case signal-during-evidence-publish pass setup_valid
 
 wrapper_case="$tmp_root/wrapper-cleanup"
 wrapper_source="$wrapper_case/source"
@@ -285,7 +325,9 @@ wrapper_bin="$wrapper_case/bin"
 mkdir -p "$wrapper_runner_temp"
 make_tools "$wrapper_bin"
 make_artifacts "$wrapper_source" 0.2.5
-PATH="$wrapper_bin:$PATH" RUNNER_TEMP="$wrapper_runner_temp" FAKE_BUNDLE_VERSION=0.2.5 \
+trash "$wrapper_bin/trash"
+PATH="$wrapper_bin" RUNNER_TEMP="$wrapper_runner_temp" FAKE_BUNDLE_VERSION=0.2.5 \
+  FAKE_MOUNT_PATH_FILE="$wrapper_case/mount-path" \
   bash "$repo_root/scripts/clean-machine-dmg-gate.sh" \
     --dmg-path "$wrapper_source/Cull_0.2.5_aarch64.dmg" \
     --archive-path "$wrapper_source/Cull_aarch64.app.tar.gz" \

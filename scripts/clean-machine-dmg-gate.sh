@@ -38,8 +38,8 @@ owned_staging_root=""
 
 cleanup_owned_staging() {
   if [[ -n "$owned_staging_root" && -d "$owned_staging_root" ]]; then
-    if ! trash "$owned_staging_root"; then
-      printf 'clean-machine-dmg-gate: failed to trash owned staging directory: %s\n' "$owned_staging_root" >&2
+    if ! safe_cleanup_private "$owned_staging_root" "$(dirname "$owned_staging_root")" 'cull-local-artifacts.'; then
+      printf 'clean-machine-dmg-gate: failed to safely retire owned staging directory: %s\n' "$owned_staging_root" >&2
       return 1
     fi
     owned_staging_root=""
@@ -82,6 +82,8 @@ done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_root"
+# shellcheck source=scripts/safe-cleanup-private.sh
+source "$repo_root/scripts/safe-cleanup-private.sh"
 
 if [[ $BUILD -eq 1 ]]; then
   npm run tauri build -- --target aarch64-apple-darwin
@@ -94,7 +96,6 @@ commit="$(git rev-parse HEAD)"
 run_id="${GITHUB_RUN_ID:-$(date +%s)}"
 
 if [[ -z "$ARTIFACT_DIR" ]]; then
-  command -v trash >/dev/null 2>&1 || die 'trash is required to own local artifact staging safely'
   dmg_name="Cull_${version}_aarch64.dmg"
   archive_name="Cull_aarch64.app.tar.gz"
 

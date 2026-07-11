@@ -80,8 +80,18 @@ npm run clean-machine-dmg-gate -- --build                          # verify + ch
 npm run clean-machine-dmg-gate:build-install                       # builds, checks, installs from DMG on a clean macOS machine
 ```
 
-Use `-- --allow-local-dev` for local ad-hoc builds where notarization checks are
-expected to fail.
+The gate has no trust bypass. It snapshots the exact DMG, updater archive,
+base64-wrapped signature, and `latest.json`, validates the mounted app and
+updater signature, and only then publishes checksums, logs, and provenance.
+`--install` copies the verified app beneath `$RUNNER_TEMP/install`; it never
+modifies the system app directory.
+
+Private verification and staging directories are retired with the user's
+`trash` command when available. Minimal CI runners do not need that nonstandard
+tool: the safe-cleanup helper instead atomically moves only validated,
+invocation-owned directories to `.cull-cleanup-quarantine` beneath
+`$RUNNER_TEMP` (or `$TMPDIR`) for runner-level cleanup. It never recursively
+deletes, follows symlinks, crosses filesystems, or moves an active DMG mount.
 
 ## Notes
 
