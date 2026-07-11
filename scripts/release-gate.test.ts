@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 
 const gate = resolve(import.meta.dirname, 'release-gate.mjs');
 const canaryWorkflowPath = resolve(import.meta.dirname, '../.github/workflows/release-canary.yml');
+const releaseWorkflowPath = resolve(import.meta.dirname, '../.github/workflows/release.yml');
 const DB_CONTRACT = 'cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden';
 const EXPORT_CONTRACT = 'cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test export_compat_golden';
 
@@ -458,5 +459,126 @@ describe('release gate', () => {
     expect(verifyJob).toContain('release-provenance.json');
     expect(verifyJob).toContain('checksums.txt');
     expect(verifyJob).toContain('verification.log');
+  });
+
+  it('defines a pinned four-stage release workflow with immutable tag dispatch', () => {
+    const workflow = readFileSync(releaseWorkflowPath, 'utf8');
+    const jobs = workflow.split('\njobs:\n')[1];
+
+    expect(workflow).toMatch(/workflow_dispatch:\n\s+inputs:\n\s+tag:\n[\s\S]*?required: true[\s\S]*?type: string/);
+    expect(workflow).toContain("tags:\n      - 'v*'");
+    expect(workflow).toContain('group: release-${{ inputs.tag || github.ref_name }}');
+    expect(workflow).toContain('cancel-in-progress: false');
+    expect([...jobs.matchAll(/^  ([a-zA-Z0-9_-]+):$/gm)].map((match) => match[1]))
+      .toEqual(['release-gate', 'signed-build', 'verify-artifact', 'publish']);
+    expect(workflowJob(workflow, 'signed-build')).toContain('needs: release-gate');
+    expect(workflowJob(workflow, 'verify-artifact')).toContain('needs: [release-gate, signed-build]');
+    expect(workflowJob(workflow, 'publish')).toContain('needs: [release-gate, signed-build, verify-artifact]');
+
+    const actionUses = [...workflow.matchAll(/uses:\s+([^\s#]+)/g)].map((match) => match[1]);
+    expect(actionUses.length).toBeGreaterThan(0);
+    expect(actionUses.every((action) => /@[0-9a-f]{40}$/.test(action))).toBe(true);
+  });
+
+  it('keeps checks and verification secret-free and grants write only to publish', () => {
+    const workflow = readFileSync(releaseWorkflowPath, 'utf8');
+    const gateJob = workflowJob(workflow, 'release-gate');
+    const buildJob = workflowJob(workflow, 'signed-build');
+    const verifyJob = workflowJob(workflow, 'verify-artifact');
+    const publishJob = workflowJob(workflow, 'publish');
+
+    expect(workflow).toContain('permissions:\n  contents: read');
+    expect(gateJob).not.toContain('${{ secrets.');
+    expect(verifyJob).not.toContain('${{ secrets.');
+    expect(gateJob).not.toContain('contents: write');
+    expect(buildJob).not.toContain('contents: write');
+    expect(verifyJob).not.toContain('contents: write');
+    expect(publishJob).toContain('contents: write');
+    expect(buildJob).toContain('${{ secrets.APPLE_CERTIFICATE }}');
+    expect(buildJob).toContain('${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}');
+    expect(buildJob).not.toContain('HOMEBREW_TAP_TOKEN');
+    expect(publishJob).not.toContain('${{ secrets.');
+    expect(publishJob).not.toContain('APPLE_CERTIFICATE');
+    expect(publishJob).not.toContain('TAURI_SIGNING_PRIVATE_KEY');
+  });
+
+  it('finishes every gate including conditional E2E before exposing signing secrets', () => {
+    const workflow = readFileSync(releaseWorkflowPath, 'utf8');
+    const gateJob = workflowJob(workflow, 'release-gate');
+    const buildJob = workflowJob(workflow, 'signed-build');
+
+    expect(gateJob).toContain('fetch-depth: 0');
+    expect(gateJob).toContain('persist-credentials: false');
+    expect(gateJob).toContain('git cat-file -t "refs/tags/$tag"');
+    expect(gateJob).toContain('node scripts/release-gate.mjs');
+    expect(gateJob).toContain('--event "$event"');
+    for (const command of [
+      'npm run audit:licenses',
+      'bash scripts/supply-chain-audit.sh check',
+      DB_CONTRACT,
+      EXPORT_CONTRACT,
+      'bash tests/e2e/run-e2e.sh',
+      'npm run build',
+    ]) expect(gateJob).toContain(command);
+    expect(gateJob).toContain("if: steps.release_gate.outputs.e2e_required == 'true'");
+    expect(buildJob).toContain('GATE_EVENT: ${{ needs.release-gate.outputs.event }}');
+    expect(buildJob).toContain('PUBLISH_ELIGIBLE: ${{ needs.release-gate.outputs.publish-eligible }}');
+    expect(buildJob).toContain('test "$PUBLISH_ELIGIBLE" = true');
+    expect(buildJob.indexOf('Assert publish-eligible gate evidence'))
+      .toBeLessThan(buildJob.indexOf('${{ secrets.'));
+  });
+
+  it('binds exact signed and verified artifacts to this run without publishing from build', () => {
+    const workflow = readFileSync(releaseWorkflowPath, 'utf8');
+    const buildJob = workflowJob(workflow, 'signed-build');
+    const verifyJob = workflowJob(workflow, 'verify-artifact');
+
+    expect(buildJob).toContain('tauri-apps/tauri-action@');
+    expect(buildJob).toContain('--target aarch64-apple-darwin --bundles dmg');
+    for (const forbidden of ['tagName:', 'releaseName:', 'releaseDraft:', 'gh release']) {
+      expect(buildJob).not.toContain(forbidden);
+    }
+    expect(buildJob).toContain('name: cull-signed-${{ github.run_id }}-${{ needs.release-gate.outputs.sha }}');
+    expect(buildJob).toContain('artifact-id: ${{ steps.upload_signed.outputs.artifact-id }}');
+    expect(buildJob).toContain('artifact-digest: ${{ steps.upload_signed.outputs.artifact-digest }}');
+    expect(verifyJob).toContain('artifact-ids: ${{ needs.signed-build.outputs.artifact-id }}');
+    expect(verifyJob).toContain('bash scripts/verify-release-artifacts.sh');
+    expect(verifyJob).toContain('--run-id "${{ github.run_id }}"');
+    expect(verifyJob).toContain('name: cull-verified-${{ github.run_id }}-${{ needs.release-gate.outputs.sha }}');
+    expect(verifyJob).toContain('artifact-id: ${{ steps.upload_verified.outputs.artifact-id }}');
+    expect(verifyJob).toContain('artifact-digest: ${{ steps.upload_verified.outputs.artifact-digest }}');
+    expect(verifyJob).not.toContain('gh release');
+  });
+
+  it('keeps automatic publication disabled and publishes only exact verified files', () => {
+    const workflow = readFileSync(releaseWorkflowPath, 'utf8');
+    const publishJob = workflowJob(workflow, 'publish');
+    const releaseDocs = readFileSync(resolve(import.meta.dirname, '../docs/RELEASING.md'), 'utf8');
+
+    expect(publishJob).toContain("vars.CULL_RELEASE_PUBLISH_ENABLED == 'true'");
+    expect(publishJob).toContain("needs.release-gate.outputs.publish-eligible == 'true'");
+    expect(publishJob).toContain("needs.release-gate.outputs.event == 'tag'");
+    expect(publishJob).toContain("needs.release-gate.outputs.event == 'dispatch'");
+    expect(publishJob).toContain('environment: release-publish');
+    expect(publishJob).toContain('artifact-ids: ${{ needs.verify-artifact.outputs.artifact-id }}');
+    expect(publishJob).toContain("schema !== 'cull.release.gate.v1'");
+    expect(publishJob).toContain('gate.publishEligible !== true');
+    expect(publishJob).toContain("gate.event !== 'tag' && gate.event !== 'dispatch'");
+    expect(publishJob).toContain("schema !== 'cull.release.provenance.v1'");
+    expect(publishJob).toContain("heading === 'Unreleased'");
+    expect(publishJob).toContain('gh release create "$TAG" --verify-tag --draft');
+    expect(publishJob).toContain('gh release upload "$TAG"');
+    expect(publishJob).not.toContain('--clobber');
+    expect(publishJob).not.toContain('tauri-action');
+    expect(publishJob).not.toContain('npm run build');
+    expect(publishJob).not.toContain('cargo ');
+    expect(publishJob).toContain('git ls-remote --tags origin');
+    expect(publishJob.indexOf('Verify remote tag target before publication'))
+      .toBeLessThan(publishJob.indexOf('gh release edit "$TAG" --draft=false'));
+    expect(publishJob).toContain('gh release edit "$TAG" --draft=false');
+    expect(releaseDocs).toContain('`CULL_RELEASE_PUBLISH_ENABLED` to equal `true`');
+    expect(releaseDocs).toContain('must remain absent or false');
+    expect(releaseDocs).toContain('29156442963');
+    expect(releaseDocs).toContain('Apple notarization returned HTTP 403');
   });
 });

@@ -67,6 +67,43 @@ default branch, dispatch it from GitHub Actions and inspect all three jobs plus
 the evidence artifact. Canary dispatch is an explicit enablement operation;
 repository-local checks do not dispatch it.
 
+## Verified automatic publication
+
+`.github/workflows/release.yml` accepts only a pushed `vX.Y.Z` tag or a manual
+`tag` input naming an existing annotated `vX.Y.Z` tag. It resolves that tag to an
+immutable commit and runs four ordered jobs:
+
+1. `release-gate` is secret-free and completes licence, supply-chain,
+   compatibility, stable-export, conditional browser E2E, and frontend build
+   checks.
+2. `signed-build` receives Apple and Tauri signing material only after the gate
+   record says `publishEligible: true`; it builds and uploads a private exact
+   inventory without creating a release.
+3. `verify-artifact` is secret-free. It downloads the build by immutable artifact
+   ID, verifies the signed DMG/updater inventory, and uploads the exact verified
+   files, checksums, provenance, log, and gate record as a new run-bound artifact.
+4. `publish` has the workflow's only `contents: write` permission and is protected
+   by the `release-publish` environment. It validates both evidence records,
+   hashes, file identities, artifact/run binding, and the matching curated
+   `CHANGELOG.md` section before creating or reusing an empty draft. It uploads
+   explicit verified files without rebuilding or replacing assets, verifies the
+   uploaded digests, rechecks the remote annotated tag target, then publishes the
+   draft.
+
+Automatic publication is intentionally disabled. The `publish` job also requires
+the repository variable `CULL_RELEASE_PUBLISH_ENABLED` to equal `true`; that
+variable must remain absent or false until the release enablement checklist has
+recorded a successful signed and verified canary. Canary run `29156442963`
+compiled and codesigned successfully, but Apple notarization returned HTTP 403
+because the Apple developer team has an outstanding agreement. Resolve that
+external agreement and complete the Task 10 canary before creating the variable.
+
+A failed build or verification publishes nothing. A publication failure leaves
+the existing tag and any draft intact for explicit recovery; automation never
+deletes or rewrites a tag/release and never uses asset clobbering. A partial draft
+with assets fails closed instead of silently replacing them. Homebrew promotion
+is a separate post-publication workflow and is not dispatched by this stage.
+
 ## Resume and recovery
 
 ```bash
@@ -128,6 +165,8 @@ DMG mount.
 
 - `main` lives in the `cull-main-landing` worktree; release from there.
 - Releases are **on demand** (ship-when-meaningful), not on a calendar.
-- `release.yml` triggers on `v*` tags (and `workflow_dispatch`).
+- `release.yml` triggers on `v*` tags (and a required `workflow_dispatch` tag),
+  but publication remains disabled while `CULL_RELEASE_PUBLISH_ENABLED` is absent
+  or false.
 - Disk: a full Rust rebuild is large; `cargo clean` an idle worktree's `target/`
   if low on space (see AGENTS.md).
