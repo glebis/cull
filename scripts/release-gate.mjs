@@ -7,12 +7,14 @@ import {
   fsyncSync,
   mkdirSync,
   openSync,
+  realpathSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeSync,
 } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { classifyE2EPaths } from './cull-release-core.mjs';
 
 const DB_CONTRACT = 'cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden';
@@ -100,6 +102,46 @@ function requireAncestor(repoRoot, ancestor, descendant, code, message) {
   const result = git(repoRoot, ['merge-base', '--is-ancestor', ancestor, descendant], { allowFailure: true });
   if (result.status === 1) throw gateError(code, message);
   if (result.status !== 0) throw gateError('GIT_FAILED', 'Git ancestry check failed', { status: result.status });
+}
+
+function isAncestor(repoRoot, ancestor, descendant) {
+  const result = git(repoRoot, ['merge-base', '--is-ancestor', ancestor, descendant], { allowFailure: true });
+  if (result.status === 0) return true;
+  if (result.status === 1) return false;
+  throw gateError('GIT_FAILED', 'Git ancestry check failed', { status: result.status });
+}
+
+function semverTuple(tag) {
+  const match = SEMVER_TAG.exec(tag);
+  if (!match) return null;
+  return match.slice(1).map(Number);
+}
+
+function compareSemver(left, right) {
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index] !== right[index]) return left[index] - right[index];
+  }
+  return 0;
+}
+
+function canonicalBaseTag(repoRoot, targetTag, targetSha) {
+  const targetVersion = semverTuple(targetTag);
+  const names = gitText(repoRoot, 'for-each-ref', '--format=%(refname:short)', 'refs/tags')
+    .split('\n').filter(Boolean);
+  const candidates = [];
+  for (const name of names) {
+    if (name === targetTag) continue;
+    const version = semverTuple(name);
+    if (!version || compareSemver(version, targetVersion) >= 0) continue;
+    const sha = resolveTag(repoRoot, name, 'Candidate base');
+    if (isAncestor(repoRoot, sha, targetSha)) candidates.push({ name, version, sha });
+  }
+  candidates.sort((left, right) => compareSemver(right.version, left.version)
+    || left.name.localeCompare(right.name));
+  if (candidates.length === 0) {
+    throw gateError('BASE_TAG_NOT_FOUND', `No reachable release tag exists before ${targetTag}`);
+  }
+  return candidates[0];
 }
 
 function objectFile(repoRoot, sha, path) {
@@ -226,19 +268,19 @@ export function assertE2ERecorded(classifiedPaths, evidence) {
   }
 }
 
-function changedPaths(repoRoot, baseTag, sha) {
-  const result = git(repoRoot, ['diff', '--name-only', '--diff-filter=ACDMRTUXB', '-z', `${baseTag}..${sha}`], {
+function changedPaths(repoRoot, baseSha, sha) {
+  const result = git(repoRoot, ['diff', '--no-renames', '--name-only', '--diff-filter=ACDMRTUXB', '-z', `${baseSha}..${sha}`], {
     encoding: 'buffer',
   });
   return result.stdout.toString('utf8').split('\0').filter(Boolean);
 }
 
-function writeJsonAtomic(path, record) {
+function stageJsonAtomic(path, record) {
   const directory = dirname(path);
-  mkdirSync(directory, { recursive: true });
   const temporary = `${path}.tmp-${process.pid}-${randomBytes(12).toString('hex')}`;
   let fd;
   try {
+    mkdirSync(directory, { recursive: true });
     fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     const bytes = Buffer.from(`${JSON.stringify(record, null, 2)}\n`);
     let offset = 0;
@@ -246,16 +288,36 @@ function writeJsonAtomic(path, record) {
     fsyncSync(fd);
     closeSync(fd);
     fd = undefined;
-    renameSync(temporary, path);
-    const directoryFd = openSync(directory, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try { fsyncSync(directoryFd); } finally { closeSync(directoryFd); }
   } catch (cause) {
     if (fd !== undefined) {
       try { closeSync(fd); } catch { /* preserve the original failure */ }
     }
     try { unlinkSync(temporary); } catch { /* unique temp may not exist */ }
-    throw gateError('OUTPUT_WRITE_FAILED', `Unable to write ${path}`, { cause: cause.message });
+    throw gateError('OUTPUT_WRITE_FAILED', `Unable to stage ${path}`, { cause: cause.message });
   }
+  let finalized = false;
+  return {
+    finalize() {
+      try {
+        renameSync(temporary, path);
+        finalized = true;
+        const directoryFd = openSync(directory, constants.O_RDONLY | constants.O_NOFOLLOW);
+        try { fsyncSync(directoryFd); } finally { closeSync(directoryFd); }
+      } catch (cause) {
+        throw gateError('OUTPUT_WRITE_FAILED', `Unable to finalize ${path}`, { cause: cause.message });
+      }
+    },
+    abort() {
+      if (finalized) return;
+      try { unlinkSync(temporary); } catch (cause) {
+        if (cause.code !== 'ENOENT') {
+          throw gateError('OUTPUT_WRITE_FAILED', `Unable to remove staged output ${temporary}`, {
+            cause: cause.message,
+          });
+        }
+      }
+    },
+  };
 }
 
 export function buildGateRecord(repoRoot, input) {
@@ -263,9 +325,14 @@ export function buildGateRecord(repoRoot, input) {
   if (tagSha !== input.sha) {
     throw gateError('TAG_SHA_MISMATCH', `Tag ${input.tag} does not resolve to ${input.sha}`, { tagSha });
   }
-  const baseSha = resolveTag(repoRoot, input.baseTag, 'Base');
   if (input.baseTag === input.tag) throw gateError('INPUT_INVALID', 'Base and release tags must differ');
-  requireAncestor(repoRoot, baseSha, input.sha, 'BASE_NOT_ANCESTOR', 'Base tag is not an ancestor of the release SHA');
+  const base = canonicalBaseTag(repoRoot, input.tag, input.sha);
+  if (input.baseTag !== base.name) {
+    throw gateError('BASE_TAG_MISMATCH', `Expected canonical previous release tag ${base.name}`, {
+      supplied: input.baseTag,
+      expected: base.name,
+    });
+  }
   const originMain = gitText(repoRoot, 'rev-parse', '--verify', 'origin/main^{commit}');
   requireAncestor(repoRoot, input.sha, originMain, 'NOT_ON_ORIGIN_MAIN', 'Release SHA is not reachable from origin/main');
 
@@ -274,7 +341,7 @@ export function buildGateRecord(repoRoot, input) {
   const versions = versionSnapshotAt(repoRoot, input.sha, config);
   assertVersions(versions, version);
   assertReleaseStamps(repoRoot, input.sha, config, version);
-  const paths = changedPaths(repoRoot, input.baseTag, input.sha);
+  const paths = changedPaths(repoRoot, base.sha, input.sha);
   const matchedPaths = classifyE2EPaths(paths, config.e2e);
   const e2e = { required: matchedPaths.length > 0, matchedPaths };
   assertE2ERecorded(matchedPaths, e2e);
@@ -292,6 +359,46 @@ export function buildGateRecord(repoRoot, input) {
   };
 }
 
+function pathIdentity(path) {
+  const absolute = resolve(path);
+  const suffix = [];
+  let existing = absolute;
+  while (true) {
+    try {
+      const canonical = realpathSync(existing);
+      let stat = null;
+      try { stat = statSync(absolute); } catch (cause) {
+        if (cause.code !== 'ENOENT') throw cause;
+      }
+      return {
+        canonical: resolve(canonical, ...suffix),
+        inode: stat ? `${stat.dev}:${stat.ino}` : null,
+      };
+    } catch (cause) {
+      if (cause.code !== 'ENOENT') {
+        throw gateError('OUTPUT_INVALID', `Unable to resolve output path ${absolute}`, { cause: cause.message });
+      }
+      const parent = dirname(existing);
+      if (parent === existing) throw gateError('OUTPUT_INVALID', `No existing ancestor for ${absolute}`);
+      suffix.unshift(basename(existing));
+      existing = parent;
+    }
+  }
+}
+
+function assertDistinctOutputs(jsonOut, workflowOutput) {
+  if (!workflowOutput) return;
+  if (/[\0\r\n]/.test(workflowOutput)) {
+    throw gateError('OUTPUT_INVALID', 'GITHUB_OUTPUT contains control characters');
+  }
+  const jsonIdentity = pathIdentity(jsonOut);
+  const workflowIdentity = pathIdentity(workflowOutput);
+  if (jsonIdentity.canonical === workflowIdentity.canonical
+    || (jsonIdentity.inode !== null && jsonIdentity.inode === workflowIdentity.inode)) {
+    throw gateError('OUTPUT_ALIAS', '--json-out and GITHUB_OUTPUT must be distinct files');
+  }
+}
+
 function appendWorkflowOutputs(path, record, jsonOut) {
   if (!path) return;
   const lines = [
@@ -302,16 +409,29 @@ function appendWorkflowOutputs(path, record, jsonOut) {
     `e2e_required=${record.e2e.required}`,
     `json_out=${jsonOut}`,
   ];
-  appendFileSync(path, `${lines.join('\n')}\n`, { encoding: 'utf8' });
+  try {
+    appendFileSync(path, `${lines.join('\n')}\n`, { encoding: 'utf8' });
+  } catch (cause) {
+    throw gateError('WORKFLOW_OUTPUT_FAILED', 'Unable to append GitHub workflow outputs', {
+      cause: cause.message,
+    });
+  }
 }
 
 function main() {
   const repoRoot = resolve(process.cwd());
   try {
     const input = parseArgs(process.argv.slice(2));
+    assertDistinctOutputs(input.jsonOut, process.env.GITHUB_OUTPUT);
     const record = buildGateRecord(repoRoot, input);
-    writeJsonAtomic(input.jsonOut, record);
-    appendWorkflowOutputs(process.env.GITHUB_OUTPUT, record, input.jsonOut);
+    const staged = stageJsonAtomic(input.jsonOut, record);
+    try {
+      appendWorkflowOutputs(process.env.GITHUB_OUTPUT, record, input.jsonOut);
+      staged.finalize();
+    } catch (cause) {
+      staged.abort();
+      throw cause;
+    }
     process.stdout.write(`${JSON.stringify(record)}\n`);
   } catch (cause) {
     const error = {

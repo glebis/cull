@@ -1,5 +1,14 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  linkSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -57,14 +66,15 @@ function fixture() {
   metadata(root, '1.2.3');
   write(root, 'CHANGELOG.md', '# Changelog\n\n## [1.2.3] - 2026-07-01\n');
   write(root, 'docs/COMPATIBILITY.md', 'Last updated: 1.2.3 (2026-07-01)\n');
-  write(root, 'src/lib/api.ts', 'export const version = 1;\n');
+  const stableApiBody = Array.from({ length: 20 }, (_, index) => `export const stable${index} = ${index};`).join('\n');
+  write(root, 'src/lib/api.ts', `export const version = 1;\n${stableApiBody}\n`);
   const baseSha = commit(root, 'base');
   git(root, 'tag', 'v1.2.3', baseSha);
 
   metadata(root, '1.2.4');
   write(root, 'CHANGELOG.md', '# Changelog\n\n## [1.2.4] - 2026-07-11\n\n### Fixed\n\n- Safe release gates.\n\n## [1.2.3] - 2026-07-01\n');
   write(root, 'docs/COMPATIBILITY.md', 'Last updated: 1.2.4 (2026-07-11)\n');
-  write(root, 'src/lib/api.ts', 'export const version = 2;\n');
+  write(root, 'src/lib/api.ts', `export const version = 2;\n${stableApiBody}\n`);
   const sha = commit(root, 'release');
   git(root, 'tag', 'v1.2.4', sha);
   git(root, 'update-ref', 'refs/remotes/origin/main', sha);
@@ -77,6 +87,7 @@ function run(root: string, options: Partial<{
   baseTag: string;
   event: string;
   jsonOut: string;
+  env: NodeJS.ProcessEnv;
 }> = {}) {
   const sha = options.sha ?? git(root, 'rev-parse', 'v1.2.4^{commit}');
   const jsonOut = options.jsonOut ?? join(root, 'gate-output.json');
@@ -87,7 +98,7 @@ function run(root: string, options: Partial<{
     '--base-tag', options.baseTag ?? 'v1.2.3',
     '--event', options.event ?? 'tag',
     '--json-out', jsonOut,
-  ], { cwd: root, encoding: 'utf8' });
+  ], { cwd: root, encoding: 'utf8', env: { ...process.env, ...options.env } });
   return { execution, jsonOut };
 }
 
@@ -159,6 +170,30 @@ describe('release gate', () => {
     expectRejected(run(root, { sha: divergent }), 'NOT_ON_ORIGIN_MAIN');
   });
 
+  it('classifies the covered source of a rename even when Git rename detection is enabled', () => {
+    const { root } = fixture();
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    renameSync(join(root, 'src/lib/api.ts'), join(root, 'docs/renamed-api.ts'));
+    const sha = commit(root, 'rename covered source outside E2E policy');
+    git(root, 'tag', '-f', 'v1.2.4', sha);
+    git(root, 'update-ref', 'refs/remotes/origin/main', sha);
+    git(root, 'config', 'diff.renames', 'copies');
+
+    const result = run(root, { sha });
+    expect(result.execution.status).toBe(0);
+    expect(JSON.parse(result.execution.stdout).e2e).toEqual({
+      required: true,
+      matchedPaths: ['src/lib/api.ts'],
+    });
+  });
+
+  it('rejects a reachable injected lower tag that would narrow the release diff', () => {
+    const { root, sha } = fixture();
+    git(root, 'tag', 'v1.2.2', sha);
+
+    expectRejected(run(root, { baseTag: 'v1.2.2' }), 'BASE_TAG_MISMATCH');
+  });
+
   it('rejects mismatched version metadata at the release commit', () => {
     const { root } = fixture();
     const released = git(root, 'rev-parse', 'HEAD');
@@ -200,6 +235,46 @@ describe('release gate', () => {
   it('requires existing tag identity for manual dispatch', () => {
     const { root } = fixture();
     expectRejected(run(root, { tag: 'v1.2.5', event: 'dispatch' }), 'TAG_NOT_FOUND');
+  });
+
+  it('rejects the JSON artifact and workflow output as the same normalized destination', () => {
+    const { root } = fixture();
+    const output = join(root, 'nested', '..', 'gate.json');
+    const normalized = join(root, 'gate.json');
+
+    expectRejected(run(root, { jsonOut: output, env: { GITHUB_OUTPUT: normalized } }), 'OUTPUT_ALIAS');
+    expect(existsSync(normalized)).toBe(false);
+  });
+
+  it.each([
+    ['symbolic link', (alias: string, target: string) => symlinkSync(target, alias)],
+    ['hard link', (alias: string, target: string) => linkSync(target, alias)],
+  ])('rejects a %s alias of the workflow output before writing', (_name, makeAlias) => {
+    const { root } = fixture();
+    const workflowOutput = join(root, 'github-output');
+    const jsonOut = join(root, 'gate-alias.json');
+    writeFileSync(workflowOutput, 'sentinel\n');
+    makeAlias(jsonOut, workflowOutput);
+
+    expectRejected(run(root, { jsonOut, env: { GITHUB_OUTPUT: workflowOutput } }), 'OUTPUT_ALIAS');
+    expect(readFileSync(workflowOutput, 'utf8')).toBe('sentinel\n');
+  });
+
+  it('does not create a JSON artifact when appending workflow outputs fails', () => {
+    const { root } = fixture();
+    const jsonOut = join(root, 'gate.json');
+
+    expectRejected(run(root, { jsonOut, env: { GITHUB_OUTPUT: root } }), 'WORKFLOW_OUTPUT_FAILED');
+    expect(existsSync(jsonOut)).toBe(false);
+  });
+
+  it('preserves a preexisting JSON destination when appending workflow outputs fails', () => {
+    const { root } = fixture();
+    const jsonOut = join(root, 'gate.json');
+    writeFileSync(jsonOut, 'preexisting artifact\n');
+
+    expectRejected(run(root, { jsonOut, env: { GITHUB_OUTPUT: root } }), 'WORKFLOW_OUTPUT_FAILED');
+    expect(readFileSync(jsonOut, 'utf8')).toBe('preexisting artifact\n');
   });
 
   it('keeps local release preflight deterministic and complete', () => {
