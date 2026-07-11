@@ -108,21 +108,23 @@ case "$OUT_DIR/" in
   "$ARTIFACT_DIR/"*) die 'out must not be inside artifact-dir' ;;
 esac
 
-for stale in release-provenance.json checksums.txt; do
-  if [[ -d "$OUT_DIR/$stale" && ! -L "$OUT_DIR/$stale" ]]; then
-    die "cannot replace output directory: $stale"
-  fi
-  [[ ! -e "$OUT_DIR/$stale" && ! -L "$OUT_DIR/$stale" ]] || unlink "$OUT_DIR/$stale"
-done
-if [[ -L "$OUT_DIR/verification.log" ]]; then
-  die 'verification.log must not be a symlink'
-fi
-if [[ -d "$OUT_DIR/verification.log" ]]; then
-  die 'verification.log must not be a directory'
-fi
-[[ ! -e "$OUT_DIR/verification.log" ]] || unlink "$OUT_DIR/verification.log"
+node - "$OUT_DIR" <<'NODE' || die 'output directory or evidence destinations are unsafe'
+const fs = require('node:fs');
+const out = process.argv[2];
+const outStat = fs.lstatSync(out, { bigint: true });
+if (!outStat.isDirectory() || outStat.isSymbolicLink()) process.exit(1);
+if ((outStat.mode & 0o022n) !== 0n) process.exit(1);
+for (const name of ['release-provenance.json', 'checksums.txt', 'verification.log']) {
+  try {
+    fs.lstatSync(`${out}/${name}`);
+    process.exit(1);
+  } catch (error) {
+    if (error.code !== 'ENOENT') process.exit(1);
+  }
+}
+NODE
 
-for command_name in node shasum codesign spctl xcrun hdiutil plutil lipo minisign; do
+for command_name in node shasum codesign spctl xcrun hdiutil plutil lipo minisign trash; do
   require_command "$command_name"
 done
 if [[ $LAUNCH -eq 1 ]]; then
@@ -132,25 +134,40 @@ if [[ $LAUNCH -eq 1 ]]; then
 fi
 
 work_dir="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/cull-release-verify.${RUN_ID}.XXXXXX")"
+snapshot_dir="$work_dir/artifacts"
 mount_dir="$work_dir/mount"
-mkdir "$mount_dir"
-log_file="$OUT_DIR/verification.log"
-set -o noclobber
+mkdir "$snapshot_dir" "$mount_dir"
+evidence_stage="$(mktemp -d "$OUT_DIR/.cull-release-evidence.${RUN_ID}.XXXXXX")"
+log_file="$evidence_stage/verification.log"
 : >"$log_file"
-set +o noclobber
-mounted=0
+attach_attempted=0
 verification_complete=0
+published_manifest="$evidence_stage/.published-manifest.json"
 
 cleanup() {
-  if [[ $mounted -eq 1 ]]; then
-    hdiutil detach "$mount_dir" -quiet >>"$log_file" 2>&1 || true
-    mounted=0
+  if [[ $attach_attempted -eq 1 ]]; then
+    if hdiutil detach "$mount_dir" -quiet >>"$log_file" 2>&1; then
+      attach_attempted=0
+    fi
   fi
-  rmdir "$mount_dir" >/dev/null 2>&1 || true
-  rmdir "$work_dir" >/dev/null 2>&1 || true
-  if [[ $verification_complete -ne 1 ]]; then
-    [[ ! -e "$OUT_DIR/release-provenance.json" && ! -L "$OUT_DIR/release-provenance.json" ]] || unlink "$OUT_DIR/release-provenance.json" >/dev/null 2>&1 || true
-    [[ ! -e "$OUT_DIR/checksums.txt" && ! -L "$OUT_DIR/checksums.txt" ]] || unlink "$OUT_DIR/checksums.txt" >/dev/null 2>&1 || true
+  if [[ $verification_complete -ne 1 && -f "$published_manifest" ]]; then
+    node - "$published_manifest" "$evidence_stage" <<'NODE' >/dev/null 2>&1 || true
+const fs = require('node:fs');
+const [manifestPath, stageDir] = process.argv.slice(2);
+for (const item of JSON.parse(fs.readFileSync(manifestPath, 'utf8')).reverse()) {
+  try {
+    const stat = fs.lstatSync(item.destination, { bigint: true });
+    if (stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1n &&
+        String(stat.dev) === item.dev && String(stat.ino) === item.ino) {
+      fs.renameSync(item.destination, `${stageDir}/${item.name}`);
+    }
+  } catch {}
+}
+NODE
+  fi
+  [[ ! -d "$evidence_stage" ]] || trash "$evidence_stage" >/dev/null 2>&1 || true
+  if [[ $attach_attempted -eq 0 && -d "$work_dir" ]]; then
+    trash "$work_dir" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -164,9 +181,53 @@ run_logged() {
   "$@" >>"$log_file" 2>&1 || die "$label check failed"
 }
 
-node - "$ARTIFACT_DIR/$metadata_name" "$VERSION" "$TAG" "$archive_name" "$ARTIFACT_DIR/$signature_name" "$repo_root/src-tauri/tauri.conf.json" <<'NODE' || die 'latest.json does not exactly bind the verified updater asset'
+node - "$ARTIFACT_DIR" "$snapshot_dir" "${required_names[@]}" <<'NODE' || die 'artifact changed or became unsafe while acquiring immutable snapshots'
 const fs = require('node:fs');
-const [metadataPath, version, tag, archiveName, signaturePath, configPath] = process.argv.slice(2);
+const path = require('node:path');
+const [sourceDir, snapshotDir, ...names] = process.argv.slice(2);
+const { O_RDONLY, O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW } = fs.constants;
+const sameIdentity = (a, b) => a.dev === b.dev && a.ino === b.ino;
+const sameStableMetadata = (a, b) => sameIdentity(a, b) && a.size === b.size &&
+  a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs && a.nlink === b.nlink;
+for (const name of names) {
+  const source = path.join(sourceDir, name);
+  const destination = path.join(snapshotDir, name);
+  let sourceFd;
+  let destinationFd;
+  try {
+    const beforePath = fs.lstatSync(source, { bigint: true });
+    if (!beforePath.isFile() || beforePath.isSymbolicLink() || beforePath.nlink !== 1n) throw new Error('unsafe source');
+    sourceFd = fs.openSync(source, O_RDONLY | O_NOFOLLOW);
+    const beforeFd = fs.fstatSync(sourceFd, { bigint: true });
+    if (!beforeFd.isFile() || beforeFd.nlink !== 1n || !sameStableMetadata(beforePath, beforeFd)) throw new Error('source race');
+    destinationFd = fs.openSync(destination, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600);
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    let position = 0;
+    for (;;) {
+      const count = fs.readSync(sourceFd, buffer, 0, buffer.length, position);
+      if (count === 0) break;
+      let written = 0;
+      while (written < count) written += fs.writeSync(destinationFd, buffer, written, count - written);
+      position += count;
+    }
+    fs.fsyncSync(destinationFd);
+    const afterFd = fs.fstatSync(sourceFd, { bigint: true });
+    const afterPath = fs.lstatSync(source, { bigint: true });
+    const snapshot = fs.fstatSync(destinationFd, { bigint: true });
+    if (!sameStableMetadata(beforeFd, afterFd) || !sameStableMetadata(afterFd, afterPath)) throw new Error('source mutated');
+    if (!snapshot.isFile() || snapshot.nlink !== 1n || snapshot.size !== afterFd.size) throw new Error('bad snapshot');
+  } catch {
+    process.exit(1);
+  } finally {
+    if (destinationFd !== undefined) fs.closeSync(destinationFd);
+    if (sourceFd !== undefined) fs.closeSync(sourceFd);
+  }
+}
+NODE
+
+node - "$snapshot_dir/$metadata_name" "$VERSION" "$TAG" "$archive_name" "$snapshot_dir/$signature_name" "$repo_root/src-tauri/tauri.conf.json" "$work_dir/updater.sig" <<'NODE' || die 'latest.json or updater signature encoding is invalid'
+const fs = require('node:fs');
+const [metadataPath, version, tag, archiveName, signaturePath, configPath, decodedSignaturePath] = process.argv.slice(2);
 let metadata;
 try {
   metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
@@ -194,6 +255,13 @@ if (url.protocol !== endpoint.protocol || url.host !== endpoint.host) process.ex
 if (pathParts.length !== expectedParts.length || pathParts.some((part, index) => part !== expectedParts[index])) process.exit(1);
 const detachedSignature = fs.readFileSync(signaturePath, 'utf8').trim();
 if (!detachedSignature || entry.signature.trim() !== detachedSignature) process.exit(1);
+if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(detachedSignature)) process.exit(1);
+const decodedBuffer = Buffer.from(detachedSignature, 'base64');
+if (decodedBuffer.toString('base64') !== detachedSignature) process.exit(1);
+const decodedSignature = decodedBuffer.toString('utf8');
+if (!decodedSignature.startsWith('untrusted comment: signature from minisign secret key\n')) process.exit(1);
+if (!decodedSignature.includes('\ntrusted comment:')) process.exit(1);
+fs.writeFileSync(decodedSignaturePath, decodedSignature, { mode: 0o600, flag: 'wx' });
 NODE
 
 node - "$repo_root/src-tauri/tauri.conf.json" "$work_dir/updater.pub" <<'NODE' || die 'could not load configured Tauri updater public key'
@@ -206,10 +274,10 @@ const decoded = Buffer.from(encoded, 'base64').toString('utf8');
 if (!decoded.includes('minisign public key') || !/^RW[QRT][A-Za-z0-9+/=]+$/m.test(decoded)) process.exit(1);
 fs.writeFileSync(outputPath, decoded, { mode: 0o600, flag: 'wx' });
 NODE
-run_logged updater-signature minisign -Vm "$ARTIFACT_DIR/$archive_name" -x "$ARTIFACT_DIR/$signature_name" -p "$work_dir/updater.pub"
+run_logged updater-signature minisign -Vm "$snapshot_dir/$archive_name" -x "$work_dir/updater.sig" -p "$work_dir/updater.pub"
 
-run_logged dmg-attach hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$ARTIFACT_DIR/$dmg_name"
-mounted=1
+attach_attempted=1
+run_logged dmg-attach hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$snapshot_dir/$dmg_name"
 app_path="$mount_dir/Cull.app"
 [[ -d "$app_path" && ! -L "$app_path" ]] || die 'mounted DMG must contain Cull.app at its root'
 info_plist="$app_path/Contents/Info.plist"
@@ -238,22 +306,22 @@ if [[ $LAUNCH -eq 1 ]]; then
 fi
 
 run_logged dmg-detach hdiutil detach "$mount_dir" -quiet
-mounted=0
+attach_attempted=0
 
 declare -a asset_shas=()
 declare -a asset_sizes=()
-: >"$work_dir/checksums.txt"
+: >"$evidence_stage/checksums.txt"
 for name in "${required_names[@]}"; do
-  sha="$(shasum -a 256 "$ARTIFACT_DIR/$name" | awk '{print $1}')"
+  sha="$(shasum -a 256 "$snapshot_dir/$name" | awk '{print $1}')"
   [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || die "could not compute SHA-256 for $name"
-  size="$(wc -c <"$ARTIFACT_DIR/$name" | tr -d '[:space:]')"
+  size="$(wc -c <"$snapshot_dir/$name" | tr -d '[:space:]')"
   [[ "$size" =~ ^[0-9]+$ ]] || die "could not compute size for $name"
   asset_shas+=("$sha")
   asset_sizes+=("$size")
-  printf '%s  %s\n' "$sha" "$name" >>"$work_dir/checksums.txt"
+  printf '%s  %s\n' "$sha" "$name" >>"$evidence_stage/checksums.txt"
 done
 
-node - "$work_dir/release-provenance.json" "$VERSION" "$TAG" "$COMMIT" "$RUN_ID" \
+node - "$evidence_stage/release-provenance.json" "$VERSION" "$TAG" "$COMMIT" "$RUN_ID" \
   "$dmg_name" "${asset_shas[0]}" "${asset_sizes[0]}" \
   "$archive_name" "${asset_shas[1]}" "${asset_sizes[1]}" \
   "$signature_name" "${asset_shas[2]}" "${asset_sizes[2]}" \
@@ -286,7 +354,62 @@ const provenance = {
 fs.writeFileSync(output, JSON.stringify(provenance, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
 NODE
 
-mv "$work_dir/checksums.txt" "$OUT_DIR/checksums.txt"
-mv "$work_dir/release-provenance.json" "$OUT_DIR/release-provenance.json"
-verification_complete=1
+trash "$work_dir"
+
+node - "$evidence_stage" "$OUT_DIR" "$published_manifest" <<'NODE' || die 'evidence destinations changed or atomic publication failed'
+const fs = require('node:fs');
+const path = require('node:path');
+const [stageDir, outDir, manifestPath] = process.argv.slice(2);
+const names = ['checksums.txt', 'release-provenance.json', 'verification.log'];
+const reservations = [];
+const published = [];
+const identity = stat => ({ dev: String(stat.dev), ino: String(stat.ino) });
+const matches = (stat, expected) => stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1n &&
+  String(stat.dev) === expected.dev && String(stat.ino) === expected.ino;
+try {
+  const outStat = fs.lstatSync(outDir, { bigint: true });
+  for (const name of names) {
+    const source = path.join(stageDir, name);
+    const sourceStat = fs.lstatSync(source, { bigint: true });
+    if (!sourceStat.isFile() || sourceStat.isSymbolicLink() || sourceStat.nlink !== 1n || sourceStat.dev !== outStat.dev) throw new Error('unsafe staged evidence');
+    const destination = path.join(outDir, name);
+    try { fs.lstatSync(destination); throw new Error('destination exists'); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    const fd = fs.openSync(destination, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+    const reserved = fs.fstatSync(fd, { bigint: true });
+    fs.closeSync(fd);
+    if (!reserved.isFile() || reserved.nlink !== 1n) throw new Error('unsafe reservation');
+    reservations.push({ name, source, destination, ...identity(reserved), consumed: false });
+  }
+  for (const item of reservations) {
+    const current = fs.lstatSync(item.destination, { bigint: true });
+    if (!matches(current, item)) throw new Error('reservation raced');
+    fs.renameSync(item.source, item.destination);
+    item.consumed = true;
+    const finalStat = fs.lstatSync(item.destination, { bigint: true });
+    if (!finalStat.isFile() || finalStat.isSymbolicLink() || finalStat.nlink !== 1n) throw new Error('unsafe published evidence');
+    published.push({ name: item.name, destination: item.destination, ...identity(finalStat) });
+  }
+  fs.writeFileSync(manifestPath, JSON.stringify(published), { flag: 'wx', mode: 0o600 });
+} catch (error) {
+  for (const item of [...published].reverse()) {
+    try {
+      const current = fs.lstatSync(item.destination, { bigint: true });
+      if (matches(current, item)) fs.renameSync(item.destination, path.join(stageDir, item.name));
+    } catch {}
+  }
+  for (const item of reservations.filter(item => !item.consumed)) {
+    try {
+      const current = fs.lstatSync(item.destination, { bigint: true });
+      if (matches(current, item)) fs.renameSync(item.destination, path.join(stageDir, `.reservation-${item.name}`));
+    } catch {}
+  }
+  process.exit(1);
+}
+NODE
+if trash "$evidence_stage"; then
+  verification_complete=1
+else
+  die 'could not trash private evidence staging after publication'
+fi
 printf 'artifact verification passed for %s (%s)\n' "$TAG" "$COMMIT"

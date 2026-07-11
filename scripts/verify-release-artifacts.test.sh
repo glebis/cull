@@ -47,9 +47,13 @@ if [[ "$1" == "attach" ]]; then
   mkdir -p "$mountpoint/Cull.app/Contents/MacOS"
   : >"$mountpoint/Cull.app/Contents/Info.plist"
   : >"$mountpoint/Cull.app/Contents/MacOS/Cull"
-  exit "${FAKE_ATTACH_STATUS:-0}"
+  if [[ "${FAKE_ATTACH_STATUS:-0}" != 0 ]]; then
+    exit "$FAKE_ATTACH_STATUS"
+  fi
+  exit 0
 fi
 if [[ "$1" == "detach" ]]; then
+  [[ -z "${FAKE_DETACH_MARKER:-}" ]] || printf 'detached\n' >>"$FAKE_DETACH_MARKER"
   exit "${FAKE_DETACH_STATUS:-0}"
 fi
 exit 1
@@ -72,7 +76,29 @@ args=" $* "
 [[ "$args" == *" -Vm "* ]] || exit 41
 [[ "$args" == *" -x "* ]] || exit 42
 [[ "$args" == *" -p "* ]] || exit 43
+x_path=""
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == '-x' ]]; then
+    x_path=$2
+    shift 2
+  else
+    shift
+  fi
+done
+grep -q '^untrusted comment: signature from minisign secret key$' "$x_path" || exit 44
+if [[ "${FAKE_MUTATE_SOURCE:-0}" == 1 ]]; then
+  printf 'mutated-after-snapshot\n' >"$FAKE_SOURCE_DIR/Cull_aarch64.app.tar.gz"
+fi
 exit "${FAKE_MINISIGN_STATUS:-0}"
+EOF
+  cat >"$bin_dir/trash" <<'EOF'
+#!/usr/bin/env bash
+for path in "$@"; do
+  if [[ "${FAKE_RACE_EVIDENCE:-0}" == 1 && "$path" == *'/cull-release-verify.'* ]]; then
+    mkdir -p "$FAKE_RACE_EVIDENCE_OUT/checksums.txt"
+  fi
+  find "$path" -depth -delete
+done
 EOF
   chmod +x "$bin_dir"/*
 }
@@ -83,7 +109,11 @@ make_artifacts() {
   mkdir -p "$dir"
   printf 'dmg\n' >"$dir/Cull_${version}_aarch64.dmg"
   printf 'archive\n' >"$dir/Cull_aarch64.app.tar.gz"
-  printf 'signature-value\n' >"$dir/Cull_aarch64.app.tar.gz.sig"
+  node - "$dir/Cull_aarch64.app.tar.gz.sig" <<'NODE'
+const fs = require('node:fs');
+const text = 'untrusted comment: signature from minisign secret key\nRUTESTSIGNATUREVALUE==\ntrusted comment: timestamp:1\nRUTESTTRUSTEDVALUE==\n';
+fs.writeFileSync(process.argv[2], Buffer.from(text, 'utf8').toString('base64') + '\n');
+NODE
   node - "$dir/latest.json" "$version" <<'NODE'
 const fs = require('node:fs');
 const [path, version] = process.argv.slice(2);
@@ -93,7 +123,7 @@ fs.writeFileSync(path, JSON.stringify({
   pub_date: '2026-07-10T00:00:00Z',
   platforms: {
     'darwin-aarch64': {
-      signature: 'signature-value',
+      signature: fs.readFileSync(path.replace(/latest\.json$/, 'Cull_aarch64.app.tar.gz.sig'), 'utf8').trim(),
       url: 'https://github.com/glebis/cull/releases/download/v0.2.6/Cull_aarch64.app.tar.gz'
     }
   }
@@ -123,6 +153,12 @@ run_case() {
     FAKE_ARCHS="${CASE_ARCHS:-arm64}" \
     FAKE_STAPLER_STATUS="${CASE_STAPLER_STATUS:-0}" \
     FAKE_DETACH_STATUS="${CASE_DETACH_STATUS:-0}" \
+    FAKE_ATTACH_STATUS="${CASE_ATTACH_STATUS:-0}" \
+    FAKE_DETACH_MARKER="$case_dir/detach-marker" \
+    FAKE_MUTATE_SOURCE="${CASE_MUTATE_SOURCE:-0}" \
+    FAKE_SOURCE_DIR="$artifacts" \
+    FAKE_RACE_EVIDENCE="${CASE_RACE_EVIDENCE:-0}" \
+    FAKE_RACE_EVIDENCE_OUT="$output" \
     bash "$verifier" \
       --artifact-dir "$artifacts" \
       --version 0.2.6 \
@@ -140,7 +176,7 @@ run_case() {
   if [[ "$expected" == fail && $status -eq 0 ]]; then
     fail "$name expected failure"
   fi
-  if [[ "$expected" == fail && ( -e "$output/release-provenance.json" || -e "$output/checksums.txt" ) ]]; then
+  if [[ "$expected" == fail && "${CASE_ALLOW_EXISTING_EVIDENCE:-0}" != 1 && ( -e "$output/release-provenance.json" || -e "$output/checksums.txt" ) ]]; then
     fail "$name left success evidence after failure"
   fi
   pass_count=$((pass_count + 1))
@@ -148,7 +184,7 @@ run_case() {
 }
 
 setup_valid() { :; }
-setup_missing_signature() { unlink "$1/Cull_aarch64.app.tar.gz.sig"; }
+setup_missing_signature() { trash "$1/Cull_aarch64.app.tar.gz.sig"; }
 setup_extra_asset() { printf 'unexpected\n' >"$1/extra.zip"; }
 setup_stale_metadata() {
   node - "$1/latest.json" <<'NODE'
@@ -169,9 +205,9 @@ fs.writeFileSync(path, JSON.stringify(data));
 NODE
 }
 setup_signature_mismatch() {
-  printf 'different-signature\n' >"$1/Cull_aarch64.app.tar.gz.sig"
+  printf 'ZGlmZmVyZW50LXNpZ25hdHVyZQo=\n' >"$1/Cull_aarch64.app.tar.gz.sig"
 }
-setup_stale_success_evidence() {
+setup_preexisting_evidence() {
   mkdir -p "$2"
   printf 'old provenance\n' >"$2/release-provenance.json"
   printf 'old checksums\n' >"$2/checksums.txt"
@@ -185,14 +221,20 @@ setup_log_symlink() {
 setup_symlink_asset() {
   local outside="$tmp_root/outside.dmg"
   printf 'outside\n' >"$outside"
-  unlink "$1/Cull_0.2.6_aarch64.dmg"
+  trash "$1/Cull_0.2.6_aarch64.dmg"
   ln -s "$outside" "$1/Cull_0.2.6_aarch64.dmg"
 }
 setup_hardlink_asset() {
   local outside="$tmp_root/outside-archive"
   printf 'outside\n' >"$outside"
-  unlink "$1/Cull_aarch64.app.tar.gz"
+  trash "$1/Cull_aarch64.app.tar.gz"
   ln "$outside" "$1/Cull_aarch64.app.tar.gz"
+}
+setup_hardlink_evidence() {
+  local victim="$tmp_root/evidence-victim"
+  printf 'do-not-touch\n' >"$victim"
+  mkdir -p "$2"
+  ln "$victim" "$2/checksums.txt"
 }
 
 run_case valid pass setup_valid
@@ -218,11 +260,42 @@ CASE_CODESIGN_STATUS=1 run_case failed-codesign fail setup_valid
 CASE_SPCTL_STATUS=1 run_case failed-gatekeeper fail setup_valid
 CASE_STAPLER_STATUS=1 run_case failed-stapler fail setup_valid
 CASE_DETACH_STATUS=1 run_case failed-detach fail setup_valid
-CASE_STAPLER_STATUS=1 run_case stale-success-evidence fail setup_stale_success_evidence
+CASE_ATTACH_STATUS=1 run_case partial-attach-failure fail setup_valid
+[[ -s "$tmp_root/partial-attach-failure/detach-marker" ]] || fail 'partial attach failure did not attempt detach'
+CASE_ALLOW_EXISTING_EVIDENCE=1 run_case preexisting-evidence fail setup_preexisting_evidence
+[[ "$(cat "$tmp_root/preexisting-evidence/output/release-provenance.json")" == 'old provenance' ]] || fail 'preexisting provenance was modified'
+[[ "$(cat "$tmp_root/preexisting-evidence/output/checksums.txt")" == 'old checksums' ]] || fail 'preexisting checksums were modified'
 run_case symlink-substitution fail setup_symlink_asset
 run_case hardlink-substitution fail setup_hardlink_asset
 run_case output-log-symlink fail setup_log_symlink
 [[ "$(cat "$tmp_root/log-victim")" == 'do-not-touch' ]] || fail 'output log symlink target was modified'
+CASE_ALLOW_EXISTING_EVIDENCE=1 run_case hardlink-evidence fail setup_hardlink_evidence
+[[ "$(cat "$tmp_root/evidence-victim")" == 'do-not-touch' ]] || fail 'hard-linked evidence target was modified'
+CASE_MUTATE_SOURCE=1 run_case source-mutation-after-snapshot pass setup_valid
+expected_archive_sha="$(printf 'archive\n' | shasum -a 256 | awk '{print $1}')"
+rg -q "^${expected_archive_sha}  Cull_aarch64.app.tar.gz$" "$tmp_root/source-mutation-after-snapshot/output/checksums.txt" || fail 'evidence did not hash acquired snapshot'
+CASE_ALLOW_EXISTING_EVIDENCE=1 CASE_RACE_EVIDENCE=1 run_case evidence-destination-race fail setup_valid
+[[ -d "$tmp_root/evidence-destination-race/output/checksums.txt" ]] || fail 'raced evidence directory was overwritten or moved into'
+
+wrapper_case="$tmp_root/wrapper-cleanup"
+wrapper_source="$wrapper_case/source"
+wrapper_runner_temp="$wrapper_case/runner-temp"
+wrapper_output="$wrapper_case/output"
+wrapper_bin="$wrapper_case/bin"
+mkdir -p "$wrapper_runner_temp"
+make_tools "$wrapper_bin"
+make_artifacts "$wrapper_source" 0.2.5
+PATH="$wrapper_bin:$PATH" RUNNER_TEMP="$wrapper_runner_temp" FAKE_BUNDLE_VERSION=0.2.5 \
+  bash "$repo_root/scripts/clean-machine-dmg-gate.sh" \
+    --dmg-path "$wrapper_source/Cull_0.2.5_aarch64.dmg" \
+    --archive-path "$wrapper_source/Cull_aarch64.app.tar.gz" \
+    --signature-path "$wrapper_source/Cull_aarch64.app.tar.gz.sig" \
+    --out-dir "$wrapper_output" >/dev/null
+if find "$wrapper_runner_temp" -maxdepth 1 -type d -name 'cull-local-artifacts.*' | grep -q .; then
+  fail 'clean-machine wrapper leaked its owned staging directory'
+fi
+pass_count=$((pass_count + 1))
+printf 'ok %d - wrapper-owned-staging-cleanup\n' "$pass_count"
 
 if rg -n '/Applications|rm -rf' "$repo_root/scripts/clean-machine-dmg-gate.sh"; then
   fail 'clean-machine gate still mutates /Applications or uses rm -rf'

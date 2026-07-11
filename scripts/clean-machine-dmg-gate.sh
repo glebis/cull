@@ -34,6 +34,29 @@ DMG_PATH=""
 ARCHIVE_PATH=""
 SIGNATURE_PATH=""
 OUT_DIR="docs/release-audit-2026-06-09"
+owned_staging_root=""
+
+cleanup_owned_staging() {
+  if [[ -n "$owned_staging_root" && -d "$owned_staging_root" ]]; then
+    if ! trash "$owned_staging_root"; then
+      printf 'clean-machine-dmg-gate: failed to trash owned staging directory: %s\n' "$owned_staging_root" >&2
+      return 1
+    fi
+    owned_staging_root=""
+  fi
+}
+# shellcheck disable=SC2329 # invoked indirectly by the EXIT trap
+finish() {
+  local original_status=$?
+  trap - EXIT
+  if ! cleanup_owned_staging; then
+    exit 1
+  fi
+  exit "$original_status"
+}
+trap finish EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -71,6 +94,7 @@ commit="$(git rev-parse HEAD)"
 run_id="${GITHUB_RUN_ID:-$(date +%s)}"
 
 if [[ -z "$ARTIFACT_DIR" ]]; then
+  command -v trash >/dev/null 2>&1 || die 'trash is required to own local artifact staging safely'
   dmg_name="Cull_${version}_aarch64.dmg"
   archive_name="Cull_aarch64.app.tar.gz"
 
@@ -99,8 +123,8 @@ if [[ -z "$ARTIFACT_DIR" ]]; then
     [[ -n "$path" && -f "$path" && ! -L "$path" ]] || die "local signed artifact not found or unsafe: ${path:-<unset>}"
   done
 
-  staging_root="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/cull-local-artifacts.${run_id}.XXXXXX")"
-  ARTIFACT_DIR="$staging_root/artifacts"
+  owned_staging_root="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/cull-local-artifacts.${run_id}.XXXXXX")"
+  ARTIFACT_DIR="$owned_staging_root/artifacts"
   mkdir "$ARTIFACT_DIR"
   cp "$DMG_PATH" "$ARTIFACT_DIR/$dmg_name"
   cp "$ARCHIVE_PATH" "$ARTIFACT_DIR/$archive_name"
@@ -134,4 +158,10 @@ args=(
 )
 [[ $INSTALL -eq 0 ]] || args+=(--launch)
 
-exec "$repo_root/scripts/verify-release-artifacts.sh" "${args[@]}"
+set +e
+"$repo_root/scripts/verify-release-artifacts.sh" "${args[@]}"
+exit_code=$?
+set -e
+cleanup_owned_staging
+trap - EXIT
+exit "$exit_code"
