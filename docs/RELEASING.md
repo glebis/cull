@@ -80,15 +80,18 @@ immutable commit and runs four ordered jobs:
    record says `publishEligible: true`; it builds and uploads a private exact
    inventory without creating a release.
 3. `verify-artifact` is secret-free. It downloads the build by immutable artifact
-   ID, verifies the signed DMG/updater inventory, and uploads the exact verified
-   files, checksums, provenance, log, and gate record as a new run-bound artifact.
+   ID only after the Actions REST metadata matches the expected name, run, commit,
+   expiry state, and upload digest. It verifies the signed DMG/updater inventory
+   and uploads the exact verified files, checksums, provenance, log, and gate
+   record as a new run-bound artifact.
 4. `publish` has the workflow's only `contents: write` permission and is protected
    by the `release-publish` environment. It validates both evidence records,
    hashes, file identities, artifact/run binding, and the matching curated
    `CHANGELOG.md` section before creating or reusing an empty draft. It uploads
    explicit verified files without rebuilding or replacing assets, verifies the
-   uploaded digests, rechecks the remote annotated tag target, then publishes the
-   draft.
+   uploaded digests, rechecks both the remote annotated tag object and its peeled
+   commit, publishes the draft without an intervening action, and immediately
+   checks both tag identities again.
 
 Automatic publication is intentionally disabled. The `publish` job also requires
 the repository variable `CULL_RELEASE_PUBLISH_ENABLED` to equal `true`; that
@@ -97,6 +100,9 @@ recorded a successful signed and verified canary. Canary run `29156442963`
 compiled and codesigned successfully, but Apple notarization returned HTTP 403
 because the Apple developer team has an outstanding agreement. Resolve that
 external agreement and complete the Task 10 canary before creating the variable.
+Task 10 tag rules must also protect release tag creation and updates before
+enablement; the workflow's before/after identity checks detect a race but cannot
+substitute for repository tag protection.
 
 A failed build or verification publishes nothing. A publication failure leaves
 the existing tag and any draft intact for explicit recovery; automation never

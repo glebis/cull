@@ -26,6 +26,7 @@ jobs:
       version: ${{ steps.release_gate.outputs.version }}
       tag: ${{ steps.release_gate.outputs.tag }}
       sha: ${{ steps.release_gate.outputs.sha }}
+      tag-object-sha: ${{ steps.release_gate.outputs.tag_object_sha }}
       base-tag: ${{ steps.release_gate.outputs.base_tag }}
       e2e-required: ${{ steps.release_gate.outputs.e2e_required }}
       event: ${{ steps.release_gate.outputs.event }}
@@ -311,11 +312,39 @@ jobs:
           node-version-file: .node-version
           cache: npm
 
+      - name: Validate signed artifact identity before download
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          ARTIFACT_ID: ${{ needs.signed-build.outputs.artifact-id }}
+          ARTIFACT_NAME: ${{ needs.signed-build.outputs.artifact-name }}
+          ARTIFACT_DIGEST: ${{ needs.signed-build.outputs.artifact-digest }}
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+          EXPECTED_SHA: ${{ needs.release-gate.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          gh api "repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID" > "$RUNNER_TEMP/signed-artifact-metadata.json"
+          ARTIFACT_JSON="$RUNNER_TEMP/signed-artifact-metadata.json" node <<'NODE'
+          const fs = require('node:fs');
+          const artifact = JSON.parse(fs.readFileSync(process.env.ARTIFACT_JSON, 'utf8'));
+          if (!/^[0-9]+$/.test(process.env.ARTIFACT_ID || '') ||
+              !/^[0-9a-f]{64}$/.test(process.env.ARTIFACT_DIGEST || '')) process.exit(2);
+          const expectedDigest = `sha256:${process.env.ARTIFACT_DIGEST}`;
+          if (String(artifact.id) !== process.env.ARTIFACT_ID || artifact.name !== process.env.ARTIFACT_NAME ||
+              String(artifact.workflow_run?.id) !== process.env.EXPECTED_RUN_ID ||
+              artifact.workflow_run?.head_sha !== process.env.EXPECTED_SHA || artifact.expired !== false ||
+              artifact.digest !== expectedDigest) process.exit(2);
+          NODE
+
       - name: Download exact private signed inventory
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           artifact-ids: ${{ needs.signed-build.outputs.artifact-id }}
           path: ${{ runner.temp }}/cull-signed
+          merge-multiple: true
 
       - name: Download immutable gate record
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -419,17 +448,46 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Validate verified artifact identity before download
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          ARTIFACT_ID: ${{ needs.verify-artifact.outputs.artifact-id }}
+          ARTIFACT_NAME: ${{ needs.verify-artifact.outputs.artifact-name }}
+          ARTIFACT_DIGEST: ${{ needs.verify-artifact.outputs.artifact-digest }}
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+          EXPECTED_SHA: ${{ needs.release-gate.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          gh api "repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID" > "$RUNNER_TEMP/verified-artifact-metadata.json"
+          ARTIFACT_JSON="$RUNNER_TEMP/verified-artifact-metadata.json" node <<'NODE'
+          const fs = require('node:fs');
+          const artifact = JSON.parse(fs.readFileSync(process.env.ARTIFACT_JSON, 'utf8'));
+          if (!/^[0-9]+$/.test(process.env.ARTIFACT_ID || '') ||
+              !/^[0-9a-f]{64}$/.test(process.env.ARTIFACT_DIGEST || '')) process.exit(2);
+          const expectedDigest = `sha256:${process.env.ARTIFACT_DIGEST}`;
+          if (String(artifact.id) !== process.env.ARTIFACT_ID || artifact.name !== process.env.ARTIFACT_NAME ||
+              String(artifact.workflow_run?.id) !== process.env.EXPECTED_RUN_ID ||
+              artifact.workflow_run?.head_sha !== process.env.EXPECTED_SHA || artifact.expired !== false ||
+              artifact.digest !== expectedDigest) process.exit(2);
+          NODE
+
       - name: Download exact verified release package
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           artifact-ids: ${{ needs.verify-artifact.outputs.artifact-id }}
           path: ${{ runner.temp }}/cull-verified
+          merge-multiple: true
 
       - name: Validate evidence, inventory, checksums, and curated notes
         env:
           VERSION: ${{ needs.release-gate.outputs.version }}
           TAG: ${{ needs.release-gate.outputs.tag }}
           COMMIT: ${{ needs.release-gate.outputs.sha }}
+          TAG_OBJECT_SHA: ${{ needs.release-gate.outputs.tag-object-sha }}
           GATE_EVENT: ${{ needs.release-gate.outputs.event }}
           EXPECTED_RUN_ID: ${{ needs.signed-build.outputs.run-id }}
           VERIFIED_ARTIFACT_DIGEST: ${{ needs.verify-artifact.outputs.artifact-digest }}
@@ -458,14 +516,23 @@ jobs:
           }
           if (!/^[0-9a-f]{64}$/.test(process.env.VERIFIED_ARTIFACT_DIGEST || '')) process.exit(2);
           const gate = JSON.parse(fs.readFileSync(path.join(process.env.PACKAGE, 'release-gate.json'), 'utf8'));
-          if (gate.schema !== 'cull.release.gate.v1' || gate.publishEligible !== true ||
+          if (!/^[0-9a-f]{40}$/.test(process.env.TAG_OBJECT_SHA || '') ||
+              gate.schema !== 'cull.release.gate.v1' || gate.publishEligible !== true ||
               (gate.event !== 'tag' && gate.event !== 'dispatch') || gate.event !== process.env.GATE_EVENT ||
-              gate.version !== process.env.VERSION || gate.tag !== process.env.TAG || gate.sha !== process.env.COMMIT) process.exit(2);
+              gate.version !== process.env.VERSION || gate.tag !== process.env.TAG || gate.sha !== process.env.COMMIT ||
+              gate.tagObjectSha !== process.env.TAG_OBJECT_SHA) process.exit(2);
           const provenance = JSON.parse(fs.readFileSync(path.join(process.env.PACKAGE, 'release-provenance.json'), 'utf8'));
           if (provenance.schema !== 'cull.release.provenance.v1' || provenance.version !== process.env.VERSION ||
               provenance.tag !== process.env.TAG || provenance.commit !== process.env.COMMIT ||
               provenance.workflowRunId !== process.env.EXPECTED_RUN_ID) process.exit(2);
           if (JSON.stringify(Object.keys(provenance.assets).sort()) !== JSON.stringify([...expectedAssets].sort())) process.exit(2);
+          const expectedChecks = [
+            'exactInventory', 'updaterMetadata', 'updaterSignature', 'dmgMountedReadOnly',
+            'embeddedVersion', 'arm64Only', 'codeSignature', 'gatekeeper', 'stapledNotarization',
+          ].sort();
+          if (!provenance.checks ||
+              JSON.stringify(Object.keys(provenance.checks).sort()) !== JSON.stringify(expectedChecks) ||
+              expectedChecks.some((name) => provenance.checks[name] !== true)) process.exit(2);
           const checksumLines = fs.readFileSync(path.join(process.env.PACKAGE, 'checksums.txt'), 'utf8').trim().split('\n');
           if (checksumLines.length !== expectedAssets.length) process.exit(2);
           const checksums = new Map();
@@ -557,26 +624,31 @@ jobs:
           }
           NODE
 
-      - name: Verify remote tag target before publication
+      - name: Verify remote tag and publish guarded draft
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-gate.outputs.tag }}
           COMMIT: ${{ needs.release-gate.outputs.sha }}
+          TAG_OBJECT_SHA: ${{ needs.release-gate.outputs.tag-object-sha }}
         shell: bash
         run: |
           set -euo pipefail
-          git ls-remote --tags origin "refs/tags/$TAG" "refs/tags/$TAG^{}" > "$RUNNER_TEMP/remote-tag-refs"
-          REFS="$RUNNER_TEMP/remote-tag-refs" node <<'NODE'
+          verify_remote_tag() {
+            local refs_file=$1
+            git ls-remote --tags origin "refs/tags/$TAG" "refs/tags/$TAG^{}" > "$refs_file"
+            REFS="$refs_file" node <<'NODE'
           const fs = require('node:fs');
           const lines = fs.readFileSync(process.env.REFS, 'utf8').trim().split('\n').filter(Boolean);
           if (lines.length !== 2) process.exit(2);
           const refs = new Map(lines.map((line) => line.split('\t')));
           const object = refs.get(`refs/tags/${process.env.TAG}`);
           const peeled = refs.get(`refs/tags/${process.env.TAG}^{}`);
-          if (!/^[0-9a-f]{40}$/.test(object || '') || peeled !== process.env.COMMIT) process.exit(2);
+          if (object !== process.env.TAG_OBJECT_SHA || peeled !== process.env.COMMIT) process.exit(2);
           NODE
-
-      - name: Publish the verified draft
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.release-gate.outputs.tag }}
-        run: gh release edit "$TAG" --draft=false
+          }
+          verify_remote_tag "$RUNNER_TEMP/remote-tag-refs-before"
+          gh release edit "$TAG" --draft=false
+          if ! verify_remote_tag "$RUNNER_TEMP/remote-tag-refs-after"; then
+            echo "CRITICAL: remote annotated tag identity changed while publishing $TAG" >&2
+            exit 2
+          fi

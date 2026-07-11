@@ -42,6 +42,10 @@ function commit(root: string, message: string) {
   return git(root, 'rev-parse', 'HEAD');
 }
 
+function annotatedTag(root: string, name: string, sha: string, force = false) {
+  git(root, 'tag', ...(force ? ['-f'] : []), '-a', name, sha, '-m', `Release ${name}`);
+}
+
 function metadata(root: string, version: string) {
   write(root, 'package.json', JSON.stringify({ name: 'cull', version }));
   write(root, 'package-lock.json', JSON.stringify({ version, packages: { '': { version } } }));
@@ -78,14 +82,14 @@ function fixture() {
   const stableApiBody = Array.from({ length: 20 }, (_, index) => `export const stable${index} = ${index};`).join('\n');
   write(root, 'src/lib/api.ts', `export const version = 1;\n${stableApiBody}\n`);
   const baseSha = commit(root, 'base');
-  git(root, 'tag', 'v1.2.3', baseSha);
+  annotatedTag(root, 'v1.2.3', baseSha);
 
   metadata(root, '1.2.4');
   write(root, 'CHANGELOG.md', '# Changelog\n\n## [1.2.4] - 2026-07-11\n\n### Fixed\n\n- Safe release gates.\n\n## [1.2.3] - 2026-07-01\n');
   write(root, 'docs/COMPATIBILITY.md', 'Last updated: 1.2.4 (2026-07-11)\n');
   write(root, 'src/lib/api.ts', `export const version = 2;\n${stableApiBody}\n`);
   const sha = commit(root, 'release');
-  git(root, 'tag', 'v1.2.4', sha);
+  annotatedTag(root, 'v1.2.4', sha);
   git(root, 'update-ref', 'refs/remotes/origin/main', sha);
   return { root, baseSha, sha };
 }
@@ -132,6 +136,7 @@ describe('release gate', () => {
 
     expect(result.execution.status).toBe(0);
     const output = JSON.parse(result.execution.stdout);
+    const tagObjectSha = git(root, 'rev-parse', 'refs/tags/v1.2.4');
     expect(output).toEqual({
       schema: 'cull.release.gate.v1',
       event: 'tag',
@@ -139,6 +144,7 @@ describe('release gate', () => {
       version: '1.2.4',
       tag: 'v1.2.4',
       sha,
+      tagObjectSha,
       baseTag: 'v1.2.3',
       mainAncestor: true,
       versions: {
@@ -176,6 +182,14 @@ describe('release gate', () => {
     expectRejected(run(root, { sha: baseSha }), 'TAG_SHA_MISMATCH');
   });
 
+  it('rejects a lightweight release tag even when it peels to the supplied SHA', () => {
+    const { root, sha } = fixture();
+    git(root, 'tag', '-d', 'v1.2.4');
+    git(root, 'tag', 'v1.2.4', sha);
+
+    expectRejected(run(root, { sha }), 'TAG_NOT_ANNOTATED');
+  });
+
   it('rejects a release SHA that is not reachable from origin/main', () => {
     const { root, baseSha } = fixture();
     git(root, 'switch', '--detach', baseSha);
@@ -184,7 +198,7 @@ describe('release gate', () => {
     write(root, 'docs/COMPATIBILITY.md', 'Last updated: 1.2.4 (2026-07-11)\n');
     const divergent = commit(root, 'divergent release');
     git(root, 'tag', 'v1.2.4-divergent', divergent);
-    git(root, 'tag', '-f', 'v1.2.4', divergent);
+    annotatedTag(root, 'v1.2.4', divergent, true);
 
     expectRejected(run(root, { sha: divergent }), 'NOT_ON_ORIGIN_MAIN');
   });
@@ -194,7 +208,7 @@ describe('release gate', () => {
     mkdirSync(join(root, 'docs'), { recursive: true });
     renameSync(join(root, 'src/lib/api.ts'), join(root, 'docs/renamed-api.ts'));
     const sha = commit(root, 'rename covered source outside E2E policy');
-    git(root, 'tag', '-f', 'v1.2.4', sha);
+    annotatedTag(root, 'v1.2.4', sha, true);
     git(root, 'update-ref', 'refs/remotes/origin/main', sha);
     git(root, 'config', 'diff.renames', 'copies');
 
@@ -218,7 +232,7 @@ describe('release gate', () => {
     const released = git(root, 'rev-parse', 'HEAD');
     write(root, 'package.json', JSON.stringify({ name: 'cull', version: '9.9.9' }));
     const mismatched = commit(root, 'mismatched metadata');
-    git(root, 'tag', '-f', 'v1.2.4', mismatched);
+    annotatedTag(root, 'v1.2.4', mismatched, true);
     git(root, 'update-ref', 'refs/remotes/origin/main', mismatched);
     expect(released).not.toBe(mismatched);
 
@@ -229,7 +243,7 @@ describe('release gate', () => {
     const { root } = fixture();
     write(root, 'CHANGELOG.md', '# Changelog\n\n## [1.2.3] - 2026-07-01\n');
     const sha = commit(root, 'missing changelog stamp');
-    git(root, 'tag', '-f', 'v1.2.4', sha);
+    annotatedTag(root, 'v1.2.4', sha, true);
     git(root, 'update-ref', 'refs/remotes/origin/main', sha);
 
     expectRejected(run(root, { sha }), 'CHANGELOG_INVALID');
@@ -239,7 +253,7 @@ describe('release gate', () => {
     const { root } = fixture();
     config(root, [DB_CONTRACT]);
     const sha = commit(root, 'missing stable export gate');
-    git(root, 'tag', '-f', 'v1.2.4', sha);
+    annotatedTag(root, 'v1.2.4', sha, true);
     git(root, 'update-ref', 'refs/remotes/origin/main', sha);
 
     expectRejected(run(root, { sha }), 'STABLE_CONTRACT_MISSING');
@@ -275,11 +289,13 @@ describe('release gate', () => {
       version: '1.2.4',
       tag: 'v1.2.4',
       sha,
+      tagObjectSha: null,
       baseTag: 'v1.2.4',
       mainAncestor: true,
       e2e: { required: true, matchedPaths: ['src/lib/api.ts'] },
     });
     expect(readFileSync(workflowOutput, 'utf8')).toContain('event=canary\npublish_eligible=false\n');
+    expect(readFileSync(workflowOutput, 'utf8')).toContain('tag_object_sha=\n');
   });
 
   it('keeps dispatch tag binding strict for the same untagged main SHA', () => {
@@ -512,6 +528,7 @@ describe('release gate', () => {
     expect(gateJob).toContain('git cat-file -t "refs/tags/$tag"');
     expect(gateJob).toContain('node scripts/release-gate.mjs');
     expect(gateJob).toContain('--event "$event"');
+    expect(gateJob).toContain('tag-object-sha: ${{ steps.release_gate.outputs.tag_object_sha }}');
     for (const command of [
       'npm run audit:licenses',
       'bash scripts/supply-chain-audit.sh check',
@@ -542,6 +559,12 @@ describe('release gate', () => {
     expect(buildJob).toContain('artifact-id: ${{ steps.upload_signed.outputs.artifact-id }}');
     expect(buildJob).toContain('artifact-digest: ${{ steps.upload_signed.outputs.artifact-digest }}');
     expect(verifyJob).toContain('artifact-ids: ${{ needs.signed-build.outputs.artifact-id }}');
+    expect(verifyJob).toContain('merge-multiple: true');
+    expect(verifyJob).toContain('gh api "repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID"');
+    expect(verifyJob).toContain('artifact.workflow_run?.id');
+    expect(verifyJob).toContain('artifact.workflow_run?.head_sha');
+    expect(verifyJob).toContain('artifact.expired !== false');
+    expect(verifyJob).toContain('artifact.digest !== expectedDigest');
     expect(verifyJob).toContain('bash scripts/verify-release-artifacts.sh');
     expect(verifyJob).toContain('--run-id "${{ github.run_id }}"');
     expect(verifyJob).toContain('name: cull-verified-${{ github.run_id }}-${{ needs.release-gate.outputs.sha }}');
@@ -561,10 +584,20 @@ describe('release gate', () => {
     expect(publishJob).toContain("needs.release-gate.outputs.event == 'dispatch'");
     expect(publishJob).toContain('environment: release-publish');
     expect(publishJob).toContain('artifact-ids: ${{ needs.verify-artifact.outputs.artifact-id }}');
+    expect(publishJob).toContain('merge-multiple: true');
+    expect(publishJob).toContain('gh api "repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID"');
+    expect(publishJob).toContain('artifact.workflow_run?.id');
+    expect(publishJob).toContain('artifact.workflow_run?.head_sha');
+    expect(publishJob).toContain('artifact.expired !== false');
+    expect(publishJob).toContain('artifact.digest !== expectedDigest');
     expect(publishJob).toContain("schema !== 'cull.release.gate.v1'");
     expect(publishJob).toContain('gate.publishEligible !== true');
     expect(publishJob).toContain("gate.event !== 'tag' && gate.event !== 'dispatch'");
+    expect(publishJob).toContain('gate.tagObjectSha !== process.env.TAG_OBJECT_SHA');
     expect(publishJob).toContain("schema !== 'cull.release.provenance.v1'");
+    expect(publishJob).toContain("'stapledNotarization'");
+    expect(publishJob).toContain('Object.keys(provenance.checks).sort()');
+    expect(publishJob).toContain('provenance.checks[name] !== true');
     expect(publishJob).toContain("heading === 'Unreleased'");
     expect(publishJob).toContain('gh release create "$TAG" --verify-tag --draft');
     expect(publishJob).toContain('gh release upload "$TAG"');
@@ -572,13 +605,15 @@ describe('release gate', () => {
     expect(publishJob).not.toContain('tauri-action');
     expect(publishJob).not.toContain('npm run build');
     expect(publishJob).not.toContain('cargo ');
-    expect(publishJob).toContain('git ls-remote --tags origin');
-    expect(publishJob.indexOf('Verify remote tag target before publication'))
-      .toBeLessThan(publishJob.indexOf('gh release edit "$TAG" --draft=false'));
-    expect(publishJob).toContain('gh release edit "$TAG" --draft=false');
+    const guardedPublish = publishJob.slice(publishJob.indexOf('Verify remote tag and publish guarded draft'));
+    expect(guardedPublish).toContain('git ls-remote --tags origin');
+    expect(guardedPublish).toContain('object !== process.env.TAG_OBJECT_SHA');
+    expect(guardedPublish.match(/verify_remote_tag/g)).toHaveLength(3);
+    expect(guardedPublish).toMatch(/verify_remote_tag[\s\S]*gh release edit "\$TAG" --draft=false[\s\S]*verify_remote_tag/);
     expect(releaseDocs).toContain('`CULL_RELEASE_PUBLISH_ENABLED` to equal `true`');
     expect(releaseDocs).toContain('must remain absent or false');
     expect(releaseDocs).toContain('29156442963');
     expect(releaseDocs).toContain('Apple notarization returned HTTP 403');
+    expect(releaseDocs).toContain('Task 10 tag rules');
   });
 });
