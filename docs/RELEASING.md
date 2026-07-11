@@ -38,6 +38,25 @@ planned bytes. A state-cache failure after that verified commit is reported as
 The compatibility review is mandatory. Any breaking change to a `stable` surface
 requires a major bump.
 
+## Signed non-publishing canary
+
+`.github/workflows/release-canary.yml` is the manual confidence run for Apple
+signing, notarization, private artifact transfer, and exact artifact verification.
+It executes `gate -> signed-build -> verify` and cannot create a Git tag, GitHub
+Release, or Homebrew update. Repository contents are read-only, signing secrets
+exist only in `signed-build`, and the secret-free verifier receives the signed
+inventory through GitHub Actions artifacts. The signed inventory is retained for
+one day; gate evidence and verifier provenance, checksums, and logs are retained
+for 14 days.
+
+The `ref` input defaults to `main`, but convenience is not authority: the release
+gate requires that the resolved commit already match its immutable `vX.Y.Z` tag,
+version files, changelog and compatibility stamps, and `origin/main` ancestry.
+An untagged or moved `main` fails before any signing secret is exposed. After the
+workflow is present on the default branch, dispatch it from GitHub Actions and
+inspect all three jobs plus the evidence artifact. Canary dispatch is an explicit
+enablement operation; repository-local checks do not dispatch it.
+
 ## Resume and recovery
 
 ```bash

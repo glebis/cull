@@ -1,0 +1,304 @@
+name: Signed release canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Existing tagged release commit to build without publishing
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-canary
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Release gate
+    runs-on: macos-14
+    outputs:
+      version: ${{ steps.release_gate.outputs.version }}
+      tag: ${{ steps.release_gate.outputs.tag }}
+      sha: ${{ steps.release_gate.outputs.sha }}
+      base-tag: ${{ steps.release_gate.outputs.base_tag }}
+      e2e-required: ${{ steps.release_gate.outputs.e2e_required }}
+    steps:
+      - name: Checkout requested release source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install pinned Rust and audit tooling
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy --target aarch64-apple-darwin
+          rustup default 1.95.0
+          cargo install cargo-deny --version 0.19.8 --locked
+          cargo install cargo-audit --version 0.22.2 --locked
+
+      - name: Install locked project dependencies
+        run: npm ci
+
+      - name: Record immutable release gate evidence
+        id: release_gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          base_tag=""
+          while IFS= read -r candidate; do
+            case "$candidate" in
+              v[0-9]*.[0-9]*.[0-9]*)
+                if [ "$candidate" != "$tag" ]; then
+                  base_tag=$candidate
+                  break
+                fi
+                ;;
+            esac
+          done < <(git for-each-ref --merged="$sha" --sort=-version:refname --format='%(refname:short)' refs/tags)
+          test -n "$base_tag"
+          node scripts/release-gate.mjs \
+            --tag "$tag" \
+            --sha "$sha" \
+            --base-tag "$base_tag" \
+            --event dispatch \
+            --json-out "$RUNNER_TEMP/release-gate.json"
+
+      - name: Audit source and dependency licences
+        run: npm run audit:licenses
+
+      - name: Run Rust supply-chain policy
+        run: bash scripts/supply-chain-audit.sh check
+
+      - name: Verify database compatibility contract
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden
+
+      - name: Verify export compatibility contract
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test export_compat_golden
+
+      - name: Install pinned browser test client
+        if: steps.release_gate.outputs.e2e_required == 'true'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/cull-e2e-venv"
+          "$RUNNER_TEMP/cull-e2e-venv/bin/pip" install --disable-pip-version-check playwright==1.55.0
+          echo "$RUNNER_TEMP/cull-e2e-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Run classified browser smoke gate
+        if: steps.release_gate.outputs.e2e_required == 'true'
+        env:
+          CULL_E2E_BROWSER: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+        run: bash tests/e2e/run-e2e.sh
+
+      - name: Build unsigned frontend production bundle
+        run: npm run build
+
+      - name: Upload immutable gate record
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cull-canary-gate-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-gate.json
+          if-no-files-found: error
+          retention-days: 1
+
+  signed-build:
+    name: Signed build without publication
+    needs: gate
+    runs-on: macos-14
+    steps:
+      - name: Checkout gate-approved commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install pinned Rust target
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --target aarch64-apple-darwin
+          rustup default 1.95.0
+
+      - name: Install locked project dependencies
+        run: npm ci
+
+      - name: Verify signing material is available
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          test -n "$APPLE_CERTIFICATE"
+          test -n "$APPLE_CERTIFICATE_PASSWORD"
+          test -n "$APPLE_ID"
+          test -n "$APPLE_PASSWORD"
+          test -n "$APPLE_TEAM_ID"
+          test -n "$KEYCHAIN_PASSWORD"
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          test -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+
+      - name: Import Apple signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          certificate_path="$RUNNER_TEMP/certificate.p12"
+          keychain_path="$RUNNER_TEMP/cull-canary-signing.keychain-db"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security default-keychain -s "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security import "$certificate_path" -k "$keychain_path" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          identity=$(security find-identity -v -p codesigning "$keychain_path" | awk -F '"' '/Developer ID Application/ { print $2; exit }')
+          test -n "$identity"
+          echo "APPLE_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Build signed and notarized artifacts without release inputs
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: --target aarch64-apple-darwin --bundles dmg
+
+      - name: Assemble exact private artifact inventory
+        env:
+          VERSION: ${{ needs.gate.outputs.version }}
+          TAG: ${{ needs.gate.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="src-tauri/target/aarch64-apple-darwin/release/bundle"
+          artifact_dir="$RUNNER_TEMP/cull-canary"
+          mkdir -m 700 "$artifact_dir"
+          install -m 600 "$bundle/dmg/Cull_${VERSION}_aarch64.dmg" "$artifact_dir/Cull_${VERSION}_aarch64.dmg"
+          install -m 600 "$bundle/macos/Cull.app.tar.gz" "$artifact_dir/Cull_aarch64.app.tar.gz"
+          install -m 600 "$bundle/macos/Cull.app.tar.gz.sig" "$artifact_dir/Cull_aarch64.app.tar.gz.sig"
+          ARTIFACT_DIR="$artifact_dir" node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const archive = 'Cull_aarch64.app.tar.gz';
+          const signature = fs.readFileSync(path.join(process.env.ARTIFACT_DIR, `${archive}.sig`), 'utf8').trim();
+          const metadata = {
+            version: process.env.VERSION,
+            platforms: {
+              'darwin-aarch64': {
+                signature,
+                url: `https://github.com/${process.env.GITHUB_REPOSITORY}/releases/download/${process.env.TAG}/${archive}`,
+              },
+            },
+          };
+          fs.writeFileSync(path.join(process.env.ARTIFACT_DIR, 'latest.json'), `${JSON.stringify(metadata, null, 2)}\n`, {
+            encoding: 'utf8', mode: 0o600, flag: 'wx',
+          });
+          NODE
+
+      - name: Upload private signed canary inventory
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cull-canary-${{ github.run_id }}
+          path: ${{ runner.temp }}/cull-canary
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  verify:
+    name: Exact artifact verification
+    needs: [gate, signed-build]
+    runs-on: macos-14
+    steps:
+      - name: Checkout gate-approved verifier
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Download private signed inventory
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cull-canary-${{ github.run_id }}
+          path: ${{ runner.temp }}/cull-canary
+
+      - name: Download immutable gate record
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cull-canary-gate-${{ github.run_id }}
+          path: ${{ runner.temp }}/cull-canary-gate
+
+      - name: Install checksum-pinned minisign
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/minisign-0.12-macos.zip"
+          curl --proto '=https' --tlsv1.2 --retry 3 --fail --silent --show-error --location \
+            https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip \
+            --output "$archive"
+          printf '%s  %s\n' '89000b19535765f9cffc65a65d64a820f433ef6db8020667f7570e06bf6aac63' "$archive" | shasum -a 256 --check
+          mkdir -m 700 "$RUNNER_TEMP/minisign-bin"
+          unzip -q "$archive" minisign -d "$RUNNER_TEMP/minisign-bin"
+          chmod 755 "$RUNNER_TEMP/minisign-bin/minisign"
+          echo "$RUNNER_TEMP/minisign-bin" >> "$GITHUB_PATH"
+
+      - name: Verify exact signed artifact set
+        env:
+          VERSION: ${{ needs.gate.outputs.version }}
+          TAG: ${{ needs.gate.outputs.tag }}
+          COMMIT: ${{ needs.gate.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -m 700 "$RUNNER_TEMP/cull-canary-evidence"
+          bash scripts/verify-release-artifacts.sh \
+            --artifact-dir "$RUNNER_TEMP/cull-canary" \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --commit "$COMMIT" \
+            --run-id "${{ github.run_id }}" \
+            --out "$RUNNER_TEMP/cull-canary-evidence"
+          install -m 600 "$RUNNER_TEMP/cull-canary-gate/release-gate.json" \
+            "$RUNNER_TEMP/cull-canary-evidence/release-gate.json"
+          test -f "$RUNNER_TEMP/cull-canary-evidence/release-provenance.json"
+          test -f "$RUNNER_TEMP/cull-canary-evidence/checksums.txt"
+          test -f "$RUNNER_TEMP/cull-canary-evidence/verification.log"
+
+      - name: Upload verification provenance, checksums, and logs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cull-canary-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/cull-canary-evidence
+          if-no-files-found: error
+          retention-days: 14

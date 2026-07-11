@@ -14,8 +14,16 @@ import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const gate = resolve(import.meta.dirname, 'release-gate.mjs');
+const canaryWorkflowPath = resolve(import.meta.dirname, '../.github/workflows/release-canary.yml');
 const DB_CONTRACT = 'cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden';
 const EXPORT_CONTRACT = 'cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test export_compat_golden';
+
+function workflowJob(workflow: string, name: string) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`^  ${escaped}:\\n([\\s\\S]*?)(?=^  [a-zA-Z0-9_-]+:\\n|(?![\\s\\S]))`, 'm').exec(workflow);
+  expect(match, `missing workflow job ${name}`).not.toBeNull();
+  return match![1];
+}
 
 function write(root: string, path: string, contents: string) {
   const destination = join(root, path);
@@ -312,5 +320,69 @@ describe('release gate', () => {
   it('configures weekly Dependabot updates for the site package', () => {
     const dependabot = readFileSync(resolve(import.meta.dirname, '../.github/dependabot.yml'), 'utf8');
     expect(dependabot).toMatch(/package-ecosystem: "npm"\n\s+directory: "\/site"/);
+  });
+
+  it('defines a read-only, serialized manual release canary', () => {
+    const workflow = readFileSync(canaryWorkflowPath, 'utf8');
+
+    expect(workflow).toMatch(/workflow_dispatch:\n\s+inputs:\n\s+ref:\n[\s\S]*?default: main/);
+    expect(workflow).toContain('permissions:\n  contents: read');
+    expect(workflow).toContain('group: release-canary');
+    expect(workflow).toContain('cancel-in-progress: true');
+    const jobs = workflow.split('\njobs:\n')[1];
+    expect([...jobs.matchAll(/^  ([a-zA-Z0-9_-]+):$/gm)].map((match) => match[1]))
+      .toEqual(['gate', 'signed-build', 'verify']);
+    expect(workflowJob(workflow, 'signed-build')).toContain('needs: gate');
+    expect(workflowJob(workflow, 'verify')).toContain('needs: [gate, signed-build]');
+  });
+
+  it('pins every canary action and contains no publishing capability', () => {
+    const workflow = readFileSync(canaryWorkflowPath, 'utf8');
+    const actionUses = [...workflow.matchAll(/uses:\s+([^\s#]+)/g)].map((match) => match[1]);
+
+    expect(actionUses.length).toBeGreaterThan(0);
+    expect(actionUses.every((action) => /@[0-9a-f]{40}$/.test(action))).toBe(true);
+    for (const forbidden of [
+      'contents: write', 'gh release', 'git tag', 'git push', 'tagName', 'releaseName',
+      'releaseDraft', 'releaseId', 'HOMEBREW_TAP_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN',
+    ]) {
+      expect(workflow).not.toContain(forbidden);
+    }
+  });
+
+  it('confines signing secrets to the signed build after gate evidence and conditional E2E', () => {
+    const workflow = readFileSync(canaryWorkflowPath, 'utf8');
+    const gateJob = workflowJob(workflow, 'gate');
+    const buildJob = workflowJob(workflow, 'signed-build');
+    const verifyJob = workflowJob(workflow, 'verify');
+
+    expect(gateJob).not.toContain('${{ secrets.');
+    expect(verifyJob).not.toContain('${{ secrets.');
+    expect(buildJob).toContain('${{ secrets.APPLE_CERTIFICATE }}');
+    expect(buildJob).toContain('${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}');
+    expect(buildJob).toContain('tauri-apps/tauri-action@');
+    expect(buildJob).toContain('--target aarch64-apple-darwin --bundles dmg');
+    expect(buildJob).not.toContain('--bundles dmg,updater');
+    expect(gateJob).toContain('node scripts/release-gate.mjs');
+    expect(gateJob).toContain("if: steps.release_gate.outputs.e2e_required == 'true'");
+    expect(gateJob).toContain('bash tests/e2e/run-e2e.sh');
+  });
+
+  it('passes the private signed inventory to a secret-free exact verifier', () => {
+    const workflow = readFileSync(canaryWorkflowPath, 'utf8');
+    const buildJob = workflowJob(workflow, 'signed-build');
+    const verifyJob = workflowJob(workflow, 'verify');
+
+    expect(buildJob).toContain('name: cull-canary-${{ github.run_id }}');
+    expect(buildJob).toContain('retention-days: 1');
+    expect(verifyJob).toContain('name: cull-canary-${{ github.run_id }}');
+    expect(verifyJob).toContain('bash scripts/verify-release-artifacts.sh');
+    expect(verifyJob).toContain('--artifact-dir "$RUNNER_TEMP/cull-canary"');
+    expect(verifyJob).toContain('--out "$RUNNER_TEMP/cull-canary-evidence"');
+    expect(verifyJob).toContain('minisign-0.12-macos.zip');
+    expect(verifyJob).toContain('89000b19535765f9cffc65a65d64a820f433ef6db8020667f7570e06bf6aac63');
+    expect(verifyJob).toContain('release-provenance.json');
+    expect(verifyJob).toContain('checksums.txt');
+    expect(verifyJob).toContain('verification.log');
   });
 });
