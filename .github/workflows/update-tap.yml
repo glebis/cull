@@ -260,6 +260,15 @@ jobs:
             git -C tap diff --check -- Casks/cull.rb
           fi
 
+          tap_commit=$(git -C tap rev-parse HEAD)
+          if [ "$changed" = true ]; then
+            git -C tap config user.name 'github-actions[bot]'
+            git -C tap config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git -C tap add -- Casks/cull.rb
+            git -C tap commit -m "chore(cull): pin cask v$VERSION"
+            tap_commit=$(git -C tap rev-parse HEAD)
+          fi
+
           failure_code=BREW_TAP_FAILED
           brew tap --custom-remote glebis/tap "file://$PWD/tap"
           failure_code=BREW_AUDIT_FAILED
@@ -276,15 +285,9 @@ jobs:
           sleep 5
           osascript -e 'tell application "Cull" to quit' || true
 
-          tap_commit=''
           if [ "$changed" = true ]; then
-            git -C tap config user.name 'github-actions[bot]'
-            git -C tap config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git -C tap add -- Casks/cull.rb
-            git -C tap commit -m "chore(cull): pin cask v$VERSION"
             failure_code=TAP_PUSH_FAILED
             git -C tap push
-            tap_commit=$(git -C tap rev-parse HEAD)
           fi
           trap - ERR
           VERSION="$VERSION" DMG_SHA256="$DMG_SHA256" TAP_COMMIT="$tap_commit" EVIDENCE="$evidence" node <<'NODE'

@@ -679,6 +679,8 @@ describe('release gate', () => {
     expect(job).toContain('git -C tap diff --exit-code');
     expect(job).not.toContain('sha256 :no_check\nsed');
     expect(job).not.toContain('git push --force');
+    expect(job.indexOf('git -C tap commit')).toBeLessThan(job.indexOf('brew audit --cask cull'));
+    expect(job.indexOf('brew audit --cask cull')).toBeLessThan(job.indexOf('git -C tap push'));
   });
 
   it('dispatches Homebrew promotion from verified public provenance after publication', () => {
