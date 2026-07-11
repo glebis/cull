@@ -28,8 +28,11 @@ cannot ship if compatibility broke.
 `src-tauri/tests/compat_golden.rs` discovers every retained `v*.db` fixture,
 sorts them by schema number, opens a separate copy of each, and asserts current
 code migrates it to the current schema and passes `verify_schema_invariants()`.
-The guard fails when the retained set is empty or two file names encode the same
-schema number.
+The guard fails when the retained set is empty, a `v*.db` name is malformed, an
+entry is not a regular file, or two file names encode the same schema number.
+Before migration, it reads `PRAGMA user_version` from the copied fixture and
+requires it to equal the schema encoded by the file name, so a mislabeled golden
+cannot silently weaken the compatibility promise.
 
 ```bash
 # (re)generate the frozen fixture from current code — run once per schema bump:

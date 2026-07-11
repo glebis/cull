@@ -32,17 +32,37 @@ fn retained_fixture_paths(dir: &Path) -> Result<Vec<(i64, PathBuf)>, String> {
     let mut fixtures = Vec::new();
     let mut schemas = HashSet::new();
     for entry in std::fs::read_dir(dir).map_err(|error| error.to_string())? {
-        let path = entry.map_err(|error| error.to_string())?.path();
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
         let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        let Some(schema) = file_name
-            .strip_prefix('v')
-            .and_then(|name| name.strip_suffix(".db"))
-            .and_then(|value| value.parse::<i64>().ok())
-        else {
+        if !file_name.starts_with('v') || !file_name.ends_with(".db") {
             continue;
-        };
+        }
+        let schema_text = &file_name[1..file_name.len() - 3];
+        if schema_text.is_empty() || !schema_text.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(format!(
+                "malformed retained DB fixture name {file_name}: expected v<schema>.db"
+            ));
+        }
+        let schema = schema_text.parse::<i64>().map_err(|_| {
+            format!("malformed retained DB fixture name {file_name}: schema is out of range")
+        })?;
+        if schema == 0 {
+            return Err(format!(
+                "malformed retained DB fixture name {file_name}: schema must be positive"
+            ));
+        }
+        if !entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_file()
+        {
+            return Err(format!(
+                "retained DB fixture must be a regular file: {file_name}"
+            ));
+        }
         if !schemas.insert(schema) {
             return Err(format!("duplicate retained DB schema v{schema}"));
         }
@@ -55,23 +75,39 @@ fn retained_fixture_paths(dir: &Path) -> Result<Vec<(i64, PathBuf)>, String> {
     Ok(fixtures)
 }
 
+fn open_retained_fixture(schema: i64, src: &Path) -> Result<(), String> {
+    // Work on a separate copy so neither the identity check nor migration can
+    // mutate a committed fixture.
+    let tmp = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let work = tmp.path().join(format!("v{schema}.db"));
+    std::fs::copy(src, &work).map_err(|error| error.to_string())?;
+
+    // Assert provenance before Database::open migrates user_version in place.
+    let conn =
+        rusqlite::Connection::open_with_flags(&work, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|error| error.to_string())?;
+    let actual_schema = conn
+        .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+        .map_err(|error| error.to_string())?;
+    drop(conn);
+    if actual_schema != schema {
+        return Err(format!(
+            "fixture filename declares schema v{schema}, but copied database contains schema v{actual_schema}"
+        ));
+    }
+
+    let db = cull_lib::test_support::Database::open(&work)
+        .map_err(|error| format!("frozen DB schema v{schema} must open: {error}"))?;
+    db.verify_schema_invariants_for_test()
+        .map_err(|error| format!("schema invariants must hold after migrating v{schema}: {error}"))
+}
+
 /// The compatibility guard wired into the release gate.
 #[test]
 fn retained_db_fixtures_open_and_satisfy_invariants() {
     let fixtures = retained_fixture_paths(&fixture_dir()).expect("discover retained DB fixtures");
     for (schema, src) in fixtures {
-        // Work on a separate copy so the test never mutates a committed fixture.
-        let tmp = tempfile::tempdir().unwrap();
-        let work = tmp.path().join(format!("v{schema}.db"));
-        std::fs::copy(&src, &work).expect("copy fixture");
-
-        let db = cull_lib::test_support::Database::open(&work).unwrap_or_else(|error| {
-            panic!("frozen DB schema v{schema} must open under current code: {error}")
-        });
-        db.verify_schema_invariants_for_test()
-            .unwrap_or_else(|error| {
-                panic!("schema invariants must hold after migrating v{schema}: {error}")
-            });
+        open_retained_fixture(schema, &src).unwrap_or_else(|error| panic!("{error}"));
     }
 }
 
@@ -124,4 +160,37 @@ fn retained_fixture_discovery_rejects_duplicate_schema_numbers() {
     assert!(retained_fixture_paths(tmp.path())
         .unwrap_err()
         .contains("duplicate retained DB schema v21"));
+}
+
+#[test]
+fn retained_fixture_rejects_filename_schema_mismatch_before_migration() {
+    let tmp = tempfile::tempdir().unwrap();
+    let fixture = tmp.path().join("v24.db");
+    let conn = rusqlite::Connection::open(&fixture).unwrap();
+    conn.pragma_update(None, "user_version", 21).unwrap();
+    drop(conn);
+
+    let error = open_retained_fixture(24, &fixture).unwrap_err();
+    assert!(error.contains("filename declares schema v24"));
+    assert!(error.contains("contains schema v21"));
+}
+
+#[test]
+fn retained_fixture_discovery_rejects_malformed_v_db_names() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("v21.db"), []).unwrap();
+    std::fs::write(tmp.path().join("vnext.db"), []).unwrap();
+    assert!(retained_fixture_paths(tmp.path())
+        .unwrap_err()
+        .contains("malformed retained DB fixture name vnext.db"));
+}
+
+#[test]
+fn retained_fixture_discovery_rejects_non_regular_v_db_entries() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("v21.db"), []).unwrap();
+    std::fs::create_dir(tmp.path().join("v22.db")).unwrap();
+    assert!(retained_fixture_paths(tmp.path())
+        .unwrap_err()
+        .contains("retained DB fixture must be a regular file: v22.db"));
 }
