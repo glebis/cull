@@ -55,7 +55,7 @@
     "@tauri-apps/plugin-updater": "^2.10.1",
     "html-to-image": "^1.11.13",
     "umap-js": "^1.4.0",
-    "virtua": "^0.49.1"
+    "virtua": "^0.49.3"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",
