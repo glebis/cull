@@ -27,6 +27,12 @@ mod watcher;
 #[cfg(feature = "test-support")]
 pub mod test_support {
     pub use crate::db_core::db::Database;
+
+    /// Validate a frozen static-publishing package with the production reader.
+    /// This is intentionally available only when the test-support feature is set.
+    pub fn validate_cull_static_package_for_test(path: &std::path::Path) -> Result<(), String> {
+        crate::commands::static_publishing::validate_cull_static_package(path)
+    }
 }
 
 use crate::commands::deeplink::{

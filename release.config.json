@@ -12,7 +12,8 @@
   "lockfiles": ["src-tauri/Cargo.lock"],
   "gate": "npm run preflight -- release",
   "extraGate": [
-    "cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden"
+    "cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden",
+    "cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test export_compat_golden"
   ],
   "changelog": { "path": "CHANGELOG.md", "style": "keep-a-changelog", "from": "conventional-commits" },
   "compatibility": { "path": "docs/COMPATIBILITY.md" },

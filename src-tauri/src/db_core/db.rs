@@ -341,8 +341,19 @@ impl Database {
         }
         self.run_migration_step(25, "agent_action_proposals", || {
             let conn = self.conn.lock();
+            // Schema 25 is also the reconciliation boundary for databases made
+            // before the migration chain was consolidated. Those databases
+            // already record migrations 1..24, so the consolidated v1 closure
+            // is intentionally skipped; applying the idempotent full schema
+            // here creates tables introduced after their frozen schema.
+            conn.execute_batch(schema)?;
             conn.execute_batch(agent_action_proposals_schema())?;
             drop(conn);
+            self.seed_preset_collections()?;
+            {
+                let mut conn = self.conn.lock();
+                self.seed_catalog_defaults(&mut conn)?;
+            }
             self.seed_agent_selection_presets()?;
             Ok(())
         })?;

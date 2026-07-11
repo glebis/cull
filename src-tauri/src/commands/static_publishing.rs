@@ -568,7 +568,7 @@ pub async fn serve_static_publish_package(
 /// Verify a directory is a Cull static-publishing package before serving it.
 /// Requires an index.html and a parseable `data/canvas.json` manifest carrying
 /// the Cull schema marker, so arbitrary local directories cannot be served.
-fn validate_cull_static_package(site_dir: &Path) -> Result<(), String> {
+pub(crate) fn validate_cull_static_package(site_dir: &Path) -> Result<(), String> {
     if !site_dir.join("index.html").exists() {
         return Err(format!(
             "No static package index.html exists at {}",
