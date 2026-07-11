@@ -642,7 +642,10 @@ jobs:
           const fs = require('node:fs');
           const lines = fs.readFileSync(process.env.REFS, 'utf8').trim().split('\n').filter(Boolean);
           if (lines.length !== 2) process.exit(2);
-          const refs = new Map(lines.map((line) => line.split('\t')));
+          const refs = new Map(lines.map((line) => {
+            const [sha, ref] = line.split('\t');
+            return [ref, sha];
+          }));
           const object = refs.get(`refs/tags/${process.env.TAG}`);
           const peeled = refs.get(`refs/tags/${process.env.TAG}^{}`);
           if (object !== process.env.TAG_OBJECT_SHA || peeled !== process.env.COMMIT) process.exit(2);

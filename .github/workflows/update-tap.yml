@@ -1,4 +1,5 @@
 name: Update Homebrew Tap
+run-name: Promote Cull ${{ github.event_name == 'release' && github.event.release.tag_name || format('v{0}', inputs.version) }}
 
 on:
   release:
@@ -22,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: homebrew-cull-${{ inputs.version || github.event.release.tag_name }}
+  group: homebrew-cull
   cancel-in-progress: false
 
 jobs:
@@ -88,15 +89,24 @@ jobs:
             --output "$RUNNER_TEMP/public-release.json"
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             "$PROVENANCE_URL" --output "$RUNNER_TEMP/release-provenance.json"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            "https://github.com/$REPOSITORY/releases/download/v$VERSION/checksums.txt" \
+            --output "$RUNNER_TEMP/checksums.txt"
+          git ls-remote --tags "https://github.com/$REPOSITORY.git" \
+            "refs/tags/v$VERSION" "refs/tags/v$VERSION^{}" > "$RUNNER_TEMP/public-tag-refs"
 
           failure_code=PROVENANCE_INVALID
           if VERSION="$VERSION" EXPECTED_SHA="$EXPECTED_SHA" \
             RELEASE_JSON="$RUNNER_TEMP/public-release.json" \
             PROVENANCE="$RUNNER_TEMP/release-provenance.json" \
+            CHECKSUMS="$RUNNER_TEMP/checksums.txt" \
+            TAG_REFS="$RUNNER_TEMP/public-tag-refs" \
             VALIDATED="$RUNNER_TEMP/validated-promotion.json" node <<'NODE'
+          const crypto = require('node:crypto');
           const fs = require('node:fs');
           const release = JSON.parse(fs.readFileSync(process.env.RELEASE_JSON, 'utf8'));
-          const provenance = JSON.parse(fs.readFileSync(process.env.PROVENANCE, 'utf8'));
+          const provenanceBytes = fs.readFileSync(process.env.PROVENANCE);
+          const provenance = JSON.parse(provenanceBytes);
           const dmgName = `Cull_${process.env.VERSION}_aarch64.dmg`;
           const expectedAssets = [dmgName, 'Cull_aarch64.app.tar.gz', 'Cull_aarch64.app.tar.gz.sig', 'latest.json'].sort();
           const expectedPublic = [...expectedAssets, 'release-provenance.json', 'checksums.txt'].sort();
@@ -117,9 +127,40 @@ jobs:
               !provenance.checks ||
               JSON.stringify(Object.keys(provenance.checks).sort()) !== JSON.stringify(expectedChecks) ||
               expectedChecks.some((name) => provenance.checks[name] !== true)) process.exit(2);
+          const refLines = fs.readFileSync(process.env.TAG_REFS, 'utf8').trim().split('\n').filter(Boolean);
+          if (refLines.length !== 2) process.exit(2);
+          const refs = new Map(refLines.map((line) => {
+            const [sha, ref] = line.split('\t');
+            return [ref, sha];
+          }));
+          if (refs.get(`refs/tags/v${process.env.VERSION}`) !== provenance.tagObjectSha ||
+              refs.get(`refs/tags/v${process.env.VERSION}^{}`) !== provenance.commit) process.exit(2);
           for (const name of expectedAssets) {
-            const asset = provenance.assets[name];
-            if (!asset || !/^[0-9a-f]{64}$/.test(asset.sha256) || !Number.isSafeInteger(asset.size) || asset.size < 1) process.exit(2);
+            const provenanceAsset = provenance.assets[name];
+            const publicAsset = release.assets.find((asset) => asset.name === name);
+            const expectedUrl = `https://github.com/${process.env.REPOSITORY}/releases/download/v${process.env.VERSION}/${name}`;
+            if (!provenanceAsset || !/^[0-9a-f]{64}$/.test(provenanceAsset.sha256) ||
+                !Number.isSafeInteger(provenanceAsset.size) || provenanceAsset.size < 1 ||
+                !publicAsset || publicAsset.state !== 'uploaded' ||
+                publicAsset.size !== provenanceAsset.size ||
+                publicAsset.digest !== `sha256:${provenanceAsset.sha256}` ||
+                publicAsset.browser_download_url !== expectedUrl) process.exit(2);
+          }
+          const checksumLines = fs.readFileSync(process.env.CHECKSUMS, 'utf8').trim().split('\n');
+          if (checksumLines.length !== expectedAssets.length) process.exit(2);
+          const checksums = new Map();
+          for (const line of checksumLines) {
+            const match = /^([0-9a-f]{64})  ([A-Za-z0-9._-]+)$/.exec(line);
+            if (!match || checksums.has(match[2])) process.exit(2);
+            checksums.set(match[2], match[1]);
+          }
+          if (expectedAssets.some((name) => checksums.get(name) !== provenance.assets[name].sha256)) process.exit(2);
+          for (const [name, bytes] of [['release-provenance.json', provenanceBytes],
+            ['checksums.txt', fs.readFileSync(process.env.CHECKSUMS)]]) {
+            const publicAsset = release.assets.find((asset) => asset.name === name);
+            const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+            if (!publicAsset || publicAsset.state !== 'uploaded' || publicAsset.size !== bytes.length ||
+                publicAsset.digest !== `sha256:${digest}`) process.exit(4);
           }
           const digest = provenance.assets[dmgName]?.sha256;
           if (process.env.EXPECTED_SHA && digest !== process.env.EXPECTED_SHA) process.exit(3);
@@ -130,6 +171,11 @@ jobs:
             version: process.env.VERSION,
             digest,
             dmgUrl: publicDmg.browser_download_url,
+            commit: provenance.commit,
+            tagObjectSha: provenance.tagObjectSha,
+            workflowRunId: provenance.workflowRunId,
+            assets: provenance.assets,
+            checks: provenance.checks,
           }));
           NODE
           then
@@ -141,6 +187,12 @@ jobs:
             trap - ERR
             write_failure DMG_SHA_MISMATCH
             echo 'DMG_SHA_MISMATCH: requested digest does not match public provenance' >&2
+            exit 2
+          fi
+          if [ "$validation_status" -eq 4 ]; then
+            trap - ERR
+            write_failure CHECKSUMS_DIGEST_MISMATCH
+            echo 'CHECKSUMS_DIGEST_MISMATCH: public evidence asset digest mismatch' >&2
             exit 2
           fi
           if [ "$validation_status" -ne 0 ]; then
@@ -166,12 +218,19 @@ jobs:
           fi
 
           trap - ERR
-          VERSION="$VERSION" DMG_SHA256="$DMG_SHA256" EVIDENCE="$evidence" node <<'NODE'
+          VERSION="$VERSION" DMG_SHA256="$DMG_SHA256" EVIDENCE="$evidence" \
+            VALIDATED="$RUNNER_TEMP/validated-promotion.json" node <<'NODE'
           const fs = require('node:fs');
+          const validated = JSON.parse(fs.readFileSync(process.env.VALIDATED, 'utf8'));
           fs.writeFileSync(process.env.EVIDENCE, `${JSON.stringify({
             schema: 'cull.release.homebrew-promotion.v1',
             version: process.env.VERSION,
             tag: `v${process.env.VERSION}`,
+            commit: validated.commit,
+            tagObjectSha: validated.tagObjectSha,
+            workflowRunId: validated.workflowRunId,
+            assets: validated.assets,
+            checks: validated.checks,
             state: 'artifact-verified',
             dmgSha256: process.env.DMG_SHA256,
             failure: null,
@@ -179,6 +238,11 @@ jobs:
           NODE
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "dmg_sha256=$DMG_SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout verified release tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Checkout tap after public artifact verification
         id: checkout_tap
@@ -226,33 +290,18 @@ jobs:
             fail TAP_CHECKOUT_FAILED
           fi
           cask=tap/Casks/cull.rb
-          if grep -Eq '^sha256[[:space:]]+:no_check[[:space:]]*$' "$cask"; then
-            fail CASK_NO_CHECK
-          fi
-
           failure_code=CASK_INVALID
-          CASK="$cask" VERSION="$VERSION" DMG_SHA256="$DMG_SHA256" node <<'NODE'
-          const fs = require('node:fs');
-          const path = process.env.CASK;
-          const stat = fs.lstatSync(path);
-          if (!stat.isFile() || stat.isSymbolicLink()) process.exit(2);
-          const source = fs.readFileSync(path, 'utf8');
-          if (source.includes('sha256 :no_check')) process.exit(2);
-          const versionPattern = /^(\s*)version\s+"([^"]+)"\s*$/gm;
-          const shaPattern = /^(\s*)sha256\s+"([0-9a-f]{64})"\s*$/gm;
-          const versionMatches = [...source.matchAll(versionPattern)];
-          const shaMatches = [...source.matchAll(shaPattern)];
-          if (versionMatches.length !== 1 || shaMatches.length !== 1) process.exit(2);
-          const alreadyCurrent = versionMatches[0][2] === process.env.VERSION && shaMatches[0][2] === process.env.DMG_SHA256;
-          let updated = source.replace(versionPattern, `$1version "${process.env.VERSION}"`)
-            .replace(shaPattern, `$1sha256 "${process.env.DMG_SHA256}"`);
-          fs.writeFileSync(path, updated);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `changed=${alreadyCurrent ? 'false' : 'true'}\n`);
-          if (alreadyCurrent) process.stderr.write('CASK_ALREADY_CURRENT\n');
-          NODE
-
-          failure_code=CASK_EDIT_INVALID
-          changed=$(tail -1 "$GITHUB_OUTPUT" | cut -d= -f2)
+          if ! node scripts/update-homebrew-cask.mjs --cask "$cask" --version "$VERSION" \
+            --sha256 "$DMG_SHA256" --json > "$RUNNER_TEMP/cask-edit.json"; then
+            cask_code=$(CASK_RESULT="$RUNNER_TEMP/cask-edit.json" node -e \
+              "const x=require(process.env.CASK_RESULT); process.stdout.write(x.code || 'CASK_INVALID')")
+            case "$cask_code" in
+              CASK_NO_CHECK|CASK_INVALID|CASK_DOWNGRADE|CASK_IMMUTABLE_SHA_MISMATCH) fail "$cask_code" ;;
+              *) fail CASK_INVALID ;;
+            esac
+          fi
+          changed=$(CASK_RESULT="$RUNNER_TEMP/cask-edit.json" node -e \
+            "const x=require(process.env.CASK_RESULT); process.stdout.write(String(x.result.changed))")
           if [ "$changed" = false ]; then
             git -C tap diff --exit-code -- Casks/cull.rb
           else
@@ -283,6 +332,11 @@ jobs:
           failure_code=BREW_LAUNCH_FAILED
           open -na "$app"
           sleep 5
+          pgrep -f "$app/Contents/MacOS/Cull" > "$RUNNER_TEMP/cull-app-pids"
+          IFS= read -r app_pid < "$RUNNER_TEMP/cull-app-pids"
+          test -n "$app_pid"
+          kill -0 "$app_pid"
+          test "$(defaults read "$app/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
           osascript -e 'tell application "Cull" to quit' || true
 
           if [ "$changed" = true ]; then
@@ -290,11 +344,15 @@ jobs:
             git -C tap push
           fi
           trap - ERR
-          VERSION="$VERSION" DMG_SHA256="$DMG_SHA256" TAP_COMMIT="$tap_commit" EVIDENCE="$evidence" node <<'NODE'
+          VERSION="$VERSION" DMG_SHA256="$DMG_SHA256" TAP_COMMIT="$tap_commit" EVIDENCE="$evidence" \
+            VALIDATED="$RUNNER_TEMP/validated-promotion.json" node <<'NODE'
           const fs = require('node:fs');
+          const validated = JSON.parse(fs.readFileSync(process.env.VALIDATED, 'utf8'));
           fs.writeFileSync(process.env.EVIDENCE, `${JSON.stringify({
             schema: 'cull.release.homebrew-promotion.v1', version: process.env.VERSION,
             tag: `v${process.env.VERSION}`, state: 'homebrew-promoted', dmgSha256: process.env.DMG_SHA256,
+            commit: validated.commit, tagObjectSha: validated.tagObjectSha,
+            workflowRunId: validated.workflowRunId, assets: validated.assets, checks: validated.checks,
             tapCommit: process.env.TAP_COMMIT || null, failure: null,
           }, null, 2)}\n`, { mode: 0o600 });
           NODE

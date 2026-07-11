@@ -655,6 +655,12 @@ describe('release gate', () => {
     expect(job).toContain('Object.keys(provenance.checks).sort()');
     expect(job).toContain('provenance.checks[name] !== true');
     expect(job).toContain('provenance.assets[dmgName]?.sha256');
+    expect(job).toContain('git ls-remote --tags');
+    expect(job).toContain('provenance.tagObjectSha');
+    expect(job).toContain('publicAsset.size !== provenanceAsset.size');
+    expect(job).toContain('publicAsset.digest !== `sha256:${provenanceAsset.sha256}`');
+    expect(job).toContain('checksums.txt');
+    expect(job).toContain('CHECKSUMS_DIGEST_MISMATCH');
     expect(job).toContain('shasum -a 256');
     expect(job).toContain('DMG_SHA_MISMATCH');
 
@@ -668,11 +674,10 @@ describe('release gate', () => {
     const workflow = readFileSync(tapWorkflowPath, 'utf8');
     const job = workflowJob(workflow, 'update-cask');
 
-    expect(job).toContain('sha256 :no_check');
     expect(job).toContain('CASK_NO_CHECK');
-    expect(job).toContain('CASK_ALREADY_CURRENT');
-    expect(job).toContain('versionMatches.length !== 1');
-    expect(job).toContain('shaMatches.length !== 1');
+    expect(job).toContain('node scripts/update-homebrew-cask.mjs');
+    expect(job).toContain('CASK_DOWNGRADE');
+    expect(job).toContain('CASK_IMMUTABLE_SHA_MISMATCH');
     expect(job).toContain('brew audit --cask cull');
     expect(job).toContain('--appdir="$RUNNER_TEMP/cull-apps"');
     expect(job).toContain('open -na "$app"');
@@ -681,6 +686,21 @@ describe('release gate', () => {
     expect(job).not.toContain('git push --force');
     expect(job.indexOf('git -C tap commit')).toBeLessThan(job.indexOf('brew audit --cask cull'));
     expect(job.indexOf('brew audit --cask cull')).toBeLessThan(job.indexOf('git -C tap push'));
+    expect(workflow).toContain('group: homebrew-cull');
+    expect(workflow).not.toContain('group: homebrew-cull-${{');
+  });
+
+  it('requires launched Cull to remain alive before any tap push', () => {
+    const workflow = readFileSync(tapWorkflowPath, 'utf8');
+    const job = workflowJob(workflow, 'update-cask');
+    const launch = job.indexOf('open -na "$app"');
+    const liveness = job.indexOf('kill -0 "$app_pid"');
+    const version = job.indexOf('CFBundleShortVersionString', launch);
+    const push = job.indexOf('git -C tap push');
+    expect(launch).toBeGreaterThan(-1);
+    expect(liveness).toBeGreaterThan(launch);
+    expect(version).toBeGreaterThan(liveness);
+    expect(push).toBeGreaterThan(version);
   });
 
   it('dispatches Homebrew promotion from verified public provenance after publication', () => {

@@ -131,20 +131,28 @@ published release. Manual dispatch requires all three inputs and accepts only th
 canonical public asset URL for that version.
 
 The workflow has no tap credential while it fetches and validates the public
-release, exact provenance schema, version, tag, release commit, annotated tag
-object, asset inventory, verification checks, and DMG entry. It then downloads
-the public DMG and compares its computed SHA-256 with provenance (and with the
-manual input when dispatched). Only after those checks pass does the tap checkout
-receive `HOMEBREW_TAP_TOKEN`.
+release, anonymous remote annotated-tag object and peeled commit, exact
+provenance schema/run/identity, four-asset inventory and verification checks.
+Every public binary asset's size and GitHub SHA-256 must match provenance. The
+downloaded `checksums.txt` must enumerate exactly those four assets and its own
+public size and digest must match, as must the downloaded provenance asset. The
+workflow then downloads the public DMG and compares its computed SHA-256 with
+provenance (and with the manual input when dispatched). Only after those checks
+pass does the tap checkout receive `HOMEBREW_TAP_TOKEN`.
 
-Promotion changes exactly the cask's single `version` and quoted `sha256` lines.
-`sha256 :no_check`, duplicate or missing fields, an unexpected cask diff, or a
-digest mismatch fails closed. Before any push, the macOS runner executes
+All Cull promotions share one non-cancelling concurrency group, so an older run
+cannot race a newer version. Promotion changes exactly the cask's sole canonical
+`version` and quoted `sha256` lines. `sha256 :no_check` (including a trailing
+comment), duplicate or noncanonical directives, a SemVer downgrade, an equal
+version with a different SHA, an unexpected cask diff, or a digest mismatch fails
+closed. Equal version and SHA is the only idempotent no-write case. Before any push, the macOS runner executes
 `brew audit --cask cull`, installs the cask into an isolated runner directory,
-checks the installed bundle version, and launches it. When the tap already has
-the exact version and SHA, the workflow still validates it but succeeds without a
-commit. Every run retains `homebrew-promotion.json`; a failed run records a stable
-stage code so promotion can be resumed without rebuilding or republishing Cull.
+launches it, waits, proves the installed process remains alive, and rechecks the
+bundle version. Only then may the local candidate commit be pushed. When the tap
+already has the exact version and SHA, the workflow still validates it but
+succeeds without a commit. Every run retains `homebrew-promotion.json`; a failed
+run records a stable stage code so promotion can be resumed without rebuilding or
+republishing Cull.
 
 ## Resume and recovery
 
@@ -168,12 +176,19 @@ npm run release:cull -- state fail --version 0.2.6 --code BUILD_FAILED \
   --evidence-json '{"workflowRunId":123}' --json
 ```
 
-Failure codes are a stable allowlist rather than free-form text. A valid public
-release whose tap is stale resumes with `promote-homebrew`; it does not rebuild or
-replace release assets. `POST_PUBLISH_VERIFY_FAILED` is different because users
+Failure codes are a stable allowlist rather than free-form text. Resume accepts
+public state only when the remote annotated tag, peeled commit, provenance
+run/identity, exact inventory/checks/sizes/digests, checksums, cask version/SHA,
+and successful `Promote Cull vX.Y.Z` workflow agree. It does not depend on a
+fabricated post-verification field in provenance. A valid public release whose
+tap is stale resumes with `promote-homebrew`; it does not rebuild or replace
+release assets. `POST_PUBLISH_VERIFY_FAILED` is different because users
 may already have received a bad release: `state fail` creates or updates one P0
 bd incident through `npm run bd --`, stores its identifier and evidence, and
-blocks later readiness checks. `resume` then returns `prepare-patch-plan`.
+blocks later readiness checks. Readiness independently queries all non-closed P0
+issues in the stable `cull-release-X.Y.Z-post-publish` external-reference
+namespace, even if local release state is missing or stale, and fails closed when
+that lookup is unavailable. `resume` then returns `prepare-patch-plan`.
 Recovery never deletes a release, rewrites a tag, force-pushes, or silently
 publishes the patch; a new explicit release request is required for that patch.
 

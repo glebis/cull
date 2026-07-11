@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -402,6 +403,30 @@ describe('Cull release readiness CLI', () => {
       result: { blockers: [{ code: 'WORKTREE_DIRTY' }] },
     });
     expect(readFileSync(join(fixture, 'package.json'), 'utf8')).toBe(before);
+  });
+
+  it('blocks on an independently queried open P0 release incident without local state', () => {
+    const fixture = createFixture();
+    const result = runCheck(fixture, { env: {
+      CULL_RELEASE_TEST_BD_LIST_JSON: JSON.stringify([{
+        id: 'imageview-public-release', status: 'open', priority: 0,
+        external_ref: 'cull-release-1.2.3-post-publish',
+      }]),
+    } });
+    expect(result.status).toBe(3);
+    expect(JSON.parse(result.stdout).result.blockers).toContain(
+      'Unresolved P0 release incident imageview-public-release blocks later releases',
+    );
+    expect(existsSync(join(fixture, '.release-state'))).toBe(false);
+  });
+
+  it('fails closed when independent P0 incident lookup fails', () => {
+    const fixture = createFixture();
+    const result = runCheck(fixture, { env: { CULL_RELEASE_TEST_BD_FAIL: '1' } });
+    expect(result.status).toBe(3);
+    expect(JSON.parse(result.stdout).result.blockers).toContain(
+      'Release incident lookup failed; publication readiness is unknown',
+    );
   });
 });
 
@@ -886,13 +911,16 @@ describe('Cull release prepare, resume, and state CLI', () => {
       failure: { code: 'POST_PUBLISH_VERIFY_FAILED', incidentId: 'imageview-release-p0' },
     });
 
-    const checked = runCheck(fixture, { env });
+    const checked = runCheck(fixture, { env: {
+      ...env,
+      CULL_RELEASE_TEST_BD_LIST_JSON: JSON.stringify([{
+        id: 'imageview-release-p0', status: 'open', priority: 0,
+        external_ref: 'cull-release-1.2.4-post-publish',
+      }]),
+    } });
     expect(checked.status).toBe(3);
     expect(JSON.parse(checked.stdout).result.blockers).toContain(
       'Unresolved P0 release incident imageview-release-p0 blocks later releases',
-    );
-    expect(JSON.parse(readFileSync(log, 'utf8').trim().split('\n').at(-1)!)).toEqual(
-      expect.arrayContaining(['run', 'bd', '--', 'show', 'imageview-release-p0', '--json']),
     );
     expect(readFileSync(statePath, 'utf8')).toContain('POST_PUBLISH_VERIFY_FAILED');
   });
@@ -1056,18 +1084,22 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(result.output.code).toBe('STATE_INVALID');
   });
 
-  it('reaches the terminal state from production commit, tag, public, tap, and provenance probes', () => {
+  it('reaches terminal state from strict public truth despite stale cached commit and run', () => {
     const fixture = createFixture();
     execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(release): v1.2.4'], {
       cwd: fixture, stdio: 'ignore',
     });
     const releaseCommit = head(fixture);
-    execFileSync('git', ['tag', 'v1.2.4'], { cwd: fixture });
+    execFileSync('git', ['tag', '-a', 'v1.2.4', '-m', 'Release v1.2.4'], { cwd: fixture });
+    execFileSync('git', ['remote', 'add', 'origin', fixture], { cwd: fixture });
+    const tagObjectSha = execFileSync('git', ['rev-parse', 'refs/tags/v1.2.4'], {
+      cwd: fixture, encoding: 'utf8',
+    }).trim();
     const stateDir = join(fixture, '.release-state');
     mkdirSync(stateDir);
     writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
       schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'requested',
-      releaseCommit, tag: 'v1.2.4', workflowRunId: 42,
+      releaseCommit: 'f'.repeat(40), tag: 'v1.2.4', workflowRunId: null,
       requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
       gates: {}, assets: {}, failure: null,
     }));
@@ -1075,15 +1107,44 @@ describe('Cull release prepare, resume, and state CLI', () => {
     const fakeGh = join(bin, 'gh');
     const dmgSha256 = 'a'.repeat(64);
     const cask = Buffer.from(`version "1.2.4"\nsha256 "${dmgSha256}"\n`).toString('base64');
+    const checks = Object.fromEntries([
+      'exactInventory', 'updaterMetadata', 'updaterSignature', 'dmgMountedReadOnly',
+      'embeddedVersion', 'arm64Only', 'codeSignature', 'gatekeeper', 'stapledNotarization',
+    ].map((name) => [name, true]));
+    const provenance = {
+      schema: 'cull.release.provenance.v1', version: '1.2.4', tag: 'v1.2.4',
+      commit: releaseCommit, tagObjectSha, workflowRunId: 42,
+      assets: { 'Cull_1.2.4.dmg': { sha256: dmgSha256, size: 123 } }, checks,
+    };
+    const rawProvenance = `${JSON.stringify(provenance)}\n`;
+    const rawChecksums = `${dmgSha256}  Cull_1.2.4.dmg\n`;
+    const evidenceAsset = (name: string, contents: string) => ({
+      name, state: 'uploaded', size: Buffer.byteLength(contents),
+      digest: `sha256:${createHash('sha256').update(contents).digest('hex')}`,
+    });
+    const release = {
+      isDraft: false,
+      assets: [
+        { name: 'Cull_1.2.4.dmg', state: 'uploaded', size: 123, digest: `sha256:${dmgSha256}` },
+        evidenceAsset('release-provenance.json', rawProvenance),
+        evidenceAsset('checksums.txt', rawChecksums),
+      ],
+    };
     writeFileSync(fakeGh, [
       '#!/usr/bin/env node',
       `const releaseCommit = ${JSON.stringify(releaseCommit)};`,
       `const cask = ${JSON.stringify(cask)};`,
+      `const provenance = ${JSON.stringify(provenance)};`,
+      `const release = ${JSON.stringify(release)};`,
+      `const rawChecksums = ${JSON.stringify(rawChecksums)};`,
       "const args = process.argv.slice(2);",
-      "if (args[0] === 'run') console.log(JSON.stringify({conclusion:'success'}));",
+      "if (args[0] === 'run' && args[1] === 'list') console.log(JSON.stringify([{databaseId:84,conclusion:'success',displayTitle:'Promote Cull v1.2.4',event:'workflow_dispatch'}]));",
+      "else if (args[0] === 'run') console.log(JSON.stringify({conclusion:'success'}));",
+      "else if (args[0] === 'api' && args[1].includes('/releases/tags/')) console.log(JSON.stringify({draft:release.isDraft,assets:release.assets}));",
       "else if (args[0] === 'api') console.log(JSON.stringify({content:cask}));",
-      "else if (args[0] === 'release' && args[1] === 'view') console.log(JSON.stringify({isDraft:false,assets:[{name:'Cull_1.2.4.dmg'}]}));",
-      "else if (args[0] === 'release' && args[1] === 'download') console.log(JSON.stringify({schema:'cull.release.provenance.v1',version:'1.2.4',tag:'v1.2.4',commit:releaseCommit,postPublishVerified:true,assets:{'Cull_1.2.4.dmg':{sha256:'a'.repeat(64)}}}));",
+      "else if (args[0] === 'release' && args[1] === 'view') console.log(JSON.stringify(release));",
+      "else if (args[0] === 'release' && args[1] === 'download' && args.includes('checksums.txt')) process.stdout.write(rawChecksums);",
+      "else if (args[0] === 'release' && args[1] === 'download') console.log(JSON.stringify(provenance));",
       'else process.exit(9);',
       '',
     ].join('\n'));
@@ -1094,7 +1155,7 @@ describe('Cull release prepare, resume, and state CLI', () => {
     };
 
     const result = run(fixture, 'resume', ['--version', '1.2.4'], {
-      PATH: `${bin}:${process.env.PATH}`,
+      PATH: `${bin}:${process.env.PATH}`, CULL_RELEASE_TEST_REPOSITORY: 'glebis/cull',
     });
 
     expect(result.execution.status).toBe(0);
@@ -1107,7 +1168,11 @@ describe('Cull release prepare, resume, and state CLI', () => {
       cwd: fixture, stdio: 'ignore',
     });
     const releaseCommit = head(fixture);
-    execFileSync('git', ['tag', 'v1.2.4'], { cwd: fixture });
+    execFileSync('git', ['tag', '-a', 'v1.2.4', '-m', 'Release v1.2.4'], { cwd: fixture });
+    execFileSync('git', ['remote', 'add', 'origin', fixture], { cwd: fixture });
+    const tagObjectSha = execFileSync('git', ['rev-parse', 'refs/tags/v1.2.4'], {
+      cwd: fixture, encoding: 'utf8',
+    }).trim();
     const stateDir = join(fixture, '.release-state');
     mkdirSync(stateDir);
     writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
@@ -1119,19 +1184,40 @@ describe('Cull release prepare, resume, and state CLI', () => {
     const bin = mkdtempSync(join(tmpdir(), 'cull-release-wrong-tap-sha-'));
     const fakeGh = join(bin, 'gh');
     const cask = Buffer.from(`version "1.2.4"\nsha256 "${'b'.repeat(64)}"\n`).toString('base64');
+    const dmgSha256 = 'a'.repeat(64);
+    const checks = Object.fromEntries([
+      'exactInventory', 'updaterMetadata', 'updaterSignature', 'dmgMountedReadOnly',
+      'embeddedVersion', 'arm64Only', 'codeSignature', 'gatekeeper', 'stapledNotarization',
+    ].map((name) => [name, true]));
     const provenance = {
       schema: 'cull.release.provenance.v1', version: '1.2.4', tag: 'v1.2.4',
-      commit: releaseCommit, postPublishVerified: true,
-      assets: { 'Cull_1.2.4.dmg': { sha256: 'a'.repeat(64) } },
+      commit: releaseCommit, tagObjectSha, workflowRunId: 42,
+      assets: { 'Cull_1.2.4.dmg': { sha256: dmgSha256, size: 123 } }, checks,
     };
+    const rawProvenance = `${JSON.stringify(provenance)}\n`;
+    const rawChecksums = `${dmgSha256}  Cull_1.2.4.dmg\n`;
+    const evidenceAsset = (name: string, contents: string) => ({
+      name, state: 'uploaded', size: Buffer.byteLength(contents),
+      digest: `sha256:${createHash('sha256').update(contents).digest('hex')}`,
+    });
+    const release = { isDraft: false, assets: [
+      { name: 'Cull_1.2.4.dmg', state: 'uploaded', size: 123, digest: `sha256:${dmgSha256}` },
+      evidenceAsset('release-provenance.json', rawProvenance),
+      evidenceAsset('checksums.txt', rawChecksums),
+    ] };
     writeFileSync(fakeGh, [
       '#!/usr/bin/env node',
       `const cask = ${JSON.stringify(cask)};`,
       `const provenance = ${JSON.stringify(provenance)};`,
+      `const release = ${JSON.stringify(release)};`,
+      `const rawChecksums = ${JSON.stringify(rawChecksums)};`,
       "const args = process.argv.slice(2);",
-      "if (args[0] === 'run') console.log(JSON.stringify({conclusion:'success'}));",
+      "if (args[0] === 'run' && args[1] === 'list') console.log(JSON.stringify([{databaseId:84,conclusion:'success',displayTitle:'Promote Cull v1.2.4',event:'workflow_dispatch'}]));",
+      "else if (args[0] === 'run') console.log(JSON.stringify({conclusion:'success'}));",
+      "else if (args[0] === 'api' && args[1].includes('/releases/tags/')) console.log(JSON.stringify({draft:release.isDraft,assets:release.assets}));",
       "else if (args[0] === 'api') console.log(JSON.stringify({content:cask}));",
-      "else if (args[0] === 'release' && args[1] === 'view') console.log(JSON.stringify({isDraft:false,assets:[{name:'Cull_1.2.4.dmg'}]}));",
+      "else if (args[0] === 'release' && args[1] === 'view') console.log(JSON.stringify(release));",
+      "else if (args[0] === 'release' && args[1] === 'download' && args.includes('checksums.txt')) process.stdout.write(rawChecksums);",
       "else if (args[0] === 'release' && args[1] === 'download') console.log(JSON.stringify(provenance));",
       'else process.exit(9);',
       '',
@@ -1139,7 +1225,7 @@ describe('Cull release prepare, resume, and state CLI', () => {
     chmodSync(fakeGh, 0o755);
 
     const result = run(fixture, 'resume', ['--version', '1.2.4'], {
-      PATH: `${bin}:${process.env.PATH}`,
+      PATH: `${bin}:${process.env.PATH}`, CULL_RELEASE_TEST_REPOSITORY: 'glebis/cull',
     });
 
     expect(result.execution.status).toBe(0);
