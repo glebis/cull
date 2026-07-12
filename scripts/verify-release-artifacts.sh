@@ -277,7 +277,7 @@ if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(det
 const decodedBuffer = Buffer.from(detachedSignature, 'base64');
 if (decodedBuffer.toString('base64') !== detachedSignature) process.exit(1);
 const decodedSignature = decodedBuffer.toString('utf8');
-if (!decodedSignature.startsWith('untrusted comment: signature from minisign secret key\n')) process.exit(1);
+if (!decodedSignature.startsWith('untrusted comment: signature from tauri secret key\n')) process.exit(1);
 if (!decodedSignature.includes('\ntrusted comment:')) process.exit(1);
 fs.writeFileSync(decodedSignaturePath, decodedSignature, { mode: 0o600, flag: 'wx' });
 NODE
