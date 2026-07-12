@@ -663,11 +663,23 @@ describe('release gate', () => {
     expect(job).toContain('CHECKSUMS_DIGEST_MISMATCH');
     expect(job).toContain('shasum -a 256');
     expect(job).toContain('DMG_SHA_MISMATCH');
+    expect(job).toContain('repos/glebis/cull/actions/runs/$WORKFLOW_RUN_ID');
+    expect(job).toContain("run.path !== '.github/workflows/release.yml'");
+    expect(job).toContain("run.repository?.full_name !== 'glebis/cull'");
+    expect(job).toContain("run.status !== 'completed'");
+    expect(job).toContain("run.conclusion !== 'success'");
+    expect(job).toContain("run.event === 'push'");
+    expect(job).toContain('run.head_sha !== provenance.commit');
+    expect(job).toContain("run.event === 'workflow_dispatch'");
+    expect(job).toContain("run.head_branch !== 'main'");
 
     const verified = job.indexOf('Verify public provenance and DMG before tap access');
+    const workflowAuthentication = job.indexOf('actions/runs/$WORKFLOW_RUN_ID');
     const token = job.indexOf('${{ secrets.HOMEBREW_TAP_TOKEN }}');
     expect(verified).toBeGreaterThan(-1);
+    expect(workflowAuthentication).toBeGreaterThan(verified);
     expect(token).toBeGreaterThan(verified);
+    expect(token).toBeGreaterThan(workflowAuthentication);
   });
 
   it('pins exactly version and SHA, rejects no_check, and makes equal promotion idempotent', () => {

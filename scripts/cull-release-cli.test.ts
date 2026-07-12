@@ -1140,7 +1140,8 @@ describe('Cull release prepare, resume, and state CLI', () => {
       "const args = process.argv.slice(2);",
       "if (args[0] === 'run' && args[1] === 'list') console.log(JSON.stringify([{databaseId:84,conclusion:'success',displayTitle:'Promote Cull v1.2.4',event:'workflow_dispatch'}]));",
       "else if (args[0] === 'run') console.log(JSON.stringify({conclusion:'success'}));",
-      "else if (args[0] === 'api' && args[1].includes('/releases/tags/')) console.log(JSON.stringify({draft:release.isDraft,assets:release.assets}));",
+      "else if (args[0] === 'api' && args[1].includes('/actions/runs/')) console.log(JSON.stringify({id:42,path:'.github/workflows/release.yml',repository:{full_name:'glebis/cull'},status:'completed',conclusion:'success',event:'workflow_dispatch',head_branch:'main'}));",
+      "else if (args[0] === 'api' && args[1].includes('/releases/tags/')) console.log(JSON.stringify({tag_name:'v1.2.4',draft:release.isDraft,prerelease:false,assets:release.assets}));",
       "else if (args[0] === 'api') console.log(JSON.stringify({content:cask}));",
       "else if (args[0] === 'release' && args[1] === 'view') console.log(JSON.stringify(release));",
       "else if (args[0] === 'release' && args[1] === 'download' && args.includes('checksums.txt')) process.stdout.write(rawChecksums);",
@@ -1214,7 +1215,8 @@ describe('Cull release prepare, resume, and state CLI', () => {
       "const args = process.argv.slice(2);",
       "if (args[0] === 'run' && args[1] === 'list') console.log(JSON.stringify([{databaseId:84,conclusion:'success',displayTitle:'Promote Cull v1.2.4',event:'workflow_dispatch'}]));",
       "else if (args[0] === 'run') console.log(JSON.stringify({conclusion:'success'}));",
-      "else if (args[0] === 'api' && args[1].includes('/releases/tags/')) console.log(JSON.stringify({draft:release.isDraft,assets:release.assets}));",
+      "else if (args[0] === 'api' && args[1].includes('/actions/runs/')) console.log(JSON.stringify({id:42,path:'.github/workflows/release.yml',repository:{full_name:'glebis/cull'},status:'completed',conclusion:'success',event:'push',head_sha:'" + releaseCommit + "'}));",
+      "else if (args[0] === 'api' && args[1].includes('/releases/tags/')) console.log(JSON.stringify({tag_name:'v1.2.4',draft:release.isDraft,prerelease:false,assets:release.assets}));",
       "else if (args[0] === 'api') console.log(JSON.stringify({content:cask}));",
       "else if (args[0] === 'release' && args[1] === 'view') console.log(JSON.stringify(release));",
       "else if (args[0] === 'release' && args[1] === 'download' && args.includes('checksums.txt')) process.stdout.write(rawChecksums);",
@@ -1231,6 +1233,61 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(result.execution.status).toBe(0);
     expect(result.output.result.nextAction).toBe('promote-homebrew');
     expect(result.output.result.evidence).toMatchObject({ publishedRelease: true, tapCommit: false });
+
+    const malformedProvenance = { ...provenance, schema: 'untrusted.provenance' };
+    const malformedRaw = `${JSON.stringify(malformedProvenance)}\n`;
+    const malformedRelease = { ...release, assets: release.assets.map((asset) =>
+      asset.name === 'release-provenance.json'
+        ? evidenceAsset('release-provenance.json', malformedRaw)
+        : asset) };
+    writeFileSync(fakeGh, [
+      '#!/usr/bin/env node',
+      `const cask = ${JSON.stringify(cask)};`,
+      `const provenance = ${JSON.stringify(malformedProvenance)};`,
+      `const release = ${JSON.stringify(malformedRelease)};`,
+      `const rawChecksums = ${JSON.stringify(rawChecksums)};`,
+      "const args = process.argv.slice(2);",
+      "if (args[0] === 'run') console.log(JSON.stringify({databaseId:42,conclusion:'success',status:'completed',event:'push',headSha:'" + releaseCommit + "',workflowName:'Release',url:'https://github.com/glebis/cull/actions/runs/42'}));",
+      "else if (args[0] === 'api' && args[1].includes('/releases/tags/')) console.log(JSON.stringify({draft:release.isDraft,prerelease:false,tag_name:'v1.2.4',assets:release.assets}));",
+      "else if (args[0] === 'api') console.log(JSON.stringify({content:cask}));",
+      "else if (args[0] === 'release' && args[1] === 'download' && args.includes('checksums.txt')) process.stdout.write(rawChecksums);",
+      "else if (args[0] === 'release' && args[1] === 'download') console.log(JSON.stringify(provenance));",
+      'else process.exit(9);',
+      '',
+    ].join('\n'));
+
+    const unsafe = run(fixture, 'resume', ['--version', '1.2.4'], {
+      PATH: `${bin}:${process.env.PATH}`, CULL_RELEASE_TEST_REPOSITORY: 'glebis/cull',
+    });
+    expect(unsafe.execution.status).toBe(0);
+    expect(unsafe.output.result.nextAction).not.toBe('promote-homebrew');
+    expect(unsafe.output.result.evidence).toMatchObject({
+      workflow: false, releaseAsset: false, publishedRelease: false, tapCommit: false,
+    });
+
+    writeFileSync(fakeGh, [
+      '#!/usr/bin/env node',
+      `const cask = ${JSON.stringify(cask)};`,
+      `const provenance = ${JSON.stringify(provenance)};`,
+      `const release = ${JSON.stringify(release)};`,
+      `const rawChecksums = ${JSON.stringify(rawChecksums)};`,
+      "const args = process.argv.slice(2);",
+      "if (args[0] === 'api' && args[1].includes('/actions/runs/')) console.log(JSON.stringify({id:42,path:'.github/workflows/ci.yml',repository:{full_name:'glebis/cull'},status:'completed',conclusion:'success',event:'push',head_sha:'" + releaseCommit + "'}));",
+      "else if (args[0] === 'api' && args[1].includes('/releases/tags/')) console.log(JSON.stringify({draft:false,prerelease:false,tag_name:'v1.2.4',assets:release.assets}));",
+      "else if (args[0] === 'api') console.log(JSON.stringify({content:cask}));",
+      "else if (args[0] === 'release' && args[1] === 'download' && args.includes('checksums.txt')) process.stdout.write(rawChecksums);",
+      "else if (args[0] === 'release' && args[1] === 'download') console.log(JSON.stringify(provenance));",
+      'else process.exit(9);',
+      '',
+    ].join('\n'));
+    const unrelated = run(fixture, 'resume', ['--version', '1.2.4'], {
+      PATH: `${bin}:${process.env.PATH}`, CULL_RELEASE_TEST_REPOSITORY: 'glebis/cull',
+    });
+    expect(unrelated.execution.status).toBe(0);
+    expect(unrelated.output.result.nextAction).not.toBe('promote-homebrew');
+    expect(unrelated.output.result.evidence).toMatchObject({
+      workflow: false, releaseAsset: false, publishedRelease: false, tapCommit: false,
+    });
   });
 
   it('rejects duplicate options, option-looking values, and invalid evidence JSON', () => {

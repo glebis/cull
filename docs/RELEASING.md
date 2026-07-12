@@ -138,7 +138,11 @@ downloaded `checksums.txt` must enumerate exactly those four assets and its own
 public size and digest must match, as must the downloaded provenance asset. The
 workflow then downloads the public DMG and compares its computed SHA-256 with
 provenance (and with the manual input when dispatched). Only after those checks
-pass does the tap checkout receive `HOMEBREW_TAP_TOKEN`.
+pass does the workflow authenticate `workflowRunId` through GitHub's Actions API
+as the exact successful, completed `glebis/cull` `.github/workflows/release.yml`
+run. Push runs must have `head_sha` equal to the provenance commit; manually
+dispatched release runs must originate from `main` and may have a different
+invocation SHA. Only then does the tap checkout receive `HOMEBREW_TAP_TOKEN`.
 
 All Cull promotions share one non-cancelling concurrency group, so an older run
 cannot race a newer version. Promotion changes exactly the cask's sole canonical
@@ -177,8 +181,9 @@ npm run release:cull -- state fail --version 0.2.6 --code BUILD_FAILED \
 ```
 
 Failure codes are a stable allowlist rather than free-form text. Resume accepts
-public state only when the remote annotated tag, peeled commit, provenance
-run/identity, exact inventory/checks/sizes/digests, checksums, cask version/SHA,
+public state only when the release tag/draft/prerelease fields, remote annotated
+tag, peeled commit, strict provenance, authenticated exact release workflow run,
+exact inventory/checks/sizes/digests, checksums, cask version/SHA,
 and successful `Promote Cull vX.Y.Z` workflow agree. It does not depend on a
 fabricated post-verification field in provenance. A valid public release whose
 tap is stale resumes with `promote-homebrew`; it does not rebuild or replace

@@ -616,9 +616,18 @@ function probeTag(record) {
   return { tagObjectSha, commit };
 }
 
-function probeWorkflow(workflowRunId) {
-  if (!Number.isSafeInteger(workflowRunId) || workflowRunId < 1) return false;
-  return tryGh('run', 'view', '--json', 'conclusion', '--', String(workflowRunId))?.conclusion === 'success';
+function probeWorkflow(provenance, repository) {
+  const workflowRunId = provenance?.workflowRunId;
+  if (repository !== 'glebis/cull'
+    || !Number.isSafeInteger(workflowRunId) || workflowRunId < 1) return false;
+  const run = tryGh('api', `repos/glebis/cull/actions/runs/${workflowRunId}`);
+  if (run?.id !== workflowRunId
+    || run.path !== '.github/workflows/release.yml'
+    || run.repository?.full_name !== 'glebis/cull'
+    || run.status !== 'completed'
+    || run.conclusion !== 'success') return false;
+  if (run.event === 'push') return run.head_sha === provenance.commit;
+  return run.event === 'workflow_dispatch' && run.head_branch === 'main';
 }
 
 function probeRelease(record) {
@@ -626,7 +635,12 @@ function probeRelease(record) {
   if (!repository) return null;
   const release = tryGh('api', `repos/${repository}/releases/tags/${record.tag}`);
   if (!release) return null;
-  return { isDraft: release.draft, assets: release.assets };
+  return {
+    tagName: release.tag_name,
+    isDraft: release.draft,
+    isPrerelease: release.prerelease,
+    assets: release.assets,
+  };
 }
 
 function releaseRepository() {
@@ -736,19 +750,22 @@ function probeEvidence(record, config) {
   }
   const release = probeRelease(record);
   const required = config.artifacts?.required?.map((name) => name.replace('{version}', record.version)) ?? [];
-  const names = new Set(release?.assets?.map((asset) => asset.name) ?? []);
-  const publishedRelease = release !== null && release.isDraft === false;
+  const releaseShapeValid = release !== null
+    && release.tagName === record.tag
+    && release.isDraft === false
+    && release.isPrerelease === false;
   const tagIdentity = probeTag(record);
-  const provenance = publishedRelease
+  const provenance = releaseShapeValid
     ? probePublishedProvenance(record, config, release, tagIdentity)
     : null;
-  const workflowRunId = provenance?.workflowRunId ?? record.workflowRunId;
+  const workflow = probeWorkflow(provenance, releaseRepository());
+  const publishedRelease = releaseShapeValid && provenance !== null && workflow;
   const tapCommit = publishedRelease && probeTapCommit(record, config, provenance);
   return {
     commit: tagIdentity !== null || probeCommit(record),
     tag: tagIdentity !== null,
-    workflow: probeWorkflow(workflowRunId),
-    releaseAsset: required.length > 0 && required.every((name) => names.has(name)),
+    workflow,
+    releaseAsset: publishedRelease && required.length > 0,
     publishedRelease,
     tapCommit,
     postPublishVerified: publishedRelease && tapCommit && provenance !== null

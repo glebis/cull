@@ -78,6 +78,7 @@ jobs:
             *) exit 2 ;;
           esac
           export VERSION
+          test "$REPOSITORY" = glebis/cull
           [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           [[ -z "$EXPECTED_SHA" || "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ ]]
           expected_provenance="https://github.com/$REPOSITORY/releases/download/v$VERSION/release-provenance.json"
@@ -203,8 +204,30 @@ jobs:
             "const x=require(process.env.VALIDATED); process.stdout.write(x.digest)")
           DMG_URL=$(VALIDATED="$RUNNER_TEMP/validated-promotion.json" node -e \
             "const x=require(process.env.VALIDATED); process.stdout.write(x.dmgUrl)")
+          WORKFLOW_RUN_ID=$(VALIDATED="$RUNNER_TEMP/validated-promotion.json" node -e \
+            "const x=require(process.env.VALIDATED); process.stdout.write(String(x.workflowRunId))")
           expected_dmg="https://github.com/$REPOSITORY/releases/download/v$VERSION/Cull_${VERSION}_aarch64.dmg"
           test "$DMG_URL" = "$expected_dmg"
+
+          failure_code=WORKFLOW_PROVENANCE_INVALID
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            "https://api.github.com/repos/glebis/cull/actions/runs/$WORKFLOW_RUN_ID" \
+            --output "$RUNNER_TEMP/release-workflow-run.json"
+          PROVENANCE="$RUNNER_TEMP/release-provenance.json" \
+            WORKFLOW_RUN="$RUNNER_TEMP/release-workflow-run.json" node <<'NODE'
+          const fs = require('node:fs');
+          const provenance = JSON.parse(fs.readFileSync(process.env.PROVENANCE, 'utf8'));
+          const run = JSON.parse(fs.readFileSync(process.env.WORKFLOW_RUN, 'utf8'));
+          if (run.id !== provenance.workflowRunId ||
+              run.path !== '.github/workflows/release.yml' ||
+              run.repository?.full_name !== 'glebis/cull' ||
+              run.status !== 'completed' || run.conclusion !== 'success') process.exit(2);
+          if (run.event === 'push') {
+            if (run.head_sha !== provenance.commit) process.exit(2);
+          } else if (run.event === 'workflow_dispatch') {
+            if (run.head_branch !== 'main') process.exit(2);
+          } else process.exit(2);
+          NODE
 
           failure_code=DMG_DOWNLOAD_FAILED
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
