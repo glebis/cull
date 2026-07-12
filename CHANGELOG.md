@@ -8,7 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 No changes yet.
 
-## [0.3.0] - 2026-07-12
+## [0.3.1] - 2026-07-12
 
 ### Fixed
 
