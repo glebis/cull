@@ -35,16 +35,28 @@ pub async fn list_images(
 
 #[tauri::command]
 pub async fn delete_folder(state: State<'_, AppState>, folder: String) -> Result<u32, String> {
-    let deleted = state
+    delete_folder_inner(&state, &folder)
+}
+
+fn delete_folder_inner(state: &AppState, folder: &str) -> Result<u32, String> {
+    let deleted_ids = state
         .db
-        .delete_images_by_folder(&folder)
+        .delete_images_by_folder(folder)
         .map_err(|e| e.to_string())?;
+    let deleted = deleted_ids.len() as u32;
+
+    // Thumbnail cleanup is best-effort and must never fail the command:
+    // the DB transaction already committed by this point.
+    for image_id in &deleted_ids {
+        crate::db_core::thumbnails::remove_thumbnails_for_image(&state.app_data_dir, image_id);
+    }
+
     if deleted > 0 {
         log_library_event(
-            &state,
+            state,
             "folder_removed_from_library",
             Some("folder"),
-            Some(folder.clone()),
+            Some(folder.to_string()),
             serde_json::json!({
                 "folder": folder,
                 "image_count": deleted,
@@ -436,17 +448,7 @@ pub async fn check_library_health(
             let conn = db.conn.lock();
             let _ = conn.execute("DELETE FROM images WHERE id = ?1", rusqlite::params![id]);
             drop(conn);
-            let thumb = crate::db_core::thumbnails::thumbnail_path(app_data_dir, id);
-            if thumb.exists() {
-                let _ = std::fs::remove_file(&thumb);
-            }
-            for &size in &crate::db_core::thumbnails::THUMBNAIL_SIZES {
-                let sized =
-                    crate::db_core::thumbnails::sized_thumbnail_path(app_data_dir, id, size);
-                if sized.exists() {
-                    let _ = std::fs::remove_file(&sized);
-                }
-            }
+            crate::db_core::thumbnails::remove_thumbnails_for_image(app_data_dir, id);
             purged += 1;
         }
     }
@@ -526,6 +528,80 @@ mod tests {
             last_seen_mtime: None,
         })
         .unwrap();
+    }
+
+    /// Creates fake thumbnail files (base + every sized variant) for an image
+    /// id, so tests can assert they get cleaned up.
+    fn write_fake_thumbnails(app_data_dir: &Path, image_id: &str) {
+        let base = crate::db_core::thumbnails::thumbnail_path(app_data_dir, image_id);
+        std::fs::write(&base, b"fake-thumb").unwrap();
+        for &size in &crate::db_core::thumbnails::THUMBNAIL_SIZES {
+            let sized =
+                crate::db_core::thumbnails::sized_thumbnail_path(app_data_dir, image_id, size);
+            std::fs::write(&sized, b"fake-thumb").unwrap();
+        }
+    }
+
+    #[test]
+    fn delete_folder_removes_thumbnails_of_exactly_the_deleted_images() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("delete-me");
+        std::fs::create_dir_all(&folder).unwrap();
+        let deleted_path = folder.join("deleted.png");
+        std::fs::write(&deleted_path, b"fake image data").unwrap();
+
+        let kept_folder = dir.path().join("keep-me");
+        std::fs::create_dir_all(&kept_folder).unwrap();
+        let kept_path = kept_folder.join("kept.png");
+        std::fs::write(&kept_path, b"fake image data").unwrap();
+
+        let state = test_state(dir.path());
+        insert_test_image(&state.db, "img-deleted", &deleted_path);
+        insert_test_image(&state.db, "img-kept", &kept_path);
+
+        write_fake_thumbnails(&state.app_data_dir, "img-deleted");
+        write_fake_thumbnails(&state.app_data_dir, "img-kept");
+
+        let count = delete_folder_inner(&state, &folder.to_string_lossy()).unwrap();
+
+        assert_eq!(count, 1);
+
+        let deleted_base =
+            crate::db_core::thumbnails::thumbnail_path(&state.app_data_dir, "img-deleted");
+        assert!(
+            !deleted_base.exists(),
+            "base thumbnail of the deleted image should be removed"
+        );
+        for &size in &crate::db_core::thumbnails::THUMBNAIL_SIZES {
+            let sized = crate::db_core::thumbnails::sized_thumbnail_path(
+                &state.app_data_dir,
+                "img-deleted",
+                size,
+            );
+            assert!(
+                !sized.exists(),
+                "sized thumbnail {} of the deleted image should be removed",
+                size
+            );
+        }
+
+        let kept_base = crate::db_core::thumbnails::thumbnail_path(&state.app_data_dir, "img-kept");
+        assert!(
+            kept_base.exists(),
+            "thumbnail of an image outside the deleted folder must survive"
+        );
+        for &size in &crate::db_core::thumbnails::THUMBNAIL_SIZES {
+            let sized = crate::db_core::thumbnails::sized_thumbnail_path(
+                &state.app_data_dir,
+                "img-kept",
+                size,
+            );
+            assert!(
+                sized.exists(),
+                "sized thumbnail {} of an image outside the deleted folder must survive",
+                size
+            );
+        }
     }
 
     /// Verify that the trash crate can handle filenames with special characters

@@ -16,10 +16,13 @@ use hyper_util::rt::TokioIo;
 use qrcode::render::svg;
 use qrcode::QrCode;
 use rand::seq::IndexedRandom;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use subtle::ConstantTimeEq;
 use tauri::State;
 use tokio::sync::oneshot;
+use tokio::sync::Semaphore;
 
 use crate::db_core::canvas_document::{
     CanvasDocument, CanvasExportBackground, CanvasExportBounds, CanvasItem, CanvasItemFit,
@@ -31,6 +34,7 @@ const MODULE_KEY: &str = "module_static_publishing";
 const SCHEMA_VERSION: &str = "cull.static_publishing.v1";
 const MAX_SNAPSHOT_LONG_EDGE: f64 = 4096.0;
 const SERVER_PORT_FALLBACK_ATTEMPTS: u16 = 20;
+const STATIC_PUBLISH_MAX_CONNECTIONS: usize = 16;
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct StaticPublishCanvasItem {
@@ -614,6 +618,12 @@ pub async fn serve_static_publish_package_inner(
     // is package identity.
     validate_cull_static_package(&site_dir)?;
 
+    // Canonicalize once up front so every request only needs to canonicalize the
+    // candidate path and compare prefixes (handles macOS /var -> /private/var).
+    let canonical_site_root = tokio::fs::canonicalize(&site_dir)
+        .await
+        .map_err(|e| format!("Failed to resolve site directory: {}", e))?;
+
     let requested_host = host.unwrap_or_else(|| "127.0.0.1".to_string());
     if requested_host != "127.0.0.1" && requested_host != "localhost" && requested_host != "::1" {
         crate::safe_eprintln!(
@@ -624,9 +634,14 @@ pub async fn serve_static_publish_package_inner(
     let host = "127.0.0.1".to_string();
     let port = port.unwrap_or(8000);
     let (listener, actual_addr) = bind_static_publish_listener(&host, port).await?;
-    let site_root = Arc::new(site_dir.clone());
+    let site_root = Arc::new(canonical_site_root);
+    let token = Arc::new(generate_publish_token());
+    let connection_semaphore = Arc::new(Semaphore::new(STATIC_PUBLISH_MAX_CONNECTIONS));
     let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
 
+    let spawn_site_root = site_root.clone();
+    let spawn_token = token.clone();
+    let spawn_semaphore = connection_semaphore.clone();
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::select! {
@@ -636,11 +651,24 @@ pub async fn serve_static_publish_package_inner(
                         break;
                     };
                     let io = TokioIo::new(stream);
-                    let site_root = site_root.clone();
+                    let site_root = spawn_site_root.clone();
+                    let token = spawn_token.clone();
+                    let connection_semaphore = spawn_semaphore.clone();
                     tokio::spawn(async move {
+                        // Acquired here, inside the connection task, rather than in
+                        // the accept loop above: acquiring before spawning would
+                        // block the loop once STATIC_PUBLISH_MAX_CONNECTIONS are
+                        // in flight, and a blocked loop stops observing stop_rx,
+                        // so the server could no longer be stopped. The permit is
+                        // held for the connection's lifetime; dropping it at task
+                        // end frees the slot for the next accepted connection.
+                        let Ok(_permit) = connection_semaphore.clone().acquire_owned().await else {
+                            return;
+                        };
                         let service = hyper::service::service_fn(move |req: Request<Incoming>| {
                             let site_root = site_root.clone();
-                            async move { Ok::<_, Infallible>(serve_static_file(site_root, req).await) }
+                            let token = token.clone();
+                            async move { Ok::<_, Infallible>(serve_static_file(site_root, token, req).await) }
                         });
                         if let Err(err) = hyper::server::conn::http1::Builder::new()
                             .serve_connection(io, service)
@@ -655,7 +683,12 @@ pub async fn serve_static_publish_package_inner(
     });
 
     let result = StaticPublishServerResult {
-        url: format!("http://{}:{}/", actual_addr.ip(), actual_addr.port()),
+        url: format!(
+            "http://{}:{}/{}/",
+            actual_addr.ip(),
+            actual_addr.port(),
+            token
+        ),
         host: actual_addr.ip().to_string(),
         port: actual_addr.port(),
         site_dir: site_dir.to_string_lossy().to_string(),
@@ -758,23 +791,49 @@ fn ensure_module_enabled(state: &AppState) -> Result<(), String> {
 
 async fn serve_static_file(
     site_root: Arc<PathBuf>,
+    token: Arc<String>,
     req: Request<Incoming>,
 ) -> Response<Full<Bytes>> {
     if req.method() != hyper::Method::GET && req.method() != hyper::Method::HEAD {
         return text_response(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed");
     }
 
-    let Some(path) = request_path_to_file(site_root.as_ref(), req.uri().path()) else {
+    // The auth token is the first path segment rather than a query param or
+    // cookie: cookies on 127.0.0.1 are host-scoped, not port-scoped, so a
+    // bootstrap cookie would leak the token to every other localhost service
+    // the browser talks to. The exported HTML uses relative asset paths
+    // (e.g. href="qr.svg", fetch('./data/canvas.json')), so a path-prefix
+    // token resolves cleanly with no cookie needed.
+    let request_path = req.uri().path();
+    let trimmed = request_path.trim_start_matches('/');
+    let (provided_token, remainder) = trimmed.split_once('/').unwrap_or((trimmed, ""));
+
+    if provided_token.is_empty() || !constant_time_str_eq(&token, provided_token) {
+        return text_response(StatusCode::UNAUTHORIZED, "Unauthorized");
+    }
+
+    let Some(path) = request_path_to_file(site_root.as_ref(), remainder) else {
         return text_response(StatusCode::BAD_REQUEST, "Bad Request");
     };
 
-    match tokio::fs::read(&path).await {
+    // The traversal check above is lexical only; `tokio::fs::read` follows
+    // symlinks, so a symlink inside the package could otherwise serve files
+    // outside site_root. Canonicalize the candidate and require it to stay
+    // under the (already canonical) site root. A nonexistent file also fails
+    // canonicalization, which naturally falls through to 404.
+    let canonical_path = match tokio::fs::canonicalize(&path).await {
+        Ok(canonical) if canonical.starts_with(site_root.as_ref()) => canonical,
+        _ => return text_response(StatusCode::NOT_FOUND, "Not Found"),
+    };
+
+    match tokio::fs::read(&canonical_path).await {
         Ok(bytes) => {
-            let mime = mime_for_path(&path);
+            let mime = mime_for_path(&canonical_path);
             Response::builder()
                 .status(StatusCode::OK)
                 .header(http::header::CONTENT_TYPE, mime)
                 .header(http::header::CACHE_CONTROL, "no-store")
+                .header(http::header::REFERRER_POLICY, "no-referrer")
                 .body(Full::new(Bytes::from(bytes)))
                 .unwrap_or_else(|_| {
                     text_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error")
@@ -782,6 +841,16 @@ async fn serve_static_file(
         }
         Err(_) => text_response(StatusCode::NOT_FOUND, "Not Found"),
     }
+}
+
+fn generate_publish_token() -> String {
+    let mut bytes = [0u8; 32];
+    rand::rng().fill(&mut bytes);
+    hex::encode(bytes)
+}
+
+fn constant_time_str_eq(expected: &str, provided: &str) -> bool {
+    expected.as_bytes().ct_eq(provided.as_bytes()).into()
 }
 
 fn request_path_to_file(site_root: &Path, request_path: &str) -> Option<PathBuf> {
@@ -809,6 +878,7 @@ fn text_response(status: StatusCode, text: &str) -> Response<Full<Bytes>> {
     Response::builder()
         .status(status)
         .header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .header(http::header::REFERRER_POLICY, "no-referrer")
         .body(Full::new(Bytes::from(text.to_string())))
         .unwrap()
 }
@@ -2324,7 +2394,12 @@ mod tests {
 
         assert_eq!(result.host, "127.0.0.1");
         assert_ne!(result.port, occupied_port);
-        assert_eq!(result.url, format!("http://127.0.0.1:{}/", result.port));
+        let prefix = format!("http://127.0.0.1:{}/", result.port);
+        assert!(result.url.starts_with(&prefix));
+        assert!(result.url.ends_with('/'));
+        let token = result.url[prefix.len()..].trim_end_matches('/');
+        assert_eq!(token.len(), 64);
+        assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[tokio::test]
@@ -2535,6 +2610,163 @@ mod tests {
             request_path_to_file(&root, "/").unwrap(),
             PathBuf::from("/tmp/site/index.html")
         );
+    }
+
+    fn write_test_publish_site(site_dir: &Path) {
+        fs::create_dir_all(site_dir).unwrap();
+        write_pkg(
+            site_dir,
+            true,
+            Some(&format!(r#"{{"schema":"{}","images":[]}}"#, SCHEMA_VERSION)),
+        );
+    }
+
+    /// The result URL is `http://<host>:<port>/<token>/`; extract the token
+    /// path segment.
+    fn token_from_result_url(url: &str) -> String {
+        let after_scheme = url.split_once("://").expect("url should have a scheme").1;
+        let after_authority = after_scheme
+            .split_once('/')
+            .expect("url should have a path")
+            .1;
+        after_authority.trim_end_matches('/').to_string()
+    }
+
+    #[tokio::test]
+    async fn static_server_rejects_missing_token() {
+        let (state, tmp) = test_state();
+        state.db.set_setting(MODULE_KEY, "true").unwrap();
+        let site_dir = tmp.path().join("site");
+        write_test_publish_site(&site_dir);
+
+        let result = serve_static_publish_package_inner(
+            &state,
+            site_dir.to_string_lossy().to_string(),
+            Some("127.0.0.1".to_string()),
+            Some(0),
+        )
+        .await
+        .unwrap();
+
+        // No token path segment at all.
+        let base = format!("http://{}:{}/", result.host, result.port);
+        let response = reqwest::get(&base).await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        stop_static_publish_server_inner(&state).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn static_server_rejects_wrong_token() {
+        let (state, tmp) = test_state();
+        state.db.set_setting(MODULE_KEY, "true").unwrap();
+        let site_dir = tmp.path().join("site");
+        write_test_publish_site(&site_dir);
+
+        let result = serve_static_publish_package_inner(
+            &state,
+            site_dir.to_string_lossy().to_string(),
+            Some("127.0.0.1".to_string()),
+            Some(0),
+        )
+        .await
+        .unwrap();
+
+        // Same length as a real 32-byte hex token, so this exercises the
+        // constant-time comparison path rather than a length short-circuit.
+        let wrong_token = "f".repeat(64);
+        let url = format!("http://{}:{}/{}/", result.host, result.port, wrong_token);
+        let response = reqwest::get(&url).await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        stop_static_publish_server_inner(&state).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn static_server_accepts_correct_token_path() {
+        let (state, tmp) = test_state();
+        state.db.set_setting(MODULE_KEY, "true").unwrap();
+        let site_dir = tmp.path().join("site");
+        write_test_publish_site(&site_dir);
+
+        let result = serve_static_publish_package_inner(
+            &state,
+            site_dir.to_string_lossy().to_string(),
+            Some("127.0.0.1".to_string()),
+            Some(0),
+        )
+        .await
+        .unwrap();
+
+        let response = reqwest::get(&result.url).await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+        stop_static_publish_server_inner(&state).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn static_server_serves_asset_under_token_path() {
+        let (state, tmp) = test_state();
+        state.db.set_setting(MODULE_KEY, "true").unwrap();
+        let site_dir = tmp.path().join("site");
+        write_test_publish_site(&site_dir);
+
+        let result = serve_static_publish_package_inner(
+            &state,
+            site_dir.to_string_lossy().to_string(),
+            Some("127.0.0.1".to_string()),
+            Some(0),
+        )
+        .await
+        .unwrap();
+
+        let token = token_from_result_url(&result.url);
+        let url = format!(
+            "http://{}:{}/{}/data/canvas.json",
+            result.host, result.port, token
+        );
+        let response = reqwest::get(&url).await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+        stop_static_publish_server_inner(&state).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn static_server_rejects_symlink_escaping_site_root() {
+        let (state, tmp) = test_state();
+        state.db.set_setting(MODULE_KEY, "true").unwrap();
+
+        let site_dir = tmp.path().join("site");
+        write_test_publish_site(&site_dir);
+
+        let secret_dir = tmp.path().join("outside");
+        fs::create_dir_all(&secret_dir).unwrap();
+        let secret_path = secret_dir.join("secret.txt");
+        fs::write(&secret_path, "top secret").unwrap();
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&secret_path, site_dir.join("escape.txt")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&secret_path, site_dir.join("escape.txt")).unwrap();
+
+        let result = serve_static_publish_package_inner(
+            &state,
+            site_dir.to_string_lossy().to_string(),
+            Some("127.0.0.1".to_string()),
+            Some(0),
+        )
+        .await
+        .unwrap();
+
+        let token = token_from_result_url(&result.url);
+        let url = format!(
+            "http://{}:{}/{}/escape.txt",
+            result.host, result.port, token
+        );
+        let response = reqwest::get(&url).await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
+
+        stop_static_publish_server_inner(&state).await.unwrap();
     }
 
     fn test_state() -> (AppState, tempfile::TempDir) {

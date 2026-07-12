@@ -429,44 +429,53 @@ impl Database {
         rows.collect::<Result<Vec<_>>>()
     }
 
-    pub fn delete_images_by_folder(&self, folder: &str) -> Result<u32> {
+    /// Deletes every image that lives exclusively under `folder`, plus any
+    /// leftover file records in that folder for images that still exist
+    /// elsewhere. Runs inside a single transaction so the deletion is
+    /// atomic, and returns the ids of the images that were deleted so
+    /// callers can clean up associated on-disk artifacts (thumbnails, etc.).
+    pub fn delete_images_by_folder(&self, folder: &str) -> Result<Vec<String>> {
         validate_delete_folder_path(folder)?;
 
-        let conn = self.conn.lock();
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
         let prefix = format!("{}/", folder.trim_end_matches('/'));
         let prefix_len = prefix.chars().count() as i64;
 
         // Get image IDs that ONLY exist in this folder (no other paths)
-        let mut stmt = conn.prepare(
-            "SELECT DISTINCT f.image_id FROM image_files f
-             WHERE substr(f.path, 1, ?2) COLLATE BINARY = ?1 COLLATE BINARY
-             AND f.missing_at IS NULL
-             AND f.image_id NOT IN (
-                 SELECT image_id FROM image_files
-                 WHERE substr(path, 1, ?2) COLLATE BINARY != ?1 COLLATE BINARY
-                 AND missing_at IS NULL
-             )",
-        )?;
-        let image_ids: Vec<String> = stmt
-            .query_map(params![&prefix, prefix_len], |row| row.get(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        let count = image_ids.len() as u32;
+        let image_ids: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT DISTINCT f.image_id FROM image_files f
+                 WHERE substr(f.path, 1, ?2) COLLATE BINARY = ?1 COLLATE BINARY
+                 AND f.missing_at IS NULL
+                 AND f.image_id NOT IN (
+                     SELECT image_id FROM image_files
+                     WHERE substr(path, 1, ?2) COLLATE BINARY != ?1 COLLATE BINARY
+                     AND missing_at IS NULL
+                 )",
+            )?;
+            let ids = stmt
+                .query_map(params![&prefix, prefix_len], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            ids
+        };
 
         // Delete the images (CASCADE will handle image_files, selections, etc.)
         for id in &image_ids {
-            conn.execute("DELETE FROM images WHERE id = ?1", params![id])?;
+            tx.execute("DELETE FROM images WHERE id = ?1", params![id])?;
         }
 
         // Also delete file records from this folder for images that still exist elsewhere
-        conn.execute(
+        tx.execute(
             "DELETE FROM image_files
              WHERE substr(path, 1, ?2) COLLATE BINARY = ?1 COLLATE BINARY",
             params![&prefix, prefix_len],
         )?;
 
-        Ok(count)
+        tx.commit()?;
+
+        Ok(image_ids)
     }
 
     pub fn update_image_dimensions(&self, image_id: &str, width: u32, height: u32) -> Result<()> {
