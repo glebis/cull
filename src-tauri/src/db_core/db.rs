@@ -1980,7 +1980,7 @@ mod tests {
 
         let deleted = db.delete_images_by_folder("/tmp/a%b").unwrap();
 
-        assert_eq!(deleted, 1);
+        assert_eq!(deleted.len(), 1);
         let remaining = db.list_images(100, 0).unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].image.id, "outside");
@@ -2004,7 +2004,7 @@ mod tests {
 
         let deleted = db.delete_images_by_folder("/tmp/a_b").unwrap();
 
-        assert_eq!(deleted, 1);
+        assert_eq!(deleted.len(), 1);
         let remaining = db.list_images(100, 0).unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].image.id, "outside");
@@ -2023,7 +2023,7 @@ mod tests {
 
         let deleted = db.delete_images_by_folder("/tmp/a").unwrap();
 
-        assert_eq!(deleted, 1);
+        assert_eq!(deleted.len(), 1);
         let remaining = db.list_images(100, 0).unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].image.id, "adjacent");
@@ -2037,7 +2037,7 @@ mod tests {
 
         let deleted = db.delete_images_by_folder("/tmp/a").unwrap();
 
-        assert_eq!(deleted, 1);
+        assert_eq!(deleted.len(), 1);
         let remaining = db.list_images(100, 0).unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].image.id, "upper");
@@ -2056,10 +2056,47 @@ mod tests {
 
         let deleted = db.delete_images_by_folder("/tmp/ä").unwrap();
 
-        assert_eq!(deleted, 1);
+        assert_eq!(deleted.len(), 1);
         let remaining = db.list_images(100, 0).unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].image.id, "adjacent");
+    }
+
+    #[test]
+    fn test_delete_images_by_folder_is_atomic_on_failure() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "first", "hash-atomic-first", "/tmp/atomic/first.png");
+        insert_test_image_at_path(
+            &db,
+            "second",
+            "hash-atomic-second",
+            "/tmp/atomic/second.png",
+        );
+
+        // Force the second DELETE in the transaction to fail, simulating a
+        // mid-transaction error, and verify the first DELETE was rolled back.
+        {
+            let conn = db.conn.lock();
+            conn.execute_batch(
+                "CREATE TRIGGER fail_second_delete
+                 BEFORE DELETE ON images
+                 WHEN OLD.id = 'second'
+                 BEGIN
+                     SELECT RAISE(ABORT, 'simulated failure');
+                 END;",
+            )
+            .unwrap();
+        }
+
+        let result = db.delete_images_by_folder("/tmp/atomic");
+        assert!(result.is_err(), "expected the transaction to fail");
+
+        let remaining = db.list_images(100, 0).unwrap();
+        assert_eq!(
+            remaining.len(),
+            2,
+            "a mid-transaction failure must not leave a partial delete"
+        );
     }
 
     #[test]
