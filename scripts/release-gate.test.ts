@@ -440,7 +440,7 @@ describe('release gate', () => {
     expect(buildJob).toContain('${{ secrets.APPLE_CERTIFICATE }}');
     expect(buildJob).toContain('${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}');
     expect(buildJob).toContain('tauri-apps/tauri-action@');
-    expect(buildJob).toContain('--target aarch64-apple-darwin --bundles dmg');
+    expect(buildJob).toContain('--target aarch64-apple-darwin --bundles app,dmg');
     expect(buildJob).not.toContain('--bundles dmg,updater');
     expect(gateJob).toContain('node scripts/release-gate.mjs');
     expect(gateJob).toContain('--event canary');

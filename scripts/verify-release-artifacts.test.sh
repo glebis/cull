@@ -96,7 +96,7 @@ while [[ $# -gt 0 ]]; do
     shift
   fi
 done
-grep -q '^untrusted comment: signature from minisign secret key$' "$x_path" || exit 44
+grep -q '^untrusted comment: signature from tauri secret key$' "$x_path" || exit 44
 if [[ "${FAKE_MUTATE_SOURCE:-0}" == 1 ]]; then
   printf 'mutated-after-snapshot\n' >"$FAKE_SOURCE_DIR/Cull_aarch64.app.tar.gz"
 fi
@@ -119,7 +119,7 @@ make_artifacts() {
   printf 'archive\n' >"$dir/Cull_aarch64.app.tar.gz"
   node - "$dir/Cull_aarch64.app.tar.gz.sig" <<'NODE'
 const fs = require('node:fs');
-const text = 'untrusted comment: signature from minisign secret key\nRUTESTSIGNATUREVALUE==\ntrusted comment: timestamp:1\nRUTESTTRUSTEDVALUE==\n';
+const text = 'untrusted comment: signature from tauri secret key\nRUTESTSIGNATUREVALUE==\ntrusted comment: timestamp:1\nRUTESTTRUSTEDVALUE==\n';
 fs.writeFileSync(process.argv[2], Buffer.from(text, 'utf8').toString('base64') + '\n');
 NODE
   node - "$dir/latest.json" "$version" <<'NODE'

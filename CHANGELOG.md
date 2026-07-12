@@ -8,6 +8,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 No changes yet.
 
+## [0.3.1] - 2026-07-12
+
+### Fixed
+
+- Signed macOS releases now include and verify the Tauri updater archive and
+  detached signature alongside the notarized Apple Silicon DMG.
+
 ## [0.2.5] - 2026-07-03
 
 ### Added
