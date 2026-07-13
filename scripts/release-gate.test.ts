@@ -61,7 +61,12 @@ function commit(root: string, message: string) {
 }
 
 function annotatedTag(root: string, name: string, sha: string, force = false) {
-  git(root, 'tag', ...(force ? ['-f'] : []), '-a', name, sha, '-m', `Release ${name}`);
+  git(
+    root,
+    '-c', 'user.name=Cull Test',
+    '-c', 'user.email=cull@example.test',
+    'tag', ...(force ? ['-f'] : []), '-a', name, sha, '-m', `Release ${name}`,
+  );
 }
 
 function metadata(root: string, version: string) {
