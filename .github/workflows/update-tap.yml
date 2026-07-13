@@ -218,10 +218,13 @@ jobs:
           const fs = require('node:fs');
           const provenance = JSON.parse(fs.readFileSync(process.env.PROVENANCE, 'utf8'));
           const run = JSON.parse(fs.readFileSync(process.env.WORKFLOW_RUN, 'utf8'));
+          const validLifecycle =
+            (run.status === 'completed' && run.conclusion === 'success') ||
+            (run.status === 'in_progress' && (run.conclusion === null || run.conclusion === ''));
           if (run.id !== provenance.workflowRunId ||
               run.path !== '.github/workflows/release.yml' ||
               run.repository?.full_name !== 'glebis/cull' ||
-              run.status !== 'completed' || run.conclusion !== 'success') process.exit(2);
+              !validLifecycle) process.exit(2);
           if (run.event === 'push') {
             if (run.head_sha !== provenance.commit) process.exit(2);
           } else if (run.event === 'workflow_dispatch') {

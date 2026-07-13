@@ -27,6 +27,23 @@ function workflowJob(workflow: string, name: string) {
   return match![1];
 }
 
+function runTapWorkflowAuthentication(run: Record<string, unknown>) {
+  const workflow = readFileSync(tapWorkflowPath, 'utf8');
+  const match = /PROVENANCE="\$RUNNER_TEMP\/release-provenance\.json" \\\n\s+WORKFLOW_RUN="\$RUNNER_TEMP\/release-workflow-run\.json" node <<'NODE'\n([\s\S]*?)\n\s+NODE/.exec(workflow);
+  expect(match, 'missing tap workflow authentication script').not.toBeNull();
+
+  const root = mkdtempSync(join(tmpdir(), 'cull-tap-auth-'));
+  const provenancePath = join(root, 'provenance.json');
+  const workflowRunPath = join(root, 'workflow-run.json');
+  writeFileSync(provenancePath, JSON.stringify({ workflowRunId: 42, commit: 'a'.repeat(40) }));
+  writeFileSync(workflowRunPath, JSON.stringify(run));
+
+  return spawnSync(process.execPath, ['-e', match![1].replace(/^ {10}/gm, '')], {
+    encoding: 'utf8',
+    env: { ...process.env, PROVENANCE: provenancePath, WORKFLOW_RUN: workflowRunPath },
+  });
+}
+
 function write(root: string, path: string, contents: string) {
   const destination = join(root, path);
   mkdirSync(dirname(destination), { recursive: true });
@@ -666,8 +683,11 @@ describe('release gate', () => {
     expect(job).toContain('repos/glebis/cull/actions/runs/$WORKFLOW_RUN_ID');
     expect(job).toContain("run.path !== '.github/workflows/release.yml'");
     expect(job).toContain("run.repository?.full_name !== 'glebis/cull'");
-    expect(job).toContain("run.status !== 'completed'");
-    expect(job).toContain("run.conclusion !== 'success'");
+    expect(job).toContain("run.status === 'completed'");
+    expect(job).toContain("run.conclusion === 'success'");
+    expect(job).toContain("run.status === 'in_progress'");
+    expect(job).toContain("run.conclusion === null || run.conclusion === ''");
+    expect(job).toContain('!validLifecycle');
     expect(job).toContain("run.event === 'push'");
     expect(job).toContain('run.head_sha !== provenance.commit');
     expect(job).toContain("run.event === 'workflow_dispatch'");
@@ -680,6 +700,22 @@ describe('release gate', () => {
     expect(workflowAuthentication).toBeGreaterThan(verified);
     expect(token).toBeGreaterThan(verified);
     expect(token).toBeGreaterThan(workflowAuthentication);
+  });
+
+  it('accepts the authenticated release run while publication is still in progress', () => {
+    const baseRun = {
+      id: 42,
+      path: '.github/workflows/release.yml',
+      repository: { full_name: 'glebis/cull' },
+      event: 'push',
+      head_sha: 'a'.repeat(40),
+    };
+
+    expect(runTapWorkflowAuthentication({ ...baseRun, status: 'in_progress', conclusion: null }).status).toBe(0);
+    expect(runTapWorkflowAuthentication({ ...baseRun, status: 'in_progress', conclusion: '' }).status).toBe(0);
+    expect(runTapWorkflowAuthentication({ ...baseRun, status: 'completed', conclusion: 'success' }).status).toBe(0);
+    expect(runTapWorkflowAuthentication({ ...baseRun, status: 'queued', conclusion: null }).status).not.toBe(0);
+    expect(runTapWorkflowAuthentication({ ...baseRun, status: 'completed', conclusion: 'failure' }).status).not.toBe(0);
   });
 
   it('pins exactly version and SHA, rejects no_check, and makes equal promotion idempotent', () => {
