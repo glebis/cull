@@ -34,7 +34,7 @@ jobs:
       gate-artifact-name: cull-release-gate-${{ github.run_id }}-${{ steps.release_gate.outputs.sha }}
     steps:
       - name: Checkout requested release tag
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
@@ -176,7 +176,7 @@ jobs:
           test "$PUBLISH_ELIGIBLE" = true
 
       - name: Checkout gate-approved commit
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.release-gate.outputs.sha }}
           persist-credentials: false
@@ -301,7 +301,7 @@ jobs:
       artifact-digest: ${{ steps.upload_verified.outputs.artifact-digest }}
     steps:
       - name: Checkout gate-approved verifier
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.release-gate.outputs.sha }}
           persist-credentials: false
@@ -443,7 +443,7 @@ jobs:
       actions: write
     steps:
       - name: Checkout gate-approved release source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.release-gate.outputs.sha }}
           fetch-depth: 0
