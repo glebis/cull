@@ -595,7 +595,7 @@ describe('release gate', () => {
     expect(verifyJob).not.toContain('gh release');
   });
 
-  it('keeps automatic publication disabled and publishes only exact verified files', () => {
+  it('keeps automatic publication fail-closed and publishes only exact verified files', () => {
     const workflow = readFileSync(releaseWorkflowPath, 'utf8');
     const publishJob = workflowJob(workflow, 'publish');
     const releaseDocs = readFileSync(resolve(import.meta.dirname, '../docs/RELEASING.md'), 'utf8');
@@ -636,10 +636,10 @@ describe('release gate', () => {
     expect(guardedPublish.match(/verify_remote_tag/g)).toHaveLength(3);
     expect(guardedPublish).toMatch(/verify_remote_tag[\s\S]*gh release edit "\$TAG" --draft=false[\s\S]*verify_remote_tag/);
     expect(releaseDocs).toContain('`CULL_RELEASE_PUBLISH_ENABLED` to equal `true`');
-    expect(releaseDocs).toContain('must remain absent or false');
-    expect(releaseDocs).toContain('29156442963');
-    expect(releaseDocs).toContain('Apple notarization returned HTTP 403');
-    expect(releaseDocs).toContain('Task 10 tag rules');
+    expect(releaseDocs).toMatch(/absent or false skips\s+publication/);
+    expect(releaseDocs).toContain('29181842274');
+    expect(releaseDocs).toContain('29182947689');
+    expect(releaseDocs).toMatch(/Branch and `v\*`\s+tag rules must be present/);
   });
 
   it('binds dispatch artifacts to the workflow invocation while evidence binds the selected tag commit', () => {

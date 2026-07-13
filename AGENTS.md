@@ -4,6 +4,10 @@
 
 Cull is a Tauri 2 + SvelteKit 5 + Rust desktop image viewer focused on AI-generated art. Uses SQLite (rusqlite), CLIP embeddings (ONNX), and Svelte 5 runes.
 
+Canonical modular release skills live in `~/ai_projects/claude-skills/` and are
+installed into `~/.agents/skills/`. Repository-local release policy and commands
+remain authoritative when a skill is unavailable.
+
 ## Architecture
 
 - **Rust backend**: `src-tauri/src/db_core/` — models, DB, smart collections, NL parser, source detection

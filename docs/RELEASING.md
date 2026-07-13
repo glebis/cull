@@ -1,8 +1,9 @@
 # Releasing Cull
 
-Cull is released with the **`release` skill** (config-driven; lives in
-`glebis/claude-skills`). Config: `release.config.json`. Policy:
-`docs/COMPATIBILITY.md`. Contract tests: `docs/CONTRACTS.md`.
+Cull is released with the modular **`cull-release`** skill suite (coordinator,
+check, prepare, publish, verify, and recover; canonical source in
+`~/ai_projects/claude-skills/`). Repository config: `release.config.json`.
+Policy: `docs/COMPATIBILITY.md`. Contract tests: `docs/CONTRACTS.md`.
 
 ## Repository release CLI
 
@@ -12,7 +13,7 @@ npm run release:cull -- check --bump patch --json
 
 # Read-only preparation preview (the compatibility review is explicit JSON)
 npm run release:cull -- prepare --bump patch --expected-source "$(git rev-parse HEAD)" \
-  --expected-version 0.2.6 --request-json '{"version":"0.2.6","requestedBump":"patch","stableBreakingChange":false,"changedSurfaces":[],"reviewedBy":"Gleb Kalinin"}' \
+  --expected-version 0.3.2 --request-json '{"version":"0.3.2","requestedBump":"patch","stableBreakingChange":false,"changedSurfaces":[],"reviewedBy":"Gleb Kalinin"}' \
   --notes $'### Fixed\n\n- Curated release note.' --dry-run --json
 ```
 
@@ -96,16 +97,14 @@ immutable commit and runs four ordered jobs:
    commit, publishes the draft without an intervening action, and immediately
    checks both tag identities again.
 
-Automatic publication is intentionally disabled. The `publish` job also requires
-the repository variable `CULL_RELEASE_PUBLISH_ENABLED` to equal `true`; that
-variable must remain absent or false until the release enablement checklist has
-recorded a successful signed and verified canary. Canary run `29156442963`
-compiled and codesigned successfully, but Apple notarization returned HTTP 403
-because the Apple developer team has an outstanding agreement. Resolve that
-external agreement and complete the Task 10 canary before creating the variable.
-Task 10 tag rules must also protect release tag creation and updates before
-enablement; the workflow's before/after identity checks detect a race but cannot
-substitute for repository tag protection.
+Automatic publication is fail-closed. The `publish` job requires the repository
+variable `CULL_RELEASE_PUBLISH_ENABLED` to equal `true`; absent or false skips
+publication after verification. Signed non-publishing canary run `29181842274`
+passed signing, notarization, private transfer, and secret-free verification.
+Production run `29182947689` then published v0.3.1 successfully. Branch and `v*`
+tag rules must be present before enabling the variable; the workflow's
+before/after identity checks detect a race but cannot substitute for repository
+protection.
 
 A manual dispatch is launched from the default-branch workflow and may select an
 older annotated tag, so the workflow invocation SHA can legitimately differ from
@@ -139,8 +138,10 @@ public size and digest must match, as must the downloaded provenance asset. The
 workflow then downloads the public DMG and compares its computed SHA-256 with
 provenance (and with the manual input when dispatched). Only after those checks
 pass does the workflow authenticate `workflowRunId` through GitHub's Actions API
-as the exact successful, completed `glebis/cull` `.github/workflows/release.yml`
-run. Push runs must have `head_sha` equal to the provenance commit; manually
+as the exact `glebis/cull` `.github/workflows/release.yml` run. The authenticated
+run may be `in_progress` with no conclusion during the legitimate publication
+race, or `completed/success`; every other lifecycle state fails closed. Push
+runs must have `head_sha` equal to the provenance commit; manually
 dispatched release runs must originate from `main` and may have a different
 invocation SHA. Only then does the tap checkout receive `HOMEBREW_TAP_TOKEN`.
 
@@ -161,8 +162,8 @@ republishing Cull.
 ## Resume and recovery
 
 ```bash
-npm run release:cull -- state show --version 0.2.6 --json
-npm run release:cull -- resume --version 0.2.6 --json
+npm run release:cull -- state show --version 0.3.1 --json
+npm run release:cull -- resume --version 0.3.1 --json
 ```
 
 Both commands are read-only. They probe the release commit, tag, workflow,
@@ -174,9 +175,9 @@ not execute it.
 State-writing automation may advance one step or record a stable failure:
 
 ```bash
-npm run release:cull -- state transition --version 0.2.6 --to tagged \
-  --evidence-json '{"tag":"v0.2.6"}' --json
-npm run release:cull -- state fail --version 0.2.6 --code BUILD_FAILED \
+npm run release:cull -- state transition --version 0.3.2 --to tagged \
+  --evidence-json '{"tag":"v0.3.2"}' --json
+npm run release:cull -- state fail --version 0.3.2 --code BUILD_FAILED \
   --evidence-json '{"workflowRunId":123}' --json
 ```
 
@@ -239,5 +240,5 @@ DMG mount.
 - `release.yml` triggers on `v*` tags (and a required `workflow_dispatch` tag),
   but publication remains disabled while `CULL_RELEASE_PUBLISH_ENABLED` is absent
   or false.
-- Disk: a full Rust rebuild is large; `cargo clean` an idle worktree's `target/`
-  if low on space (see AGENTS.md).
+- Disk: a full Rust rebuild is large; move only an idle worktree's generated
+  `target/` to Trash if low on space (see AGENTS.md). Never touch `cull.db`.
