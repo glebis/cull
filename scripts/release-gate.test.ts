@@ -15,6 +15,8 @@ import { describe, expect, it } from 'vitest';
 
 const gate = resolve(import.meta.dirname, 'release-gate.mjs');
 const canaryWorkflowPath = resolve(import.meta.dirname, '../.github/workflows/release-canary.yml');
+const releaseWorkflowPath = resolve(import.meta.dirname, '../.github/workflows/release.yml');
+const tapWorkflowPath = resolve(import.meta.dirname, '../.github/workflows/update-tap.yml');
 const DB_CONTRACT = 'cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden';
 const EXPORT_CONTRACT = 'cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test export_compat_golden';
 
@@ -23,6 +25,23 @@ function workflowJob(workflow: string, name: string) {
   const match = new RegExp(`^  ${escaped}:\\n([\\s\\S]*?)(?=^  [a-zA-Z0-9_-]+:\\n|(?![\\s\\S]))`, 'm').exec(workflow);
   expect(match, `missing workflow job ${name}`).not.toBeNull();
   return match![1];
+}
+
+function runTapWorkflowAuthentication(run: Record<string, unknown>) {
+  const workflow = readFileSync(tapWorkflowPath, 'utf8');
+  const match = /PROVENANCE="\$RUNNER_TEMP\/release-provenance\.json" \\\n\s+WORKFLOW_RUN="\$RUNNER_TEMP\/release-workflow-run\.json" node <<'NODE'\n([\s\S]*?)\n\s+NODE/.exec(workflow);
+  expect(match, 'missing tap workflow authentication script').not.toBeNull();
+
+  const root = mkdtempSync(join(tmpdir(), 'cull-tap-auth-'));
+  const provenancePath = join(root, 'provenance.json');
+  const workflowRunPath = join(root, 'workflow-run.json');
+  writeFileSync(provenancePath, JSON.stringify({ workflowRunId: 42, commit: 'a'.repeat(40) }));
+  writeFileSync(workflowRunPath, JSON.stringify(run));
+
+  return spawnSync(process.execPath, ['-e', match![1].replace(/^ {10}/gm, '')], {
+    encoding: 'utf8',
+    env: { ...process.env, PROVENANCE: provenancePath, WORKFLOW_RUN: workflowRunPath },
+  });
 }
 
 function write(root: string, path: string, contents: string) {
@@ -39,6 +58,15 @@ function commit(root: string, message: string) {
   git(root, 'add', '.');
   git(root, '-c', 'user.name=Cull Test', '-c', 'user.email=cull@example.test', 'commit', '-m', message);
   return git(root, 'rev-parse', 'HEAD');
+}
+
+function annotatedTag(root: string, name: string, sha: string, force = false) {
+  git(
+    root,
+    '-c', 'user.name=Cull Test',
+    '-c', 'user.email=cull@example.test',
+    'tag', ...(force ? ['-f'] : []), '-a', name, sha, '-m', `Release ${name}`,
+  );
 }
 
 function metadata(root: string, version: string) {
@@ -77,14 +105,14 @@ function fixture() {
   const stableApiBody = Array.from({ length: 20 }, (_, index) => `export const stable${index} = ${index};`).join('\n');
   write(root, 'src/lib/api.ts', `export const version = 1;\n${stableApiBody}\n`);
   const baseSha = commit(root, 'base');
-  git(root, 'tag', 'v1.2.3', baseSha);
+  annotatedTag(root, 'v1.2.3', baseSha);
 
   metadata(root, '1.2.4');
   write(root, 'CHANGELOG.md', '# Changelog\n\n## [1.2.4] - 2026-07-11\n\n### Fixed\n\n- Safe release gates.\n\n## [1.2.3] - 2026-07-01\n');
   write(root, 'docs/COMPATIBILITY.md', 'Last updated: 1.2.4 (2026-07-11)\n');
   write(root, 'src/lib/api.ts', `export const version = 2;\n${stableApiBody}\n`);
   const sha = commit(root, 'release');
-  git(root, 'tag', 'v1.2.4', sha);
+  annotatedTag(root, 'v1.2.4', sha);
   git(root, 'update-ref', 'refs/remotes/origin/main', sha);
   return { root, baseSha, sha };
 }
@@ -131,6 +159,7 @@ describe('release gate', () => {
 
     expect(result.execution.status).toBe(0);
     const output = JSON.parse(result.execution.stdout);
+    const tagObjectSha = git(root, 'rev-parse', 'refs/tags/v1.2.4');
     expect(output).toEqual({
       schema: 'cull.release.gate.v1',
       event: 'tag',
@@ -138,6 +167,7 @@ describe('release gate', () => {
       version: '1.2.4',
       tag: 'v1.2.4',
       sha,
+      tagObjectSha,
       baseTag: 'v1.2.3',
       mainAncestor: true,
       versions: {
@@ -175,6 +205,14 @@ describe('release gate', () => {
     expectRejected(run(root, { sha: baseSha }), 'TAG_SHA_MISMATCH');
   });
 
+  it('rejects a lightweight release tag even when it peels to the supplied SHA', () => {
+    const { root, sha } = fixture();
+    git(root, 'tag', '-d', 'v1.2.4');
+    git(root, 'tag', 'v1.2.4', sha);
+
+    expectRejected(run(root, { sha }), 'TAG_NOT_ANNOTATED');
+  });
+
   it('rejects a release SHA that is not reachable from origin/main', () => {
     const { root, baseSha } = fixture();
     git(root, 'switch', '--detach', baseSha);
@@ -183,7 +221,7 @@ describe('release gate', () => {
     write(root, 'docs/COMPATIBILITY.md', 'Last updated: 1.2.4 (2026-07-11)\n');
     const divergent = commit(root, 'divergent release');
     git(root, 'tag', 'v1.2.4-divergent', divergent);
-    git(root, 'tag', '-f', 'v1.2.4', divergent);
+    annotatedTag(root, 'v1.2.4', divergent, true);
 
     expectRejected(run(root, { sha: divergent }), 'NOT_ON_ORIGIN_MAIN');
   });
@@ -193,7 +231,7 @@ describe('release gate', () => {
     mkdirSync(join(root, 'docs'), { recursive: true });
     renameSync(join(root, 'src/lib/api.ts'), join(root, 'docs/renamed-api.ts'));
     const sha = commit(root, 'rename covered source outside E2E policy');
-    git(root, 'tag', '-f', 'v1.2.4', sha);
+    annotatedTag(root, 'v1.2.4', sha, true);
     git(root, 'update-ref', 'refs/remotes/origin/main', sha);
     git(root, 'config', 'diff.renames', 'copies');
 
@@ -217,7 +255,7 @@ describe('release gate', () => {
     const released = git(root, 'rev-parse', 'HEAD');
     write(root, 'package.json', JSON.stringify({ name: 'cull', version: '9.9.9' }));
     const mismatched = commit(root, 'mismatched metadata');
-    git(root, 'tag', '-f', 'v1.2.4', mismatched);
+    annotatedTag(root, 'v1.2.4', mismatched, true);
     git(root, 'update-ref', 'refs/remotes/origin/main', mismatched);
     expect(released).not.toBe(mismatched);
 
@@ -228,7 +266,7 @@ describe('release gate', () => {
     const { root } = fixture();
     write(root, 'CHANGELOG.md', '# Changelog\n\n## [1.2.3] - 2026-07-01\n');
     const sha = commit(root, 'missing changelog stamp');
-    git(root, 'tag', '-f', 'v1.2.4', sha);
+    annotatedTag(root, 'v1.2.4', sha, true);
     git(root, 'update-ref', 'refs/remotes/origin/main', sha);
 
     expectRejected(run(root, { sha }), 'CHANGELOG_INVALID');
@@ -238,7 +276,7 @@ describe('release gate', () => {
     const { root } = fixture();
     config(root, [DB_CONTRACT]);
     const sha = commit(root, 'missing stable export gate');
-    git(root, 'tag', '-f', 'v1.2.4', sha);
+    annotatedTag(root, 'v1.2.4', sha, true);
     git(root, 'update-ref', 'refs/remotes/origin/main', sha);
 
     expectRejected(run(root, { sha }), 'STABLE_CONTRACT_MISSING');
@@ -274,11 +312,13 @@ describe('release gate', () => {
       version: '1.2.4',
       tag: 'v1.2.4',
       sha,
+      tagObjectSha: null,
       baseTag: 'v1.2.4',
       mainAncestor: true,
       e2e: { required: true, matchedPaths: ['src/lib/api.ts'] },
     });
     expect(readFileSync(workflowOutput, 'utf8')).toContain('event=canary\npublish_eligible=false\n');
+    expect(readFileSync(workflowOutput, 'utf8')).toContain('tag_object_sha=\n');
   });
 
   it('keeps dispatch tag binding strict for the same untagged main SHA', () => {
@@ -458,5 +498,273 @@ describe('release gate', () => {
     expect(verifyJob).toContain('release-provenance.json');
     expect(verifyJob).toContain('checksums.txt');
     expect(verifyJob).toContain('verification.log');
+    expect(verifyJob).not.toContain('--tag-object-sha');
+  });
+
+  it('defines a pinned four-stage release workflow with immutable tag dispatch', () => {
+    const workflow = readFileSync(releaseWorkflowPath, 'utf8');
+    const jobs = workflow.split('\njobs:\n')[1];
+
+    expect(workflow).toMatch(/workflow_dispatch:\n\s+inputs:\n\s+tag:\n[\s\S]*?required: true[\s\S]*?type: string/);
+    expect(workflow).toContain("tags:\n      - 'v*'");
+    expect(workflow).toContain('group: release-${{ inputs.tag || github.ref_name }}');
+    expect(workflow).toContain('cancel-in-progress: false');
+    expect([...jobs.matchAll(/^  ([a-zA-Z0-9_-]+):$/gm)].map((match) => match[1]))
+      .toEqual(['release-gate', 'signed-build', 'verify-artifact', 'publish']);
+    expect(workflowJob(workflow, 'signed-build')).toContain('needs: release-gate');
+    expect(workflowJob(workflow, 'verify-artifact')).toContain('needs: [release-gate, signed-build]');
+    expect(workflowJob(workflow, 'publish')).toContain('needs: [release-gate, signed-build, verify-artifact]');
+
+    const actionUses = [...workflow.matchAll(/uses:\s+([^\s#]+)/g)].map((match) => match[1]);
+    expect(actionUses.length).toBeGreaterThan(0);
+    expect(actionUses.every((action) => /@[0-9a-f]{40}$/.test(action))).toBe(true);
+  });
+
+  it('keeps checks and verification secret-free and grants write only to publish', () => {
+    const workflow = readFileSync(releaseWorkflowPath, 'utf8');
+    const gateJob = workflowJob(workflow, 'release-gate');
+    const buildJob = workflowJob(workflow, 'signed-build');
+    const verifyJob = workflowJob(workflow, 'verify-artifact');
+    const publishJob = workflowJob(workflow, 'publish');
+
+    expect(workflow).toContain('permissions:\n  contents: read');
+    expect(gateJob).not.toContain('${{ secrets.');
+    expect(verifyJob).not.toContain('${{ secrets.');
+    expect(gateJob).not.toContain('contents: write');
+    expect(buildJob).not.toContain('contents: write');
+    expect(verifyJob).not.toContain('contents: write');
+    expect(publishJob).toContain('contents: write');
+    expect(buildJob).toContain('${{ secrets.APPLE_CERTIFICATE }}');
+    expect(buildJob).toContain('${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}');
+    expect(buildJob).not.toContain('HOMEBREW_TAP_TOKEN');
+    expect(publishJob).not.toContain('${{ secrets.');
+    expect(publishJob).not.toContain('APPLE_CERTIFICATE');
+    expect(publishJob).not.toContain('TAURI_SIGNING_PRIVATE_KEY');
+  });
+
+  it('finishes every gate including conditional E2E before exposing signing secrets', () => {
+    const workflow = readFileSync(releaseWorkflowPath, 'utf8');
+    const gateJob = workflowJob(workflow, 'release-gate');
+    const buildJob = workflowJob(workflow, 'signed-build');
+
+    expect(gateJob).toContain('fetch-depth: 0');
+    expect(gateJob).toContain('persist-credentials: false');
+    expect(gateJob).toContain('git cat-file -t "refs/tags/$tag"');
+    expect(gateJob).toContain('node scripts/release-gate.mjs');
+    expect(gateJob).toContain('--event "$event"');
+    expect(gateJob).toContain('tag-object-sha: ${{ steps.release_gate.outputs.tag_object_sha }}');
+    for (const command of [
+      'npm run audit:licenses',
+      'bash scripts/supply-chain-audit.sh check',
+      DB_CONTRACT,
+      EXPORT_CONTRACT,
+      'bash tests/e2e/run-e2e.sh',
+      'npm run build',
+    ]) expect(gateJob).toContain(command);
+    expect(gateJob).toContain("if: steps.release_gate.outputs.e2e_required == 'true'");
+    expect(buildJob).toContain('GATE_EVENT: ${{ needs.release-gate.outputs.event }}');
+    expect(buildJob).toContain('PUBLISH_ELIGIBLE: ${{ needs.release-gate.outputs.publish-eligible }}');
+    expect(buildJob).toContain('test "$PUBLISH_ELIGIBLE" = true');
+    expect(buildJob.indexOf('Assert publish-eligible gate evidence'))
+      .toBeLessThan(buildJob.indexOf('${{ secrets.'));
+  });
+
+  it('binds exact signed and verified artifacts to this run without publishing from build', () => {
+    const workflow = readFileSync(releaseWorkflowPath, 'utf8');
+    const buildJob = workflowJob(workflow, 'signed-build');
+    const verifyJob = workflowJob(workflow, 'verify-artifact');
+
+    expect(buildJob).toContain('tauri-apps/tauri-action@');
+    expect(buildJob).toContain('--target aarch64-apple-darwin --bundles dmg');
+    for (const forbidden of ['tagName:', 'releaseName:', 'releaseDraft:', 'gh release']) {
+      expect(buildJob).not.toContain(forbidden);
+    }
+    expect(buildJob).toContain('name: cull-signed-${{ github.run_id }}-${{ needs.release-gate.outputs.sha }}');
+    expect(buildJob).toContain('artifact-id: ${{ steps.upload_signed.outputs.artifact-id }}');
+    expect(buildJob).toContain('artifact-digest: ${{ steps.upload_signed.outputs.artifact-digest }}');
+    expect(verifyJob).toContain('artifact-ids: ${{ needs.signed-build.outputs.artifact-id }}');
+    expect(verifyJob).toContain('merge-multiple: true');
+    expect(verifyJob).toContain('gh api "repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID"');
+    expect(verifyJob).toContain('artifact.workflow_run?.id');
+    expect(verifyJob).toContain('artifact.workflow_run?.head_sha');
+    expect(verifyJob).toContain('EXPECTED_INVOCATION_SHA: ${{ github.sha }}');
+    expect(verifyJob).not.toContain('EXPECTED_SHA: ${{ needs.release-gate.outputs.sha }}');
+    expect(verifyJob).toContain('artifact.expired !== false');
+    expect(verifyJob).toContain('artifact.digest !== expectedDigest');
+    expect(verifyJob).toContain('bash scripts/verify-release-artifacts.sh');
+    expect(verifyJob).toContain('--run-id "${{ github.run_id }}"');
+    expect(verifyJob).toContain('--tag-object-sha "${{ needs.release-gate.outputs.tag-object-sha }}"');
+    expect(verifyJob).toContain('name: cull-verified-${{ github.run_id }}-${{ needs.release-gate.outputs.sha }}');
+    expect(verifyJob).toContain('artifact-id: ${{ steps.upload_verified.outputs.artifact-id }}');
+    expect(verifyJob).toContain('artifact-digest: ${{ steps.upload_verified.outputs.artifact-digest }}');
+    expect(verifyJob).not.toContain('gh release');
+  });
+
+  it('keeps automatic publication fail-closed and publishes only exact verified files', () => {
+    const workflow = readFileSync(releaseWorkflowPath, 'utf8');
+    const publishJob = workflowJob(workflow, 'publish');
+    const releaseDocs = readFileSync(resolve(import.meta.dirname, '../docs/RELEASING.md'), 'utf8');
+
+    expect(publishJob).toContain("vars.CULL_RELEASE_PUBLISH_ENABLED == 'true'");
+    expect(publishJob).toContain("needs.release-gate.outputs.publish-eligible == 'true'");
+    expect(publishJob).toContain("needs.release-gate.outputs.event == 'tag'");
+    expect(publishJob).toContain("needs.release-gate.outputs.event == 'dispatch'");
+    expect(publishJob).toContain('environment: release-publish');
+    expect(publishJob).toContain('artifact-ids: ${{ needs.verify-artifact.outputs.artifact-id }}');
+    expect(publishJob).toContain('merge-multiple: true');
+    expect(publishJob).toContain('gh api "repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID"');
+    expect(publishJob).toContain('artifact.workflow_run?.id');
+    expect(publishJob).toContain('artifact.workflow_run?.head_sha');
+    expect(publishJob).toContain('EXPECTED_INVOCATION_SHA: ${{ github.sha }}');
+    expect(publishJob).not.toContain('EXPECTED_SHA: ${{ needs.release-gate.outputs.sha }}');
+    expect(publishJob).toContain('artifact.expired !== false');
+    expect(publishJob).toContain('artifact.digest !== expectedDigest');
+    expect(publishJob).toContain("schema !== 'cull.release.gate.v1'");
+    expect(publishJob).toContain('gate.publishEligible !== true');
+    expect(publishJob).toContain("gate.event !== 'tag' && gate.event !== 'dispatch'");
+    expect(publishJob).toContain('gate.tagObjectSha !== process.env.TAG_OBJECT_SHA');
+    expect(publishJob).toContain("schema !== 'cull.release.provenance.v1'");
+    expect(publishJob).toContain('provenance.tagObjectSha !== process.env.TAG_OBJECT_SHA');
+    expect(publishJob).toContain("'stapledNotarization'");
+    expect(publishJob).toContain('Object.keys(provenance.checks).sort()');
+    expect(publishJob).toContain('provenance.checks[name] !== true');
+    expect(publishJob).toContain("heading === 'Unreleased'");
+    expect(publishJob).toContain('gh release create "$TAG" --verify-tag --draft');
+    expect(publishJob).toContain('gh release upload "$TAG"');
+    expect(publishJob).not.toContain('--clobber');
+    expect(publishJob).not.toContain('tauri-action');
+    expect(publishJob).not.toContain('npm run build');
+    expect(publishJob).not.toContain('cargo ');
+    const guardedPublish = publishJob.slice(publishJob.indexOf('Verify remote tag and publish guarded draft'));
+    expect(guardedPublish).toContain('git ls-remote --tags origin');
+    expect(guardedPublish).toContain('object !== process.env.TAG_OBJECT_SHA');
+    expect(guardedPublish.match(/verify_remote_tag/g)).toHaveLength(3);
+    expect(guardedPublish).toMatch(/verify_remote_tag[\s\S]*gh release edit "\$TAG" --draft=false[\s\S]*verify_remote_tag/);
+    expect(releaseDocs).toContain('`CULL_RELEASE_PUBLISH_ENABLED` to equal `true`');
+    expect(releaseDocs).toMatch(/absent or false skips\s+publication/);
+    expect(releaseDocs).toContain('29181842274');
+    expect(releaseDocs).toContain('29182947689');
+    expect(releaseDocs).toMatch(/Branch and `v\*`\s+tag rules must be present/);
+  });
+
+  it('binds dispatch artifacts to the workflow invocation while evidence binds the selected tag commit', () => {
+    const workflow = readFileSync(releaseWorkflowPath, 'utf8');
+    const invocation = {
+      workflowDispatchSha: '1111111111111111111111111111111111111111',
+      inputTagCommit: '2222222222222222222222222222222222222222',
+    };
+    const verifyJob = workflowJob(workflow, 'verify-artifact');
+    const publishJob = workflowJob(workflow, 'publish');
+
+    expect(invocation.workflowDispatchSha).not.toBe(invocation.inputTagCommit);
+    expect(verifyJob).toContain('EXPECTED_INVOCATION_SHA: ${{ github.sha }}');
+    expect(publishJob).toContain('EXPECTED_INVOCATION_SHA: ${{ github.sha }}');
+    expect(verifyJob).toContain('COMMIT: ${{ needs.release-gate.outputs.sha }}');
+    expect(publishJob).toContain('COMMIT: ${{ needs.release-gate.outputs.sha }}');
+  });
+
+  it('validates public provenance and the exact DMG digest before exposing the tap token', () => {
+    const workflow = readFileSync(tapWorkflowPath, 'utf8');
+    const job = workflowJob(workflow, 'update-cask');
+
+    expect(workflow).toMatch(/workflow_dispatch:\n\s+inputs:\n\s+version:[\s\S]*?dmg_sha256:[\s\S]*?provenance_url:/);
+    expect(workflow.match(/required: true/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(job).toContain("schema !== 'cull.release.provenance.v1'");
+    expect(job).toContain('provenance.version !== process.env.VERSION');
+    expect(job).toContain('provenance.tag !== `v${process.env.VERSION}`');
+    expect(job).toContain("!/^[0-9a-f]{40}$/.test(provenance.commit)");
+    expect(job).toContain('Object.keys(provenance.assets).sort()');
+    expect(job).toContain('Object.keys(provenance.checks).sort()');
+    expect(job).toContain('provenance.checks[name] !== true');
+    expect(job).toContain('provenance.assets[dmgName]?.sha256');
+    expect(job).toContain('git ls-remote --tags');
+    expect(job).toContain('provenance.tagObjectSha');
+    expect(job).toContain('publicAsset.size !== provenanceAsset.size');
+    expect(job).toContain('publicAsset.digest !== `sha256:${provenanceAsset.sha256}`');
+    expect(job).toContain('checksums.txt');
+    expect(job).toContain('CHECKSUMS_DIGEST_MISMATCH');
+    expect(job).toContain('shasum -a 256');
+    expect(job).toContain('DMG_SHA_MISMATCH');
+    expect(job).toContain('repos/glebis/cull/actions/runs/$WORKFLOW_RUN_ID');
+    expect(job).toContain("run.path !== '.github/workflows/release.yml'");
+    expect(job).toContain("run.repository?.full_name !== 'glebis/cull'");
+    expect(job).toContain("run.status === 'completed'");
+    expect(job).toContain("run.conclusion === 'success'");
+    expect(job).toContain("run.status === 'in_progress'");
+    expect(job).toContain("run.conclusion === null || run.conclusion === ''");
+    expect(job).toContain('!validLifecycle');
+    expect(job).toContain("run.event === 'push'");
+    expect(job).toContain('run.head_sha !== provenance.commit');
+    expect(job).toContain("run.event === 'workflow_dispatch'");
+    expect(job).toContain("run.head_branch !== 'main'");
+
+    const verified = job.indexOf('Verify public provenance and DMG before tap access');
+    const workflowAuthentication = job.indexOf('actions/runs/$WORKFLOW_RUN_ID');
+    const token = job.indexOf('${{ secrets.HOMEBREW_TAP_TOKEN }}');
+    expect(verified).toBeGreaterThan(-1);
+    expect(workflowAuthentication).toBeGreaterThan(verified);
+    expect(token).toBeGreaterThan(verified);
+    expect(token).toBeGreaterThan(workflowAuthentication);
+  });
+
+  it('accepts the authenticated release run while publication is still in progress', () => {
+    const baseRun = {
+      id: 42,
+      path: '.github/workflows/release.yml',
+      repository: { full_name: 'glebis/cull' },
+      event: 'push',
+      head_sha: 'a'.repeat(40),
+    };
+
+    expect(runTapWorkflowAuthentication({ ...baseRun, status: 'in_progress', conclusion: null }).status).toBe(0);
+    expect(runTapWorkflowAuthentication({ ...baseRun, status: 'in_progress', conclusion: '' }).status).toBe(0);
+    expect(runTapWorkflowAuthentication({ ...baseRun, status: 'completed', conclusion: 'success' }).status).toBe(0);
+    expect(runTapWorkflowAuthentication({ ...baseRun, status: 'queued', conclusion: null }).status).not.toBe(0);
+    expect(runTapWorkflowAuthentication({ ...baseRun, status: 'completed', conclusion: 'failure' }).status).not.toBe(0);
+  });
+
+  it('pins exactly version and SHA, rejects no_check, and makes equal promotion idempotent', () => {
+    const workflow = readFileSync(tapWorkflowPath, 'utf8');
+    const job = workflowJob(workflow, 'update-cask');
+
+    expect(job).toContain('CASK_NO_CHECK');
+    expect(job).toContain('node scripts/update-homebrew-cask.mjs');
+    expect(job).toContain('CASK_DOWNGRADE');
+    expect(job).toContain('CASK_IMMUTABLE_SHA_MISMATCH');
+    expect(job).toContain('brew audit --cask cull');
+    expect(job).toContain('--appdir="$RUNNER_TEMP/cull-apps"');
+    expect(job).toContain('open -na "$app"');
+    expect(job).toContain('git -C tap diff --exit-code');
+    expect(job).not.toContain('sha256 :no_check\nsed');
+    expect(job).not.toContain('git push --force');
+    expect(job.indexOf('git -C tap commit')).toBeLessThan(job.indexOf('brew audit --cask cull'));
+    expect(job.indexOf('brew audit --cask cull')).toBeLessThan(job.indexOf('git -C tap push'));
+    expect(workflow).toContain('group: homebrew-cull');
+    expect(workflow).not.toContain('group: homebrew-cull-${{');
+  });
+
+  it('requires launched Cull to remain alive before any tap push', () => {
+    const workflow = readFileSync(tapWorkflowPath, 'utf8');
+    const job = workflowJob(workflow, 'update-cask');
+    const launch = job.indexOf('open -na "$app"');
+    const liveness = job.indexOf('kill -0 "$app_pid"');
+    const version = job.indexOf('CFBundleShortVersionString', launch);
+    const push = job.indexOf('git -C tap push');
+    expect(launch).toBeGreaterThan(-1);
+    expect(liveness).toBeGreaterThan(launch);
+    expect(version).toBeGreaterThan(liveness);
+    expect(push).toBeGreaterThan(version);
+  });
+
+  it('dispatches Homebrew promotion from verified public provenance after publication', () => {
+    const releaseWorkflow = readFileSync(releaseWorkflowPath, 'utf8');
+    const publishJob = workflowJob(releaseWorkflow, 'publish');
+
+    expect(publishJob).toContain('gh workflow run update-tap.yml');
+    expect(publishJob).toContain('-f "version=$VERSION"');
+    expect(publishJob).toContain('-f "dmg_sha256=$DMG_SHA256"');
+    expect(publishJob).toContain('-f "provenance_url=$PROVENANCE_URL"');
+    expect(publishJob.indexOf('gh release edit "$TAG" --draft=false'))
+      .toBeLessThan(publishJob.indexOf('gh workflow run update-tap.yml'));
   });
 });

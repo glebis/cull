@@ -10,7 +10,7 @@ Quickest path, with [Homebrew](https://brew.sh):
 brew install --cask glebis/tap/cull
 ```
 
-Or download the latest `.dmg` for your Mac from [GitHub Releases](https://github.com/glebis/cull/releases), open it, and drag **Cull** into **Applications**. Current builds are not yet signed/notarized, so on first launch right-click the app and choose **Open** to clear the macOS Gatekeeper warning.
+Or download the latest `.dmg` for your Mac from [GitHub Releases](https://github.com/glebis/cull/releases), open it, and drag **Cull** into **Applications**. Current releases are Developer ID signed, Apple-notarized, and stapled, so they should launch normally through macOS Gatekeeper.
 
 ## Install And Run From Source
 

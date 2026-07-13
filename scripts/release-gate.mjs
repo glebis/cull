@@ -98,6 +98,20 @@ function resolveTag(repoRoot, tag, role) {
   return result.stdout.trim();
 }
 
+function resolveAnnotatedTag(repoRoot, tag, role) {
+  const sha = resolveTag(repoRoot, tag, role);
+  const type = git(repoRoot, ['cat-file', '-t', `refs/tags/${tag}`], { allowFailure: true });
+  if (type.status !== 0) throw gateError('TAG_NOT_FOUND', `${role} tag ${tag} does not exist`);
+  if (type.stdout.trim() !== 'tag') {
+    throw gateError('TAG_NOT_ANNOTATED', `${role} tag ${tag} must be an annotated tag`);
+  }
+  const objectSha = gitText(repoRoot, 'rev-parse', '--verify', `refs/tags/${tag}`);
+  if (!SHA40.test(objectSha)) {
+    throw gateError('TAG_OBJECT_INVALID', `${role} tag ${tag} has an invalid object ID`);
+  }
+  return { sha, objectSha };
+}
+
 function requireAncestor(repoRoot, ancestor, descendant, code, message) {
   const result = git(repoRoot, ['merge-base', '--is-ancestor', ancestor, descendant], { allowFailure: true });
   if (result.status === 1) throw gateError(code, message);
@@ -342,14 +356,17 @@ function stageJsonAtomic(path, record) {
 export function buildGateRecord(repoRoot, input) {
   let base;
   let publishEligible;
+  let tagObjectSha;
   if (input.event === 'canary') {
     base = canonicalCanaryBaseTag(repoRoot, input.tag, input.sha);
     publishEligible = false;
+    tagObjectSha = null;
   } else {
-    const tagSha = resolveTag(repoRoot, input.tag, 'Release');
-    if (tagSha !== input.sha) {
-      throw gateError('TAG_SHA_MISMATCH', `Tag ${input.tag} does not resolve to ${input.sha}`, { tagSha });
+    const tag = resolveAnnotatedTag(repoRoot, input.tag, 'Release');
+    if (tag.sha !== input.sha) {
+      throw gateError('TAG_SHA_MISMATCH', `Tag ${input.tag} does not resolve to ${input.sha}`, { tagSha: tag.sha });
     }
+    tagObjectSha = tag.objectSha;
     if (input.baseTag === input.tag) throw gateError('INPUT_INVALID', 'Base and release tags must differ');
     base = canonicalBaseTag(repoRoot, input.tag, input.sha);
     publishEligible = true;
@@ -383,6 +400,7 @@ export function buildGateRecord(repoRoot, input) {
     version,
     tag: input.tag,
     sha: input.sha,
+    tagObjectSha,
     baseTag: input.baseTag,
     mainAncestor: true,
     versions,
@@ -439,6 +457,7 @@ function appendWorkflowOutputs(path, record, jsonOut) {
     `version=${record.version}`,
     `tag=${record.tag}`,
     `sha=${record.sha}`,
+    `tag_object_sha=${record.tagObjectSha ?? ''}`,
     `base_tag=${record.baseTag}`,
     `e2e_required=${record.e2e.required}`,
     `json_out=${jsonOut}`,

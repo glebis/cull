@@ -4,7 +4,7 @@ umask 077
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: scripts/verify-release-artifacts.sh --artifact-dir DIR --version X.Y.Z --tag vX.Y.Z --commit SHA --run-id ID --out DIR [--launch]
+Usage: scripts/verify-release-artifacts.sh --artifact-dir DIR --version X.Y.Z --tag vX.Y.Z --commit SHA [--tag-object-sha SHA] --run-id ID --out DIR [--launch]
 USAGE
 }
 
@@ -21,19 +21,26 @@ ARTIFACT_DIR=""
 VERSION=""
 TAG=""
 COMMIT=""
+TAG_OBJECT_SHA=""
+TAG_OBJECT_SHA_SET=0
 RUN_ID=""
 OUT_DIR=""
 LAUNCH=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --artifact-dir|--version|--tag|--commit|--run-id|--out)
+    --artifact-dir|--version|--tag|--commit|--tag-object-sha|--run-id|--out)
       [[ $# -ge 2 ]] || die "missing value for $1"
       case "$1" in
         --artifact-dir) ARTIFACT_DIR=$2 ;;
         --version) VERSION=$2 ;;
         --tag) TAG=$2 ;;
         --commit) COMMIT=$2 ;;
+        --tag-object-sha)
+          [[ $TAG_OBJECT_SHA_SET -eq 0 ]] || die 'tag-object-sha may be supplied only once'
+          TAG_OBJECT_SHA=$2
+          TAG_OBJECT_SHA_SET=1
+          ;;
         --run-id) RUN_ID=$2 ;;
         --out) OUT_DIR=$2 ;;
       esac
@@ -61,6 +68,9 @@ done
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'version must be X.Y.Z'
 [[ "$TAG" == "v$VERSION" ]] || die "tag must equal v$VERSION"
 [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || die 'commit must be a lowercase 40-character Git SHA'
+if [[ $TAG_OBJECT_SHA_SET -eq 1 ]]; then
+  [[ "$TAG_OBJECT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'tag-object-sha must be a lowercase 40-character Git SHA'
+fi
 [[ "$RUN_ID" =~ ^[0-9]+$ ]] || die 'run-id must contain decimal digits only'
 [[ -d "$ARTIFACT_DIR" && ! -L "$ARTIFACT_DIR" ]] || die 'artifact-dir must be a real directory, not a symlink'
 
@@ -339,13 +349,13 @@ for name in "${required_names[@]}"; do
   printf '%s  %s\n' "$sha" "$name" >>"$evidence_stage/checksums.txt"
 done
 
-node - "$evidence_stage/release-provenance.json" "$VERSION" "$TAG" "$COMMIT" "$RUN_ID" \
+node - "$evidence_stage/release-provenance.json" "$VERSION" "$TAG" "$COMMIT" "$TAG_OBJECT_SHA" "$RUN_ID" \
   "$dmg_name" "${asset_shas[0]}" "${asset_sizes[0]}" \
   "$archive_name" "${asset_shas[1]}" "${asset_sizes[1]}" \
   "$signature_name" "${asset_shas[2]}" "${asset_sizes[2]}" \
   "$metadata_name" "${asset_shas[3]}" "${asset_sizes[3]}" <<'NODE'
 const fs = require('node:fs');
-const [output, version, tag, commit, workflowRunId, ...assetFields] = process.argv.slice(2);
+const [output, version, tag, commit, tagObjectSha, workflowRunId, ...assetFields] = process.argv.slice(2);
 const assets = {};
 for (let i = 0; i < assetFields.length; i += 3) {
   assets[assetFields[i]] = { sha256: assetFields[i + 1], size: Number(assetFields[i + 2]) };
@@ -355,6 +365,7 @@ const provenance = {
   version,
   tag,
   commit,
+  tagObjectSha: tagObjectSha || null,
   workflowRunId,
   assets,
   checks: {

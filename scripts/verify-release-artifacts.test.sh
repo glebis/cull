@@ -153,6 +153,16 @@ run_case() {
   make_artifacts "$artifacts"
   "$setup" "$artifacts" "$output"
   local case_path="$bin_dir"
+  local verifier_args=(
+    --artifact-dir "$artifacts"
+    --version 0.2.6
+    --tag v0.2.6
+    --commit 0123456789abcdef0123456789abcdef01234567
+  )
+  if [[ -n "${CASE_TAG_OBJECT_SHA:-}" ]]; then
+    verifier_args+=(--tag-object-sha "$CASE_TAG_OBJECT_SHA")
+  fi
+  verifier_args+=(--run-id 123 --out "$output")
 
   set +e
   PATH="$case_path" \
@@ -175,13 +185,7 @@ run_case() {
     CULL_VERIFY_TEST_RACE_PUBLISHED_NAME="${CASE_RACE_PUBLISHED_NAME:-}" \
     CULL_VERIFY_TEST_SIGNAL_DURING_PUBLISH="${CASE_SIGNAL_DURING_PUBLISH:-}" \
     CULL_VERIFY_TEST_RACE_DESTINATION_NAME="${CASE_RACE_DESTINATION_NAME:-}" \
-    bash "$verifier" \
-      --artifact-dir "$artifacts" \
-      --version 0.2.6 \
-      --tag v0.2.6 \
-      --commit 0123456789abcdef0123456789abcdef01234567 \
-      --run-id 123 \
-      --out "$output" >"$case_dir/stdout" 2>"$case_dir/stderr"
+    bash "$verifier" "${verifier_args[@]}" >"$case_dir/stdout" 2>"$case_dir/stderr"
   local status=$?
   printf '%s\n' "$status" >"$case_dir/status"
   set -e
@@ -262,9 +266,17 @@ const fs = require('node:fs');
 const p = JSON.parse(fs.readFileSync(process.argv[2]));
 if (p.schema !== 'cull.release.provenance.v1' || p.version !== '0.2.6' || p.tag !== 'v0.2.6') process.exit(1);
 if (p.commit !== '0123456789abcdef0123456789abcdef01234567' || p.workflowRunId !== '123') process.exit(1);
+if (p.tagObjectSha !== null) process.exit(1);
 if (Object.keys(p.assets).length !== 4) process.exit(1);
 if (!Object.values(p.checks).every(Boolean)) process.exit(1);
 NODE
+CASE_TAG_OBJECT_SHA=89abcdef0123456789abcdef0123456789abcdef run_case tagged-provenance pass setup_valid
+node - "$tmp_root/tagged-provenance/output/release-provenance.json" <<'NODE'
+const fs = require('node:fs');
+const p = JSON.parse(fs.readFileSync(process.argv[2]));
+if (p.tagObjectSha !== '89abcdef0123456789abcdef0123456789abcdef') process.exit(1);
+NODE
+CASE_TAG_OBJECT_SHA=ABC run_case invalid-tag-object-sha fail setup_valid
 run_case missing-signature fail setup_missing_signature
 run_case extra-asset fail setup_extra_asset
 run_case stale-latest-json fail setup_stale_metadata

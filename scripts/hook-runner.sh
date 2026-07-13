@@ -2,6 +2,12 @@
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+git_local_env_vars="$(git rev-parse --local-env-vars 2>/dev/null || true)"
+while IFS= read -r git_local_env_var; do
+  if [ -n "$git_local_env_var" ]; then
+    unset "$git_local_env_var"
+  fi
+done <<< "$git_local_env_vars"
 cd "$ROOT"
 
 hook_name="${1:-}"

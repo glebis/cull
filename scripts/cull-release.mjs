@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   closeSync,
   constants,
@@ -38,6 +39,15 @@ import {
 const repoRoot = process.cwd();
 const argv = process.argv.slice(2);
 const command = argv[0] ?? null;
+
+const RELEASE_FAILURE_CODES = new Set([
+  'GATE_FAILED',
+  'BUILD_FAILED',
+  'ARTIFACT_INVALID',
+  'PUBLISH_FAILED',
+  'HOMEBREW_PROMOTION_FAILED',
+  'POST_PUBLISH_VERIFY_FAILED',
+]);
 
 function commandError(code, message, details) {
   const error = new Error(message);
@@ -145,7 +155,7 @@ function runCheck(args) {
   const source = git('rev-parse', 'HEAD');
   const clean = git('status', '--porcelain').length === 0;
   const syncedWithOriginMain = source === git('rev-parse', 'origin/main');
-  return buildReadinessReport({
+  const report = buildReadinessReport({
     currentVersion,
     targetVersion: nextVersion(currentVersion, args.bump),
     source,
@@ -157,6 +167,36 @@ function runCheck(args) {
     nodeVersion: process.version,
     rustVersion: rustVersion(),
   });
+  return { ...report, blockers: [...report.blockers, ...releaseIncidentBlockers(config)] };
+}
+
+function releaseIncidentBlockers(config) {
+  try {
+    return queryReleaseIncidents()
+      .filter((issue) => /^cull-release-(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-post-publish$/
+        .test(issue.external_ref ?? issue.externalRef ?? ''))
+      .filter((issue) => [0, '0', 'P0'].includes(issue.priority) && issue.status !== 'closed')
+      .sort((left, right) => String(left.id).localeCompare(String(right.id)))
+      .map((issue) => `Unresolved P0 release incident ${issue.id} blocks later releases`);
+  } catch {
+    return ['Release incident lookup failed; publication readiness is unknown'];
+  }
+}
+
+function queryReleaseIncidents() {
+  if (process.env.CULL_RELEASE_TEST_MODE === '1') {
+    if (process.env.CULL_RELEASE_TEST_BD_FAIL === '1') throw new Error('Injected bd lookup failure');
+    const value = process.env.CULL_RELEASE_TEST_BD_LIST_JSON ?? '[]';
+    const issues = JSON.parse(value);
+    if (!Array.isArray(issues)) throw new Error('Injected bd list must be an array');
+    return issues;
+  }
+  const output = execFileSync('npm', [
+    'run', '--silent', 'bd', '--', 'list', '--json', '--limit', '0',
+  ], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const issues = JSON.parse(output);
+  if (!Array.isArray(issues)) throw new Error('bd list did not return an array');
+  return issues;
 }
 
 function normalizeCommand(commandValue) {
@@ -560,19 +600,59 @@ function probeCommit(record) {
 }
 
 function probeTag(record) {
-  return tryGit('rev-parse', '--verify', '--end-of-options', `${record.tag}^{commit}`) === record.releaseCommit;
+  const raw = tryGit(
+    'ls-remote', '--tags', 'origin', `refs/tags/${record.tag}`, `refs/tags/${record.tag}^{}`,
+  );
+  if (!raw) return null;
+  const lines = raw.split('\n').filter(Boolean);
+  if (lines.length !== 2) return null;
+  const refs = new Map(lines.map((line) => {
+    const [sha, ref] = line.split('\t');
+    return [ref, sha];
+  }));
+  const tagObjectSha = refs.get(`refs/tags/${record.tag}`);
+  const commit = refs.get(`refs/tags/${record.tag}^{}`);
+  if (!/^[0-9a-f]{40}$/.test(tagObjectSha ?? '') || !/^[0-9a-f]{40}$/.test(commit ?? '')) return null;
+  return { tagObjectSha, commit };
 }
 
-function probeWorkflow(record) {
-  if (!record.workflowRunId) return false;
-  return tryGh('run', 'view', '--json', 'conclusion', '--', String(record.workflowRunId))?.conclusion === 'success';
+function probeWorkflow(provenance, repository) {
+  const workflowRunId = provenance?.workflowRunId;
+  if (repository !== 'glebis/cull'
+    || !Number.isSafeInteger(workflowRunId) || workflowRunId < 1) return false;
+  const run = tryGh('api', `repos/glebis/cull/actions/runs/${workflowRunId}`);
+  if (run?.id !== workflowRunId
+    || run.path !== '.github/workflows/release.yml'
+    || run.repository?.full_name !== 'glebis/cull'
+    || run.status !== 'completed'
+    || run.conclusion !== 'success') return false;
+  if (run.event === 'push') return run.head_sha === provenance.commit;
+  return run.event === 'workflow_dispatch' && run.head_branch === 'main';
 }
 
 function probeRelease(record) {
-  return tryGh('release', 'view', '--json', 'isDraft,assets', '--', record.tag);
+  const repository = releaseRepository();
+  if (!repository) return null;
+  const release = tryGh('api', `repos/${repository}/releases/tags/${record.tag}`);
+  if (!release) return null;
+  return {
+    tagName: release.tag_name,
+    isDraft: release.draft,
+    isPrerelease: release.prerelease,
+    assets: release.assets,
+  };
 }
 
-function probeTapCommit(record, config) {
+function releaseRepository() {
+  if (process.env.CULL_RELEASE_TEST_MODE === '1' && process.env.CULL_RELEASE_TEST_REPOSITORY) {
+    return process.env.CULL_RELEASE_TEST_REPOSITORY;
+  }
+  const url = tryGit('remote', 'get-url', 'origin');
+  const match = /^(?:https:\/\/github\.com\/|git@github\.com:)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(url ?? '');
+  return match?.[1] ?? null;
+}
+
+function probeTapCommit(record, config, provenance) {
   const repo = config.homebrew?.repo;
   const cask = config.homebrew?.cask;
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo ?? '')
@@ -580,26 +660,86 @@ function probeTapCommit(record, config) {
     || cask.startsWith('-')
     || cask.split('/').includes('..')) return false;
   const response = tryGh('api', `repos/${repo}/contents/${cask}`);
-  if (!response?.content) return false;
+  if (!response?.content || !provenance) return false;
   const contents = Buffer.from(response.content, 'base64').toString('utf8');
-  return new RegExp(`^version "${record.version.replaceAll('.', '\\.')}"$`, 'm').test(contents);
+  return new RegExp(`^version "${record.version.replaceAll('.', '\\.')}"$`, 'm').test(contents)
+    && new RegExp(`^sha256 "${provenance.dmgSha256}"$`, 'm').test(contents);
 }
 
-function probePostPublishProvenance(record) {
+function probePublishedProvenance(record, config, release, tagIdentity) {
   try {
-    const raw = execFileSync('gh', [
+    const rawProvenance = execFileSync('gh', [
       'release', 'download', '--pattern', 'release-provenance.json', '--output', '-',
       '--', record.tag,
     ], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    const provenance = JSON.parse(raw);
-    return provenance.schema === 'cull.release.provenance.v1'
+    const rawChecksums = execFileSync('gh', [
+      'release', 'download', '--pattern', 'checksums.txt', '--output', '-', '--', record.tag,
+    ], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const provenance = JSON.parse(rawProvenance);
+    const expectedAssets = config.artifacts?.required
+      ?.map((name) => name.replace('{version}', record.version)).sort() ?? [];
+    const dmgName = expectedAssets.find((name) => name.endsWith('.dmg'));
+    const expectedChecks = [
+      'exactInventory', 'updaterMetadata', 'updaterSignature', 'dmgMountedReadOnly',
+      'embeddedVersion', 'arm64Only', 'codeSignature', 'gatekeeper', 'stapledNotarization',
+    ].sort();
+    const publicAssets = new Map((release?.assets ?? []).map((asset) => [asset.name, asset]));
+    const expectedPublic = [...expectedAssets, 'checksums.txt', 'release-provenance.json'].sort();
+    const checksumLines = rawChecksums.trim().split('\n');
+    const checksums = new Map();
+    for (const line of checksumLines) {
+      const match = /^([0-9a-f]{64})  ([A-Za-z0-9._-]+)$/.exec(line);
+      if (!match || checksums.has(match[2])) return null;
+      checksums.set(match[2], match[1]);
+    }
+    const validEvidenceAssets = [
+      ['release-provenance.json', Buffer.from(rawProvenance)],
+      ['checksums.txt', Buffer.from(rawChecksums)],
+    ].every(([name, bytes]) => {
+      const asset = publicAssets.get(name);
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      return asset?.state === 'uploaded' && asset.size === bytes.length && asset.digest === `sha256:${digest}`;
+    });
+    if (provenance.schema === 'cull.release.provenance.v1'
       && provenance.version === record.version
       && provenance.tag === record.tag
-      && provenance.releaseCommit === record.releaseCommit
-      && provenance.postPublishVerified === true;
+      && provenance.commit === tagIdentity?.commit
+      && provenance.tagObjectSha === tagIdentity?.tagObjectSha
+      && Number.isSafeInteger(provenance.workflowRunId) && provenance.workflowRunId > 0
+      && typeof dmgName === 'string'
+      && JSON.stringify(Object.keys(provenance.assets ?? {}).sort()) === JSON.stringify(expectedAssets)
+      && JSON.stringify(Object.keys(provenance.checks ?? {}).sort()) === JSON.stringify(expectedChecks)
+      && expectedChecks.every((name) => provenance.checks[name] === true)
+      && JSON.stringify([...publicAssets.keys()].sort()) === JSON.stringify(expectedPublic)
+      && checksumLines.length === expectedAssets.length
+      && validEvidenceAssets
+      && expectedAssets.every((name) => {
+        const proven = provenance.assets[name];
+        const published = publicAssets.get(name);
+        return /^[0-9a-f]{64}$/.test(proven?.sha256 ?? '')
+          && Number.isSafeInteger(proven?.size) && proven.size > 0
+          && checksums.get(name) === proven.sha256
+          && published?.state === 'uploaded'
+          && published.size === proven.size
+          && published.digest === `sha256:${proven.sha256}`;
+      })) {
+      return { ...provenance, dmgName, dmgSha256: provenance.assets[dmgName].sha256 };
+    }
+    return null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function probePromotionWorkflow(record) {
+  const runs = tryGh(
+    'run', 'list', '--workflow', 'update-tap.yml',
+    '--json', 'databaseId,conclusion,displayTitle,event', '--limit', '100',
+  );
+  return Array.isArray(runs) && runs.some((run) =>
+    run.conclusion === 'success'
+      && run.displayTitle === `Promote Cull ${record.tag}`
+      && (run.event === 'release' || run.event === 'workflow_dispatch'));
 }
 
 function probeEvidence(record, config) {
@@ -610,17 +750,26 @@ function probeEvidence(record, config) {
   }
   const release = probeRelease(record);
   const required = config.artifacts?.required?.map((name) => name.replace('{version}', record.version)) ?? [];
-  const names = new Set(release?.assets?.map((asset) => asset.name) ?? []);
-  const publishedRelease = release !== null && release.isDraft === false;
-  const tapCommit = probeTapCommit(record, config);
+  const releaseShapeValid = release !== null
+    && release.tagName === record.tag
+    && release.isDraft === false
+    && release.isPrerelease === false;
+  const tagIdentity = probeTag(record);
+  const provenance = releaseShapeValid
+    ? probePublishedProvenance(record, config, release, tagIdentity)
+    : null;
+  const workflow = probeWorkflow(provenance, releaseRepository());
+  const publishedRelease = releaseShapeValid && provenance !== null && workflow;
+  const tapCommit = publishedRelease && probeTapCommit(record, config, provenance);
   return {
-    commit: probeCommit(record),
-    tag: probeTag(record),
-    workflow: probeWorkflow(record),
-    releaseAsset: required.length > 0 && required.every((name) => names.has(name)),
+    commit: tagIdentity !== null || probeCommit(record),
+    tag: tagIdentity !== null,
+    workflow,
+    releaseAsset: publishedRelease && required.length > 0,
     publishedRelease,
     tapCommit,
-    postPublishVerified: publishedRelease && tapCommit && probePostPublishProvenance(record),
+    postPublishVerified: publishedRelease && tapCommit && provenance !== null
+      && probePromotionWorkflow(record),
   };
 }
 
@@ -658,18 +807,90 @@ function runState(subcommand, args) {
     updated = transitionReleaseRecord(record, args.to, parseJsonOption(args.evidenceJson, '--evidence-json'), now());
   } else if (subcommand === 'fail') {
     requireArgs(args, ['code', 'evidenceJson']);
+    if (!RELEASE_FAILURE_CODES.has(args.code)) {
+      throw inputError(`Unsupported release failure code ${args.code}`);
+    }
+    const evidence = parseJsonOption(args.evidenceJson, '--evidence-json');
+    const incidentId = args.code === 'POST_PUBLISH_VERIFY_FAILED'
+      ? ensurePostPublishIncident(record, evidence)
+      : undefined;
     updated = recordFailure(record, {
       code: args.code,
-      evidence: parseJsonOption(args.evidenceJson, '--evidence-json'),
+      evidence,
+      ...(incidentId === undefined ? {} : { incidentId }),
     }, now());
   } else throw inputError(`Unknown state command ${subcommand}`);
   writeReleaseRecordAtomic(repoRoot, config, updated);
   return updated;
 }
 
+function ensurePostPublishIncident(record, evidence) {
+  const title = `Post-publish verification failed for Cull ${record.version}`;
+  const description = [
+    `Release ${record.tag} is already public and failed post-publish verification.`,
+    'The next Cull release is blocked until this P0 is resolved.',
+    `Evidence: ${JSON.stringify(evidence)}`,
+  ].join(' ');
+  let existing = record.failure?.code === 'POST_PUBLISH_VERIFY_FAILED'
+    ? record.failure.incidentId
+    : null;
+  const externalRef = `cull-release-${record.version}-post-publish`;
+  if (!existing) {
+    try {
+      const output = execFileSync('npm', [
+        'run', '--silent', 'bd', '--', 'list', '--json', '--limit', '0',
+      ], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const issues = JSON.parse(output);
+      const matches = (Array.isArray(issues) ? issues : []).filter((issue) =>
+        (issue.external_ref ?? issue.externalRef) === externalRef);
+      if (matches.length > 1) throw new Error('multiple release incidents share one external reference');
+      if (matches.length === 1) existing = matches[0].id;
+    } catch (cause) {
+      if (process.env.CULL_RELEASE_TEST_MODE !== '1') {
+        throw externalFailure('Unable to inspect existing P0 release incidents', {
+          code: 'BD_INCIDENT_LOOKUP_FAILED', status: cause.status,
+        });
+      }
+      throw cause;
+    }
+  }
+  const args = existing
+    ? ['run', 'bd', '--', 'update', existing, '--status', 'open', '-p', 'P0', '-d', description]
+    : [
+      'run', 'bd', '--', 'create', '--type', 'task', '-p', 'P0',
+      '--external-ref', externalRef,
+      '--acceptance', 'A verified patch plan exists and the public release incident is resolved.',
+      '-d', description, '--silent', title,
+    ];
+  try {
+    const output = execFileSync('npm', args, {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+    const incidentId = existing ?? output.split(/\s+/).filter(Boolean).at(-1);
+    if (!/^[A-Za-z0-9._-]+$/.test(incidentId ?? '')) {
+      throw new Error('bd did not return a valid issue identifier');
+    }
+    return incidentId;
+  } catch (cause) {
+    throw externalFailure('Unable to create or update the P0 release incident', {
+      code: 'BD_INCIDENT_FAILED', status: cause.status,
+    });
+  }
+}
+
 function runResume(args) {
   requireArgs(args, ['version']);
-  const { evidence, derivedState } = readDerived(args.version);
+  const { record, evidence, derivedState } = readDerived(args.version);
+  if (record.failure?.code === 'POST_PUBLISH_VERIFY_FAILED') {
+    return {
+      nextState: null,
+      nextAction: 'prepare-patch-plan',
+      evidence,
+      failure: record.failure,
+    };
+  }
   return { ...buildResumeAction(derivedState), evidence };
 }
 
