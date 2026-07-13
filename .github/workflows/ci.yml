@@ -18,7 +18,7 @@ jobs:
     name: Frontend checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.0
 
       - uses: actions/setup-node@v6
         with:
@@ -32,7 +32,7 @@ jobs:
     name: Rust checks
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.0
 
       - uses: actions/setup-node@v6
         with:
@@ -59,7 +59,7 @@ jobs:
       run:
         working-directory: site
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.0
 
       - uses: actions/setup-node@v6
         with:
@@ -83,7 +83,7 @@ jobs:
     name: Supply-chain audit
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.0
 
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@1.95.0

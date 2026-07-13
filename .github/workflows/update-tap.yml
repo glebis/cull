@@ -266,14 +266,14 @@ jobs:
           echo "dmg_sha256=$DMG_SHA256" >> "$GITHUB_OUTPUT"
 
       - name: Checkout verified release tooling
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Checkout tap after public artifact verification
         id: checkout_tap
         continue-on-error: true
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: glebis/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
