@@ -40,17 +40,23 @@ impl Database {
     }
 
     pub fn get_all_embeddings(&self, model_name: &str) -> Result<Vec<(String, Vec<f32>)>> {
-        let conn = self.conn.lock();
-        let mut stmt =
-            conn.prepare("SELECT image_id, vector, dims FROM embeddings WHERE model_name = ?1")?;
-        let rows = stmt.query_map(params![model_name], |row| {
-            let image_id: String = row.get(0)?;
-            let bytes: Vec<u8> = row.get(1)?;
-            let _dims: u32 = row.get(2)?;
-            let vector = decode_embedding_bytes(&bytes);
-            Ok((image_id, vector))
-        })?;
-        rows.collect::<Result<Vec<_>>>()
+        // As in `find_similar`, only run the query under the lock; decoding
+        // the (potentially large) blob-to-f32 conversion happens afterwards
+        // so the lock isn't held for the whole table scan.
+        let raw_rows: Vec<(String, Vec<u8>)> = {
+            let conn = self.conn.lock();
+            let mut stmt =
+                conn.prepare("SELECT image_id, vector FROM embeddings WHERE model_name = ?1")?;
+            let rows = stmt.query_map(params![model_name], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })?;
+            rows.collect::<Result<Vec<_>>>()?
+        };
+
+        Ok(raw_rows
+            .into_iter()
+            .map(|(image_id, bytes)| (image_id, decode_embedding_bytes(&bytes)))
+            .collect())
     }
 
     pub fn get_embedding_page(
@@ -128,16 +134,23 @@ impl Database {
             return Ok(Vec::new());
         }
 
-        let conn = self.conn.lock();
-        let mut stmt =
-            conn.prepare("SELECT image_id, vector FROM embeddings WHERE model_name = ?1")?;
-        let rows = stmt.query_map(params![model_name], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
-        })?;
+        // Only hold the connection lock long enough to run the query and
+        // collect the raw rows. Decoding embedding blobs and computing
+        // cosine similarity for every row can be slow for large libraries,
+        // and doing that work under the lock would block all other
+        // database access (including UI reads) for the duration.
+        let raw_rows: Vec<(String, Vec<u8>)> = {
+            let conn = self.conn.lock();
+            let mut stmt =
+                conn.prepare("SELECT image_id, vector FROM embeddings WHERE model_name = ?1")?;
+            let rows = stmt.query_map(params![model_name], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })?;
+            rows.collect::<Result<Vec<_>>>()?
+        };
 
         let mut scores: Vec<(String, f32)> = Vec::with_capacity(top_k);
-        for row in rows {
-            let (id, bytes) = row?;
+        for (id, bytes) in raw_rows {
             let emb = decode_embedding_bytes(&bytes);
             let score = cosine_similarity(vector, &emb);
             if scores.len() < top_k {
@@ -163,5 +176,114 @@ impl Database {
             params![model_name],
             |row| row.get(0),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn open_test_db() -> Database {
+        Database::open(std::path::Path::new(":memory:")).unwrap()
+    }
+
+    fn insert_test_image(db: &Database, id: &str) {
+        let conn = db.conn.lock();
+        conn.execute(
+            "INSERT INTO images (id, sha256_hash, width, height, format, file_size, created_at, imported_at, ai_prompt) VALUES (?1, ?2, 100, 100, 'png', 1000, '2026-01-01', '2026-01-01', NULL)",
+            params![id, format!("hash_{}", id)],
+        )
+        .unwrap();
+    }
+
+    /// Straightforward reference implementation of top-k cosine similarity,
+    /// used to check that the lock-scoped `find_similar` returns identical
+    /// results (same scores, same ordering, same tie handling).
+    fn reference_find_similar(
+        vector: &[f32],
+        rows: &[(String, Vec<f32>)],
+        top_k: usize,
+    ) -> Vec<(String, f32)> {
+        let mut scores: Vec<(String, f32)> = rows
+            .iter()
+            .map(|(id, emb)| (id.clone(), cosine_similarity(vector, emb)))
+            .collect();
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores.truncate(top_k);
+        scores
+    }
+
+    #[test]
+    fn find_similar_matches_reference_implementation() {
+        let db = open_test_db();
+        let model = "clip-vit-b32";
+        let fixture: Vec<(&str, Vec<f32>)> = vec![
+            ("img1", vec![1.0, 0.0, 0.0]),
+            ("img2", vec![0.9, 0.1, 0.0]),
+            ("img3", vec![0.0, 1.0, 0.0]),
+            ("img4", vec![0.0, 0.0, 1.0]),
+            ("img5", vec![0.5, 0.5, 0.0]),
+            ("img6", vec![-1.0, 0.0, 0.0]),
+        ];
+        for (id, vec) in &fixture {
+            insert_test_image(&db, id);
+            db.store_embedding(id, model, vec).unwrap();
+        }
+
+        let query = vec![1.0, 0.0, 0.0];
+        let top_k = 3;
+
+        let actual = db.find_similar(&query, model, top_k).unwrap();
+
+        let reference_rows: Vec<(String, Vec<f32>)> = fixture
+            .iter()
+            .map(|(id, v)| (id.to_string(), v.clone()))
+            .collect();
+        let expected = reference_find_similar(&query, &reference_rows, top_k);
+
+        assert_eq!(actual.len(), expected.len());
+        assert_eq!(actual, expected);
+        assert_eq!(actual[0].0, "img1");
+    }
+
+    #[test]
+    fn find_similar_respects_top_k_zero() {
+        let db = open_test_db();
+        insert_test_image(&db, "img1");
+        db.store_embedding("img1", "clip-vit-b32", &[1.0, 0.0])
+            .unwrap();
+        let result = db.find_similar(&[1.0, 0.0], "clip-vit-b32", 0).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn find_similar_filters_by_model_name() {
+        let db = open_test_db();
+        insert_test_image(&db, "img1");
+        db.store_embedding("img1", "model-a", &[1.0, 0.0]).unwrap();
+        let result = db.find_similar(&[1.0, 0.0], "model-b", 10).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn get_all_embeddings_decodes_all_rows_for_model() {
+        let db = open_test_db();
+        insert_test_image(&db, "img1");
+        insert_test_image(&db, "img2");
+        db.store_embedding("img1", "clip-vit-b32", &[0.1, 0.2, 0.3])
+            .unwrap();
+        db.store_embedding("img2", "clip-vit-b32", &[0.4, 0.5, 0.6])
+            .unwrap();
+
+        let mut result = db.get_all_embeddings("clip-vit-b32").unwrap();
+        result.sort_by(|a, b| a.0.cmp(&b.0));
+
+        assert_eq!(
+            result,
+            vec![
+                ("img1".to_string(), vec![0.1, 0.2, 0.3]),
+                ("img2".to_string(), vec![0.4, 0.5, 0.6]),
+            ]
+        );
     }
 }

@@ -13,6 +13,15 @@ use std::collections::HashSet;
 const MAX_EMBEDDING_PAGE_SIZE: u32 = 5000;
 const SIMILARITY_GROUPING_METHOD: &str = "greedy_threshold_v1";
 
+/// Upper bound on the number of embeddings `generate_similarity_groups` will
+/// process in a single call. Grouping is O(N^2) pairwise comparisons, so at
+/// 25,000 embeddings that's already ~312 million comparisons; beyond this the
+/// CPU/memory cost becomes impractical for a single request.
+/// `generate_similarity_groups` has no scope parameter, so callers hitting
+/// this limit must reduce the number of embedded images in the library, or
+/// run grouping on a smaller model set.
+const MAX_SIMILARITY_GROUP_EMBEDDINGS: usize = 25_000;
+
 pub fn find_similar_images(
     ctx: &ServiceContext,
     image_id: &str,
@@ -65,21 +74,63 @@ pub fn generate_similarity_groups(
     let model_name = model.unwrap_or("clip-vit-b32");
     let min_group_size = min_group_size.max(2) as usize;
     let embeddings = ctx.db.get_all_embeddings(model_name)?;
+    let (groups, singleton_images) = build_similarity_groups(
+        embeddings,
+        threshold,
+        min_group_size,
+        MAX_SIMILARITY_GROUP_EMBEDDINGS,
+    )?;
+
+    Ok(ctx.db.replace_similarity_groups(
+        model_name,
+        threshold,
+        SIMILARITY_GROUPING_METHOD,
+        &groups,
+        singleton_images,
+    )?)
+}
+
+type SimilarityGroups = Vec<Vec<(String, f32)>>;
+
+/// Core grouping logic, factored out so the embedding-count cap can be
+/// exercised in tests with a small `max_embeddings` value instead of
+/// requiring an unwieldy 25k-row fixture.
+fn build_similarity_groups(
+    embeddings: Vec<(String, Vec<f32>)>,
+    threshold: f64,
+    min_group_size: usize,
+    max_embeddings: usize,
+) -> Result<(SimilarityGroups, u32), ServiceError> {
+    if embeddings.len() > max_embeddings {
+        return Err(ServiceError::InvalidInput(format!(
+            "Too many embeddings ({}) for similarity grouping; the pairwise comparison is \
+             O(N^2) and is capped at {} per run. Reduce the number of embedded images in the \
+             library, or run grouping on a smaller model set.",
+            embeddings.len(),
+            max_embeddings
+        )));
+    }
+
+    // Normalize every vector once up front so the O(N^2) inner loop can use
+    // a plain dot product instead of recomputing both vectors' norms on
+    // every pairwise comparison.
+    let normalized = l2_normalize_all(embeddings);
+
     let mut assigned: HashSet<String> = HashSet::new();
     let mut groups: Vec<Vec<(String, f32)>> = Vec::new();
     let mut singleton_images = 0u32;
 
-    for (seed_id, seed_vector) in &embeddings {
+    for (seed_id, seed_vector) in &normalized {
         if assigned.contains(seed_id) {
             continue;
         }
 
         let mut members = vec![(seed_id.clone(), 1.0f32)];
-        for (candidate_id, candidate_vector) in &embeddings {
+        for (candidate_id, candidate_vector) in &normalized {
             if candidate_id == seed_id || assigned.contains(candidate_id) {
                 continue;
             }
-            let score = cosine_similarity(seed_vector, candidate_vector);
+            let score = normalized_dot(seed_vector, candidate_vector);
             if score >= threshold as f32 {
                 members.push((candidate_id.clone(), score));
             }
@@ -103,13 +154,33 @@ pub fn generate_similarity_groups(
 
     groups.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a[0].0.cmp(&b[0].0)));
 
-    Ok(ctx.db.replace_similarity_groups(
-        model_name,
-        threshold,
-        SIMILARITY_GROUPING_METHOD,
-        &groups,
-        singleton_images,
-    )?)
+    Ok((groups, singleton_images))
+}
+
+/// L2-normalizes every vector in place. Zero-norm vectors are left as-is
+/// (all zero components): `normalized_dot` against a zero vector always
+/// yields 0.0, matching the "no match" behavior of the original
+/// `dot / (norm_a * norm_b)` cosine similarity when either norm was zero.
+fn l2_normalize_all(mut vectors: Vec<(String, Vec<f32>)>) -> Vec<(String, Vec<f32>)> {
+    for (_, v) in vectors.iter_mut() {
+        let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm > 0.0 {
+            for x in v.iter_mut() {
+                *x /= norm;
+            }
+        }
+    }
+    vectors
+}
+
+/// Dot product of two already-L2-normalized vectors, equivalent to cosine
+/// similarity. Mismatched lengths return 0.0, matching the original
+/// `cosine_similarity`'s guard.
+fn normalized_dot(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() {
+        return 0.0;
+    }
+    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
 pub fn list_similarity_groups(
@@ -295,20 +366,6 @@ pub fn find_near_duplicates_by_phash(
         duplicate.image = image;
     }
     Ok(duplicates)
-}
-
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    if a.len() != b.len() {
-        return 0.0;
-    }
-    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm_a == 0.0 || norm_b == 0.0 {
-        0.0
-    } else {
-        dot / (norm_a * norm_b)
-    }
 }
 
 #[cfg(test)]
@@ -616,5 +673,76 @@ mod tests {
             .unwrap();
         let c = ctx(&db, &s, &d, &ee, &de, &se);
         assert_eq!(get_vision_count(&c, Some("minicpm-v")).unwrap(), 1);
+    }
+
+    #[test]
+    fn test_build_similarity_groups_rejects_too_many_embeddings() {
+        let embeddings = vec![
+            ("img1".to_string(), vec![1.0, 0.0]),
+            ("img2".to_string(), vec![0.0, 1.0]),
+            ("img3".to_string(), vec![1.0, 1.0]),
+        ];
+        // Cap of 2 with 3 embeddings should be rejected before any pairwise
+        // comparison work happens.
+        let result = build_similarity_groups(embeddings, 0.9, 2, 2);
+        match result {
+            Err(ServiceError::InvalidInput(msg)) => {
+                assert!(msg.contains("Too many embeddings"));
+                assert!(msg.contains('3'));
+                assert!(msg.contains('2'));
+            }
+            other => panic!("Expected InvalidInput cap error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_similarity_groups_within_cap_still_works() {
+        let embeddings = vec![
+            ("img1".to_string(), vec![1.0, 0.0]),
+            ("img2".to_string(), vec![0.99, 0.01]),
+        ];
+        let (groups, singleton_images) = build_similarity_groups(embeddings, 0.9, 2, 2).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].len(), 2);
+        assert_eq!(singleton_images, 0);
+    }
+
+    #[test]
+    fn test_build_similarity_groups_zero_vector_is_never_a_match() {
+        // A zero-norm embedding must behave like the original
+        // dot / (norm_a * norm_b) cosine similarity, which returns 0.0
+        // whenever either operand's norm is zero — i.e. it never matches
+        // anything, including another zero vector. (Threshold 0.0 would
+        // trivially match everything since cosine scores are >= 0.0 here,
+        // so use a small positive threshold to make the guard meaningful.)
+        let embeddings = vec![
+            ("img_zero_a".to_string(), vec![0.0, 0.0]),
+            ("img_zero_b".to_string(), vec![0.0, 0.0]),
+            ("img_real".to_string(), vec![1.0, 0.0]),
+        ];
+        let (groups, singleton_images) =
+            build_similarity_groups(embeddings, 0.01, 2, MAX_SIMILARITY_GROUP_EMBEDDINGS).unwrap();
+        assert!(groups.is_empty());
+        assert_eq!(singleton_images, 3);
+    }
+
+    #[test]
+    fn test_normalized_dot_matches_cosine_for_known_vectors() {
+        let normalized = l2_normalize_all(vec![
+            ("a".to_string(), vec![3.0, 4.0]),
+            ("b".to_string(), vec![3.0, 4.0]),
+            ("c".to_string(), vec![4.0, 3.0]),
+        ]);
+        let a = &normalized[0].1;
+        let b = &normalized[1].1;
+        let c = &normalized[2].1;
+        assert!((normalized_dot(a, b) - 1.0).abs() < 1e-6);
+        // cos angle between (3,4) and (4,3): dot=24, norms=5*5=25 => 0.96
+        assert!((normalized_dot(a, c) - 0.96).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_normalized_dot_mismatched_lengths_returns_zero() {
+        assert_eq!(normalized_dot(&[1.0, 0.0], &[1.0, 0.0, 0.0]), 0.0);
     }
 }

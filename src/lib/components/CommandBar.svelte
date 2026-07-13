@@ -111,6 +111,7 @@
                 isCollapsed = grid.scrollTop > 50 && (showRules || applied);
             };
             grid.addEventListener('scroll', onScroll, { passive: true });
+            unlisteners.push(() => grid.removeEventListener('scroll', onScroll));
         }
 
         const unlistenResult = await listen<{ text: string; is_final: boolean }>('dictation-result', (event) => {
