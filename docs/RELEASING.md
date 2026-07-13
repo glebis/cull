@@ -99,12 +99,13 @@ immutable commit and runs four ordered jobs:
 
 Automatic publication is fail-closed. The `publish` job requires the repository
 variable `CULL_RELEASE_PUBLISH_ENABLED` to equal `true`; absent or false skips
-publication after verification. Signed non-publishing canary run `29181842274`
-passed signing, notarization, private transfer, and secret-free verification.
-Production run `29182947689` then published v0.3.1 successfully. Branch and `v*`
-tag rules must be present before enabling the variable; the workflow's
-before/after identity checks detect a race but cannot substitute for repository
-protection.
+publication after verification. Signed non-publishing canary run `29240223393`
+passed the complete protected-main gate, signing, notarization, private transfer,
+and secret-free verification on 2026-07-13. Automatic publication was enabled
+only after that evidence and the active branch and immutable `v*` tag rules were
+verified. Production run `29182947689` previously published v0.3.1 successfully.
+The workflow's before/after identity checks detect a race but cannot substitute
+for repository protection.
 
 A manual dispatch is launched from the default-branch workflow and may select an
 older annotated tag, so the workflow invocation SHA can legitimately differ from

@@ -642,9 +642,9 @@ describe('release gate', () => {
     expect(guardedPublish).toMatch(/verify_remote_tag[\s\S]*gh release edit "\$TAG" --draft=false[\s\S]*verify_remote_tag/);
     expect(releaseDocs).toContain('`CULL_RELEASE_PUBLISH_ENABLED` to equal `true`');
     expect(releaseDocs).toMatch(/absent or false skips\s+publication/);
-    expect(releaseDocs).toContain('29181842274');
+    expect(releaseDocs).toContain('29240223393');
     expect(releaseDocs).toContain('29182947689');
-    expect(releaseDocs).toMatch(/Branch and `v\*`\s+tag rules must be present/);
+    expect(releaseDocs).toMatch(/active branch and immutable `v\*` tag rules were\s+verified/);
   });
 
   it('binds dispatch artifacts to the workflow invocation while evidence binds the selected tag commit', () => {
