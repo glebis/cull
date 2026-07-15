@@ -1,6 +1,6 @@
 <script lang="ts">
     import { openPreviewDisplay } from '$lib/api';
-    import { viewMode, thumbnailSize, canvasZoom, navigateTo, requestCanvasZoom, showToast } from '$lib/stores';
+    import { viewMode, thumbnailSize, canvasZoom, navigateTo, requestCanvasZoom, setGridThumbnailSize, showToast } from '$lib/stores';
     import type { ViewMode } from '$lib/stores';
     import {
         canvasZoomFromPosition,
@@ -31,7 +31,7 @@
         const position = parseFloat((e.target as HTMLInputElement).value);
         const val = thumbnailSizeFromZoomPosition(position);
         zoomPosition = position;
-        thumbnailSize.set(val);
+        setGridThumbnailSize(val);
     }
 
     function setCanvasZoom(e: Event) {

@@ -1,5 +1,5 @@
-export const THUMBNAIL_ZOOM_MIN = 80;
-export const THUMBNAIL_ZOOM_MAX = 400;
+export const THUMBNAIL_ZOOM_MIN = 4;
+export const THUMBNAIL_ZOOM_MAX = 800;
 
 function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
@@ -27,4 +27,12 @@ export function zoomPositionFromThumbnailSize(size: number): number {
     }
 
     return ((lo + hi) / 2) * 100;
+}
+
+export function nudgeThumbnailSize(size: number, direction: -1 | 1): number {
+    const factor = direction > 0 ? 1.25 : 0.8;
+    const next = Math.round(clamp(size * factor, THUMBNAIL_ZOOM_MIN, THUMBNAIL_ZOOM_MAX));
+    if (next === size && size > THUMBNAIL_ZOOM_MIN && direction < 0) return size - 1;
+    if (next === size && size < THUMBNAIL_ZOOM_MAX && direction > 0) return size + 1;
+    return next;
 }

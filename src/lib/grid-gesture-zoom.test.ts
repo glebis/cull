@@ -22,11 +22,12 @@ describe('grid gesture zoom', () => {
 
     it('clamps gesture zoom to grid thumbnail bounds', () => {
         const presets = [
-            { name: 'compact', size: 80, gap: 2 },
+            { name: 'pixels', size: 4, gap: 0 },
             { name: 'xl', size: 400, gap: 12 },
+            { name: 'detail', size: 800, gap: 16 },
         ];
 
-        expect(gridGestureZoom({ size: 80, gap: 2, preset: 0 }, 0.1, presets).size).toBe(GRID_GESTURE_ZOOM_MIN);
+        expect(gridGestureZoom({ size: 8, gap: 0, preset: 0 }, 0.1, presets).size).toBe(GRID_GESTURE_ZOOM_MIN);
         expect(gridGestureZoom({ size: 400, gap: 12, preset: 1 }, 10, presets).size).toBe(GRID_GESTURE_ZOOM_MAX);
     });
 });

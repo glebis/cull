@@ -3,6 +3,7 @@ import {
     THUMBNAIL_ZOOM_MAX,
     THUMBNAIL_ZOOM_MIN,
     thumbnailSizeFromZoomPosition,
+    nudgeThumbnailSize,
     zoomPositionFromThumbnailSize,
 } from './thumbnail-zoom';
 
@@ -24,10 +25,17 @@ describe('thumbnail zoom curve', () => {
     });
 
     it('round-trips existing thumbnail sizes back to slider positions', () => {
-        for (const size of [80, 160, 280, 400]) {
+        for (const size of [4, 8, 32, 80, 160, 400, 800]) {
             const position = zoomPositionFromThumbnailSize(size);
 
             expect(thumbnailSizeFromZoomPosition(position)).toBeCloseTo(size, 0);
         }
+    });
+
+    it('nudges proportionally across the extended range without crossing its bounds', () => {
+        expect(nudgeThumbnailSize(4, 1)).toBe(5);
+        expect(nudgeThumbnailSize(5, -1)).toBe(4);
+        expect(nudgeThumbnailSize(800, 1)).toBe(800);
+        expect(nudgeThumbnailSize(4, -1)).toBe(4);
     });
 });
