@@ -8,6 +8,7 @@ import {
     pinnedCollection, pinnedCollections,
     expandedFolders, sidebarSectionsCollapsed,
     resetLoupeTransform,
+    setGridThumbnailSize,
     type ViewMode, type LineageLayout, type NsfwMode, type EmbeddingViewState,
 } from './stores';
 
@@ -88,9 +89,9 @@ export function restoreAppStateBeforeImages(): PersistedState | null {
         const state: PersistedState = JSON.parse(raw);
         if (state._version !== SCHEMA_VERSION) return null;
 
-        thumbnailSize.set(state.thumbnailSize);
-        gridPreset.set(state.gridPreset);
-        gridGap.set(state.gridGap);
+        // Derive the presentation preset from size so states saved before new
+        // overview/detail presets were added do not restore a mismatched label/gap.
+        setGridThumbnailSize(state.thumbnailSize);
         sidebarVisible.set(state.sidebarVisible);
         zenMode.set(state.zenMode);
         activeFolder.set(state.activeFolder);

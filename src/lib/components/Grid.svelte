@@ -4,7 +4,8 @@
     import { open } from '@tauri-apps/plugin-dialog';
     import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState, showToast, totalCount, folders, gridPreset, GRID_PRESETS, activeSmartCollection, activeCollection, activeDetectedClass, activeFolder, minSizeFilter, clipboardMonitorStatus } from '$lib/stores';
     import { importFolder as apiImportFolder, getImageCount, listFolders } from '$lib/api';
-    import { IMAGE_PAGE_SIZE, loadImagesForCurrentScope, loadMoreImagesForCurrentScope } from '$lib/image-loading';
+    import type { ImageWithFile } from '$lib/api';
+    import { IMAGE_OVERVIEW_PAGE_SIZE, IMAGE_PAGE_SIZE, loadImagesForCurrentScope, loadMoreImagesForCurrentScope } from '$lib/image-loading';
     import { wheelGestureIntent } from '$lib/gesture-interactions';
     import { gridGestureZoom } from '$lib/grid-gesture-zoom';
     import { resolveLibraryViewState, scopeEmptyCopy, type LibraryScopeKind } from '$lib/library-view-state';
@@ -20,7 +21,18 @@
         type ScrollDirection,
     } from '$lib/view-utils';
     import { createPrefetchCache } from '$lib/prefetch-cache';
+    import {
+        GRID_FULL_SCOPE_OVERVIEW_MAX_SIZE,
+        GRID_OVERVIEW_MAX_SIZE,
+    } from '$lib/grid-overview';
+    import {
+        gridIndexAtPointer,
+        planGridHoverPreview,
+        type GridHoverPreviewPlan,
+    } from '$lib/grid-hover-preview';
     import clipboardMonitorEmptySrc from '$lib/assets/clipboard-monitor-empty.png';
+    import GridHoverPreview from './GridHoverPreview.svelte';
+    import GridOverviewCanvas from './GridOverviewCanvas.svelte';
     import Thumbnail from './Thumbnail.svelte';
 
     let containerEl: HTMLDivElement | undefined = $state(undefined);
@@ -62,6 +74,7 @@
 
     let visibleItems = $derived.by(() => {
         const imgs = $images;
+        if (size <= GRID_OVERVIEW_MAX_SIZE) return [];
         return computeVisibleItems(scrollTop, containerHeight, layout.cols, layout.cellSize, imgs.length, {
             overscanRowsBefore: overscan.before,
             overscanRowsAfter: overscan.after,
@@ -70,6 +83,7 @@
     });
 
     function warmPrefetch() {
+        if (size <= GRID_OVERVIEW_MAX_SIZE) return;
         if (cellSize <= 0 || cols <= 0) return;
         const imgs = $images;
         const indices = computePrefetchIndices(
@@ -112,6 +126,7 @@
     }
 
     function onScroll(e: Event) {
+        hoverPlan = null;
         const nextScrollTop = (e.target as HTMLDivElement).scrollTop;
         scrollDir = computeScrollDirection(prevScrollTop, nextScrollTop, scrollDir);
         prevScrollTop = nextScrollTop;
@@ -178,6 +193,67 @@
         navigateTo('loupe');
     }
 
+    let hoverPlan = $state<GridHoverPreviewPlan | null>(null);
+    let hoverX = $state(0);
+    let hoverY = $state(0);
+    let hoverItems = $derived.by<ImageWithFile[]>(() => {
+        const plan = hoverPlan;
+        if (!plan) return [];
+        return plan.indices
+            .map(index => $images[index])
+            .filter((item): item is ImageWithFile => item !== undefined);
+    });
+
+    function gridPointerCoordinates(event: MouseEvent): { x: number; y: number } | null {
+        if (!containerEl) return null;
+        const rect = containerEl.getBoundingClientRect();
+        const styles = getComputedStyle(containerEl);
+        return {
+            x: event.clientX - rect.left - (Number.parseFloat(styles.paddingLeft) || 0),
+            y: event.clientY - rect.top - (Number.parseFloat(styles.paddingTop) || 0),
+        };
+    }
+
+    function updateHoverPreview(event: PointerEvent) {
+        if (!containerEl || event.pointerType === 'touch') return;
+        const pointer = gridPointerCoordinates(event);
+        if (!pointer) return;
+        hoverX = event.clientX;
+        hoverY = event.clientY;
+        hoverPlan = planGridHoverPreview({
+            pointerX: pointer.x,
+            pointerY: pointer.y,
+            scrollTop,
+            cols,
+            cellSize,
+            thumbnailSize: size,
+            totalItems: $images.length,
+        });
+    }
+
+    function overviewIndex(event: MouseEvent): number | null {
+        const pointer = gridPointerCoordinates(event);
+        if (!pointer) return null;
+        return gridIndexAtPointer(
+            pointer.x,
+            pointer.y,
+            scrollTop,
+            cols,
+            cellSize,
+            $images.length,
+        );
+    }
+
+    function handleOverviewClick(event: MouseEvent) {
+        const index = overviewIndex(event);
+        if (index !== null) handleClick(index, event);
+    }
+
+    function handleOverviewDblClick(event: MouseEvent) {
+        const index = overviewIndex(event);
+        if (index !== null) handleDblClick(index);
+    }
+
     $effect(() => {
         if (!containerEl) return;
         const ro = new ResizeObserver((entries) => {
@@ -202,6 +278,16 @@
         $imageLoadState.loadingMore;
         maybeLoadMore();
         warmPrefetch();
+    });
+
+    // Pixel overview represents the full scope, not only the first paged window.
+    // Load remaining metadata progressively; image decoding stays bounded in the canvas.
+    $effect(() => {
+        if (size > GRID_FULL_SCOPE_OVERVIEW_MAX_SIZE) return;
+        if (!$imageLoadState.hasMore || $imageLoadState.loading || $imageLoadState.loadingMore) return;
+        $images.length;
+        const timer = window.setTimeout(() => void loadMoreImagesForCurrentScope(IMAGE_OVERVIEW_PAGE_SIZE), 16);
+        return () => window.clearTimeout(timer);
     });
 
     $effect(() => {
@@ -359,7 +445,10 @@
     onscroll={onScroll}
     onwheel={handleWheel}
     role="grid"
+    tabindex="-1"
     aria-label={"Image grid, " + $images.length + " images"}
+    onpointermove={updateHoverPreview}
+    onpointerleave={() => hoverPlan = null}
 >
     {#if libraryViewState === 'error'}
         <div class="load-error" role="alert" data-testid="library-error-banner">
@@ -411,37 +500,59 @@
         </div>
     {:else}
         <div class="grid-scroll" style="height: {totalHeight}px; position: relative;">
-            {#each visibleItems.filter(vi => vi.item) as vi (vi.item.image.id)}
-                <div
-                    class="grid-cell"
-                    style="position: absolute; left: {vi.x}px; top: {vi.y}px; width: {size}px; height: {size}px;"
-                    data-agent-image-id={vi.item.image.id}
-                    data-agent-filename={vi.item.path.split('/').filter(Boolean).pop() ?? vi.item.image.id}
-                    data-agent-path={vi.item.path}
-                    data-agent-thumbnail-path={vi.item.thumbnail_path ?? ''}
-                    data-agent-rating={vi.item.selection?.star_rating ?? ''}
-                    data-agent-decision={vi.item.selection?.decision ?? 'undecided'}
-                    data-agent-selected={$selectedIds.has(vi.item.image.id)}
-                    data-agent-focused={$focusedIndex === vi.index}
-                    data-agent-view-role="grid-cell"
-                >
-                    <Thumbnail
-                        item={vi.item}
-                        {size}
-                        focused={$focusedIndex === vi.index}
-                        selected={$selectedIds.has(vi.item.image.id)}
-                        onclick={(event) => handleClick(vi.index, event)}
-                        ondblclick={() => handleDblClick(vi.index)}
-                        loading="eager"
-                    />
-                </div>
-            {/each}
+            {#if size <= GRID_OVERVIEW_MAX_SIZE}
+                <GridOverviewCanvas
+                    items={$images}
+                    width={containerWidth}
+                    height={containerHeight}
+                    {scrollTop}
+                    {size}
+                    {gap}
+                    {cols}
+                    focusedIndex={$focusedIndex}
+                    selectedIds={$selectedIds}
+                    onclick={handleOverviewClick}
+                    ondblclick={handleOverviewDblClick}
+                />
+            {:else}
+                {#each visibleItems.filter(vi => vi.item) as vi (vi.item.image.id)}
+                    <div
+                        class="grid-cell"
+                        style="position: absolute; left: {vi.x}px; top: {vi.y}px; width: {size}px; height: {size}px;"
+                        data-agent-image-id={vi.item.image.id}
+                        data-agent-filename={vi.item.path.split('/').filter(Boolean).pop() ?? vi.item.image.id}
+                        data-agent-path={vi.item.path}
+                        data-agent-thumbnail-path={vi.item.thumbnail_path ?? ''}
+                        data-agent-rating={vi.item.selection?.star_rating ?? ''}
+                        data-agent-decision={vi.item.selection?.decision ?? 'undecided'}
+                        data-agent-selected={$selectedIds.has(vi.item.image.id)}
+                        data-agent-focused={$focusedIndex === vi.index}
+                        data-agent-view-role="grid-cell"
+                    >
+                        <Thumbnail
+                            item={vi.item}
+                            {size}
+                            focused={$focusedIndex === vi.index}
+                            selected={$selectedIds.has(vi.item.image.id)}
+                            onclick={(event) => handleClick(vi.index, event)}
+                            ondblclick={() => handleDblClick(vi.index)}
+                            loading="eager"
+                        />
+                    </div>
+                {/each}
+            {/if}
         </div>
         {#if $imageLoadState.loadingMore}
             <div class="load-indicator" aria-live="polite">Loading</div>
         {/if}
     {/if}
 </div>
+
+{#if hoverPlan && hoverItems.length > 0}
+    {#key hoverPlan.previewKey}
+        <GridHoverPreview plan={hoverPlan} items={hoverItems} x={hoverX} y={hoverY} />
+    {/key}
+{/if}
 
 <style>
     .grid-container {

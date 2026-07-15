@@ -197,14 +197,32 @@ export function cycleAgentVisualLevel() {
 }
 
 export const GRID_PRESETS = [
+    { name: 'pixels', size: 4, gap: 0 },
+    { name: 'overview', size: 12, gap: 0 },
+    { name: 'contact', size: 32, gap: 1 },
     { name: 'compact', size: 80, gap: 2 },
     { name: 'normal', size: 160, gap: 4 },
-    { name: 'large', size: 280, gap: 8 },
-    { name: 'xl', size: 400, gap: 12 },
+    { name: 'large', size: 320, gap: 8 },
+    { name: 'detail', size: 640, gap: 12 },
 ];
 
-export const gridPreset = writable<number>(1);
+export const gridPreset = writable<number>(4);
 export const gridGap = writable<number>(4);
+
+export function setGridThumbnailSize(size: number) {
+    let closest = 0;
+    let distance = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < GRID_PRESETS.length; i += 1) {
+        const nextDistance = Math.abs(GRID_PRESETS[i].size - size);
+        if (nextDistance < distance) {
+            closest = i;
+            distance = nextDistance;
+        }
+    }
+    thumbnailSize.set(size);
+    gridPreset.set(closest);
+    gridGap.set(GRID_PRESETS[closest]?.gap ?? 0);
+}
 
 export const zenMode = writable<boolean>(false);
 

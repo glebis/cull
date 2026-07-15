@@ -8,7 +8,7 @@ import {
     navigateTo, navigateBack, searchOpen, shortcutsOpen, undoHistoryOpen, focusedImage, activeSession,
     requestTextInput, requestCollectionTarget, selectionAnchorIndex, requestLoupeActualSize, requestLoupeFitIn,
     requestLoupeZoomIn, requestLoupeZoomOut,
-    activeFolder,
+    activeFolder, setGridThumbnailSize,
 } from './stores';
 import { tabCycleOrder } from './plugins/tab-registry';
 import { computeCompareSwap, nextComparePresentationState } from './compare-utils';
@@ -23,6 +23,7 @@ import { commandForKeyboardEvent, openCommandPalette, runCommandPaletteItem } fr
 import { recordShortcutUse, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from './shortcut-reminders';
 import { withDecision, withRating, type ImageDecision } from './selection-updates';
 import { pasteDestinationForContext } from './clipboard-actions';
+import { nudgeThumbnailSize } from './thumbnail-zoom';
 
 let waitingForStar = false;
 
@@ -168,12 +169,7 @@ export async function handleDecision(decision: ImageDecision, imageIndex?: numbe
 }
 
 function handleResize(delta: number) {
-    thumbnailSize.update(s => {
-        const next = s + delta;
-        if (next < 80) return 80;
-        if (next > 400) return 400;
-        return next;
-    });
+    setGridThumbnailSize(nudgeThumbnailSize(get(thumbnailSize), delta < 0 ? -1 : 1));
 }
 
 // ---- Compare helpers ----
