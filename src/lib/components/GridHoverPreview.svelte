@@ -1,7 +1,6 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { untrack } from 'svelte';
-    import { cubicOut } from 'svelte/easing';
     import { fade } from 'svelte/transition';
     import type { ImageWithFile } from '$lib/api';
     import type { GridHoverPreviewPlan } from '$lib/grid-hover-preview';
@@ -20,20 +19,6 @@
     const singleMaxHeight = 360;
     const groupExtent = 300;
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    function organicZoom(_node: Element, params: { start: number }) {
-        return {
-            duration: reduceMotion ? 0 : 340,
-            easing: cubicOut,
-            css: (t: number) => {
-                const scale = params.start + (1 - params.start) * t;
-                const opacity = 0.3 + 0.7 * t;
-                const saturation = 0.84 + 0.16 * t;
-                const brightness = 0.88 + 0.12 * t;
-                return `transform: scale(${scale}); opacity: ${opacity}; filter: saturate(${saturation}) brightness(${brightness});`;
-            },
-        };
-    }
 
     function previewColumnsForCurrentSource(): number {
         if (plan.mode !== 'group') return 1;
@@ -61,22 +46,21 @@
         };
     }
 
-    function sourceScaleForCurrentSource(
-        size: { width: number; height: number },
+    function sourceRectForCurrentSource(
         sourceAnchor: { left: number; top: number; width: number; height: number },
-    ): number {
-        if (plan.mode === 'group') {
-            return Math.max(0.015, Math.min(
-                1,
-                sourceAnchor.width / size.width,
-                sourceAnchor.height / size.height,
-            ));
-        }
+    ): { left: number; top: number; width: number; height: number } {
+        if (plan.mode === 'group') return sourceAnchor;
         const item = items[0];
-        if (!item) return 0.1;
+        if (!item) return sourceAnchor;
         const aspect = Math.max(1, item.image.width) / Math.max(1, item.image.height);
-        const containedWidth = Math.min(sourceAnchor.width, sourceAnchor.height * aspect);
-        return Math.max(0.015, Math.min(1, containedWidth / size.width));
+        const width = Math.min(sourceAnchor.width, sourceAnchor.height * aspect);
+        const height = Math.min(sourceAnchor.height, sourceAnchor.width / aspect);
+        return {
+            left: sourceAnchor.left + (sourceAnchor.width - width) / 2,
+            top: sourceAnchor.top + (sourceAnchor.height - height) / 2,
+            width,
+            height,
+        };
     }
 
     // A hover session gets one stable lens. Content changes inside it, but its
@@ -99,9 +83,11 @@
             window.innerHeight - lensSize.height - viewportInset,
         ),
     );
-    const lensOriginX = initialAnchor.left + initialAnchor.width / 2 - lensLeft;
-    const lensOriginY = initialAnchor.top + initialAnchor.height / 2 - lensTop;
-    const lensSourceScale = sourceScaleForCurrentSource(lensSize, initialAnchor);
+    const sourceRect = sourceRectForCurrentSource(initialAnchor);
+    const lensSourceX = sourceRect.left - lensLeft;
+    const lensSourceY = sourceRect.top - lensTop;
+    const lensSourceScaleX = sourceRect.width / lensSize.width;
+    const lensSourceScaleY = sourceRect.height / lensSize.height;
 
     function previewSrc(item: ImageWithFile): string {
         const path = safeAssetPreviewPath(item, { displayPx: plan.mode === 'single' ? 320 : 88, dpr: window.devicePixelRatio || 1 });
@@ -113,10 +99,11 @@
 <aside
     class="hover-preview"
     class:group={plan.mode === 'group'}
-    style:--preview-origin-x={`${lensOriginX}px`}
-    style:--preview-origin-y={`${lensOriginY}px`}
+    style:--preview-source-x={`${lensSourceX}px`}
+    style:--preview-source-y={`${lensSourceY}px`}
+    style:--preview-source-scale-x={lensSourceScaleX}
+    style:--preview-source-scale-y={lensSourceScaleY}
     style="left: {lensLeft}px; top: {lensTop}px; width: {lensSize.width}px; height: {lensSize.height}px;"
-    transition:organicZoom={{ start: lensSourceScale }}
     aria-hidden="true"
 >
     {#if plan.mode === 'single' && items[0]}
@@ -154,8 +141,33 @@
         border-radius: calc(var(--radius) * 1.5);
         background: var(--surface);
         box-shadow: 0 22px 70px color-mix(in srgb, var(--bg) 72%, transparent);
-        transform-origin: var(--preview-origin-x) var(--preview-origin-y);
-        will-change: left, top, transform, opacity;
+        transform-origin: top left;
+        animation: preview-enter 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+        will-change: transform, opacity, filter;
+    }
+
+    @keyframes preview-enter {
+        0% {
+            transform: translate(var(--preview-source-x), var(--preview-source-y)) scale(var(--preview-source-scale-x), var(--preview-source-scale-y));
+            opacity: 0.2;
+            filter: saturate(0.82) brightness(0.86);
+            box-shadow: 0 2px 8px color-mix(in srgb, var(--bg) 42%, transparent);
+        }
+        62% {
+            opacity: 0.96;
+        }
+        100% {
+            transform: translate(0, 0) scale(1, 1);
+            opacity: 1;
+            filter: saturate(1) brightness(1);
+            box-shadow: 0 22px 70px color-mix(in srgb, var(--bg) 72%, transparent);
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .hover-preview {
+            animation: none;
+        }
     }
 
     .single-image {
