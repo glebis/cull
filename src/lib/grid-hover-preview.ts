@@ -23,6 +23,36 @@ export interface GridHoverPreviewInput extends GridPointerInput {
     thumbnailSize: number;
 }
 
+export interface GridHoverGroupBounds {
+    startRow: number;
+    startCol: number;
+    side: number;
+    rows: number;
+    cols: number;
+}
+
+export function gridHoverGroupBounds(
+    anchorIndex: number,
+    cols: number,
+    cellSize: number,
+    totalItems: number,
+): GridHoverGroupBounds {
+    const side = Math.max(2, Math.ceil(GRID_HOVER_FOOTPRINT_PX / cellSize));
+    const anchorRow = Math.floor(anchorIndex / cols);
+    const anchorCol = anchorIndex % cols;
+    const startRow = Math.floor(anchorRow / side) * side;
+    const startCol = Math.floor(anchorCol / side) * side;
+    const actualCols = Math.min(side, cols - startCol);
+    const remainingItems = Math.max(0, totalItems - (startRow * cols + startCol));
+    return {
+        startRow,
+        startCol,
+        side,
+        rows: Math.min(side, Math.ceil(remainingItems / cols)),
+        cols: Math.min(actualCols, remainingItems),
+    };
+}
+
 export function gridIndexAtPointer(
     pointerX: number,
     pointerY: number,
@@ -71,11 +101,12 @@ export function planGridHoverPreview(input: GridHoverPreviewInput): GridHoverPre
         return { mode: 'single', previewKey: `image:${anchorIndex}`, anchorIndex, indices: [anchorIndex], groupCount: 1 };
     }
 
-    const side = Math.max(2, Math.ceil(GRID_HOVER_FOOTPRINT_PX / input.cellSize));
-    const anchorRow = Math.floor(anchorIndex / input.cols);
-    const anchorCol = anchorIndex % input.cols;
-    const startRow = Math.floor(anchorRow / side) * side;
-    const startCol = Math.floor(anchorCol / side) * side;
+    const { startRow, startCol, side } = gridHoverGroupBounds(
+        anchorIndex,
+        input.cols,
+        input.cellSize,
+        input.totalItems,
+    );
     const group: number[] = [];
 
     for (let row = startRow; row < startRow + side; row += 1) {

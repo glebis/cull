@@ -26,6 +26,7 @@
         GRID_OVERVIEW_MAX_SIZE,
     } from '$lib/grid-overview';
     import {
+        gridHoverGroupBounds,
         gridIndexAtPointer,
         planGridHoverPreview,
         type GridHoverPreviewPlan,
@@ -194,8 +195,8 @@
     }
 
     let hoverPlan = $state<GridHoverPreviewPlan | null>(null);
-    let hoverX = $state(0);
-    let hoverY = $state(0);
+    let hoverAnchor = $state({ left: 0, top: 0, width: 1, height: 1 });
+    let hoverShape = $state({ rows: 1, cols: 1 });
     let hoverItems = $derived.by<ImageWithFile[]>(() => {
         const plan = hoverPlan;
         if (!plan) return [];
@@ -218,9 +219,7 @@
         if (!containerEl || event.pointerType === 'touch') return;
         const pointer = gridPointerCoordinates(event);
         if (!pointer) return;
-        hoverX = event.clientX;
-        hoverY = event.clientY;
-        hoverPlan = planGridHoverPreview({
+        const plan = planGridHoverPreview({
             pointerX: pointer.x,
             pointerY: pointer.y,
             scrollTop,
@@ -229,6 +228,35 @@
             thumbnailSize: size,
             totalItems: $images.length,
         });
+        hoverPlan = plan;
+        if (!plan) return;
+
+        const rect = containerEl.getBoundingClientRect();
+        const styles = getComputedStyle(containerEl);
+        const paddingLeft = Number.parseFloat(styles.paddingLeft) || 0;
+        const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
+        const row = Math.floor(plan.anchorIndex / cols);
+        const col = plan.anchorIndex % cols;
+
+        if (plan.mode === 'single') {
+            hoverShape = { rows: 1, cols: 1 };
+            hoverAnchor = {
+                left: rect.left + paddingLeft + col * cellSize,
+                top: rect.top + paddingTop + row * cellSize - scrollTop,
+                width: size,
+                height: size,
+            };
+            return;
+        }
+
+        const bounds = gridHoverGroupBounds(plan.anchorIndex, cols, cellSize, $images.length);
+        hoverShape = { rows: bounds.rows, cols: bounds.cols };
+        hoverAnchor = {
+            left: rect.left + paddingLeft + bounds.startCol * cellSize,
+            top: rect.top + paddingTop + bounds.startRow * cellSize - scrollTop,
+            width: bounds.cols * cellSize,
+            height: bounds.rows * cellSize,
+        };
     }
 
     function overviewIndex(event: MouseEvent): number | null {
@@ -549,9 +577,7 @@
 </div>
 
 {#if hoverPlan && hoverItems.length > 0}
-    {#key hoverPlan.previewKey}
-        <GridHoverPreview plan={hoverPlan} items={hoverItems} x={hoverX} y={hoverY} />
-    {/key}
+    <GridHoverPreview plan={hoverPlan} items={hoverItems} anchor={hoverAnchor} sourceShape={hoverShape} />
 {/if}
 
 <style>

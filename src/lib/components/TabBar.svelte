@@ -10,6 +10,9 @@
     import { visibleViewTabs } from '$lib/view-tabs';
     import { tabRegistry } from '$lib/plugins/tab-registry';
     import {
+        nudgeThumbnailSize,
+        THUMBNAIL_ZOOM_MAX,
+        THUMBNAIL_ZOOM_MIN,
         thumbnailSizeFromZoomPosition,
         zoomPositionFromThumbnailSize,
     } from '$lib/thumbnail-zoom';
@@ -32,6 +35,10 @@
         const val = thumbnailSizeFromZoomPosition(position);
         zoomPosition = position;
         setGridThumbnailSize(val);
+    }
+
+    function stepGridZoom(direction: -1 | 1) {
+        setGridThumbnailSize(nudgeThumbnailSize($thumbnailSize, direction));
     }
 
     function setCanvasZoom(e: Event) {
@@ -104,7 +111,7 @@
     <div class="tabbar-right">
         {#if $viewMode === 'grid'}
             <div class="slider-group">
-                <span class="slider-icon">▪▪</span>
+                <button class="slider-icon" type="button" aria-label="Zoom thumbnails out" title="Zoom out" disabled={$thumbnailSize <= THUMBNAIL_ZOOM_MIN} onclick={() => stepGridZoom(-1)}>▪▪</button>
                 <div class="slider-track">
                     <input
                         type="range"
@@ -116,11 +123,11 @@
                         aria-label="Thumbnail size"
                     />
                 </div>
-                <span class="slider-icon">▪</span>
+                <button class="slider-icon" type="button" aria-label="Zoom thumbnails in" title="Zoom in" disabled={$thumbnailSize >= THUMBNAIL_ZOOM_MAX} onclick={() => stepGridZoom(1)}>▪</button>
             </div>
         {:else if $viewMode === 'canvas'}
             <div class="slider-group">
-                <span class="slider-icon">-</span>
+                <span class="slider-marker">-</span>
                 <div class="slider-track">
                     <input
                         type="range"
@@ -132,7 +139,7 @@
                         aria-label="Canvas zoom"
                     />
                 </div>
-                <span class="slider-icon">+</span>
+                <span class="slider-marker">+</span>
             </div>
         {/if}
     </div>
@@ -312,10 +319,46 @@
         gap: 6px;
     }
     .slider-icon {
+        display: grid;
+        place-items: center;
+        min-width: 18px;
+        height: 22px;
+        padding: 0 3px;
+        border: 0;
+        border-radius: var(--radius);
+        background: transparent;
         color: var(--text-secondary);
+        font-family: var(--font);
         font-size: 8px;
         opacity: 0.5;
         letter-spacing: 1px;
+        cursor: pointer;
+        transition: color 120ms, opacity 120ms, background 120ms, transform 80ms;
+    }
+    .slider-marker {
+        color: var(--text-secondary);
+        font-size: 8px;
+        opacity: 0.5;
+    }
+    .slider-icon:hover {
+        color: var(--text);
+        background: color-mix(in srgb, var(--blue) 10%, transparent);
+        opacity: 1;
+    }
+    .slider-icon:active {
+        transform: scale(0.88);
+    }
+    .slider-icon:disabled {
+        opacity: 0.18;
+        cursor: default;
+    }
+    .slider-icon:disabled:hover {
+        color: var(--text-secondary);
+        background: transparent;
+    }
+    .slider-icon:focus-visible {
+        outline: 1px solid var(--blue);
+        outline-offset: 1px;
     }
     .slider-track {
         width: 80px;
@@ -348,6 +391,9 @@
         .tab,
         .tab-label,
         .tab-label-popover {
+            transition: none;
+        }
+        .slider-icon {
             transition: none;
         }
     }
