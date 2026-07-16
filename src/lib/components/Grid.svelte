@@ -195,8 +195,22 @@
     }
 
     let hoverPlan = $state<GridHoverPreviewPlan | null>(null);
+    let hoverSessionId = $state(0);
     let hoverAnchor = $state({ left: 0, top: 0, width: 1, height: 1 });
     let hoverShape = $state({ rows: 1, cols: 1 });
+    let previousHoverLayout: string | null = null;
+
+    $effect(() => {
+        const layoutKey = `${size}:${gap}:${cols}:${containerWidth}:${containerHeight}:${window.innerWidth}:${window.innerHeight}`;
+        if (previousHoverLayout === null) {
+            previousHoverLayout = layoutKey;
+            return;
+        }
+        if (layoutKey === previousHoverLayout) return;
+        previousHoverLayout = layoutKey;
+        hoverPlan = null;
+    });
+
     let hoverItems = $derived.by<ImageWithFile[]>(() => {
         const plan = hoverPlan;
         if (!plan) return [];
@@ -476,6 +490,7 @@
     tabindex="-1"
     aria-label={"Image grid, " + $images.length + " images"}
     onpointermove={updateHoverPreview}
+    onpointerenter={() => hoverSessionId += 1}
     onpointerleave={() => hoverPlan = null}
 >
     {#if libraryViewState === 'error'}
@@ -577,7 +592,9 @@
 </div>
 
 {#if hoverPlan && hoverItems.length > 0}
-    <GridHoverPreview plan={hoverPlan} items={hoverItems} anchor={hoverAnchor} sourceShape={hoverShape} />
+    {#key hoverSessionId}
+        <GridHoverPreview plan={hoverPlan} items={hoverItems} anchor={hoverAnchor} sourceShape={hoverShape} />
+    {/key}
 {/if}
 
 <style>

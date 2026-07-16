@@ -1,5 +1,6 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
+    import { untrack } from 'svelte';
     import { cubicOut } from 'svelte/easing';
     import { fade } from 'svelte/transition';
     import type { ImageWithFile } from '$lib/api';
@@ -34,13 +35,14 @@
         };
     }
 
-    let previewColumns = $derived.by(() => {
+    function previewColumnsForCurrentSource(): number {
         if (plan.mode !== 'group') return 1;
         if (items.length === plan.groupCount) return Math.max(1, sourceShape.cols);
         const aspect = Math.max(1, sourceShape.cols) / Math.max(1, sourceShape.rows);
         return Math.max(1, Math.ceil(Math.sqrt(items.length * aspect)));
-    });
-    let previewSize = $derived.by(() => {
+    }
+
+    function previewSizeForCurrentSource(): { width: number; height: number } {
         if (plan.mode === 'group' || !items[0]) {
             const aspect = Math.max(1, sourceShape.cols) / Math.max(1, sourceShape.rows);
             const width = aspect >= 1 ? groupExtent : groupExtent * aspect;
@@ -57,37 +59,49 @@
             width: Math.max(1, Math.round(imageWidth * scale)),
             height: Math.max(1, Math.round(imageHeight * scale)),
         };
-    });
-    let left = $derived(Math.max(
-        viewportInset,
-        Math.min(
-            anchor.left + anchor.width / 2 - previewSize.width / 2,
-            window.innerWidth - previewSize.width - viewportInset,
-        ),
-    ));
-    let top = $derived(Math.max(
-        viewportInset,
-        Math.min(
-            anchor.top + anchor.height / 2 - previewSize.height / 2,
-            window.innerHeight - previewSize.height - viewportInset,
-        ),
-    ));
-    let originX = $derived(anchor.left + anchor.width / 2 - left);
-    let originY = $derived(anchor.top + anchor.height / 2 - top);
-    let sourceScale = $derived.by(() => {
+    }
+
+    function sourceScaleForCurrentSource(
+        size: { width: number; height: number },
+        sourceAnchor: { left: number; top: number; width: number; height: number },
+    ): number {
         if (plan.mode === 'group') {
             return Math.max(0.015, Math.min(
                 1,
-                anchor.width / previewSize.width,
-                anchor.height / previewSize.height,
+                sourceAnchor.width / size.width,
+                sourceAnchor.height / size.height,
             ));
         }
         const item = items[0];
         if (!item) return 0.1;
         const aspect = Math.max(1, item.image.width) / Math.max(1, item.image.height);
-        const containedWidth = Math.min(anchor.width, anchor.height * aspect);
-        return Math.max(0.015, Math.min(1, containedWidth / previewSize.width));
-    });
+        const containedWidth = Math.min(sourceAnchor.width, sourceAnchor.height * aspect);
+        return Math.max(0.015, Math.min(1, containedWidth / size.width));
+    }
+
+    // A hover session gets one stable lens. Content changes inside it, but its
+    // geometry does not chase every thumbnail under the pointer.
+    let previewColumns = $derived(previewColumnsForCurrentSource());
+    let previewRows = $derived(Math.max(1, Math.ceil(items.length / previewColumns)));
+    const lensSize = previewSizeForCurrentSource();
+    const initialAnchor = untrack(() => ({ ...anchor }));
+    const lensLeft = Math.max(
+        viewportInset,
+        Math.min(
+            initialAnchor.left + initialAnchor.width / 2 - lensSize.width / 2,
+            window.innerWidth - lensSize.width - viewportInset,
+        ),
+    );
+    const lensTop = Math.max(
+        viewportInset,
+        Math.min(
+            initialAnchor.top + initialAnchor.height / 2 - lensSize.height / 2,
+            window.innerHeight - lensSize.height - viewportInset,
+        ),
+    );
+    const lensOriginX = initialAnchor.left + initialAnchor.width / 2 - lensLeft;
+    const lensOriginY = initialAnchor.top + initialAnchor.height / 2 - lensTop;
+    const lensSourceScale = sourceScaleForCurrentSource(lensSize, initialAnchor);
 
     function previewSrc(item: ImageWithFile): string {
         const path = safeAssetPreviewPath(item, { displayPx: plan.mode === 'single' ? 320 : 88, dpr: window.devicePixelRatio || 1 });
@@ -99,10 +113,10 @@
 <aside
     class="hover-preview"
     class:group={plan.mode === 'group'}
-    style:--preview-origin-x={`${originX}px`}
-    style:--preview-origin-y={`${originY}px`}
-    style="left: {left}px; top: {top}px; width: {previewSize.width}px; height: {previewSize.height}px;"
-    transition:organicZoom={{ start: sourceScale }}
+    style:--preview-origin-x={`${lensOriginX}px`}
+    style:--preview-origin-y={`${lensOriginY}px`}
+    style="left: {lensLeft}px; top: {lensTop}px; width: {lensSize.width}px; height: {lensSize.height}px;"
+    transition:organicZoom={{ start: lensSourceScale }}
     aria-hidden="true"
 >
     {#if plan.mode === 'single' && items[0]}
@@ -116,7 +130,8 @@
         {#key plan.previewKey}
             <div
                 class="preview-grid"
-                style:grid-template-columns={`repeat(${previewColumns}, 1fr)`}
+                style:grid-template-columns={`repeat(${previewColumns}, minmax(0, 1fr))`}
+                style:grid-template-rows={`repeat(${previewRows}, minmax(0, 1fr))`}
                 transition:fade={{ duration: reduceMotion ? 0 : 120 }}
             >
                 {#each items as item (item.image.id)}
@@ -140,14 +155,11 @@
         background: var(--surface);
         box-shadow: 0 22px 70px color-mix(in srgb, var(--bg) 72%, transparent);
         transform-origin: var(--preview-origin-x) var(--preview-origin-y);
-        transition: left 220ms cubic-bezier(0.22, 1, 0.36, 1),
-            top 220ms cubic-bezier(0.22, 1, 0.36, 1),
-            width 220ms cubic-bezier(0.22, 1, 0.36, 1),
-            height 220ms cubic-bezier(0.22, 1, 0.36, 1);
         will-change: left, top, transform, opacity;
     }
 
     .single-image {
+        position: relative;
         width: 100%;
         height: 100%;
         display: flex;
@@ -164,7 +176,14 @@
         display: block;
     }
 
+    .single-image img {
+        position: absolute;
+        inset: 0;
+    }
+
     .preview-grid {
+        position: absolute;
+        inset: 0;
         display: grid;
         width: 100%;
         height: 100%;
@@ -172,7 +191,6 @@
     }
 
     .preview-cell {
-        aspect-ratio: 1;
         overflow: hidden;
         background: var(--bg);
     }
