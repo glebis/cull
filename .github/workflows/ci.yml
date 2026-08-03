@@ -94,7 +94,7 @@ jobs:
           workspaces: src-tauri -> target
 
       - name: Install cargo-deny and cargo-audit
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.5
         with:
           tool: cargo-deny,cargo-audit
 
