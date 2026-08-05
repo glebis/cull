@@ -60,10 +60,15 @@ pub struct AppState {
     pub preview_state: PreviewStateStore,
     pub preview_web_stream: PreviewWebStreamController,
     pub agent_snapshots: Mutex<services::agent_snapshots::AgentSnapshotRegistry>,
+    /// Pending agent-snapshot round-trips. The payload is a `Result` so the
+    /// frontend can report a capture failure instead of going silent and making
+    /// the caller wait out the full timeout.
     pub agent_snapshot_requests: Mutex<
         std::collections::HashMap<
             String,
-            tokio::sync::oneshot::Sender<services::agent_snapshots::AgentSnapshotPackage>,
+            tokio::sync::oneshot::Sender<
+                Result<services::agent_snapshots::AgentSnapshotPackage, String>,
+            >,
         >,
     >,
 }
@@ -127,12 +132,24 @@ where
     });
 }
 
-pub(crate) fn reveal_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-    }
+/// Reveal the main window. Returns `Err` with a reason when the window is
+/// missing or refuses to show, so callers that promise the user a visible
+/// window (the MCP display tools) can report a real failure instead of
+/// silently succeeding against a window nobody can see.
+pub(crate) fn try_reveal_main_window<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "the main app window does not exist".to_string())?;
+    window
+        .show()
+        .map_err(|e| format!("could not show the main window: {}", e))?;
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+    Ok(())
+}
+
+pub(crate) fn reveal_main_window<R: tauri::Runtime>(app: &AppHandle<R>) {
+    let _ = try_reveal_main_window(app);
 }
 
 fn run_stdio_bridge() {
@@ -417,6 +434,7 @@ pub fn run() {
             commands::import::regenerate_single_thumbnail,
             commands::import::rescan_sources,
             commands::deeplink::drain_pending_open_params,
+            commands::deeplink::complete_deep_link_navigation,
             commands::deeplink::open_deep_link_urls,
             commands::jobs::get_job,
             commands::jobs::list_jobs,
@@ -632,6 +650,7 @@ pub fn run() {
             commands::files::list_open_with_applications,
             commands::agent_snapshots::capture_agent_window_snapshot,
             commands::agent_snapshots::complete_agent_view_snapshot,
+            commands::agent_snapshots::fail_agent_view_snapshot,
             commands::agent_snapshots::get_last_agent_view_snapshot,
             commands::agent_snapshots::request_agent_view_snapshot,
             menu::update_menu_state,

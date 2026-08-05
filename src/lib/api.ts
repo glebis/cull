@@ -1181,6 +1181,14 @@ export async function drainPendingOpenParams<T>(): Promise<T[]> {
     return invoke<T[]>('drain_pending_open_params');
 }
 
+export async function completeDeepLinkNavigation(
+    requestId: string,
+    ok: boolean,
+    error?: string | null
+): Promise<void> {
+    return invoke('complete_deep_link_navigation', { requestId, ok, error: error ?? null });
+}
+
 export async function openDeepLinkUrls(urls: string[]): Promise<void> {
     return invoke('open_deep_link_urls', { urls });
 }
@@ -1784,6 +1792,10 @@ export async function completeAgentViewSnapshot(
     request: CompleteAgentViewSnapshotRequest,
 ): Promise<AgentSnapshotPackage> {
     return invoke<AgentSnapshotPackage>('complete_agent_view_snapshot', { request });
+}
+
+export async function failAgentViewSnapshot(requestId: string, error: string): Promise<void> {
+    return invoke<void>('fail_agent_view_snapshot', { requestId, error });
 }
 
 export async function getLastAgentViewSnapshot(snapshotId: string | null = null): Promise<AgentSnapshotPackage | null> {
