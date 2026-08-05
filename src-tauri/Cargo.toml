@@ -78,6 +78,7 @@ trash = "5"
 pdfium-render = { version = "0.8.37", default-features = false, features = ["sync", "image", "pdfium_latest"] }
 
 [dev-dependencies]
+tauri = { version = "2", features = ["test"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
