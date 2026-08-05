@@ -46,3 +46,8 @@ docs/internal/
 .impeccable/live/sessions/
 .worktrees/
 .tdd-state.json
+
+# Vendored agent skill packs (local tooling, not product code)
+.agents/
+.claude/skills/
+skills-lock.json
