@@ -1,0 +1,7 @@
+{
+  "schema": "cull.static_publishing.v1",
+  "canvas": null,
+  "unknown_future_field": {
+    "purpose": "Readers must ignore unknown top-level fields"
+  }
+}

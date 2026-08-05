@@ -50,8 +50,8 @@ Release checks are explicit and heavier:
 npm run preflight:release
 ```
 
-Release checks run the full tier, license/model policy audit, and production
-build.
+Release checks run the full tier, license/model and supply-chain audits, both
+stable compatibility gates, and the production build.
 
 ## Overrides
 
@@ -61,7 +61,6 @@ Use overrides sparingly and mention them in handoff when used:
 - `CULL_PRE_COMMIT_TIER=<tier>`: override the pre-commit tier.
 - `CULL_PRE_PUSH_TIER=<tier>`: override the pre-push tier.
 - `CULL_PREFLIGHT_DRY_RUN=1`: print preflight commands without running them.
-- `CULL_PREFLIGHT_SKIP_E2E=1`: skip E2E inside the release tier.
 
 bd hook shims still run separately unless bd itself is disabled.
 

@@ -18,6 +18,15 @@ updates:
       timezone: "Etc/UTC"
     open-pull-requests-limit: 5
 
+  - package-ecosystem: "npm"
+    directory: "/site"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:15"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

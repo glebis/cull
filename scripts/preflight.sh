@@ -6,7 +6,7 @@ usage() {
   printf '  hook    shell syntax and app tauri-mock import guard\n' >&2
   printf '  quick   hook + npm run check; npm test\n' >&2
   printf '  full    quick + Rust fmt, clippy, and tests\n' >&2
-  printf '  release full + license audit and production build\n' >&2
+  printf '  release full + policy, compatibility, and production build gates\n' >&2
 }
 
 tier="${1:-quick}"
@@ -70,6 +70,9 @@ run_rust() {
 
 run_release() {
   run npm run audit:licenses
+  run bash scripts/supply-chain-audit.sh check
+  run cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden
+  run cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test export_compat_golden
   run npm run build
 }
 

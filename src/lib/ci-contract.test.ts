@@ -25,6 +25,12 @@ describe('CI quality gate contract', () => {
     expect(viteConfig).toContain('"**/.worktrees/**"');
   });
 
+  it('keeps the independently installed site package out of root Vitest discovery', () => {
+    const viteConfig = read('vite.config.js');
+
+    expect(viteConfig).toContain('"**/site/**"');
+  });
+
   it('uses locked Rust dependencies and encodes Clippy warning policy in CI', () => {
     const checkCi = read('scripts/check-ci.sh');
     const releaseWorkflow = read('.github/workflows/release.yml');

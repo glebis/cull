@@ -5,20 +5,21 @@ The runner starts Vite with `CULL_E2E_MOCK=1` and executes `tests/e2e/smoke.py` 
 
 ## Classification
 
-**Current classification: pre-push, manual, change-triggered.**
+**Current classification: pre-push manual gate plus machine-classified release CI.**
 
 Run the browser E2E smoke suite before pushing a branch or opening a PR when the
-change touches one of the required file areas below. The suite is intentionally
-not part of `npm run ci` or the current GitHub CI jobs because it depends on a
-local browser environment and the E2E Tauri mock, but it is stronger than an
-optional local-only check for covered UI behavior.
+change touches one of the required file areas below. The ordinary `CI` workflow
+does not run it. The signed canary and production release workflows classify the
+exact changed paths with `release.config.json`; when a covered path matches, the
+release gate runs the browser suite on the GitHub macOS runner and records the
+classification and result in immutable gate evidence.
 
 | Option | Status | Meaning for Cull |
 | --- | --- | --- |
 | Local-only | No | Useful for debugging, but not the policy for covered UI changes. |
 | Pre-push | **Yes** | Required before push/PR for the file areas listed below. |
 | Nightly | No | A good future automation target, but not currently configured. |
-| CI-on-change | No | Do not claim GitHub CI runs it until a workflow explicitly does so. |
+| CI-on-change | Release only | Canary and production release gates run it for machine-classified covered paths; ordinary PR/main CI does not. |
 
 If the suite cannot run because the machine lacks the required browser or
 Playwright setup, document the limitation in the PR test plan and include the

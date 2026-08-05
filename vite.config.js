@@ -20,7 +20,12 @@ export default defineConfig(async () => ({
   plugins: [sveltekit(), svelteTesting()],
   resolve: e2eMock ? { alias: tauriMockAliases } : undefined,
   test: {
-    exclude: [...configDefaults.exclude, "**/.worktrees/**", "**/.claude/worktrees/**"],
+    exclude: [
+      ...configDefaults.exclude,
+      "**/.worktrees/**",
+      "**/.claude/worktrees/**",
+      "**/site/**",
+    ],
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

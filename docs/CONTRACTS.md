@@ -25,29 +25,79 @@ cannot ship if compatibility broke.
 
 ## Worked example — DB round-trip (`db`, mode `BACKWARD_TRANSITIVE`)
 
-`src-tauri/tests/compat_golden.rs` opens a frozen `cull.db` fixture and asserts
-current code migrates it to the current schema and passes
-`verify_schema_invariants()`. Generate/refresh the fixture with the ignored
-generator test, then run the guard:
+`src-tauri/tests/compat_golden.rs` discovers every retained `v*.db` fixture,
+sorts them by schema number, opens a separate copy of each, and asserts current
+code migrates it to the current schema and passes `verify_schema_invariants()`.
+The guard fails when the retained set is empty, a `v*.db` name is malformed, an
+entry is not a regular file, or two file names encode the same schema number.
+Before migration, it reads `PRAGMA user_version` from the copied fixture and
+requires it to equal the schema encoded by the file name, so a mislabeled golden
+cannot silently weaken the compatibility promise.
 
 ```bash
 # (re)generate the frozen fixture from current code — run once per schema bump:
 cargo test --manifest-path src-tauri/Cargo.toml --features test-support \
   --test compat_golden -- --ignored regenerate_db_fixture
-# the actual round-trip guard (runs in the release gate):
+# the actual transitive round-trip guard (runs in the release gate):
 cargo test --manifest-path src-tauri/Cargo.toml --features test-support \
-  --test compat_golden db_fixture_opens_and_satisfies_invariants
+  --test compat_golden
 ```
 
 **Timing matters:** freeze a fixture for version `N` *while the code is still at
 `N`* — commit `vN.db`, then add migration `N+1`. Freezing *after* bumping the
 schema captures the new state and tests nothing. Keep every old fixture so each
-version stays tested forever.
+released/reachable stable version stays tested forever. Historical fixtures must
+be generated with the matching historical code in an isolated worktree, never
+with current code and never against the live application data directory.
+
+Retained fixture provenance:
+
+| Schema | Producer commit | Status |
+| --- | --- | --- |
+| v21 | `e9bd555e24f28acd2f0f22c2abc739826b30651f` | retained historical fixture |
+| v22 | `a0a577ae5f96194d2e6424833399f5fb2308eb0b` | reconstructed with that commit's ignored generator |
+| v23 | `84b9630361b236d65bec7c7e2ed7a17c14c7c617` | reconstructed crash-reachable boundary; SHA-256 `d645eeaf688027d8abcc5a36e07dcd7b9ca497788876d49019a1f4f4a3a17368` |
+| v24 | `84b9630361b236d65bec7c7e2ed7a17c14c7c617` | reconstructed with that commit's ignored generator |
+
+Schema 23 and 24 were introduced by the same producer commit, but not in one
+transaction. `run_migration_step(23, "media_assets", ...)` commits its transaction,
+records the successful step, and advances `PRAGMA user_version` to 23 before
+`run_migration_step(24, "catalog_schema", ...)` begins. A crash in that interval
+therefore leaves a persistent, reachable schema-23 database that current code must
+continue to migrate.
+
+The retained v23 fixture was reconstructed in a detached temporary worktree at
+the producer commit. The only source patch inserted
+`std::process::exit(23);` immediately after the authentic migration-23 call
+returned and immediately before migration 24. That commit's ignored
+`regenerate_db_fixture` test then opened a fresh database through the production
+migration chain and exited with status 23 at the injected boundary. Before the
+fixture alone was copied out and the worktree removed, SQLite reported:
+
+- `PRAGMA user_version = 23` and `PRAGMA integrity_check = ok`;
+- migration 23 (`media_assets`) recorded as succeeded, with no migration-24 row;
+- v23 tables `media_assets`, `media_files`, and `pdf_pages` present;
+- zero `catalog_%` tables, proving migration 24 had not started.
+
+This is a fault-injected historical artifact, not a database fabricated from
+current code or hand-authored SQL. The live Cull database was not accessed.
+
+## Stable static package (`exports`, mode `forward-compatible`)
+
+`src-tauri/tests/export_compat_golden.rs` passes the frozen
+`cull.static_publishing.v1` package to the production package reader exposed only
+by the `test-support` feature. Its manifest includes an unknown top-level field,
+proving the reader tolerates additive fields. Run the release-blocking guard with:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml --features test-support \
+  --test export_compat_golden
+```
 
 ## Add the next contract test
 
 - [x] **DB** round-trip — the worked example above.
-- [ ] **Exports** — serve a frozen `cull.static_publishing.v1` package; assert it renders and unknown fields are ignored.
+- [x] **Exports** — validate a frozen `cull.static_publishing.v1` package and assert unknown fields are ignored.
 - [ ] **MCP** — adopt `protocolVersion`; record consumer expectations (Pact-style) and verify the provider still satisfies them; add negative-path authz tests for every tool.
 
 Promotion `preview → stable` for a surface requires its contract tests to exist

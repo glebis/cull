@@ -65,7 +65,7 @@ function makeMockImage(i: number) {
     },
     path: mockImagePath(i),
     thumbnail_path: mockThumbnailPath(i),
-    selection: i % 3 === 0 ? {
+    selection: i > 0 && i % 3 === 0 ? {
       image_id: `img-${i}`,
       project_id: null,
       star_rating: Math.min(5, Math.floor(i / 2) + 1),
@@ -174,6 +174,15 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   'plugin:opener|open_url': () => undefined,
   'plugin:opener|open_path': () => undefined,
   'plugin:opener|reveal_item_in_dir': () => undefined,
+
+  drain_pending_open_params: () => [],
+  list_action_proposals: () => [],
+  list_agent_selection_presets: () => [],
+  get_image_file_bytes: (_: any, args: { imageId: string }) => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#0c0c12"/><text x="320" y="180" text-anchor="middle" fill="#e0e0e0">${args.imageId}</text></svg>`;
+    return { bytes: Array.from(new TextEncoder().encode(svg)), mime_type: 'image/svg+xml' };
+  },
+  stop_dictation: () => undefined,
 
   list_smart_collections: () => [...MOCK_SMART_COLLECTIONS, ...userCollections],
 

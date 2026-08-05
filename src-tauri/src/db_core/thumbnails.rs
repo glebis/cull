@@ -256,6 +256,26 @@ pub fn sized_thumbnail_path(app_data_dir: &Path, image_id: &str, size: u32) -> P
     }
 }
 
+/// Remove every thumbnail file (base + sized variants) for a single image.
+/// Best-effort: individual failures are logged and otherwise ignored, since
+/// thumbnail cleanup must never fail the caller's delete operation.
+pub fn remove_thumbnails_for_image(app_data_dir: &Path, image_id: &str) {
+    let base = thumbnail_path(app_data_dir, image_id);
+    if base.exists() {
+        if let Err(e) = std::fs::remove_file(&base) {
+            crate::safe_eprintln!("Failed to remove thumbnail {}: {}", base.display(), e);
+        }
+    }
+    for &size in THUMBNAIL_SIZES.iter() {
+        let sized = sized_thumbnail_path(app_data_dir, image_id, size);
+        if sized.exists() {
+            if let Err(e) = std::fs::remove_file(&sized) {
+                crate::safe_eprintln!("Failed to remove thumbnail {}: {}", sized.display(), e);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

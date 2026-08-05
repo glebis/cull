@@ -1,6 +1,6 @@
 # Cross-Platform Distribution
 
-Status: Draft, 2026-05-13
+Status: macOS release path active, updated 2026-07-13
 
 ImageView is a Tauri 2 desktop app. The practical release path is macOS first, then Linux, then Windows after a portability pass. Android and iOS are technically supported by Tauri 2, but they are separate product tracks for this app because ImageView depends heavily on desktop filesystem access, local model files, tray/background behavior, file associations, MCP, and large-screen culling workflows.
 
@@ -8,8 +8,8 @@ ImageView is a Tauri 2 desktop app. The practical release path is macOS first, t
 
 | Platform | Release status | Effort | Notes |
 |---|---:|---:|---|
-| macOS arm64 | Active | Low | Existing release workflow builds `aarch64-apple-darwin`. |
-| macOS x64 | Active | Low | Existing release workflow builds `x86_64-apple-darwin`. |
+| macOS arm64 | Active | Low | Signed, notarized Apple Silicon DMG and updater artifacts ship today. |
+| macOS x64 | Planned | Medium | No Intel artifact is currently published; add and verify a signed target before claiming support. |
 | Linux x64 | Next | Medium | Unix socket MCP code is compatible. Needs distro dependency testing, packaging, and Secret Service validation. |
 | Windows x64 | Planned | Medium/high | Tauri support is strong, but current Unix socket MCP code will not compile on Windows. |
 | Linux arm64 | Later | High | Possible, but AppImage/ONNX/runtime testing will take extra CI work. |
@@ -34,11 +34,14 @@ The current Tauri config uses `"bundle.targets": "all"`, creates updater artifac
 }
 ```
 
-The current GitHub release workflow builds macOS Intel and Apple Silicon artifacts. Add Linux and Windows runners only after the portability checklist below passes locally or in dedicated CI branches.
+The current GitHub release workflow builds Apple Silicon only
+(`aarch64-apple-darwin`), producing a signed/notarized DMG plus the signed updater
+archive and metadata. Add Intel, Linux, and Windows runners only after the
+portability checklist below passes locally or in dedicated CI branches.
 
 ## Current Publish Audit
 
-Status: macOS-first direct-download release path, updated 2026-05-22.
+Status: verified macOS Apple Silicon publication path, updated 2026-07-13.
 
 Agent-complete items:
 
@@ -46,20 +49,26 @@ Agent-complete items:
 - The GitHub release workflow runs the frontend and Rust quality gates before packaging.
 - The release workflow imports a macOS signing certificate and passes Apple notarization credentials plus Tauri updater signing credentials to `tauri-action`.
 - Frontend dependencies were refreshed inside the existing semver ranges, and the remaining `cookie` advisory is pinned to `0.7.2` via npm overrides.
+- Signed canary run `29181842274` completed successfully.
+- Production run `29182947689` published v0.3.1; updater signature, DMG,
+  embedded version/architecture, codesign, Gatekeeper, and notarization staple
+  verification all passed.
+- Homebrew promotion is bound to authenticated public provenance and the exact
+  verified DMG SHA-256.
 
-Human-owned release blockers:
+Human-owned release controls:
 
-- Apple Developer Program membership with authority to create a Developer ID Application certificate.
-- GitHub Actions secrets: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, `KEYCHAIN_PASSWORD`, `TAURI_SIGNING_PRIVATE_KEY`, and optionally `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 - Private backup of the Tauri updater signing key. Losing it means installed users cannot receive trusted updates from this update channel.
-- Clean-machine smoke testing on Apple Silicon and Intel macOS before publishing the draft release.
-- Final publishing decision for license and positioning: the repo is open source under Apache-2.0.
+- Keep Apple Developer agreements and signing credentials valid without exposing
+  them outside the secret-bearing build job.
+- Clean-machine smoke testing on Apple Silicon before publication. Intel testing
+  becomes required only when an Intel artifact is added.
 
 Remaining agent-track work before expanding beyond macOS:
 
 - Add Linux release matrix only after Linux dependency/install smoke tests pass on the oldest supported distro.
 - Add Windows release matrix only after MCP local transport is abstracted away from Unix sockets and trash behavior is implemented or explicitly unsupported on Windows.
-- Add artifact smoke-test automation once signed macOS artifacts exist.
+- Extend the existing signed artifact verifier for every new platform or package type.
 
 ## Platform Support Notes
 
@@ -152,7 +161,7 @@ npm run tauri build -- --bundles nsis,msi
 
 ```bash
 xcode-select --install
-rustup target add aarch64-apple-darwin x86_64-apple-darwin
+rustup target add aarch64-apple-darwin
 npm ci
 ```
 
@@ -160,7 +169,6 @@ Build:
 
 ```bash
 npm run tauri build -- --target aarch64-apple-darwin
-npm run tauri build -- --target x86_64-apple-darwin
 ```
 
 Release builds for public distribution need Developer ID signing and notarization. The updater also needs Tauri updater signing keys.
@@ -218,14 +226,14 @@ Add `msi` once WiX/MSI-specific signing and install tests are in place.
 
 ## CI Release Matrix
 
-The release workflow should move in stages:
+Expansion beyond the current Apple Silicon workflow should move in stages:
 
-1. Keep macOS matrix as-is.
-2. Add Linux x64 with `ubuntu-22.04` or the oldest supported runner/container.
-3. Add Windows x64 after MCP transport compiles on Windows.
-4. Add signing/notarization secrets.
-5. Add release smoke tests against produced artifacts.
-6. Promote draft releases manually after install testing.
+1. Keep the verified Apple Silicon lane unchanged.
+2. Add Intel macOS only with signed artifact and clean-machine verification.
+3. Add Linux x64 with the oldest supported runner/container.
+4. Add Windows x64 after MCP transport compiles on Windows.
+5. Extend provenance, checksum, install, launch, and updater verification for
+   every new artifact before enabling publication for it.
 
 Target matrix:
 
@@ -254,7 +262,9 @@ Linux runners need this step before the Tauri action:
     sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 ```
 
-The Tauri action can continue to create draft GitHub releases. Keep draft releases until all artifact smoke tests pass.
+The production workflow creates an empty draft only after artifact verification,
+uploads the exact verified files, validates public digests, and then publishes
+without rebuilding. New platform lanes must preserve that ordering.
 
 ## Smoke Test Checklist
 
@@ -282,7 +292,7 @@ Platform-specific checks:
 
 | Platform | Extra checks |
 |---|---|
-| macOS | Gatekeeper, notarization, Finder Open With, drag-and-drop, tray/menu behavior, Apple Silicon and Intel launch. |
+| macOS | Gatekeeper, notarization, Finder Open With, drag-and-drop, tray/menu behavior, and Apple Silicon launch. Add Intel launch coverage when an Intel artifact exists. |
 | Linux | AppImage executes after `chmod +x`, `.deb` dependencies install cleanly, tray behavior works under GNOME/KDE where supported. |
 | Windows | NSIS installer, uninstall, Start Menu shortcut, WebView2 install path, Defender/SmartScreen reputation, path handling with spaces/non-ASCII. |
 
@@ -291,12 +301,13 @@ Platform-specific checks:
 1. Confirm version in `src-tauri/tauri.conf.json`.
 2. Run quality gates.
 3. Build platform artifacts in CI from a clean tag.
-4. Keep GitHub release as draft.
-5. Install artifacts on clean machines/VMs.
-6. Run smoke checklist.
-7. Confirm updater metadata and signatures.
-8. Publish the GitHub release.
-9. Install from the public release URL and verify the app still launches.
+4. Let the secret-free verifier validate the signed inventory and updater.
+5. Let the guarded publish job create and populate the empty draft with those
+   exact verified files.
+6. Verify public digests and the immutable annotated tag, then publish.
+7. Promote Homebrew only from authenticated public provenance and the exact DMG
+   SHA-256.
+8. Install from the public release URL and verify the app still launches.
 
 ## Documentation Sources
 

@@ -51,3 +51,6 @@ docs/internal/
 .agents/
 .claude/skills/
 skills-lock.json
+
+# Local release resumability cache; authoritative evidence lives in Git/GitHub.
+.release-state/
