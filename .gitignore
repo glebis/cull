@@ -11,6 +11,7 @@ node_modules/
 /package
 
 # Vite
+/.vite-cache/
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 

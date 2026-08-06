@@ -4,6 +4,16 @@ import { describe, expect, it } from 'vitest';
 const read = (path: string) => readFileSync(path, 'utf8');
 
 describe('CI quality gate contract', () => {
+  it('blocks ordinary merge CI on the packaged macOS interaction smoke and retains failure artifacts', () => {
+    const ciWorkflow = read('.github/workflows/ci.yml');
+
+    expect(ciWorkflow).toContain('packaged-interaction-smoke:');
+    expect(ciWorkflow).toContain('bash tests/native/run-packaged-interaction-smoke.sh');
+    expect(ciWorkflow).toContain('CULL_NATIVE_SMOKE_SHOTS: ${{ runner.temp }}/cull-native-interaction-smoke');
+    expect(ciWorkflow).toContain('if: always()');
+    expect(ciWorkflow).toContain('name: packaged-interaction-smoke-${{ github.run_id }}');
+  });
+
   it('runs the production frontend build in every frontend CI tier', () => {
     const checkCi = read('scripts/check-ci.sh');
     const ciWorkflow = read('.github/workflows/ci.yml');
@@ -23,6 +33,15 @@ describe('CI quality gate contract', () => {
 
     expect(viteConfig).toContain('configDefaults.exclude');
     expect(viteConfig).toContain('"**/.worktrees/**"');
+  });
+
+  it('keeps optimized Vite dependencies local to each worktree', () => {
+    const viteConfig = read('vite.config.js');
+    const gitignore = read('.gitignore');
+
+    expect(viteConfig).toContain('const viteCacheVariant = nativeInteractionSmoke');
+    expect(viteConfig).toContain('cacheDir: `.vite-cache/${viteCacheVariant}`');
+    expect(gitignore).toContain('/.vite-cache/');
   });
 
   it('keeps the independently installed site package out of root Vitest discovery', () => {
