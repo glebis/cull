@@ -59,13 +59,16 @@
     let imgError = $state(false);
     let regenerating = $state(false);
     let pdfPageCount = $state<number | null>(null);
-    let pageLookupSeq = $state(0);
+    // Request identity is deliberately non-reactive. Making this a rune causes
+    // the effect below to subscribe to its own increment and rerun forever.
+    let pageLookupSeq = 0;
     const isPdf = $derived(item.image.format.toLowerCase() === 'pdf');
 
     $effect(() => {
         const imageId = item.image.id;
 
         if (!isPdf) {
+            pageLookupSeq += 1;
             pdfPageCount = null;
             return;
         }

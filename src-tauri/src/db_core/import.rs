@@ -153,6 +153,10 @@ pub fn sync_file(
             run_sidecar_detection(db, file_path, &image_id);
             run_perceptual_hash(db, file_path, &image_id, decoded.as_ref().map(|d| &d.image));
             run_color_metrics(db, file_path, &image_id, decoded.as_ref().map(|d| &d.image));
+        } else if is_document {
+            validate_pdf_import(file_path)?;
+            let _ = thumbnails::generate_document_thumbnail(file_path, app_data_dir, &image_id);
+            persist_pdf_media_metadata(db, file_path, &image_id)?;
         }
         return Ok(SyncOutcome::ContentChanged { image_id });
     }
@@ -580,6 +584,34 @@ mod tests {
         let image_id = import_file(&db, &pdf_path, &app_data_dir).unwrap().unwrap();
 
         assert!(crate::db_core::thumbnails::thumbnail_path(&app_data_dir, &image_id).exists());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn changed_pdf_content_generates_a_preview_for_the_replacement_image() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        let app_data_dir = dir.path().join("app-data");
+        let pdf_path = dir.path().join("changing.pdf");
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pdf/sample_two_page.pdf");
+        std::fs::copy(&fixture, &pdf_path).unwrap();
+
+        let original_id = import_file(&db, &pdf_path, &app_data_dir).unwrap().unwrap();
+        let mut changed = std::fs::read(&fixture).unwrap();
+        changed.extend_from_slice(b"\n% changed content\n");
+        std::fs::write(&pdf_path, changed).unwrap();
+
+        let outcome = sync_file(&db, &pdf_path, &app_data_dir).unwrap();
+        let replacement_id = match outcome {
+            SyncOutcome::ContentChanged { image_id } => image_id,
+            other => panic!("expected changed PDF content, got {other:?}"),
+        };
+
+        assert_ne!(replacement_id, original_id);
+        assert!(
+            crate::db_core::thumbnails::thumbnail_path(&app_data_dir, &replacement_id).exists()
+        );
     }
 
     #[test]
