@@ -39,7 +39,7 @@ describe('sidebar contextual action policy', () => {
             'Rescan Folder',
             'Add Contents to Collection',
             'Copy Path',
-            'Remove folder from library',
+            'Remove Folder from Library…',
         ]);
         expect(items.map(item => item.label)).not.toContain('Rename Folder…');
         expect(items[2].children?.map(item => item.label)).toEqual(['New Collection…', 'Portfolio']);
