@@ -798,9 +798,7 @@ impl Database {
                 5,
             ),
             (
-                "Recent Imports",
-                recent_imports_filter,
-                6,
+                "Recent Imports", recent_imports_filter, 6,
             ),
             (
                 "Imported Today",
