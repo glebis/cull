@@ -61,7 +61,9 @@
     let mediaAsset = $state<MediaAsset | null>(null);
     let pdfPages = $state<PdfPage[]>([]);
     let pdfPageIndex = $state(0);
-    let pdfLookupSeq = $state(0);
+    // Request identity must not be reactive: the PDF effect increments it.
+    // A rune here makes the effect depend on its own write and loop forever.
+    let pdfLookupSeq = 0;
     let isPdf = $derived(image?.image.format.toLowerCase() === 'pdf');
     let filename = $derived(image?.path.split('/').pop() ?? '');
     let dimensions = $derived(image ? `${image.image.width}x${image.image.height}` : '');
@@ -391,7 +393,7 @@
         const imageId = current?.image.id;
 
         if (!current || !isPdf) {
-            pdfLookupSeq = 0;
+            pdfLookupSeq += 1;
             mediaAsset = null;
             pdfPages = [];
             pdfPageIndex = 0;

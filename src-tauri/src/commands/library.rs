@@ -389,7 +389,9 @@ pub async fn check_library_health(
                 missing_sources += 1;
             } else {
                 let thumb = crate::db_core::thumbnails::thumbnail_path(app_data_dir, &img.image.id);
-                if !thumb.exists() {
+                let legacy_pdf_placeholder = img.image.format.eq_ignore_ascii_case("pdf")
+                    && crate::db_core::thumbnails::is_legacy_document_placeholder(&thumb);
+                if !thumb.exists() || legacy_pdf_placeholder {
                     to_regenerate.push(img.image.id.clone());
                 }
             }
