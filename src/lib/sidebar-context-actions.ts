@@ -71,7 +71,7 @@ export function buildFolderContextActions(options: FolderContextActionOptions): 
         },
         {
             id: 'folder-remove',
-            label: 'Remove folder from library',
+            label: 'Remove Folder from Library…',
             action: () => options.onRemove(options.folder),
             danger: true,
             separatorBefore: true,
