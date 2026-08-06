@@ -797,9 +797,7 @@ impl Database {
                 r#"{"type":"group","op":"and","children":[{"type":"rule","field":"rating","op":"eq","value":0.0},{"type":"rule","field":"decision","op":"eq","value":"undecided"}]}"#,
                 5,
             ),
-            (
-                "Recent Imports", recent_imports_filter, 6,
-            ),
+            ("Recent Imports", recent_imports_filter, 6),
             (
                 "Imported Today",
                 r#"{"type":"rule","field":"imported_at","op":"last_n_days","value":1.0}"#,
