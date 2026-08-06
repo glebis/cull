@@ -115,20 +115,36 @@
     }
 
     async function refreshSessionLists() {
-        const [nextSessions, nextCollections] = await Promise.all([listSessions(), listCollections()]);
-        sessions.set(nextSessions);
-        collections.set(nextCollections);
+        const [sessionResult, collectionResult] = await Promise.allSettled([listSessions(), listCollections()]);
+        if (sessionResult.status === 'fulfilled') sessions.set(sessionResult.value);
+        if (collectionResult.status === 'fulfilled') collections.set(collectionResult.value);
+        const failures = [sessionResult, collectionResult].filter(result => result.status === 'rejected');
+        if (failures.length > 0) {
+            showToast('Change saved, but some sidebar lists could not refresh', { type: 'warning', duration: 8000 });
+        }
     }
 
     async function convertSession(session: Session) {
+        const confirmed = await requestConfirm({
+            title: 'Convert Session to Collection',
+            description: `Convert “${session.name}” to a collection? Its canvas layouts will be permanently deleted; images and original files stay available.`,
+            confirmLabel: 'Convert Session',
+            danger: true,
+        });
+        if (!confirmed) return;
         try {
             await convertSessionToCollection(session.id);
-            if ($activeSession?.id === session.id) await selectSession(null);
-            await refreshSessionLists();
+            if ($activeSession?.id === session.id) {
+                activeSession.set(null);
+                activeCanvas.set(null);
+                sessionCanvases.set([]);
+            }
             showToast(`Session "${session.name}" converted to a collection`, { type: 'success' });
         } catch (e) {
             showToast('Failed to convert session to collection', { detail: String(e), type: 'error', duration: 8000 });
+            return;
         }
+        await refreshSessionLists();
     }
 
     async function removeSession(session: Session) {
@@ -141,12 +157,17 @@
         if (!confirmed) return;
         try {
             await deleteSession(session.id, false);
-            if ($activeSession?.id === session.id) await selectSession(null);
-            await refreshSessionLists();
+            if ($activeSession?.id === session.id) {
+                activeSession.set(null);
+                activeCanvas.set(null);
+                sessionCanvases.set([]);
+            }
             showToast(`Session "${session.name}" deleted`, { type: 'success' });
         } catch (e) {
             showToast('Failed to delete session', { detail: String(e), type: 'error', duration: 8000 });
+            return;
         }
+        await refreshSessionLists();
     }
 
     let sessionContextItems = $derived.by((): ActionMenuItem[] => {
@@ -156,7 +177,7 @@
         return [
             { id: 'session-open', label: 'Open Session', action: () => openSession(session) },
             { id: 'session-reveal', label: 'Reveal Session Folder in Finder', action: () => revealSessionFolder(session) },
-            { id: 'session-convert', label: 'Convert to Collection', action: () => convertSession(session) },
+            { id: 'session-convert', label: 'Convert to Collection…', action: () => convertSession(session) },
             {
                 id: 'session-delete',
                 label: 'Delete Session…',

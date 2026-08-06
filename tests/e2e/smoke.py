@@ -1110,11 +1110,31 @@ def test_sidebar_context_menus(page: Page) -> None:
     press(page, "Meta+1")
     wait_mode(page, "grid")
 
+    folder = page.locator('.folder-row[role="treeitem"]').first
+    expect(folder).to_be_visible()
+    folder.focus()
+    page.keyboard.press("Shift+F10")
+    menu = page.locator(".action-menu")
+    expect(menu).to_be_visible()
+    expect(menu).to_contain_text("Reveal in Finder")
+    expect(menu).to_contain_text("Rescan Folder")
+    expect(menu).to_contain_text("Add Contents to Collection")
+    expect(menu.get_by_role("menuitem", name="Reveal in Finder")).to_be_focused()
+    page.keyboard.press("ArrowDown")
+    expect(menu.get_by_role("menuitem", name="Rescan Folder")).to_be_focused()
+    page.keyboard.press("ArrowDown")
+    expect(menu.get_by_role("menuitem", name="Add Contents to Collection")).to_be_focused()
+    page.keyboard.press("ArrowRight")
+    expect(menu.get_by_role("menuitem", name="New Collection…")).to_be_focused()
+    page.keyboard.press("Escape")
+    page.keyboard.press("Escape")
+    expect(menu).to_have_count(0)
+    expect(folder).to_be_focused()
+
     collection = page.locator(".collection-row .section-item").first
     expect(collection).to_be_visible()
     collection.focus()
     collection.click(button="right")
-    menu = page.locator(".action-menu")
     expect(menu).to_be_visible()
     expect(menu).to_contain_text("Open Collection")
     expect(menu).to_contain_text("Export to Folder")
@@ -1149,6 +1169,16 @@ def test_sidebar_context_menus(page: Page) -> None:
     page.keyboard.press("Escape")
     expect(menu).to_have_count(0)
     expect(session).to_be_focused()
+
+    session.click()
+    canvas = page.locator(".canvas-row .section-item").first
+    expect(canvas).to_be_visible()
+    canvas.click(button="right")
+    expect(menu).to_be_visible()
+    expect(menu).to_contain_text("Open Canvas")
+    expect(menu).to_contain_text("Delete Canvas")
+    page.keyboard.press("Escape")
+    expect(menu).to_have_count(0)
 
 
 def test_context_menu_escape_stays_in_loupe(page: Page) -> None:

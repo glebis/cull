@@ -58,6 +58,7 @@ export function buildFolderContextActions(options: FolderContextActionOptions): 
             id: 'folder-rescan',
             label: 'Rescan Folder',
             action: () => options.onRescan(options.folder),
+            hidden: !options.removable,
         },
         {
             id: 'folder-add-to-collection',

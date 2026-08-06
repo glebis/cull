@@ -819,7 +819,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     },
   ],
   list_similarity_group_images: () => Array.from({ length: 4 }, (_, i) => makeMockImage(i)),
-  list_folders: () => [],
+  list_folders: () => [['/mock/library', 20]],
   delete_folder: () => 0,
   list_collections: () => mockCollections,
   create_collection: (_: any, args: { name: string }) => {

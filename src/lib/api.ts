@@ -615,8 +615,8 @@ export async function listImageIds(): Promise<string[]> {
     return invoke<string[]>('list_image_ids');
 }
 
-export async function importFolder(folderPath: string, sessionId?: string | null): Promise<ImportResponse> {
-    const result = await invoke<ImportResponse>('import_folder', { folderPath, sessionId: sessionId ?? null });
+export async function importFolder(folderPath: string, sessionId?: string | null, registerRoot = true): Promise<ImportResponse> {
+    const result = await invoke<ImportResponse>('import_folder', { folderPath, sessionId: sessionId ?? null, registerRoot });
     emitSessionEventsRefresh();
     return result;
 }

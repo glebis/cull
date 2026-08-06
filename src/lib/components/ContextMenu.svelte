@@ -9,6 +9,7 @@
     import { clampFloatingPosition, placeAdjacentSubmenu } from '$lib/floating-position';
     import { filterMoveFolders, folderDisplayName, folderParentPath } from '$lib/move-menu-utils';
     import { withDecision, withRating, type ImageDecision } from '$lib/selection-updates';
+    import { claimContextMenu } from '$lib/context-menu-coordinator';
 
     interface Props {
         image: ImageWithFile;
@@ -154,6 +155,7 @@
     });
 
     onMount(() => {
+        const releaseMenuClaim = claimContextMenu(onclose);
         function handleClickOutside(e: MouseEvent) {
             if (menuEl && !menuEl.contains(e.target as Node)) onclose();
         }
@@ -175,6 +177,7 @@
             window.addEventListener('resize', handleResize);
         });
         return () => {
+            releaseMenuClaim();
             window.removeEventListener('click', handleClickOutside);
             window.removeEventListener('contextmenu', handleClickOutside);
             window.removeEventListener('keydown', handleWindowKeydown, true);
@@ -693,6 +696,7 @@
     class="context-menu"
     style="left: {menuX}px; top: {menuY}px; visibility: {menuReady ? 'visible' : 'hidden'};"
     role="menu"
+    aria-label="Image actions"
     tabindex="-1"
     bind:this={menuEl}
     onkeydown={handleMenuKeydown}
@@ -722,6 +726,7 @@
             <div
                 class="submenu"
                 role="menu"
+                aria-label="Rate submenu"
                 data-submenu-key="rate"
                 bind:this={rateSubmenuEl}
                 style={rateSubmenuPlacement}
@@ -789,6 +794,7 @@
             <div
                 class="submenu collection-submenu"
                 role="menu"
+                aria-label="Add to Collection submenu"
                 data-submenu-key="collections"
                 bind:this={collectionSubmenuEl}
                 style={collectionSubmenuPlacement}
@@ -868,6 +874,7 @@
             <div
                 class="submenu"
                 role="menu"
+                aria-label="Copy submenu"
                 data-submenu-key="copy"
                 bind:this={copySubmenuEl}
                 style={copySubmenuPlacement}
@@ -923,6 +930,7 @@
                 <div
                     class="submenu open-with-submenu"
                     role="menu"
+                    aria-label="Open With submenu"
                     data-submenu-key="openwith"
                     bind:this={openWithSubmenuEl}
                     style={openWithSubmenuPlacement}
@@ -976,6 +984,7 @@
             <div
                 class="submenu move-submenu"
                 role="menu"
+                aria-label="Move to submenu"
                 data-submenu-key="moveto"
                 bind:this={moveSubmenuEl}
                 style={moveSubmenuPlacement}

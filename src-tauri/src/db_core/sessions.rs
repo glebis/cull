@@ -107,13 +107,15 @@ impl Database {
             subject_id: Some(id.to_string()),
             payload_json: "{}".to_string(),
         });
-        let conn = self.conn.lock();
-        conn.execute("DELETE FROM canvases WHERE session_id = ?1", params![id])?;
-        conn.execute(
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM canvases WHERE session_id = ?1", params![id])?;
+        tx.execute(
             "UPDATE projects SET collection_type = 'manual', folder_path = NULL, settings_json = NULL
              WHERE id = ?1 AND collection_type = 'session'",
             params![id],
         )?;
+        tx.commit()?;
         Ok(())
     }
 

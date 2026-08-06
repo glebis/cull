@@ -109,14 +109,8 @@
     // is not where you look after an import. Promote it next to All Images and
     // drop it from the SMART list so it appears exactly once.
     const RECENT_IMPORTS_NAME = 'Recent Imports';
-    const RECENT_IMPORTS_FILTER_JSON =
-        '{"type":"rule","field":"imported_at","op":"last_n_days","value":7.0}';
     let recentImportsCollection = $derived(
-        $smartCollections.find(
-            sc =>
-                sc.filter_json === RECENT_IMPORTS_FILTER_JSON &&
-                (sc.image_count ?? 0) > 0
-        ) ?? null
+        $smartCollections.find(sc => sc.name === RECENT_IMPORTS_NAME && (sc.image_count ?? 0) > 0) ?? null
     );
 
     // The rows actually on screen. Both the render loop and the keyboard
@@ -175,7 +169,7 @@
                 kind: 'folder',
                 folder: row.fullPath,
                 name: row.name,
-                removable: !row.isGroup,
+                removable: !row.isGroup && row.fullPath !== '/',
                 x: rect ? rect.left + Math.min(32, rect.width / 2) : 16,
                 y: rect ? rect.top + Math.min(24, rect.height) : 16,
             };
@@ -654,7 +648,7 @@
         importCurrent = 0;
         importTotal = 0;
         try {
-            const result = await apiImportFolder(folder, null);
+            const result = await apiImportFolder(folder, null, false);
             const summary = `Rescanned “${folderName(folder)}”: ${result.imported} imported, ${result.skipped} unchanged`;
             setLastResult(result.errors.length > 0 ? `${summary}, ${result.errors.length} errors` : summary, result.errors.length > 0 ? 'error' : 'success');
             await refreshImages();
@@ -700,16 +694,20 @@
             confirmLabel: 'Create and Add',
         });
         if (!name?.trim()) return;
+        let createdId: string | null = null;
         try {
             const ids = await listAllFolderImageIds(folder);
-            const collectionId = await createCollection(name.trim());
-            if (ids.length > 0) await addToCollection(collectionId, ids);
+            createdId = await createCollection(name.trim());
+            if (ids.length > 0) await addToCollection(createdId, ids);
             collections.set(await listCollections());
             showToast(`Created collection “${name.trim()}”`, {
                 detail: `${ids.length} image${ids.length === 1 ? '' : 's'} added`,
                 type: 'success',
             });
         } catch (e) {
+            if (createdId) {
+                try { await deleteCollectionApi(createdId); } catch (_) { /* best-effort rollback */ }
+            }
             showToast('Could not create collection from folder', { detail: String(e), type: 'error', duration: 10000 });
         }
     }
@@ -1270,7 +1268,7 @@
                         data-tree-row={i}
                         tabindex={i === treeTabIndex ? 0 : -1}
                         onfocusin={() => treeFocusIndex = i}
-                        oncontextmenu={(event) => openFolderContextMenu(event, folder.fullPath, folder.name, !folder.isGroup)}
+                        oncontextmenu={(event) => openFolderContextMenu(event, folder.fullPath, folder.name, !folder.isGroup && folder.fullPath !== '/')}
                     >
                         {#if folder.hasChildren}
                             <button
@@ -1303,7 +1301,7 @@
                         <button
                             class="menu-btn"
                             tabindex="-1"
-                            onclick={(event) => openFolderContextMenu(event, folder.fullPath, folder.name, !folder.isGroup)}
+                            onclick={(event) => openFolderContextMenu(event, folder.fullPath, folder.name, !folder.isGroup && folder.fullPath !== '/')}
                             title="Folder actions"
                             aria-label={`Folder actions: ${folder.name}`}
                             aria-haspopup="menu"

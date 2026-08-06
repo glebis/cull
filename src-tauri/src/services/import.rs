@@ -46,6 +46,8 @@ pub fn import_folder(
     app_data_dir: &Path,
     params: ImportFolderParams,
 ) -> Result<ImportResult, String> {
+    crate::db_core::db::validate_delete_folder_path(&params.folder_path)
+        .map_err(|e| e.to_string())?;
     let entries = supported_entries(db, &params.folder_path);
     let mut result = import_paths(db, app_data_dir, "folder", entries)?;
     let _ = db.add_library_root(&params.folder_path);

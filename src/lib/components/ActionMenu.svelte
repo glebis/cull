@@ -14,6 +14,7 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import { clampFloatingPosition, placeAdjacentSubmenu } from '$lib/floating-position';
+    import { claimContextMenu } from '$lib/context-menu-coordinator';
 
     interface Props {
         title?: string;
@@ -138,6 +139,7 @@
     }
 
     onMount(() => {
+        const releaseMenuClaim = claimContextMenu(onclose);
         function closeFromOutside(event: MouseEvent) {
             if (menuEl && !menuEl.contains(event.target as Node)) onclose();
         }
@@ -151,6 +153,7 @@
         });
         window.addEventListener('resize', reposition);
         return () => {
+            releaseMenuClaim();
             window.clearTimeout(listenerTimer);
             window.removeEventListener('click', closeFromOutside);
             window.removeEventListener('contextmenu', closeFromOutside);
@@ -200,24 +203,30 @@
 
         if (event.key === 'ArrowDown') {
             event.preventDefault();
+            event.stopPropagation();
             void requestFocus(inSubmenu ? 'submenu' : 'root', index + 1);
         } else if (event.key === 'ArrowUp') {
             event.preventDefault();
+            event.stopPropagation();
             void requestFocus(inSubmenu ? 'submenu' : 'root', index - 1);
         } else if (event.key === 'Home') {
             event.preventDefault();
+            event.stopPropagation();
             void requestFocus(inSubmenu ? 'submenu' : 'root', 0);
         } else if (event.key === 'End') {
             event.preventDefault();
+            event.stopPropagation();
             void requestFocus(inSubmenu ? 'submenu' : 'root', elements.length - 1);
         } else if (event.key === 'ArrowRight' && !inSubmenu) {
             const item = visibleItems.find(candidate => candidate.id === elements[index]?.dataset.actionId);
             if (item?.children?.length) {
                 event.preventDefault();
+                event.stopPropagation();
                 void openSubmenu(item, true);
             }
         } else if (event.key === 'ArrowLeft' && inSubmenu) {
             event.preventDefault();
+            event.stopPropagation();
             void closeSubmenuAndRestoreParent();
         } else if (event.key === 'Escape') {
             event.preventDefault();
@@ -226,6 +235,7 @@
             else onclose();
         } else if ((event.key === 'Enter' || event.key === ' ') && event.target instanceof HTMLButtonElement) {
             event.preventDefault();
+            event.stopPropagation();
             event.target.click();
         }
     }
@@ -235,6 +245,7 @@
     class="action-menu"
     style="left: {menuX}px; top: {menuY}px; visibility: {menuReady ? 'visible' : 'hidden'};"
     role="menu"
+    aria-label={title ? `${title} actions` : 'Actions'}
     tabindex="-1"
     bind:this={menuEl}
     onkeydown={handleKeydown}
@@ -269,6 +280,7 @@
                 <div
                     class="action-submenu"
                     role="menu"
+                    aria-label={`${item.label} submenu`}
                     bind:this={submenuEl}
                     style={submenuPlacement}
                 >

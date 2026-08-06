@@ -27,7 +27,9 @@ pub async fn import_folder(
     state: State<'_, AppState>,
     folder_path: String,
     session_id: Option<String>,
+    register_root: Option<bool>,
 ) -> Result<ImportResponse, String> {
+    crate::db_core::db::validate_delete_folder_path(&folder_path).map_err(|e| e.to_string())?;
     let db = &state.db;
     let app_data_dir = &state.app_data_dir;
 
@@ -79,7 +81,9 @@ pub async fn import_folder(
         }
     }
 
-    let _ = state.db.add_library_root(&folder_path);
+    if register_root.unwrap_or(true) {
+        let _ = state.db.add_library_root(&folder_path);
+    }
 
     let batch_id = if !new_image_ids.is_empty() {
         let batch = db

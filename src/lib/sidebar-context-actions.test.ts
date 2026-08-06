@@ -46,6 +46,20 @@ describe('sidebar contextual action policy', () => {
         await items[2].children?.[1].action?.();
         expect(add).toHaveBeenCalledWith('/Pictures/Run 1', 'c1');
         expect(items.at(-1)).toMatchObject({ danger: true, separatorBefore: true });
+
+        const root = buildFolderContextActions({
+            folder: '/',
+            removable: false,
+            collections: [],
+            onReveal: reveal,
+            onRescan: rescan,
+            onAddToCollection: add,
+            onCreateCollection: create,
+            onCopyPath: copy,
+            onRemove: remove,
+        });
+        expect(root.map(item => item.label)).not.toContain('Rescan Folder');
+        expect(root.map(item => item.label)).not.toContain('Remove Folder from Library…');
     });
 
     it('preserves supported collection actions and hides export for an empty collection', () => {
