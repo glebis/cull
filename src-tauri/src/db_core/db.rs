@@ -756,6 +756,17 @@ impl Database {
             |row| row.get(0),
         )?;
 
+        let recent_imports_filter =
+            r#"{"type":"rule","field":"imported_at","op":"last_n_days","value":7.0}"#;
+        conn.execute(
+            "UPDATE projects
+             SET name = 'Recent Imports'
+             WHERE is_preset = 1
+               AND filter_json = ?1
+               AND name != 'Recent Imports'",
+            params![recent_imports_filter],
+        )?;
+
         if existing > 0 {
             return Ok(());
         }
@@ -786,11 +797,7 @@ impl Database {
                 r#"{"type":"group","op":"and","children":[{"type":"rule","field":"rating","op":"eq","value":0.0},{"type":"rule","field":"decision","op":"eq","value":"undecided"}]}"#,
                 5,
             ),
-            (
-                "Recent Imports",
-                r#"{"type":"rule","field":"imported_at","op":"last_n_days","value":7.0}"#,
-                6,
-            ),
+            ("Recent Imports", recent_imports_filter, 6),
             (
                 "Imported Today",
                 r#"{"type":"rule","field":"imported_at","op":"last_n_days","value":1.0}"#,
@@ -1583,6 +1590,34 @@ mod tests {
             last_seen_mtime: None,
         };
         db.insert_image_file(&file).unwrap();
+    }
+
+    #[test]
+    fn preset_seeding_repairs_the_recent_imports_name_without_reseeding() {
+        let db = test_db();
+        let recent_imports_filter =
+            r#"{"type":"rule","field":"imported_at","op":"last_n_days","value":7.0}"#;
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "UPDATE projects SET name = 'Recent' WHERE is_preset = 1 AND filter_json = ?1",
+                params![recent_imports_filter],
+            )
+            .unwrap();
+        }
+
+        db.seed_preset_collections().unwrap();
+
+        let repaired_name: String = db
+            .conn
+            .lock()
+            .query_row(
+                "SELECT name FROM projects WHERE is_preset = 1 AND filter_json = ?1",
+                params![recent_imports_filter],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(repaired_name, "Recent Imports");
     }
 
     #[test]
