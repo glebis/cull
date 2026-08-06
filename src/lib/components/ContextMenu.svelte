@@ -27,6 +27,7 @@
     let menuEl: HTMLDivElement | undefined = $state();
     let openSubmenu = $state<string | null>(null);
     let collectionList = $state<[string, string, number][]>([]);
+    let collectionListLoaded = $state(false);
     let collectionSearch = $state('');
     let collectionLoading = $state(false);
     let folderList = $state<[string, number][]>([]);
@@ -47,8 +48,14 @@
     let menuX = $state(0);
     let menuY = $state(0);
     let menuReady = $state(false);
-    let activeIndex = $state(0);
     let placementRun = 0;
+    let focusRequestId = 0;
+    let submenuRequestId = 0;
+    let deferredCollectionFocusIndex: number | null = null;
+    let initialFocusRequested = false;
+
+    type SubmenuKey = 'rate' | 'collections' | 'copy' | 'openwith' | 'moveto';
+    type FocusScope = 'root' | SubmenuKey;
 
     let currentRating = $derived(image.selection?.star_rating ?? 0);
     let currentDecision = $derived(image.selection?.decision ?? 'undecided');
@@ -62,12 +69,6 @@
     );
     let multiCount = $derived(targetIds.length);
     let inCollection = $derived($activeCollection !== null);
-
-    let flatItems = $derived(
-        menuEl
-            ? Array.from(menuEl.querySelectorAll<HTMLButtonElement>('button[data-menu-index]'))
-            : []
-    );
 
     function restoreOpenerFocus() {
         if (!opener?.isConnected) return;
@@ -103,8 +104,9 @@
 
         if (run === placementRun && menuEl) {
             menuReady = true;
-            if (!menuEl.contains(document.activeElement)) {
-                menuEl.focus();
+            if (!initialFocusRequested) {
+                initialFocusRequested = true;
+                requestFocus('root', 0);
             }
         }
     }
@@ -186,61 +188,207 @@
         await revealItemInDir(path);
     }
 
-    $effect(() => {
-        if (menuEl) {
-            flatItems[activeIndex]?.focus();
-        }
-    });
+    function scopeItems(scope: FocusScope): HTMLElement[] {
+        if (!menuEl) return [];
+        const container = scope === 'root'
+            ? menuEl
+            : menuEl.querySelector<HTMLElement>(`.submenu[data-submenu-key="${scope}"]`);
+        if (!container) return [];
+        const selector = scope === 'root'
+            ? 'button[data-menu-index]:not([disabled])'
+            : 'button[role="menuitem"]:not([disabled]), input:not([disabled])';
+        return Array.from(container.querySelectorAll<HTMLElement>(selector));
+    }
 
-    function handleMenuKeydown(e: KeyboardEvent) {
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            e.stopPropagation();
-            if (openSubmenu !== null) {
-                openSubmenu = null;
-            } else {
-                onclose();
+    function scopeForTarget(target: EventTarget | null): FocusScope {
+        if (!(target instanceof Element)) return 'root';
+        const submenu = target.closest<HTMLElement>('.submenu[data-submenu-key]');
+        return (submenu?.dataset.submenuKey as SubmenuKey | undefined) ?? 'root';
+    }
+
+    function requestFocus(scope: FocusScope, index: number) {
+        const requestId = ++focusRequestId;
+        void tick().then(() => {
+            function applyFocus() {
+                if (requestId !== focusRequestId) return;
+                const items = scopeItems(scope);
+                if (items.length === 0) return;
+                if (scope === 'collections' && collectionLoading && index >= items.length) {
+                    deferredCollectionFocusIndex = index;
+                    return;
+                }
+                const next = ((index % items.length) + items.length) % items.length;
+                items[next].focus({ preventScroll: true });
+            }
+
+            applyFocus();
+            // Opening a positioned submenu can trigger a late native focus
+            // reversion to its parent while placement settles. Keep this one
+            // imperative request authoritative across the short placement
+            // window; a newer key request cancels these checks immediately.
+            if (scope !== 'root') {
+                const stabilize = (framesLeft: number) => window.requestAnimationFrame(() => {
+                    if (requestId !== focusRequestId || openSubmenu !== scope) return;
+                    const submenu = menuEl?.querySelector<HTMLElement>(`.submenu[data-submenu-key="${scope}"]`);
+                    if (!(document.activeElement instanceof Node) || !submenu?.contains(document.activeElement)) {
+                        applyFocus();
+                    }
+                    if (framesLeft > 1) stabilize(framesLeft - 1);
+                });
+                stabilize(4);
+            }
+        });
+    }
+
+    function closeSubmenuAndFocusParent() {
+        const closing = openSubmenu as SubmenuKey | null;
+        if (!closing) return;
+        ++submenuRequestId;
+        openSubmenu = null;
+        deferredCollectionFocusIndex = null;
+        const parentIndex = scopeItems('root').findIndex(item => item.dataset.submenuKey === closing);
+        requestFocus('root', Math.max(0, parentIndex));
+    }
+
+    function closeSubmenuFromPointer(key: SubmenuKey) {
+        window.setTimeout(() => {
+            if (openSubmenu !== key || !menuEl) return;
+            const submenu = menuEl.querySelector<HTMLElement>(`.submenu[data-submenu-key="${key}"]`);
+            const parent = menuEl.querySelector<HTMLElement>(`button[data-submenu-key="${key}"]`)?.closest<HTMLElement>('.submenu-parent');
+            const focusInside = !!submenu
+                && document.activeElement instanceof Node
+                && submenu.contains(document.activeElement);
+            if (focusInside || parent?.matches(':hover')) return;
+            ++submenuRequestId;
+            openSubmenu = null;
+            deferredCollectionFocusIndex = null;
+        });
+    }
+
+    async function showSubmenu(key: SubmenuKey, focusOnOpen: boolean) {
+        const opening = openSubmenu !== key;
+        const requestId = opening ? ++submenuRequestId : submenuRequestId;
+        openSubmenu = key;
+        if (opening && key === 'collections') collectionSearch = '';
+        if (opening && key === 'moveto') folderSearch = '';
+
+        if (key === 'collections') {
+            if (!opening && collectionLoading) {
+                if (focusOnOpen && requestId === submenuRequestId) requestFocus(key, 0);
+                return;
+            }
+            if (collectionListLoaded) {
+                await placeCollectionSubmenu();
+                if (focusOnOpen && requestId === submenuRequestId && openSubmenu === key) requestFocus(key, 0);
+                return;
+            }
+            collectionLoading = true;
+            if (focusOnOpen && requestId === submenuRequestId) requestFocus(key, 0);
+            await placeCollectionSubmenu();
+            try {
+                collectionList = await listCollections();
+            } catch (e) {
+                collectionList = [];
+                showToast('Collection list unavailable', { detail: String(e), type: 'warning', duration: 8000 });
+            } finally {
+                collectionLoading = false;
+                collectionListLoaded = true;
+                await placeCollectionSubmenu();
+                if (requestId === submenuRequestId && openSubmenu === key && deferredCollectionFocusIndex !== null) {
+                    const index = deferredCollectionFocusIndex;
+                    deferredCollectionFocusIndex = null;
+                    requestFocus(key, index);
+                }
             }
             return;
         }
 
-        const items = flatItems;
-        const count = items.length;
-        if (count === 0) return;
-
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            activeIndex = (activeIndex + 1) % count;
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            activeIndex = (activeIndex - 1 + count) % count;
-        } else if (e.key === 'ArrowRight') {
-            e.preventDefault();
-            // Find which submenu-parent the active button belongs to
-            const activeBtn = items[activeIndex];
-            if (activeBtn?.classList.contains('has-submenu')) {
-                const parentEl = activeBtn.closest('.submenu-parent');
-                if (parentEl) {
-                    // Determine submenu key from data attribute or order
-                    const key = activeBtn.dataset.submenuKey;
-                    if (key === 'rate') openSubmenu = 'rate';
-                    else if (key === 'collections') { loadCollections(); }
-                    else if (key === 'copy') openSubmenu = 'copy';
-                    else if (key === 'openwith') { loadOpenWithApps(); }
-                    else if (key === 'moveto') { loadFolders(); }
+        if (key === 'openwith') {
+            if (openWithLoadedFor !== image.image.id) {
+                openWithLoading = true;
+                try {
+                    openWithApps = (await listOpenWithApplications(image.image.id)) ?? [];
+                    openWithLoadedFor = image.image.id;
+                } catch (e) {
+                    openWithApps = [];
+                    showToast('Open With app list unavailable', { detail: String(e), type: 'warning', duration: 8000 });
+                } finally {
+                    openWithLoading = false;
                 }
             }
-        } else if (e.key === 'ArrowLeft') {
-            e.preventDefault();
-            if (openSubmenu !== null) {
-                openSubmenu = null;
-            } else {
-                onclose();
+            if (focusOnOpen && requestId === submenuRequestId && openSubmenu === key) requestFocus(key, 0);
+            return;
+        }
+
+        if (key === 'moveto') {
+            try {
+                folderList = await listFolders();
+            } catch (e) {
+                folderList = [];
+                showToast('Folder list unavailable', { detail: String(e), type: 'warning', duration: 8000 });
             }
-        } else if (e.key === 'Enter') {
+        }
+
+        if (focusOnOpen && requestId === submenuRequestId && openSubmenu === key) requestFocus(key, 0);
+    }
+
+    function handleMenuKeydown(e: KeyboardEvent) {
+        const scope = scopeForTarget(e.target);
+        const items = scopeItems(scope);
+        const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+
+        if (e.key === 'Escape') {
             e.preventDefault();
-            const activeBtn = items[activeIndex];
-            activeBtn?.click();
+            e.stopPropagation();
+            if (scope !== 'root') closeSubmenuAndFocusParent();
+            else if (openSubmenu !== null) closeSubmenuAndFocusParent();
+            else onclose();
+            return;
+        }
+
+        if (e.key === 'ArrowLeft') {
+            if (scope !== 'root') {
+                e.preventDefault();
+                closeSubmenuAndFocusParent();
+            }
+            return;
+        }
+
+        if (e.key === 'ArrowRight' && scope === 'root') {
+            const key = items[currentIndex]?.dataset.submenuKey as SubmenuKey | undefined;
+            if (key) {
+                e.preventDefault();
+                const opening = showSubmenu(key, false);
+                requestFocus(key, 0);
+                void opening.then(() => {
+                    if (openSubmenu !== key) return;
+                    const submenu = menuEl?.querySelector<HTMLElement>(`.submenu[data-submenu-key="${key}"]`);
+                    const focusInside = document.activeElement instanceof Node
+                        && !!submenu?.contains(document.activeElement);
+                    if (!focusInside) requestFocus(key, 0);
+                });
+            }
+            return;
+        }
+
+        if (e.key === 'Enter' && e.target instanceof HTMLInputElement && e.target.classList.contains('collection-search')) {
+            const firstCollection = scopeItems('collections').find(item => item.classList.contains('collection-item'));
+            if (firstCollection) {
+                e.preventDefault();
+                firstCollection.click();
+            }
+            return;
+        }
+
+        if (items.length === 0) return;
+        let nextIndex: number | null = null;
+        if (e.key === 'ArrowDown') nextIndex = currentIndex + 1;
+        else if (e.key === 'ArrowUp') nextIndex = currentIndex - 1;
+        else if (e.key === 'Home') nextIndex = 0;
+        else if (e.key === 'End') nextIndex = items.length - 1;
+        if (nextIndex !== null) {
+            e.preventDefault();
+            requestFocus(scope, nextIndex);
         }
     }
 
@@ -330,23 +478,6 @@
         invalidateImageCache();
         image.selection = withDecision(image, d).selection;
         images.update(all => all.map(item => item.image.id === image.image.id ? withDecision(item, d) : item));
-    }
-
-    async function loadCollections() {
-        const opening = openSubmenu !== 'collections';
-        openSubmenu = 'collections';
-        if (opening) collectionSearch = '';
-        collectionLoading = true;
-        await placeCollectionSubmenu();
-        try {
-            collectionList = await listCollections();
-        } catch (e) {
-            collectionList = [];
-            showToast('Collection list unavailable', { detail: String(e), type: 'warning', duration: 8000 });
-        } finally {
-            collectionLoading = false;
-            await placeCollectionSubmenu();
-        }
     }
 
     async function handleAddToCollection(colId: string) {
@@ -447,22 +578,6 @@
         await handleOpenWithApp(selected);
     }
 
-    async function loadOpenWithApps() {
-        openSubmenu = 'openwith';
-        if (openWithLoadedFor === image.image.id) return;
-
-        openWithLoading = true;
-        try {
-            openWithApps = await listOpenWithApplications(image.image.id);
-            openWithLoadedFor = image.image.id;
-        } catch (e) {
-            openWithApps = [];
-            showToast('Open With app list unavailable', { detail: String(e), type: 'warning', duration: 8000 });
-        } finally {
-            openWithLoading = false;
-        }
-    }
-
     async function handleOpenWithApp(appPath: string) {
         onclose();
         try {
@@ -505,11 +620,6 @@
         } catch (e) {
             showToast(`Rename failed: ${e}`, { type: 'error' });
         }
-    }
-
-    async function loadFolders() {
-        openSubmenu = 'moveto';
-        folderList = await listFolders();
     }
 
     function currentFolderPath() {
@@ -576,24 +686,6 @@
         await moveImagesToFolder(ids, selected);
     }
 
-    function handleFolderSearchKeydown(e: KeyboardEvent) {
-        e.stopPropagation();
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            folderSearch = '';
-        }
-    }
-
-    function handleCollectionSearchKeydown(e: KeyboardEvent) {
-        e.stopPropagation();
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            collectionSearch = '';
-        } else if (e.key === 'Enter' && filteredCollectionList.length > 0) {
-            e.preventDefault();
-            void handleAddToCollection(filteredCollectionList[0][0]);
-        }
-    }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -612,15 +704,16 @@
 
     <!-- Rate -->
     <div class="submenu-parent"
-        onmouseenter={() => openSubmenu = 'rate'}
-        onmouseleave={() => { if (openSubmenu === 'rate') openSubmenu = null; }}
+        onmouseenter={() => void showSubmenu('rate', false)}
+        onmouseleave={() => closeSubmenuFromPointer('rate')}
     >
         <button
             class="context-menu-item has-submenu"
             role="menuitem"
             data-menu-index="0"
             data-submenu-key="rate"
-            tabindex={activeIndex === 0 ? 0 : -1}
+            tabindex="0"
+            onclick={() => void showSubmenu('rate', true)}
         >
             <span>Rate</span>
             <span class="current-value">{currentRating > 0 ? '★'.repeat(currentRating) : '—'}</span>
@@ -629,6 +722,7 @@
             <div
                 class="submenu"
                 role="menu"
+                data-submenu-key="rate"
                 bind:this={rateSubmenuEl}
                 style={rateSubmenuPlacement}
             >
@@ -649,7 +743,7 @@
         onclick={() => handleDecision('accept')}
         role="menuitem"
         data-menu-index="1"
-        tabindex={activeIndex === 1 ? 0 : -1}
+        tabindex="-1"
     >
         <span>Accept</span>
         {#if currentDecision === 'accept'}<span class="check">✓</span>{/if}
@@ -660,7 +754,7 @@
         onclick={() => handleDecision('reject')}
         role="menuitem"
         data-menu-index="2"
-        tabindex={activeIndex === 2 ? 0 : -1}
+        tabindex="-1"
     >
         <span>Reject</span>
         {#if currentDecision === 'reject'}<span class="check">✓</span>{/if}
@@ -670,22 +764,23 @@
         onclick={() => handleDecision('undecided')}
         role="menuitem"
         data-menu-index="3"
-        tabindex={activeIndex === 3 ? 0 : -1}
+        tabindex="-1"
     >Clear Decision</button>
 
     <div class="separator"></div>
 
     <!-- Collections -->
     <div class="submenu-parent"
-        onmouseenter={loadCollections}
-        onmouseleave={() => { if (openSubmenu === 'collections') openSubmenu = null; }}
+        onmouseenter={() => void showSubmenu('collections', false)}
+        onmouseleave={() => closeSubmenuFromPointer('collections')}
     >
         <button
             class="context-menu-item has-submenu"
             role="menuitem"
             data-menu-index="4"
             data-submenu-key="collections"
-            tabindex={activeIndex === 4 ? 0 : -1}
+            tabindex="-1"
+            onclick={() => void showSubmenu('collections', true)}
         >
             <span>Add to Collection</span>
             <span class="arrow">►</span>
@@ -694,6 +789,7 @@
             <div
                 class="submenu collection-submenu"
                 role="menu"
+                data-submenu-key="collections"
                 bind:this={collectionSubmenuEl}
                 style={collectionSubmenuPlacement}
             >
@@ -706,7 +802,6 @@
                         placeholder="Filter collections"
                         aria-label="Filter collections"
                         bind:value={collectionSearch}
-                        onkeydown={handleCollectionSearchKeydown}
                     />
                 </div>
                 <div class="collection-list">
@@ -736,7 +831,7 @@
             onclick={handleRemoveFromCollection}
             role="menuitem"
             data-menu-index="5"
-            tabindex={activeIndex === 5 ? 0 : -1}
+            tabindex="-1"
         >Remove from Collection{multiCount > 1 ? ` (${multiCount})` : ''}</button>
     {/if}
 
@@ -748,22 +843,23 @@
         onclick={handleFindSimilar}
         role="menuitem"
         data-menu-index="6"
-        tabindex={activeIndex === 6 ? 0 : -1}
+        tabindex="-1"
     >Find Similar</button>
 
     <div class="separator"></div>
 
     <!-- Copy -->
     <div class="submenu-parent"
-        onmouseenter={() => openSubmenu = 'copy'}
-        onmouseleave={() => { if (openSubmenu === 'copy') openSubmenu = null; }}
+        onmouseenter={() => void showSubmenu('copy', false)}
+        onmouseleave={() => closeSubmenuFromPointer('copy')}
     >
         <button
             class="context-menu-item has-submenu"
             role="menuitem"
             data-menu-index="7"
             data-submenu-key="copy"
-            tabindex={activeIndex === 7 ? 0 : -1}
+            tabindex="-1"
+            onclick={() => void showSubmenu('copy', true)}
         >
             <span>Copy</span>
             <span class="arrow">►</span>
@@ -772,6 +868,7 @@
             <div
                 class="submenu"
                 role="menu"
+                data-submenu-key="copy"
                 bind:this={copySubmenuEl}
                 style={copySubmenuPlacement}
             >
@@ -787,7 +884,7 @@
         onclick={handleShare}
         role="menuitem"
         data-menu-index="8"
-        tabindex={activeIndex === 8 ? 0 : -1}
+        tabindex="-1"
     >Share{multiCount > 1 ? ` (${multiCount})` : ''}...</button>
 
     <!-- File actions -->
@@ -796,7 +893,7 @@
         onclick={act(() => revealInFinder(image.path))}
         role="menuitem"
         data-menu-index="9"
-        tabindex={activeIndex === 9 ? 0 : -1}
+        tabindex="-1"
     >Reveal in Finder</button>
 
     {#if multiCount === 1}
@@ -805,18 +902,19 @@
             onclick={act(() => openInDefaultApp(image.path))}
             role="menuitem"
             data-menu-index="10"
-            tabindex={activeIndex === 10 ? 0 : -1}
+            tabindex="-1"
         >Open in Default App</button>
         <div class="submenu-parent"
-            onmouseenter={loadOpenWithApps}
-            onmouseleave={() => { if (openSubmenu === 'openwith') openSubmenu = null; }}
+            onmouseenter={() => void showSubmenu('openwith', false)}
+            onmouseleave={() => closeSubmenuFromPointer('openwith')}
         >
             <button
                 class="context-menu-item has-submenu"
                 role="menuitem"
                 data-menu-index="11"
                 data-submenu-key="openwith"
-                tabindex={activeIndex === 11 ? 0 : -1}
+                tabindex="-1"
+                onclick={() => void showSubmenu('openwith', true)}
             >
                 <span>Open With</span>
                 <span class="arrow">►</span>
@@ -825,6 +923,7 @@
                 <div
                     class="submenu open-with-submenu"
                     role="menu"
+                    data-submenu-key="openwith"
                     bind:this={openWithSubmenuEl}
                     style={openWithSubmenuPlacement}
                 >
@@ -854,20 +953,21 @@
         onclick={handleRename}
         role="menuitem"
         data-menu-index="12"
-        tabindex={activeIndex === 12 ? 0 : -1}
+        tabindex="-1"
     >Rename...</button>
 
     <!-- Move to -->
     <div class="submenu-parent"
-        onmouseenter={loadFolders}
-        onmouseleave={() => { if (openSubmenu === 'moveto') openSubmenu = null; }}
+        onmouseenter={() => void showSubmenu('moveto', false)}
+        onmouseleave={() => closeSubmenuFromPointer('moveto')}
     >
         <button
             class="context-menu-item has-submenu"
             role="menuitem"
             data-menu-index="13"
             data-submenu-key="moveto"
-            tabindex={activeIndex === 13 ? 0 : -1}
+            tabindex="-1"
+            onclick={() => void showSubmenu('moveto', true)}
         >
             <span>Move to...</span>
             <span class="arrow">►</span>
@@ -876,6 +976,7 @@
             <div
                 class="submenu move-submenu"
                 role="menu"
+                data-submenu-key="moveto"
                 bind:this={moveSubmenuEl}
                 style={moveSubmenuPlacement}
             >
@@ -890,7 +991,6 @@
                         placeholder="Search folders"
                         aria-label="Search folders"
                         bind:value={folderSearch}
-                        onkeydown={handleFolderSearchKeydown}
                     />
                 </div>
                 <div class="folder-list">
@@ -921,7 +1021,7 @@
         onclick={handleTrash}
         role="menuitem"
         data-menu-index="14"
-        tabindex={activeIndex === 14 ? 0 : -1}
+        tabindex="-1"
     >Trash{multiCount > 1 ? ` (${multiCount})` : ''}</button>
 </div>
 

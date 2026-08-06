@@ -47,5 +47,10 @@ docs/internal/
 .worktrees/
 .tdd-state.json
 
+# Vendored agent skill packs (local tooling, not product code)
+.agents/
+.claude/skills/
+skills-lock.json
+
 # Local release resumability cache; authoritative evidence lives in Git/GitHub.
 .release-state/

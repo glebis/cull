@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { folderName, buildDisplayFolders, buildPinnedCollectionRows, formatImportResult, formatSidebarCount } from './sidebar-utils';
+import { folderName, buildDisplayFolders, buildPinnedCollectionRows, formatImportResult, formatSidebarCount, formatFolderCount, visibleFolderRows, prunePinnedIds } from './sidebar-utils';
 
 describe('folderName', () => {
     it('returns last segment of a path', () => {
@@ -168,5 +168,177 @@ describe('buildPinnedCollectionRows', () => {
         ];
 
         expect(buildPinnedCollectionRows(rows, ['missing', 'b']).map(([id]) => id)).toEqual(['b', 'a']);
+    });
+});
+
+describe('formatFolderCount', () => {
+    it('shows a single number when the folder has no subfolders', () => {
+        expect(formatFolderCount(4, 4)).toBe('4');
+    });
+
+    it('shows direct and subtree when they differ', () => {
+        expect(formatFolderCount(4, 27)).toBe('4 (27)');
+    });
+
+    it('shows 0 direct for a group folder that only carries descendants', () => {
+        expect(formatFolderCount(0, 27)).toBe('0 (27)');
+    });
+});
+
+describe('buildDisplayFolders subtree counts', () => {
+    it('sums descendants into subtreeCount while keeping the direct count', () => {
+        const rows = buildDisplayFolders([
+            // The sibling keeps /lib/photos from being swallowed by the
+            // common-prefix stripping.
+            ['/lib/other', 1],
+            ['/lib/photos', 4],
+            ['/lib/photos/sub', 20],
+            ['/lib/photos/sub/deep', 3],
+        ]);
+        const photos = rows.find(r => r.fullPath === '/lib/photos')!;
+        expect(photos.count).toBe(4);
+        expect(photos.subtreeCount).toBe(27);
+    });
+
+    it('gives group folders a real navigable path instead of an empty string', () => {
+        // /lib/art has no images of its own, so the backend never reports it.
+        const rows = buildDisplayFolders([
+            ['/lib/other', 1],
+            ['/lib/art/a', 2],
+            ['/lib/art/b', 3],
+        ]);
+        const group = rows.find(r => r.name === 'art')!;
+        expect(group.fullPath).toBe('/lib/art');
+        expect(group.isGroup).toBe(true);
+        expect(group.count).toBe(0);
+        expect(group.subtreeCount).toBe(5);
+    });
+
+    it('attributes a compressed single-child chain to its terminal folder', () => {
+        const rows = buildDisplayFolders([
+            ['/lib/a/b/c', 7],
+        ]);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].fullPath).toBe('/lib/a/b/c');
+        expect(rows[0].count).toBe(7);
+        expect(rows[0].subtreeCount).toBe(7);
+    });
+});
+
+describe('visibleFolderRows', () => {
+    const tree = () => buildDisplayFolders([
+        ['/lib/art', 1],
+        ['/lib/art/raw', 2],
+        ['/lib/art/raw/nested', 3],
+        ['/lib/photos', 4],
+    ]);
+
+    it('hides descendants of a collapsed node', () => {
+        const rows = visibleFolderRows(tree(), new Set());
+        expect(rows.map(r => r.name)).toEqual(['art', 'photos']);
+    });
+
+    it('reveals one level per expanded node', () => {
+        const rows = visibleFolderRows(tree(), new Set(['/lib/art']));
+        expect(rows.map(r => r.name)).toEqual(['art', 'raw', 'photos']);
+    });
+
+    it('does not reveal a grandchild whose parent is still collapsed', () => {
+        const rows = visibleFolderRows(tree(), new Set(['/lib/art/raw']));
+        expect(rows.map(r => r.name)).toEqual(['art', 'photos']);
+    });
+
+    it('keeps ancestors of a filter match as context', () => {
+        const rows = visibleFolderRows(tree(), new Set(), 'nested');
+        expect(rows.map(r => r.name)).toEqual(['art', 'raw', 'nested']);
+    });
+
+    it('ignores collapse state while filtering', () => {
+        // Everything is collapsed, yet the match and its subtree still show.
+        const collapsedRows = visibleFolderRows(tree(), new Set(), 'raw');
+        expect(collapsedRows.map(r => r.name)).toEqual(['art', 'raw', 'nested']);
+    });
+
+    it('matches case-insensitively and returns nothing on no match', () => {
+        expect(visibleFolderRows(tree(), new Set(), 'PHOTOS').map(r => r.name)).toEqual(['photos']);
+        expect(visibleFolderRows(tree(), new Set(), 'zzz')).toEqual([]);
+    });
+});
+
+describe('prunePinnedIds', () => {
+    it('drops pins whose collection no longer exists', () => {
+        expect(prunePinnedIds(['a', 'gone', 'b'], [['a', 'A', 1], ['b', 'B', 2]])).toEqual(['a', 'b']);
+    });
+
+    it('preserves pin order', () => {
+        expect(prunePinnedIds(['b', 'a'], [['a', 'A', 1], ['b', 'B', 2]])).toEqual(['b', 'a']);
+    });
+});
+
+describe('buildDisplayFolders regression guards', () => {
+    it('keeps a folder that is itself the common prefix (its images used to vanish)', () => {
+        const rows = buildDisplayFolders([
+            ['/lib', 5],
+            ['/lib/sub', 3],
+        ]);
+        const lib = rows.find(r => r.fullPath === '/lib')!;
+        expect(lib).toBeDefined();
+        expect(lib.count).toBe(5);
+        expect(lib.subtreeCount).toBe(8);
+    });
+
+    it('still reconstructs a lone folder path', () => {
+        const rows = buildDisplayFolders([['/Photos', 5]]);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].fullPath).toBe('/Photos');
+        expect(rows[0].subtreeCount).toBe(5);
+    });
+
+    it('emits the filesystem root instead of dropping it', () => {
+        // list_folders() returns ("/", n) for files stored at the root; with no
+        // path segments to walk, this used to vanish from the sidebar entirely.
+        const rows = buildDisplayFolders([['/', 3]]);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].fullPath).toBe('/');
+        expect(rows[0].count).toBe(3);
+    });
+
+    it('renders the root alongside its siblings', () => {
+        const rows = buildDisplayFolders([['/', 3], ['/lib', 5]]);
+        expect(rows.map(r => r.fullPath)).toEqual(['/', '/lib']);
+        expect(rows[0].count).toBe(3);
+        expect(rows[0].subtreeCount).toBe(8);
+    });
+});
+
+describe('visibleFolderRows filter reveals matched subtrees', () => {
+    const groups = () => buildDisplayFolders([
+        ['/p/src/a', 5],
+        ['/p/src/b', 3],
+        ['/p/docs', 2],
+    ]);
+
+    it('shows children of a matched group instead of a dead end', () => {
+        // /p/src holds no images of its own. Excluding descendants would render
+        // one row advertising 8 images with no way to reach them, and the
+        // chevron cannot rescue it because filtering ignores expansion state.
+        const rows = visibleFolderRows(groups(), new Set(), 'src');
+        expect(rows.map(r => r.name)).toEqual(['src', 'a', 'b']);
+        expect(rows[0].isGroup).toBe(true);
+        expect(rows[0].subtreeCount).toBe(8);
+    });
+
+    it('keeps ancestors and descendants of a match', () => {
+        const rows = visibleFolderRows(buildDisplayFolders([
+            ['/lib/art', 1],
+            ['/lib/art/raw', 2],
+            ['/lib/art/raw/nested', 3],
+            ['/lib/photos', 4],
+        ]), new Set(), 'raw');
+        expect(rows.map(r => r.name)).toEqual(['art', 'raw', 'nested']);
+    });
+
+    it('excludes unrelated subtrees entirely', () => {
+        expect(visibleFolderRows(groups(), new Set(), 'docs').map(r => r.name)).toEqual(['docs']);
     });
 });

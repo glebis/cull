@@ -1181,6 +1181,14 @@ export async function drainPendingOpenParams<T>(): Promise<T[]> {
     return invoke<T[]>('drain_pending_open_params');
 }
 
+export async function completeDeepLinkNavigation(
+    requestId: string,
+    ok: boolean,
+    error?: string | null
+): Promise<void> {
+    return invoke('complete_deep_link_navigation', { requestId, ok, error: error ?? null });
+}
+
 export async function openDeepLinkUrls(urls: string[]): Promise<void> {
     return invoke('open_deep_link_urls', { urls });
 }
@@ -1358,8 +1366,42 @@ export interface UndoRecord {
     created_at: string;
 }
 
+export interface HistoryTarget {
+    kind: string;
+    display_name: string;
+    context: string | null;
+    unavailable: boolean;
+}
+
+export interface HistoryImagePreview {
+    image_id: string;
+    display_name: string;
+    thumbnail_path: string | null;
+    missing: boolean;
+}
+
+export interface UndoHistoryEntry {
+    record: UndoRecord;
+    action_title: string;
+    target: HistoryTarget;
+    change_summary: string | null;
+    previews: HistoryImagePreview[];
+    affected_count: number;
+    can_undo: boolean;
+}
+
+export interface UndoManyResult {
+    requested: number;
+    completed: string[];
+    failure: string | null;
+}
+
 export async function undo(): Promise<string | null> {
     return invoke<string | null>('undo');
+}
+
+export async function undoMany(count: number): Promise<UndoManyResult> {
+    return invoke<UndoManyResult>('undo_many', { count });
 }
 
 export async function redo(): Promise<string | null> {
@@ -1370,8 +1412,8 @@ export async function getUndoStatus(): Promise<UndoStatus> {
     return invoke<UndoStatus>('get_undo_status');
 }
 
-export async function listUndoHistory(limit?: number | null): Promise<UndoRecord[]> {
-    return invoke<UndoRecord[]>('list_undo_history', { limit: limit ?? null });
+export async function listUndoHistory(limit?: number | null): Promise<UndoHistoryEntry[]> {
+    return invoke<UndoHistoryEntry[]>('list_undo_history', { limit: limit ?? null });
 }
 
 // Settings
@@ -1750,6 +1792,10 @@ export async function completeAgentViewSnapshot(
     request: CompleteAgentViewSnapshotRequest,
 ): Promise<AgentSnapshotPackage> {
     return invoke<AgentSnapshotPackage>('complete_agent_view_snapshot', { request });
+}
+
+export async function failAgentViewSnapshot(requestId: string, error: string): Promise<void> {
+    return invoke<void>('fail_agent_view_snapshot', { requestId, error });
 }
 
 export async function getLastAgentViewSnapshot(snapshotId: string | null = null): Promise<AgentSnapshotPackage | null> {

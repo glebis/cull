@@ -3,13 +3,13 @@
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen } from '$lib/stores';
-    import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, isYoloAvailable, isNudenetAvailable, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
+    import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, listImagesByFolder, deleteFolder as apiDeleteFolder, listCollections, createCollection, renameCollectionApi, addToCollection, deleteCollectionApi, listCollectionImages, listSmartCollections, updateSmartCollectionApi, deleteSmartCollectionApi, isYoloAvailable, isNudenetAvailable, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
-    import type { ClipboardMonitorStatus, ClipboardPublishResult, ImageWithFile, SmartCollection } from '$lib/api';
+    import type { ClipboardMonitorStatus, ClipboardPublishResult, FilterNode, ImageWithFile, SmartCollection } from '$lib/api';
     import { applyClipboardMonitorCollection } from '$lib/clipboard-monitor';
     import { MODEL_SETUP_GUIDE_URL, resolveAiSectionExpanded } from '$lib/onboarding';
     import { safeAssetPreviewPath } from '$lib/view-utils';
-    import { openUrl } from '@tauri-apps/plugin-opener';
+    import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
     import { onDestroy, onMount } from 'svelte';
     import { get } from 'svelte/store';
 
@@ -40,13 +40,15 @@
         x: number;
         y: number;
     } | null>(null);
-    let collectionContextMenu = $state<{
-        collectionId: string;
-        name: string;
-        count: number;
-        x: number;
-        y: number;
-    } | null>(null);
+    type SidebarContextTarget =
+        | { kind: 'canvas'; canvas: Canvas; x: number; y: number }
+        | { kind: 'folder'; folder: string; name: string; removable: boolean; x: number; y: number }
+        | { kind: 'collection'; collectionId: string; name: string; count: number; x: number; y: number }
+        | { kind: 'smart'; collection: SmartCollection; x: number; y: number };
+
+    let sidebarContextMenu = $state<SidebarContextTarget | null>(null);
+    let smartCollectionEditor = $state<SmartCollection | null>(null);
+    let smartCollectionDraft = $state<FilterNode | null>(null);
     let collectionPreviewTimer: ReturnType<typeof setTimeout> | null = null;
     let collectionPreviewRequest = 0;
 
@@ -55,13 +57,195 @@
         clipboardMonitorStatus.set(status);
     }
 
-    import { buildDisplayFolders, buildPinnedCollectionRows, formatSidebarCount } from '$lib/sidebar-utils';
+    import { buildDisplayFolders, buildPinnedCollectionRows, formatSidebarCount, formatFolderCount, visibleFolderRows, matchesSidebarFilter, prunePinnedIds, type CollectionRow } from '$lib/sidebar-utils';
+
+    function prunePinsToExistingCollections(rows: CollectionRow[]) {
+        const kept = prunePinnedIds(get(pinnedCollections), rows);
+        if (kept.length !== get(pinnedCollections).length) {
+            pinnedCollections.set(kept);
+        }
+        if (get(pinnedCollection) && !kept.includes(get(pinnedCollection)!)) {
+            pinnedCollection.set(kept[kept.length - 1] ?? null);
+        }
+    }
     import SessionSwitcher from './SessionSwitcher.svelte';
-    import { activeCanvas, activeSession, navigateTo, sessionCanvases } from '$lib/stores';
-    import { createCanvas, type Canvas } from '$lib/api';
+    import ActionMenu from './ActionMenu.svelte';
+    import ModalDialog from './ModalDialog.svelte';
+    import RuleBuilder from './RuleBuilder.svelte';
+    import { buildCanvasContextActions, buildCollectionContextActions, buildFolderContextActions, buildSmartCollectionContextActions } from '$lib/sidebar-context-actions';
+    import { activeCanvas, activeSession, navigateTo, sessionCanvases, expandedFolders, sidebarSectionsCollapsed, sidebarFilter } from '$lib/stores';
+    import { createCanvas, deleteCanvas, type Canvas } from '$lib/api';
+
+    // "All Images" is only the active scope when nothing else narrows it —
+    // including a detected-class filter, which used to leave both All Images
+    // and the class row looking unselected/selected at the same time.
+    let allImagesActive = $derived(
+        $activeFolder === null &&
+        $activeCollection === null &&
+        $activeSmartCollection === null &&
+        $activeDetectedClass === null
+    );
 
     let displayFolders = $derived(buildDisplayFolders($folders));
-    let displayCollections = $derived(buildPinnedCollectionRows($collections, $pinnedCollections));
+    let displayCollections = $derived(
+        buildPinnedCollectionRows($collections, $pinnedCollections)
+            .filter(([, name]) => matchesSidebarFilter(name, $sidebarFilter))
+    );
+
+    // Section collapse. The store holds the COLLAPSED ids, so a section added
+    // later defaults to open for users who already have persisted state.
+    function isSectionCollapsed(collapsed: Set<string>, id: string): boolean {
+        return collapsed.has(id);
+    }
+    function toggleSection(id: string) {
+        sidebarSectionsCollapsed.update(set => {
+            const next = new Set(set);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    }
+
+    // "Recent Imports" is a seeded smart collection, but sixth in a 22-row list
+    // is not where you look after an import. Promote it next to All Images and
+    // drop it from the SMART list so it appears exactly once.
+    const RECENT_IMPORTS_NAME = 'Recent Imports';
+    const RECENT_IMPORTS_FILTER_JSON =
+        '{"type":"rule","field":"imported_at","op":"last_n_days","value":7.0}';
+    let recentImportsCollection = $derived(
+        $smartCollections.find(
+            sc =>
+                sc.filter_json === RECENT_IMPORTS_FILTER_JSON &&
+                (sc.image_count ?? 0) > 0
+        ) ?? null
+    );
+
+    // The rows actually on screen. Both the render loop and the keyboard
+    // handler read this, so arrow keys can never focus a hidden row.
+    let visibleFolders = $derived(visibleFolderRows(displayFolders, $expandedFolders, $sidebarFilter));
+    let treeFocusIndex = $state(0);
+    // While filtering, the tree auto-reveals matches and their subtrees, so
+    // expansion controls are inert and say so rather than looking broken.
+    let filterActive = $derived($sidebarFilter.trim() !== '');
+    // Filtering or collapsing can shrink the list below the remembered index.
+    // Clamping in a $derived (rather than writing back to treeFocusIndex from
+    // an effect) keeps exactly one row tabbable without a self-referential
+    // effect, so Tab can always re-enter the tree.
+    let treeTabIndex = $derived(
+        visibleFolders.length === 0 ? -1 : Math.min(treeFocusIndex, visibleFolders.length - 1)
+    );
+
+    function toggleFolderExpanded(path: string) {
+        // While a filter is active the tree ignores expansion entirely, so a
+        // toggle here would silently rewrite persisted state the user cannot
+        // see — they would only discover it after clearing the filter.
+        if (get(sidebarFilter).trim()) return;
+        expandedFolders.update(set => {
+            const next = new Set(set);
+            if (next.has(path)) next.delete(path); else next.add(path);
+            return next;
+        });
+    }
+
+    function focusTreeRow(index: number) {
+        const clamped = Math.max(0, Math.min(index, visibleFolders.length - 1));
+        treeFocusIndex = clamped;
+        // The row must exist in the DOM before it can take focus; Svelte has
+        // already flushed by the time a keydown handler runs for rows that were
+        // visible, and expand/collapse re-renders synchronously via $derived.
+        queueMicrotask(() => {
+            const el = document.querySelector<HTMLElement>(`[data-tree-row="${clamped}"]`);
+            el?.focus();
+        });
+    }
+
+    function handleTreeKeydown(event: KeyboardEvent) {
+        const rows = visibleFolders;
+        if (rows.length === 0) return;
+        const i = Math.min(treeFocusIndex, rows.length - 1);
+        const row = rows[i];
+
+        if (isContextMenuKey(event)) {
+            event.preventDefault();
+            event.stopPropagation();
+            const treeItem = event.target instanceof HTMLElement
+                ? event.target.closest<HTMLElement>('[data-tree-row]')
+                : null;
+            const rect = treeItem?.getBoundingClientRect();
+            sidebarContextMenu = {
+                kind: 'folder',
+                folder: row.fullPath,
+                name: row.name,
+                removable: !row.isGroup,
+                x: rect ? rect.left + Math.min(32, rect.width / 2) : 16,
+                y: rect ? rect.top + Math.min(24, rect.height) : 16,
+            };
+            return;
+        }
+
+        switch (event.key) {
+            case 'Enter':
+            case ' ':
+                // Focus lives on the treeitem, not the inner button, so the
+                // row has to activate itself.
+                event.preventDefault();
+                selectFolder(row.fullPath);
+                break;
+            case 'ArrowDown':
+                event.preventDefault();
+                focusTreeRow(i + 1);
+                break;
+            case 'ArrowUp':
+                event.preventDefault();
+                focusTreeRow(i - 1);
+                break;
+            case 'Home':
+                event.preventDefault();
+                focusTreeRow(0);
+                break;
+            case 'End':
+                event.preventDefault();
+                focusTreeRow(rows.length - 1);
+                break;
+            case 'ArrowRight':
+                event.preventDefault();
+                // Standard tree behaviour: open a closed node, then step into it.
+                // Filtering already reveals every subtree, so there is nothing
+                // to open and Right simply steps in.
+                if (row.hasChildren && !filterActive && !get(expandedFolders).has(row.fullPath)) {
+                    toggleFolderExpanded(row.fullPath);
+                } else if (row.hasChildren) {
+                    focusTreeRow(i + 1);
+                }
+                break;
+            case 'ArrowLeft':
+                event.preventDefault();
+                if (row.hasChildren && !filterActive && get(expandedFolders).has(row.fullPath)) {
+                    toggleFolderExpanded(row.fullPath);
+                } else {
+                    // Jump to the nearest shallower row — the visual parent.
+                    for (let k = i - 1; k >= 0; k--) {
+                        if (rows[k].depth < row.depth) { focusTreeRow(k); break; }
+                    }
+                }
+                break;
+        }
+    }
+
+    // A running monitor forces the section open — a background capture that the
+    // user cannot see the state of is worse than the space it costs.
+    let clipboardCollapsed = $derived(
+        isSectionCollapsed($sidebarSectionsCollapsed, 'clipboard') && !clipboardStatus?.running
+    );
+
+    // Smart collections seed ~22 presets. Hiding the empty ones keeps the list
+    // proportional to the library instead of to the seed table.
+    let visibleSmartCollections = $derived(
+        $smartCollections.filter(sc =>
+            (sc.image_count ?? 0) > 0 &&
+            sc.id !== recentImportsCollection?.id &&
+            matchesSidebarFilter(sc.name, $sidebarFilter)
+        )
+    );
 
     function clearCollectionPreviewTimer() {
         if (!collectionPreviewTimer) return;
@@ -109,21 +293,52 @@
         }
     }
 
-    function openCollectionContextMenu(event: MouseEvent, collectionId: string, name: string, count: number) {
+    function contextPoint(event: MouseEvent | KeyboardEvent): { x: number; y: number } {
+        if (event instanceof MouseEvent && event.type === 'contextmenu') {
+            return { x: event.clientX, y: event.clientY };
+        }
+        const target = event.currentTarget as HTMLElement | null;
+        const rect = target?.getBoundingClientRect();
+        return rect
+            ? { x: rect.left + Math.min(32, rect.width / 2), y: rect.top + Math.min(24, rect.height) }
+            : { x: 16, y: 16 };
+    }
+
+    function isContextMenuKey(event: KeyboardEvent): boolean {
+        return event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10');
+    }
+
+    function openFolderContextMenu(event: MouseEvent | KeyboardEvent, folder: string, name: string, removable: boolean) {
+        event.preventDefault();
+        event.stopPropagation();
+        const point = contextPoint(event);
+        sidebarContextMenu = { kind: 'folder', folder, name, removable, ...point };
+    }
+
+    function openCollectionContextMenu(event: MouseEvent | KeyboardEvent, collectionId: string, name: string, count: number) {
         event.preventDefault();
         event.stopPropagation();
         hideCollectionPreview(collectionId);
-        collectionContextMenu = {
-            collectionId,
-            name,
-            count,
-            x: Math.min(event.clientX, window.innerWidth - 208),
-            y: Math.min(event.clientY, window.innerHeight - 224),
-        };
+        const point = contextPoint(event);
+        sidebarContextMenu = { kind: 'collection', collectionId, name, count, ...point };
     }
 
-    function closeCollectionContextMenu() {
-        collectionContextMenu = null;
+    function openSmartCollectionContextMenu(event: MouseEvent | KeyboardEvent, collection: SmartCollection) {
+        event.preventDefault();
+        event.stopPropagation();
+        const point = contextPoint(event);
+        sidebarContextMenu = { kind: 'smart', collection, ...point };
+    }
+
+    function openCanvasContextMenu(event: MouseEvent | KeyboardEvent, canvas: Canvas) {
+        event.preventDefault();
+        event.stopPropagation();
+        const point = contextPoint(event);
+        sidebarContextMenu = { kind: 'canvas', canvas, ...point };
+    }
+
+    function closeSidebarContextMenu() {
+        sidebarContextMenu = null;
     }
 
     onDestroy(() => {
@@ -141,6 +356,7 @@
         try {
             const c = await listCollections();
             collections.set(c);
+            prunePinsToExistingCollections(c);
         } catch (e) {
             console.error('Failed to load collections:', e);
             showToast('Failed to load collections', { detail: String(e), type: 'error', duration: 8000 });
@@ -204,7 +420,7 @@
     }
 
     async function handleRenameCollection(collectionId: string, currentName: string) {
-        closeCollectionContextMenu();
+        closeSidebarContextMenu();
         const name = await requestTextInput({
             title: 'Rename Collection',
             label: 'Collection name',
@@ -224,13 +440,66 @@
     }
 
     async function handleExportCollection(collectionId: string) {
-        closeCollectionContextMenu();
+        closeSidebarContextMenu();
         await selectCollection(collectionId);
         exportFolderOpen.set(true);
     }
 
+    async function listAllCollectionImageIds(collectionId: string): Promise<string[]> {
+        const pageSize = 500;
+        const ids: string[] = [];
+        for (let offset = 0; ; offset += pageSize) {
+            const page = await listCollectionImages(collectionId, pageSize, offset);
+            ids.push(...page.map(item => item.image.id));
+            if (page.length < pageSize) break;
+        }
+        return [...new Set(ids)];
+    }
+
+    async function duplicateCollection(collectionId: string, currentName: string) {
+        const name = await requestTextInput({
+            title: 'Duplicate Collection',
+            label: 'New collection name',
+            initialValue: `${currentName} Copy`,
+            confirmLabel: 'Duplicate',
+        });
+        if (!name?.trim()) return;
+
+        let createdId: string | null = null;
+        try {
+            const ids = await listAllCollectionImageIds(collectionId);
+            createdId = await createCollection(name.trim());
+            if (ids.length > 0) await addToCollection(createdId, ids);
+            collections.set(await listCollections());
+            showToast(`Duplicated “${currentName}”`, {
+                detail: `${ids.length} image${ids.length === 1 ? '' : 's'}`,
+                type: 'success',
+            });
+        } catch (e) {
+            if (createdId) {
+                try { await deleteCollectionApi(createdId); } catch (_) { /* best-effort rollback */ }
+            }
+            showToast('Could not duplicate collection', { detail: String(e), type: 'error', duration: 10000 });
+        }
+    }
+
+    async function publishCollection(collectionId: string) {
+        try {
+            const result = await publishClipboardCollection(collectionId);
+            clipboardPublishResult = result;
+            try {
+                await navigator.clipboard.writeText(result.url);
+                showToast('Collection published; link copied', { detail: result.url, type: 'success', duration: 10000 });
+            } catch (e) {
+                showToast('Collection published', { detail: `${result.url} · Copy failed: ${e}`, type: 'warning', duration: 10000 });
+            }
+        } catch (e) {
+            showToast('Could not publish collection', { detail: String(e), type: 'error', duration: 10000 });
+        }
+    }
+
     async function copyCollectionId(collectionId: string) {
-        closeCollectionContextMenu();
+        closeSidebarContextMenu();
         try {
             await navigator.clipboard.writeText(collectionId);
             showToast('Collection ID copied', { type: 'success', duration: 2500 });
@@ -240,7 +509,7 @@
     }
 
     function setCollectTarget(collectionId: string, name: string) {
-        closeCollectionContextMenu();
+        closeSidebarContextMenu();
         collectMode.set(true);
         collectModeTarget.set(collectionId);
         showToast('Collect mode enabled', { detail: name, type: 'info', duration: 5000 });
@@ -311,9 +580,8 @@
         }
     }
 
-    async function handleDeleteCollection(event: Event, collectionId: string, collectionName: string) {
-        event.stopPropagation();
-        closeCollectionContextMenu();
+    async function handleDeleteCollection(collectionId: string, collectionName: string) {
+        closeSidebarContextMenu();
         const confirmed = await requestConfirm({
             title: 'Delete Collection',
             description: `Delete collection "${collectionName}"? Images stay in the library.`,
@@ -341,12 +609,12 @@
         }
     }
 
-    async function handleDeleteFolder(event: Event, folder: string) {
-        event.stopPropagation();
+    async function handleDeleteFolder(folder: string) {
+        closeSidebarContextMenu();
         const name = folderName(folder);
         const confirmed = await requestConfirm({
             title: 'Remove Folder from Library',
-            description: `Remove "${name}" from the library? Cull records for images that only exist in this folder will be removed. Original files stay on disk.`,
+            description: `Remove folder from library: "${name}"? Cull records for images that only exist in this folder will be removed. Original files stay on disk.`,
             confirmLabel: 'Remove Folder',
             danger: true,
         });
@@ -360,6 +628,173 @@
             await refreshImages();
         } catch (e) {
             setLastResult(`Error: ${e}`, 'error');
+        }
+    }
+
+    async function revealFolder(folder: string) {
+        try {
+            await revealItemInDir(folder);
+        } catch (e) {
+            showToast('Could not reveal folder in Finder', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    async function copyFolderPath(folder: string) {
+        try {
+            await navigator.clipboard.writeText(folder);
+            showToast('Folder path copied', { type: 'success', duration: 2500 });
+        } catch (e) {
+            showToast('Copy failed', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    async function rescanFolder(folder: string) {
+        if (importing) return;
+        importing = true;
+        importCurrent = 0;
+        importTotal = 0;
+        try {
+            const result = await apiImportFolder(folder, null);
+            const summary = `Rescanned “${folderName(folder)}”: ${result.imported} imported, ${result.skipped} unchanged`;
+            setLastResult(result.errors.length > 0 ? `${summary}, ${result.errors.length} errors` : summary, result.errors.length > 0 ? 'error' : 'success');
+            await refreshImages();
+        } catch (e) {
+            setLastResult(`Rescan failed: ${e}`, 'error');
+        } finally {
+            importing = false;
+        }
+    }
+
+    async function listAllFolderImageIds(folder: string): Promise<string[]> {
+        const pageSize = 500;
+        const ids: string[] = [];
+        for (let offset = 0; ; offset += pageSize) {
+            const page = await listImagesByFolder(folder, pageSize, offset);
+            ids.push(...page.map(item => item.image.id));
+            if (page.length < pageSize) break;
+        }
+        return [...new Set(ids)];
+    }
+
+    async function addFolderToCollection(folder: string, collectionId: string) {
+        try {
+            const ids = await listAllFolderImageIds(folder);
+            if (ids.length === 0) {
+                showToast('Folder contains no images to add', { type: 'info', duration: 3500 });
+                return;
+            }
+            await addToCollection(collectionId, ids);
+            collections.set(await listCollections());
+            const collectionName = get(collections).find(([id]) => id === collectionId)?.[1] ?? 'collection';
+            showToast(`Added ${ids.length} image${ids.length === 1 ? '' : 's'} to ${collectionName}`, { type: 'success' });
+        } catch (e) {
+            showToast('Could not add folder to collection', { detail: String(e), type: 'error', duration: 10000 });
+        }
+    }
+
+    async function createCollectionFromFolder(folder: string) {
+        const name = await requestTextInput({
+            title: 'New Collection from Folder',
+            label: 'Collection name',
+            initialValue: folderName(folder),
+            confirmLabel: 'Create and Add',
+        });
+        if (!name?.trim()) return;
+        try {
+            const ids = await listAllFolderImageIds(folder);
+            const collectionId = await createCollection(name.trim());
+            if (ids.length > 0) await addToCollection(collectionId, ids);
+            collections.set(await listCollections());
+            showToast(`Created collection “${name.trim()}”`, {
+                detail: `${ids.length} image${ids.length === 1 ? '' : 's'} added`,
+                type: 'success',
+            });
+        } catch (e) {
+            showToast('Could not create collection from folder', { detail: String(e), type: 'error', duration: 10000 });
+        }
+    }
+
+    async function beginEditSmartCollection(id: string) {
+        const collection = get(smartCollections).find(item => item.id === id);
+        if (!collection?.filter_json || collection.is_preset) return;
+        try {
+            smartCollectionDraft = JSON.parse(collection.filter_json) as FilterNode;
+            smartCollectionEditor = collection;
+        } catch (e) {
+            showToast('Smart collection rules could not be opened', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    function closeSmartCollectionEditor() {
+        smartCollectionEditor = null;
+        smartCollectionDraft = null;
+    }
+
+    async function saveSmartCollectionRules() {
+        const collection = smartCollectionEditor;
+        const draft = smartCollectionDraft;
+        if (!collection || !draft) return;
+        try {
+            await updateSmartCollectionApi(collection.id, collection.name, JSON.stringify(draft));
+            const updated = await listSmartCollections();
+            smartCollections.set(updated);
+            const nextActive = updated.find(item => item.id === collection.id) ?? null;
+            if (get(activeSmartCollection)?.id === collection.id && nextActive) {
+                activeSmartCollection.set(nextActive);
+                await loadImagesForCurrentScope({ force: true, invalidateCache: true });
+            }
+            closeSmartCollectionEditor();
+            showToast('Smart collection rules updated', { type: 'success' });
+        } catch (e) {
+            showToast('Could not update smart collection', { detail: String(e), type: 'error', duration: 10000 });
+        }
+    }
+
+    async function deleteSmartCollection(id: string, name: string) {
+        const confirmed = await requestConfirm({
+            title: 'Delete Smart Collection',
+            description: `Delete smart collection “${name}”? Images stay in the library.`,
+            confirmLabel: 'Delete',
+            danger: true,
+        });
+        if (!confirmed) return;
+        try {
+            await deleteSmartCollectionApi(id);
+            if (get(activeSmartCollection)?.id === id) {
+                activeSmartCollection.set(null);
+                await loadImagesForCurrentScope({ force: true, invalidateCache: true });
+            }
+            smartCollections.set(await listSmartCollections());
+            showToast('Smart collection deleted', { type: 'success' });
+        } catch (e) {
+            showToast('Could not delete smart collection', { detail: String(e), type: 'error', duration: 10000 });
+        }
+    }
+
+    async function exportSmartCollection(id: string) {
+        const collection = get(smartCollections).find(item => item.id === id);
+        if (!collection) return;
+        await selectSmartCollection(collection);
+        exportFolderOpen.set(true);
+    }
+
+    async function deleteCanvasFromSidebar(canvasId: string, name: string) {
+        const confirmed = await requestConfirm({
+            title: 'Delete Canvas',
+            description: `Delete canvas “${name}”? Images and files stay in the session.`,
+            confirmLabel: 'Delete Canvas',
+            danger: true,
+        });
+        if (!confirmed) return;
+        try {
+            await deleteCanvas(canvasId);
+            sessionCanvases.update(items => items.filter(item => item.id !== canvasId));
+            if (get(activeCanvas)?.id === canvasId) {
+                activeCanvas.set(null);
+            }
+            showToast('Canvas deleted', { type: 'success' });
+        } catch (e) {
+            showToast('Could not delete canvas', { detail: String(e), type: 'error', duration: 10000 });
         }
     }
 
@@ -514,10 +949,17 @@
                 summary += `, ${result.errors.length} errors`;
             }
             setLastResult(summary, result.errors.length > 0 ? 'error' : 'success');
+            const importedFolder = selected as string;
             showToast(`Imported "${folderName}"`, {
                 detail: summary,
                 type: 'success',
                 duration: 8000,
+                // "Where did what I just imported go?" is the question every
+                // import ends on; answer it in the toast instead of making the
+                // user hunt for the folder in the tree.
+                actions: result.imported > 0
+                    ? [{ label: 'View imported', onclick: () => { selectFolder(importedFolder); } }]
+                    : undefined,
             });
             await refreshImages();
         } catch (e) {
@@ -648,12 +1090,67 @@
             folders.set(f);
         } catch (_) {}
     }
-</script>
 
-<svelte:window
-    onclick={closeCollectionContextMenu}
-    onkeydown={(e) => { if (e.key === 'Escape') { closeCollectionContextMenu(); hideCollectionPreview(); } }}
-/>
+    let sidebarContextItems = $derived.by(() => {
+        const target = sidebarContextMenu;
+        if (!target) return [];
+        if (target.kind === 'canvas') {
+            return buildCanvasContextActions({
+                canvasId: target.canvas.id,
+                name: target.canvas.name,
+                onOpen: (id) => {
+                    const canvas = get(sessionCanvases).find(item => item.id === id);
+                    if (canvas) selectCanvas(canvas);
+                },
+                onDelete: deleteCanvasFromSidebar,
+            });
+        }
+        if (target.kind === 'folder') {
+            return buildFolderContextActions({
+                folder: target.folder,
+                removable: target.removable,
+                collections: $collections,
+                onReveal: revealFolder,
+                onRescan: rescanFolder,
+                onAddToCollection: addFolderToCollection,
+                onCreateCollection: createCollectionFromFolder,
+                onCopyPath: copyFolderPath,
+                onRemove: handleDeleteFolder,
+            });
+        }
+        if (target.kind === 'collection') {
+            return buildCollectionContextActions({
+                collectionId: target.collectionId,
+                name: target.name,
+                count: target.count,
+                pinned: $pinnedCollections.includes(target.collectionId),
+                onOpen: selectCollection,
+                onRename: handleRenameCollection,
+                onDuplicate: duplicateCollection,
+                onExport: handleExportCollection,
+                onPublish: publishCollection,
+                onCollect: setCollectTarget,
+                onTogglePin: togglePinnedCollection,
+                onCopyId: copyCollectionId,
+                onDelete: handleDeleteCollection,
+            });
+        }
+        const collection = target.collection;
+        return buildSmartCollectionContextActions({
+            id: collection.id,
+            name: collection.name,
+            count: collection.image_count ?? 0,
+            isPreset: collection.is_preset,
+            onOpen: async (id) => {
+                const next = get(smartCollections).find(item => item.id === id);
+                if (next) await selectSmartCollection(next);
+            },
+            onEdit: beginEditSmartCollection,
+            onExport: exportSmartCollection,
+            onDelete: deleteSmartCollection,
+        });
+    });
+</script>
 
 <aside class="sidebar" aria-label="Library sidebar">
     <div class="sidebar-scroll">
@@ -672,31 +1169,72 @@
                 }} aria-label="New canvas">+</button>
             </div>
             {#each $sessionCanvases as canvas}
-                <button
-                    class="section-item"
+                <div
+                    class="folder-row canvas-row"
                     class:active={$activeCanvas?.id === canvas.id}
-                    onclick={() => selectCanvas(canvas)}
-                    aria-current={$activeCanvas?.id === canvas.id ? 'true' : undefined}
+                    oncontextmenu={(event) => openCanvasContextMenu(event, canvas)}
+                    role="group"
+                    aria-label={`Canvas actions: ${canvas.name}`}
                 >
-                    <span class="item-label">{canvas.name}</span>
-                    <span class="count">{canvas.canvas_type}</span>
-                </button>
+                    <button
+                        class="section-item"
+                        onclick={() => selectCanvas(canvas)}
+                        onkeydown={(event) => { if (isContextMenuKey(event)) openCanvasContextMenu(event, canvas); }}
+                        aria-current={$activeCanvas?.id === canvas.id ? 'true' : undefined}
+                    >
+                        <span class="item-label">{canvas.name}</span>
+                        <span class="count">{canvas.canvas_type}</span>
+                    </button>
+                    <button
+                        class="menu-btn"
+                        onclick={(event) => openCanvasContextMenu(event, canvas)}
+                        title="Canvas actions"
+                        aria-label={`Canvas actions: ${canvas.name}`}
+                        aria-haspopup="menu"
+                    >…</button>
+                </div>
             {/each}
         </div>
     {/if}
+
+    <div class="sidebar-filter">
+        <input
+            type="search"
+            class="sidebar-filter-input"
+            placeholder="Filter folders &amp; collections"
+            aria-label="Filter folders and collections"
+            bind:value={$sidebarFilter}
+            onkeydown={(e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); sidebarFilter.set(''); } }}
+        />
+    </div>
 
     <div class="section">
         <div class="section-header">LIBRARY</div>
         <button
             class="section-item"
-            class:active={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null}
+            class:active={allImagesActive}
             onclick={() => selectFolder(null)}
-            aria-current={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null ? 'true' : undefined}
+            aria-current={allImagesActive ? 'true' : undefined}
         >
             <span class="icon">&#9632;</span>
             <span class="item-label">All Images</span>
             <span class="count">{formatSidebarCount($totalCount)}</span>
         </button>
+
+        {#if recentImportsCollection}
+            <button
+                class="section-item"
+                class:active={$activeSmartCollection?.id === recentImportsCollection.id}
+                onclick={() => selectSmartCollection(recentImportsCollection!)}
+                oncontextmenu={(event) => openSmartCollectionContextMenu(event, recentImportsCollection!)}
+                onkeydown={(event) => { if (isContextMenuKey(event)) openSmartCollectionContextMenu(event, recentImportsCollection!); }}
+                aria-current={$activeSmartCollection?.id === recentImportsCollection.id ? 'true' : undefined}
+                title="Images imported in the last 7 days"
+            >
+                <span class="item-label">Recent Imports</span>
+                <span class="count">{formatSidebarCount(recentImportsCollection.image_count)}</span>
+            </button>
+        {/if}
 
         {#if displayFolders.length > 0}
             <button
@@ -710,34 +1248,71 @@
             </button>
 
             {#if foldersExpanded}
-                <div aria-label="Folder hierarchy">
-                {#each displayFolders as folder}
-                    <div class="folder-row" class:active={$activeFolder === folder.fullPath} style="padding-left: {folder.depth * 12}px">
-                        {#if folder.count > 0}
+                <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
+                <div
+                    class="folder-tree"
+                    role="tree"
+                    tabindex="-1"
+                    aria-label="Folder hierarchy"
+                    onkeydown={handleTreeKeydown}
+                >
+                {#each visibleFolders as folder, i (folder.fullPath)}
+                    {@const isExpanded = $expandedFolders.has(folder.fullPath)}
+                    <div
+                        class="folder-row"
+                        class:active={$activeFolder === folder.fullPath}
+                        style="padding-left: {folder.depth * 12}px"
+                        role="treeitem"
+                        aria-level={folder.depth + 1}
+                        aria-selected={$activeFolder === folder.fullPath}
+                        aria-expanded={folder.hasChildren ? (isExpanded || filterActive) : undefined}
+                        aria-label={`${folder.name}, ${folder.subtreeCount} images`}
+                        data-tree-row={i}
+                        tabindex={i === treeTabIndex ? 0 : -1}
+                        onfocusin={() => treeFocusIndex = i}
+                        oncontextmenu={(event) => openFolderContextMenu(event, folder.fullPath, folder.name, !folder.isGroup)}
+                    >
+                        {#if folder.hasChildren}
                             <button
-                                class="section-item"
-                                onclick={() => selectFolder(folder.fullPath)}
-                                title={folder.fullPath}
-                                aria-current={$activeFolder === folder.fullPath ? 'true' : undefined}
-                            >
-                                <span class="icon">{folder.hasChildren ? '▾' : '▸'}</span>
-                                <span class="folder-label">{folder.name}</span>
-                                <span class="count">{formatSidebarCount(folder.count)}</span>
-                            </button>
-                            <button
-                                class="delete-btn"
-                                onclick={(e: Event) => handleDeleteFolder(e, folder.fullPath)}
-                                title="Remove folder from library"
-                                aria-label={`Remove folder from library: ${folder.name}`}
-                            >&times;</button>
+                                class="twisty"
+                                tabindex="-1"
+                                disabled={filterActive}
+                                onclick={(e: Event) => { e.stopPropagation(); toggleFolderExpanded(folder.fullPath); }}
+                                aria-label={`${isExpanded || filterActive ? 'Collapse' : 'Expand'} ${folder.name}`}
+                                title={filterActive ? 'Expansion is disabled while filtering' : undefined}
+                            >{isExpanded || filterActive ? '▾' : '▸'}</button>
                         {:else}
-                            <span class="section-item folder-group">
-                                <span class="icon">▾</span>
-                                <span class="folder-label">{folder.name}</span>
-                            </span>
+                            <span class="twisty-spacer" aria-hidden="true"></span>
                         {/if}
+                        <button
+                            class="section-item"
+                            class:folder-group={folder.isGroup}
+                            tabindex="-1"
+                            onclick={() => selectFolder(folder.fullPath)}
+                            title={folder.fullPath}
+                            aria-current={$activeFolder === folder.fullPath ? 'true' : undefined}
+                        >
+                            <span class="folder-label">{folder.name}</span>
+                            <span
+                                class="count"
+                                title={folder.count === folder.subtreeCount
+                                    ? undefined
+                                    : `${folder.count} directly in this folder, ${folder.subtreeCount} including subfolders`}
+                            >{formatFolderCount(folder.count, folder.subtreeCount)}</span>
+                        </button>
+                        <button
+                            class="menu-btn"
+                            tabindex="-1"
+                            onclick={(event) => openFolderContextMenu(event, folder.fullPath, folder.name, !folder.isGroup)}
+                            title="Folder actions"
+                            aria-label={`Folder actions: ${folder.name}`}
+                            aria-haspopup="menu"
+                        >…</button>
                     </div>
                 {/each}
+                {#if visibleFolders.length === 0}
+                    <div class="section-empty">No folders match "{$sidebarFilter}"</div>
+                {/if}
                 </div>
             {/if}
         {/if}
@@ -771,6 +1346,7 @@
                     <button
                         class="section-item"
                         onclick={() => selectCollection(id)}
+                        onkeydown={(event) => { if (isContextMenuKey(event)) openCollectionContextMenu(event, id, name, count); }}
                         aria-current={$activeCollection === id ? 'true' : undefined}
                     >
                         <span class="icon">&#9671;</span>
@@ -788,18 +1364,92 @@
                         <span class="generated-pin" aria-hidden="true"></span>
                     </button>
                     <button
-                        class="delete-btn"
-                        onclick={(e: Event) => handleDeleteCollection(e, id, name)}
-                        title="Delete collection"
-                        aria-label={`Delete collection: ${name}`}
-                    >&times;</button>
+                        class="menu-btn"
+                        onclick={(event) => openCollectionContextMenu(event, id, name, count)}
+                        title="Collection actions"
+                        aria-label={`Collection actions: ${name}`}
+                        aria-haspopup="menu"
+                    >…</button>
                 </div>
             {/each}
         {/if}
     </div>
 
+    {#if visibleSmartCollections.length > 0}
+    {@const smartCollapsed = isSectionCollapsed($sidebarSectionsCollapsed, 'smart')}
+    <div class="section">
+        <button
+            class="folders-toggle"
+            onclick={() => toggleSection('smart')}
+            aria-expanded={!smartCollapsed}
+        >
+            <span class="toggle-arrow">{smartCollapsed ? '▸' : '▾'}</span>
+            <span class="folders-toggle-label">Smart</span>
+            <span class="count">{formatSidebarCount(visibleSmartCollections.length)}</span>
+        </button>
+        {#if !smartCollapsed}
+            {#each visibleSmartCollections as sc}
+                <div
+                    class="folder-row smart-collection-row"
+                    class:active={$activeSmartCollection?.id === sc.id}
+                    oncontextmenu={(event) => openSmartCollectionContextMenu(event, sc)}
+                    role="group"
+                    aria-label={`Smart collection actions: ${sc.name}`}
+                >
+                    <button class="section-item"
+                        onclick={() => selectSmartCollection(sc)}
+                        onkeydown={(event) => { if (isContextMenuKey(event)) openSmartCollectionContextMenu(event, sc); }}
+                        aria-current={$activeSmartCollection?.id === sc.id ? 'true' : undefined}>
+                        <span class="icon">&#9733;</span>
+                        <span class="item-label">{sc.name}</span>
+                        <span class="count">{formatSidebarCount(sc.image_count)}</span>
+                    </button>
+                    <button
+                        class="menu-btn"
+                        onclick={(event) => openSmartCollectionContextMenu(event, sc)}
+                        title="Smart collection actions"
+                        aria-label={`Smart collection actions: ${sc.name}`}
+                        aria-haspopup="menu"
+                    >…</button>
+                </div>
+            {/each}
+        {/if}
+    </div>
+    {/if}
+
+    <div class="section">
+        <div class="section-header">FILTERS</div>
+        <div class="filter-row">
+            <span class="filter-label">Min size</span>
+            <div class="filter-presets">
+                {#each SIZE_PRESETS as preset}
+                    <button
+                        class="preset-btn"
+                        class:active={$minSizeFilter === preset.value}
+                        onclick={() => handleSizeFilter(preset.value)}
+                    >{preset.label}</button>
+                {/each}
+            </div>
+        </div>
+        <label class="show-missing-toggle">
+            <input type="checkbox" bind:checked={$showMissing} />
+            Show missing files
+        </label>
+    </div>
+
     <div class="section clipboard-monitor">
-        <div class="section-header">CLIPBOARD MONITOR</div>
+        <button
+            class="folders-toggle"
+            onclick={() => toggleSection('clipboard')}
+            aria-expanded={!clipboardCollapsed}
+        >
+            <span class="toggle-arrow">{clipboardCollapsed ? '▸' : '▾'}</span>
+            <span class="folders-toggle-label">Clipboard Monitor</span>
+            {#if clipboardStatus?.running}
+                <span class="count running-dot" title="Monitor running">●</span>
+            {/if}
+        </button>
+        {#if !clipboardCollapsed}
         <button
             class="section-item"
             class:active={clipboardStatus?.running}
@@ -853,42 +1503,7 @@
                 >{clipboardPublishResult.url}</button>
             {/if}
         {/if}
-    </div>
-
-    {#if $smartCollections.length > 0}
-    <div class="section">
-        <div class="section-header">SMART</div>
-        {#each $smartCollections as sc}
-            <button class="section-item"
-                class:active={$activeSmartCollection?.id === sc.id}
-                onclick={() => selectSmartCollection(sc)}
-                aria-current={$activeSmartCollection?.id === sc.id ? 'true' : undefined}>
-                <span class="icon">&#9733;</span>
-                <span class="item-label">{sc.name}</span>
-                <span class="count">{formatSidebarCount(sc.image_count)}</span>
-            </button>
-        {/each}
-    </div>
-    {/if}
-
-    <div class="section">
-        <div class="section-header">FILTERS</div>
-        <div class="filter-row">
-            <span class="filter-label">Min size</span>
-            <div class="filter-presets">
-                {#each SIZE_PRESETS as preset}
-                    <button
-                        class="preset-btn"
-                        class:active={$minSizeFilter === preset.value}
-                        onclick={() => handleSizeFilter(preset.value)}
-                    >{preset.label}</button>
-                {/each}
-            </div>
-        </div>
-        <label class="show-missing-toggle">
-            <input type="checkbox" bind:checked={$showMissing} />
-            Show missing files
-        </label>
+        {/if}
     </div>
 
     <div class="section">
@@ -972,7 +1587,12 @@
                 {#if detectedClasses.length > 0}
                     <div class="detected-header">DETECTED</div>
                     {#each detectedClasses as [cls, count]}
-                        <button class="section-item detected-class" onclick={() => filterByClass(cls)}>
+                        <button
+                            class="section-item detected-class"
+                            class:active={$activeDetectedClass === cls}
+                            onclick={() => filterByClass(cls)}
+                            aria-current={$activeDetectedClass === cls ? 'true' : undefined}
+                        >
                             <span class="class-tag">{cls}</span>
                             <span class="count">{formatSidebarCount(count)}</span>
                         </button>
@@ -1010,24 +1630,20 @@
         </div>
     {/if}
 
-    {#if collectionContextMenu}
-        <div
-            class="collection-context-menu"
-            style="left: {collectionContextMenu.x}px; top: {collectionContextMenu.y}px;"
-            role="menu"
-            tabindex="-1"
-        >
-            <div class="context-menu-header">{collectionContextMenu.name}</div>
-            <button type="button" role="menuitem" onclick={() => { selectCollection(collectionContextMenu!.collectionId); closeCollectionContextMenu(); }}>Open Collection</button>
-            <button type="button" role="menuitem" onclick={() => handleRenameCollection(collectionContextMenu!.collectionId, collectionContextMenu!.name)}>Rename...</button>
-            <button type="button" role="menuitem" onclick={() => handleExportCollection(collectionContextMenu!.collectionId)} disabled={collectionContextMenu.count === 0}>Export to Folder...</button>
-            <button type="button" role="menuitem" onclick={() => setCollectTarget(collectionContextMenu!.collectionId, collectionContextMenu!.name)}>Use for Collect Mode</button>
-            <button type="button" role="menuitem" onclick={() => togglePinnedCollection(collectionContextMenu!.collectionId)}>
-                {$pinnedCollections.includes(collectionContextMenu.collectionId) ? 'Unpin Collection' : 'Pin Collection'}
-            </button>
-            <button type="button" role="menuitem" onclick={() => copyCollectionId(collectionContextMenu!.collectionId)}>Copy Collection ID</button>
-            <button type="button" role="menuitem" class="danger" onclick={(e) => handleDeleteCollection(e, collectionContextMenu!.collectionId, collectionContextMenu!.name)}>Delete Collection...</button>
-        </div>
+    {#if sidebarContextMenu}
+        <ActionMenu
+            title={sidebarContextMenu.kind === 'canvas'
+                ? sidebarContextMenu.canvas.name
+                : sidebarContextMenu.kind === 'folder'
+                    ? sidebarContextMenu.name
+                    : sidebarContextMenu.kind === 'collection'
+                        ? sidebarContextMenu.name
+                        : sidebarContextMenu.collection.name}
+            x={sidebarContextMenu.x}
+            y={sidebarContextMenu.y}
+            items={sidebarContextItems}
+            onclose={closeSidebarContextMenu}
+        />
     {/if}
 
     <div class="sidebar-footer" aria-live="polite" aria-busy={importing || regenerating || rescanning}>
@@ -1070,6 +1686,27 @@
         </div>
     </div>
 </aside>
+
+{#if smartCollectionEditor && smartCollectionDraft}
+    <ModalDialog
+        titleId="smart-collection-editor-title"
+        descriptionId="smart-collection-editor-description"
+        onclose={closeSmartCollectionEditor}
+    >
+        <div class="smart-editor-dialog">
+            <h2 id="smart-collection-editor-title">Edit {smartCollectionEditor.name}</h2>
+            <p id="smart-collection-editor-description">Adjust the rules that decide which images appear in this smart collection.</p>
+            <RuleBuilder
+                filter={smartCollectionDraft}
+                onchange={(next) => smartCollectionDraft = next}
+            />
+            <div class="smart-editor-actions">
+                <button type="button" onclick={closeSmartCollectionEditor}>Cancel</button>
+                <button type="button" class="primary" data-modal-initial-focus onclick={saveSmartCollectionRules}>Save Rules</button>
+            </div>
+        </div>
+    </ModalDialog>
+{/if}
 
 <style>
     .sidebar {
@@ -1201,6 +1838,50 @@
         font-size: 11px;
         flex: none;
     }
+    .sidebar-filter {
+        padding: var(--spacing) var(--spacing) 0;
+    }
+    .sidebar-filter-input {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 11px;
+        min-height: 28px;
+        padding: 4px 8px;
+        width: 100%;
+    }
+    .sidebar-filter-input::placeholder {
+        color: var(--text-secondary);
+    }
+    .sidebar-filter-input:focus {
+        border-color: var(--blue);
+        outline: none;
+    }
+    .twisty {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        flex: none;
+        font-family: inherit;
+        font-size: 8px;
+        line-height: 1;
+        padding: 0;
+        width: 14px;
+    }
+    .twisty:hover {
+        color: var(--text);
+    }
+    .twisty-spacer {
+        flex: none;
+        width: 14px;
+    }
+    .running-dot {
+        color: var(--green);
+        font-size: 9px;
+    }
     .folder-row {
         display: flex;
         align-items: center;
@@ -1222,13 +1903,13 @@
         flex: 1;
         min-width: 0;
     }
-    .delete-btn {
+    .menu-btn {
         align-items: center;
         display: inline-flex;
         height: 24px;
         justify-content: center;
         margin-right: 4px;
-        font-size: 14px;
+        font-size: 15px;
         line-height: 1;
         color: var(--text-secondary);
         cursor: pointer;
@@ -1241,13 +1922,15 @@
         font-family: inherit;
         width: 24px;
     }
-    .folder-row:hover .delete-btn,
-    .folder-row:focus-within .delete-btn {
+    .folder-row:hover .menu-btn,
+    .folder-row:focus-within .menu-btn {
         opacity: 1;
         pointer-events: auto;
     }
-    .delete-btn:hover {
-        color: var(--red);
+    .menu-btn:hover,
+    .menu-btn:focus-visible {
+        color: var(--text);
+        outline: 1px solid var(--blue);
     }
     .folders-toggle {
         font-size: 11px;
@@ -1654,46 +2337,39 @@
         object-fit: cover;
         width: 100%;
     }
-    .collection-context-menu {
+    .smart-editor-dialog {
+        min-width: min(620px, 80vw);
+        padding: calc(var(--spacing) * 2);
+    }
+    .smart-editor-dialog h2 {
+        color: var(--text);
+        font-size: 16px;
+        margin: 0 0 var(--spacing);
+    }
+    .smart-editor-dialog p {
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.5;
+        margin: 0 0 calc(var(--spacing) * 2);
+    }
+    .smart-editor-actions {
+        display: flex;
+        gap: var(--spacing);
+        justify-content: flex-end;
+        margin-top: calc(var(--spacing) * 2);
+    }
+    .smart-editor-actions button {
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: var(--radius);
-        box-shadow: 0 12px 32px color-mix(in srgb, var(--bg) 80%, transparent);
-        display: grid;
-        min-width: 200px;
-        padding: 4px;
-        position: fixed;
-        z-index: var(--z-context-menu);
-    }
-    .context-menu-header {
-        color: var(--text-secondary);
-        font-size: 10px;
-        overflow: hidden;
-        padding: 6px 8px;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .collection-context-menu button {
-        background: none;
-        border: none;
-        border-radius: var(--radius);
         color: var(--text);
         cursor: pointer;
-        font-family: inherit;
-        font-size: 12px;
-        padding: 6px 8px;
-        text-align: left;
+        font: inherit;
+        padding: 7px 12px;
     }
-    .collection-context-menu button:hover:not(:disabled),
-    .collection-context-menu button:focus-visible {
-        background: var(--border);
-    }
-    .collection-context-menu button:disabled {
-        color: var(--text-secondary);
-        cursor: default;
-    }
-    .collection-context-menu button.danger {
-        color: var(--red);
+    .smart-editor-actions button.primary {
+        border-color: var(--blue);
+        color: var(--blue);
     }
     .sr-only {
         border: 0;
