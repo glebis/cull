@@ -1,13 +1,16 @@
 <script lang="ts">
-    import { sessions, activeSession, sessionCanvases, activeCanvas, showToast } from '$lib/stores';
-    import { listSessions, createSession, listCanvases, validateSessionFolder } from '$lib/api';
+    import { sessions, activeSession, sessionCanvases, activeCanvas, collections, showToast, requestConfirm } from '$lib/stores';
+    import { listSessions, listCollections, createSession, listCanvases, validateSessionFolder, deleteSession, convertSessionToCollection, type Session } from '$lib/api';
+    import { revealItemInDir } from '@tauri-apps/plugin-opener';
     import { onMount } from 'svelte';
+    import ActionMenu, { type ActionMenuItem } from './ActionMenu.svelte';
 
     let open = $state(false);
     let search = $state('');
     let creating = $state(false);
     let newName = $state('');
     let rootEl = $state<HTMLDivElement | undefined>();
+    let sessionContextMenu = $state<{ session: Session; x: number; y: number } | null>(null);
 
     function close() {
         open = false;
@@ -72,6 +75,97 @@
         creating = false;
         newName = '';
     }
+
+    function contextPoint(event: MouseEvent | KeyboardEvent): { x: number; y: number } {
+        if (event instanceof MouseEvent && event.type === 'contextmenu') {
+            return { x: event.clientX, y: event.clientY };
+        }
+        const target = event.currentTarget as HTMLElement | null;
+        const row = target?.closest<HTMLElement>('.session-row') ?? target;
+        const rect = row?.getBoundingClientRect();
+        return rect
+            ? { x: rect.left + Math.min(32, rect.width / 2), y: rect.top + Math.min(24, rect.height) }
+            : { x: 16, y: 16 };
+    }
+
+    function isContextMenuKey(event: KeyboardEvent): boolean {
+        return event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10');
+    }
+
+    function openSessionContextMenu(event: MouseEvent | KeyboardEvent, session: Session) {
+        event.preventDefault();
+        event.stopPropagation();
+        sessionContextMenu = { session, ...contextPoint(event) };
+    }
+
+    async function openSession(session: Session) {
+        try {
+            await selectSession(session);
+        } catch (e) {
+            showToast('Failed to open session', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    async function revealSessionFolder(session: Session) {
+        try {
+            await revealItemInDir(session.folder_path);
+        } catch (e) {
+            showToast('Could not reveal session folder in Finder', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    async function refreshSessionLists() {
+        const [nextSessions, nextCollections] = await Promise.all([listSessions(), listCollections()]);
+        sessions.set(nextSessions);
+        collections.set(nextCollections);
+    }
+
+    async function convertSession(session: Session) {
+        try {
+            await convertSessionToCollection(session.id);
+            if ($activeSession?.id === session.id) await selectSession(null);
+            await refreshSessionLists();
+            showToast(`Session "${session.name}" converted to a collection`, { type: 'success' });
+        } catch (e) {
+            showToast('Failed to convert session to collection', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    async function removeSession(session: Session) {
+        const confirmed = await requestConfirm({
+            title: 'Delete Session',
+            description: `Delete session "${session.name}"? Original files stay on disk.`,
+            confirmLabel: 'Delete Session',
+            danger: true,
+        });
+        if (!confirmed) return;
+        try {
+            await deleteSession(session.id, false);
+            if ($activeSession?.id === session.id) await selectSession(null);
+            await refreshSessionLists();
+            showToast(`Session "${session.name}" deleted`, { type: 'success' });
+        } catch (e) {
+            showToast('Failed to delete session', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    let sessionContextItems = $derived.by((): ActionMenuItem[] => {
+        const target = sessionContextMenu;
+        if (!target) return [];
+        const { session } = target;
+        return [
+            { id: 'session-open', label: 'Open Session', action: () => openSession(session) },
+            { id: 'session-reveal', label: 'Reveal Session Folder in Finder', action: () => revealSessionFolder(session) },
+            { id: 'session-convert', label: 'Convert to Collection', action: () => convertSession(session) },
+            {
+                id: 'session-delete',
+                label: 'Delete Session…',
+                action: () => removeSession(session),
+                danger: true,
+                separatorBefore: true,
+            },
+        ];
+    });
 </script>
 
 <svelte:document onpointerdown={handleDocumentPointerdown} />
@@ -108,14 +202,25 @@
             </button>
 
             {#each filtered as session}
-                <button
-                    class="session-item"
-                    class:active={$activeSession?.id === session.id}
-                    onclick={() => selectSession(session)}
-                >
-                    <span class="session-name">{session.name}</span>
-                    <span class="count">{session.image_count}</span>
-                </button>
+                <div class="session-row" class:active={$activeSession?.id === session.id}>
+                    <button
+                        class="session-item"
+                        class:active={$activeSession?.id === session.id}
+                        onclick={() => selectSession(session)}
+                        oncontextmenu={(event) => openSessionContextMenu(event, session)}
+                        onkeydown={(event) => { if (isContextMenuKey(event)) openSessionContextMenu(event, session); }}
+                    >
+                        <span class="session-name">{session.name}</span>
+                        <span class="count">{session.image_count}</span>
+                    </button>
+                    <button
+                        class="session-menu-button"
+                        onclick={(event) => openSessionContextMenu(event, session)}
+                        title="Session actions"
+                        aria-label={`Session actions: ${session.name}`}
+                        aria-haspopup="menu"
+                    >…</button>
+                </div>
             {/each}
 
             {#if creating}
@@ -137,6 +242,16 @@
         </div>
     {/if}
 </div>
+
+{#if sessionContextMenu}
+    <ActionMenu
+        title={sessionContextMenu.session.name}
+        x={sessionContextMenu.x}
+        y={sessionContextMenu.y}
+        items={sessionContextItems}
+        onclose={() => sessionContextMenu = null}
+    />
+{/if}
 
 <style>
     .session-switcher {
@@ -219,6 +334,32 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+    .session-row {
+        align-items: center;
+        display: flex;
+    }
+    .session-row .session-item {
+        min-width: 0;
+    }
+    .session-menu-button {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        flex-shrink: 0;
+        font: inherit;
+        opacity: 0;
+        padding: 6px 8px;
+    }
+    .session-row:hover .session-menu-button,
+    .session-row:focus-within .session-menu-button {
+        opacity: 1;
+    }
+    .session-menu-button:hover,
+    .session-menu-button:focus-visible {
+        color: var(--text);
+        outline: none;
     }
     .count {
         color: var(--text-secondary);
