@@ -4,6 +4,12 @@ import { svelteTesting } from "@testing-library/svelte/vite";
 
 const host = process.env.TAURI_DEV_HOST;
 const e2eMock = process.env.CULL_E2E_MOCK === "1";
+const nativeInteractionSmoke = process.env.CULL_NATIVE_INTERACTION_SMOKE === "1";
+const viteCacheVariant = nativeInteractionSmoke
+  ? "native-smoke"
+  : e2eMock
+    ? "browser-e2e"
+    : "app";
 const tauriMock = decodeURIComponent(new URL("./src/lib/tauri-mock.ts", import.meta.url).pathname);
 const tauriMockAliases = [
   "@tauri-apps/api/core",
@@ -18,6 +24,13 @@ const tauriMockAliases = [
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [sveltekit(), svelteTesting()],
+  // Keep optimized dependency paths scoped to this checkout. Some local
+  // worktrees intentionally share node_modules, whose default .vite cache can
+  // otherwise hydrate the app with modules pre-bundled from another worktree.
+  cacheDir: `.vite-cache/${viteCacheVariant}`,
+  define: {
+    "import.meta.env.CULL_NATIVE_INTERACTION_SMOKE": JSON.stringify(nativeInteractionSmoke),
+  },
   resolve: e2eMock ? { alias: tauriMockAliases } : undefined,
   test: {
     exclude: [

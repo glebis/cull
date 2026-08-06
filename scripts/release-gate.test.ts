@@ -409,8 +409,8 @@ describe('release gate', () => {
     expect(workflow).toContain('permissions:\n  contents: read');
     expect(workflow).toContain('group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}');
     expect(workflow).toContain('cancel-in-progress: true');
-    expect(workflow.match(/uses: Swatinem\/rust-cache@/g)).toHaveLength(2);
-    expect(workflow.match(/workspaces: src-tauri -> target/g)).toHaveLength(2);
+    expect(workflow.match(/uses: Swatinem\/rust-cache@/g)).toHaveLength(3);
+    expect(workflow.match(/workspaces: src-tauri -> target/g)).toHaveLength(3);
     expect(workflow).toMatch(/\n  site:\n[\s\S]*?working-directory: site[\s\S]*?npm ci[\s\S]*?npm run check[\s\S]*?npm test[\s\S]*?npm run build/);
 
     const ciScript = readFileSync(resolve(import.meta.dirname, 'check-ci.sh'), 'utf8');

@@ -814,10 +814,18 @@
                 console.error('Library health check failed:', e);
             }
         };
-        init().catch(e => {
+        const initPromise = init();
+        initPromise.catch(e => {
             console.error('Failed to initialize app:', e);
             showToast('App initialization failed', { detail: String(e), type: 'error', duration: 10000 });
         });
+        if (import.meta.env.CULL_NATIVE_INTERACTION_SMOKE) {
+            initPromise.finally(() => {
+                import('$lib/native-interaction-smoke')
+                    .then(({ runNativeInteractionSmoke }) => runNativeInteractionSmoke())
+                    .catch(e => console.error('[native-interaction-smoke] failed to start:', e));
+            }).catch(() => {});
+        }
         initMenu().catch(e => console.error('Failed to init menu:', e));
 
         const dragUnlisten = listen<boolean>('drag-hover', (event) => {
