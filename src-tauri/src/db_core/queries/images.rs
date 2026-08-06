@@ -118,11 +118,22 @@ impl Database {
 
         for folder in folders {
             let folder = folder.trim_end_matches('/');
-            // Exact folder OR any descendant. The trailing "/%" keeps sibling
-            // prefixes like /artisan from matching a /art scope.
-            clauses.push("(f.path = ? OR f.path LIKE ? || '/%')".to_string());
+            // Exact folder OR any descendant. The descendant test is a substr
+            // prefix comparison rather than LIKE: `_` and `%` are LIKE
+            // wildcards, so a folder named `2025_Trips` would also pull in
+            // `2025XTrips`, and LIKE is ASCII-case-insensitive, which would
+            // merge `/lib/Art` and `/lib/art` into one result set even though
+            // the sidebar shows them as two folders with separate counts.
+            // COLLATE BINARY keeps both distinctions. Matches
+            // list_images_by_folder and delete_images_by_folder.
+            let prefix = format!("{}/", folder);
+            clauses.push(
+                "(f.path = ? OR substr(f.path, 1, ?) COLLATE BINARY = ? COLLATE BINARY)"
+                    .to_string(),
+            );
             args.push(Value::Text(folder.to_string()));
-            args.push(Value::Text(folder.to_string()));
+            args.push(Value::Integer(prefix.chars().count() as i64));
+            args.push(Value::Text(prefix));
         }
         if !collections.is_empty() {
             let placeholders = vec!["?"; collections.len()].join(",");
@@ -264,7 +275,12 @@ impl Database {
         offset: u32,
     ) -> Result<Vec<ImageWithFile>> {
         let conn = self.conn.lock();
-        let pattern = format!("{}/%", folder);
+        // Prefix-match on substr rather than LIKE: `_` and `%` are wildcards in
+        // LIKE, so a folder named `2025_Trips` would also pull in `2025XTrips`.
+        // This mirrors delete_images_by_folder, which avoids LIKE for the same
+        // reason.
+        let prefix = format!("{}/", folder.trim_end_matches('/'));
+        let prefix_len = prefix.chars().count() as i64;
         let mut stmt = conn.prepare(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
@@ -273,12 +289,12 @@ impl Database {
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE f.path LIKE ?1
+             WHERE substr(f.path, 1, ?4) COLLATE BINARY = ?1 COLLATE BINARY
              GROUP BY i.id
              ORDER BY i.imported_at DESC
              LIMIT ?2 OFFSET ?3",
         )?;
-        let rows = stmt.query_map(params![pattern, limit, offset], |row| {
+        let rows = stmt.query_map(params![prefix, limit, offset, prefix_len], |row| {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
             let decision: Option<String> = row.get(11)?;

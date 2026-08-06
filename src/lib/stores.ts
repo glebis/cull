@@ -461,6 +461,16 @@ export const pinnedCollection = writable<string | null>(null);
 // Sidebar collection pins, ordered by the time they were pinned.
 export const pinnedCollections = writable<string[]>([]);
 
+// Folder-tree rows the user has expanded, keyed by full folder path. Persisted,
+// so a deep working branch survives a relaunch.
+export const expandedFolders = writable<Set<string>>(new Set());
+// Sidebar sections the user has collapsed, keyed by section id. Collapsed (not
+// expanded) is the stored state so a section added later defaults to open.
+export const sidebarSectionsCollapsed = writable<Set<string>>(new Set());
+// Free-text filter narrowing folders, collections and smart collections in the
+// sidebar. Transient by design — a stale filter on launch reads as data loss.
+export const sidebarFilter = writable<string>('');
+
 // Lineage tab layout preference
 export type LineageLayout = 'timeline' | 'comparison';
 export const lineageLayout = writable<LineageLayout>('timeline');
