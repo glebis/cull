@@ -613,8 +613,8 @@
         closeSidebarContextMenu();
         const name = folderName(folder);
         const confirmed = await requestConfirm({
-            title: 'Remove Folder from Library',
-            description: `Remove "${name}" from the library? Cull records for images that only exist in this folder will be removed. Original files stay on disk.`,
+            title: 'Remove folder from library',
+            description: `Remove folder from library: "${name}"? Cull records for images that only exist in this folder will be removed. Original files stay on disk.`,
             confirmLabel: 'Remove Folder',
             danger: true,
         });
