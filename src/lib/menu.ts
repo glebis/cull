@@ -16,19 +16,9 @@ import {
     listCollections,
     listFolders,
     updateMenuState,
-    openPreviewDisplay,
-    setPreviewDisplayAlwaysOnTop as setPreviewDisplayAlwaysOnTopNative,
-    listPreviewDisplayMonitors,
-    placePreviewDisplay,
-    startPreviewDisplayWebStream,
-    stopPreviewDisplayWebStream,
     getPreviewDisplayWebStreamStatus,
-    setAppSetting,
     type ImageWithFile,
-    type PreviewDisplayLayout,
     type OpenWithApplication,
-    type PreviewDisplayMode,
-    type PreviewWebStreamStatus,
 } from './api';
 import {
     images,
@@ -62,9 +52,6 @@ import {
 } from './stores';
 import { openSettings } from './settings-navigation';
 import {
-    PREVIEW_DISPLAY_MODE_SETTING,
-    PREVIEW_DISPLAY_LAYOUT_SETTING,
-    PREVIEW_DISPLAY_OVERLAY_SETTING,
     previewDisplayAlwaysOnTop,
     previewDisplayBlanked,
     previewDisplayFrozen,
@@ -72,12 +59,6 @@ import {
     previewDisplayMode,
     previewDisplayOverlay,
     previewDisplayWebStreamStatus,
-    setPreviewDisplayBlanked,
-    setPreviewDisplayAlwaysOnTop,
-    setPreviewDisplayFrozen,
-    setPreviewDisplayLayout,
-    setPreviewDisplayMode,
-    setPreviewDisplayOverlay,
     setPreviewDisplayWebStreamStatus,
 } from './preview-display-store';
 import { tabRegistry } from './plugins/tab-registry';
@@ -88,13 +69,23 @@ function publishTabAvailable(): boolean {
     return get(tabRegistry).some(t => t.id === 'publish');
 }
 import {
-    overlayForPreviewDisplayMode,
-    withPreviewDisplayField,
-    withPreviewDisplayRailSide,
-    withPreviewDisplayRailTextSize,
-    withPreviewDisplayRailWidth,
-    type PreviewDisplayField,
-} from './preview-display';
+    copyPreviewDisplayWebStreamUrl,
+    handleOpenPreviewDisplay,
+    handlePreviewDisplayAlwaysOnTop,
+    handlePreviewDisplayBlank,
+    handlePreviewDisplayField,
+    handlePreviewDisplayFreeze,
+    handlePreviewDisplayFullscreen,
+    handlePreviewDisplayLayout,
+    handlePreviewDisplayMoveMonitor,
+    handlePreviewDisplayPreset,
+    handlePreviewDisplayRailSide,
+    handlePreviewDisplayRailTextSize,
+    handlePreviewDisplayRailWidth,
+    handlePreviewDisplayStartWebStream,
+    handlePreviewDisplayStopWebStream,
+    requestPreviewDisplayCapture,
+} from './preview-display-actions';
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { folderDisplayName } from './move-menu-utils';
 import { openCommandPalette } from './command-palette';
@@ -396,183 +387,6 @@ async function handleGitHubWiki() {
     }
 }
 
-function handlePreviewDisplayFreeze() {
-    const next = !get(previewDisplayFrozen);
-    setPreviewDisplayFrozen(next);
-    showToast(next ? 'Preview Display frozen' : 'Preview Display live', { type: 'info', duration: 3000 });
-}
-
-function handlePreviewDisplayBlank() {
-    const next = !get(previewDisplayBlanked);
-    setPreviewDisplayBlanked(next);
-    showToast(next ? 'Preview Display blanked' : 'Preview Display visible', { type: 'info', duration: 3000 });
-}
-
-async function handlePreviewDisplayAlwaysOnTop() {
-    const previous = get(previewDisplayAlwaysOnTop);
-    const next = !previous;
-    setPreviewDisplayAlwaysOnTop(next);
-    try {
-        await setPreviewDisplayAlwaysOnTopNative(next);
-        showToast(next ? 'Preview Display stays on top' : 'Preview Display normal stacking', {
-            type: 'info',
-            duration: 3000,
-        });
-    } catch (e) {
-        setPreviewDisplayAlwaysOnTop(previous);
-        showToast('Preview Display stacking failed', { detail: String(e), type: 'error', duration: 8000 });
-    }
-}
-
-async function handlePreviewDisplayPreset(mode: PreviewDisplayMode) {
-    const overlay = overlayForPreviewDisplayMode(mode);
-    setPreviewDisplayMode(mode);
-    try {
-        await setAppSetting(PREVIEW_DISPLAY_MODE_SETTING, mode);
-        await setAppSetting(PREVIEW_DISPLAY_OVERLAY_SETTING, JSON.stringify(overlay));
-    } catch (e) {
-        showToast('Preview Display preset not saved', { detail: String(e), type: 'warning', duration: 6000 });
-    }
-}
-
-async function handlePreviewDisplayLayout(layout: PreviewDisplayLayout) {
-    setPreviewDisplayLayout(layout);
-    try {
-        await setAppSetting(PREVIEW_DISPLAY_LAYOUT_SETTING, layout);
-    } catch (e) {
-        showToast('Preview Display layout not saved', { detail: String(e), type: 'warning', duration: 6000 });
-    }
-}
-
-async function persistPreviewDisplayOverlay(overlay = get(previewDisplayOverlay)) {
-    setPreviewDisplayOverlay(overlay);
-    try {
-        await setAppSetting(PREVIEW_DISPLAY_OVERLAY_SETTING, JSON.stringify(overlay));
-    } catch (e) {
-        showToast('Preview Display settings not saved', { detail: String(e), type: 'warning', duration: 6000 });
-    }
-}
-
-function handlePreviewDisplayField(field: PreviewDisplayField) {
-    const overlay = get(previewDisplayOverlay);
-    persistPreviewDisplayOverlay(withPreviewDisplayField(overlay, field, !overlay[field]));
-}
-
-async function requestPreviewDisplayCapture(destination: 'clipboard' | 'png') {
-    try {
-        await openPreviewDisplay();
-        await emit('preview-display:capture-request', { destination });
-        showToast(destination === 'clipboard' ? 'Preview Display copy requested' : 'Preview Display export requested', {
-            type: 'info',
-            duration: 3000,
-        });
-    } catch (e) {
-        showToast('Preview Display capture failed', { detail: String(e), type: 'error', duration: 8000 });
-    }
-}
-
-function displayLabel(monitor: { name: string | null; width: number; height: number; primary: boolean }, index: number): string {
-    const name = monitor.name || `Display ${index + 1}`;
-    return `${name}${monitor.primary ? ' (Primary)' : ''} ${monitor.width}x${monitor.height}`;
-}
-
-async function handlePreviewDisplayMoveMonitor() {
-    try {
-        const monitors = await listPreviewDisplayMonitors();
-        if (monitors.length === 0) {
-            showToast('No displays available', { type: 'warning' });
-            return;
-        }
-        showToast('Move Preview Display', {
-            detail: 'Choose display',
-            duration: 12000,
-            actions: monitors.slice(0, 4).map((monitor, index) => ({
-                label: displayLabel(monitor, index),
-                onclick: () => {
-                    placePreviewDisplay(monitor.id, false).catch((e) => {
-                        showToast('Preview Display move failed', { detail: String(e), type: 'error', duration: 8000 });
-                    });
-                },
-            })),
-        });
-    } catch (e) {
-        showToast('Display list unavailable', { detail: String(e), type: 'error', duration: 8000 });
-    }
-}
-
-async function handlePreviewDisplayFullscreen() {
-    try {
-        await placePreviewDisplay(null, true);
-    } catch (e) {
-        showToast('Preview Display fullscreen failed', { detail: String(e), type: 'error', duration: 8000 });
-    }
-}
-
-async function copyPreviewDisplayWebStreamUrl(status: PreviewWebStreamStatus = get(previewDisplayWebStreamStatus)) {
-    if (!status.active || !status.url) {
-        showToast('Preview Display web stream is not running', { type: 'warning', duration: 4000 });
-        return;
-    }
-    try {
-        await navigator.clipboard.writeText(status.url);
-        showToast('Preview Display URL copied', { detail: status.url, type: 'success', duration: 8000 });
-    } catch (e) {
-        showToast('Preview Display URL ready', { detail: `${status.url} Copy failed: ${String(e)}`, type: 'warning', duration: 10000 });
-    }
-}
-
-function showPreviewDisplayWebStreamToast(status: PreviewWebStreamStatus) {
-    if (!status.url) return;
-    showToast('Preview Display web stream live', {
-        detail: status.url,
-        type: 'success',
-        duration: 12000,
-        actions: [
-            {
-                label: 'Open',
-                onclick: () => {
-                    openUrl(status.url!).catch((e) => {
-                        showToast('Could not open Preview Display URL', { detail: String(e), type: 'error', duration: 8000 });
-                    });
-                },
-            },
-            {
-                label: 'Copy',
-                onclick: () => {
-                    copyPreviewDisplayWebStreamUrl(status);
-                },
-            },
-            {
-                label: 'Stop',
-                onclick: () => {
-                    handlePreviewDisplayStopWebStream();
-                },
-            },
-        ],
-    });
-}
-
-async function handlePreviewDisplayStartWebStream(host: '127.0.0.1' | '0.0.0.0' = '127.0.0.1') {
-    try {
-        const status = await startPreviewDisplayWebStream(host, null);
-        setPreviewDisplayWebStreamStatus(status);
-        await copyPreviewDisplayWebStreamUrl(status);
-        showPreviewDisplayWebStreamToast(status);
-    } catch (e) {
-        showToast('Preview Display web stream failed', { detail: String(e), type: 'error', duration: 8000 });
-    }
-}
-
-async function handlePreviewDisplayStopWebStream() {
-    try {
-        const status = await stopPreviewDisplayWebStream();
-        setPreviewDisplayWebStreamStatus(status);
-        showToast('Preview Display web stream stopped', { type: 'info', duration: 4000 });
-    } catch (e) {
-        showToast('Preview Display web stream stop failed', { detail: String(e), type: 'error', duration: 8000 });
-    }
-}
-
 function handleMenuAction(action: string) {
     switch (action) {
         case 'about':
@@ -668,9 +482,7 @@ function handleMenuAction(action: string) {
             showLoupeHistogram.update((visible) => !visible);
             break;
         case 'view_preview_display':
-            openPreviewDisplay().catch((e) => {
-                showToast('Preview Display failed', { detail: String(e), type: 'error', duration: 8000 });
-            });
+            handleOpenPreviewDisplay();
             break;
         case 'preview_display_move_monitor':
             handlePreviewDisplayMoveMonitor();
@@ -751,28 +563,28 @@ function handleMenuAction(action: string) {
             handlePreviewDisplayField('showHistogram');
             break;
         case 'preview_display_rail_left':
-            persistPreviewDisplayOverlay(withPreviewDisplayRailSide(get(previewDisplayOverlay), 'left'));
+            handlePreviewDisplayRailSide('left');
             break;
         case 'preview_display_rail_right':
-            persistPreviewDisplayOverlay(withPreviewDisplayRailSide(get(previewDisplayOverlay), 'right'));
+            handlePreviewDisplayRailSide('right');
             break;
         case 'preview_display_rail_width_narrow':
-            persistPreviewDisplayOverlay(withPreviewDisplayRailWidth(get(previewDisplayOverlay), 'narrow'));
+            handlePreviewDisplayRailWidth('narrow');
             break;
         case 'preview_display_rail_width_medium':
-            persistPreviewDisplayOverlay(withPreviewDisplayRailWidth(get(previewDisplayOverlay), 'medium'));
+            handlePreviewDisplayRailWidth('medium');
             break;
         case 'preview_display_rail_width_wide':
-            persistPreviewDisplayOverlay(withPreviewDisplayRailWidth(get(previewDisplayOverlay), 'wide'));
+            handlePreviewDisplayRailWidth('wide');
             break;
         case 'preview_display_text_small':
-            persistPreviewDisplayOverlay(withPreviewDisplayRailTextSize(get(previewDisplayOverlay), 'small'));
+            handlePreviewDisplayRailTextSize('small');
             break;
         case 'preview_display_text_medium':
-            persistPreviewDisplayOverlay(withPreviewDisplayRailTextSize(get(previewDisplayOverlay), 'medium'));
+            handlePreviewDisplayRailTextSize('medium');
             break;
         case 'preview_display_text_large':
-            persistPreviewDisplayOverlay(withPreviewDisplayRailTextSize(get(previewDisplayOverlay), 'large'));
+            handlePreviewDisplayRailTextSize('large');
             break;
         case 'zoom_in':
             if (get(viewMode) === 'loupe') {

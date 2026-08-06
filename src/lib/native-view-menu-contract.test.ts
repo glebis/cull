@@ -99,7 +99,7 @@ describe('native View menu contract', () => {
         expect(nativeMenu).toContain('preview_display_always_on_top: bool');
         expect(nativeMenu).toContain('state.preview_display_always_on_top');
         expect(frontendMenu).toContain("case 'preview_display_always_on_top'");
-        expect(frontendMenu).toContain('setPreviewDisplayAlwaysOnTopNative');
+        expect(source('src/lib/preview-display-actions.ts')).toContain('setPreviewDisplayAlwaysOnTopNative');
         expect(frontendMenu).toContain('previewDisplayAlwaysOnTop.subscribe(queueMenuStateUpdate)');
         expect(api).toContain("invoke<boolean>('set_preview_display_always_on_top'");
         expect(store).toContain('previewDisplayAlwaysOnTop');
