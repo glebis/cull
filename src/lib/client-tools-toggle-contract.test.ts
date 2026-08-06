@@ -85,9 +85,13 @@ describe('client tools + voice dictation toggle contract', () => {
         expect(ids).toContain('client.toggle-favorite');
         expect(ids).toContain('client.add-comment');
 
+        // Preview Display handlers live in preview-display-actions.ts so the
+        // command palette can share them with the native menu; the menu still
+        // dispatches into them.
         const menu = readProjectFile('src/lib/menu.ts');
-        expect(menu).toContain('openPreviewDisplay');
-        expect(menu).toContain('startPreviewDisplayWebStream');
+        const previewActions = readProjectFile('src/lib/preview-display-actions.ts');
+        expect(previewActions).toContain('openPreviewDisplay');
+        expect(previewActions).toContain('startPreviewDisplayWebStream');
         expect(menu).not.toContain('clientToolsEnabled');
         expect(menu).not.toContain('voiceDictationEnabled');
 

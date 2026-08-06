@@ -56,6 +56,32 @@ import { loadSimilarImages } from './similarity';
 import { getPluginPaletteCommands } from './plugins/loader';
 import { tabRegistry } from './plugins/tab-registry';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
+import {
+    previewDisplayAlwaysOnTop,
+    previewDisplayBlanked,
+    previewDisplayFrozen,
+    previewDisplayLayout,
+    previewDisplayMode,
+    previewDisplayOverlay,
+    previewDisplayWebStreamStatus,
+} from './preview-display-store';
+import type { PreviewDisplayField } from './preview-display';
+import type { PreviewDisplayLayout, PreviewDisplayMode } from './api';
+import {
+    copyPreviewDisplayWebStreamUrl,
+    handleOpenPreviewDisplay,
+    handlePreviewDisplayAlwaysOnTop,
+    handlePreviewDisplayBlank,
+    handlePreviewDisplayField,
+    handlePreviewDisplayFreeze,
+    handlePreviewDisplayFullscreen,
+    handlePreviewDisplayLayout,
+    handlePreviewDisplayMoveMonitor,
+    handlePreviewDisplayPreset,
+    handlePreviewDisplayStartWebStream,
+    handlePreviewDisplayStopWebStream,
+    requestPreviewDisplayCapture,
+} from './preview-display-actions';
 
 export type CommandPaletteItemKind = 'command' | 'destination';
 
@@ -1023,6 +1049,195 @@ function commandItems(): CommandPaletteItem[] {
             kind: 'command',
             keywords: ['objects', 'metadata', 'panel'],
             run: () => showDetectionInspector.update(value => !value),
+        },
+        ...previewDisplayItems(),
+    ];
+}
+
+/**
+ * Preview Display (second-screen output) commands.
+ *
+ * Every entry delegates to the same handler the native menu uses — see
+ * `preview-display-actions.ts`. Keywords are deliberately generous because
+ * people call this surface by the hardware ("projector", "beamer",
+ * "second screen") far more often than by its in-app name.
+ */
+function previewDisplayItems(): CommandPaletteItem[] {
+    const frozen = get(previewDisplayFrozen);
+    const blanked = get(previewDisplayBlanked);
+    const onTop = get(previewDisplayAlwaysOnTop);
+    const mode = get(previewDisplayMode);
+    const layout = get(previewDisplayLayout);
+    const overlay = get(previewDisplayOverlay);
+    const stream = get(previewDisplayWebStreamStatus);
+
+    // Shared vocabulary so any of these words finds any preview command.
+    const base = ['preview', 'display', 'second screen', 'secondary screen', 'external display',
+        'projector', 'beamer', 'monitor', 'output', 'presentation', 'client'];
+
+    const presets: Array<{ mode: PreviewDisplayMode; title: string; subtitle: string; extra: string[] }> = [
+        { mode: 'image_only', title: 'Preview: Image Only', subtitle: 'Clean full-bleed image, no overlays', extra: ['clean', 'bare', 'preset'] },
+        { mode: 'client_review', title: 'Preview: Client Review', subtitle: 'Filename, rating and decision overlay', extra: ['review', 'preset'] },
+        { mode: 'metadata_review', title: 'Preview: Metadata Review', subtitle: 'Full metadata rail alongside the image', extra: ['metadata', 'rail', 'preset'] },
+    ];
+
+    const layouts: Array<{ layout: PreviewDisplayLayout; title: string; subtitle: string; extra: string[] }> = [
+        { layout: 'single', title: 'Preview Layout: Single', subtitle: 'One image fills the preview display', extra: ['one', 'solo'] },
+        { layout: 'compare', title: 'Preview Layout: Compare', subtitle: 'Side-by-side comparison on the preview display', extra: ['side by side', 'ab'] },
+        { layout: 'grid', title: 'Preview Layout: Grid', subtitle: 'Contact-sheet grid on the preview display', extra: ['contact sheet', 'tiles'] },
+    ];
+
+    const fields: Array<{ field: PreviewDisplayField; id: string; label: string; extra: string[] }> = [
+        { field: 'showFilename', id: 'filename', label: 'Filename', extra: ['name', 'file'] },
+        { field: 'showRating', id: 'rating', label: 'Rating', extra: ['stars'] },
+        { field: 'showDecision', id: 'decision', label: 'Decision', extra: ['pick', 'reject', 'flag'] },
+        { field: 'showDimensions', id: 'dimensions', label: 'Dimensions', extra: ['size', 'pixels', 'resolution'] },
+        { field: 'showFormat', id: 'format', label: 'Format', extra: ['type', 'extension'] },
+    ];
+
+    return [
+        {
+            id: 'preview.open',
+            title: 'Open Preview Display',
+            subtitle: 'Show the second-screen output window',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'open', 'show', 'window'],
+            run: handleOpenPreviewDisplay,
+        },
+        {
+            id: 'preview.move-monitor',
+            title: 'Move Preview Display to Display…',
+            subtitle: 'Pick which physical display shows the preview',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'move', 'screen', 'place'],
+            run: handlePreviewDisplayMoveMonitor,
+        },
+        {
+            id: 'preview.fullscreen',
+            title: 'Preview Display Fullscreen',
+            subtitle: 'Take the preview display fullscreen',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'fullscreen', 'full screen', 'maximise', 'maximize'],
+            run: handlePreviewDisplayFullscreen,
+        },
+        {
+            id: 'preview.toggle-always-on-top',
+            title: onTop ? 'Preview Display: Normal Stacking' : 'Preview Display: Always on Top',
+            subtitle: onTop ? 'Let other windows cover the preview display' : 'Keep the preview display above other windows',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'always on top', 'float', 'stacking', 'front'],
+            run: handlePreviewDisplayAlwaysOnTop,
+        },
+        {
+            id: 'preview.toggle-freeze',
+            title: frozen ? 'Unfreeze Preview Display' : 'Freeze Preview Display',
+            subtitle: frozen ? 'Resume following the focused image' : 'Hold the current image while you browse',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'freeze', 'unfreeze', 'hold', 'lock', 'pause', 'live'],
+            run: handlePreviewDisplayFreeze,
+        },
+        {
+            id: 'preview.toggle-blank',
+            title: blanked ? 'Unblank Preview Display' : 'Blank Preview Display',
+            subtitle: blanked ? 'Show the image again' : 'Black out the preview display',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'blank', 'unblank', 'black', 'hide', 'mute'],
+            run: handlePreviewDisplayBlank,
+        },
+        ...presets.map(preset => ({
+            id: `preview.preset-${preset.mode}`,
+            title: preset.title,
+            subtitle: mode === preset.mode ? `${preset.subtitle} (current)` : preset.subtitle,
+            category: 'Preview',
+            kind: 'command' as const,
+            keywords: [...base, ...preset.extra],
+            run: () => handlePreviewDisplayPreset(preset.mode),
+        })),
+        ...layouts.map(entry => ({
+            id: `preview.layout-${entry.layout}`,
+            title: entry.title,
+            subtitle: layout === entry.layout ? `${entry.subtitle} (current)` : entry.subtitle,
+            category: 'Preview',
+            kind: 'command' as const,
+            keywords: [...base, 'layout', ...entry.extra],
+            run: () => handlePreviewDisplayLayout(entry.layout),
+        })),
+        ...fields.map(entry => ({
+            id: `preview.field-${entry.id}`,
+            title: overlay[entry.field]
+                ? `Preview Overlay: Hide ${entry.label}`
+                : `Preview Overlay: Show ${entry.label}`,
+            subtitle: overlay[entry.field]
+                ? `${entry.label} is currently shown on the preview display`
+                : `${entry.label} is currently hidden on the preview display`,
+            category: 'Preview',
+            kind: 'command' as const,
+            keywords: [...base, 'overlay', 'field', ...entry.extra],
+            run: () => handlePreviewDisplayField(entry.field),
+        })),
+        {
+            id: 'preview.copy-to-clipboard',
+            title: 'Copy Preview Display to Clipboard',
+            subtitle: 'Capture what the preview display is showing',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'copy', 'clipboard', 'capture', 'screenshot'],
+            run: () => requestPreviewDisplayCapture('clipboard'),
+        },
+        {
+            id: 'preview.export-png',
+            title: 'Export Preview Display as PNG',
+            subtitle: 'Save what the preview display is showing to a file',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'export', 'png', 'save', 'capture', 'screenshot'],
+            run: () => requestPreviewDisplayCapture('png'),
+        },
+        {
+            id: 'preview.start-web-stream',
+            title: 'Start Preview Web Stream (This Mac)',
+            subtitle: 'Serve the preview display on localhost',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'web', 'stream', 'browser', 'localhost', 'serve', 'share'],
+            when: () => !get(previewDisplayWebStreamStatus).active,
+            run: () => handlePreviewDisplayStartWebStream('127.0.0.1'),
+        },
+        {
+            id: 'preview.start-lan-web-stream',
+            title: 'Start Preview Web Stream (Local Network)',
+            subtitle: 'Serve the preview display to other devices on this network',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'web', 'stream', 'lan', 'network', 'wifi', 'remote', 'share', 'ipad', 'phone'],
+            when: () => !get(previewDisplayWebStreamStatus).active,
+            run: () => handlePreviewDisplayStartWebStream('0.0.0.0'),
+        },
+        {
+            id: 'preview.copy-web-stream-url',
+            title: 'Copy Preview Web Stream URL',
+            subtitle: stream.url ?? 'Stream URL',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'web', 'stream', 'url', 'copy', 'link', 'address'],
+            when: () => get(previewDisplayWebStreamStatus).active,
+            run: () => copyPreviewDisplayWebStreamUrl(),
+        },
+        {
+            id: 'preview.stop-web-stream',
+            title: 'Stop Preview Web Stream',
+            subtitle: 'Shut down the preview web server',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'web', 'stream', 'stop', 'end', 'close'],
+            when: () => get(previewDisplayWebStreamStatus).active,
+            run: handlePreviewDisplayStopWebStream,
         },
     ];
 }
