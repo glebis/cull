@@ -2025,6 +2025,40 @@ mod tests {
     }
 
     #[test]
+    fn list_images_in_scope_treats_like_wildcards_as_literal() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "inside", "h-in", "/Photos/2025_Trips/a.png");
+        insert_test_image_at_path(&db, "outside", "h-out", "/Photos/2025XTrips/c.png");
+
+        // `_` is a LIKE wildcard; the scope must treat it as a literal.
+        let ids: Vec<String> = db
+            .list_images_in_scope(&["/Photos/2025_Trips".to_string()], &[], &[], 100, 0)
+            .unwrap()
+            .into_iter()
+            .map(|i| i.image.id)
+            .collect();
+        assert_eq!(ids, vec!["inside".to_string()]);
+    }
+
+    #[test]
+    fn list_images_in_scope_folder_is_case_sensitive() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "upper", "h-u", "/lib/Art/u.png");
+        insert_test_image_at_path(&db, "lower", "h-l", "/lib/art/l.png");
+
+        // SQLite's LIKE is ASCII-case-insensitive, which would merge these two
+        // folders even though the sidebar lists them separately with their own
+        // counts. COLLATE BINARY keeps the displayed counts honest.
+        let ids: Vec<String> = db
+            .list_images_in_scope(&["/lib/Art".to_string()], &[], &[], 100, 0)
+            .unwrap()
+            .into_iter()
+            .map(|i| i.image.id)
+            .collect();
+        assert_eq!(ids, vec!["upper".to_string()]);
+    }
+
+    #[test]
     fn list_images_in_scope_folder_prefix_is_exact() {
         let db = test_db();
         insert_test_image_at_path(&db, "a", "h-a", "/art/a.png");
@@ -2042,6 +2076,41 @@ mod tests {
         assert!(ids.contains("a"));
         assert!(ids.contains("c"));
         assert!(!ids.contains("b"));
+    }
+
+    #[test]
+    fn list_images_by_folder_treats_underscore_as_literal() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "inside", "h-in", "/Photos/2025_Trips/A/a.png");
+        insert_test_image_at_path(&db, "outside", "h-out", "/Photos/2025XTrips/C/c.png");
+
+        // `_` is a LIKE wildcard; the prefix match must treat it literally or
+        // the 2025XTrips image leaks into the 2025_Trips folder.
+        let ids: Vec<String> = db
+            .list_images_by_folder("/Photos/2025_Trips", 100, 0)
+            .unwrap()
+            .into_iter()
+            .map(|i| i.image.id)
+            .collect();
+        assert_eq!(ids, vec!["inside".to_string()]);
+    }
+
+    #[test]
+    fn list_images_by_folder_is_recursive_but_not_prefix_greedy() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "a", "h-a", "/art/a.png");
+        insert_test_image_at_path(&db, "c", "h-c", "/art/sub/c.png");
+        insert_test_image_at_path(&db, "b", "h-b", "/artisan/b.png");
+
+        let ids: std::collections::BTreeSet<String> = db
+            .list_images_by_folder("/art", 100, 0)
+            .unwrap()
+            .into_iter()
+            .map(|i| i.image.id)
+            .collect();
+        assert!(ids.contains("a"));
+        assert!(ids.contains("c"), "subfolders must be included");
+        assert!(!ids.contains("b"), "sibling prefix must not match");
     }
 
     #[test]
