@@ -1078,8 +1078,6 @@
                 </div>
             {/if}
         </div>
-    {:else}
-        <div class="empty">No image selected</div>
     {/if}
 
     {#if cropMode}
@@ -1191,6 +1189,7 @@
 
     {#if !hideOverlays}
     <div class="overlay-bar">
+        {#if image}
         <span class="filename">{filename}</span>
         <span class="sep">|</span>
         <span class="dim">{infoDimensions}</span>
@@ -1231,6 +1230,9 @@
             <span class="decision" class:accept={decision === 'accept'} class:reject={decision === 'reject'}>
                 {decision}
             </span>
+        {/if}
+        {:else}
+            <span class="empty-status">No image selected</span>
         {/if}
         <span class="sep">|</span>
         <button
@@ -1432,9 +1434,8 @@
         font-size: 14px;
         text-align: center;
     }
-    .empty {
+    .empty-status {
         color: var(--text-secondary);
-        font-size: 14px;
     }
     .overlay-bar {
         position: relative;
@@ -1445,6 +1446,7 @@
         align-items: center;
         gap: 8px;
         min-height: 32px;
+        margin-top: auto;
         padding: 0 12px;
         background: var(--bg);
         font-size: 11px;
