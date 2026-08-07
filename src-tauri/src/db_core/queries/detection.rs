@@ -104,6 +104,20 @@ impl Database {
         )
     }
 
+    pub fn list_detected_classes(&self) -> Result<Vec<(String, u32)>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT d.class_name, COUNT(DISTINCT d.image_id) AS image_count
+             FROM detections d
+             JOIN image_files f ON f.image_id = d.image_id AND f.missing_at IS NULL
+             WHERE d.model_name GLOB 'yolo*'
+             GROUP BY d.class_name
+             ORDER BY image_count DESC, d.class_name ASC",
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
     pub fn list_images_by_class(
         &self,
         class_name: &str,
@@ -161,5 +175,102 @@ impl Database {
             params![model_name],
             |row| row.get::<_, u32>(0),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db_core::detection::Detection;
+
+    fn insert_image(db: &Database, id: &str) {
+        let conn = db.conn.lock();
+        conn.execute(
+            "INSERT INTO images
+                (id, sha256_hash, width, height, format, file_size, created_at, imported_at)
+             VALUES (?1, ?2, 100, 100, 'png', 100, '2026-01-01', '2026-01-01')",
+            params![id, format!("hash-{id}")],
+        )
+        .unwrap();
+    }
+
+    fn insert_file(db: &Database, id: &str, image_id: &str, missing_at: Option<&str>) {
+        let conn = db.conn.lock();
+        conn.execute(
+            "INSERT INTO image_files (id, image_id, path, last_seen_at, missing_at)
+             VALUES (?1, ?2, ?3, '2026-01-01', ?4)",
+            params![id, image_id, format!("/test/{id}.png"), missing_at],
+        )
+        .unwrap();
+    }
+
+    fn detection(class_name: &str, confidence: f32) -> Detection {
+        Detection {
+            class_name: class_name.to_string(),
+            confidence,
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+        }
+    }
+
+    #[test]
+    fn list_detected_classes_counts_distinct_live_images_and_sorts_stably() {
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+
+        insert_image(&db, "live-a");
+        insert_file(&db, "file-a-1", "live-a", None);
+        insert_file(&db, "file-a-2", "live-a", None);
+        db.store_detections(
+            "live-a",
+            "yolo11m",
+            &[
+                detection("truck", 0.9),
+                detection("truck", 0.8),
+                detection("bus", 0.7),
+            ],
+        )
+        .unwrap();
+        db.store_detections("live-a", "nudenet", &[detection("EXPOSED_BREAST_F", 0.95)])
+            .unwrap();
+
+        insert_image(&db, "live-b");
+        insert_file(&db, "file-b", "live-b", None);
+        db.store_detections(
+            "live-b",
+            "yolo11m",
+            &[detection("truck", 0.9), detection("airplane", 0.8)],
+        )
+        .unwrap();
+
+        insert_image(&db, "live-c");
+        insert_file(&db, "file-c", "live-c", None);
+        db.store_detections("live-c", "yolo11m", &[detection("bus", 0.9)])
+            .unwrap();
+
+        insert_image(&db, "historical-yolo");
+        insert_file(&db, "file-historical-yolo", "historical-yolo", None);
+        db.store_detections("historical-yolo", "yolov8m", &[detection("dog", 0.9)])
+            .unwrap();
+
+        insert_image(&db, "missing");
+        insert_file(&db, "file-missing", "missing", Some("2026-01-02"));
+        db.store_detections("missing", "yolo11m", &[detection("zebra", 0.9)])
+            .unwrap();
+
+        insert_image(&db, "without-file");
+        db.store_detections("without-file", "yolo11m", &[detection("elephant", 0.9)])
+            .unwrap();
+
+        assert_eq!(
+            db.list_detected_classes().unwrap(),
+            vec![
+                ("bus".to_string(), 2),
+                ("truck".to_string(), 2),
+                ("airplane".to_string(), 1),
+                ("dog".to_string(), 1),
+            ],
+        );
     }
 }

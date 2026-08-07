@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(join(process.cwd(), 'src/lib/components/Sidebar.svelte'), 'utf8');
+const apiSource = readFileSync(join(process.cwd(), 'src/lib/api.ts'), 'utf8');
 
 describe('sidebar detected-object filters', () => {
     it('keeps detected classes under Filters after removing the AI Models block', () => {
@@ -12,5 +13,14 @@ describe('sidebar detected-object filters', () => {
         expect(detected).toBeGreaterThan(filters);
         expect(source).not.toContain('AI MODELS');
         expect(source).toContain("window.addEventListener('detected-classes-changed'");
+    });
+
+    it('loads every detected class through one aggregate backend call', () => {
+        expect(apiSource).toContain('export async function listDetectedClasses(): Promise<[string, number][]>');
+        expect(apiSource).toContain("invoke('list_detected_classes')");
+        expect(source).toContain('listDetectedClasses');
+        expect(source).toContain('detectedClasses = await listDetectedClasses()');
+        expect(source).not.toContain('commonClasses');
+        expect(source).not.toContain('for (const cls of');
     });
 });

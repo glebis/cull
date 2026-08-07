@@ -22,32 +22,70 @@
     let tokens = $state<McpToken[]>([]);
     let httpEnabled = $state(false);
     let httpPort = $state('9847');
+    let savedHttpPort = $state('9847');
+    let connectionError = $state<string | null>(null);
     let showCreate = $state(false);
     let newName = $state('');
     let newRole = $state('admin');
     let newExpiryDays = $state('90');
     let revealedSecret = $state<string | null>(null);
     let revealedTokenName = $state('');
+    let initializationState = $state<'loading' | 'ready' | 'error'>('loading');
 
     let selectedMethod = $derived(INSTALL_METHODS.find(method => method.id === installMethod) ?? INSTALL_METHODS[0]);
 
-    onMount(async () => {
-        const [loadedTokens, enabled, port] = await Promise.all([
-            listMcpTokens(), getAppSetting('mcp_http_enabled'), getAppSetting('mcp_http_port'),
-        ]);
-        tokens = loadedTokens;
-        httpEnabled = enabled === 'true';
-        httpPort = port || httpPort;
+    onMount(() => {
+        void initialize();
     });
+
+    async function initialize() {
+        initializationState = 'loading';
+        try {
+            const [loadedTokens, enabled, port] = await Promise.all([
+                listMcpTokens(), getAppSetting('mcp_http_enabled'), getAppSetting('mcp_http_port'),
+            ]);
+            tokens = loadedTokens;
+            httpEnabled = enabled === 'true';
+            httpPort = port || '9847';
+            savedHttpPort = httpPort;
+            initializationState = 'ready';
+        } catch {
+            initializationState = 'error';
+        }
+    }
 
     async function copy(value: string, label: string) {
         try { await navigator.clipboard.writeText(value); showToast(`${label} copied`, { type: 'success', duration: 2500 }); }
         catch (error) { showToast('Could not copy', { detail: String(error), type: 'error', duration: 5000 }); }
     }
-    async function toggleHttp() { httpEnabled = !httpEnabled; await setAppSetting('mcp_http_enabled', httpEnabled ? 'true' : 'false'); }
+    async function toggleHttp() {
+        const previous = httpEnabled;
+        connectionError = null;
+        httpEnabled = !previous;
+        try {
+            await setAppSetting('mcp_http_enabled', httpEnabled ? 'true' : 'false');
+        } catch {
+            httpEnabled = previous;
+            connectionError = 'Could not update the local HTTP endpoint. The previous setting was kept.';
+        }
+    }
     async function savePort() {
-        const port = Number.parseInt(httpPort, 10);
-        if (port > 0 && port < 65536) await setAppSetting('mcp_http_port', httpPort);
+        const candidate = httpPort.trim();
+        const port = Number(candidate);
+        if (!/^\d+$/.test(candidate) || !Number.isInteger(port) || port < 1 || port > 65535) {
+            httpPort = savedHttpPort;
+            connectionError = 'Enter a whole-number port from 1 to 65535.';
+            return;
+        }
+        connectionError = null;
+        try {
+            await setAppSetting('mcp_http_port', candidate);
+            httpPort = candidate;
+            savedHttpPort = candidate;
+        } catch {
+            httpPort = savedHttpPort;
+            connectionError = 'Could not save the HTTP port. The previous value was kept.';
+        }
     }
     async function createToken() {
         if (!newName.trim()) return;
@@ -83,15 +121,20 @@
     }
 </script>
 
+{#if initializationState === 'loading'}
+    <section class="initialization-state"><p role="status">Loading agent access settings…</p></section>
+{:else if initializationState === 'error'}
+    <section class="initialization-state"><div role="alert"><p>Could not load agent access settings.</p><button onclick={initialize}>Retry</button></div></section>
+{:else}
 <section class="settings-section">
     <h3>Install the Cull Skill</h3>
-    <p class="intro">Teach your coding agent how to search, curate, rate, and organise your Cull library. Choose an installation method; Cull only copies the command or prompt.</p>
-    <div class="method-tabs" role="tablist" aria-label="Skill installation method">
+    <p class="intro">Teach your coding agent how to search, curate, rate, and organise your Cull library. Start with the Cull skill and CLI; MCP is not required. Choose an installation method; Cull only copies the command or prompt. After installation, start a new agent turn or session if the skill is not discovered immediately.</p>
+    <div class="method-tabs" role="group" aria-label="Skill installation method">
         {#each INSTALL_METHODS as method}
-            <button role="tab" aria-selected={installMethod === method.id} class:active={installMethod === method.id} onclick={() => installMethod = method.id}>{method.label}</button>
+            <button aria-pressed={installMethod === method.id} class:active={installMethod === method.id} onclick={() => installMethod = method.id}>{method.label}</button>
         {/each}
     </div>
-    <div class="copy-box"><code>{selectedMethod.copy}</code><button onclick={() => copy(selectedMethod.copy, 'Installation instructions')}>Copy</button></div>
+    <div class="copy-box"><code>{selectedMethod.copy}</code><button aria-label={`Copy ${selectedMethod.label} installation instructions`} onclick={() => copy(selectedMethod.copy, 'Installation instructions')}>Copy</button></div>
     <a href={SKILL_SOURCE} target="_blank" rel="noreferrer">View SKILL.md source ↗</a>
 </section>
 
@@ -99,6 +142,7 @@
     <h3>MCP Connection <span>optional</span></h3>
     <p class="intro">Enable Cull's local HTTP endpoint when an agent cannot connect through the desktop transport.</p>
     <div class="setting-row"><span>Local HTTP endpoint</span><div class="controls"><button class:on={httpEnabled} aria-pressed={httpEnabled} onclick={toggleHttp}>{httpEnabled ? 'ON' : 'OFF'}</button>{#if httpEnabled}<input class="port" bind:value={httpPort} onblur={savePort} aria-label="MCP HTTP port" />{/if}</div></div>
+    {#if connectionError}<p id="mcp-connection-error" class="connection-error" role="alert">{connectionError}</p>{/if}
     {#if httpEnabled}<p class="note">Loopback only by default. Remote access requires explicit opt-in and least-privilege tokens.</p>{/if}
 </section>
 
@@ -106,7 +150,7 @@
     <section class="settings-section secret">
         <h3>Token Secret · {revealedTokenName}</h3>
         <p class="warning">Copy this now. It will not be shown again.</p>
-        <div class="copy-box"><code>{revealedSecret}</code><button onclick={() => copy(revealedSecret!, 'Token')}>Copy</button></div>
+        <div class="copy-box"><code>{revealedSecret}</code><button aria-label="Copy token secret" onclick={() => copy(revealedSecret!, 'Token')}>Copy</button></div>
         <button class="plain" onclick={() => revealedSecret = null}>Done</button>
     </section>
 {/if}
@@ -115,8 +159,8 @@
     <h3>Access Tokens <button class="plain" onclick={() => showCreate = !showCreate}>{showCreate ? 'Cancel' : '+ Create'}</button></h3>
     {#if showCreate}
         <div class="create-form">
-            <input bind:value={newName} placeholder="Token name (e.g. Claude Code)" />
-            <select bind:value={newRole}>{#each ROLES as role}<option value={role.value}>{role.label} — {role.desc}</option>{/each}</select>
+            <input bind:value={newName} aria-label="Token name" placeholder="Token name (e.g. Claude Code)" />
+            <select bind:value={newRole} aria-label="Token role">{#each ROLES as role}<option value={role.value}>{role.label} — {role.desc}</option>{/each}</select>
             <select bind:value={newExpiryDays} aria-label="Token expiry"><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days (recommended)</option><option value="365">1 year</option><option value="">No expiry</option></select>
             <button class="primary" disabled={!newName.trim()} onclick={createToken}>Create Token</button>
         </div>
@@ -128,11 +172,14 @@
 </section>
 
 <section class="settings-section">
-    <h3>Claude Code MCP Config <button class="plain" onclick={() => copy(MCP_CONFIG_SNIPPET, 'Config')}>Copy</button></h3>
+    <h3>Claude Code MCP Config <button class="plain" aria-label="Copy Claude Code MCP config" onclick={() => copy(MCP_CONFIG_SNIPPET, 'Config')}>Copy</button></h3>
     <pre>{MCP_CONFIG_SNIPPET}</pre>
 </section>
+{/if}
 
 <style>
+    .initialization-state { padding: 24px 20px; color: var(--text-secondary); font-size: 11px; }
+    .initialization-state p { margin: 0 0 10px; }
     .settings-section { padding: 16px 20px; border-bottom: 1px solid var(--border); }
     h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 12px; color: var(--text-secondary); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
     h3 span { font-size: 9px; font-weight: 400; letter-spacing: 0; text-transform: none; }
@@ -158,4 +205,5 @@
     .token-row span.warn { color: var(--orange); }
     .token-row span.expired { color: var(--red); }
     .warning { color: var(--orange); font-size: 10px; }
+    .connection-error { margin: 8px 0 0; color: var(--red); font-size: 10px; line-height: 1.5; }
 </style>

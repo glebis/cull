@@ -2,6 +2,25 @@
 
 Cull exposes an MCP server that lets AI agents browse, curate, search, and export your image library. Three connection methods: local stdio, LAN HTTP, or tunneled HTTP.
 
+## Start With The Cull Skill And CLI
+
+MCP is optional. For many local agent workflows, install the Cull skill from **Settings > Agent Access**, then let the agent use Cull's JSON CLI without starting an MCP server. The tab offers these copyable alternatives:
+
+```bash
+npx skills add glebis/claude-skills --skill cull
+```
+
+For Claude:
+
+```bash
+claude plugin marketplace add glebis/claude-skills
+claude plugin install cull@glebis-skills
+```
+
+For Codex, ask `$skill-installer` to install the Cull skill from `https://github.com/glebis/claude-skills/tree/main/cull`. For another agent, ask it to install from that repository, read `SKILL.md`, and place the skill in its skills directory. The tab also links to the [Cull skill source](https://github.com/glebis/claude-skills/blob/main/cull/SKILL.md). Cull only copies these instructions; it never runs an installer.
+
+Skill discovery depends on the agent runtime. After installation, start a new agent turn or session if the current one does not see the skill. Enable MCP only when the workflow benefits from a live connection to Cull's tools.
+
 ## Local Access (Claude Code)
 
 Add to your Claude Code MCP config (`~/.claude/settings.json` or project `.claude/settings.json`):
@@ -124,7 +143,7 @@ Union semantics: an image is accessible if it matches any filter. Null scope mea
 - Filesystem paths are redacted for remote clients — they see filenames only, not full paths.
 - Create scoped tokens with minimal roles for remote access. Never share admin tokens over tunnels.
 - Tokens can be rotated (new secret, old one invalidated) or revoked in Settings.
-- All MCP tool invocations are logged in the audit log (Settings > MCP Server).
+- All MCP tool invocations are logged in the audit log. MCP connection and token controls are under **Settings > Agent Access**.
 
 ## Troubleshooting
 

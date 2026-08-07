@@ -47,6 +47,7 @@ commands.allow = [
   "is_model_available",
   "is_nudenet_available",
   "is_yolo_available",
+  "list_detected_classes",
   "list_embedding_providers",
   "list_image_ids_missing_detection",
   "list_image_ids_missing_vision",

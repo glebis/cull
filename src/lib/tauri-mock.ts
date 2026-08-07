@@ -850,6 +850,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   get_detection_count: (_: any, args: { model: string }) => args.model === 'yolo11m' ? 5 : 1,
   list_image_ids_missing_detection: (_: any, args: { model: string }) => args.model === 'nudenet' ? ['img-2'] : ['img-1', 'img-2'],
   count_by_detected_class: (_: any, args: { className: string }) => args.className === 'person' ? 5 : 0,
+  list_detected_classes: () => [['person', 5], ['truck', 2]],
   search_by_detected_class: () => [['img-0', 0.95], ['img-1', 0.9]],
   list_images_by_detected_class: () => [makeMockImage(0), makeMockImage(1)],
   get_detections: () => [

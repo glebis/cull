@@ -531,6 +531,7 @@ pub fn run() {
             commands::detection::get_detections,
             commands::detection::search_by_detected_class,
             commands::detection::count_by_detected_class,
+            commands::detection::list_detected_classes,
             commands::detection::list_images_by_detected_class,
             commands::detection::is_yolo_available,
             commands::detection::is_nudenet_available,

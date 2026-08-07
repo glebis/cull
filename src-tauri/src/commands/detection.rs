@@ -180,6 +180,14 @@ pub async fn count_by_detected_class(
 }
 
 #[tauri::command]
+pub async fn list_detected_classes(
+    state: State<'_, AppState>,
+) -> Result<Vec<(String, u32)>, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::list_detected_classes(&ctx).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn list_images_by_detected_class(
     state: State<'_, AppState>,
     class_name: String,

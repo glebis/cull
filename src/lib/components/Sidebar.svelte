@@ -3,7 +3,7 @@
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen } from '$lib/stores';
-    import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, countByDetectedClass, regenerateThumbnails, rescanSources, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
+    import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, countByDetectedClass, listDetectedClasses, regenerateThumbnails, rescanSources, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, ImageWithFile, SmartCollection } from '$lib/api';
     import { applyClipboardMonitorCollection } from '$lib/clipboard-monitor';
@@ -534,17 +534,10 @@
     function handleDetectedClassesChanged() { void loadDetectedClasses(); }
 
     async function loadDetectedClasses() {
-        const commonClasses = ['person', 'dog', 'cat', 'car', 'bicycle', 'bird', 'horse', 'chair', 'bottle', 'laptop', 'phone', 'book'];
-        const results: [string, number][] = [];
-        for (const cls of commonClasses) {
-            try {
-                const count = await countByDetectedClass(cls);
-                if (count > 0) results.push([cls, count]);
-            } catch (_) {}
-        }
-        results.sort((a, b) => b[1] - a[1]);
-        detectedClasses = results;
-        detectedClassesStore.set(results);
+        try {
+            detectedClasses = await listDetectedClasses();
+            detectedClassesStore.set(detectedClasses);
+        } catch (_) {}
     }
 
     async function filterByClass(className: string) {
@@ -620,9 +613,9 @@
         <div class="section-header">LIBRARY</div>
         <button
             class="section-item"
-            class:active={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null}
+            class:active={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null && $activeDetectedClass === null}
             onclick={() => selectFolder(null)}
-            aria-current={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null ? 'true' : undefined}
+            aria-current={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null && $activeDetectedClass === null ? 'true' : undefined}
         >
             <span class="icon">&#9632;</span>
             <span class="item-label">All Images</span>
@@ -823,7 +816,12 @@
         {#if detectedClasses.length > 0}
             <div class="detected-header">DETECTED OBJECTS</div>
             {#each detectedClasses as [cls, count]}
-                <button class="section-item detected-class" class:active={$activeDetectedClass === cls} onclick={() => filterByClass(cls)}>
+                <button
+                    class="section-item detected-class"
+                    class:active={$activeDetectedClass === cls}
+                    onclick={() => filterByClass(cls)}
+                    aria-current={$activeDetectedClass === cls ? 'true' : undefined}
+                >
                     <span class="class-tag">{cls}</span>
                     <span class="count">{formatSidebarCount(count)}</span>
                 </button>

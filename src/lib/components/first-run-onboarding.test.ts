@@ -56,10 +56,11 @@ describe('first-run onboarding (UX-03 + UX-04)', () => {
             expect(settings).toMatch(/setup guide/i);
         });
 
-        it("softens 'manual install' / 'offline' statuses to optional-integration framing", () => {
+        it("uses explicit readiness states instead of ambiguous optional/offline wording", () => {
             expect(settings).not.toContain('>manual install<');
             expect(settings).not.toContain('>offline<');
-            expect(settings.toLowerCase()).toContain('optional');
+            expect(settings).toContain("'Not installed'");
+            expect(settings).not.toContain("'optional'");
         });
     });
 });

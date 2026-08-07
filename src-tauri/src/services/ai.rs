@@ -228,6 +228,10 @@ pub fn count_by_detected_class(
     Ok(ctx.db.count_by_class(class_name)?)
 }
 
+pub fn list_detected_classes(ctx: &ServiceContext) -> Result<Vec<(String, u32)>, ServiceError> {
+    Ok(ctx.db.list_detected_classes()?)
+}
+
 pub fn list_images_by_detected_class(
     ctx: &ServiceContext,
     class_name: &str,

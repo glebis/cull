@@ -11,6 +11,7 @@ pub struct OpenParams {
     pub path: Option<String>,
     pub paths: Option<Vec<String>>,
     pub folder: Option<String>,
+    pub settings_tab: Option<String>,
     pub view: Option<String>,
     pub size: Option<u32>,
     pub zoom: Option<u32>,
@@ -96,6 +97,7 @@ pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams>
             None
         },
         folder: None,
+        settings_tab: None,
         view: Some("loupe".to_string()),
         size: None,
         zoom: None,
@@ -229,6 +231,7 @@ pub async fn open_with_params(
         path,
         paths,
         folder,
+        settings_tab: None,
         view,
         size,
         zoom,
@@ -254,11 +257,14 @@ pub async fn open_deep_link_urls(app: AppHandle, urls: Vec<String>) -> Result<()
 
 /// Parse a deep link URL into OpenParams.
 /// Returns an error if any file-system path fails validation.
+/// Settings links accept the six UI tab IDs; an absent or unknown fragment
+/// falls back to `general`, while malformed percent encoding remains an error.
 pub fn parse_deep_link(url: &str) -> Result<OpenParams, String> {
     let mut params = OpenParams {
         path: None,
         paths: None,
         folder: None,
+        settings_tab: None,
         view: None,
         size: None,
         zoom: None,
@@ -275,7 +281,7 @@ pub fn parse_deep_link(url: &str) -> Result<OpenParams, String> {
     // cull://open?path=... or cull://grid?size=280
     let action = if let Some(scheme_end) = url.find("://") {
         let after_scheme = &url[scheme_end + 3..];
-        let action_end = after_scheme.find('?').unwrap_or(after_scheme.len());
+        let action_end = after_scheme.find(['?', '#']).unwrap_or(after_scheme.len());
         Some(after_scheme[..action_end].to_string())
     } else {
         None
@@ -286,6 +292,17 @@ pub fn parse_deep_link(url: &str) -> Result<OpenParams, String> {
         Some("grid") => params.view = Some("grid".to_string()),
         Some("loupe") => params.view = Some("loupe".to_string()),
         Some("compare") => params.view = Some("compare".to_string()),
+        Some("settings") => {
+            let fragment = url
+                .split_once('#')
+                .map(|(_, fragment)| fragment)
+                .unwrap_or("");
+            let decoded = percent_decode(fragment)?;
+            params.settings_tab = Some(match decoded.as_str() {
+                "general" | "appearance" | "ai" | "agent-access" | "privacy" | "plugins" => decoded,
+                _ => "general".to_string(),
+            });
+        }
         _ => {}
     }
 
@@ -494,6 +511,33 @@ mod tests {
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].view.as_deref(), Some("grid"));
         assert_eq!(params[0].size, Some(280));
+    }
+
+    #[test]
+    fn settings_deep_links_parse_every_supported_tab() {
+        for tab in [
+            "general",
+            "appearance",
+            "ai",
+            "agent-access",
+            "privacy",
+            "plugins",
+        ] {
+            let params = parse_deep_link(&format!("cull://settings#{tab}")).unwrap();
+            assert_eq!(params.settings_tab.as_deref(), Some(tab));
+        }
+    }
+
+    #[test]
+    fn settings_deep_links_fall_back_to_general_for_invalid_fragments() {
+        for url in [
+            "cull://settings",
+            "cull://settings#",
+            "cull://settings#unknown",
+        ] {
+            let params = parse_deep_link(url).unwrap();
+            assert_eq!(params.settings_tab.as_deref(), Some("general"));
+        }
     }
 
     #[test]

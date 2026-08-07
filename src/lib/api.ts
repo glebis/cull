@@ -1146,6 +1146,10 @@ export async function countByDetectedClass(className: string): Promise<number> {
     return invoke('count_by_detected_class', { className });
 }
 
+export async function listDetectedClasses(): Promise<[string, number][]> {
+    return invoke('list_detected_classes');
+}
+
 export async function listImagesByDetectedClass(className: string, limit: number, offset: number): Promise<ImageWithFile[]> {
     return invoke('list_images_by_detected_class', { className, limit, offset });
 }

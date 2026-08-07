@@ -40,6 +40,20 @@
             showToast('Could not apply app icon', { detail: String(error), type: 'error', duration: 5000 });
         }
     }
+
+    function handleTabKeydown(event: KeyboardEvent, index: number) {
+        let nextIndex: number;
+        if (event.key === 'ArrowRight') nextIndex = (index + 1) % TABS.length;
+        else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + TABS.length) % TABS.length;
+        else if (event.key === 'Home') nextIndex = 0;
+        else if (event.key === 'End') nextIndex = TABS.length - 1;
+        else return;
+
+        event.preventDefault();
+        const nextTab = TABS[nextIndex];
+        settingsTab.set(nextTab.id);
+        document.getElementById(`settings-tab-${nextTab.id}`)?.focus();
+    }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -48,8 +62,8 @@
     <div class="panel" bind:this={panelElement} onclick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1">
         <header class="panel-header"><h2 id="settings-title">Settings</h2><button class="close" onclick={onclose} aria-label="Close settings">&times;</button></header>
         <div class="settings-tabs" role="tablist" aria-label="Settings sections">
-            {#each TABS as tab}
-                <button id={`settings-tab-${tab.id}`} class="settings-tab" class:active={$settingsTab === tab.id} role="tab" aria-selected={$settingsTab === tab.id} aria-controls={`settings-panel-${tab.id}`} tabindex={$settingsTab === tab.id ? 0 : -1} onclick={() => settingsTab.set(tab.id)}>{tab.label}</button>
+            {#each TABS as tab, index}
+                <button id={`settings-tab-${tab.id}`} class="settings-tab" class:active={$settingsTab === tab.id} role="tab" aria-selected={$settingsTab === tab.id} aria-controls={`settings-panel-${tab.id}`} tabindex={$settingsTab === tab.id ? 0 : -1} onclick={() => settingsTab.set(tab.id)} onkeydown={(event) => handleTabKeydown(event, index)}>{tab.label}</button>
             {/each}
         </div>
         <div class="content" id={`settings-panel-${$settingsTab}`} role="tabpanel" aria-labelledby={`settings-tab-${$settingsTab}`}>
