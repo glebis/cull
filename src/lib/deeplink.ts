@@ -28,11 +28,13 @@ import {
 import { importFolder, importFiles, addToCollection, listCollections, getBatchImages, listFolders, listImagesByFolder, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls, type ImageWithFile, type ImportResponse } from './api';
 import { applyClipboardMonitorCollection } from './clipboard-monitor';
 import { clearImageScope, invalidateImageCache, loadAllImages, loadImagesForCurrentScope, loadImagesUntil, resetImagePaging } from './image-loading';
+import { openSettings, type SettingsTab } from './settings-navigation';
 
 interface OpenParams {
     path?: string | null;
     paths?: string[] | null;
     folder?: string | null;
+    settings_tab?: string | null;
     view?: string | null;
     size?: number | null;
     zoom?: number | null;
@@ -47,6 +49,7 @@ interface OpenParams {
 }
 
 const VALID_VIEWS: ViewMode[] = ['grid', 'compare', 'loupe', 'canvas', 'lineage', 'embeddings', 'export'];
+const VALID_SETTINGS_TABS: SettingsTab[] = ['general', 'appearance', 'ai', 'agent-access', 'privacy', 'plugins'];
 const FOLDER_IMAGE_PAGE_SIZE = 250;
 const FOLDER_IMAGE_PAGE_LIMIT = 200;
 
@@ -101,6 +104,12 @@ async function focusImageById(imageId: string): Promise<boolean> {
 
 export async function handleParams(params: OpenParams) {
     console.log('[deep-link] handleParams called:', JSON.stringify(params));
+    if (params.settings_tab) {
+        const tab = VALID_SETTINGS_TABS.includes(params.settings_tab as SettingsTab)
+            ? params.settings_tab as SettingsTab
+            : 'general';
+        openSettings(tab);
+    }
     if (params.drag_drop && get(viewMode) === 'canvas' && (params.folder || params.path || (params.paths && params.paths.length > 0))) {
         await handleCanvasDropImport(params);
         return;

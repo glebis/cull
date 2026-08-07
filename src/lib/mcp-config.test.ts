@@ -12,8 +12,8 @@ describe('MCP config snippet', () => {
         expect(parsed.mcpServers.cull.args).toEqual(['--mcp-stdio']);
     });
 
-    it('is the single source for both McpSettings display and copy', () => {
-        const src = readFileSync(join(componentsDir, 'McpSettings.svelte'), 'utf8');
+    it('is the single source for both Agent Access display and copy', () => {
+        const src = readFileSync(join(componentsDir, 'AgentAccessSettings.svelte'), 'utf8');
         expect(src).toContain('MCP_CONFIG_SNIPPET');
         // The old bug: copyConfig() copied a hardcoded app-bundle path that
         // differed from the rendered snippet.
