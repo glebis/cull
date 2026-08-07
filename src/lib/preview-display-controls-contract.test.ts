@@ -78,9 +78,10 @@ describe('Preview Display control contract', () => {
         expect(frontendMenu).toContain("case 'preview_display_preset_client_review'");
         expect(frontendMenu).toContain("case 'preview_display_layout_grid'");
         expect(frontendMenu).toContain("case 'preview_display_export_png'");
-        expect(frontendMenu).toContain('setPreviewDisplayMode');
-        expect(frontendMenu).toContain('setPreviewDisplayLayout');
-        expect(frontendMenu).toContain('setAppSetting');
+        const previewActions = source('src/lib/preview-display-actions.ts');
+        expect(previewActions).toContain('setPreviewDisplayMode');
+        expect(previewActions).toContain('setPreviewDisplayLayout');
+        expect(previewActions).toContain('setAppSetting');
     });
 
     it('shows a status indicator and prevents focus churn while frozen or blanked', () => {
