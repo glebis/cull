@@ -575,7 +575,7 @@ describe('release gate', () => {
     const verifyJob = workflowJob(workflow, 'verify-artifact');
 
     expect(buildJob).toContain('tauri-apps/tauri-action@');
-    expect(buildJob).toContain('--target aarch64-apple-darwin --bundles dmg');
+    expect(buildJob).toContain('--target aarch64-apple-darwin --bundles app,dmg');
     for (const forbidden of ['tagName:', 'releaseName:', 'releaseDraft:', 'gh release']) {
       expect(buildJob).not.toContain(forbidden);
     }
@@ -598,6 +598,18 @@ describe('release gate', () => {
     expect(verifyJob).toContain('artifact-id: ${{ steps.upload_verified.outputs.artifact-id }}');
     expect(verifyJob).toContain('artifact-digest: ${{ steps.upload_verified.outputs.artifact-digest }}');
     expect(verifyJob).not.toContain('gh release');
+  });
+
+  it('builds the same updater-capable bundle set in canary and production', () => {
+    const canaryBuild = workflowJob(readFileSync(canaryWorkflowPath, 'utf8'), 'signed-build');
+    const releaseBuild = workflowJob(readFileSync(releaseWorkflowPath, 'utf8'), 'signed-build');
+
+    for (const build of [canaryBuild, releaseBuild]) {
+      expect(build).toContain('--target aarch64-apple-darwin --bundles app,dmg');
+      expect(build).toContain('$bundle/dmg/Cull_${VERSION}_aarch64.dmg');
+      expect(build).toContain('$bundle/macos/Cull.app.tar.gz');
+      expect(build).toContain('$bundle/macos/Cull.app.tar.gz.sig');
+    }
   });
 
   it('keeps automatic publication fail-closed and publishes only exact verified files', () => {

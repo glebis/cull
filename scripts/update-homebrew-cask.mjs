@@ -27,6 +27,10 @@ function parseArgs() {
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index];
     if (token === '--json') parsed.json = true;
+    else if (token === '--migrate-no-check') {
+      if (parsed.migrateNoCheck) throw failure('INPUT_INVALID', `Duplicate option ${token}`);
+      parsed.migrateNoCheck = true;
+    }
     else if (values.has(token)) {
       if (parsed[token]) throw failure('INPUT_INVALID', `Duplicate option ${token}`);
       const value = args[index += 1];
@@ -56,7 +60,7 @@ function compareSemver(left, right) {
   return 0;
 }
 
-function updateCask(path, targetVersion, targetSha) {
+function updateCask(path, targetVersion, targetSha, migrateNoCheck = false) {
   const stat = lstatSync(path);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
     throw failure('CASK_INVALID', 'Cask must be a singly linked regular file');
@@ -67,16 +71,28 @@ function updateCask(path, targetVersion, targetSha) {
     .filter(({ line }) => /^[ \t]*version\b/.test(line));
   const shaLines = lines.map((line, index) => ({ line, index }))
     .filter(({ line }) => /^[ \t]*sha256\b/.test(line));
-  if (shaLines.some(({ line }) => /^[ \t]*sha256[ \t]+:no_check(?:[ \t]+#.*)?[ \t]*$/.test(line))) {
-    throw failure('CASK_NO_CHECK', 'sha256 :no_check is forbidden');
-  }
   if (versionLines.length !== 1 || shaLines.length !== 1) {
     throw failure('CASK_INVALID', 'Cask must contain one active version and one active sha256 directive');
   }
   const version = /^([ \t]*)version "((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))"[ \t]*$/.exec(versionLines[0].line);
+  const noCheck = /^([ \t]*)sha256[ \t]+:no_check(?:[ \t]+#.*)?[ \t]*$/.exec(shaLines[0].line);
   const sha = /^([ \t]*)sha256 "([0-9a-f]{64})"[ \t]*$/.exec(shaLines[0].line);
-  if (!version || !sha) throw failure('CASK_INVALID', 'Cask directives must use canonical quoted syntax');
+  if (!version || (!sha && !noCheck)) {
+    throw failure('CASK_INVALID', 'Cask directives must use canonical quoted syntax');
+  }
   const comparison = compareSemver(targetVersion, version[2]);
+  if (noCheck) {
+    if (!migrateNoCheck) throw failure('CASK_NO_CHECK', 'sha256 :no_check is forbidden');
+    if (comparison !== 0) {
+      throw failure(
+        'CASK_MIGRATION_VERSION_MISMATCH',
+        'sha256 :no_check migration must pin the exact existing version before any upgrade',
+      );
+    }
+    lines[shaLines[0].index] = `${noCheck[1]}sha256 "${targetSha}"`;
+    writeUpdatedCask(path, stat, lines.join('\n'));
+    return { changed: true, migratedNoCheck: true, previousVersion: version[2] };
+  }
   if (comparison < 0) throw failure('CASK_DOWNGRADE', `Refusing downgrade ${version[2]} -> ${targetVersion}`);
   if (comparison === 0 && sha[2] !== targetSha) {
     throw failure('CASK_IMMUTABLE_SHA_MISMATCH', 'Equal cask version already has a different SHA-256');
@@ -85,7 +101,11 @@ function updateCask(path, targetVersion, targetSha) {
 
   lines[versionLines[0].index] = `${version[1]}version "${targetVersion}"`;
   lines[shaLines[0].index] = `${sha[1]}sha256 "${targetSha}"`;
-  const updated = lines.join('\n');
+  writeUpdatedCask(path, stat, lines.join('\n'));
+  return { changed: true, previousVersion: version[2] };
+}
+
+function writeUpdatedCask(path, stat, updated) {
   const temporary = `${path}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`;
   let fd;
   try {
@@ -101,12 +121,16 @@ function updateCask(path, targetVersion, targetSha) {
     try { unlinkSync(temporary); } catch { /* unique temporary may already be renamed */ }
     throw cause;
   }
-  return { changed: true, previousVersion: version[2] };
 }
 
 try {
   const parsed = parseArgs();
-  const result = updateCask(parsed['--cask'], parsed['--version'], parsed['--sha256']);
+  const result = updateCask(
+    parsed['--cask'],
+    parsed['--version'],
+    parsed['--sha256'],
+    parsed.migrateNoCheck === true,
+  );
   process.stdout.write(`${JSON.stringify({
     schema: 'cull.release.cask-edit.v1', event: 'result', ok: true, result,
   })}\n`);

@@ -248,6 +248,29 @@ describe('Cull release readiness CLI', () => {
     expect(readFileSync(join(fixture, 'package.json'), 'utf8')).toBe(before);
   });
 
+  it('blocks readiness when the configured Homebrew cask is not SHA-pinned', () => {
+    const fixture = createFixture();
+    const result = runCheck(fixture, { env: {
+      CULL_RELEASE_TEST_CASK: 'version "1.2.3"\nsha256 :no_check\n',
+    } });
+
+    expect(result.status).toBe(3);
+    expect(JSON.parse(result.stdout).result.blockers).toContainEqual({
+      code: 'HOMEBREW_CASK_NO_CHECK',
+      message: 'Configured Homebrew cask uses sha256 :no_check',
+    });
+  });
+
+  it('accepts a canonical SHA-pinned Homebrew cask during readiness', () => {
+    const fixture = createFixture();
+    const result = runCheck(fixture, { env: {
+      CULL_RELEASE_TEST_CASK: `version "1.2.3"\nsha256 "${'a'.repeat(64)}"\n`,
+    } });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).result.blockers).toEqual([]);
+  });
+
   it('disables optional Git locks and leaves repository and index state byte-for-byte unchanged', () => {
     const fixture = createFixture();
     const bin = mkdtempSync(join(tmpdir(), 'cull-release-git-wrapper-'));
@@ -845,6 +868,248 @@ describe('Cull release prepare, resume, and state CLI', () => {
 
     expect(failed.execution.status).toBe(2);
     expect(failed.output.code).toBe('INPUT_INVALID');
+  });
+
+  it('requires a new version after an immutable tagged release fails artifact assembly', () => {
+    const fixture = createFixture();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'tagged',
+      releaseCommit: head(fixture), tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: {
+        code: 'ARTIFACT_INVALID',
+        evidence: { workflowRunId: 31169457762, publicRelease: false },
+        at: '2026-07-11T12:01:00.000Z',
+      },
+    }));
+    const evidence = {
+      commit: true, tag: true, workflow: false, releaseAsset: false,
+      publishedRelease: false, tapCommit: false, postPublishVerified: false,
+    };
+
+    const resumed = run(fixture, 'resume', ['--version', '1.2.4'], {
+      CULL_RELEASE_TEST_EVIDENCE: JSON.stringify(evidence),
+    });
+
+    expect(resumed.execution.status).toBe(0);
+    expect(resumed.output.result).toMatchObject({
+      nextState: null,
+      nextAction: 'prepare-new-version',
+      evidence,
+      failure: { code: 'ARTIFACT_INVALID' },
+    });
+  });
+
+  it('reports an immutable conflicting tag instead of recommending a tag push', () => {
+    const fixture = createFixture();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    const releaseCommit = head(fixture);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'prepared',
+      releaseCommit, tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+    const actualCommit = 'b'.repeat(40);
+    const evidence = {
+      commit: true,
+      tag: false,
+      tagConflict: { expectedCommit: releaseCommit, actualCommit, tagObjectSha: 'c'.repeat(40) },
+      workflow: false,
+      releaseAsset: false,
+      publishedRelease: false,
+      tapCommit: false,
+      postPublishVerified: false,
+    };
+
+    const resumed = run(fixture, 'resume', ['--version', '1.2.4'], {
+      CULL_RELEASE_TEST_EVIDENCE: JSON.stringify(evidence),
+    });
+
+    expect(resumed.execution.status).toBe(0);
+    expect(resumed.output.result).toEqual({
+      nextState: null,
+      nextAction: 'prepare-new-version',
+      evidence,
+      failure: {
+        code: 'CONFLICTING_TAG',
+        tag: 'v1.2.4',
+        expectedCommit: releaseCommit,
+        actualCommit,
+        tagObjectSha: 'c'.repeat(40),
+      },
+    });
+  });
+
+  it('creates and pushes an annotated tag for the exact prepared commit', () => {
+    const fixture = createFixture();
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(release): v1.2.4'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    const releaseCommit = head(fixture);
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', releaseCommit], { cwd: fixture });
+    const remote = mkdtempSync(join(tmpdir(), 'cull-release-tag-remote-'));
+    execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: fixture });
+    execFileSync('git', ['push', 'origin', 'main'], { cwd: fixture, stdio: 'ignore' });
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    const statePath = join(stateDir, '1.2.4.json');
+    writeFileSync(statePath, JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'prepared',
+      releaseCommit, tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+
+    const tagged = run(fixture, 'tag', [
+      '--version', '1.2.4', '--expected-source', releaseCommit,
+    ], { CULL_RELEASE_NOW: '2026-07-11T12:02:00.000Z' });
+
+    expect(tagged.execution.status).toBe(0);
+    expect(tagged.output.result).toMatchObject({
+      version: '1.2.4',
+      tag: 'v1.2.4',
+      releaseCommit,
+      state: 'tagged',
+      pushed: true,
+    });
+    expect(execFileSync('git', ['rev-parse', 'refs/tags/v1.2.4^{}'], {
+      cwd: remote,
+      encoding: 'utf8',
+    }).trim()).toBe(releaseCommit);
+    expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({
+      state: 'tagged',
+      releaseCommit,
+      gates: { tag: 'v1.2.4' },
+    });
+  });
+
+  it('rechecks Homebrew readiness immediately before creating a tag', () => {
+    const fixture = createFixture();
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(release): v1.2.4'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    const releaseCommit = head(fixture);
+    const remote = mkdtempSync(join(tmpdir(), 'cull-release-tag-readiness-'));
+    execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: fixture });
+    execFileSync('git', ['push', 'origin', 'main'], { cwd: fixture, stdio: 'ignore' });
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', releaseCommit], { cwd: fixture });
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    const statePath = join(stateDir, '1.2.4.json');
+    writeFileSync(statePath, JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'prepared',
+      releaseCommit, tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+
+    const tagged = run(fixture, 'tag', [
+      '--version', '1.2.4', '--expected-source', releaseCommit,
+    ], { CULL_RELEASE_TEST_CASK: 'version "1.2.3"\nsha256 :no_check\n' });
+
+    expect(tagged.execution.status).toBe(3);
+    expect(tagged.output).toMatchObject({
+      code: 'BLOCKED',
+      details: { blockers: [{ code: 'HOMEBREW_CASK_NO_CHECK' }] },
+    });
+    expect(JSON.parse(readFileSync(statePath, 'utf8')).state).toBe('prepared');
+    expect(() => execFileSync('git', ['rev-parse', 'refs/tags/v1.2.4'], {
+      cwd: remote,
+      stdio: 'ignore',
+    })).toThrow();
+  });
+
+  it('refuses to tag when the immutable remote tag points to a merge commit', () => {
+    const fixture = createFixture();
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(release): v1.2.4'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    const releaseCommit = head(fixture);
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'Merge pull request #80'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    const mergeCommit = head(fixture);
+    const remote = mkdtempSync(join(tmpdir(), 'cull-release-conflict-remote-'));
+    execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: fixture });
+    execFileSync('git', ['tag', '-a', 'v1.2.4', mergeCommit, '-m', 'Cull v1.2.4'], { cwd: fixture });
+    execFileSync('git', ['push', 'origin', 'main', 'refs/tags/v1.2.4'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', mergeCommit], { cwd: fixture });
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'prepared',
+      releaseCommit, tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+
+    const tagged = run(fixture, 'tag', [
+      '--version', '1.2.4', '--expected-source', releaseCommit,
+    ]);
+
+    expect(tagged.execution.status).toBe(5);
+    expect(tagged.output).toMatchObject({
+      code: 'CONFLICTING_TAG',
+      details: { expectedCommit: releaseCommit, actualCommit: mergeCommit },
+    });
+    expect(JSON.parse(readFileSync(join(stateDir, '1.2.4.json'), 'utf8')).state).toBe('prepared');
+  });
+
+  it('refuses a tagged state transition when the remote tag points elsewhere', () => {
+    const fixture = createFixture();
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(release): v1.2.4'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    const releaseCommit = head(fixture);
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'Merge pull request #80'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    const mergeCommit = head(fixture);
+    const remote = mkdtempSync(join(tmpdir(), 'cull-release-transition-conflict-'));
+    execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: fixture });
+    execFileSync('git', ['tag', '-a', 'v1.2.4', mergeCommit, '-m', 'Cull v1.2.4'], { cwd: fixture });
+    execFileSync('git', ['push', 'origin', 'main', 'refs/tags/v1.2.4'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    const statePath = join(stateDir, '1.2.4.json');
+    writeFileSync(statePath, JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'prepared',
+      releaseCommit, tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+
+    const transitioned = run(fixture, 'state', [
+      'transition', '--version', '1.2.4', '--to', 'tagged',
+      '--evidence-json', '{"tag":"v1.2.4"}',
+    ]);
+
+    expect(transitioned.execution.status).toBe(5);
+    expect(transitioned.output).toMatchObject({
+      code: 'CONFLICTING_TAG',
+      details: { expectedCommit: releaseCommit, actualCommit: mergeCommit },
+    });
+    expect(JSON.parse(readFileSync(statePath, 'utf8')).state).toBe('prepared');
   });
 
   it('files one P0 incident, updates it idempotently, and prepares a patch plan after public verification fails', () => {
