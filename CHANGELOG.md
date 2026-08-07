@@ -6,7 +6,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-No changes yet.
+## [0.3.2] - 2026-08-07
+
+### Fixed
+
+- Restored real PDF first-page previews and repaired legacy placeholders.
+- Prevented PDF preview preparation from blocking filtering or leaving the interface in Loading.
+- Prevented packaged interaction cache contamination and preserved empty Loupe and Recent Imports behavior.
 
 ## [0.3.1] - 2026-07-12
 
