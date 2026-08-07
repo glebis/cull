@@ -361,6 +361,8 @@ impl Database {
         self.run_migration_step(26, "image_analysis_status", || {
             let conn = self.conn.lock();
             conn.execute_batch(image_analysis_status_schema())?;
+            drop(conn);
+            self.seed_preset_collections()?;
             Ok(())
         })?;
 
@@ -1501,6 +1503,46 @@ mod migration_safety_tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn test_version_26_repairs_recent_imports_preset_for_existing_v25_database() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("existing-v25-preset.db");
+        {
+            let _ = Database::open(&db_path).unwrap();
+        }
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "
+                UPDATE projects
+                SET name = 'Recent'
+                WHERE is_preset = 1
+                  AND filter_json = '{\"type\":\"rule\",\"field\":\"imported_at\",\"op\":\"last_n_days\",\"value\":7.0}';
+                DROP TABLE image_analysis_status;
+                DELETE FROM schema_migrations WHERE version = 26;
+                DELETE FROM schema_migration_steps WHERE version = 26;
+                PRAGMA user_version = 25;
+                ",
+            )
+            .unwrap();
+        }
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock();
+        assert_eq!(user_version(&conn).unwrap(), 26);
+        assert!(table_exists(&conn, "image_analysis_status").unwrap());
+        let repaired_name: String = conn
+            .query_row(
+                "SELECT name FROM projects
+                 WHERE is_preset = 1
+                   AND filter_json = ?1",
+                params![r#"{"type":"rule","field":"imported_at","op":"last_n_days","value":7.0}"#],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(repaired_name, "Recent Imports");
     }
 
     #[test]
