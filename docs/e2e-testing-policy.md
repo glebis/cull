@@ -3,13 +3,39 @@
 Cull has one browser E2E smoke suite, run by `npm run test:e2e` / `bash tests/e2e/run-e2e.sh`.
 The runner starts Vite with `CULL_E2E_MOCK=1` and executes `tests/e2e/smoke.py` against the browser-only Tauri mock.
 
-## Classification
+## Packaged production interaction gate
 
-**Current classification: pre-push manual gate plus machine-classified release CI.**
+Every pull request and push to `main` runs a separate macOS gate against a
+packaged `Cull.app` and its production WKWebView. It does not use Vite,
+Playwright, or `tauri-mock.ts` at runtime. The gate seeds two images into a
+dedicated smoke database and verifies pointer hit-testing plus observable UI
+outcomes for a folder click, Recent Imports, the sidebar filter, image
+selection, double-click Loupe navigation, and the image context menu.
+
+```bash
+bash tests/native/run-packaged-interaction-smoke.sh
+```
+
+The GitHub `CI` job is named `Packaged production interaction smoke`. A failed
+assertion exits non-zero, fails the workflow before merge, and uploads the app
+log, result manifest, and PNG failure capture from the smoke artifact directory. Its bundle
+identifier is `com.glebkalinin.cull.interaction-smoke`, so it cannot open or
+mutate the user's `com.glebkalinin.cull` database.
+
+Vite's optimized dependencies use checkout-local, build-variant directories
+under `.vite-cache`, not `node_modules/.vite`. This prevents a shared dependency
+directory from hydrating one worktree with paths pre-bundled in another
+worktree, and prevents a running dev server from sharing optimized modules with
+the native-smoke build.
+
+## Browser smoke classification
+
+**Current browser-suite classification: pre-push manual gate plus machine-classified release CI.**
 
 Run the browser E2E smoke suite before pushing a branch or opening a PR when the
 change touches one of the required file areas below. The ordinary `CI` workflow
-does not run it. The signed canary and production release workflows classify the
+does not run the browser/mock suite; it runs the packaged production gate above.
+The signed canary and production release workflows classify the
 exact changed paths with `release.config.json`; when a covered path matches, the
 release gate runs the browser suite on the GitHub macOS runner and records the
 classification and result in immutable gate evidence.

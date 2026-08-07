@@ -26,6 +26,7 @@ import { formatLibraryLoadError } from './library-view-state';
 
 export const IMAGE_PAGE_SIZE = 200;
 const MAX_SCOPE_CACHE_ENTRIES = 5;
+const LIBRARY_LOAD_TIMEOUT_MS = 15_000;
 
 export interface ImageLoadOptions {
     resetFocus?: boolean;
@@ -53,6 +54,21 @@ interface CachedScopeState {
     hasMore: boolean;
     focusedIndex: number;
     scrollTop: number;
+}
+
+async function withLibraryLoadTimeout<T>(operation: Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+            reject(new Error('Library load timed out after 15 seconds'));
+        }, LIBRARY_LOAD_TIMEOUT_MS);
+    });
+
+    try {
+        return await Promise.race([operation, timeout]);
+    } finally {
+        if (timer !== undefined) clearTimeout(timer);
+    }
 }
 
 let activeScopeKey = '';
@@ -246,7 +262,7 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
         let lastRawCount = 0;
 
         do {
-            const page = await fetchPage(scope, offset, IMAGE_PAGE_SIZE);
+            const page = await withLibraryLoadTimeout(fetchPage(scope, offset, IMAGE_PAGE_SIZE));
             if (seq !== requestSeq || key !== activeScopeKey) return;
 
             lastRawCount = page.rawCount;
@@ -292,7 +308,7 @@ export async function loadMoreImagesForCurrentScope() {
     setLoadState();
 
     try {
-        const page = await fetchPage(scope, offset, IMAGE_PAGE_SIZE);
+        const page = await withLibraryLoadTimeout(fetchPage(scope, offset, IMAGE_PAGE_SIZE));
         if (seq !== requestSeq || key !== activeScopeKey) return;
 
         nextOffset += IMAGE_PAGE_SIZE;
