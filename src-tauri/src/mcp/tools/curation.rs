@@ -39,25 +39,30 @@ impl CullMcp {
     }
 
     #[tool(description = "Open an image in the loupe (fullscreen detail) view on the local app")]
-    fn show_image(&self, Parameters(params): Parameters<ShowImageParams>) -> String {
+    async fn show_image(&self, Parameters(params): Parameters<ShowImageParams>) -> String {
         match self.check_image_id_scope(&params.image_id) {
             Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
             Err(e) => return format!("Error: {}", e),
             _ => {}
         }
-        match crate::services::display::show_image(&self.app_handle, &params.image_id) {
+        match crate::services::display::show_image(&self.app_handle, &params.image_id).await {
             Ok(()) => serde_json::json!({"status": "ok", "action": "opened in loupe"}).to_string(),
             Err(e) => format!("Error: {}", e),
         }
     }
 
     #[tool(description = "Navigate the local app to a folder in grid view")]
-    fn navigate_to_folder(&self, Parameters(params): Parameters<NavigateToFolderParams>) -> String {
+    async fn navigate_to_folder(
+        &self,
+        Parameters(params): Parameters<NavigateToFolderParams>,
+    ) -> String {
         let scope = self.token_scope();
         if !tokens::folder_in_scope(&scope, &params.folder_path) {
             return "Error: Access denied — folder outside token scope".to_string();
         }
-        match crate::services::display::navigate_to_folder(&self.app_handle, &params.folder_path) {
+        match crate::services::display::navigate_to_folder(&self.app_handle, &params.folder_path)
+            .await
+        {
             Ok(()) => {
                 serde_json::json!({"status": "ok", "action": "navigated to folder"}).to_string()
             }

@@ -65,10 +65,14 @@ describe('native window reveal contract', () => {
         const lib = source('src-tauri/src/lib.rs');
         const tray = source('src-tauri/src/tray.rs');
 
-        expect(lib).toContain('pub(crate) fn reveal_main_window(app: &AppHandle)');
+        expect(lib).toMatch(/pub\(crate\) fn reveal_main_window(<R: tauri::Runtime>)?\(app: &AppHandle(<R>)?\)/);
+        // The reveal body lives in try_reveal_main_window, which reports why a
+        // reveal failed so the MCP display tools can surface it; reveal_main_window
+        // is the infallible wrapper for callers with nowhere to report.
         expect(lib).toMatch(
-            /fn reveal_main_window[\s\S]*window\.show\(\)[\s\S]*window\.unminimize\(\)[\s\S]*window\.set_focus\(\)/
+            /fn try_reveal_main_window[\s\S]*window\s*\.show\(\)[\s\S]*window\.unminimize\(\)[\s\S]*window\.set_focus\(\)/
         );
+        expect(lib).toMatch(/fn reveal_main_window[\s\S]*try_reveal_main_window\(app\)/);
         expect(lib).toContain('tauri::RunEvent::Reopen');
         expect(lib).toContain('reveal_main_window(app);');
         expect(lib).toContain('tauri::RunEvent::Opened');

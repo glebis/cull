@@ -12,6 +12,7 @@ pub struct OpenParams {
     pub paths: Option<Vec<String>>,
     pub folder: Option<String>,
     pub settings_tab: Option<String>,
+    pub collection: Option<String>,
     pub view: Option<String>,
     pub size: Option<u32>,
     pub zoom: Option<u32>,
@@ -22,6 +23,10 @@ pub struct OpenParams {
     pub drag_drop: Option<bool>,
     pub drop_x: Option<f64>,
     pub drop_y: Option<f64>,
+    /// Correlation id for the navigation ack round-trip. When set, the frontend
+    /// must report back via `complete_deep_link_navigation` so the caller can
+    /// tell whether the navigation actually happened. See `services::display`.
+    pub request_id: Option<String>,
 }
 
 /// Validate that a single path is safe for deep-link access.
@@ -71,7 +76,10 @@ fn pending_open_params() -> &'static Mutex<Vec<OpenParams>> {
     PENDING_OPEN_PARAMS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-pub fn emit_open_params(app: &AppHandle, params: OpenParams) -> tauri::Result<()> {
+pub fn emit_open_params<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    params: OpenParams,
+) -> tauri::Result<()> {
     if !FRONTEND_OPEN_LISTENER_READY.load(Ordering::SeqCst) {
         if let Ok(mut pending) = pending_open_params().lock() {
             pending.push(params.clone());
@@ -98,6 +106,7 @@ pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams>
         },
         folder: None,
         settings_tab: None,
+        collection: None,
         view: Some("loupe".to_string()),
         size: None,
         zoom: None,
@@ -108,6 +117,7 @@ pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams>
         drag_drop: None,
         drop_x: None,
         drop_y: None,
+        request_id: None,
     };
 
     validate_open_params(params).ok()
@@ -212,6 +222,22 @@ pub async fn drain_pending_open_params() -> Result<Vec<OpenParams>, String> {
     Ok(std::mem::take(&mut *pending))
 }
 
+/// Frontend ack for a navigation that carried a `request_id`. This is what
+/// makes the display tools able to report a real failure: without it they can
+/// only observe that Tauri accepted the event, never that the UI acted on it.
+#[tauri::command]
+pub async fn complete_deep_link_navigation(
+    request_id: String,
+    ok: bool,
+    error: Option<String>,
+) -> Result<(), String> {
+    crate::services::display::complete_navigation(
+        &request_id,
+        crate::services::display::NavigationAck { ok, error },
+    );
+    Ok(())
+}
+
 /// Tauri command that agents can call via IPC to control the app.
 #[tauri::command]
 pub async fn open_with_params(
@@ -232,6 +258,7 @@ pub async fn open_with_params(
         paths,
         folder,
         settings_tab: None,
+        collection: None,
         view,
         size,
         zoom,
@@ -242,6 +269,7 @@ pub async fn open_with_params(
         drag_drop: None,
         drop_x: None,
         drop_y: None,
+        request_id: None,
     };
     let validated = validate_open_params(params)?;
     emit_open_params(&app, validated).map_err(|e| e.to_string())
@@ -265,6 +293,7 @@ pub fn parse_deep_link(url: &str) -> Result<OpenParams, String> {
         paths: None,
         folder: None,
         settings_tab: None,
+        collection: None,
         view: None,
         size: None,
         zoom: None,
@@ -275,6 +304,7 @@ pub fn parse_deep_link(url: &str) -> Result<OpenParams, String> {
         drag_drop: None,
         drop_x: None,
         drop_y: None,
+        request_id: None,
     };
 
     // Extract the action from the URL (e.g., "open", "grid", "loupe")

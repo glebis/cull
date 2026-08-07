@@ -139,7 +139,7 @@ impl CullMcp {
     }
 
     #[tool(description = "Display a collection in the local app grid view")]
-    fn show_collection(&self, Parameters(params): Parameters<CollectionIdParams>) -> String {
+    async fn show_collection(&self, Parameters(params): Parameters<CollectionIdParams>) -> String {
         if let Some(ref scope) = self.token_scope() {
             if let Some(ref allowed) = scope.collections {
                 if !allowed.contains(&params.collection_id) {
@@ -147,7 +147,9 @@ impl CullMcp {
                 }
             }
         }
-        match crate::services::display::show_collection(&self.app_handle, &params.collection_id) {
+        match crate::services::display::show_collection(&self.app_handle, &params.collection_id)
+            .await
+        {
             Ok(()) => {
                 serde_json::json!({"status": "ok", "action": "showing collection"}).to_string()
             }

@@ -17,7 +17,7 @@ impl CullMcp {
         let request_id = format!("req_{}", uuid::Uuid::new_v4().simple());
         let snapshot_id = format!("snap_{}", uuid::Uuid::new_v4().simple());
         let (sender, receiver) = tokio::sync::oneshot::channel::<
-            crate::services::agent_snapshots::AgentSnapshotPackage,
+            Result<crate::services::agent_snapshots::AgentSnapshotPackage, String>,
         >();
         state
             .agent_snapshot_requests
@@ -30,16 +30,20 @@ impl CullMcp {
             "capture_reason": "mcp",
         });
 
+        // A snapshot of a hidden tray window cannot succeed, so reveal it first.
+        crate::reveal_main_window(&self.app_handle);
+
         if let Err(e) = self.app_handle.emit("agent-view-snapshot:request", payload) {
             state.agent_snapshot_requests.lock().remove(&request_id);
             return format!("Error: Failed to request frontend snapshot: {}", e);
         }
 
         match tokio::time::timeout(std::time::Duration::from_secs(15), receiver).await {
-            Ok(Ok(package)) => {
+            Ok(Ok(Ok(package))) => {
                 crate::services::agent_snapshots::snapshot_response_value(&package, false)
                     .to_string()
             }
+            Ok(Ok(Err(e))) => format!("Error: The app could not capture a snapshot: {}", e),
             Ok(Err(_)) => "Error: Agent snapshot request was cancelled".to_string(),
             Err(_) => {
                 state.agent_snapshot_requests.lock().remove(&request_id);

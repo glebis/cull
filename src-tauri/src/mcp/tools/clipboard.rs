@@ -19,7 +19,7 @@ impl CullMcp {
     }
 
     #[tool(description = "Show the active Clipboard Monitor collection in the local app grid")]
-    fn show_clipboard_collection(&self, Parameters(_): Parameters<EmptyParams>) -> String {
+    async fn show_clipboard_collection(&self, Parameters(_): Parameters<EmptyParams>) -> String {
         let state = self.app_handle.state::<AppState>();
         let collection_id = state
             .clipboard_monitor
@@ -43,7 +43,7 @@ impl CullMcp {
                 }
             }
         }
-        match crate::services::display::show_collection(&self.app_handle, &collection_id) {
+        match crate::services::display::show_collection(&self.app_handle, &collection_id).await {
             Ok(()) => serde_json::json!({"status":"ok","collection_id":collection_id}).to_string(),
             Err(e) => format!("Error: {}", e),
         }
