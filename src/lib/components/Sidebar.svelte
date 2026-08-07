@@ -53,13 +53,173 @@
         clipboardMonitorStatus.set(status);
     }
 
-    import { buildDisplayFolders, buildPinnedCollectionRows, formatSidebarCount } from '$lib/sidebar-utils';
+    import { buildDisplayFolders, buildPinnedCollectionRows, formatSidebarCount, formatFolderCount, visibleFolderRows, matchesSidebarFilter, prunePinnedIds, type CollectionRow } from '$lib/sidebar-utils';
+
+    function prunePinsToExistingCollections(rows: CollectionRow[]) {
+        const kept = prunePinnedIds(get(pinnedCollections), rows);
+        if (kept.length !== get(pinnedCollections).length) {
+            pinnedCollections.set(kept);
+        }
+        if (get(pinnedCollection) && !kept.includes(get(pinnedCollection)!)) {
+            pinnedCollection.set(kept[kept.length - 1] ?? null);
+        }
+    }
     import SessionSwitcher from './SessionSwitcher.svelte';
-    import { activeCanvas, activeSession, navigateTo, sessionCanvases } from '$lib/stores';
+    import { activeCanvas, activeSession, navigateTo, sessionCanvases, expandedFolders, sidebarSectionsCollapsed, sidebarFilter } from '$lib/stores';
     import { createCanvas, type Canvas } from '$lib/api';
 
+    // "All Images" is only the active scope when nothing else narrows it —
+    // including a detected-class filter, which used to leave both All Images
+    // and the class row looking unselected/selected at the same time.
+    let allImagesActive = $derived(
+        $activeFolder === null &&
+        $activeCollection === null &&
+        $activeSmartCollection === null &&
+        $activeDetectedClass === null
+    );
+
     let displayFolders = $derived(buildDisplayFolders($folders));
-    let displayCollections = $derived(buildPinnedCollectionRows($collections, $pinnedCollections));
+    let displayCollections = $derived(
+        buildPinnedCollectionRows($collections, $pinnedCollections)
+            .filter(([, name]) => matchesSidebarFilter(name, $sidebarFilter))
+    );
+
+    // Section collapse. The store holds the COLLAPSED ids, so a section added
+    // later defaults to open for users who already have persisted state.
+    function isSectionCollapsed(collapsed: Set<string>, id: string): boolean {
+        return collapsed.has(id);
+    }
+    function toggleSection(id: string) {
+        sidebarSectionsCollapsed.update(set => {
+            const next = new Set(set);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    }
+
+    // "Recent Imports" is a seeded smart collection, but sixth in a 22-row list
+    // is not where you look after an import. Promote it next to All Images and
+    // drop it from the SMART list so it appears exactly once.
+    const RECENT_IMPORTS_NAME = 'Recent Imports';
+    let recentImportsCollection = $derived(
+        $smartCollections.find(sc => sc.name === RECENT_IMPORTS_NAME && (sc.image_count ?? 0) > 0) ?? null
+    );
+
+    // The rows actually on screen. Both the render loop and the keyboard
+    // handler read this, so arrow keys can never focus a hidden row.
+    let visibleFolders = $derived(visibleFolderRows(displayFolders, $expandedFolders, $sidebarFilter));
+    let treeFocusIndex = $state(0);
+    // While filtering, the tree auto-reveals matches and their subtrees, so
+    // expansion controls are inert and say so rather than looking broken.
+    let filterActive = $derived($sidebarFilter.trim() !== '');
+    // Filtering or collapsing can shrink the list below the remembered index.
+    // Clamping in a $derived (rather than writing back to treeFocusIndex from
+    // an effect) keeps exactly one row tabbable without a self-referential
+    // effect, so Tab can always re-enter the tree.
+    let treeTabIndex = $derived(
+        visibleFolders.length === 0 ? -1 : Math.min(treeFocusIndex, visibleFolders.length - 1)
+    );
+
+    function toggleFolderExpanded(path: string) {
+        // While a filter is active the tree ignores expansion entirely, so a
+        // toggle here would silently rewrite persisted state the user cannot
+        // see — they would only discover it after clearing the filter.
+        if (get(sidebarFilter).trim()) return;
+        expandedFolders.update(set => {
+            const next = new Set(set);
+            if (next.has(path)) next.delete(path); else next.add(path);
+            return next;
+        });
+    }
+
+    function focusTreeRow(index: number) {
+        const clamped = Math.max(0, Math.min(index, visibleFolders.length - 1));
+        treeFocusIndex = clamped;
+        // The row must exist in the DOM before it can take focus; Svelte has
+        // already flushed by the time a keydown handler runs for rows that were
+        // visible, and expand/collapse re-renders synchronously via $derived.
+        queueMicrotask(() => {
+            const el = document.querySelector<HTMLElement>(`[data-tree-row="${clamped}"]`);
+            el?.focus();
+        });
+    }
+
+    function handleTreeKeydown(event: KeyboardEvent) {
+        const rows = visibleFolders;
+        if (rows.length === 0) return;
+        const i = Math.min(treeFocusIndex, rows.length - 1);
+        const row = rows[i];
+
+        switch (event.key) {
+            case 'Enter':
+            case ' ':
+                // Focus lives on the treeitem, not the inner button, so the
+                // row has to activate itself.
+                event.preventDefault();
+                selectFolder(row.fullPath);
+                break;
+            case 'ArrowDown':
+                event.preventDefault();
+                focusTreeRow(i + 1);
+                break;
+            case 'ArrowUp':
+                event.preventDefault();
+                focusTreeRow(i - 1);
+                break;
+            case 'Home':
+                event.preventDefault();
+                focusTreeRow(0);
+                break;
+            case 'End':
+                event.preventDefault();
+                focusTreeRow(rows.length - 1);
+                break;
+            case 'ArrowRight':
+                event.preventDefault();
+                // Standard tree behaviour: open a closed node, then step into it.
+                // Filtering already reveals every subtree, so there is nothing
+                // to open and Right simply steps in.
+                if (row.hasChildren && !filterActive && !get(expandedFolders).has(row.fullPath)) {
+                    toggleFolderExpanded(row.fullPath);
+                } else if (row.hasChildren) {
+                    focusTreeRow(i + 1);
+                }
+                break;
+            case 'ArrowLeft':
+                event.preventDefault();
+                if (row.hasChildren && !filterActive && get(expandedFolders).has(row.fullPath)) {
+                    toggleFolderExpanded(row.fullPath);
+                } else {
+                    // Jump to the nearest shallower row — the visual parent.
+                    for (let k = i - 1; k >= 0; k--) {
+                        if (rows[k].depth < row.depth) { focusTreeRow(k); break; }
+                    }
+                }
+                break;
+            case 'Delete':
+                if (!row.isGroup) {
+                    event.preventDefault();
+                    void handleDeleteFolder(event, row.fullPath);
+                }
+                break;
+        }
+    }
+
+    // A running monitor forces the section open — a background capture that the
+    // user cannot see the state of is worse than the space it costs.
+    let clipboardCollapsed = $derived(
+        isSectionCollapsed($sidebarSectionsCollapsed, 'clipboard') && !clipboardStatus?.running
+    );
+
+    // Smart collections seed ~22 presets. Hiding the empty ones keeps the list
+    // proportional to the library instead of to the seed table.
+    let visibleSmartCollections = $derived(
+        $smartCollections.filter(sc =>
+            (sc.image_count ?? 0) > 0 &&
+            sc.id !== recentImportsCollection?.id &&
+            matchesSidebarFilter(sc.name, $sidebarFilter)
+        )
+    );
 
     function clearCollectionPreviewTimer() {
         if (!collectionPreviewTimer) return;
@@ -140,6 +300,7 @@
         try {
             const c = await listCollections();
             collections.set(c);
+            prunePinsToExistingCollections(c);
         } catch (e) {
             console.error('Failed to load collections:', e);
             showToast('Failed to load collections', { detail: String(e), type: 'error', duration: 8000 });
@@ -514,10 +675,17 @@
                 summary += `, ${result.errors.length} errors`;
             }
             setLastResult(summary, result.errors.length > 0 ? 'error' : 'success');
+            const importedFolder = selected as string;
             showToast(`Imported "${folderName}"`, {
                 detail: summary,
                 type: 'success',
                 duration: 8000,
+                // "Where did what I just imported go?" is the question every
+                // import ends on; answer it in the toast instead of making the
+                // user hunt for the folder in the tree.
+                actions: result.imported > 0
+                    ? [{ label: 'View imported', onclick: () => { selectFolder(importedFolder); } }]
+                    : undefined,
             });
             await refreshImages();
         } catch (e) {
@@ -609,18 +777,43 @@
         </div>
     {/if}
 
+    <div class="sidebar-filter">
+        <input
+            type="search"
+            class="sidebar-filter-input"
+            placeholder="Filter folders &amp; collections"
+            aria-label="Filter folders and collections"
+            bind:value={$sidebarFilter}
+            onkeydown={(e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); sidebarFilter.set(''); } }}
+        />
+    </div>
+
     <div class="section">
         <div class="section-header">LIBRARY</div>
         <button
             class="section-item"
-            class:active={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null && $activeDetectedClass === null}
+            class:active={allImagesActive}
             onclick={() => selectFolder(null)}
-            aria-current={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null && $activeDetectedClass === null ? 'true' : undefined}
+            aria-current={allImagesActive ? 'true' : undefined}
         >
             <span class="icon">&#9632;</span>
             <span class="item-label">All Images</span>
             <span class="count">{formatSidebarCount($totalCount)}</span>
         </button>
+
+        {#if recentImportsCollection}
+            <button
+                class="section-item"
+                class:active={$activeSmartCollection?.id === recentImportsCollection.id}
+                onclick={() => selectSmartCollection(recentImportsCollection!)}
+                aria-current={$activeSmartCollection?.id === recentImportsCollection.id ? 'true' : undefined}
+                title="Images imported in the last 7 days"
+            >
+                <span class="icon">&#9200;</span>
+                <span class="item-label">Recent Imports</span>
+                <span class="count">{formatSidebarCount(recentImportsCollection.image_count)}</span>
+            </button>
+        {/if}
 
         {#if displayFolders.length > 0}
             <button
@@ -634,34 +827,72 @@
             </button>
 
             {#if foldersExpanded}
-                <div aria-label="Folder hierarchy">
-                {#each displayFolders as folder}
-                    <div class="folder-row" class:active={$activeFolder === folder.fullPath} style="padding-left: {folder.depth * 12}px">
-                        {#if folder.count > 0}
+                <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
+                <div
+                    class="folder-tree"
+                    role="tree"
+                    tabindex="-1"
+                    aria-label="Folder hierarchy"
+                    onkeydown={handleTreeKeydown}
+                >
+                {#each visibleFolders as folder, i (folder.fullPath)}
+                    {@const isExpanded = $expandedFolders.has(folder.fullPath)}
+                    <div
+                        class="folder-row"
+                        class:active={$activeFolder === folder.fullPath}
+                        style="padding-left: {folder.depth * 12}px"
+                        role="treeitem"
+                        aria-level={folder.depth + 1}
+                        aria-keyshortcuts={folder.isGroup ? undefined : 'Delete'}
+                        aria-selected={$activeFolder === folder.fullPath}
+                        aria-expanded={folder.hasChildren ? (isExpanded || filterActive) : undefined}
+                        aria-label={`${folder.name}, ${folder.subtreeCount} images`}
+                        data-tree-row={i}
+                        tabindex={i === treeTabIndex ? 0 : -1}
+                        onfocusin={() => treeFocusIndex = i}
+                    >
+                        {#if folder.hasChildren}
                             <button
-                                class="section-item"
-                                onclick={() => selectFolder(folder.fullPath)}
-                                title={folder.fullPath}
-                                aria-current={$activeFolder === folder.fullPath ? 'true' : undefined}
-                            >
-                                <span class="icon">{folder.hasChildren ? '▾' : '▸'}</span>
-                                <span class="folder-label">{folder.name}</span>
-                                <span class="count">{formatSidebarCount(folder.count)}</span>
-                            </button>
+                                class="twisty"
+                                tabindex="-1"
+                                disabled={filterActive}
+                                onclick={(e: Event) => { e.stopPropagation(); toggleFolderExpanded(folder.fullPath); }}
+                                aria-label={`${isExpanded || filterActive ? 'Collapse' : 'Expand'} ${folder.name}`}
+                                title={filterActive ? 'Expansion is disabled while filtering' : undefined}
+                            >{isExpanded || filterActive ? '▾' : '▸'}</button>
+                        {:else}
+                            <span class="twisty-spacer" aria-hidden="true"></span>
+                        {/if}
+                        <button
+                            class="section-item"
+                            class:folder-group={folder.isGroup}
+                            tabindex="-1"
+                            onclick={() => selectFolder(folder.fullPath)}
+                            title={folder.fullPath}
+                            aria-current={$activeFolder === folder.fullPath ? 'true' : undefined}
+                        >
+                            <span class="folder-label">{folder.name}</span>
+                            <span
+                                class="count"
+                                title={folder.count === folder.subtreeCount
+                                    ? undefined
+                                    : `${folder.count} directly in this folder, ${folder.subtreeCount} including subfolders`}
+                            >{formatFolderCount(folder.count, folder.subtreeCount)}</span>
+                        </button>
+                        {#if !folder.isGroup}
                             <button
                                 class="delete-btn"
+                                tabindex="-1"
                                 onclick={(e: Event) => handleDeleteFolder(e, folder.fullPath)}
                                 title="Remove folder from library"
                                 aria-label={`Remove folder from library: ${folder.name}`}
                             >&times;</button>
-                        {:else}
-                            <span class="section-item folder-group">
-                                <span class="icon">▾</span>
-                                <span class="folder-label">{folder.name}</span>
-                            </span>
                         {/if}
                     </div>
                 {/each}
+                {#if visibleFolders.length === 0}
+                    <div class="section-empty">No folders match "{$sidebarFilter}"</div>
+                {/if}
                 </div>
             {/if}
         {/if}
@@ -722,8 +953,80 @@
         {/if}
     </div>
 
+    {#if visibleSmartCollections.length > 0}
+    {@const smartCollapsed = isSectionCollapsed($sidebarSectionsCollapsed, 'smart')}
+    <div class="section">
+        <button
+            class="folders-toggle"
+            onclick={() => toggleSection('smart')}
+            aria-expanded={!smartCollapsed}
+        >
+            <span class="toggle-arrow">{smartCollapsed ? '▸' : '▾'}</span>
+            <span class="folders-toggle-label">Smart</span>
+            <span class="count">{formatSidebarCount(visibleSmartCollections.length)}</span>
+        </button>
+        {#if !smartCollapsed}
+            {#each visibleSmartCollections as sc}
+                <button class="section-item"
+                    class:active={$activeSmartCollection?.id === sc.id}
+                    onclick={() => selectSmartCollection(sc)}
+                    aria-current={$activeSmartCollection?.id === sc.id ? 'true' : undefined}>
+                    <span class="icon">&#9733;</span>
+                    <span class="item-label">{sc.name}</span>
+                    <span class="count">{formatSidebarCount(sc.image_count)}</span>
+                </button>
+            {/each}
+        {/if}
+    </div>
+    {/if}
+
+    <div class="section">
+        <div class="section-header">FILTERS</div>
+        <div class="filter-row">
+            <span class="filter-label">Min size</span>
+            <div class="filter-presets">
+                {#each SIZE_PRESETS as preset}
+                    <button
+                        class="preset-btn"
+                        class:active={$minSizeFilter === preset.value}
+                        onclick={() => handleSizeFilter(preset.value)}
+                    >{preset.label}</button>
+                {/each}
+            </div>
+        </div>
+        <label class="show-missing-toggle">
+            <input type="checkbox" bind:checked={$showMissing} />
+            Show missing files
+        </label>
+        {#if detectedClasses.length > 0}
+            <div class="detected-header">DETECTED OBJECTS</div>
+            {#each detectedClasses as [cls, count]}
+                <button
+                    class="section-item detected-class"
+                    class:active={$activeDetectedClass === cls}
+                    onclick={() => filterByClass(cls)}
+                    aria-current={$activeDetectedClass === cls ? 'true' : undefined}
+                >
+                    <span class="class-tag">{cls}</span>
+                    <span class="count">{formatSidebarCount(count)}</span>
+                </button>
+            {/each}
+        {/if}
+    </div>
+
     <div class="section clipboard-monitor">
-        <div class="section-header">CLIPBOARD MONITOR</div>
+        <button
+            class="folders-toggle"
+            onclick={() => toggleSection('clipboard')}
+            aria-expanded={!clipboardCollapsed}
+        >
+            <span class="toggle-arrow">{clipboardCollapsed ? '▸' : '▾'}</span>
+            <span class="folders-toggle-label">Clipboard Monitor</span>
+            {#if clipboardStatus?.running}
+                <span class="count running-dot" title="Monitor running">●</span>
+            {/if}
+        </button>
+        {#if !clipboardCollapsed}
         <button
             class="section-item"
             class:active={clipboardStatus?.running}
@@ -777,55 +1080,6 @@
                 >{clipboardPublishResult.url}</button>
             {/if}
         {/if}
-    </div>
-
-    {#if $smartCollections.length > 0}
-    <div class="section">
-        <div class="section-header">SMART</div>
-        {#each $smartCollections as sc}
-            <button class="section-item"
-                class:active={$activeSmartCollection?.id === sc.id}
-                onclick={() => selectSmartCollection(sc)}
-                aria-current={$activeSmartCollection?.id === sc.id ? 'true' : undefined}>
-                <span class="icon">&#9733;</span>
-                <span class="item-label">{sc.name}</span>
-                <span class="count">{formatSidebarCount(sc.image_count)}</span>
-            </button>
-        {/each}
-    </div>
-    {/if}
-
-    <div class="section">
-        <div class="section-header">FILTERS</div>
-        <div class="filter-row">
-            <span class="filter-label">Min size</span>
-            <div class="filter-presets">
-                {#each SIZE_PRESETS as preset}
-                    <button
-                        class="preset-btn"
-                        class:active={$minSizeFilter === preset.value}
-                        onclick={() => handleSizeFilter(preset.value)}
-                    >{preset.label}</button>
-                {/each}
-            </div>
-        </div>
-        <label class="show-missing-toggle">
-            <input type="checkbox" bind:checked={$showMissing} />
-            Show missing files
-        </label>
-        {#if detectedClasses.length > 0}
-            <div class="detected-header">DETECTED OBJECTS</div>
-            {#each detectedClasses as [cls, count]}
-                <button
-                    class="section-item detected-class"
-                    class:active={$activeDetectedClass === cls}
-                    onclick={() => filterByClass(cls)}
-                    aria-current={$activeDetectedClass === cls ? 'true' : undefined}
-                >
-                    <span class="class-tag">{cls}</span>
-                    <span class="count">{formatSidebarCount(count)}</span>
-                </button>
-            {/each}
         {/if}
     </div>
     </div>
@@ -1047,6 +1301,50 @@
         margin-left: auto;
         font-size: 11px;
         flex: none;
+    }
+    .sidebar-filter {
+        padding: var(--spacing) var(--spacing) 0;
+    }
+    .sidebar-filter-input {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 11px;
+        min-height: 28px;
+        padding: 4px 8px;
+        width: 100%;
+    }
+    .sidebar-filter-input::placeholder {
+        color: var(--text-secondary);
+    }
+    .sidebar-filter-input:focus {
+        border-color: var(--blue);
+        outline: none;
+    }
+    .twisty {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        flex: none;
+        font-family: inherit;
+        font-size: 8px;
+        line-height: 1;
+        padding: 0;
+        width: 14px;
+    }
+    .twisty:hover {
+        color: var(--text);
+    }
+    .twisty-spacer {
+        flex: none;
+        width: 14px;
+    }
+    .running-dot {
+        color: var(--green);
+        font-size: 9px;
     }
     .folder-row {
         display: flex;

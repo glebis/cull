@@ -5,6 +5,8 @@ import {
     activeSmartCollection, activeDetectedClass, minSizeFilter, loupeScale, loupePanX, loupePanY,
     lineageLayout, showDetectionBoxes, nsfwMode, embeddingViewState,
     focusedIndex, images,
+    pinnedCollection, pinnedCollections,
+    expandedFolders, sidebarSectionsCollapsed,
     resetLoupeTransform,
     type ViewMode, type LineageLayout, type NsfwMode, type EmbeddingViewState,
 } from './stores';
@@ -35,6 +37,12 @@ export interface PersistedState {
     showDetectionBoxes: boolean;
     nsfwMode: NsfwMode;
     embeddingViewState: EmbeddingViewState;
+    // Sidebar state. All optional so a state blob written before these fields
+    // existed still restores under the same SCHEMA_VERSION.
+    pinnedCollectionIds?: string[];
+    pinnedCollectionId?: string | null;
+    expandedFolders?: string[];
+    sidebarSectionsCollapsed?: string[];
 }
 
 export function saveAppState(): void {
@@ -61,6 +69,10 @@ export function saveAppState(): void {
         showDetectionBoxes: get(showDetectionBoxes),
         nsfwMode: get(nsfwMode),
         embeddingViewState: get(embeddingViewState),
+        pinnedCollectionIds: get(pinnedCollections),
+        pinnedCollectionId: get(pinnedCollection),
+        expandedFolders: [...get(expandedFolders)],
+        sidebarSectionsCollapsed: [...get(sidebarSectionsCollapsed)],
     };
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -94,6 +106,12 @@ export function restoreAppStateBeforeImages(): PersistedState | null {
         showDetectionBoxes.set(state.showDetectionBoxes);
         nsfwMode.set(state.nsfwMode);
         embeddingViewState.set(state.embeddingViewState);
+        // Pins are restored optimistically; Sidebar prunes ids whose collection
+        // no longer exists once the collection list arrives.
+        pinnedCollections.set(state.pinnedCollectionIds ?? []);
+        pinnedCollection.set(state.pinnedCollectionId ?? null);
+        expandedFolders.set(new Set(state.expandedFolders ?? []));
+        sidebarSectionsCollapsed.set(new Set(state.sidebarSectionsCollapsed ?? []));
         return state;
     } catch {
         return null;

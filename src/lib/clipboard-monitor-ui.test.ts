@@ -6,7 +6,9 @@ const sidebar = readFileSync(join(process.cwd(), 'src/lib/components/Sidebar.sve
 
 describe('clipboard monitor sidebar UI contract', () => {
     it('renders operational clipboard monitor controls in the sidebar', () => {
-        expect(sidebar).toContain('CLIPBOARD MONITOR');
+        // The section is now a collapse toggle; `.folders-toggle-label` applies
+        // text-transform: uppercase, so it still reads CLIPBOARD MONITOR.
+        expect(sidebar).toContain('Clipboard Monitor');
         expect(sidebar).toContain('startClipboardMonitor');
         expect(sidebar).toContain('stopClipboardMonitor');
         expect(sidebar).toContain('setClipboardMonitorCaptureExistingOnStart');
