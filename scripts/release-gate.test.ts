@@ -641,8 +641,16 @@ describe('release gate', () => {
     expect(publishJob).toContain('Object.keys(provenance.checks).sort()');
     expect(publishJob).toContain('provenance.checks[name] !== true');
     expect(publishJob).toContain("heading === 'Unreleased'");
+    expect(publishJob).toContain('id: release_draft');
+    expect(publishJob).toContain('gh api --paginate --slurp "repos/$REPOSITORY/releases?per_page=100"');
+    expect(publishJob).toContain('release-id=${release_id}');
+    expect(publishJob).toContain('asset-count=${asset_count}');
     expect(publishJob).toContain('gh release create "$TAG" --verify-tag --draft');
     expect(publishJob).toContain('gh release upload "$TAG"');
+    expect(publishJob).toContain("if: steps.release_draft.outputs.asset-count == '0'");
+    expect(publishJob).toContain('RELEASE_ID: ${{ steps.release_draft.outputs.release-id }}');
+    expect(publishJob).toContain('gh api "repos/$REPOSITORY/releases/$RELEASE_ID"');
+    expect(publishJob).not.toContain('releases/tags/$TAG');
     expect(publishJob).not.toContain('--clobber');
     expect(publishJob).not.toContain('tauri-action');
     expect(publishJob).not.toContain('npm run build');

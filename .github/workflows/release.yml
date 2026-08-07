@@ -562,30 +562,64 @@ jobs:
           NODE
 
       - name: Create or validate idempotent draft
+        id: release_draft
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-gate.outputs.tag }}
           COMMIT: ${{ needs.release-gate.outputs.sha }}
+          VERSION: ${{ needs.release-gate.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
-          release_json="$RUNNER_TEMP/existing-release.json"
-          release_error="$RUNNER_TEMP/existing-release.error"
-          if gh release view "$TAG" --json tagName,isDraft,isPrerelease,assets,body >"$release_json" 2>"$release_error"; then
-            RELEASE_JSON="$release_json" NOTES="$RUNNER_TEMP/release-notes.md" node <<'NODE'
+          releases_json="$RUNNER_TEMP/existing-releases.json"
+          gh api --paginate --slurp "repos/$REPOSITORY/releases?per_page=100" > "$releases_json"
+          release_details=$(RELEASES_JSON="$releases_json" NOTES="$RUNNER_TEMP/release-notes.md" node <<'NODE'
           const fs = require('node:fs');
-          const release = JSON.parse(fs.readFileSync(process.env.RELEASE_JSON, 'utf8'));
+          const pages = JSON.parse(fs.readFileSync(process.env.RELEASES_JSON, 'utf8'));
+          if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) process.exit(2);
+          const matches = pages.flat().filter((release) => release.tag_name === process.env.TAG);
+          if (matches.length > 1) process.exit(2);
+          if (matches.length === 0) process.exit(3);
+          const release = matches[0];
           const notes = fs.readFileSync(process.env.NOTES, 'utf8').trim();
-          if (release.tagName !== process.env.TAG || release.isDraft !== true || release.isPrerelease !== false ||
-              release.body.trim() !== notes || release.assets.length !== 0) process.exit(2);
+          const expectedAssets = [
+            `Cull_${process.env.VERSION}_aarch64.dmg`, 'Cull_aarch64.app.tar.gz',
+            'Cull_aarch64.app.tar.gz.sig', 'latest.json', 'release-provenance.json', 'checksums.txt',
+          ].sort();
+          const actualAssets = release.assets.map(({ name }) => name).sort();
+          if (!Number.isSafeInteger(release.id) || release.id <= 0 || release.draft !== true ||
+              release.prerelease !== false || release.body.trim() !== notes ||
+              (actualAssets.length !== 0 && JSON.stringify(actualAssets) !== JSON.stringify(expectedAssets))) process.exit(2);
+          process.stdout.write(`${release.id} ${actualAssets.length}`);
           NODE
-          else
-            grep -Eiq 'HTTP 404|release not found' "$release_error"
+          ) || release_status=$?
+          release_status=${release_status:-0}
+          if [[ $release_status -eq 3 ]]; then
             gh release create "$TAG" --verify-tag --draft --title "Cull $TAG" \
               --notes-file "$RUNNER_TEMP/release-notes.md" --target "$COMMIT"
+            gh api --paginate --slurp "repos/$REPOSITORY/releases?per_page=100" > "$releases_json"
+            release_details=$(RELEASES_JSON="$releases_json" NOTES="$RUNNER_TEMP/release-notes.md" node <<'NODE'
+          const fs = require('node:fs');
+          const pages = JSON.parse(fs.readFileSync(process.env.RELEASES_JSON, 'utf8'));
+          const matches = pages.flat().filter((release) => release.tag_name === process.env.TAG);
+          const notes = fs.readFileSync(process.env.NOTES, 'utf8').trim();
+          if (matches.length !== 1 || !Number.isSafeInteger(matches[0].id) || matches[0].id <= 0 ||
+              matches[0].draft !== true || matches[0].prerelease !== false ||
+              matches[0].body.trim() !== notes || matches[0].assets.length !== 0) process.exit(2);
+          process.stdout.write(`${matches[0].id} 0`);
+          NODE
+            )
+          elif [[ $release_status -ne 0 ]]; then
+            exit "$release_status"
           fi
+          read -r release_id asset_count <<< "$release_details"
+          [[ "$release_id" =~ ^[0-9]+$ && "$asset_count" =~ ^(0|6)$ ]]
+          echo "release-id=${release_id}" >> "$GITHUB_OUTPUT"
+          echo "asset-count=${asset_count}" >> "$GITHUB_OUTPUT"
 
       - name: Upload only verified release assets and evidence
+        if: steps.release_draft.outputs.asset-count == '0'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-gate.outputs.tag }}
@@ -602,13 +636,14 @@ jobs:
       - name: Verify uploaded release asset inventory
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.release-gate.outputs.tag }}
           VERSION: ${{ needs.release-gate.outputs.version }}
           REPOSITORY: ${{ github.repository }}
+          RELEASE_ID: ${{ steps.release_draft.outputs.release-id }}
         shell: bash
         run: |
           set -euo pipefail
-          gh api "repos/$REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/uploaded-release.json"
+          [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$REPOSITORY/releases/$RELEASE_ID" > "$RUNNER_TEMP/uploaded-release.json"
           RELEASE_JSON="$RUNNER_TEMP/uploaded-release.json" PACKAGE="$RUNNER_TEMP/cull-verified" node <<'NODE'
           const crypto = require('node:crypto');
           const fs = require('node:fs');
