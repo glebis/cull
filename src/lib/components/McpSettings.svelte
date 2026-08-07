@@ -86,7 +86,7 @@
 
 <style>
     .overlay { position: fixed; inset: 0; z-index: var(--z-modal); display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--bg) 78%, transparent); }
-    .panel { width: min(720px, calc(100vw - 32px)); max-height: min(84vh, 820px); display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+    .panel { width: min(720px, calc(100vw - 32px)); height: 90vh; display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
     .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
     h2 { margin: 0; color: var(--text); font-size: 14px; }
     .close { padding: 0 4px; background: none; border: 0; color: var(--text-secondary); font: 18px var(--font); cursor: pointer; }

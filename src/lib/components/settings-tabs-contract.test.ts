@@ -18,4 +18,10 @@ describe('Settings tabs', () => {
         expect(source).toContain('aria-selected=');
         expect(source).toContain('role="tabpanel"');
     });
+
+    it('keeps one viewport-sized dialog frame while tab content scrolls inside it', () => {
+        expect(source).toMatch(/\.overlay\s*\{[^}]*align-items:\s*center/s);
+        expect(source).toMatch(/\.panel\s*\{[^}]*height:\s*90vh/s);
+        expect(source).toMatch(/\.content\s*\{[^}]*overflow-y:\s*auto/s);
+    });
 });
