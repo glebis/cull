@@ -180,6 +180,14 @@ pub async fn count_by_detected_class(
 }
 
 #[tauri::command]
+pub async fn list_detected_classes(
+    state: State<'_, AppState>,
+) -> Result<Vec<(String, u32)>, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::list_detected_classes(&ctx).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn list_images_by_detected_class(
     state: State<'_, AppState>,
     class_name: String,
@@ -219,4 +227,13 @@ pub async fn is_nudenet_available(state: State<'_, AppState>) -> Result<bool, St
 pub async fn get_detection_count(state: State<'_, AppState>, model: String) -> Result<u32, String> {
     let ctx = crate::services::ServiceContext::from_app_state(&state, None);
     crate::services::ai::get_detection_count(&ctx, &model).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_image_ids_missing_detection(
+    state: State<'_, AppState>,
+    model: String,
+) -> Result<Vec<String>, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::get_pending_detection_ids(&ctx, &model).map_err(|e| e.to_string())
 }

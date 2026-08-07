@@ -10,10 +10,10 @@ function readProjectFile(path: string): string {
 
 describe('raw support default contract (module_raw un-gated in v1)', () => {
     it('defaults the Settings toggle to enabled unless explicitly disabled', () => {
-        const settings = readProjectFile('src/lib/components/McpSettings.svelte');
+        const settings = readProjectFile('src/lib/components/GeneralSettings.svelte');
 
-        expect(settings).toContain("moduleRaw = rawSetting !== 'false'");
-        expect(settings).not.toContain("moduleRaw = rawSetting === 'true'");
+        expect(settings).toContain("moduleRaw = raw !== 'false'");
+        expect(settings).not.toContain("moduleRaw = raw === 'true'");
     });
 
     it('defaults module_raw to enabled in the Rust backend via a single shared helper', () => {
@@ -31,7 +31,7 @@ describe('raw support default contract (module_raw un-gated in v1)', () => {
     });
 
     it('does not label RAW support as experimental in settings', () => {
-        const settings = readProjectFile('src/lib/components/McpSettings.svelte');
+        const settings = readProjectFile('src/lib/components/GeneralSettings.svelte');
 
         expect(settings).toContain('RAW File Support');
         expect(settings.toLowerCase()).not.toContain('experimental');

@@ -6,6 +6,7 @@ const sidebar = readFileSync(join(process.cwd(), 'src/lib/components/Sidebar.sve
 const sessionSwitcher = readFileSync(join(process.cwd(), 'src/lib/components/SessionSwitcher.svelte'), 'utf8');
 const page = readFileSync(join(process.cwd(), 'src/routes/+page.svelte'), 'utf8');
 const stores = readFileSync(join(process.cwd(), 'src/lib/stores.ts'), 'utf8');
+const palette = readFileSync(join(process.cwd(), 'src/lib/command-palette.ts'), 'utf8');
 
 describe('sidebar audit fixes contract', () => {
     it('renders errors in error styling, not success green (H1)', () => {
@@ -41,7 +42,7 @@ describe('sidebar audit fixes contract', () => {
     });
 
     it('orders content sections before utilities, with Collections and Clipboard high (M1)', () => {
-        const order = ['LIBRARY', 'COLLECTIONS', 'CLIPBOARD MONITOR', 'SMART', 'FILTERS', 'AI MODELS'];
+        const order = ['LIBRARY', 'COLLECTIONS', 'CLIPBOARD MONITOR', 'SMART', 'FILTERS'];
         const positions = order.map(label => sidebar.indexOf(`>${label}<`) !== -1
             ? sidebar.indexOf(`>${label}<`)
             : sidebar.indexOf(label));
@@ -56,10 +57,10 @@ describe('sidebar audit fixes contract', () => {
         expect(sidebar).toContain('copyPublishUrl');
     });
 
-    it('names batch analysis actions distinctly with remaining counts (M6)', () => {
-        expect(sidebar).toContain('Detect objects');
-        expect(sidebar).toContain('Describe images');
-        expect(sidebar).toContain('remaining');
+    it('moves distinctly named batch analysis actions to the command palette (M6)', () => {
+        expect(palette).toContain('Detect Objects in Library');
+        expect(palette).toContain('Describe Images in Library');
+        expect(palette).toContain('only on pending images');
         expect(sidebar).not.toContain('Analyze uncatalogued images');
     });
 

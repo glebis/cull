@@ -75,7 +75,7 @@ client, shell wrapper, or human operator workflow before the tool call is made.
 Cull runs an MCP server inside the app over a local Unix socket. `cull
 --mcp-stdio` is a thin stdio↔socket bridge that launches the app in tray mode if
 it is not already running. Drop this into an MCP client config (the same snippet
-the in-app Settings → Access Tokens panel copies):
+the in-app Settings → Agent Access → Claude Code MCP Config panel copies):
 
 ```json
 {
@@ -103,7 +103,7 @@ flag, and you should only do that with scoped, least-privilege tokens.
 
 Two ways:
 
-- **UI**: Settings → Access Tokens → Create. Pick a role (viewer / curator /
+- **UI**: Settings → Agent Access → Access Tokens → Create. Pick a role (viewer / curator /
   operator / admin) and an expiry window (90 days recommended). The secret is
   shown once.
 - **MCP**: call the `create_token` tool over a connected admin session. It

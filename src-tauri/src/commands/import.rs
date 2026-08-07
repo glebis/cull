@@ -651,25 +651,27 @@ fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
     let app_clone = app.clone();
     crate::spawn_guarded(app_clone, "post-import-detection", move || async move {
         let state: State<'_, AppState> = app.state();
+        let yolo_variant = crate::db_core::detection::YoloVariant::Medium;
+        let yolo_model_name = yolo_variant.model_name();
 
         // YOLO detection (if model available)
         let yolo_available = {
             let engine = state.detection_engine.lock();
-            engine.is_variant_available(crate::db_core::detection::YoloVariant::Medium)
+            engine.is_variant_available(yolo_variant)
         };
 
         if yolo_available {
             let _ = app.emit(
                 "auto-detection-start",
                 serde_json::json!({
-                    "model": "yolov8m", "count": image_ids.len()
+                    "model": yolo_model_name, "count": image_ids.len()
                 }),
             );
 
             {
                 let mut engine = state.detection_engine.lock();
                 if engine.session.is_none() {
-                    let _ = engine.load_yolo(crate::db_core::detection::YoloVariant::Medium);
+                    let _ = engine.load_yolo(yolo_variant);
                 }
             }
 
@@ -682,7 +684,10 @@ fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
                         let engine = state.detection_engine.lock();
                         if let Ok(detections) = engine.detect(&detect_path) {
                             drop(engine);
-                            let _ = state.db.store_detections(image_id, "yolov8m", &detections);
+                            let _ =
+                                state
+                                    .db
+                                    .store_detections(image_id, yolo_model_name, &detections);
                         }
                     }
                 }
@@ -690,7 +695,7 @@ fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
                 let _ = app.emit(
                     "auto-detection-progress",
                     serde_json::json!({
-                        "current": i + 1, "total": image_ids.len(), "model": "yolov8m"
+                        "current": i + 1, "total": image_ids.len(), "model": yolo_model_name
                     }),
                 );
             }
@@ -753,6 +758,27 @@ fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
 mod tests {
     use super::*;
     use crate::db_core::db::Database;
+
+    #[test]
+    fn post_import_detection_persists_and_emits_canonical_medium_yolo_model_name() {
+        let canonical = crate::db_core::detection::YoloVariant::Medium.model_name();
+        assert_eq!(canonical, "yolo11m");
+
+        let source = include_str!("import.rs");
+        let legacy = ["yolo", "v8m"].concat();
+        assert!(!source.contains(&format!("\"{legacy}\"")));
+        let compact = source.split_whitespace().collect::<String>();
+        let store_call = [
+            "store_detections(",
+            "image_id,",
+            "yolo_model_name,",
+            "&detections",
+        ]
+        .concat();
+        let event_model = ["\"model\":", "yolo_model_name"].concat();
+        assert!(compact.contains(&store_call));
+        assert_eq!(compact.matches(&event_model).count(), 2);
+    }
 
     #[test]
     fn post_import_quality_analysis_stores_metrics_without_inline_import_work() {

@@ -70,6 +70,21 @@ The palette keeps the last five commands launched through the palette at the top
 - **Result actions**: right-click a row (or press `Shift+F10`) for Run, Favorite/Unfavorite, Set Hotkey…, Add Alias…, Remove from Recents, Copy Command ID, and Open in Settings. Aliases add your own search terms to a command.
 - **Keyboard shortcuts**: run **View Keyboard Shortcuts** to browse every command's binding, search them, customize a hotkey (with conflict and reserved-key detection), or reset everything to defaults.
 - **Workflows**: run **Save Workflow from Recent Commands** to capture your recent command sequence as a reusable workflow. Saved workflows appear in the palette as runnable, favoritable items; rename or delete them from the row context menu. Workflows validate each step's context before running and confirm destructive steps.
+- **Library AI jobs**: run **Detect Objects in Library**, **Scan Library for Sensitive Content**, or **Describe Images in Library**. Each job processes only images still pending for the active model; results from another YOLO variant or vision model do not suppress the run. Configure the required models under **Settings → AI**.
+
+## Settings And AI Setup
+
+Settings has six tabs: **General**, **Appearance**, **AI**, **Agent Access**, **Privacy**, and **Plugins**. Settings deep links use the same tab IDs, for example `cull://settings#appearance`. Valid fragments are `general`, `appearance`, `ai`, `agent-access`, `privacy`, and `plugins`; an absent or unknown fragment opens General.
+
+The **AI** tab is arranged provider-first:
+
+1. Add and validate any cloud **Provider Credentials** you intend to use.
+2. Check **Local Models**, choose the active YOLO variant, and follow the model setup guide when a model is not installed. YOLO and NudeNet weights are user-supplied and separately licensed; Cull does not download or license them for you.
+3. Configure **Embedding Models** for similarity and embedding workflows.
+
+The three Command-K library jobs use the active configuration and skip images already completed for that exact model. **Detect Objects in Library** uses the selected YOLO variant, **Scan Library for Sensitive Content** uses NudeNet, and **Describe Images in Library** uses the configured Ollama vision model. If a prerequisite is unavailable, open **Settings → AI** and complete its setup before retrying.
+
+The **Agent Access** tab provides copyable Cull skill installation instructions for npx, Claude, Codex, and other agents, followed by the optional MCP connection and access-token controls. Cull copies installation text; it does not execute installers. Start with the skill and Cull's CLI when that is sufficient—MCP is not required. After installing the skill, begin a new agent turn or session if the current agent does not discover it immediately.
 
 ## Preview Display
 
@@ -173,6 +188,8 @@ Optional cloud embedding and generation providers require your own API key. Keys
 
 Cull exposes an agent-friendly workflow surface through MCP-aligned commands and menu actions.
 
+- Install the Cull skill from **Settings → Agent Access** to teach a compatible agent the workflow. npx, Claude, Codex, and generic-agent alternatives are available there.
+- Prefer the CLI for straightforward local automation. MCP is optional and is useful when an agent needs a live tool connection.
 - The tray menu includes window, Clipboard Monitor, MCP status, and quit actions.
 - MCP tools can inspect library state, work with collections, and publish clipboard monitor collections when the server is enabled.
 - The MCP HTTP server is disabled by default; enable it only when you need remote agent access.

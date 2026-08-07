@@ -97,12 +97,12 @@ roles are in `docs/mcp-remote-access.md`.
 
 ### M02 — HTTP server enable
 1. `cull --mcp-http` binds `127.0.0.1:9847`; `cull --mcp-http 8080` uses a custom port
-2. Settings → MCP Server → HTTP Server toggles the same listener
+2. Settings → Agent Access → MCP Connection toggles the same listener
 3. Default bind is loopback only; no remote reachability without opt-in
 4. `curl -H "Authorization: Bearer <token>" .../mcp -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'`
 
 ### M03 — Tokens & roles
-1. Settings → Access Tokens → Create Token → secret shown once, copyable
+1. Settings → Agent Access → Access Tokens → Create Token → secret shown once, copyable
 2. Create one token per role: viewer, curator, operator, admin
 3. **viewer**: read/list/search succeed; `set_rating`, `import_folder` → permission denied
 4. **curator**: ratings, decisions, collections, export succeed; import/AI engines denied
@@ -432,16 +432,17 @@ draft (tasks `imageview-m2u`, `imageview-b1k`). Parsing lives in
 
 ## GUI — AI & Embeddings
 
-### S34 — Model download
-1. In sidebar AI Models section, click download for an embedding model
-2. Progress bar shows download
-3. After download, "Detect" / "Analyze" buttons become active
+### S34 — AI model configuration
+1. Open Settings → AI
+2. Provider Credentials is followed by Local Models, then Embedding Models
+3. Select the YOLO variant and configure the Ollama vision model
 4. Third-party weights (YOLO, NudeNet) require a user-supplied local ONNX path
 
 ### S35 — Batch detection
-1. Click "Detect" → job starts, progress in JobProgressPanel
-2. Pause/Resume/Cancel job
-3. After completion, detection tags appear in sidebar
+1. Run "Detect Objects in Library" from the command palette
+2. Only images pending the selected YOLO model are processed
+3. Progress appears in JobProgressPanel
+4. After completion, detected-object filters appear under sidebar Filters
 
 ### S36 — Embedding generation
 1. Open Embedding Explorer → select provider
@@ -458,9 +459,9 @@ draft (tasks `imageview-m2u`, `imageview-b1k`). Parsing lives in
 
 ### S38 — Settings dialog
 1. `⌘,` or gear icon → settings modal opens
-2. General tab: MCP tokens, HTTP server, API keys
-3. Appearance tab: icon variants
-4. Privacy tab: data flow status, audit log
+2. Tabs appear in order: General, Appearance, AI, Agent Access, Privacy, Plugins
+3. AI owns credentials and model configuration; Agent Access owns skill installation, MCP, and tokens
+4. The Cull skill instructions can be copied for npx, Claude, Codex, or another agent; Cull never executes installers
 5. `Escape` closes
 
 ### S39 — Session management
