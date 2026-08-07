@@ -25,6 +25,20 @@ and creates exactly one `chore(release): vX.Y.Z` commit. Preparation never tags 
 pushes. The release state cache is written to `.release-state/X.Y.Z.json` with
 owner-only permissions.
 
+Tagging is also bound to the exact prepared commit. Do not tag the current branch
+tip by hand: it may have moved after preparation.
+
+```bash
+release_commit="$(npm run --silent release:cull -- state show --version 0.3.3 --json | jq -r '.result.record.releaseCommit')"
+npm run release:cull -- tag --version 0.3.3 --expected-source "$release_commit" --dry-run --json
+npm run release:cull -- tag --version 0.3.3 --expected-source "$release_commit" --json
+```
+
+The command requires the prepared commit to be reachable from `origin/main`,
+creates an annotated tag for that exact commit, verifies the immutable remote tag,
+and only then advances release state. A pre-existing tag that points elsewhere is
+a burned version: never move or replace it; prepare a new version instead.
+
 Preparation must run on `main` in the configured linked release worktree; an
 ordinary checkout, detached worktree, or submodule is rejected. Gate commands are
 preferably configured as JSON argument arrays. The legacy string form accepts
@@ -198,6 +212,11 @@ namespace, even if local release state is missing or stale, and fails closed whe
 that lookup is unavailable. `resume` then returns `prepare-patch-plan`.
 Recovery never deletes a release, rewrites a tag, force-pushes, or silently
 publishes the patch; a new explicit release request is required for that patch.
+
+An immutable tagged release that fails before publication is treated the same way:
+`ARTIFACT_INVALID` or a conflicting remote tag returns `prepare-new-version`.
+The failed `v0.3.2` build is therefore not retried under the same identity; the
+next release candidate is `v0.3.3` or later.
 
 ## Legacy manual flow
 

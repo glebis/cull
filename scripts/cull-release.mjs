@@ -167,7 +167,53 @@ function runCheck(args) {
     nodeVersion: process.version,
     rustVersion: rustVersion(),
   });
-  return { ...report, blockers: [...report.blockers, ...releaseIncidentBlockers(config)] };
+  return {
+    ...report,
+    blockers: [
+      ...report.blockers,
+      ...homebrewCaskBlockers(config),
+      ...releaseIncidentBlockers(config),
+    ],
+  };
+}
+
+function homebrewCaskBlockers(config) {
+  let contents;
+  if (process.env.CULL_RELEASE_TEST_MODE === '1') {
+    if (process.env.CULL_RELEASE_TEST_CASK === undefined) return [];
+    contents = process.env.CULL_RELEASE_TEST_CASK;
+  } else {
+    const repo = config.homebrew?.repo;
+    const cask = config.homebrew?.cask;
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo ?? '')
+      || !/^[A-Za-z0-9_./-]+$/.test(cask ?? '')
+      || cask.startsWith('-')
+      || cask.split('/').includes('..')) {
+      return [{ code: 'HOMEBREW_CONFIG_INVALID', message: 'Homebrew release configuration is invalid' }];
+    }
+    const response = tryGh('api', `repos/${repo}/contents/${cask}`);
+    if (!response?.content) {
+      return [{ code: 'HOMEBREW_CASK_UNAVAILABLE', message: 'Configured Homebrew cask could not be verified' }];
+    }
+    contents = Buffer.from(response.content, 'base64').toString('utf8');
+  }
+  const versionLines = contents.match(/^[ \t]*version\b.*$/gm) ?? [];
+  const shaLines = contents.match(/^[ \t]*sha256\b.*$/gm) ?? [];
+  if (shaLines.some((line) => /^[ \t]*sha256[ \t]+:no_check(?:[ \t]+#.*)?[ \t]*$/.test(line))) {
+    return [{
+      code: 'HOMEBREW_CASK_NO_CHECK',
+      message: 'Configured Homebrew cask uses sha256 :no_check',
+    }];
+  }
+  if (versionLines.length !== 1 || shaLines.length !== 1
+    || !/^[ \t]*version "(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"[ \t]*$/.test(versionLines[0])
+    || !/^[ \t]*sha256 "[0-9a-f]{64}"[ \t]*$/.test(shaLines[0])) {
+    return [{
+      code: 'HOMEBREW_CASK_INVALID',
+      message: 'Configured Homebrew cask is not canonically versioned and SHA-pinned',
+    }];
+  }
+  return [];
 }
 
 function releaseIncidentBlockers(config) {
@@ -586,6 +632,117 @@ function tryGit(...args) {
   try { return git(...args); } catch { return null; }
 }
 
+function runTag(args) {
+  requireArgs(args, ['version', 'expectedSource']);
+  if (!/^[0-9a-f]{40}$/.test(args.expectedSource)) {
+    throw inputError('--expected-source must be a lowercase 40-character Git SHA');
+  }
+  const config = loadReleaseConfig(repoRoot);
+  const record = readReleaseRecord(repoRoot, config, args.version);
+  if (record.state !== 'prepared') {
+    throw commandError('STATE_INVALID', 'Only a prepared release can be tagged', {
+      version: record.version,
+      state: record.state,
+    });
+  }
+  if (record.releaseCommit !== args.expectedSource) {
+    throw commandError('SOURCE_MOVED', 'Prepared release commit does not match --expected-source', {
+      expectedSource: args.expectedSource,
+      releaseCommit: record.releaseCommit,
+    });
+  }
+  if (!probeCommit(record)) {
+    throw commandError('STATE_INVALID', 'Prepared release commit is missing or has the wrong subject', {
+      version: record.version,
+      releaseCommit: record.releaseCommit,
+    });
+  }
+  if (tryGit('merge-base', '--is-ancestor', record.releaseCommit, 'origin/main') === null) {
+    throw commandError('BLOCKED', 'Prepared release commit is not reachable from origin/main', {
+      releaseCommit: record.releaseCommit,
+    });
+  }
+  const readinessBlockers = [
+    ...homebrewCaskBlockers(config),
+    ...releaseIncidentBlockers(config),
+  ];
+  if (readinessBlockers.length > 0) {
+    throw commandError('BLOCKED', 'Release readiness changed after preparation', {
+      blockers: readinessBlockers,
+    });
+  }
+  const remoteIdentity = probeTag(record);
+  if (remoteIdentity !== null && remoteIdentity.commit !== record.releaseCommit) {
+    throw commandError('CONFLICTING_TAG', 'The immutable remote release tag points to a different commit', {
+      tag: record.tag,
+      expectedCommit: record.releaseCommit,
+      actualCommit: remoteIdentity.commit,
+      tagObjectSha: remoteIdentity.tagObjectSha,
+    });
+  }
+  if (args.dryRun) {
+    return {
+      version: record.version,
+      tag: record.tag,
+      releaseCommit: record.releaseCommit,
+      state: record.state,
+      pushed: remoteIdentity !== null,
+      dryRun: true,
+    };
+  }
+
+  let pushed = false;
+  let identity = remoteIdentity;
+  if (identity === null) {
+    const localType = tryGit('cat-file', '-t', `refs/tags/${record.tag}`);
+    const localCommit = localType === 'tag'
+      ? tryGit('rev-parse', `refs/tags/${record.tag}^{commit}`)
+      : null;
+    if (localType !== null && (localType !== 'tag' || localCommit !== record.releaseCommit)) {
+      throw commandError('CONFLICTING_TAG', 'The local release tag is not the required annotated identity', {
+        tag: record.tag,
+        expectedCommit: record.releaseCommit,
+        actualCommit: localCommit,
+        actualType: localType,
+      });
+    }
+    if (localType === null) {
+      git('tag', '-a', record.tag, record.releaseCommit, '-m', `Cull ${record.tag}`);
+    }
+    git('push', 'origin', `refs/tags/${record.tag}`);
+    pushed = true;
+    identity = probeTag(record);
+  }
+  if (identity === null || identity.commit !== record.releaseCommit) {
+    throw commandError('INCONSISTENT_RECOVERY', 'Tag push completed without verifiable remote identity', {
+      tag: record.tag,
+      expectedCommit: record.releaseCommit,
+    });
+  }
+  const updated = transitionReleaseRecord(record, 'tagged', {
+    tag: record.tag,
+    tagObjectSha: identity.tagObjectSha,
+  }, now());
+  try {
+    writeReleaseRecordAtomic(repoRoot, config, updated);
+  } catch (cause) {
+    throw commandError('INCONSISTENT_RECOVERY', 'Remote tag is valid but local state cache could not advance', {
+      tag: record.tag,
+      releaseCommit: record.releaseCommit,
+      tagObjectSha: identity.tagObjectSha,
+      cause: cause.message,
+    });
+  }
+  return {
+    version: record.version,
+    tag: record.tag,
+    releaseCommit: record.releaseCommit,
+    tagObjectSha: identity.tagObjectSha,
+    state: updated.state,
+    pushed,
+  };
+}
+
 function tryGh(...args) {
   try {
     return JSON.parse(execFileSync('gh', args, {
@@ -755,15 +912,23 @@ function probeEvidence(record, config) {
     && release.isDraft === false
     && release.isPrerelease === false;
   const tagIdentity = probeTag(record);
-  const provenance = releaseShapeValid
+  const tagMatchesPreparedCommit = tagIdentity?.commit === record.releaseCommit;
+  const provenance = releaseShapeValid && tagIdentity !== null
     ? probePublishedProvenance(record, config, release, tagIdentity)
     : null;
   const workflow = probeWorkflow(provenance, releaseRepository());
   const publishedRelease = releaseShapeValid && provenance !== null && workflow;
   const tapCommit = publishedRelease && probeTapCommit(record, config, provenance);
   return {
-    commit: tagIdentity !== null || probeCommit(record),
-    tag: tagIdentity !== null,
+    commit: publishedRelease || probeCommit(record),
+    tag: publishedRelease || tagMatchesPreparedCommit,
+    ...(tagIdentity !== null && !tagMatchesPreparedCommit && !publishedRelease ? {
+      tagConflict: {
+        expectedCommit: record.releaseCommit,
+        actualCommit: tagIdentity.commit,
+        tagObjectSha: tagIdentity.tagObjectSha,
+      },
+    } : {}),
     workflow,
     releaseAsset: publishedRelease && required.length > 0,
     publishedRelease,
@@ -804,7 +969,31 @@ function runState(subcommand, args) {
   let updated;
   if (subcommand === 'transition') {
     requireArgs(args, ['to', 'evidenceJson']);
-    updated = transitionReleaseRecord(record, args.to, parseJsonOption(args.evidenceJson, '--evidence-json'), now());
+    const evidence = parseJsonOption(args.evidenceJson, '--evidence-json');
+    if (args.to === 'tagged') {
+      if (evidence.tag !== record.tag) {
+        throw commandError('CONFLICTING_TAG', 'Tagged transition evidence does not name the release tag', {
+          expectedTag: record.tag,
+          actualTag: evidence.tag ?? null,
+        });
+      }
+      const identity = probeTag(record);
+      if (identity === null) {
+        throw commandError('TAG_NOT_FOUND', 'The annotated remote release tag does not exist', {
+          tag: record.tag,
+          expectedCommit: record.releaseCommit,
+        });
+      }
+      if (identity.commit !== record.releaseCommit) {
+        throw commandError('CONFLICTING_TAG', 'The immutable release tag points to a different commit', {
+          tag: record.tag,
+          expectedCommit: record.releaseCommit,
+          actualCommit: identity.commit,
+          tagObjectSha: identity.tagObjectSha,
+        });
+      }
+    }
+    updated = transitionReleaseRecord(record, args.to, evidence, now());
   } else if (subcommand === 'fail') {
     requireArgs(args, ['code', 'evidenceJson']);
     if (!RELEASE_FAILURE_CODES.has(args.code)) {
@@ -891,6 +1080,26 @@ function runResume(args) {
       failure: record.failure,
     };
   }
+  if (evidence.tagConflict) {
+    return {
+      nextState: null,
+      nextAction: 'prepare-new-version',
+      evidence,
+      failure: {
+        code: 'CONFLICTING_TAG',
+        tag: record.tag,
+        ...evidence.tagConflict,
+      },
+    };
+  }
+  if (record.failure?.code === 'ARTIFACT_INVALID' && evidence.tag) {
+    return {
+      nextState: null,
+      nextAction: 'prepare-new-version',
+      evidence,
+      failure: record.failure,
+    };
+  }
   return { ...buildResumeAction(derivedState), evidence };
 }
 
@@ -898,6 +1107,7 @@ function errorExitCode(error) {
   if (error.code === 'BLOCKED') return 3;
   if (error.code === 'EXTERNAL_FAILURE') return 4;
   if (error.code === 'INCONSISTENT_RECOVERY') return 5;
+  if (error.code === 'CONFLICTING_TAG') return 5;
   return 2;
 }
 
@@ -912,6 +1122,7 @@ try {
     args = parseArgs(argv.slice(1));
     if (command === 'check') result = runCheck(args);
     else if (command === 'prepare') result = runPrepare(args);
+    else if (command === 'tag') result = runTag(args);
     else if (command === 'resume') result = runResume(args);
     else throw inputError(`Unknown command ${command}`);
   }
