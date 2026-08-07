@@ -62,10 +62,8 @@ describe('undo history panel contract', () => {
     });
 
     it('does not repeat undo-backed activity in the secondary activity section', () => {
-        expect(panel).toContain('const undoBackedEventTypes = new Set([');
-        expect(panel).toContain("'rating_set'");
-        expect(panel).toContain("'decision_set'");
-        expect(panel).toContain('activityEvents = activity.recent_events.filter');
+        expect(panel).toContain("import { filterUndoBackedActivity } from '$lib/history-activity';");
+        expect(panel).toContain('filterUndoBackedActivity(activity.recent_events, undoRows)');
     });
 
     it('documents the commands that currently feed action history', () => {

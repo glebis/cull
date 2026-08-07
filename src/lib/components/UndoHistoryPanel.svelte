@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { undo, redo, listUndoHistory, getActivityContext, type SessionEvent, type UndoRecord } from '$lib/api';
+    import { filterUndoBackedActivity } from '$lib/history-activity';
     import { showToast, undoHistoryOpen } from '$lib/stores';
 
     let loading = $state(false);
@@ -8,12 +9,6 @@
     let error = $state<string | null>(null);
     let undoHistory = $state<UndoRecord[]>([]);
     let activityEvents = $state<SessionEvent[]>([]);
-
-    const undoBackedEventTypes = new Set([
-        'rating_set',
-        'decision_set',
-        'image_moved_to_trash',
-    ]);
 
     function closeHistory() {
         undoHistoryOpen.set(false);
@@ -115,7 +110,7 @@
                 getActivityContext(null, 40),
             ]);
             undoHistory = undoRows;
-            activityEvents = activity.recent_events.filter(event => !undoBackedEventTypes.has(event.event_type));
+            activityEvents = filterUndoBackedActivity(activity.recent_events, undoRows);
         } catch (e) {
             error = String(e);
         } finally {
@@ -493,8 +488,8 @@
         grid-template-columns: 130px minmax(180px, 1fr) 100px 180px;
         gap: 10px;
         align-items: center;
-        min-height: 42px;
-        padding: 9px 12px;
+        min-height: 40px;
+        padding: 8px 16px;
         box-sizing: border-box;
     }
 
