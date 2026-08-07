@@ -196,6 +196,12 @@
                     }
                 }
                 break;
+            case 'Delete':
+                if (!row.isGroup) {
+                    event.preventDefault();
+                    void handleDeleteFolder(event, row.fullPath);
+                }
+                break;
         }
     }
 
@@ -837,6 +843,7 @@
                         style="padding-left: {folder.depth * 12}px"
                         role="treeitem"
                         aria-level={folder.depth + 1}
+                        aria-keyshortcuts={folder.isGroup ? undefined : 'Delete'}
                         aria-selected={$activeFolder === folder.fullPath}
                         aria-expanded={folder.hasChildren ? (isExpanded || filterActive) : undefined}
                         aria-label={`${folder.name}, ${folder.subtreeCount} images`}

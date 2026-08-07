@@ -39,6 +39,12 @@ describe('sidebar audit fixes contract', () => {
         expect(sidebar).toContain('Math.min(treeFocusIndex, visibleFolders.length - 1)');
     });
 
+    it('keeps folder removal available from the keyboard tree', () => {
+        expect(sidebar).toContain("case 'Delete':");
+        expect(sidebar).toContain('handleDeleteFolder(event, row.fullPath)');
+        expect(sidebar).toContain("aria-keyshortcuts={folder.isGroup ? undefined : 'Delete'}");
+    });
+
     it('session switcher dropdown is dismissible and announced (H4)', () => {
         expect(sessionSwitcher).toContain('aria-expanded={open}');
         expect(sessionSwitcher).toContain('aria-haspopup');
