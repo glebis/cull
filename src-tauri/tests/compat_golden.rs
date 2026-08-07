@@ -112,7 +112,7 @@ fn retained_db_fixtures_open_and_satisfy_invariants() {
         .collect::<Vec<_>>();
     assert_eq!(
         retained_schemas,
-        vec![21, 22, 23, 24],
+        vec![21, 22, 23, 24, 25],
         "the transitive DB contract requires every retained reachable schema"
     );
     for (schema, src) in fixtures {
@@ -125,7 +125,7 @@ fn retained_db_fixtures_open_and_satisfy_invariants() {
 #[test]
 #[ignore]
 fn regenerate_db_fixture() {
-    let out = fixture_dir().join("v25.db");
+    let out = fixture_dir().join("v26.db");
     std::fs::create_dir_all(out.parent().unwrap()).unwrap();
     let _ = std::fs::remove_file(&out);
     // Opening a fresh path runs the full migration chain at the current schema.

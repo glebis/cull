@@ -10,9 +10,9 @@ describe('plugins settings tab', () => {
     const plugins = read('src/lib/components/PluginsSettings.svelte');
 
     it('McpSettings has a plugins tab in the tab union and a tab button', () => {
-        expect(mcp).toMatch(/activeSettingsTab[^\n]*'plugins'/);
-        expect(mcp).toMatch(/activeSettingsTab\s*===\s*'plugins'/);
-        expect(mcp).toMatch(/=>\s*activeSettingsTab\s*=\s*'plugins'/);
+        expect(mcp).toContain("{ id: 'plugins', label: 'Plugins' }");
+        expect(mcp).toContain("$settingsTab === 'privacy'");
+        expect(mcp).toContain('<PluginsSettings />');
     });
 
     it('the module_plugins toggle lives in PluginsSettings, not McpSettings General', () => {
@@ -20,7 +20,7 @@ describe('plugins settings tab', () => {
     });
 
     it('renders PluginsSettings inside the shared settings section spacing', () => {
-        expect(mcp).toMatch(/activeSettingsTab === 'plugins'[\s\S]*<div class="section">[\s\S]*<PluginsSettings \/>/);
+        expect(mcp).toContain('<section class="wrapped"><PluginsSettings /></section>');
     });
 
     it('lists Core bundled plugins with a Core badge', () => {

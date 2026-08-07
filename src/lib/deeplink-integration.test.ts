@@ -59,6 +59,10 @@ vi.mock('./image-loading', () => ({
     resetImagePaging: vi.fn(),
 }));
 
+vi.mock('./settings-navigation', () => ({
+    openSettings: vi.fn(),
+}));
+
 vi.mock('@tauri-apps/api/event', () => ({
     listen: vi.fn(),
 }));
@@ -74,6 +78,7 @@ import { importFolder, importFiles, getBatchImages, listFolders, listImagesByFol
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { listen } from '@tauri-apps/api/event';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
+import { openSettings } from './settings-navigation';
 
 beforeEach(() => {
     vi.clearAllMocks();
@@ -90,6 +95,23 @@ beforeEach(() => {
 });
 
 describe('handleParams', () => {
+    it('opens every supported settings tab from structured deep-link params', async () => {
+        const tabs = ['general', 'appearance', 'ai', 'agent-access', 'privacy', 'plugins'] as const;
+
+        for (const tab of tabs) {
+            await handleParams({ settings_tab: tab });
+            expect(openSettings).toHaveBeenLastCalledWith(tab);
+        }
+
+        expect(openSettings).toHaveBeenCalledTimes(tabs.length);
+    });
+
+    it('falls back to General for an invalid structured settings tab', async () => {
+        await handleParams({ settings_tab: 'unknown' as never });
+
+        expect(openSettings).toHaveBeenCalledWith('general');
+    });
+
     it('sets view mode via navigateTo for valid views', async () => {
         await handleParams({ view: 'loupe' });
         expect(navigateTo).toHaveBeenCalledWith('loupe');
