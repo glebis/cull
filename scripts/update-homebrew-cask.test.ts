@@ -7,12 +7,12 @@ import { describe, expect, it } from 'vitest';
 const script = resolve(import.meta.dirname, 'update-homebrew-cask.mjs');
 const sha = (character: string) => character.repeat(64);
 
-function execute(source: string, version = '1.2.4', digest = sha('a')) {
+function execute(source: string, version = '1.2.4', digest = sha('a'), extraArgs: string[] = []) {
   const root = mkdtempSync(join(tmpdir(), 'cull-cask-update-'));
   const cask = join(root, 'cull.rb');
   writeFileSync(cask, source);
   const result = spawnSync(process.execPath, [
-    script, '--cask', cask, '--version', version, '--sha256', digest, '--json',
+    script, '--cask', cask, '--version', version, '--sha256', digest, ...extraArgs, '--json',
   ], { encoding: 'utf8' });
   return {
     ...result,
@@ -27,6 +27,28 @@ describe('Homebrew cask release editor', () => {
     const result = execute(source);
     expect(result.status).toBe(2);
     expect(result.output.code).toBe('CASK_NO_CHECK');
+    expect(result.contents).toBe(source);
+  });
+
+  it('migrates no_check only for the exact existing version with explicit authorization', () => {
+    const source = 'cask "cull" do\n  version "1.2.3"\n  sha256 :no_check\nend\n';
+    const result = execute(source, '1.2.3', sha('a'), ['--migrate-no-check']);
+
+    expect(result.status).toBe(0);
+    expect(result.output.result).toEqual({
+      changed: true,
+      migratedNoCheck: true,
+      previousVersion: '1.2.3',
+    });
+    expect(result.contents).toContain(`  sha256 "${sha('a')}"`);
+  });
+
+  it('refuses to combine no_check migration with a version change', () => {
+    const source = 'version "1.2.3"\nsha256 :no_check\n';
+    const result = execute(source, '1.2.4', sha('a'), ['--migrate-no-check']);
+
+    expect(result.status).toBe(2);
+    expect(result.output.code).toBe('CASK_MIGRATION_VERSION_MISMATCH');
     expect(result.contents).toBe(source);
   });
 
