@@ -485,7 +485,7 @@ async fn run_http_server(
                     let auth = AuthContext::Authenticated(token);
                     let handle_for_mcp = auth_handle.clone();
                     let config = StreamableHttpServerConfig::default()
-                        .with_stateful_mode(false)
+                        .with_legacy_session_mode(false)
                         .with_json_response(true);
                     let session_manager = Arc::new(LocalSessionManager::default());
                     let mut mcp_service = StreamableHttpService::new(
