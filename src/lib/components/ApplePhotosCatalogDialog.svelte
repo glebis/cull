@@ -19,6 +19,7 @@
     const PAGE_SIZE = 100;
     let authorization = $state<ApplePhotosAuthorization | null>(null);
     let albums = $state<ApplePhotosAlbum[]>([]);
+    let albumsHasMore = $state(false);
     let selectedAlbumId = $state('');
     let assets = $state<ApplePhotosAsset[]>([]);
     let assetsTotal = $state(0);
@@ -37,16 +38,24 @@
     function messageFrom(errorValue: unknown): string {
         if (errorValue instanceof Error) return errorValue.message;
         if (typeof errorValue === 'string') return errorValue;
+        if (
+            typeof errorValue === 'object' &&
+            errorValue !== null &&
+            'message' in errorValue &&
+            typeof errorValue.message === 'string'
+        ) return errorValue.message;
         return 'Apple Photos could not be reached.';
     }
 
-    async function loadAlbums() {
+    async function loadAlbums(offset = 0, append = false) {
         const generation = ++albumsGeneration;
         albumsLoading = true;
+        error = null;
         try {
-            const page = await client.listAlbums(0, PAGE_SIZE);
+            const page = await client.listAlbums(offset, PAGE_SIZE);
             if (generation !== albumsGeneration) return;
-            albums = page.items;
+            albums = append ? [...albums, ...page.items] : page.items;
+            albumsHasMore = page.has_more;
         } catch (loadError) {
             if (generation !== albumsGeneration) return;
             error = messageFrom(loadError);
@@ -125,6 +134,11 @@
         void loadAssets(selectedAlbumId || null, assets.length, true);
     }
 
+    function loadMoreAlbums() {
+        if (albumsLoading || !albumsHasMore) return;
+        void loadAlbums(albums.length, true);
+    }
+
     onMount(() => {
         void checkAuthorization();
     });
@@ -189,6 +203,12 @@
                     {/each}
                 </select>
             </label>
+
+            {#if albumsHasMore}
+                <button class="btn" onclick={loadMoreAlbums} disabled={albumsLoading}>
+                    {albumsLoading ? 'Loading albums…' : 'Load more albums'}
+                </button>
+            {/if}
 
             {#if error}
                 <div class="catalog-error" role="alert">{error}</div>

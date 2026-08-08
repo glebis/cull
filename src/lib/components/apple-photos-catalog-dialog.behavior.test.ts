@@ -104,4 +104,50 @@ describe('Apple Photos catalog dialog', () => {
         await user.click(screen.getByRole('button', { name: 'Close Apple Photos' }));
         expect(onclose).toHaveBeenCalledOnce();
     });
+
+    it.each(['restricted', 'unsupported'] as const)('renders the %s platform state', async (status) => {
+        const catalog = client({ authorizationStatus: vi.fn().mockResolvedValue(status) });
+        render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        if (status === 'restricted') {
+            expect(await screen.findByText(/System Settings.*Privacy & Security.*Photos/i)).toBeInTheDocument();
+        } else {
+            expect(await screen.findByText('This catalog source is not supported on the current platform.')).toBeInTheDocument();
+        }
+        expect(catalog.requestAuthorization).not.toHaveBeenCalled();
+    });
+
+    it('loads another bounded album page when the library has more than 100 albums', async () => {
+        const firstAlbums = Array.from({ length: 100 }, (_, index) => album(`album-${index}`, `Album ${index}`));
+        const catalog = client({
+            listAlbums: vi.fn()
+                .mockResolvedValueOnce(page(firstAlbums, 0, 101))
+                .mockResolvedValueOnce(page([album('album-last', 'Last album')], 100, 101)),
+        });
+        const user = userEvent.setup();
+        render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        await user.click(await screen.findByRole('button', { name: 'Load more albums' }));
+
+        expect(await screen.findByRole('option', { name: 'Last album' })).toBeInTheDocument();
+        expect(catalog.listAlbums).toHaveBeenLastCalledWith(100, 100);
+    });
+
+    it('ignores authorization completion after the dialog has closed', async () => {
+        let resolveAuthorization!: (status: 'authorized') => void;
+        const authorization = new Promise<'authorized'>(resolve => { resolveAuthorization = resolve; });
+        const catalog = client({ authorizationStatus: vi.fn(() => authorization) });
+        const onclose = vi.fn();
+        const user = userEvent.setup();
+        const view = render(ApplePhotosCatalogDialog, { onclose, client: catalog });
+
+        await user.click(screen.getByRole('button', { name: 'Close Apple Photos' }));
+        view.unmount();
+        resolveAuthorization('authorized');
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(catalog.listAlbums).not.toHaveBeenCalled();
+        expect(catalog.listAssets).not.toHaveBeenCalled();
+    });
 });
