@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "app-photos",
   "description": "Apple Photos authorization and read-only catalog metadata IPC.",
-  "windows": ["main", "window-*"],
+  "windows": ["main"],
   "permissions": ["app-photos"]
 }

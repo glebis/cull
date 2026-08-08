@@ -90,5 +90,10 @@ mod tests {
             conf["bundle"]["macOS"]["entitlements"].as_str(),
             Some("Entitlements.plist")
         );
+
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/app-photos.json"))
+                .expect("app-photos capability must be valid JSON");
+        assert_eq!(capability["windows"], serde_json::json!(["main"]));
     }
 }

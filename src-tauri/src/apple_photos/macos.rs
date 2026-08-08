@@ -102,9 +102,12 @@ pub(super) fn list_assets_page(
     unsafe {
         let options = PHFetchOptions::new();
         let creation_key = NSString::from_str("creationDate");
+        let identifier_key = NSString::from_str("localIdentifier");
         let creation_sort =
             NSSortDescriptor::sortDescriptorWithKey_ascending(Some(&creation_key), false);
-        let descriptors = NSArray::from_retained_slice(&[creation_sort]);
+        let identifier_sort =
+            NSSortDescriptor::sortDescriptorWithKey_ascending(Some(&identifier_key), true);
+        let descriptors = NSArray::from_retained_slice(&[creation_sort, identifier_sort]);
         options.setSortDescriptors(Some(&descriptors));
         let image_predicate_format = NSString::from_str("mediaType == 1");
         let image_predicate =
@@ -128,33 +131,13 @@ pub(super) fn list_assets_page(
 
         let result_count = result.count();
         let total = u32::try_from(result_count).unwrap_or(u32::MAX);
-        // PhotoKit does not guarantee a stable tie order for equal creation dates.
-        // Read only lightweight keys across the fetch result, then bound the more
-        // expensive PHAssetResource lookup to the requested page.
-        let mut ordered_indices = Vec::with_capacity(result_count);
-        for index in 0..result_count {
-            let asset = result.objectAtIndex(index);
-            ordered_indices.push((
-                index,
-                asset.creationDate().as_deref().and_then(date_to_rfc3339),
-                asset.localIdentifier().to_string(),
-            ));
-        }
-        ordered_indices.sort_by(|a, b| match (&a.1, &b.1) {
-            (Some(a_date), Some(b_date)) => b_date.cmp(a_date).then_with(|| a.2.cmp(&b.2)),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => a.2.cmp(&b.2),
-        });
         let start = usize::try_from(offset)
             .unwrap_or(usize::MAX)
-            .min(ordered_indices.len());
-        let end = start
-            .saturating_add(limit as usize)
-            .min(ordered_indices.len());
+            .min(result_count);
+        let end = start.saturating_add(limit as usize).min(result_count);
         let mut assets = Vec::new();
-        for (index, _, _) in &ordered_indices[start..end] {
-            let asset = result.objectAtIndex(*index);
+        for index in start..end {
+            let asset = result.objectAtIndex(index);
             if asset.mediaType() != PHAssetMediaType::Image {
                 continue;
             }
@@ -180,7 +163,7 @@ pub(super) fn list_assets_page(
             items: assets,
             total,
             offset,
-            has_more: end < ordered_indices.len(),
+            has_more: end < result_count,
         })
     }
 }

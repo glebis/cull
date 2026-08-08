@@ -150,16 +150,6 @@ pub fn list_assets(
     catalog.list_assets_page(album_id, offset, limit.clamp(1, 100))
 }
 
-fn page_assets(mut assets: Vec<PhotosAsset>, offset: u32, limit: u32) -> PhotosPage<PhotosAsset> {
-    assets.sort_by(|a, b| match (&a.created_at, &b.created_at) {
-        (Some(a_date), Some(b_date)) => b_date.cmp(a_date).then_with(|| a.id.cmp(&b.id)),
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => a.id.cmp(&b.id),
-    });
-    paginate(assets, offset, limit)
-}
-
 fn paginate<T>(items: Vec<T>, offset: u32, limit: u32) -> PhotosPage<T> {
     let limit = limit.clamp(1, 100) as usize;
     let total = u32::try_from(items.len()).unwrap_or(u32::MAX);
@@ -260,12 +250,12 @@ mod tests {
             offset: u32,
             limit: u32,
         ) -> Result<PhotosPage<PhotosAsset>, PhotosError> {
-            Ok(page_assets(
+            Ok(paginate(
                 vec![
+                    PhotosAsset::new("new-a", Some("2026-02-01T00:00:00Z")),
+                    PhotosAsset::new("new-b", Some("2026-02-01T00:00:00Z")),
                     PhotosAsset::new("old", Some("2026-01-01T00:00:00Z")),
                     PhotosAsset::new("null", None),
-                    PhotosAsset::new("new-b", Some("2026-02-01T00:00:00Z")),
-                    PhotosAsset::new("new-a", Some("2026-02-01T00:00:00Z")),
                 ],
                 offset,
                 limit,
@@ -308,7 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn asset_page_orders_created_desc_null_last_then_id() {
+    fn asset_adapter_page_preserves_created_desc_null_last_then_id() {
         let page = list_assets(&FakeCatalog::default(), None, 0, 100).unwrap();
         let ids: Vec<&str> = page.items.iter().map(|item| item.id.as_str()).collect();
         assert_eq!(ids, vec!["new-a", "new-b", "old", "null"]);
