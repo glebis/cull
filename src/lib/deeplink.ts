@@ -15,8 +15,6 @@ import {
     windowLabel,
     navigateTo,
     showToast,
-    importBatchFilter,
-    importBatchImageIds,
     pinnedCollection,
     activeCollection,
     activeSmartCollection,
@@ -25,10 +23,11 @@ import {
     collections,
     type ViewMode,
 } from './stores';
-import { importFolder, importFiles, addToCollection, listCollections, getBatchImages, listFolders, listImagesByFolder, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls, completeDeepLinkNavigation, type ImageWithFile, type ImportResponse } from './api';
+import { importFolder, importFiles, addToCollection, listCollections, listFolders, listImagesByFolder, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls, completeDeepLinkNavigation, type ImageWithFile, type ImportResponse } from './api';
 import { applyClipboardMonitorCollection } from './clipboard-monitor';
-import { clearImageScope, invalidateImageCache, loadAllImages, loadImagesForCurrentScope, loadImagesUntil, resetImagePaging } from './image-loading';
+import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { openSettings, type SettingsTab } from './settings-navigation';
+import { activateImportBatch } from './import-batch-navigation';
 
 interface OpenParams {
     path?: string | null;
@@ -288,14 +287,7 @@ async function handleParamsInner(params: OpenParams, ack: AckFn) {
                 });
             } else if (result.batch_id) {
                 // No active collection — filter to batch
-                const batchImgs = await getBatchImages(result.batch_id);
-                invalidateImageCache();
-                clearImageScope();
-                resetImagePaging();
-                images.set(batchImgs);
-                importBatchFilter.set(result.batch_id);
-                importBatchImageIds.set(result.image_ids);
-                focusIndex(0);
+                await activateImportBatch(result.batch_id);
             } else {
                 await loadAllImages({ force: true, invalidateCache: true });
                 focusIndex(0);

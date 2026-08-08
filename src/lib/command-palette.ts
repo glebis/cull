@@ -20,6 +20,8 @@ import {
     groupRankingOpen,
     focusedIndex,
     images,
+    importBatchFilter,
+    importBatchImageIds,
     requestCollectionTarget,
     requestTextInput,
     searchOpen,
@@ -48,6 +50,7 @@ import {
 } from './stores';
 import { invalidateImageCache, loadAllImages, loadImagesForCurrentScope } from './image-loading';
 import { addToCollection, analyzeImages, checkOllama, createCollection, detectNsfw, detectObjects, getAppSetting, getClientFeedback, getOllamaConfig, isNudenetAvailable, isYoloAvailable, listCanvases, listClientFeedback, listCollections, listImageIdsMissingDetection, listImageIdsMissingVision, redo, saveTextToPath, setClientFeedback, setDecision, setRating, undo, validateSessionFolder, type Canvas, type Session } from './api';
+import { activateImportBatch } from './import-batch-navigation';
 import { withDecision, withRating, type ImageDecision } from './selection-updates';
 import { createWorkflow, readWorkflows, runWorkflow, type CommandWorkflow } from './workflows';
 import { buildDeliveryCsv, type DeliveryRow } from './delivery-csv';
@@ -328,10 +331,25 @@ export function listCommandShortcuts(
     });
 }
 
-function clearNavigationScope() {
+function clearSessionScope() {
     activeSession.set(null);
     sessionCanvases.set([]);
     activeCanvas.set(null);
+}
+
+function clearImportScope() {
+    importBatchFilter.set(null);
+    importBatchImageIds.set([]);
+}
+
+function clearNavigationScope() {
+    clearSessionScope();
+    clearImportScope();
+}
+
+async function openCurrentImportBatch(batchId: string) {
+    clearSessionScope();
+    await activateImportBatch(batchId);
 }
 
 async function openAllImages() {
@@ -390,6 +408,7 @@ async function openSession(session: Session) {
     } catch {
         sessionCanvases.set([]);
     }
+    clearImportScope();
     activeSmartCollection.set(null);
     activeFolder.set(null);
     activeCollection.set(null);
@@ -399,6 +418,7 @@ async function openSession(session: Session) {
 }
 
 function openCanvas(canvas: Canvas) {
+    clearImportScope();
     activeCanvas.set(canvas);
     navigateTo('canvas');
 }
@@ -1298,6 +1318,9 @@ function destinationItems(): CommandPaletteItem[] {
     const activeSessionId = get(activeSession)?.id ?? null;
     const activeCanvasId = get(activeCanvas)?.id ?? null;
     const activeClass = get(activeDetectedClass);
+    const currentImportBatch = get(importBatchFilter);
+    const currentImportImageIds = get(importBatchImageIds);
+    const currentImportCount = currentImportImageIds.length;
 
     return [
         {
@@ -1309,6 +1332,15 @@ function destinationItems(): CommandPaletteItem[] {
             keywords: ['library', 'root'],
             run: openAllImages,
         },
+        ...(currentImportBatch ? [{
+            id: `scope.import.${currentImportBatch}`,
+            title: 'Current Import',
+            subtitle: `${currentImportCount} image${currentImportCount === 1 ? '' : 's'} · ${currentImportBatch}`,
+            category: 'Import',
+            kind: 'destination' as const,
+            keywords: ['import', 'batch', 'recent', currentImportBatch],
+            run: () => openCurrentImportBatch(currentImportBatch),
+        }] : []),
         ...get(sessions).map((session): CommandPaletteItem => ({
             id: `scope.session.${session.id}`,
             title: session.name,
