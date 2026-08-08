@@ -319,6 +319,16 @@ pub fn run() {
                     return Err(format!("database open failed: {}", e).into());
                 }
             };
+            if let Err(error) = commands::files::recover_pending_folder_rename(&db) {
+                let msg = format!(
+                    "Cull found an incomplete folder rename and could not finish recovery safely:\n{error}\n\nStartup has stopped before watchers or background services began. Inspect the source and target folders before reopening Cull."
+                );
+                app.dialog()
+                    .message(msg)
+                    .title("Folder Rename Recovery Required")
+                    .blocking_show();
+                return Err(format!("folder rename recovery failed: {error}").into());
+            }
 
             let model_dir = app_data_dir.join("models");
             let embedding_engine = Mutex::new(EmbeddingEngine::new(&model_dir));
@@ -693,6 +703,7 @@ pub fn run() {
             commands::files::paste_image_from_clipboard,
             commands::files::move_image,
             commands::files::rename_image,
+            commands::files::rename_folder,
             commands::files::create_subfolder,
             commands::files::share_images,
             commands::files::open_images_with_application,

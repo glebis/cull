@@ -94,6 +94,11 @@ impl FileWatcher {
         );
     }
 
+    pub fn clear_move_intent(&self, old_path: &std::path::Path, new_path: &std::path::Path) {
+        self.intent_registry.remove(old_path);
+        self.intent_registry.remove(new_path);
+    }
+
     pub fn start(
         &mut self,
         db: Database,

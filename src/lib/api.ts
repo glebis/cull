@@ -1751,6 +1751,18 @@ export async function createSubfolder(parentPath: string, name: string): Promise
     return result;
 }
 
+export interface RenameFolderResult {
+    oldPath: string;
+    newPath: string;
+    imageCount: number;
+}
+
+export async function renameFolder(folder: string, newName: string): Promise<RenameFolderResult> {
+    const result = await invoke<RenameFolderResult>('rename_folder', { folder, newName });
+    emitSessionEventsRefresh();
+    return result;
+}
+
 export async function shareImages(imageIds: string[]): Promise<void> {
     return invoke<void>('share_images', { imageIds });
 }
