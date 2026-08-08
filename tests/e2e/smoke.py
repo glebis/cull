@@ -921,8 +921,8 @@ def test_command_palette_navigate_and_execute(page: Page) -> None:
     wait_mode(page, "grid")
 
 
-def test_command_palette_arrows_and_favorite(page: Page) -> None:
-    """S19 (zu0.8) — Arrow keys move selection; row context menu favorites a result."""
+def test_command_palette_arrows_and_pin(page: Page) -> None:
+    """S19 (zu0.8) — Arrow keys move selection; row context menu pins a result."""
     press(page, "Meta+1")
     wait_mode(page, "grid")
 
@@ -940,13 +940,13 @@ def test_command_palette_arrows_and_favorite(page: Page) -> None:
     second_selected = page.locator(".palette-row.selected").first.get_attribute("id")
     assert first_selected != second_selected, "ArrowDown did not move palette selection"
 
-    # Right-click the first row to open the result context menu and Favorite it.
+    # Right-click the first row to open the result context menu and pin it.
     page.locator(".palette-row").first.click(button="right")
     expect(page.locator(".palette-context-menu")).to_be_visible()
-    expect(page.locator(".palette-context-menu")).to_contain_text("Favorite")
-    page.locator(".palette-context-menu button", has_text="Favorite").first.click()
+    expect(page.locator(".palette-context-menu")).to_contain_text("Pin")
+    page.locator(".palette-context-menu button", has_text="Pin").first.click()
 
-    # A favorited row now carries the pin mark.
+    # A pinned row now carries the pin mark.
     expect(page.locator(".palette-row .row-mark", has_text="*").first).to_be_visible()
 
     palette_input.press("Escape")
@@ -1374,7 +1374,7 @@ def main() -> int:
         smoke.step("S29a zen mode", lambda: test_zen_mode(page))
         smoke.step("S19a command palette open/close", lambda: test_command_palette_open_close(page))
         smoke.step("S19b command palette navigate and execute", lambda: test_command_palette_navigate_and_execute(page))
-        smoke.step("S19c command palette arrows and favorite", lambda: test_command_palette_arrows_and_favorite(page))
+        smoke.step("S19c command palette arrows and pin", lambda: test_command_palette_arrows_and_pin(page))
         smoke.step("S19d keyboard shortcuts panel", lambda: test_keyboard_shortcuts_panel(page))
         smoke.step("S19e palette does not hijack text input", lambda: test_palette_does_not_hijack_text_input(page))
         smoke.step("S19f AI settings and library commands", lambda: test_ai_settings_and_library_commands(page))
