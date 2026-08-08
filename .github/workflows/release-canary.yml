@@ -30,7 +30,7 @@ jobs:
       publish_eligible: ${{ steps.release_gate.outputs.publish_eligible }}
     steps:
       - name: Checkout requested release source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
@@ -149,7 +149,7 @@ jobs:
           test "$PUBLISH_ELIGIBLE" = false
 
       - name: Checkout gate-approved commit
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.gate.outputs.sha }}
           persist-credentials: false
@@ -266,7 +266,7 @@ jobs:
     runs-on: macos-14
     steps:
       - name: Checkout gate-approved verifier
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.gate.outputs.sha }}
           persist-credentials: false
