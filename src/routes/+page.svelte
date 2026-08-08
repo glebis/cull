@@ -86,6 +86,7 @@
         approvedImageIds: string[];
         resultJson: string;
     } | null>(null);
+    let trashProposalCompletionInFlight = $state(false);
     let trashInFlight = $state(false);
     let skipTrashConfirmSession = $state(false);
     const previewDisplayWindow = isPreviewDisplayRoute();
@@ -243,47 +244,53 @@
         completion: { proposalId: string; approvedImageIds: string[]; resultJson: string },
         result?: Awaited<ReturnType<typeof trashImagesDetailed>>,
     ) {
+        if (trashProposalCompletionInFlight) return;
+        trashProposalCompletionInFlight = true;
         try {
-            await applyActionProposal(
-                completion.proposalId,
-                completion.approvedImageIds,
-                completion.resultJson,
-            );
-        } catch (error) {
-            pendingTrashProposalCompletion = completion;
-            showToast('Images moved, but proposal update failed', {
-                detail: String(error),
-                type: 'error',
-                duration: 10000,
-                actions: [{
-                    label: 'Retry update',
-                    onclick: () => { void retryTrashProposalCompletion(); },
-                }],
-            });
-            return;
-        }
-        pendingTrashProposalCompletion = null;
-        if (result) {
-            showToast('Trash proposal applied', {
-                detail: `${result.succeeded} moved to Trash, ${result.failed} failed`,
-                type: result.failed > 0 ? 'warning' : 'info',
-                duration: 6000,
-                actions: [
-                    { label: 'Undo', onclick: () => { void undoLastTrashProposal(); } },
-                ],
-            });
-        }
-        reviewProposalId = null;
-        activeAgentProposalId.set(null);
-        try {
-            await refreshAgentPanelData();
-        } catch (error) {
-            console.error('Failed to refresh agent proposals after Trash:', error);
-            showToast('Proposal applied; refresh failed', {
-                detail: String(error),
-                type: 'warning',
-                duration: 8000,
-            });
+            try {
+                await applyActionProposal(
+                    completion.proposalId,
+                    completion.approvedImageIds,
+                    completion.resultJson,
+                );
+            } catch (error) {
+                pendingTrashProposalCompletion = completion;
+                showToast('Images moved, but proposal update failed', {
+                    detail: String(error),
+                    type: 'error',
+                    duration: 10000,
+                    actions: [{
+                        label: 'Retry update',
+                        onclick: () => { void retryTrashProposalCompletion(); },
+                    }],
+                });
+                return;
+            }
+            pendingTrashProposalCompletion = null;
+            if (result) {
+                showToast('Trash proposal applied', {
+                    detail: `${result.succeeded} moved to Trash, ${result.failed} failed`,
+                    type: result.failed > 0 ? 'warning' : 'info',
+                    duration: 6000,
+                    actions: [
+                        { label: 'Undo', onclick: () => { void undoLastTrashProposal(); } },
+                    ],
+                });
+            }
+            reviewProposalId = null;
+            activeAgentProposalId.set(null);
+            try {
+                await refreshAgentPanelData();
+            } catch (error) {
+                console.error('Failed to refresh agent proposals after Trash:', error);
+                showToast('Proposal applied; refresh failed', {
+                    detail: String(error),
+                    type: 'warning',
+                    duration: 8000,
+                });
+            }
+        } finally {
+            trashProposalCompletionInFlight = false;
         }
     }
 
@@ -841,7 +848,13 @@
         const proposal = agentProposals.find(item => item.id === proposalId);
         if (!proposal) return;
         if (proposal.kind === 'trash_images') {
-            if (trashInFlight || pendingTrashIds.length > 0 || trashConfirmVisible) {
+            if (
+                trashInFlight
+                || pendingTrashIds.length > 0
+                || trashConfirmVisible
+                || pendingTrashProposalCompletion
+                || trashProposalCompletionInFlight
+            ) {
                 showToast('Trash is already in progress', { type: 'warning' });
                 return;
             }

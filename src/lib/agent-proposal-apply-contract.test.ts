@@ -8,7 +8,7 @@ describe('agent proposal apply flow contract', () => {
     it('routes approved Trash proposals through confirmation before marking them applied', () => {
         const requestCall = pageSource.indexOf('requestTrashImages(approvedImageIds)');
         const trashCall = pageSource.indexOf('result = await trashImagesDetailed(ids)');
-        const applyCall = pageSource.indexOf('await applyActionProposal(\n                completion.proposalId');
+        const applyCall = pageSource.indexOf('completion.proposalId');
         expect(requestCall).toBeGreaterThan(-1);
         expect(trashCall).toBeGreaterThan(-1);
         expect(applyCall).toBeGreaterThan(-1);
@@ -17,6 +17,8 @@ describe('agent proposal apply flow contract', () => {
         expect(pageSource).toContain('const ids = resolveTrashRequestIds(requestedIds, defaultTrashIds())');
         expect(pageSource).toContain("showToast('Images moved, but proposal update failed'");
         expect(pageSource).toContain('pendingTrashProposalCompletion = completion');
+        expect(pageSource).toContain('if (trashProposalCompletionInFlight) return');
+        expect(pageSource).toContain('|| pendingTrashProposalCompletion');
         expect(pageSource).toContain(".filter(item => item.status === 'trashed')");
         expect(pageSource).toContain("{ label: 'Undo', onclick: () => { void undoLastTrashProposal(); } },");
         expect(pageSource).toContain('const label = await undo()');
