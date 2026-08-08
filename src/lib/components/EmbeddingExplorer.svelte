@@ -32,6 +32,10 @@
         downloadEmbeddingModel,
         startModelEmbeddingGeneration,
         hasApiKey,
+        setApiKey,
+        validateApiKey,
+        getOllamaEmbeddingConfig,
+        setOllamaEmbeddingConfig,
         getImagesByIds,
         getGenerationRun,
         regenerateThumbnails,
@@ -81,6 +85,11 @@
     let hasCohereKey = $state(false);
     let hasOpenAiKey = $state(false);
     let ollamaEmbeddingReady = $state(false);
+    let providerKeyInput = $state('');
+    let providerConfigStatus = $state<'idle' | 'loading' | 'saving' | 'saved' | 'invalid' | 'error'>('idle');
+    let providerConfigLoadSeq = 0;
+    let ollamaEmbeddingUrl = $state('http://localhost:11434/api/embed');
+    let ollamaEmbeddingModel = $state('embeddinggemma');
     let localModelAvailable = $state<Record<LocalProvider, boolean>>({ clip: false, dinov2: false });
     let localEmbeddingCounts = $state<Record<LocalProvider, number>>({ clip: 0, dinov2: 0 });
     let localModelDownloadInfo = $state<Record<LocalProvider, EmbeddingModelDownloadInfo | null>>({ clip: null, dinov2: null });
@@ -358,8 +367,99 @@
 
     async function selectProvider(provider: EmbeddingProvider) {
         if (provider === selectedProvider) return;
+        providerConfigLoadSeq += 1;
+        providerKeyInput = '';
+        providerConfigStatus = 'idle';
         selectedProvider = provider;
         await handleProviderChange();
+        if (configOpen) await loadSelectedProviderConfig();
+    }
+
+    function handleProviderSelection(event: Event) {
+        const provider = (event.currentTarget as HTMLSelectElement).value as EmbeddingProvider;
+        void selectProvider(provider);
+    }
+
+    function embeddingApiKeyProvider(provider: EmbeddingProvider): 'google' | 'cohere' | 'openai' | null {
+        if (provider === 'gemini') return 'google';
+        if (provider === 'cohere' || provider === 'openai') return provider;
+        return null;
+    }
+
+    async function toggleEmbeddingConfig() {
+        configOpen = !configOpen;
+        if (configOpen) {
+            await loadSelectedProviderConfig();
+        } else {
+            providerConfigLoadSeq += 1;
+            providerKeyInput = '';
+            providerConfigStatus = 'idle';
+        }
+    }
+
+    async function loadSelectedProviderConfig() {
+        const provider = selectedProvider;
+        const requestSeq = ++providerConfigLoadSeq;
+        providerKeyInput = '';
+        providerConfigStatus = provider === 'ollama' ? 'loading' : 'idle';
+        if (provider !== 'ollama') return;
+        try {
+            const [url, model] = await getOllamaEmbeddingConfig();
+            if (requestSeq !== providerConfigLoadSeq || !configOpen || selectedProvider !== provider) return;
+            ollamaEmbeddingUrl = url;
+            ollamaEmbeddingModel = model;
+            providerConfigStatus = 'idle';
+        } catch {
+            if (requestSeq !== providerConfigLoadSeq || !configOpen || selectedProvider !== provider) return;
+            providerConfigStatus = 'error';
+        }
+    }
+
+    async function saveSelectedProviderConfig() {
+        const provider = selectedProvider;
+        const requestSeq = providerConfigLoadSeq;
+        providerConfigStatus = 'saving';
+        try {
+            if (provider === 'ollama') {
+                const url = ollamaEmbeddingUrl.trim() || 'http://localhost:11434/api/embed';
+                const model = ollamaEmbeddingModel.trim() || 'embeddinggemma';
+                ollamaEmbeddingUrl = url;
+                ollamaEmbeddingModel = model;
+                await setOllamaEmbeddingConfig(
+                    url,
+                    model,
+                );
+                await loadProviderOptions();
+                if (selectedProvider === provider) await loadEmbeddingState();
+                if (selectedProvider !== provider) return;
+                providerConfigStatus = 'saved';
+                return;
+            }
+
+            const apiProvider = embeddingApiKeyProvider(provider);
+            const key = providerKeyInput.trim();
+            if (!apiProvider || !key) {
+                providerConfigStatus = 'invalid';
+                return;
+            }
+            const valid = await validateApiKey(apiProvider, key);
+            if (requestSeq !== providerConfigLoadSeq || selectedProvider !== provider) return;
+            if (!valid) {
+                providerConfigStatus = 'invalid';
+                return;
+            }
+            await setApiKey(apiProvider, key);
+            if (apiProvider === 'google') hasGoogleKey = true;
+            if (apiProvider === 'cohere') hasCohereKey = true;
+            if (apiProvider === 'openai') hasOpenAiKey = true;
+            await loadProviderOptions();
+            if (selectedProvider !== provider) return;
+            providerKeyInput = '';
+            providerConfigStatus = 'saved';
+        } catch {
+            if (selectedProvider !== provider) return;
+            providerConfigStatus = 'error';
+        }
     }
 
     function restoreInteractionState(savedState: Partial<EmbeddingViewState>) {
@@ -1830,46 +1930,83 @@
         <div class="panel-section">
             <div class="section-header-row">
                 <div class="section-header">MODEL</div>
-                <button class="gear-btn" onclick={() => configOpen = !configOpen} title="Settings">
+                <button
+                    class="gear-btn"
+                    onclick={toggleEmbeddingConfig}
+                    aria-label={configOpen ? 'Close embedding configuration' : 'Configure embedding model'}
+                    aria-expanded={configOpen}
+                    title={configOpen ? 'Close configuration' : 'Configure embedding model'}
+                >
                     &#9881;
                 </button>
             </div>
-            <div class="model-list" role="radiogroup" aria-label="Embedding model">
-                {#each modelOptions as option}
-                    <button
-                        class="model-option"
-                        class:active={selectedProvider === option.id}
-                        onclick={() => selectProvider(option.id)}
-                        role="radio"
-                        aria-checked={selectedProvider === option.id}
-                        title={option.label}
-                    >
-                        <span class="model-option-main">
-                            <span class="model-name">{option.shortLabel}</span>
-                            <span class="model-count">{providerEmbeddingCount(option.id)}/{totalImages}</span>
-                        </span>
-                        <span class="model-option-meta">
-                            <span>{option.scope}</span>
-                            <span>{option.dims}</span>
-                            <span class:ready={providerReady(option.id)}>{providerStatusLabel(option.id)}</span>
-                        </span>
-                    </button>
-                {/each}
+            <div class="model-summary">
+                <span class="model-summary-name">{selectedModel.label}</span>
+                <span class="model-summary-count">{currentEmbeddingCount}/{totalImages} images embedded</span>
             </div>
+
+            {#if configOpen}
+                <label class="provider-config-row" for="embedding-provider">
+                    <span>Provider</span>
+                    <select
+                        id="embedding-provider"
+                        class="provider-select"
+                        value={selectedProvider}
+                        onchange={handleProviderSelection}
+                        aria-label="Embedding provider"
+                    >
+                        {#each modelOptions as option}
+                            <option value={option.id}>{option.label}</option>
+                        {/each}
+                    </select>
+                </label>
+                <div class="provider-config-meta">
+                    <span>{selectedModel.scope}</span>
+                    <span>{selectedModel.dims}</span>
+                    <span class:ready={selectedModelAvailable}>{providerStatusLabel(selectedProvider)}</span>
+                </div>
+            {/if}
         </div>
 
-        {#if configOpen && ((selectedProvider === 'gemini' && !hasGoogleKey) || (selectedProvider === 'cohere' && !hasCohereKey) || (selectedProvider === 'openai' && !hasOpenAiKey) || (selectedProvider === 'ollama' && !ollamaEmbeddingReady))}
+        {#if configOpen && !isLocalProvider(selectedProvider)}
             <div class="panel-section config-section">
                 {#if selectedProvider === 'ollama'}
-                    <div class="section-header">OLLAMA EMBEDDINGS OFFLINE</div>
-                    <p class="key-missing-text">Start Ollama and pull an embedding model such as embeddinggemma.</p>
+                    <div class="section-header">OLLAMA EMBEDDINGS</div>
+                    <label class="provider-field">
+                        <span>URL</span>
+                        <input aria-label="Ollama embedding URL" bind:value={ollamaEmbeddingUrl} disabled={providerConfigStatus === 'loading'} />
+                    </label>
+                    <label class="provider-field">
+                        <span>Model</span>
+                        <input aria-label="Ollama embedding model" bind:value={ollamaEmbeddingModel} disabled={providerConfigStatus === 'loading'} />
+                    </label>
                 {:else}
-                    <div class="section-header">{selectedModel.shortLabel.toUpperCase()} API KEY REQUIRED</div>
-                    <p class="key-missing-text">Set your {selectedModel.shortLabel} API key in Settings.</p>
-                    <button class="settings-link-btn" onclick={() => openSettings('ai')}>
-                        Open Settings
-                    </button>
+                    <div class="section-header">{selectedModel.shortLabel.toUpperCase()} CREDENTIALS</div>
+                    <label class="provider-field">
+                        <span>API key</span>
+                        <input
+                            type="password"
+                            aria-label="{selectedModel.shortLabel} API key"
+                            placeholder={selectedModelAvailable ? 'Connected · enter to replace' : 'Enter API key'}
+                            bind:value={providerKeyInput}
+                        />
+                    </label>
                 {/if}
+                <button
+                    class="settings-link-btn"
+                    onclick={saveSelectedProviderConfig}
+                    disabled={providerConfigStatus === 'loading' || providerConfigStatus === 'saving'}
+                >
+                    {providerConfigStatus === 'loading' ? 'Loading…' : providerConfigStatus === 'saving' ? 'Saving…' : selectedProvider === 'ollama' ? 'Save Ollama config' : 'Save API key'}
+                </button>
+                {#if providerConfigStatus === 'saved'}
+                    <p class="provider-config-message ready" role="status">Configuration saved.</p>
+                {:else if providerConfigStatus === 'invalid'}
+                    <p class="provider-config-message error" role="alert">Enter a valid API key.</p>
+                {:else if providerConfigStatus === 'error'}
+                    <p class="provider-config-message error" role="alert">Could not save provider configuration.</p>
+                {/if}
+                <button class="settings-link-btn secondary-link" onclick={() => openSettings('ai')}>More AI settings</button>
             </div>
         {/if}
 
@@ -2031,6 +2168,7 @@
         </div>
 
         {#if isLocalProvider(selectedProvider) && !selectedModelAvailable}
+            {#if configOpen}
                 <div class="panel-section">
                     {#if downloading}
                         <div class="download-progress">
@@ -2107,25 +2245,28 @@
                         {/if}
                     </div>
                 </div>
+            {/if}
         {:else}
             <div class="panel-section">
-                <div class="stat-row">
-                    <span class="stat-label">Images</span>
-                    <span class="stat-value">{totalImages}</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Embeddings</span>
-                    <span class="stat-value">{currentEmbeddingCount}</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Need embeddings</span>
-                    <span class="stat-value">{missingEmbeddingCount}</span>
-                </div>
-                {#if isLocalProvider(selectedProvider)}
+                {#if configOpen}
                     <div class="stat-row">
-                        <span class="stat-label">Model</span>
-                        <span class="stat-value">{selectedModel.dims}</span>
+                        <span class="stat-label">Images</span>
+                        <span class="stat-value">{totalImages}</span>
                     </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Embeddings</span>
+                        <span class="stat-value">{currentEmbeddingCount}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Need embeddings</span>
+                        <span class="stat-value">{missingEmbeddingCount}</span>
+                    </div>
+                    {#if isLocalProvider(selectedProvider)}
+                        <div class="stat-row">
+                            <span class="stat-label">Model</span>
+                            <span class="stat-value">{selectedModel.dims}</span>
+                        </div>
+                    {/if}
                 {/if}
                 <div class="generation-actions">
                     <button
@@ -2136,14 +2277,16 @@
                     >
                         {missingEmbeddingCount === 0 ? 'Up to date' : `Generate missing (${missingEmbeddingCount})`}
                     </button>
-                    <button
-                        class="action-btn secondary"
-                        onclick={() => startGeneration('all')}
-                        disabled={generating || !selectedModelAvailable || totalImages === 0}
-                        title={selectedModelAvailable ? '' : providerStatusLabel(selectedProvider)}
-                    >
-                        Regenerate all ({totalImages})
-                    </button>
+                    {#if configOpen}
+                        <button
+                            class="action-btn secondary"
+                            onclick={() => startGeneration('all')}
+                            disabled={generating || !selectedModelAvailable || totalImages === 0}
+                            title={selectedModelAvailable ? '' : providerStatusLabel(selectedProvider)}
+                        >
+                            Regenerate all ({totalImages})
+                        </button>
+                    {/if}
                 </div>
             </div>
         {/if}
@@ -2464,46 +2607,12 @@
         margin-bottom: 8px;
     }
 
-    .model-list {
+    .model-summary {
         display: grid;
-        gap: 5px;
+        gap: 4px;
     }
 
-    .model-option {
-        display: grid;
-        gap: 3px;
-        width: 100%;
-        min-height: 46px;
-        padding: 7px 8px;
-        background: var(--bg);
-        color: var(--text-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        font-family: var(--font);
-        cursor: pointer;
-        text-align: left;
-        transition: border-color 0.15s, background 0.15s, color 0.15s;
-    }
-
-    .model-option:hover {
-        border-color: var(--blue);
-        color: var(--text);
-    }
-
-    .model-option.active {
-        background: color-mix(in srgb, var(--blue) 12%, var(--bg));
-        border-color: var(--blue);
-        color: var(--text);
-    }
-
-    .model-option-main,
-    .model-option-meta {
-        display: flex;
-        align-items: center;
-        min-width: 0;
-    }
-
-    .model-name {
+    .model-summary-name {
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -2513,27 +2622,28 @@
         color: var(--text);
     }
 
-    .model-count {
-        margin-left: auto;
-        flex-shrink: 0;
+    .model-summary-count {
         font-size: 10px;
         color: var(--text-secondary);
     }
 
-    .model-option-meta {
-        gap: 6px;
-        font-size: 9px;
+    .provider-config-row {
+        display: grid;
+        gap: 4px;
+        margin-top: var(--spacing);
+        font-size: 10px;
         color: var(--text-secondary);
     }
 
-    .model-option-meta span {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+    .provider-config-meta {
+        display: flex;
+        gap: var(--spacing);
+        margin-top: 4px;
+        color: var(--text-secondary);
+        font-size: 9px;
     }
 
-    .model-option-meta span.ready {
+    .provider-config-meta .ready {
         color: var(--green);
     }
 
@@ -3333,23 +3443,62 @@
         background: color-mix(in srgb, var(--bg) 55%, var(--surface));
     }
 
-    .key-missing-text {
-        font-size: 12px;
+    .provider-field {
+        display: grid;
+        gap: 4px;
+        margin-bottom: var(--spacing);
+        font-size: 10px;
         color: var(--text-secondary);
-        margin: 0 0 8px 0;
     }
+
+    .provider-field input {
+        box-sizing: border-box;
+        width: 100%;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 6px 8px;
+        font: 11px var(--font);
+    }
+
     .settings-link-btn {
         background: none;
         border: 1px solid var(--blue);
-        border-radius: var(--radius, 4px);
+        border-radius: var(--radius);
         padding: 4px 12px;
         font-size: 12px;
-        font-family: inherit;
+        font-family: var(--font);
         color: var(--blue);
         cursor: pointer;
     }
+
     .settings-link-btn:hover {
         background: color-mix(in srgb, var(--blue) 10%, transparent);
+    }
+
+    .settings-link-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .secondary-link {
+        margin-left: 4px;
+        color: var(--text-secondary);
+        border-color: var(--border);
+    }
+
+    .provider-config-message {
+        margin: var(--spacing) 0 0;
+        font-size: 10px;
+    }
+
+    .provider-config-message.ready {
+        color: var(--green);
+    }
+
+    .provider-config-message.error {
+        color: var(--red);
     }
 
     @media (max-width: 920px) {
