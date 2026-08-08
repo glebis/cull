@@ -1,6 +1,7 @@
 <script lang="ts">
     import { resubmitPrompt, estimateGenerationCost, type CostEstimate } from '$lib/api';
     import { createStaleGuard } from '$lib/stale-guard';
+    import ModalDialog from '$lib/components/ModalDialog.svelte';
 
     interface Props {
         visible: boolean;
@@ -81,19 +82,22 @@
     }
 
     function handleKeydown(e: KeyboardEvent) {
-        if (e.key === 'Escape') onclose();
-        if (e.key === 'Enter' && e.metaKey) submit();
+        if (e.key === 'Enter' && e.metaKey) void submit();
     }
 </script>
 
 {#if visible}
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="dialog-overlay" onclick={onclose} onkeydown={handleKeydown}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="dialog" onclick={(e) => e.stopPropagation()} onkeydown={handleKeydown}>
+<ModalDialog
+    titleId="prompt-resubmit-title"
+    overlayClass="prompt-resubmit-overlay"
+    panelClass="prompt-resubmit-dialog"
+    onclose={onclose}
+    onkeydown={handleKeydown}
+>
+    <div class="dialog-content">
         <div class="dialog-header">
-            <h3>Re-generate</h3>
-            <button class="close-btn" onclick={onclose}>&times;</button>
+            <h3 id="prompt-resubmit-title">Re-generate</h3>
+            <button class="close-btn" onclick={onclose} aria-label="Close">&times;</button>
         </div>
 
         <div class="dialog-body">
@@ -188,11 +192,11 @@
             </button>
         </div>
     </div>
-</div>
+</ModalDialog>
 {/if}
 
 <style>
-    .dialog-overlay {
+    :global(.prompt-resubmit-overlay) {
         position: fixed;
         inset: 0;
         background: color-mix(in srgb, var(--bg) 80%, transparent);
@@ -201,7 +205,7 @@
         justify-content: center;
         z-index: var(--z-modal);
     }
-    .dialog {
+    :global(.prompt-resubmit-dialog) {
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: calc(var(--radius) * 2);
