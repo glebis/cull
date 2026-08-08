@@ -98,6 +98,72 @@ html, body {
     outline-offset: 2px;
 }
 
+.dialog .btn {
+    border: 1px solid var(--border);
+    border-radius: 0;
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 12px;
+    line-height: 1.5;
+    padding: var(--spacing) calc(var(--spacing) * 2);
+}
+
+.dialog .btn.primary {
+    background: color-mix(in srgb, var(--green) 16%, var(--surface));
+    border-color: var(--green);
+    color: var(--green);
+}
+
+.dialog .btn.secondary {
+    background: var(--surface);
+    color: var(--text-secondary);
+}
+
+.dialog .btn.danger {
+    background: var(--red);
+    border-color: var(--red);
+    color: var(--bg);
+}
+
+.dialog .btn:hover:not(:disabled) {
+    filter: brightness(1.1);
+}
+
+.dialog .btn.primary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--green) 24%, var(--surface));
+}
+
+.dialog .btn.secondary:hover:not(:disabled) {
+    border-color: var(--text-secondary);
+    color: var(--text);
+}
+
+.dialog .btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.dialog .btn:focus-visible,
+.dialog .close-btn:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+}
+
+.dialog .close-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 var(--spacing);
+}
+
+.dialog .close-btn:hover {
+    color: var(--text);
+}
+
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 3px; }
