@@ -715,6 +715,25 @@ describe('Embedding Explorer library scope', () => {
         ]);
     });
 
+    it('lets keyboard users activate cluster filters and return to all images', async () => {
+        const user = userEvent.setup();
+        render(EmbeddingExplorer);
+
+        const clusterButton = await screen.findByRole('button', { name: /Cluster 1.*2/ });
+        clusterButton.focus();
+        await user.keyboard('{Enter}');
+        expect(clusterButton).toHaveClass('active');
+        expect(clusterButton).toHaveAttribute('aria-pressed', 'true');
+
+        const allImagesButton = screen.getByRole('button', { name: /All Images.*2/ });
+        allImagesButton.focus();
+        await user.keyboard(' ');
+        expect(allImagesButton).toHaveClass('active');
+        expect(allImagesButton).toHaveAttribute('aria-pressed', 'true');
+        expect(clusterButton).toHaveAttribute('aria-pressed', 'false');
+        expect(clusterButton).not.toHaveClass('active');
+    });
+
     it('renders the projection before naming completes and ignores a stale provider label', async () => {
         const user = userEvent.setup();
         let resolveOldName!: (value: Array<{ cluster_id: number; label: string; source: string }>) => void;
