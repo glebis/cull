@@ -12,6 +12,7 @@ use crate::services::{Pagination, ServiceContext, ServiceError};
 use std::collections::HashSet;
 
 const MAX_EMBEDDING_PAGE_SIZE: u32 = 5000;
+const MAX_SIMILAR_IMAGES: usize = 100;
 const SIMILARITY_GROUPING_METHOD: &str = "greedy_threshold_v1";
 
 /// Upper bound on the number of embeddings `generate_similarity_groups` will
@@ -35,6 +36,20 @@ pub fn find_similar_images(
         .get_embedding_vector(image_id, model_name)?
         .ok_or_else(|| ServiceError::NotFound("Image has no embedding".into()))?;
     Ok(ctx.db.find_similar(&query, model_name, top_k)?)
+}
+
+pub fn find_similar_images_in_scope(
+    ctx: &ServiceContext,
+    scope: &EmbeddingScope,
+    image_id: &str,
+    top_k: usize,
+    model: Option<&str>,
+) -> Result<Vec<(String, f32)>, ServiceError> {
+    let model_name = model.unwrap_or("clip-vit-b32");
+    let top_k = top_k.min(MAX_SIMILAR_IMAGES);
+    ctx.db
+        .find_similar_in_scope(image_id, model_name, scope, top_k)?
+        .ok_or_else(|| ServiceError::NotFound("Image has no embedding".into()))
 }
 
 pub fn get_all_embeddings(
@@ -607,6 +622,31 @@ mod tests {
             ServiceError::NotFound(msg) => assert!(msg.contains("no embedding")),
             other => panic!("Expected NotFound, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn scoped_neighbor_service_clamps_top_k_to_standard_page_bounds() {
+        let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
+        insert_test_image(&db, "source");
+        db.store_embedding("source", "clip-vit-b32", &[1.0, 0.0])
+            .unwrap();
+        for index in 0..101 {
+            let id = format!("candidate-{index:03}");
+            insert_test_image(&db, &id);
+            db.store_embedding(&id, "clip-vit-b32", &[1.0, index as f32 / 1_000.0])
+                .unwrap();
+        }
+        let c = ctx(&db, &s, &d, &ee, &de, &se);
+        let scope = EmbeddingScope::All {
+            include_rejected: false,
+        };
+
+        let minimum = find_similar_images_in_scope(&c, &scope, "source", 0, None).unwrap();
+        let maximum = find_similar_images_in_scope(&c, &scope, "source", usize::MAX, None).unwrap();
+
+        assert!(minimum.is_empty());
+        assert_eq!(maximum.len(), 100);
+        assert!(maximum.iter().all(|(id, _)| id != "source"));
     }
 
     #[test]

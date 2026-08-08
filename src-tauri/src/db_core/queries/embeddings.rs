@@ -384,6 +384,81 @@ impl Database {
         Ok(scores)
     }
 
+    /// Finds nearest neighbors among the live images admitted by `scope`.
+    /// The scope is applied in SQL before vector decoding and scoring, and
+    /// the source image is always excluded from the candidate set.
+    pub fn find_similar_in_scope(
+        &self,
+        image_id: &str,
+        model_name: &str,
+        scope: &EmbeddingScope,
+        top_k: usize,
+    ) -> Result<Option<Vec<(String, f32)>>> {
+        let (scope_clause, scope_params, visibility) = scoped_where_clause(scope)?;
+        let (source_bytes, raw_candidates): (Option<Vec<u8>>, Vec<(String, Vec<u8>)>) = {
+            let mut conn = self.read_connection();
+            let transaction = conn.transaction()?;
+            let source_bytes = transaction
+                .query_row(
+                    "SELECT vector FROM embeddings WHERE image_id = ?1 AND model_name = ?2",
+                    params![image_id, model_name],
+                    |row| row.get(0),
+                )
+                .optional()?;
+
+            let candidate_sql = format!(
+                "SELECT DISTINCT e.image_id, e.vector
+                 FROM embeddings e
+                 JOIN images i ON i.id = e.image_id
+                 JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+                 LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+                 LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
+                 LEFT JOIN image_color_metrics cm ON cm.image_id = i.id
+                 LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
+                 WHERE e.model_name = ? AND e.image_id != ?
+                   AND ({scope_clause}) AND {}",
+                visibility.sql_predicate()
+            );
+            let mut candidate_params = vec![
+                Value::Text(model_name.to_string()),
+                Value::Text(image_id.to_string()),
+            ];
+            candidate_params.extend(scope_params);
+            let raw_candidates = {
+                let mut stmt = transaction.prepare(&candidate_sql)?;
+                let rows = stmt.query_map(to_param_refs(&candidate_params).as_slice(), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+                })?;
+                rows.collect::<Result<Vec<_>>>()?
+            };
+            transaction.commit()?;
+            (source_bytes, raw_candidates)
+        };
+
+        let Some(source_bytes) = source_bytes else {
+            return Ok(None);
+        };
+        if top_k == 0 {
+            return Ok(Some(Vec::new()));
+        }
+
+        let source = decode_embedding_bytes(&source_bytes);
+        let mut scores: Vec<(String, f32)> = raw_candidates
+            .into_iter()
+            .map(|(id, bytes)| {
+                let candidate = decode_embedding_bytes(&bytes);
+                (id, cosine_similarity(&source, &candidate))
+            })
+            .collect();
+        scores.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        scores.truncate(top_k);
+        Ok(Some(scores))
+    }
+
     pub fn embedding_count(&self, model_name: &str) -> Result<u32> {
         let conn = self.conn.lock();
         conn.query_row(
@@ -519,6 +594,37 @@ mod tests {
         db.store_embedding("img1", "model-a", &[1.0, 0.0]).unwrap();
         let result = db.find_similar(&[1.0, 0.0], "model-b", 10).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn scoped_neighbors_filter_candidates_before_scoring_and_exclude_source() {
+        let db = open_test_db();
+        for (id, path, vector) in [
+            ("source", "/selected/source.png", vec![1.0, 0.0]),
+            ("in-close", "/selected/close.png", vec![0.8, 0.6]),
+            ("in-far", "/selected/far.png", vec![0.0, 1.0]),
+            ("outside-closest", "/other/closest.png", vec![0.999, 0.001]),
+        ] {
+            insert_scoped_image(&db, id, path, 500, 500, None);
+            db.store_embedding(id, "model", &vector).unwrap();
+        }
+        let scope = EmbeddingScope::Folder {
+            path: "/selected".to_string(),
+            min_size: 0,
+            include_rejected: false,
+        };
+
+        let neighbors = db
+            .find_similar_in_scope("source", "model", &scope, 2)
+            .unwrap()
+            .expect("source embedding exists");
+
+        assert_eq!(neighbors.len(), 2);
+        assert_eq!(neighbors[0].0, "in-close");
+        assert!((neighbors[0].1 - 0.8).abs() < 0.000_001);
+        assert_eq!(neighbors[1], ("in-far".to_string(), 0.0));
+        assert!(neighbors.iter().all(|(id, _)| id != "source"));
+        assert!(neighbors.iter().all(|(id, _)| id != "outside-closest"));
     }
 
     #[test]

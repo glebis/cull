@@ -21,6 +21,7 @@ commands.allow = [
   "estimate_generation_cost",
   "find_near_duplicates_by_phash",
   "find_similar_images",
+  "find_similar_images_in_scope",
   "generate_embeddings",
   "generate_gemini_embeddings",
   "generate_model_embeddings",
