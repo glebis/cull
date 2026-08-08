@@ -113,10 +113,11 @@ pub async fn remove_from_lineage_group(
 pub async fn get_batch_images(
     state: State<'_, AppState>,
     batch_id: String,
+    include_rejected: Option<bool>,
 ) -> Result<Vec<ImageWithFile>, String> {
     state
         .db
-        .get_batch_images(&batch_id)
+        .get_batch_images_with_visibility(&batch_id, include_rejected.unwrap_or(false))
         .map_err(|e| e.to_string())
 }
 

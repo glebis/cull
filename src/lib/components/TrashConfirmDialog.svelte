@@ -61,7 +61,7 @@
 
     <div class="dialog-footer">
         <button class="btn secondary" onclick={oncancel}>Cancel</button>
-        <button class="btn primary" data-modal-initial-focus onclick={confirm}>Move to Trash</button>
+        <button class="btn danger" data-modal-initial-focus onclick={confirm}>Move to Trash</button>
     </div>
 </ModalDialog>
 {/if}
@@ -95,15 +95,6 @@
         font-size: 14px;
         color: var(--text);
     }
-    .close-btn {
-        background: none;
-        border: none;
-        color: var(--text-secondary);
-        font-size: 18px;
-        cursor: pointer;
-        padding: 0 4px;
-    }
-    .close-btn:hover { color: var(--text); }
     .dialog-body {
         padding: calc(var(--spacing) * 2);
         display: flex;
@@ -140,9 +131,7 @@
         accent-color: var(--blue);
     }
     input[type="checkbox"]:focus-visible,
-    input[type="radio"]:focus-visible,
-    .close-btn:focus-visible,
-    .btn:focus-visible {
+    input[type="radio"]:focus-visible {
         outline: 2px solid var(--blue);
         outline-offset: 2px;
     }
@@ -152,29 +141,5 @@
         gap: var(--spacing);
         padding: calc(var(--spacing) * 2);
         border-top: 1px solid var(--border);
-    }
-    .btn {
-        padding: 6px 16px;
-        border-radius: var(--radius);
-        font-size: 12px;
-        font-family: var(--font);
-        cursor: pointer;
-        border: 1px solid var(--border);
-    }
-    .btn.secondary {
-        background: var(--surface);
-        color: var(--text-secondary);
-    }
-    .btn.secondary:hover {
-        color: var(--text);
-        border-color: var(--text-secondary);
-    }
-    .btn.primary {
-        background: var(--red);
-        color: var(--bg);
-        border-color: var(--red);
-    }
-    .btn.primary:hover {
-        filter: brightness(1.1);
     }
 </style>

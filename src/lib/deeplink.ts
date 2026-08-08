@@ -15,24 +15,28 @@ import {
     windowLabel,
     navigateTo,
     showToast,
-    importBatchFilter,
-    importBatchImageIds,
     pinnedCollection,
     activeCollection,
     activeSmartCollection,
     activeDetectedClass,
     activeSession,
     collections,
+    showRejected,
     type ViewMode,
 } from './stores';
-import { importFolder, importFiles, addToCollection, listCollections, getBatchImages, listFolders, listImagesByFolder, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls, type ImageWithFile, type ImportResponse } from './api';
+import { importFolder, importFiles, addToCollection, listCollections, listFolders, listImagesByFolder, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls, completeDeepLinkNavigation, type ImageWithFile, type ImportResponse } from './api';
 import { applyClipboardMonitorCollection } from './clipboard-monitor';
-import { clearImageScope, invalidateImageCache, loadAllImages, loadImagesForCurrentScope, loadImagesUntil, resetImagePaging } from './image-loading';
+import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
+import { openSettings, type SettingsTab } from './settings-navigation';
+import { activateImportBatch } from './import-batch-navigation';
 
 interface OpenParams {
     path?: string | null;
     paths?: string[] | null;
     folder?: string | null;
+    settings_tab?: string | null;
+    collection?: string | null;
+    request_id?: string | null;
     view?: string | null;
     size?: number | null;
     zoom?: number | null;
@@ -47,6 +51,7 @@ interface OpenParams {
 }
 
 const VALID_VIEWS: ViewMode[] = ['grid', 'compare', 'loupe', 'canvas', 'lineage', 'embeddings', 'export'];
+const VALID_SETTINGS_TABS: SettingsTab[] = ['general', 'appearance', 'ai', 'agent-access', 'privacy', 'plugins'];
 const FOLDER_IMAGE_PAGE_SIZE = 250;
 const FOLDER_IMAGE_PAGE_LIMIT = 200;
 
@@ -99,8 +104,55 @@ async function focusImageById(imageId: string): Promise<boolean> {
     return false;
 }
 
+/**
+ * Report the outcome of a navigation back to Rust. Display tools (show_image,
+ * show_collection, navigate_to_folder) block on this ack, so every exit path of
+ * handleParams must reach it — otherwise the tool reports a spurious timeout.
+ * A failure to ack is logged and swallowed: it must never break the navigation
+ * that already succeeded.
+ */
+async function ackNavigation(params: OpenParams, ok: boolean, error?: unknown): Promise<boolean> {
+    if (!params.request_id) return true;
+    const message = error == null ? null : (error instanceof Error ? error.message : String(error));
+    try {
+        await completeDeepLinkNavigation(params.request_id, ok, message);
+        return true;
+    } catch (e) {
+        console.warn('[deep-link] Failed to ack navigation', e);
+        return false;
+    }
+}
+
 export async function handleParams(params: OpenParams) {
+    let acked = false;
+    // Only latch on a delivered ack. If the IPC call itself failed, a later
+    // ack attempt should still get through rather than leaving the caller to
+    // time out on a navigation that succeeded.
+    const ack: AckFn = async (ok, error) => {
+        if (acked) return;
+        acked = await ackNavigation(params, ok, error);
+    };
+
+    try {
+        const result = await handleParamsInner(params, ack);
+        await ack(true);
+        return result;
+    } catch (e) {
+        await ack(false, e);
+        throw e;
+    }
+}
+
+type AckFn = (ok: boolean, error?: unknown) => Promise<void>;
+
+async function handleParamsInner(params: OpenParams, ack: AckFn) {
     console.log('[deep-link] handleParams called:', JSON.stringify(params));
+    if (params.settings_tab) {
+        const tab = VALID_SETTINGS_TABS.includes(params.settings_tab as SettingsTab)
+            ? params.settings_tab as SettingsTab
+            : 'general';
+        openSettings(tab);
+    }
     if (params.drag_drop && get(viewMode) === 'canvas' && (params.folder || params.path || (params.paths && params.paths.length > 0))) {
         await handleCanvasDropImport(params);
         return;
@@ -126,19 +178,34 @@ export async function handleParams(params: OpenParams) {
         loupeScale.set(params.zoom / 100);
     }
 
+    // Handle collection navigation. Comes through the same buffered
+    // `open-with-params` channel, so a collection shown while the webview is not
+    // yet listening is replayed on init instead of being lost.
+    if (params.collection) {
+        await applyClipboardMonitorCollection(params.collection);
+        return;
+    }
+
     // Handle folder import
     if (params.folder) {
         try {
-            const result = await importFolder(params.folder);
+            // Switch scope to the target folder FIRST, then ack, then import.
+            // The ack must mean "the app is now on this folder", which is only
+            // true once activeFolder is set. Acking after importFolder instead
+            // would make the caller wait on unbounded scan/thumbnail/detection
+            // work that routinely outlasts its timeout, reporting a timeout for
+            // a navigation that visibly succeeded.
             activeSmartCollection.set(null);
             activeCollection.set(null);
             activeDetectedClass.set(null);
             activeFolder.set(params.folder);
+            await ack(true);
+            const result = await importFolder(params.folder);
             const folderName = params.folder.split('/').filter(Boolean).pop() ?? params.folder;
             await loadImagesForCurrentScope({ force: true, invalidateCache: true });
             focusIndex(0);
             // Refresh folder list in sidebar
-            const f = await listFolders();
+            const f = await listFolders(get(showRejected));
             folders.set(f);
             const folderTotal = f.find(([path]) => path === params.folder)?.[1] ?? result.imported;
             if (result.imported > 0) {
@@ -162,7 +229,7 @@ export async function handleParams(params: OpenParams) {
 
             if (pinned && result.image_ids.length > 0) {
                 await addToCollection(pinned, result.image_ids);
-                const c = await listCollections();
+                const c = await listCollections(get(showRejected));
                 collections.set(c);
                 showToast(`Image added to active collection`, { type: 'success', duration: 5000 });
             }
@@ -198,7 +265,7 @@ export async function handleParams(params: OpenParams) {
             if (pinned && result.image_ids.length > 0) {
                 // Active collection exists — append silently
                 await addToCollection(pinned, result.image_ids);
-                const c = await listCollections();
+                const c = await listCollections(get(showRejected));
                 collections.set(c);
 
                 activeCollection.set(pinned);
@@ -221,14 +288,7 @@ export async function handleParams(params: OpenParams) {
                 });
             } else if (result.batch_id) {
                 // No active collection — filter to batch
-                const batchImgs = await getBatchImages(result.batch_id);
-                invalidateImageCache();
-                clearImageScope();
-                resetImagePaging();
-                images.set(batchImgs);
-                importBatchFilter.set(result.batch_id);
-                importBatchImageIds.set(result.image_ids);
-                focusIndex(0);
+                await activateImportBatch(result.batch_id);
             } else {
                 await loadAllImages({ force: true, invalidateCache: true });
                 focusIndex(0);
@@ -241,7 +301,12 @@ export async function handleParams(params: OpenParams) {
     // Handle explicit image-id focus from MCP/display integrations, or numeric index focus from URLs.
     const imageId = imageIdFromParams(params);
     if (imageId) {
-        await focusImageById(imageId);
+        // focusImageById returns false for an image that could not be found or
+        // loaded. Acking success there would tell show_image's caller the image
+        // is on screen when the app is showing whatever it was showing before.
+        if (!await focusImageById(imageId)) {
+            await ack(false, `Image not found: ${imageId}`);
+        }
     } else if (typeof params.focus === 'number' && Number.isFinite(params.focus)) {
         focusIndex(params.focus);
     }
@@ -286,7 +351,7 @@ async function handleCanvasFolderDrop(params: OpenParams) {
     try {
         const result = await importFolder(params.folder, get(activeSession)?.id ?? null);
         const folderImages = await listAllImagesByFolder(params.folder);
-        const f = await listFolders();
+        const f = await listFolders(get(showRejected));
         folders.set(f);
         emitCanvasImportDrop({
             images: folderImages,
@@ -305,7 +370,7 @@ async function listAllImagesByFolder(folder: string): Promise<ImageWithFile[]> {
     const allImages: ImageWithFile[] = [];
     for (let page = 0; page < FOLDER_IMAGE_PAGE_LIMIT; page++) {
         const offset = page * FOLDER_IMAGE_PAGE_SIZE;
-        const batch = await listImagesByFolder(folder, FOLDER_IMAGE_PAGE_SIZE, offset);
+        const batch = await listImagesByFolder(folder, FOLDER_IMAGE_PAGE_SIZE, offset, get(showRejected));
         allImages.push(...batch);
         if (batch.length < FOLDER_IMAGE_PAGE_SIZE) break;
     }
@@ -335,12 +400,18 @@ function deduplicatedHandleParams(params: OpenParams, source: string) {
     const now = Date.now();
     if (key === lastHandledKey && now - lastHandledAt < 5000) {
         console.log(`[deep-link] Skipping duplicate from ${source}`);
+        // Deliberately do NOT ack here. An identical key means a first delivery
+        // is already handling these params and will ack its real outcome; acking
+        // success on the duplicate would report success for work still in
+        // flight, and would mask a failure the first handler is about to report.
         return;
     }
     lastHandledKey = key;
     lastHandledAt = now;
     console.log(`[deep-link] Handling from ${source}:`, key);
-    handleParams(params);
+    void handleParams(params).catch((e) => {
+        console.error(`[deep-link] Failed to handle params from ${source}`, e);
+    });
 }
 
 export async function initDeepLink() {

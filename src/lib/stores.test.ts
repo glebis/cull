@@ -8,12 +8,16 @@ import {
     focusedImageOverride,
     focusedIndex,
     images,
+    gridGap,
+    gridPreset,
     loupePanX,
     loupePanY,
     loupeScale,
     navigateTo,
     openImageInLoupe,
     selectedIds,
+    setGridThumbnailSize,
+    thumbnailSize,
     viewHistory,
     viewMode,
 } from './stores';
@@ -79,6 +83,16 @@ describe('agent visual level store', () => {
         expect(get(agentVisualLevel)).toBe('text');
         cycleAgentVisualLevel();
         expect(get(agentVisualLevel)).toBe('tiny');
+    });
+});
+
+describe('grid thumbnail presentation state', () => {
+    it('keeps overview size, preset, and gap coherent', () => {
+        setGridThumbnailSize(12);
+
+        expect(get(thumbnailSize)).toBe(12);
+        expect(get(gridPreset)).toBe(1);
+        expect(get(gridGap)).toBe(0);
     });
 });
 

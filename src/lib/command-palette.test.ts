@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import {
     canAssignCommandHotkey,
+    commandForKeyboardEvent,
+    commandShortcutHints,
     eventMatchesShortcut,
     findDuplicateCommandHotkeys,
     getCommandPaletteItems,
@@ -23,8 +25,10 @@ import {
 } from './command-palette';
 import {
     activeCollection,
+    activeCanvas,
     activeDetectedClass,
     activeFolder,
+    activeSession,
     activeSmartCollection,
     agentPanelPinned,
     agentPanelVisible,
@@ -36,12 +40,34 @@ import {
     focusedIndex,
     folders,
     images,
+    importBatchFilter,
+    importBatchImageIds,
     selectedIds,
     sessions,
     sessionCanvases,
     smartCollections,
 } from './stores';
+import { loadImagesForCurrentScope } from './image-loading';
+import { getBatchImages } from './api';
 import { clearPluginTabs, registerCoreTabs, registerPluginTab } from './plugins/tab-registry';
+
+vi.mock('./image-loading', () => ({
+    clearImageScope: vi.fn(() => {
+        activeSmartCollection.set(null);
+        activeCollection.set(null);
+        activeDetectedClass.set(null);
+        activeFolder.set(null);
+    }),
+    invalidateImageCache: vi.fn(),
+    loadAllImages: vi.fn(),
+    loadImagesForCurrentScope: vi.fn(),
+    resetImagePaging: vi.fn(),
+}));
+
+vi.mock('./api', async (importOriginal) => ({
+    ...await importOriginal<typeof import('./api')>(),
+    getBatchImages: vi.fn(),
+}));
 
 function keyEvent(key: string, modifiers: Partial<KeyboardEvent> = {}): KeyboardEvent {
     return {
@@ -89,6 +115,77 @@ describe('command palette helpers', () => {
         clearPluginTabs();
         registerCoreTabs();
     }
+
+    it('resolves context-menu image shortcuts from the command registry', () => {
+        resetCommandContext();
+        images.set([{
+            image: {
+                id: 'image-one',
+                sha256_hash: 'hash-one',
+                width: 100,
+                height: 100,
+                format: 'png',
+                file_size: 100,
+                created_at: '2026-08-08T00:00:00Z',
+                imported_at: '2026-08-08T00:00:00Z',
+                ai_prompt: null,
+                raw_metadata: null,
+            },
+            path: '/images/one.png',
+            thumbnail_path: null,
+            selection: null,
+            source_label: null,
+            missing_at: null,
+        }]);
+
+        expect(commandShortcutHints([
+            'image.rating.0',
+            'image.rating.3',
+            'image.decision.accept',
+            'image.decision.reject',
+            'image.decision.undecided',
+            'image.copy',
+            'image.trash',
+        ])).toEqual({
+            'image.rating.0': '0',
+            'image.rating.3': '3',
+            'image.decision.accept': 'A',
+            'image.decision.reject': 'X',
+            'image.decision.undecided': 'U',
+            'image.copy': 'Cmd+C',
+            'image.trash': 'Backspace',
+        });
+
+        setCommandHotkey('image.decision.accept', 'Shift+A');
+        expect(commandShortcutHints(['image.decision.accept'])).toEqual({
+            'image.decision.accept': 'Shift+A',
+        });
+    });
+
+    it('uses custom image shortcuts as replacements for registry defaults', () => {
+        resetCommandContext();
+        images.set([{
+            image: {
+                id: 'image-one', sha256_hash: 'hash-one', width: 100, height: 100,
+                format: 'png', file_size: 100, created_at: '2026-08-08T00:00:00Z',
+                imported_at: '2026-08-08T00:00:00Z', ai_prompt: null, raw_metadata: null,
+            },
+            path: '/images/one.png', thumbnail_path: null, selection: null,
+            source_label: null, missing_at: null,
+        }]);
+
+        expect(commandForKeyboardEvent(keyEvent('c', { metaKey: true }))?.id).toBe('image.copy');
+        expect(commandForKeyboardEvent(keyEvent('z', { metaKey: true }))).toBeNull();
+        setCommandHotkey('image.copy', 'Shift+C');
+        expect(commandForKeyboardEvent(keyEvent('c', { metaKey: true }))).toBeNull();
+        expect(commandForKeyboardEvent(keyEvent('C', { shiftKey: true }))?.id).toBe('image.copy');
+
+        expect(commandForKeyboardEvent(keyEvent('a'))?.id).toBe('image.decision.accept');
+        setCommandHotkey('image.decision.accept', 'Shift+A');
+        expect(commandForKeyboardEvent(keyEvent('a'))).toBeNull();
+        expect(commandForKeyboardEvent(keyEvent('A', { shiftKey: true }))?.id)
+            .toBe('image.decision.accept');
+    });
 
     it('scores title, category, keyword, and acronym matches', () => {
         const grid = item('view.grid', 'Grid View', 'View', { keywords: ['gallery'] });
@@ -340,9 +437,15 @@ describe('command palette destination providers', () => {
         sessionCanvases.set([]);
         detectedClasses.set([]);
         activeCollection.set(null);
+        activeCanvas.set(null);
         activeFolder.set(null);
+        activeSession.set(null);
         activeSmartCollection.set(null);
         activeDetectedClass.set(null);
+        importBatchFilter.set(null);
+        importBatchImageIds.set([]);
+        vi.mocked(loadImagesForCurrentScope).mockClear();
+        vi.mocked(getBatchImages).mockReset();
     }
 
     it('always offers the All Images destination', () => {
@@ -385,6 +488,102 @@ describe('command palette destination providers', () => {
         expect(person).toBeTruthy();
         expect(person?.category).toBe('Detection');
         expect(person?.subtitle).toContain('12');
+    });
+
+    it('exposes folder, manual collection, and saved smart collection destinations', () => {
+        resetDestinations();
+        folders.set([['/photos/portraits', 9]]);
+        collections.set([['collection-1', 'Portfolio', 7]]);
+        smartCollections.set([{
+            id: 'smart-1',
+            name: 'Five Stars',
+            description: 'Top picks',
+            filter_json: '{"type":"rule"}',
+            nl_query: 'five stars',
+            image_count: 5,
+        }] as never);
+
+        const items = getCommandPaletteItems('all');
+        expect(items.find(i => i.id === 'scope.folder./photos/portraits')).toMatchObject({
+            title: 'portraits', category: 'Folder', kind: 'destination',
+        });
+        expect(items.find(i => i.id === 'scope.collection.collection-1')).toMatchObject({
+            title: 'Portfolio', subtitle: '7 images', category: 'Collection', kind: 'destination',
+        });
+        expect(items.find(i => i.id === 'scope.smart.smart-1')).toMatchObject({
+            title: 'Five Stars', subtitle: '5 images', category: 'Smart Collection', kind: 'destination',
+        });
+    });
+
+    it('exposes the current import batch and clears conflicting scopes when selected', async () => {
+        resetDestinations();
+        activeCollection.set('collection-1');
+        activeFolder.set('/photos');
+        activeSession.set({ id: 'session-1' } as never);
+        activeCanvas.set({ id: 'canvas-1' } as never);
+        importBatchFilter.set('batch-42');
+        importBatchImageIds.set(['image-1', 'image-2']);
+        vi.mocked(getBatchImages).mockResolvedValue([{
+            image: { id: 'image-1' }, path: '/photos/one.png', thumbnail_path: null, selection: null,
+        }] as never);
+        vi.mocked(loadImagesForCurrentScope).mockImplementationOnce(async () => {
+            const batchImages = await getBatchImages('batch-42');
+            images.set(batchImages);
+            importBatchImageIds.set(batchImages.map(item => item.image.id));
+        });
+
+        const batch = getCommandPaletteItems('all').find(i => i.id === 'scope.import.batch-42');
+
+        expect(batch?.kind).toBe('destination');
+        expect(batch?.category).toBe('Import');
+        expect(batch?.title).toBe('Current Import');
+        expect(batch?.subtitle).toContain('2 images');
+        await batch?.run();
+        expect(get(activeCollection)).toBeNull();
+        expect(get(activeFolder)).toBeNull();
+        expect(get(activeSession)).toBeNull();
+        expect(get(activeCanvas)).toBeNull();
+        expect(get(importBatchFilter)).toBe('batch-42');
+        expect(get(images).map(item => item.image.id)).toEqual(['image-1']);
+        expect(get(importBatchImageIds)).toEqual(['image-1']);
+    });
+
+    it('clears conflicting session and import scopes before opening a collection', async () => {
+        resetDestinations();
+        collections.set([['collection-1', 'Portfolio', 7]]);
+        activeSession.set({ id: 'session-1' } as never);
+        activeCanvas.set({ id: 'canvas-1' } as never);
+        importBatchFilter.set('batch-42');
+        importBatchImageIds.set(['image-1']);
+
+        const collection = getCommandPaletteItems('all')
+            .find(i => i.id === 'scope.collection.collection-1');
+        await collection?.run();
+
+        expect(get(activeCollection)).toBe('collection-1');
+        expect(get(activeSession)).toBeNull();
+        expect(get(activeCanvas)).toBeNull();
+        expect(get(importBatchFilter)).toBeNull();
+        expect(get(importBatchImageIds)).toEqual([]);
+        expect(loadImagesForCurrentScope).toHaveBeenCalledOnce();
+    });
+
+    it('clears the transient import scope before opening a canvas', async () => {
+        resetDestinations();
+        sessionCanvases.set([{
+            id: 'canvas-1', session_id: 'session-1', name: 'Selects', canvas_type: 'manual',
+            layout_json: '{}', filter_json: null, grid_config_json: null,
+            sort_order: 0, created_at: '', updated_at: '',
+        }] as never);
+        importBatchFilter.set('batch-42');
+        importBatchImageIds.set(['image-1']);
+
+        const canvas = getCommandPaletteItems('all').find(i => i.id === 'scope.canvas.canvas-1');
+        await canvas?.run();
+
+        expect(get(activeCanvas)?.id).toBe('canvas-1');
+        expect(get(importBatchFilter)).toBeNull();
+        expect(get(importBatchImageIds)).toEqual([]);
     });
 
     it('omits destinations in command-only mode', () => {

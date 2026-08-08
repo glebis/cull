@@ -1,7 +1,7 @@
 use crate::commands::log_library_event;
 use crate::db_core::db::Database;
 use crate::AppState;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -9,6 +9,14 @@ use tauri::{AppHandle, Emitter, State, Window};
 
 const CLIPBOARD_PASTE_DATE_FORMAT_SETTING: &str = "clipboard_paste_date_format";
 const DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT: &str = "%Y-%m-%d";
+const PENDING_FOLDER_RENAME_SETTING: &str = "pending_folder_rename";
+static FOLDER_RENAME_LOCK: parking_lot::Mutex<()> = parking_lot::const_mutex(());
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PendingFolderRename {
+    source: String,
+    target: String,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct OpenWithApplication {
@@ -21,6 +29,14 @@ pub struct OpenWithApplication {
 pub struct PastedImageResult {
     path: String,
     image_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameFolderResult {
+    old_path: String,
+    new_path: String,
+    image_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -75,6 +91,391 @@ fn rollback_disk_move(kind: DiskMove, old_path: &Path, new_path: &Path) {
             let _ = std::fs::remove_file(new_path);
         }
     }
+}
+
+fn rewrite_folder_descendant(source: &Path, target: &Path, candidate: &str) -> Option<PathBuf> {
+    let candidate = Path::new(candidate);
+    if candidate == source {
+        return Some(target.to_path_buf());
+    }
+    let relative = candidate.strip_prefix(source).ok()?;
+    Some(target.join(relative))
+}
+
+#[cfg(target_os = "macos")]
+fn rename_directory_exclusive(source: &Path, target: &Path) -> Result<(), String> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let source = CString::new(source.as_os_str().as_bytes())
+        .map_err(|_| "Source path contains an invalid NUL byte".to_string())?;
+    let target = CString::new(target.as_os_str().as_bytes())
+        .map_err(|_| "Target path contains an invalid NUL byte".to_string())?;
+    // SAFETY: both arguments are valid, NUL-terminated path strings and remain
+    // alive for the duration of the call. RENAME_EXCL makes the no-overwrite
+    // guarantee atomic with the rename itself.
+    let result = unsafe {
+        libc::renameatx_np(
+            libc::AT_FDCWD,
+            source.as_ptr(),
+            libc::AT_FDCWD,
+            target.as_ptr(),
+            libc::RENAME_EXCL,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error().to_string())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn rename_directory_exclusive(source: &Path, target: &Path) -> Result<(), String> {
+    if target.exists() {
+        return Err("Target folder already exists".to_string());
+    }
+    std::fs::rename(source, target).map_err(|error| error.to_string())
+}
+
+fn restore_watcher_roots(
+    watcher: &mut crate::watcher::FileWatcher,
+    roots: &[String],
+) -> Vec<String> {
+    roots
+        .iter()
+        .filter_map(|root| watcher.watch_folder(root).err())
+        .collect()
+}
+
+trait FolderWatchOps {
+    fn add(&mut self, root: &str) -> Result<(), String>;
+    fn remove(&mut self, root: &str) -> Result<(), String>;
+}
+
+impl FolderWatchOps for crate::watcher::FileWatcher {
+    fn add(&mut self, root: &str) -> Result<(), String> {
+        self.watch_folder(root)
+    }
+
+    fn remove(&mut self, root: &str) -> Result<(), String> {
+        self.unwatch_folder(root)
+    }
+}
+
+fn register_new_watcher_roots<W: FolderWatchOps>(
+    watcher: &mut W,
+    roots: &[String],
+) -> Result<(), String> {
+    let mut registered: Vec<String> = Vec::new();
+    for root in roots {
+        if let Err(error) = watcher.add(root) {
+            let cleanup_errors = registered
+                .iter()
+                .filter_map(|added| watcher.remove(added).err())
+                .collect::<Vec<_>>();
+            return if cleanup_errors.is_empty() {
+                Err(error)
+            } else {
+                Err(format!(
+                    "{error}; failed to remove partial watcher registrations: {}",
+                    cleanup_errors.join("; ")
+                ))
+            };
+        }
+        registered.push(root.clone());
+    }
+    Ok(())
+}
+
+fn rollback_folder_rename(
+    db: &Database,
+    watcher: &parking_lot::Mutex<crate::watcher::FileWatcher>,
+    source: &Path,
+    target: &Path,
+    old_roots: &[String],
+    new_roots: &[String],
+    disk_moved: bool,
+) -> Result<(), String> {
+    let mut failures = Vec::new();
+    let disk_restored = !disk_moved
+        || match rename_directory_exclusive(target, source) {
+            Ok(()) => true,
+            Err(error) => {
+                failures.push(format!("failed to restore folder on disk: {error}"));
+                false
+            }
+        };
+    if disk_restored {
+        if let Err(error) =
+            db.migrate_folder_paths(&target.to_string_lossy(), &source.to_string_lossy())
+        {
+            failures.push(format!("failed to restore database paths: {error}"));
+        }
+    }
+    let mut watcher = watcher.lock();
+    failures.extend(
+        restore_watcher_roots(
+            &mut watcher,
+            if disk_restored { old_roots } else { new_roots },
+        )
+        .into_iter()
+        .map(|error| format!("failed to restore watcher: {error}")),
+    );
+    if failures.is_empty() {
+        db.delete_setting(PENDING_FOLDER_RENAME_SETTING)
+            .map_err(|error| format!("failed to clear recovery journal: {error}"))
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
+pub fn recover_pending_folder_rename(db: &Database) -> Result<(), String> {
+    let Some(raw) = db
+        .get_setting(PENDING_FOLDER_RENAME_SETTING)
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(());
+    };
+    let pending: PendingFolderRename = serde_json::from_str(&raw)
+        .map_err(|error| format!("invalid folder rename journal: {error}"))?;
+    let source = Path::new(&pending.source);
+    let target = Path::new(&pending.target);
+    match (source.exists(), target.exists()) {
+        (true, false) => {
+            db.migrate_folder_paths(&pending.target, &pending.source)
+                .map_err(|error| format!("failed to restore database paths: {error}"))?;
+        }
+        // Journal reservation and the forward DB migration commit in one SQLite
+        // transaction, so a surviving journal proves the DB is already forward.
+        (false, true) => {}
+        (true, true) => {
+            return Err(
+                "folder rename recovery found both source and target; refusing to choose"
+                    .to_string(),
+            )
+        }
+        (false, false) => {
+            return Err("folder rename recovery found neither source nor target".to_string())
+        }
+    }
+    db.delete_setting(PENDING_FOLDER_RENAME_SETTING)
+        .map_err(|error| format!("failed to clear folder rename journal: {error}"))
+}
+
+fn clear_folder_move_intents(
+    watcher: &parking_lot::Mutex<crate::watcher::FileWatcher>,
+    source: &Path,
+    target: &Path,
+    files: &[(String, String)],
+) {
+    let watcher = watcher.lock();
+    for (_, old_path) in files {
+        if let Some(new_path) = rewrite_folder_descendant(source, target, old_path) {
+            watcher.clear_move_intent(Path::new(old_path), &new_path);
+        }
+    }
+}
+
+fn rename_folder_on_disk_and_db(
+    db: &Database,
+    watcher: &parking_lot::Mutex<crate::watcher::FileWatcher>,
+    source: &Path,
+    new_name: &str,
+) -> Result<RenameFolderResult, String> {
+    let _operation_guard = FOLDER_RENAME_LOCK.lock();
+    if new_name.is_empty()
+        || new_name == "."
+        || new_name == ".."
+        || new_name.starts_with('.')
+        || new_name.contains('/')
+        || new_name.contains('\\')
+    {
+        return Err("Invalid folder name".to_string());
+    }
+    if !source.is_absolute() || !source.is_dir() {
+        return Err("Source folder does not exist".to_string());
+    }
+    if source.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::CurDir | std::path::Component::ParentDir
+        )
+    }) {
+        return Err("Source folder path must be normalized".to_string());
+    }
+    if std::fs::symlink_metadata(source)
+        .map_err(|error| format!("Failed to inspect source folder: {error}"))?
+        .file_type()
+        .is_symlink()
+    {
+        return Err("Source folder cannot be a symbolic link".to_string());
+    }
+    let parent = source
+        .parent()
+        .ok_or_else(|| "Cannot rename a filesystem root".to_string())?;
+    let target = parent.join(new_name);
+    if target == source {
+        return Ok(RenameFolderResult {
+            old_path: source.to_string_lossy().to_string(),
+            new_path: source.to_string_lossy().to_string(),
+            image_count: 0,
+        });
+    }
+    if target.exists() {
+        return Err(format!("Folder '{}' already exists", new_name));
+    }
+
+    let roots = db.list_library_roots().map_err(|error| error.to_string())?;
+    let canonical_source = source
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve source folder: {error}"))?;
+    let source_is_in_library = roots.iter().any(|root| {
+        Path::new(root)
+            .canonicalize()
+            .map(|canonical_root| canonical_source.starts_with(canonical_root))
+            .unwrap_or(false)
+    });
+    let moving_roots = roots
+        .iter()
+        .filter(|root| Path::new(root).starts_with(source))
+        .cloned()
+        .collect::<Vec<_>>();
+    let safe_managed_parent = !moving_roots.is_empty()
+        && std::fs::read_dir(source)
+            .map(|entries| {
+                entries.into_iter().all(|entry| {
+                    entry
+                        .map(|entry| {
+                            let path = entry.path();
+                            entry
+                                .file_type()
+                                .map(|kind| kind.is_dir() && !kind.is_symlink())
+                                .unwrap_or(false)
+                                && moving_roots.iter().any(|root| Path::new(root) == path)
+                        })
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+    if !source_is_in_library && !safe_managed_parent {
+        return Err("Source folder is not safely managed by the library".to_string());
+    }
+    let next_roots = moving_roots
+        .iter()
+        .filter_map(|root| rewrite_folder_descendant(source, &target, root))
+        .map(|path| path.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    let files = db
+        .list_image_files_under_path(&source.to_string_lossy())
+        .map_err(|error| error.to_string())?;
+
+    {
+        let mut watcher = watcher.lock();
+        let mut unwatched = Vec::new();
+        for root in &moving_roots {
+            if let Err(error) = watcher.unwatch_folder(root) {
+                let restore_errors = restore_watcher_roots(&mut watcher, &unwatched);
+                if restore_errors.is_empty() {
+                    return Err(error);
+                }
+                return Err(format!(
+                    "{error}; failed to restore watcher: {}",
+                    restore_errors.join("; ")
+                ));
+            }
+            unwatched.push(root.clone());
+        }
+    }
+
+    let pending = PendingFolderRename {
+        source: source.to_string_lossy().to_string(),
+        target: target.to_string_lossy().to_string(),
+    };
+    let journal = serde_json::to_string(&pending).map_err(|error| error.to_string())?;
+    let migration = match db.migrate_folder_paths_with_journal(
+        &source.to_string_lossy(),
+        &target.to_string_lossy(),
+        PENDING_FOLDER_RENAME_SETTING,
+        &journal,
+    ) {
+        Ok(migration) => migration,
+        Err(error) => {
+            let restore_errors = restore_watcher_roots(&mut watcher.lock(), &moving_roots);
+            let suffix = if restore_errors.is_empty() {
+                String::new()
+            } else {
+                format!("; failed to restore watcher: {}", restore_errors.join("; "))
+            };
+            return Err(format!(
+                "Database path migration/journal reservation failed: {error}{suffix}"
+            ));
+        }
+    };
+
+    {
+        let watcher = watcher.lock();
+        for (file_id, old_path) in &files {
+            if let Some(new_path) = rewrite_folder_descendant(source, &target, old_path) {
+                watcher.register_move_intent(PathBuf::from(old_path), new_path, file_id.clone());
+            }
+        }
+    }
+
+    if let Err(error) = rename_directory_exclusive(source, &target) {
+        clear_folder_move_intents(watcher, source, &target, &files);
+        let rollback = rollback_folder_rename(
+            db,
+            watcher,
+            source,
+            &target,
+            &moving_roots,
+            &next_roots,
+            false,
+        );
+        return Err(match rollback {
+            Ok(()) => format!("Failed to rename folder; database restored: {error}"),
+            Err(rollback_error) => {
+                format!("Failed to rename folder ({error}); rollback also failed: {rollback_error}")
+            }
+        });
+    }
+
+    {
+        let mut watcher_guard = watcher.lock();
+        if let Err(error) = register_new_watcher_roots(&mut *watcher_guard, &next_roots) {
+            drop(watcher_guard);
+            let rollback = rollback_folder_rename(
+                db,
+                watcher,
+                source,
+                &target,
+                &moving_roots,
+                &next_roots,
+                true,
+            );
+            clear_folder_move_intents(watcher, source, &target, &files);
+            return Err(match rollback {
+                Ok(()) => format!("Failed to watch renamed folder; rename restored: {error}"),
+                Err(rollback_error) => format!(
+                    "Failed to watch renamed folder ({error}); rollback also failed: {rollback_error}"
+                ),
+            });
+        }
+    }
+
+    if let Err(error) = db.delete_setting(PENDING_FOLDER_RENAME_SETTING) {
+        crate::safe_eprintln!(
+            "[folder-rename] Rename committed; recovery journal cleanup will retry at startup: {}",
+            error
+        );
+    }
+
+    Ok(RenameFolderResult {
+        old_path: source.to_string_lossy().to_string(),
+        new_path: target.to_string_lossy().to_string(),
+        image_count: migration.image_files,
+    })
 }
 
 fn mime_type_for_path(path: &Path) -> &'static str {
@@ -757,6 +1158,35 @@ pub async fn create_subfolder(
 }
 
 #[tauri::command]
+pub async fn rename_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    folder: String,
+    new_name: String,
+) -> Result<RenameFolderResult, String> {
+    let result = rename_folder_on_disk_and_db(
+        &state.db,
+        &state.file_watcher,
+        Path::new(&folder),
+        &new_name,
+    )?;
+    let _ = app.emit("folders:changed", ());
+    let _ = app.emit("images:changed", ());
+    log_library_event(
+        &state,
+        "folder_renamed",
+        Some("folder"),
+        Some(result.new_path.clone()),
+        serde_json::json!({
+            "old_path": result.old_path,
+            "new_path": result.new_path,
+            "image_count": result.image_count,
+        }),
+    );
+    Ok(result)
+}
+
+#[tauri::command]
 pub async fn share_images(
     app: AppHandle,
     window: Window,
@@ -1048,6 +1478,28 @@ mod tests {
     use image::{ImageBuffer, Rgba};
     use std::io::Write;
 
+    #[derive(Default)]
+    struct FailingWatchOps {
+        added: Vec<String>,
+        removed: Vec<String>,
+        fail_on: String,
+    }
+
+    impl FolderWatchOps for FailingWatchOps {
+        fn add(&mut self, root: &str) -> Result<(), String> {
+            if root == self.fail_on {
+                return Err(format!("cannot watch {root}"));
+            }
+            self.added.push(root.to_string());
+            Ok(())
+        }
+
+        fn remove(&mut self, root: &str) -> Result<(), String> {
+            self.removed.push(root.to_string());
+            Ok(())
+        }
+    }
+
     /// Security regression guard for SECURITY.md's asset-protocol boundary:
     /// the `asset:` scope is configured statically in tauri.conf.json
     /// (thumbnails / generated only). No code may widen it at runtime, which
@@ -1167,6 +1619,329 @@ mod tests {
 
         assert_eq!(std::fs::read(&source).unwrap(), b"image");
         assert!(!dest.exists());
+    }
+
+    #[test]
+    fn rename_folder_moves_disk_and_database_paths_together() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        let nested = source.join("nested");
+        let app_data = tmp.path().join("app-data");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(&app_data).unwrap();
+        let image_path = nested.join("image.png");
+        ImageBuffer::from_pixel(2, 2, Rgba([10u8, 20, 30, 255]))
+            .save(&image_path)
+            .unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let image_id = crate::db_core::import::import_file(&db, &image_path, &app_data)
+            .unwrap()
+            .unwrap();
+        db.set_decision(&image_id, "accept").unwrap();
+        db.add_library_root(&source.to_string_lossy()).unwrap();
+        let watcher = parking_lot::Mutex::new(crate::watcher::FileWatcher::new());
+
+        let result = rename_folder_on_disk_and_db(&db, &watcher, &source, "renamed").unwrap();
+
+        let renamed_image = tmp.path().join("renamed/nested/image.png");
+        assert!(!source.exists());
+        assert!(renamed_image.exists());
+        assert_eq!(
+            result.new_path,
+            tmp.path().join("renamed").to_string_lossy()
+        );
+        assert!(db
+            .get_image_file_by_path(&renamed_image.to_string_lossy())
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            db.get_selection_for_image(&image_id)
+                .unwrap()
+                .unwrap()
+                .decision,
+            "accept"
+        );
+        assert_eq!(
+            db.list_library_roots().unwrap(),
+            vec![tmp.path().join("renamed").to_string_lossy().to_string()]
+        );
+    }
+
+    #[test]
+    fn rename_folder_leaves_disk_untouched_when_database_paths_collide() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        let source_file = source.join("image.png");
+        std::fs::write(&source_file, b"source").unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let inside = crate::db_core::models::Image {
+            id: "inside".to_string(),
+            sha256_hash: "inside-hash".to_string(),
+            width: 1,
+            height: 1,
+            format: "png".to_string(),
+            file_size: 6,
+            created_at: "2026-01-01".to_string(),
+            imported_at: "2026-01-01".to_string(),
+            ai_prompt: None,
+            raw_metadata: None,
+        };
+        let collision = crate::db_core::models::Image {
+            id: "collision".to_string(),
+            sha256_hash: "collision-hash".to_string(),
+            ..inside.clone()
+        };
+        db.insert_image(&inside).unwrap();
+        db.insert_image(&collision).unwrap();
+        db.insert_image_file(&crate::db_core::models::ImageFile {
+            id: "f-inside".to_string(),
+            image_id: "inside".to_string(),
+            path: source_file.to_string_lossy().to_string(),
+            last_seen_at: "2026-01-01".to_string(),
+            missing_at: None,
+            last_seen_size: None,
+            last_seen_mtime: None,
+        })
+        .unwrap();
+        db.insert_image_file(&crate::db_core::models::ImageFile {
+            id: "f-collision".to_string(),
+            image_id: "collision".to_string(),
+            path: tmp
+                .path()
+                .join("renamed/image.png")
+                .to_string_lossy()
+                .to_string(),
+            last_seen_at: "2026-01-01".to_string(),
+            missing_at: None,
+            last_seen_size: None,
+            last_seen_mtime: None,
+        })
+        .unwrap();
+        db.add_library_root(&source.to_string_lossy()).unwrap();
+        let watcher = parking_lot::Mutex::new(crate::watcher::FileWatcher::new());
+
+        let error = rename_folder_on_disk_and_db(&db, &watcher, &source, "renamed").unwrap_err();
+
+        assert!(error.contains("target subtree"));
+        assert!(source.exists());
+        assert!(source_file.exists());
+        assert!(!tmp.path().join("renamed").exists());
+        assert!(db
+            .get_image_file_by_path(&source_file.to_string_lossy())
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn pending_folder_rename_recovery_restores_database_when_disk_did_not_move() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        let target = tmp.path().join("target");
+        std::fs::create_dir(&source).unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        db.add_library_root(&target.to_string_lossy()).unwrap();
+        db.set_setting(
+            PENDING_FOLDER_RENAME_SETTING,
+            &serde_json::to_string(&PendingFolderRename {
+                source: source.to_string_lossy().to_string(),
+                target: target.to_string_lossy().to_string(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        recover_pending_folder_rename(&db).unwrap();
+
+        assert_eq!(
+            db.list_library_roots().unwrap(),
+            vec![source.to_string_lossy()]
+        );
+        assert!(db
+            .get_setting(PENDING_FOLDER_RENAME_SETTING)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn pending_folder_rename_recovery_accepts_committed_database_when_disk_moved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        let target = tmp.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        db.add_library_root(&target.to_string_lossy()).unwrap();
+        db.set_setting(
+            PENDING_FOLDER_RENAME_SETTING,
+            &serde_json::to_string(&PendingFolderRename {
+                source: source.to_string_lossy().to_string(),
+                target: target.to_string_lossy().to_string(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        recover_pending_folder_rename(&db).unwrap();
+
+        assert_eq!(
+            db.list_library_roots().unwrap(),
+            vec![target.to_string_lossy()]
+        );
+        assert!(db
+            .get_setting(PENDING_FOLDER_RENAME_SETTING)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn exclusive_directory_rename_never_replaces_an_existing_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        let target = tmp.path().join("target");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(source.join("source.txt"), b"source").unwrap();
+        std::fs::write(target.join("unrelated.txt"), b"unrelated").unwrap();
+
+        assert!(rename_directory_exclusive(&source, &target).is_err());
+        assert_eq!(std::fs::read(source.join("source.txt")).unwrap(), b"source");
+        assert_eq!(
+            std::fs::read(target.join("unrelated.txt")).unwrap(),
+            b"unrelated"
+        );
+    }
+
+    #[test]
+    fn watcher_registration_failure_removes_every_partial_new_root() {
+        let roots = vec!["/new/one".to_string(), "/new/two".to_string()];
+        let mut watcher = FailingWatchOps {
+            fail_on: "/new/two".to_string(),
+            ..Default::default()
+        };
+
+        let error = register_new_watcher_roots(&mut watcher, &roots).unwrap_err();
+
+        assert!(error.contains("cannot watch /new/two"));
+        assert_eq!(watcher.added, vec!["/new/one"]);
+        assert_eq!(watcher.removed, vec!["/new/one"]);
+    }
+
+    #[test]
+    fn stale_recovery_journal_is_never_overwritten_by_a_new_rename() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        db.add_library_root(&source.to_string_lossy()).unwrap();
+        let stale = r#"{"source":"/old/source","target":"/old/target"}"#;
+        db.set_setting(PENDING_FOLDER_RENAME_SETTING, stale)
+            .unwrap();
+        let watcher = parking_lot::Mutex::new(crate::watcher::FileWatcher::new());
+
+        let error = rename_folder_on_disk_and_db(&db, &watcher, &source, "renamed").unwrap_err();
+
+        assert!(error.contains("requires recovery"));
+        assert_eq!(
+            db.get_setting(PENDING_FOLDER_RENAME_SETTING)
+                .unwrap()
+                .as_deref(),
+            Some(stale)
+        );
+        assert!(source.exists());
+        assert!(!tmp.path().join("renamed").exists());
+    }
+
+    #[test]
+    fn rollback_keeps_forward_database_paths_when_disk_cannot_be_restored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        let target = tmp.path().join("target");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(source.join("unrelated.txt"), b"unrelated").unwrap();
+        std::fs::write(target.join("moved.txt"), b"moved").unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        db.add_library_root(&target.to_string_lossy()).unwrap();
+        db.set_setting(PENDING_FOLDER_RENAME_SETTING, "pending")
+            .unwrap();
+        let watcher = parking_lot::Mutex::new(crate::watcher::FileWatcher::new());
+
+        let error = rollback_folder_rename(
+            &db,
+            &watcher,
+            &source,
+            &target,
+            &[source.to_string_lossy().to_string()],
+            &[target.to_string_lossy().to_string()],
+            true,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("failed to restore folder on disk"));
+        assert_eq!(
+            db.list_library_roots().unwrap(),
+            vec![target.to_string_lossy()]
+        );
+        assert!(db
+            .get_setting(PENDING_FOLDER_RENAME_SETTING)
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            std::fs::read(source.join("unrelated.txt")).unwrap(),
+            b"unrelated"
+        );
+        assert_eq!(std::fs::read(target.join("moved.txt")).unwrap(), b"moved");
+    }
+
+    #[test]
+    fn rename_allows_a_parent_containing_only_managed_library_roots() {
+        let tmp = tempfile::tempdir().unwrap();
+        let group = tmp.path().join("group");
+        let first = group.join("first");
+        let second = group.join("second");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir(&second).unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        db.add_library_root(&first.to_string_lossy()).unwrap();
+        db.add_library_root(&second.to_string_lossy()).unwrap();
+        let watcher = parking_lot::Mutex::new(crate::watcher::FileWatcher::new());
+
+        rename_folder_on_disk_and_db(&db, &watcher, &group, "renamed").unwrap();
+
+        assert!(!group.exists());
+        let renamed = tmp.path().join("renamed");
+        assert!(renamed.join("first").exists());
+        assert!(renamed.join("second").exists());
+        assert_eq!(
+            db.list_library_roots().unwrap(),
+            vec![
+                renamed.join("first").to_string_lossy().to_string(),
+                renamed.join("second").to_string_lossy().to_string(),
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rename_folder_rejects_symlink_escape_from_library_root() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("library");
+        let external = tmp.path().join("external");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(&external).unwrap();
+        let escaped = root.join("linked-folder");
+        symlink(&external, &escaped).unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        db.add_library_root(&root.to_string_lossy()).unwrap();
+        let watcher = parking_lot::Mutex::new(crate::watcher::FileWatcher::new());
+
+        let error = rename_folder_on_disk_and_db(&db, &watcher, &escaped, "renamed").unwrap_err();
+
+        assert!(error.contains("symbolic link"));
+        assert!(external.exists());
+        assert!(!root.join("renamed").exists());
     }
 
     #[test]

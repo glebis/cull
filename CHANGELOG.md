@@ -6,7 +6,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-No changes yet.
+## [0.3.3] - 2026-08-08
+
+### Fixed
+
+- Restored readable PDF first-page previews on macOS; previews no longer render as solid black.
+- Hardened release recovery so an already-verified draft can be published without replacing its assets.
+
+## [0.3.2] - 2026-08-07
+
+### Fixed
+
+- Restored real PDF first-page previews and repaired legacy placeholders.
+- Prevented PDF preview preparation from blocking filtering or leaving the interface in Loading.
+- Prevented packaged interaction cache contamination and preserved empty Loupe and Recent Imports behavior.
+
+## [0.3.1] - 2026-07-12
+
+### Fixed
+
+- Signed macOS releases now include and verify the Tauri updater archive and
+  detached signature alongside the notarized Apple Silicon DMG.
 
 ## [0.2.5] - 2026-07-03
 

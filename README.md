@@ -57,7 +57,9 @@ Prefer a manual download (no developer tools required):
 
 1. Download the latest `.dmg` for your Mac from [GitHub Releases](https://github.com/glebis/cull/releases).
 2. Open the DMG and drag **Cull** into **Applications**.
-3. First launch: current builds are not yet signed/notarized, so macOS Gatekeeper will warn. Right-click the app, choose **Open**, then confirm. You can also allow it under **System Settings -> Privacy & Security**.
+3. Launch Cull normally. Current release artifacts are signed with Developer ID,
+   notarized by Apple, and stapled; macOS Gatekeeper should accept them without
+   the unsigned-app override.
 
 Prefer building from source? See [Development](#development).
 
@@ -88,6 +90,7 @@ Current high-level shape:
 Cull has an MCP-aligned headless CLI slice. Command names and JSON fields mirror the MCP tool model where possible:
 
 ```bash
+cull ~/renders
 cull --json get_library_stats
 cull --json import_folder --folder_path ~/renders
 cull --json import_files --file_paths ~/renders/a.png,~/renders/b.png
@@ -106,7 +109,7 @@ npm install
 npm run tauri dev
 ```
 
-Prerequisites: Rust 1.89.0 and Node.js 20.20.2. The repository pins these versions in `rust-toolchain.toml`, `.node-version`, and `.nvmrc`; see [Toolchain](docs/toolchain.md).
+Prerequisites: Rust 1.95.0 and Node.js 20.20.2. The repository pins these versions in `rust-toolchain.toml`, `.node-version`, and `.nvmrc`; see [Toolchain](docs/toolchain.md).
 
 Useful checks:
 

@@ -649,7 +649,9 @@ Expected: both exit 0. (If disk-constrained, `cargo clean` the main worktree tar
 
 **Files:** (mutates version files, CHANGELOG.md, docs/COMPATIBILITY.md)
 
-- [ ] **Step 1: Merge the doc/config/test branch into main** (use the established merge flow into the `cull-main-landing` worktree, `--no-ff`).
+- [ ] **Step 1: Land the doc/config/test branch through a pull request** (use
+  `npm run land:feature -- <feature-branch>` so required checks pass before
+  GitHub merges it and local `main` is fast-forwarded).
 
 - [ ] **Step 2: Invoke `/release minor`** (the skill) on Cull. Walk its steps: it bumps `0.1.0 → 0.2.0`, runs the gate, drafts the CHANGELOG from this session's audit/P0/P1 commits, prompts the compatibility review (no stable breakage this batch → `minor` is allowed), stamps COMPATIBILITY.md, commits `chore(release): v0.2.0`, tags `v0.2.0`, pushes.
 

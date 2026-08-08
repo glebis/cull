@@ -1,9 +1,11 @@
 use crate::db_core::db::Database;
 use crate::db_core::models::NewSessionEvent;
+use crate::services::jobs::JobRegistry;
 use crate::AppState;
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tokio_util::sync::CancellationToken;
 
 #[derive(serde::Serialize)]
 pub struct ImportResponse {
@@ -12,13 +14,175 @@ pub struct ImportResponse {
     pub errors: Vec<String>,
     pub batch_id: Option<String>,
     pub image_ids: Vec<String>,
+    pub cancelled: bool,
 }
 
 #[derive(Clone, serde::Serialize)]
 struct ImportProgress {
+    job_id: String,
+    progress_id: Option<String>,
     current: u32,
     total: u32,
     filename: String,
+}
+
+struct ImportWorkResult {
+    response: ImportResponse,
+    cancelled: bool,
+}
+
+struct ImportPathSummary {
+    imported: u32,
+    skipped: u32,
+    errors: Vec<String>,
+    image_ids: Vec<String>,
+    cancelled: bool,
+}
+
+struct ImportDiscovery {
+    entries: Vec<PathBuf>,
+    cancelled: bool,
+}
+
+fn collect_cancellable_entries<I, F>(
+    candidates: I,
+    cancel: &CancellationToken,
+    mut is_supported: F,
+) -> ImportDiscovery
+where
+    I: IntoIterator<Item = PathBuf>,
+    F: FnMut(&Path) -> bool,
+{
+    let mut entries = Vec::new();
+    for path in candidates {
+        if cancel.is_cancelled() {
+            return ImportDiscovery {
+                entries,
+                cancelled: true,
+            };
+        }
+        if is_supported(&path) {
+            entries.push(path);
+        }
+    }
+    ImportDiscovery {
+        entries,
+        cancelled: false,
+    }
+}
+
+fn process_import_entries<P, F>(
+    entries: &[PathBuf],
+    cancel: &CancellationToken,
+    mut on_progress: P,
+    mut import_one: F,
+) -> ImportPathSummary
+where
+    P: FnMut(u32, u32, &Path),
+    F: FnMut(&Path) -> Result<Option<String>, String>,
+{
+    let total = entries.len() as u32;
+    let mut summary = ImportPathSummary {
+        imported: 0,
+        skipped: 0,
+        errors: Vec::new(),
+        image_ids: Vec::new(),
+        cancelled: false,
+    };
+
+    for (index, path) in entries.iter().enumerate() {
+        if cancel.is_cancelled() {
+            summary.cancelled = true;
+            break;
+        }
+
+        on_progress((index + 1) as u32, total, path);
+        match import_one(path) {
+            Ok(Some(id)) => {
+                summary.image_ids.push(id);
+                summary.imported += 1;
+            }
+            Ok(None) => summary.skipped += 1,
+            Err(_) if cancel.is_cancelled() => {
+                summary.cancelled = true;
+                break;
+            }
+            Err(error) => summary
+                .errors
+                .push(format!("{}: {}", path.display(), error)),
+        }
+        if cancel.is_cancelled() {
+            summary.cancelled = true;
+            break;
+        }
+    }
+
+    summary
+}
+
+fn emit_import_job_status(app: &AppHandle, job_id: &str, status: &str, current: u32, total: u32) {
+    let _ = app.emit(
+        "job-status-changed",
+        serde_json::json!({
+            "job_id": job_id,
+            "kind": "import",
+            "status": status,
+            "current": current,
+            "total": total,
+        }),
+    );
+}
+
+fn finish_import_job(
+    app: &AppHandle,
+    jobs: &JobRegistry,
+    job_id: &str,
+    work: &Result<ImportWorkResult, String>,
+) {
+    match work {
+        Ok(result) if result.cancelled => jobs.mark_cancelled(job_id),
+        Ok(_) => jobs.complete(job_id),
+        Err(error) => jobs.fail(job_id, error),
+    }
+    if let Some(snapshot) = jobs.get(job_id) {
+        emit_import_job_status(
+            app,
+            job_id,
+            &snapshot.status,
+            snapshot.current,
+            snapshot.total,
+        );
+    }
+}
+
+fn seal_import_job(
+    jobs: &JobRegistry,
+    job_id: &str,
+    cancel: &CancellationToken,
+    already_cancelled: bool,
+) -> bool {
+    if already_cancelled || cancel.is_cancelled() {
+        jobs.mark_cancelled(job_id);
+    } else {
+        // Completing here closes the cancellation window before audit logging
+        // and automatic child-job dispatch. Later cancel requests are rejected.
+        jobs.complete(job_id);
+    }
+    jobs.get(job_id)
+        .map(|snapshot| snapshot.status == "cancelled")
+        .unwrap_or(already_cancelled || cancel.is_cancelled())
+}
+
+fn import_audit_event_type(cancelled: bool) -> &'static str {
+    if cancelled {
+        "import_cancelled"
+    } else {
+        "import_completed"
+    }
+}
+
+async fn persist_import_job(db: Database, jobs: JobRegistry, job_id: String) {
+    let _ = tauri::async_runtime::spawn_blocking(move || jobs.persist_terminal(&job_id, &db)).await;
 }
 
 #[tauri::command]
@@ -27,59 +191,116 @@ pub async fn import_folder(
     state: State<'_, AppState>,
     folder_path: String,
     session_id: Option<String>,
+    progress_id: Option<String>,
 ) -> Result<ImportResponse, String> {
-    let db = &state.db;
-    let app_data_dir = &state.app_data_dir;
+    let db = state.db.clone();
+    let app_data_dir = state.app_data_dir.clone();
+    let jobs = state.jobs.clone();
+    let (job_id, cancel) = jobs.create_job("import", 0);
+    emit_import_job_status(&app, &job_id, "running", 0, 0);
 
+    let worker_app = app.clone();
+    let worker_jobs = jobs.clone();
+    let worker_job_id = job_id.clone();
+    let joined = tauri::async_runtime::spawn_blocking(move || {
+        import_folder_blocking(
+            worker_app,
+            db,
+            app_data_dir,
+            worker_jobs,
+            worker_job_id,
+            cancel,
+            folder_path,
+            session_id,
+            progress_id,
+        )
+    })
+    .await;
+    let work = match joined {
+        Ok(work) => work,
+        Err(error) => Err(format!("Import worker failed: {error}")),
+    };
+
+    finish_import_job(&app, &jobs, &job_id, &work);
+    persist_import_job(state.db.clone(), jobs, job_id).await;
+    work.map(|result| result.response)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn import_folder_blocking(
+    app: AppHandle,
+    db: Database,
+    app_data_dir: PathBuf,
+    jobs: JobRegistry,
+    job_id: String,
+    cancel: CancellationToken,
+    folder_path: String,
+    session_id: Option<String>,
+    progress_id: Option<String>,
+) -> Result<ImportWorkResult, String> {
     // Collect all image files first so we know the total
-    let module_raw = crate::db_core::import::is_module_raw_enabled(&state.db);
+    let module_raw = crate::db_core::import::is_module_raw_enabled(&db);
     let extensions = crate::extensions::supported_extensions(module_raw);
-    let entries: Vec<std::path::PathBuf> = walkdir::WalkDir::new(&folder_path)
+    let candidates = walkdir::WalkDir::new(&folder_path)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .map(|ext| extensions.contains(&ext.to_lowercase().as_str()))
-                .unwrap_or(false)
-        })
-        .map(|e| e.path().to_path_buf())
-        .collect();
+        .map(|e| e.path().to_path_buf());
+    let discovery = collect_cancellable_entries(candidates, &cancel, |path| {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| extensions.contains(&ext.to_lowercase().as_str()))
+            .unwrap_or(false)
+    });
+    if discovery.cancelled {
+        return Ok(ImportWorkResult {
+            response: ImportResponse {
+                imported: 0,
+                skipped: 0,
+                errors: Vec::new(),
+                batch_id: None,
+                image_ids: Vec::new(),
+                cancelled: true,
+            },
+            cancelled: true,
+        });
+    }
+    let entries = discovery.entries;
 
     let total = entries.len() as u32;
-    let mut imported = 0u32;
-    let mut skipped = 0u32;
-    let mut errors = Vec::new();
-    let mut new_image_ids: Vec<String> = Vec::new();
+    jobs.update_total(&job_id, total);
+    let summary = process_import_entries(
+        &entries,
+        &cancel,
+        |current, total, path| {
+            let filename = path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let _ = app.emit(
+                "import-progress",
+                ImportProgress {
+                    job_id: job_id.clone(),
+                    progress_id: progress_id.clone(),
+                    current,
+                    total,
+                    filename: filename.clone(),
+                },
+            );
+            jobs.update_progress(&job_id, current, Some(&filename));
+        },
+        |path| {
+            crate::db_core::import::import_file_cancellable(&db, path, &app_data_dir, &|| {
+                cancel.is_cancelled()
+            })
+        },
+    );
+    let imported = summary.imported;
+    let skipped = summary.skipped;
+    let errors = summary.errors;
+    let new_image_ids = summary.image_ids;
 
-    for (i, path) in entries.iter().enumerate() {
-        let filename = path
-            .file_name()
-            .map(|f| f.to_string_lossy().to_string())
-            .unwrap_or_default();
-
-        let _ = app.emit(
-            "import-progress",
-            ImportProgress {
-                current: (i + 1) as u32,
-                total,
-                filename,
-            },
-        );
-
-        match crate::db_core::import::import_file(db, path, app_data_dir) {
-            Ok(Some(id)) => {
-                new_image_ids.push(id);
-                imported += 1;
-            }
-            Ok(None) => skipped += 1,
-            Err(e) => errors.push(format!("{}: {}", path.display(), e)),
-        }
-    }
-
-    let _ = state.db.add_library_root(&folder_path);
+    let _ = db.add_library_root(&folder_path);
 
     let batch_id = if !new_image_ids.is_empty() {
         let batch = db
@@ -93,9 +314,17 @@ pub async fn import_folder(
             let _ = db.add_to_collection(active_session_id, &refs);
         }
         let _ = db.detect_lineage_for_batch(&new_image_ids);
+        Some(batch)
+    } else {
+        None
+    };
+
+    let auto_process_ids = filter_image_ids_for_auto_jobs(&db, &new_image_ids)?;
+    let cancelled = seal_import_job(&jobs, &job_id, &cancel, summary.cancelled);
+    if let Some(batch) = batch_id.as_ref() {
         let _ = db.log_session_event(&NewSessionEvent {
             session_id: session_id.clone(),
-            event_type: "import_completed".to_string(),
+            event_type: import_audit_event_type(cancelled).to_string(),
             actor_type: "user".to_string(),
             actor_id: None,
             subject_type: Some("import_batch".to_string()),
@@ -107,30 +336,29 @@ pub async fn import_folder(
                 "skipped": skipped,
                 "error_count": errors.len(),
                 "image_count": new_image_ids.len(),
+                "cancelled": cancelled,
             })
             .to_string(),
         });
-        Some(batch)
-    } else {
-        None
-    };
-
+    }
     let image_ids_out = new_image_ids.clone();
-    let auto_process_ids =
-        filter_image_ids_for_auto_jobs(&db, &new_image_ids).map_err(|e| e.to_string())?;
 
-    if !auto_process_ids.is_empty() {
+    if !cancelled && !auto_process_ids.is_empty() {
         run_post_import_quality_analysis(app.clone(), auto_process_ids.clone());
         run_post_import_detection(app.clone(), auto_process_ids);
     }
     let _ = crate::tray::refresh_tray_menu(&app);
 
-    Ok(ImportResponse {
-        imported,
-        skipped,
-        errors,
-        batch_id,
-        image_ids: image_ids_out,
+    Ok(ImportWorkResult {
+        response: ImportResponse {
+            imported,
+            skipped,
+            errors,
+            batch_id,
+            image_ids: image_ids_out,
+            cancelled,
+        },
+        cancelled,
     })
 }
 
@@ -140,40 +368,85 @@ pub async fn import_files(
     state: State<'_, AppState>,
     file_paths: Vec<String>,
     session_id: Option<String>,
+    progress_id: Option<String>,
 ) -> Result<ImportResponse, String> {
-    let db = &state.db;
-    let app_data_dir = &state.app_data_dir;
-    let mut imported = 0u32;
-    let mut skipped = 0u32;
-    let mut errors = Vec::new();
-
-    let mut new_image_ids: Vec<String> = Vec::new();
+    let db = state.db.clone();
+    let app_data_dir = state.app_data_dir.clone();
+    let jobs = state.jobs.clone();
     let total = file_paths.len() as u32;
+    let (job_id, cancel) = jobs.create_job("import", total);
+    emit_import_job_status(&app, &job_id, "running", 0, total);
 
-    for (i, path_str) in file_paths.iter().enumerate() {
-        let filename = Path::new(path_str.as_str())
-            .file_name()
-            .map(|f| f.to_string_lossy().to_string())
-            .unwrap_or_else(|| path_str.clone());
+    let worker_app = app.clone();
+    let worker_jobs = jobs.clone();
+    let worker_job_id = job_id.clone();
+    let joined = tauri::async_runtime::spawn_blocking(move || {
+        import_files_blocking(
+            worker_app,
+            db,
+            app_data_dir,
+            worker_jobs,
+            worker_job_id,
+            cancel,
+            file_paths,
+            session_id,
+            progress_id,
+        )
+    })
+    .await;
+    let work = match joined {
+        Ok(work) => work,
+        Err(error) => Err(format!("Import worker failed: {error}")),
+    };
 
-        let _ = app.emit(
-            "import-progress",
-            ImportProgress {
-                current: (i + 1) as u32,
-                total,
-                filename,
-            },
-        );
+    finish_import_job(&app, &jobs, &job_id, &work);
+    persist_import_job(state.db.clone(), jobs, job_id).await;
+    work.map(|result| result.response)
+}
 
-        match crate::db_core::import::import_file(db, Path::new(path_str.as_str()), app_data_dir) {
-            Ok(Some(id)) => {
-                new_image_ids.push(id);
-                imported += 1;
-            }
-            Ok(None) => skipped += 1,
-            Err(e) => errors.push(format!("{}: {}", path_str, e)),
-        }
-    }
+#[allow(clippy::too_many_arguments)]
+fn import_files_blocking(
+    app: AppHandle,
+    db: Database,
+    app_data_dir: PathBuf,
+    jobs: JobRegistry,
+    job_id: String,
+    cancel: CancellationToken,
+    file_paths: Vec<String>,
+    session_id: Option<String>,
+    progress_id: Option<String>,
+) -> Result<ImportWorkResult, String> {
+    let entries: Vec<PathBuf> = file_paths.into_iter().map(PathBuf::from).collect();
+    let summary = process_import_entries(
+        &entries,
+        &cancel,
+        |current, total, path| {
+            let filename = path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.to_string_lossy().to_string());
+            let _ = app.emit(
+                "import-progress",
+                ImportProgress {
+                    job_id: job_id.clone(),
+                    progress_id: progress_id.clone(),
+                    current,
+                    total,
+                    filename: filename.clone(),
+                },
+            );
+            jobs.update_progress(&job_id, current, Some(&filename));
+        },
+        |path| {
+            crate::db_core::import::import_file_cancellable(&db, path, &app_data_dir, &|| {
+                cancel.is_cancelled()
+            })
+        },
+    );
+    let imported = summary.imported;
+    let skipped = summary.skipped;
+    let errors = summary.errors;
+    let new_image_ids = summary.image_ids;
 
     let batch_id = if !new_image_ids.is_empty() {
         let batch = db
@@ -187,46 +460,53 @@ pub async fn import_files(
             let _ = db.add_to_collection(active_session_id, &refs);
         }
         let _ = db.detect_lineage_for_batch(&new_image_ids);
+        Some(batch)
+    } else {
+        None
+    };
+
+    let auto_process_ids = filter_image_ids_for_auto_jobs(&db, &new_image_ids)?;
+    let cancelled = seal_import_job(&jobs, &job_id, &cancel, summary.cancelled);
+    if let Some(batch) = batch_id.as_ref() {
         let _ = db.log_session_event(&NewSessionEvent {
             session_id: session_id.clone(),
-            event_type: "import_completed".to_string(),
+            event_type: import_audit_event_type(cancelled).to_string(),
             actor_type: "user".to_string(),
             actor_id: None,
             subject_type: Some("import_batch".to_string()),
             subject_id: Some(batch.clone()),
             payload_json: serde_json::json!({
                 "source": "files",
-                "file_count": file_paths.len(),
+                "file_count": entries.len(),
                 "imported": imported,
                 "skipped": skipped,
                 "error_count": errors.len(),
                 "image_count": new_image_ids.len(),
+                "cancelled": cancelled,
             })
             .to_string(),
         });
-        Some(batch)
-    } else {
-        None
-    };
-
+    }
     let image_ids_out = new_image_ids.clone();
-    let auto_process_ids =
-        filter_image_ids_for_auto_jobs(&db, &new_image_ids).map_err(|e| e.to_string())?;
 
     if !new_image_ids.is_empty() {
         let _ = crate::tray::refresh_tray_menu(&app);
-        if !auto_process_ids.is_empty() {
+        if !cancelled && !auto_process_ids.is_empty() {
             run_post_import_quality_analysis(app.clone(), auto_process_ids.clone());
             run_post_import_detection(app, auto_process_ids);
         }
     }
 
-    Ok(ImportResponse {
-        imported,
-        skipped,
-        errors,
-        batch_id,
-        image_ids: image_ids_out,
+    Ok(ImportWorkResult {
+        response: ImportResponse {
+            imported,
+            skipped,
+            errors,
+            batch_id,
+            image_ids: image_ids_out,
+            cancelled,
+        },
+        cancelled,
     })
 }
 
@@ -534,62 +814,76 @@ fn run_post_import_quality_analysis(app: AppHandle, image_ids: Vec<String>) {
 
     let app_clone = app.clone();
     crate::spawn_guarded(app_clone, "post-import-quality", move || async move {
-        let state: State<'_, AppState> = app.state();
-        let total = image_ids.len() as u32;
-        let (job_id, cancel_token) = state.jobs.create_job("quality", total);
-        let progress_job_id = job_id.clone();
-        let progress_app = app.clone();
-        let cancel_for_loop = cancel_token.clone();
+        let blocking_app = app.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            let state: State<'_, AppState> = blocking_app.state();
+            let total = image_ids.len() as u32;
+            let (job_id, cancel_token) = state.jobs.create_job("quality", total);
+            let progress_job_id = job_id.clone();
+            let progress_app = blocking_app.clone();
+            let cancel_for_loop = cancel_token.clone();
 
-        let _ = app.emit(
-            "job-status-changed",
-            serde_json::json!({
-                "job_id": &job_id,
-                "kind": "quality",
-                "status": "running",
-                "current": 0,
-                "total": total,
-            }),
-        );
+            let _ = blocking_app.emit(
+                "job-status-changed",
+                serde_json::json!({
+                    "job_id": &job_id,
+                    "kind": "quality",
+                    "status": "running",
+                    "current": 0,
+                    "total": total,
+                }),
+            );
 
-        let summary = analyze_quality_for_imported_images(
-            &state.db,
-            &state.app_data_dir,
-            &image_ids,
-            |current, total| {
-                state.jobs.update_progress(&progress_job_id, current, None);
-                let _ = progress_app.emit(
-                    "quality-progress",
-                    serde_json::json!({
-                        "job_id": &progress_job_id,
-                        "current": current,
-                        "total": total,
-                        "analyzer": crate::db_core::quality::QUALITY_ANALYZER_VERSION,
-                    }),
-                );
-            },
-            move || cancel_for_loop.is_cancelled(),
-        );
+            let summary = analyze_quality_for_imported_images(
+                &state.db,
+                &state.app_data_dir,
+                &image_ids,
+                |current, total| {
+                    state.jobs.update_progress(&progress_job_id, current, None);
+                    let _ = progress_app.emit(
+                        "quality-progress",
+                        serde_json::json!({
+                            "job_id": &progress_job_id,
+                            "current": current,
+                            "total": total,
+                            "analyzer": crate::db_core::quality::QUALITY_ANALYZER_VERSION,
+                        }),
+                    );
+                },
+                move || cancel_for_loop.is_cancelled(),
+            );
 
-        let status = if summary.cancelled {
-            state.jobs.mark_cancelled(&job_id);
-            "cancelled"
-        } else {
-            state.jobs.complete(&job_id);
-            "completed"
-        };
-        state.jobs.persist_terminal(&job_id, &state.db);
-        let _ = app.emit(
-            "job-status-changed",
-            serde_json::json!({
-                "job_id": &job_id,
-                "kind": "quality",
-                "status": status,
-                "current": if summary.cancelled { summary.analyzed + summary.failed } else { total },
-                "total": total,
-                "message": format!("{} analyzed, {} skipped", summary.analyzed, summary.failed),
-            }),
-        );
+            let status = if summary.cancelled {
+                state.jobs.mark_cancelled(&job_id);
+                "cancelled"
+            } else {
+                state.jobs.complete(&job_id);
+                "completed"
+            };
+            let _ = blocking_app.emit(
+                "job-status-changed",
+                serde_json::json!({
+                    "job_id": &job_id,
+                    "kind": "quality",
+                    "status": status,
+                    "current": if summary.cancelled { summary.analyzed + summary.failed } else { total },
+                    "total": total,
+                    "message": format!("{} analyzed, {} skipped", summary.analyzed, summary.failed),
+                }),
+            );
+            state.jobs.persist_terminal(&job_id, &state.db);
+        })
+        .await;
+        if let Err(error) = result {
+            let _ = app.emit(
+                "background-task-failed",
+                serde_json::json!({
+                    "task": "post-import-quality",
+                    "message": error.to_string(),
+                    "recoverable": true,
+                }),
+            );
+        }
     });
 }
 
@@ -650,109 +944,395 @@ fn analyze_quality_for_imported_image(
 fn run_post_import_detection(app: AppHandle, image_ids: Vec<String>) {
     let app_clone = app.clone();
     crate::spawn_guarded(app_clone, "post-import-detection", move || async move {
-        let state: State<'_, AppState> = app.state();
-
-        // YOLO detection (if model available)
-        let yolo_available = {
-            let engine = state.detection_engine.lock();
-            engine.is_variant_available(crate::db_core::detection::YoloVariant::Medium)
-        };
-
-        if yolo_available {
+        let blocking_app = app.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            run_post_import_detection_blocking(blocking_app, image_ids)
+        })
+        .await;
+        if let Err(error) = result {
             let _ = app.emit(
-                "auto-detection-start",
+                "background-task-failed",
                 serde_json::json!({
-                    "model": "yolov8m", "count": image_ids.len()
+                    "task": "post-import-detection",
+                    "message": error.to_string(),
+                    "recoverable": true,
                 }),
             );
-
-            {
-                let mut engine = state.detection_engine.lock();
-                if engine.session.is_none() {
-                    let _ = engine.load_yolo(crate::db_core::detection::YoloVariant::Medium);
-                }
-            }
-
-            for (i, image_id) in image_ids.iter().enumerate() {
-                let id_refs: Vec<&str> = vec![image_id.as_str()];
-                if let Ok(images) = state.db.get_images_by_ids(&id_refs) {
-                    if let Some(img) = images.first() {
-                        let detect_path =
-                            crate::commands::resolve_image_path_for_ml(img, &state.app_data_dir);
-                        let engine = state.detection_engine.lock();
-                        if let Ok(detections) = engine.detect(&detect_path) {
-                            drop(engine);
-                            let _ = state.db.store_detections(image_id, "yolov8m", &detections);
-                        }
-                    }
-                }
-
-                let _ = app.emit(
-                    "auto-detection-progress",
-                    serde_json::json!({
-                        "current": i + 1, "total": image_ids.len(), "model": "yolov8m"
-                    }),
-                );
-            }
         }
+    });
+}
 
-        // NudeNet safety check (if model available)
-        let nudenet_available = {
-            let engine = state.safety_engine.lock();
-            engine.is_nudenet_available()
-        };
+fn run_post_import_detection_blocking(app: AppHandle, image_ids: Vec<String>) {
+    let state: State<'_, AppState> = app.state();
+    let yolo_variant = crate::db_core::detection::YoloVariant::Medium;
+    let yolo_model_name = yolo_variant.model_name();
+    let yolo_available = {
+        let engine = state.detection_engine.lock();
+        engine.is_variant_available(yolo_variant)
+    };
+    let nudenet_available = {
+        let engine = state.safety_engine.lock();
+        engine.is_nudenet_available()
+    };
+    let stage_size = image_ids.len() as u32;
+    let enabled_stages = u32::from(yolo_available) + u32::from(nudenet_available);
+    let total = stage_size.saturating_mul(enabled_stages);
+    let (job_id, cancel) = state.jobs.create_job("detection", total);
+    let _ = app.emit(
+        "job-status-changed",
+        serde_json::json!({
+            "job_id": &job_id,
+            "kind": "detection",
+            "status": "running",
+            "current": 0,
+            "total": total,
+        }),
+    );
+    let mut completed_stages = 0u32;
 
-        if nudenet_available {
-            let _ = app.emit(
-                "auto-detection-start",
-                serde_json::json!({
-                    "model": "nudenet", "count": image_ids.len()
-                }),
-            );
-
-            {
-                let mut engine = state.safety_engine.lock();
-                if engine.session.is_none() {
-                    let _ = engine.load_nudenet();
-                }
-            }
-
-            for (i, image_id) in image_ids.iter().enumerate() {
-                let id_refs: Vec<&str> = vec![image_id.as_str()];
-                if let Ok(images) = state.db.get_images_by_ids(&id_refs) {
-                    if let Some(img) = images.first() {
-                        let detect_path =
-                            crate::commands::resolve_image_path_for_ml(img, &state.app_data_dir);
-                        let engine = state.safety_engine.lock();
-                        if let Ok(detections) = engine.detect(&detect_path) {
-                            drop(engine);
-                            let _ = state.db.store_detections(image_id, "nudenet", &detections);
-                        }
-                    }
-                }
-
-                let _ = app.emit(
-                    "auto-detection-progress",
-                    serde_json::json!({
-                        "current": i + 1, "total": image_ids.len(), "model": "nudenet"
-                    }),
-                );
-            }
-        }
-
+    if yolo_available && !cancel.is_cancelled() {
         let _ = app.emit(
-            "auto-detection-complete",
+            "auto-detection-start",
             serde_json::json!({
-                "count": image_ids.len()
+                "job_id": &job_id,
+                "model": yolo_model_name,
+                "current": completed_stages,
+                "total": total,
             }),
         );
-    });
+        {
+            let mut engine = state.detection_engine.lock();
+            if engine.session.is_none() {
+                let _ = engine.load_yolo(yolo_variant);
+            }
+        }
+        for (index, image_id) in image_ids.iter().enumerate() {
+            if cancel.is_cancelled() {
+                break;
+            }
+            if let Ok(images) = state.db.get_images_by_ids(&[image_id.as_str()]) {
+                if let Some(image) = images.first() {
+                    let path =
+                        crate::commands::resolve_image_path_for_ml(image, &state.app_data_dir);
+                    let engine = state.detection_engine.lock();
+                    if let Ok(detections) = engine.detect(&path) {
+                        drop(engine);
+                        let _ = state
+                            .db
+                            .store_detections(image_id, yolo_model_name, &detections);
+                    }
+                }
+            }
+            let current = completed_stages + (index + 1) as u32;
+            state.jobs.update_progress(&job_id, current, None);
+            let _ = app.emit(
+                "auto-detection-progress",
+                serde_json::json!({
+                    "job_id": &job_id,
+                    "current": current,
+                    "total": total,
+                    "model": yolo_model_name,
+                }),
+            );
+        }
+        if !cancel.is_cancelled() {
+            completed_stages = completed_stages.saturating_add(stage_size);
+        }
+    }
+
+    if nudenet_available && !cancel.is_cancelled() {
+        let _ = app.emit(
+            "auto-detection-start",
+            serde_json::json!({
+                "job_id": &job_id,
+                "model": "nudenet",
+                "current": completed_stages,
+                "total": total,
+            }),
+        );
+        {
+            let mut engine = state.safety_engine.lock();
+            if engine.session.is_none() {
+                let _ = engine.load_nudenet();
+            }
+        }
+        for (index, image_id) in image_ids.iter().enumerate() {
+            if cancel.is_cancelled() {
+                break;
+            }
+            if let Ok(images) = state.db.get_images_by_ids(&[image_id.as_str()]) {
+                if let Some(image) = images.first() {
+                    let path =
+                        crate::commands::resolve_image_path_for_ml(image, &state.app_data_dir);
+                    let engine = state.safety_engine.lock();
+                    if let Ok(detections) = engine.detect(&path) {
+                        drop(engine);
+                        let _ = state.db.store_detections(image_id, "nudenet", &detections);
+                    }
+                }
+            }
+            let current = completed_stages + (index + 1) as u32;
+            state.jobs.update_progress(&job_id, current, None);
+            let _ = app.emit(
+                "auto-detection-progress",
+                serde_json::json!({
+                    "job_id": &job_id,
+                    "current": current,
+                    "total": total,
+                    "model": "nudenet",
+                }),
+            );
+        }
+        if !cancel.is_cancelled() {
+            completed_stages = completed_stages.saturating_add(stage_size);
+        }
+    }
+
+    let status = if cancel.is_cancelled() {
+        state.jobs.mark_cancelled(&job_id);
+        "cancelled"
+    } else {
+        state.jobs.complete(&job_id);
+        "completed"
+    };
+    let _ = app.emit(
+        "job-status-changed",
+        serde_json::json!({
+            "job_id": &job_id,
+            "kind": "detection",
+            "status": status,
+            "current": state.jobs.get(&job_id).map(|job| job.current).unwrap_or(0),
+            "total": total,
+        }),
+    );
+    let _ = app.emit(
+        "auto-detection-complete",
+        serde_json::json!({
+            "job_id": &job_id,
+            "current": state.jobs.get(&job_id).map(|job| job.current).unwrap_or(completed_stages),
+            "total": total,
+            "cancelled": cancel.is_cancelled(),
+        }),
+    );
+    state.jobs.persist_terminal(&job_id, &state.db);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db_core::db::Database;
+
+    #[test]
+    fn synthetic_10k_import_work_is_bounded_and_cancellable_between_files() {
+        let entries: Vec<PathBuf> = (0..10_000)
+            .map(|index| PathBuf::from(format!("synthetic-{index}.png")))
+            .collect();
+        let cancel = CancellationToken::new();
+        let cancel_after_progress = cancel.clone();
+        let mut max_total = 0;
+
+        let summary = process_import_entries(
+            &entries,
+            &cancel,
+            |current, total, _path| {
+                max_total = total;
+                if current == 128 {
+                    cancel_after_progress.cancel();
+                }
+            },
+            |path| Ok(Some(path.to_string_lossy().to_string())),
+        );
+
+        assert_eq!(max_total, 10_000);
+        assert_eq!(summary.imported, 128);
+        assert!(summary.cancelled);
+        assert_eq!(summary.image_ids.len(), 128);
+    }
+
+    #[test]
+    fn synthetic_10k_folder_discovery_stops_when_cancelled() {
+        let cancel = CancellationToken::new();
+        let cancel_during_walk = cancel.clone();
+        let candidates = (0..10_000).map(move |index| {
+            if index == 128 {
+                cancel_during_walk.cancel();
+            }
+            PathBuf::from(format!("synthetic-{index}.png"))
+        });
+
+        let discovery = collect_cancellable_entries(candidates, &cancel, |_| true);
+
+        assert!(discovery.cancelled);
+        assert_eq!(discovery.entries.len(), 128);
+    }
+
+    #[test]
+    fn synthetic_10k_import_keeps_browse_and_job_listing_responsive() {
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open(&tmp.path().join("responsive-import.db")).unwrap();
+        let jobs = JobRegistry::default();
+        let (job_id, cancel) = jobs.create_job("import", 10_000);
+        let entries: Vec<PathBuf> = (0..10_000)
+            .map(|index| PathBuf::from(format!("synthetic-{index}.png")))
+            .collect();
+        let worker_db = db.clone();
+        let worker_cancel = cancel.clone();
+        let (writer_started_tx, writer_started_rx) = mpsc::channel();
+        let (release_writer_tx, release_writer_rx) = mpsc::channel();
+
+        let worker = std::thread::spawn(move || {
+            process_import_entries(
+                &entries,
+                &worker_cancel,
+                |_current, _total, _path| {},
+                |_path| {
+                    let writer = worker_db.conn.lock();
+                    writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+                    writer_started_tx.send(()).unwrap();
+                    release_writer_rx.recv().unwrap();
+                    writer.execute_batch("ROLLBACK").unwrap();
+                    worker_cancel.cancel();
+                    Ok(None)
+                },
+            )
+        });
+        writer_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("synthetic import should enter its database stage");
+
+        let started = Instant::now();
+        assert_eq!(db.image_count().unwrap(), 0);
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "browse reads must not wait for the import writer"
+        );
+        let started = Instant::now();
+        assert_eq!(jobs.list().first().unwrap().job_id, job_id);
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "list_jobs must not wait for import work"
+        );
+
+        release_writer_tx.send(()).unwrap();
+        let summary = worker.join().unwrap();
+        assert!(summary.cancelled);
+    }
+
+    #[test]
+    fn tauri_import_commands_dispatch_blocking_work_to_the_blocking_pool() {
+        let source = include_str!("import.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        assert_eq!(
+            production
+                .matches("tauri::async_runtime::spawn_blocking")
+                .count(),
+            5
+        );
+        assert!(production.contains("process_import_entries("));
+        assert!(production.contains("cancel.is_cancelled()"));
+    }
+
+    #[test]
+    fn import_outcome_is_sealed_only_after_fallible_child_job_preparation() {
+        let source = include_str!("import.rs");
+        let folder = &source[source.find("fn import_folder_blocking(").unwrap()
+            ..source.find("pub async fn import_files(").unwrap()];
+        let files = &source[source.find("fn import_files_blocking(").unwrap()
+            ..source.find("struct ThumbnailProgress").unwrap()];
+
+        for worker in [folder, files] {
+            let prepare = worker.find("filter_image_ids_for_auto_jobs").unwrap();
+            let seal = worker.find("seal_import_job").unwrap();
+            let audit = worker.find("log_session_event").unwrap();
+            assert!(prepare < seal && seal < audit);
+        }
+    }
+
+    #[test]
+    fn child_jobs_emit_terminal_status_before_database_persistence() {
+        let source = include_str!("import.rs");
+        let quality = &source[source.find("fn run_post_import_quality_analysis").unwrap()
+            ..source
+                .find("fn analyze_quality_for_imported_images")
+                .unwrap()];
+        let detection = &source[source
+            .find("fn run_post_import_detection_blocking")
+            .unwrap()
+            ..source.find("#[cfg(test)]\nmod tests").unwrap()];
+
+        for child in [quality, detection] {
+            let terminal_event = child.rfind("job-status-changed").unwrap();
+            let persistence = child.rfind("persist_terminal").unwrap();
+            assert!(terminal_event < persistence);
+        }
+    }
+
+    #[test]
+    fn import_progress_uses_the_registered_job_identity() {
+        let payload = serde_json::to_value(ImportProgress {
+            job_id: "job_import".to_string(),
+            progress_id: Some("sidebar-import".to_string()),
+            current: 3,
+            total: 10,
+            filename: "image.png".to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(payload["job_id"], "job_import");
+        assert_eq!(payload["progress_id"], "sidebar-import");
+        assert_eq!(payload["current"], 3);
+        assert_eq!(payload["total"], 10);
+    }
+
+    #[test]
+    fn cancellation_is_sealed_before_child_jobs_and_audit_logging() {
+        let jobs = JobRegistry::default();
+        let (cancelled_id, cancelled_token) = jobs.create_job("import", 1);
+        cancelled_token.cancel();
+        assert!(seal_import_job(
+            &jobs,
+            &cancelled_id,
+            &cancelled_token,
+            false
+        ));
+        assert_eq!(jobs.get(&cancelled_id).unwrap().status, "cancelled");
+        assert_eq!(import_audit_event_type(true), "import_cancelled");
+
+        let (completed_id, completed_token) = jobs.create_job("import", 1);
+        assert!(!seal_import_job(
+            &jobs,
+            &completed_id,
+            &completed_token,
+            false
+        ));
+        assert_eq!(jobs.get(&completed_id).unwrap().status, "completed");
+        assert!(jobs.cancel(&completed_id).is_err());
+        assert_eq!(import_audit_event_type(false), "import_completed");
+    }
+
+    #[test]
+    fn post_import_detection_persists_and_emits_canonical_medium_yolo_model_name() {
+        let canonical = crate::db_core::detection::YoloVariant::Medium.model_name();
+        assert_eq!(canonical, "yolo11m");
+
+        let source = include_str!("import.rs");
+        let legacy = ["yolo", "v8m"].concat();
+        assert!(!source.contains(&format!("\"{legacy}\"")));
+        let compact = source.split_whitespace().collect::<String>();
+        let store_call = [
+            "store_detections(",
+            "image_id,",
+            "yolo_model_name,",
+            "&detections",
+        ]
+        .concat();
+        let event_model = ["\"model\":", "yolo_model_name"].concat();
+        assert!(compact.contains(&store_call));
+        assert_eq!(compact.matches(&event_model).count(), 2);
+    }
 
     #[test]
     fn post_import_quality_analysis_stores_metrics_without_inline_import_work() {

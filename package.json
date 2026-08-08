@@ -1,6 +1,6 @@
 {
   "name": "cull",
-  "version": "0.2.5",
+  "version": "0.3.3",
   "description": "Local-first desktop image viewer for AI-generated art workflows.",
   "type": "module",
   "scripts": {
@@ -24,7 +24,8 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "bash scripts/tauri-local.sh",
     "test": "vitest run",
-    "test:release": "vitest run scripts/cull-release-core.test.ts scripts/cull-release-cli.test.ts scripts/release-gate.test.ts",
+    "test:release": "vitest run scripts/cull-release-core.test.ts scripts/cull-release-cli.test.ts scripts/release-gate.test.ts scripts/release-regression-gate.test.ts scripts/update-homebrew-cask.test.ts",
+    "test:release-regressions": "node scripts/release-regression-gate.mjs",
     "release:cull": "node scripts/cull-release.mjs",
     "test:e2e": "bash tests/e2e/run-e2e.sh",
     "test:perf": "vitest run src/lib/view-utils.test.ts -t \"grid rendering performance budget\"",
@@ -54,8 +55,7 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
     "html-to-image": "^1.11.13",
-    "umap-js": "^1.4.0",
-    "virtua": "^0.49.1"
+    "umap-js": "^1.4.0"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",

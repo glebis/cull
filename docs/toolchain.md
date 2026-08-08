@@ -9,7 +9,7 @@ runtime/compiler versions.
 | --- | --- | --- |
 | Node.js | 20.20.2 | `.node-version`, `.nvmrc` |
 | npm | Use the npm bundled with Node.js 20.20.2 | Node.js distribution |
-| Rust | 1.89.0 | `rust-toolchain.toml` |
+| Rust | 1.95.0 | `rust-toolchain.toml` |
 
 Use your preferred version manager to install the pinned versions before running
 checks:

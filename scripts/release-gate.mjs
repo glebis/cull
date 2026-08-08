@@ -26,6 +26,7 @@ const STATIC_COMMANDS = [
   EXPORT_CONTRACT,
 ];
 const E2E_COMMAND = 'bash tests/e2e/run-e2e.sh';
+const REGRESSION_COMMAND = 'node scripts/release-regression-gate.mjs';
 const BUILD_COMMAND = 'npm run build';
 const VALUE_OPTIONS = new Set(['--tag', '--sha', '--base-tag', '--event', '--json-out']);
 const SEMVER_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -59,8 +60,8 @@ function parseArgs(argv) {
   if (!SEMVER_TAG.test(parsed['--tag'])) throw gateError('INPUT_INVALID', 'Expected --tag vX.Y.Z');
   if (!SEMVER_TAG.test(parsed['--base-tag'])) throw gateError('INPUT_INVALID', 'Expected --base-tag vX.Y.Z');
   if (!SHA40.test(parsed['--sha'])) throw gateError('INPUT_INVALID', 'Expected --sha as 40 lowercase hexadecimal characters');
-  if (!['tag', 'dispatch'].includes(parsed['--event'])) {
-    throw gateError('INPUT_INVALID', 'Expected --event tag|dispatch');
+  if (!['tag', 'dispatch', 'canary'].includes(parsed['--event'])) {
+    throw gateError('INPUT_INVALID', 'Expected --event tag|dispatch|canary');
   }
   if (!isAbsolute(parsed['--json-out'])) throw gateError('INPUT_INVALID', '--json-out must be an absolute path');
   return {
@@ -96,6 +97,20 @@ function resolveTag(repoRoot, tag, role) {
     throw gateError('TAG_NOT_FOUND', `${role} tag ${tag} does not exist`);
   }
   return result.stdout.trim();
+}
+
+function resolveAnnotatedTag(repoRoot, tag, role) {
+  const sha = resolveTag(repoRoot, tag, role);
+  const type = git(repoRoot, ['cat-file', '-t', `refs/tags/${tag}`], { allowFailure: true });
+  if (type.status !== 0) throw gateError('TAG_NOT_FOUND', `${role} tag ${tag} does not exist`);
+  if (type.stdout.trim() !== 'tag') {
+    throw gateError('TAG_NOT_ANNOTATED', `${role} tag ${tag} must be an annotated tag`);
+  }
+  const objectSha = gitText(repoRoot, 'rev-parse', '--verify', `refs/tags/${tag}`);
+  if (!SHA40.test(objectSha)) {
+    throw gateError('TAG_OBJECT_INVALID', `${role} tag ${tag} has an invalid object ID`);
+  }
+  return { sha, objectSha };
 }
 
 function requireAncestor(repoRoot, ancestor, descendant, code, message) {
@@ -140,6 +155,25 @@ function canonicalBaseTag(repoRoot, targetTag, targetSha) {
     || left.name.localeCompare(right.name));
   if (candidates.length === 0) {
     throw gateError('BASE_TAG_NOT_FOUND', `No reachable release tag exists before ${targetTag}`);
+  }
+  return candidates[0];
+}
+
+function canonicalCanaryBaseTag(repoRoot, targetTag, targetSha) {
+  const targetVersion = semverTuple(targetTag);
+  const names = gitText(repoRoot, 'for-each-ref', '--format=%(refname:short)', 'refs/tags')
+    .split('\n').filter(Boolean);
+  const candidates = [];
+  for (const name of names) {
+    const version = semverTuple(name);
+    if (!version || compareSemver(version, targetVersion) > 0) continue;
+    const sha = resolveTag(repoRoot, name, 'Candidate canary base');
+    if (isAncestor(repoRoot, sha, targetSha)) candidates.push({ name, version, sha });
+  }
+  candidates.sort((left, right) => compareSemver(right.version, left.version)
+    || left.name.localeCompare(right.name));
+  if (candidates.length === 0) {
+    throw gateError('BASE_TAG_NOT_FOUND', `No reachable release tag exists at or before ${targetTag}`);
   }
   return candidates[0];
 }
@@ -321,20 +355,43 @@ function stageJsonAtomic(path, record) {
 }
 
 export function buildGateRecord(repoRoot, input) {
-  const tagSha = resolveTag(repoRoot, input.tag, 'Release');
-  if (tagSha !== input.sha) {
-    throw gateError('TAG_SHA_MISMATCH', `Tag ${input.tag} does not resolve to ${input.sha}`, { tagSha });
+  let base;
+  let publishEligible;
+  let tagObjectSha;
+  if (input.event === 'canary') {
+    base = canonicalCanaryBaseTag(repoRoot, input.tag, input.sha);
+    publishEligible = false;
+    tagObjectSha = null;
+  } else {
+    const tag = resolveAnnotatedTag(repoRoot, input.tag, 'Release');
+    if (tag.sha !== input.sha) {
+      throw gateError('TAG_SHA_MISMATCH', `Tag ${input.tag} does not resolve to ${input.sha}`, { tagSha: tag.sha });
+    }
+    tagObjectSha = tag.objectSha;
+    if (input.baseTag === input.tag) throw gateError('INPUT_INVALID', 'Base and release tags must differ');
+    base = canonicalBaseTag(repoRoot, input.tag, input.sha);
+    publishEligible = true;
   }
-  if (input.baseTag === input.tag) throw gateError('INPUT_INVALID', 'Base and release tags must differ');
-  const base = canonicalBaseTag(repoRoot, input.tag, input.sha);
   if (input.baseTag !== base.name) {
-    throw gateError('BASE_TAG_MISMATCH', `Expected canonical previous release tag ${base.name}`, {
+    const message = input.event === 'canary'
+      ? `Expected canonical canary base tag ${base.name}`
+      : `Expected canonical previous release tag ${base.name}`;
+    throw gateError('BASE_TAG_MISMATCH', message, {
       supplied: input.baseTag,
       expected: base.name,
     });
   }
   const originMain = gitText(repoRoot, 'rev-parse', '--verify', 'origin/main^{commit}');
   requireAncestor(repoRoot, input.sha, originMain, 'NOT_ON_ORIGIN_MAIN', 'Release SHA is not reachable from origin/main');
+  if (!isAncestor(repoRoot, originMain, input.sha)) {
+    const omittedCommits = gitText(repoRoot, 'log', '--format=%H %s', '--max-count=20', `${input.sha}..${originMain}`)
+      .split('\n').filter(Boolean);
+    throw gateError(
+      'STALE_RELEASE_SOURCE',
+      'Release source omits commits already on origin/main; update the candidate from verified main before packaging',
+      { releaseSha: input.sha, originMain, omittedCommits },
+    );
+  }
 
   const version = input.tag.slice(1);
   const config = loadConfigAt(repoRoot, input.sha);
@@ -345,12 +402,15 @@ export function buildGateRecord(repoRoot, input) {
   const matchedPaths = classifyE2EPaths(paths, config.e2e);
   const e2e = { required: matchedPaths.length > 0, matchedPaths };
   assertE2ERecorded(matchedPaths, e2e);
-  const commands = [...STATIC_COMMANDS, ...(e2e.required ? [E2E_COMMAND] : []), BUILD_COMMAND];
+  const commands = [...STATIC_COMMANDS, REGRESSION_COMMAND, ...(e2e.required ? [E2E_COMMAND] : []), BUILD_COMMAND];
   return {
     schema: 'cull.release.gate.v1',
+    event: input.event,
+    publishEligible,
     version,
     tag: input.tag,
     sha: input.sha,
+    tagObjectSha,
     baseTag: input.baseTag,
     mainAncestor: true,
     versions,
@@ -402,9 +462,12 @@ function assertDistinctOutputs(jsonOut, workflowOutput) {
 function appendWorkflowOutputs(path, record, jsonOut) {
   if (!path) return;
   const lines = [
+    `event=${record.event}`,
+    `publish_eligible=${record.publishEligible}`,
     `version=${record.version}`,
     `tag=${record.tag}`,
     `sha=${record.sha}`,
+    `tag_object_sha=${record.tagObjectSha ?? ''}`,
     `base_tag=${record.baseTag}`,
     `e2e_required=${record.e2e.required}`,
     `json_out=${jsonOut}`,

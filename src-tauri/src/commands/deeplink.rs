@@ -11,6 +11,8 @@ pub struct OpenParams {
     pub path: Option<String>,
     pub paths: Option<Vec<String>>,
     pub folder: Option<String>,
+    pub settings_tab: Option<String>,
+    pub collection: Option<String>,
     pub view: Option<String>,
     pub size: Option<u32>,
     pub zoom: Option<u32>,
@@ -21,6 +23,10 @@ pub struct OpenParams {
     pub drag_drop: Option<bool>,
     pub drop_x: Option<f64>,
     pub drop_y: Option<f64>,
+    /// Correlation id for the navigation ack round-trip. When set, the frontend
+    /// must report back via `complete_deep_link_navigation` so the caller can
+    /// tell whether the navigation actually happened. See `services::display`.
+    pub request_id: Option<String>,
 }
 
 /// Validate that a single path is safe for deep-link access.
@@ -70,7 +76,10 @@ fn pending_open_params() -> &'static Mutex<Vec<OpenParams>> {
     PENDING_OPEN_PARAMS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-pub fn emit_open_params(app: &AppHandle, params: OpenParams) -> tauri::Result<()> {
+pub fn emit_open_params<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    params: OpenParams,
+) -> tauri::Result<()> {
     if !FRONTEND_OPEN_LISTENER_READY.load(Ordering::SeqCst) {
         if let Ok(mut pending) = pending_open_params().lock() {
             pending.push(params.clone());
@@ -84,7 +93,11 @@ pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams>
         return None;
     }
 
-    let params = OpenParams {
+    validate_open_params(build_file_open_params(file_paths)).ok()
+}
+
+fn build_file_open_params(file_paths: Vec<String>) -> OpenParams {
+    OpenParams {
         path: if file_paths.len() == 1 {
             Some(file_paths[0].clone())
         } else {
@@ -96,6 +109,8 @@ pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams>
             None
         },
         folder: None,
+        settings_tab: None,
+        collection: None,
         view: Some("loupe".to_string()),
         size: None,
         zoom: None,
@@ -106,9 +121,32 @@ pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams>
         drag_drop: None,
         drop_x: None,
         drop_y: None,
-    };
+        request_id: None,
+    }
+}
 
-    validate_open_params(params).ok()
+pub fn open_params_for_launch_path(path: &std::path::Path) -> Option<OpenParams> {
+    let canonical = crate::db_core::path_policy::validate_path(
+        path.to_string_lossy().as_ref(),
+        crate::db_core::path_policy::PathMode::UserPicked,
+    )
+    .ok()?;
+
+    if canonical.is_dir() {
+        return Some(OpenParams {
+            folder: Some(canonical.to_string_lossy().into_owned()),
+            view: Some("grid".to_string()),
+            ..OpenParams::default()
+        });
+    }
+
+    if canonical.is_file() && crate::extensions::is_image_path(&canonical, false) {
+        Some(build_file_open_params(vec![canonical
+            .to_string_lossy()
+            .into_owned()]))
+    } else {
+        None
+    }
 }
 
 pub fn open_params_for_urls(urls: &[String]) -> Vec<OpenParams> {
@@ -210,6 +248,22 @@ pub async fn drain_pending_open_params() -> Result<Vec<OpenParams>, String> {
     Ok(std::mem::take(&mut *pending))
 }
 
+/// Frontend ack for a navigation that carried a `request_id`. This is what
+/// makes the display tools able to report a real failure: without it they can
+/// only observe that Tauri accepted the event, never that the UI acted on it.
+#[tauri::command]
+pub async fn complete_deep_link_navigation(
+    request_id: String,
+    ok: bool,
+    error: Option<String>,
+) -> Result<(), String> {
+    crate::services::display::complete_navigation(
+        &request_id,
+        crate::services::display::NavigationAck { ok, error },
+    );
+    Ok(())
+}
+
 /// Tauri command that agents can call via IPC to control the app.
 #[tauri::command]
 pub async fn open_with_params(
@@ -229,6 +283,8 @@ pub async fn open_with_params(
         path,
         paths,
         folder,
+        settings_tab: None,
+        collection: None,
         view,
         size,
         zoom,
@@ -239,6 +295,7 @@ pub async fn open_with_params(
         drag_drop: None,
         drop_x: None,
         drop_y: None,
+        request_id: None,
     };
     let validated = validate_open_params(params)?;
     emit_open_params(&app, validated).map_err(|e| e.to_string())
@@ -254,11 +311,15 @@ pub async fn open_deep_link_urls(app: AppHandle, urls: Vec<String>) -> Result<()
 
 /// Parse a deep link URL into OpenParams.
 /// Returns an error if any file-system path fails validation.
+/// Settings links accept the six UI tab IDs; an absent or unknown fragment
+/// falls back to `general`, while malformed percent encoding remains an error.
 pub fn parse_deep_link(url: &str) -> Result<OpenParams, String> {
     let mut params = OpenParams {
         path: None,
         paths: None,
         folder: None,
+        settings_tab: None,
+        collection: None,
         view: None,
         size: None,
         zoom: None,
@@ -269,13 +330,14 @@ pub fn parse_deep_link(url: &str) -> Result<OpenParams, String> {
         drag_drop: None,
         drop_x: None,
         drop_y: None,
+        request_id: None,
     };
 
     // Extract the action from the URL (e.g., "open", "grid", "loupe")
     // cull://open?path=... or cull://grid?size=280
     let action = if let Some(scheme_end) = url.find("://") {
         let after_scheme = &url[scheme_end + 3..];
-        let action_end = after_scheme.find('?').unwrap_or(after_scheme.len());
+        let action_end = after_scheme.find(['?', '#']).unwrap_or(after_scheme.len());
         Some(after_scheme[..action_end].to_string())
     } else {
         None
@@ -286,6 +348,17 @@ pub fn parse_deep_link(url: &str) -> Result<OpenParams, String> {
         Some("grid") => params.view = Some("grid".to_string()),
         Some("loupe") => params.view = Some("loupe".to_string()),
         Some("compare") => params.view = Some("compare".to_string()),
+        Some("settings") => {
+            let fragment = url
+                .split_once('#')
+                .map(|(_, fragment)| fragment)
+                .unwrap_or("");
+            let decoded = percent_decode(fragment)?;
+            params.settings_tab = Some(match decoded.as_str() {
+                "general" | "appearance" | "ai" | "agent-access" | "privacy" | "plugins" => decoded,
+                _ => "general".to_string(),
+            });
+        }
         _ => {}
     }
 
@@ -497,6 +570,33 @@ mod tests {
     }
 
     #[test]
+    fn settings_deep_links_parse_every_supported_tab() {
+        for tab in [
+            "general",
+            "appearance",
+            "ai",
+            "agent-access",
+            "privacy",
+            "plugins",
+        ] {
+            let params = parse_deep_link(&format!("cull://settings#{tab}")).unwrap();
+            assert_eq!(params.settings_tab.as_deref(), Some(tab));
+        }
+    }
+
+    #[test]
+    fn settings_deep_links_fall_back_to_general_for_invalid_fragments() {
+        for url in [
+            "cull://settings",
+            "cull://settings#",
+            "cull://settings#unknown",
+        ] {
+            let params = parse_deep_link(url).unwrap();
+            assert_eq!(params.settings_tab.as_deref(), Some("general"));
+        }
+    }
+
+    #[test]
     fn open_params_for_urls_rejects_invalid_cull_url_paths() {
         let urls = vec!["cull://open?path=/Users/test/Cull%ZZ.png".to_string()];
 
@@ -530,6 +630,72 @@ mod tests {
         assert_eq!(params.path.as_deref(), Some(canonical.as_str()));
         assert_eq!(params.view.as_deref(), Some("loupe"));
         assert!(params.paths.is_none());
+    }
+
+    #[test]
+    fn launch_folder_builds_grid_import_params() {
+        let dir = home_tempdir("cull_launch_folder_");
+        let folder = dir.path().join("Library");
+        std::fs::create_dir(&folder).unwrap();
+
+        let params = open_params_for_launch_path(&folder).unwrap();
+
+        assert_eq!(
+            params.folder,
+            Some(
+                folder
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+        assert_eq!(params.view.as_deref(), Some("grid"));
+        assert_eq!(params.drag_drop, None);
+        assert!(params.path.is_none());
+    }
+
+    #[test]
+    fn launch_path_rejects_unsupported_files() {
+        let dir = home_tempdir("cull_launch_unsupported_");
+        let text = dir.path().join("notes.txt");
+        std::fs::write(&text, b"notes").unwrap();
+
+        assert!(open_params_for_launch_path(&text).is_none());
+    }
+
+    #[test]
+    fn launch_folder_accepts_explicit_path_outside_home() {
+        let folder = tempfile::tempdir().unwrap();
+
+        let params = open_params_for_launch_path(folder.path()).unwrap();
+
+        assert_eq!(
+            params.folder,
+            Some(
+                folder
+                    .path()
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn launch_image_accepts_explicit_path_outside_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let image = dir.path().join("shot.png");
+        std::fs::write(&image, b"image").unwrap();
+
+        let params = open_params_for_launch_path(&image).unwrap();
+
+        assert_eq!(
+            params.path,
+            Some(image.canonicalize().unwrap().to_string_lossy().into_owned())
+        );
+        assert_eq!(params.view.as_deref(), Some("loupe"));
     }
 
     #[test]

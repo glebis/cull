@@ -1,9 +1,21 @@
 # Open Source Transition Audit
 
-Date: 2026-06-04
+Last reviewed: 2026-07-13
 
 Cull is now released under the Apache License 2.0. This note records the
 transition checklist and the evidence used for the current release decision.
+
+## Current Release Evidence
+
+- v0.3.1 was published from production workflow run `29182947689` as an
+  Apache-2.0 release.
+- The public Apple Silicon DMG and updater archive were signed and notarized;
+  the updater signature, checksums, codesign, Gatekeeper assessment, and
+  notarization staple were verified before publication.
+- Release gates include `npm run audit:licenses` and the supply-chain audit, and
+  Homebrew promotion consumes the exact verified public DMG SHA-256.
+- Cull's Apache-2.0 grant still excludes third-party model weights, fonts,
+  artwork, and other assets except where their own recorded licences allow use.
 
 ## License Metadata
 

@@ -238,12 +238,15 @@ describe('Tauri command contract', () => {
             'app-curation',
             'app-export-publishing',
             'app-file-access',
+            'app-photos',
             'app-read',
             'app-ui',
         ]);
 
         for (const capability of appCapabilities) {
-            expect(capability.windows).toEqual(['main', 'window-*']);
+            expect(capability.windows).toEqual(
+                capability.identifier === 'app-photos' ? ['main'] : ['main', 'window-*'],
+            );
         }
     });
 

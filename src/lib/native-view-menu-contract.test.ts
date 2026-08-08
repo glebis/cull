@@ -18,6 +18,7 @@ const customViewMenuActions = [
     'view_publish',
     'view_export',
     'toggle_sidebar',
+    'view_show_rejected',
     'view_loupe_histogram',
     'view_preview_display',
     'preview_display_move_monitor',
@@ -65,10 +66,14 @@ describe('native window reveal contract', () => {
         const lib = source('src-tauri/src/lib.rs');
         const tray = source('src-tauri/src/tray.rs');
 
-        expect(lib).toContain('pub(crate) fn reveal_main_window(app: &AppHandle)');
+        expect(lib).toMatch(/pub\(crate\) fn reveal_main_window(<R: tauri::Runtime>)?\(app: &AppHandle(<R>)?\)/);
+        // The reveal body lives in try_reveal_main_window, which reports why a
+        // reveal failed so the MCP display tools can surface it; reveal_main_window
+        // is the infallible wrapper for callers with nowhere to report.
         expect(lib).toMatch(
-            /fn reveal_main_window[\s\S]*window\.show\(\)[\s\S]*window\.unminimize\(\)[\s\S]*window\.set_focus\(\)/
+            /fn try_reveal_main_window[\s\S]*window\s*\.show\(\)[\s\S]*window\.unminimize\(\)[\s\S]*window\.set_focus\(\)/
         );
+        expect(lib).toMatch(/fn reveal_main_window[\s\S]*try_reveal_main_window\(app\)/);
         expect(lib).toContain('tauri::RunEvent::Reopen');
         expect(lib).toContain('reveal_main_window(app);');
         expect(lib).toContain('tauri::RunEvent::Opened');
@@ -99,7 +104,7 @@ describe('native View menu contract', () => {
         expect(nativeMenu).toContain('preview_display_always_on_top: bool');
         expect(nativeMenu).toContain('state.preview_display_always_on_top');
         expect(frontendMenu).toContain("case 'preview_display_always_on_top'");
-        expect(frontendMenu).toContain('setPreviewDisplayAlwaysOnTopNative');
+        expect(source('src/lib/preview-display-actions.ts')).toContain('setPreviewDisplayAlwaysOnTopNative');
         expect(frontendMenu).toContain('previewDisplayAlwaysOnTop.subscribe(queueMenuStateUpdate)');
         expect(api).toContain("invoke<boolean>('set_preview_display_always_on_top'");
         expect(store).toContain('previewDisplayAlwaysOnTop');

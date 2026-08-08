@@ -1,11 +1,13 @@
 import { get } from 'svelte/store';
 import {
     viewMode, thumbnailSize, gridPreset, gridGap, gridScrollTop,
-    sidebarVisible, zenMode, activeFolder, activeCollection,
+    sidebarVisible, zenMode, showRejected, activeFolder, activeCollection,
     activeSmartCollection, activeDetectedClass, minSizeFilter, loupeScale, loupePanX, loupePanY,
     lineageLayout, showDetectionBoxes, nsfwMode, embeddingViewState,
     focusedIndex, images,
-    resetLoupeTransform,
+    pinnedCollection, pinnedCollections,
+    expandedFolders, sidebarSectionsCollapsed,
+    resetLoupeTransform, setGridThumbnailSize,
     type ViewMode, type LineageLayout, type NsfwMode, type EmbeddingViewState,
 } from './stores';
 
@@ -23,6 +25,7 @@ export interface PersistedState {
     loadedImageCount?: number;
     sidebarVisible: boolean;
     zenMode: boolean;
+    showRejected?: boolean;
     activeFolder: string | null;
     activeCollection: string | null;
     activeSmartCollectionId: string | null;
@@ -35,6 +38,12 @@ export interface PersistedState {
     showDetectionBoxes: boolean;
     nsfwMode: NsfwMode;
     embeddingViewState: EmbeddingViewState;
+    // Sidebar state. All optional so a state blob written before these fields
+    // existed still restores under the same SCHEMA_VERSION.
+    pinnedCollectionIds?: string[];
+    pinnedCollectionId?: string | null;
+    expandedFolders?: string[];
+    sidebarSectionsCollapsed?: string[];
 }
 
 export function saveAppState(): void {
@@ -49,6 +58,7 @@ export function saveAppState(): void {
         loadedImageCount: get(images).length,
         sidebarVisible: get(sidebarVisible),
         zenMode: get(zenMode),
+        showRejected: get(showRejected),
         activeFolder: get(activeFolder),
         activeCollection: get(activeCollection),
         activeSmartCollectionId: get(activeSmartCollection)?.id ?? null,
@@ -61,6 +71,10 @@ export function saveAppState(): void {
         showDetectionBoxes: get(showDetectionBoxes),
         nsfwMode: get(nsfwMode),
         embeddingViewState: get(embeddingViewState),
+        pinnedCollectionIds: get(pinnedCollections),
+        pinnedCollectionId: get(pinnedCollection),
+        expandedFolders: [...get(expandedFolders)],
+        sidebarSectionsCollapsed: [...get(sidebarSectionsCollapsed)],
     };
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -76,11 +90,10 @@ export function restoreAppStateBeforeImages(): PersistedState | null {
         const state: PersistedState = JSON.parse(raw);
         if (state._version !== SCHEMA_VERSION) return null;
 
-        thumbnailSize.set(state.thumbnailSize);
-        gridPreset.set(state.gridPreset);
-        gridGap.set(state.gridGap);
+        setGridThumbnailSize(state.thumbnailSize);
         sidebarVisible.set(state.sidebarVisible);
         zenMode.set(state.zenMode);
+        showRejected.set(state.showRejected ?? false);
         activeFolder.set(state.activeFolder);
         activeCollection.set(state.activeCollection);
         activeDetectedClass.set(state.activeDetectedClass ?? null);
@@ -94,6 +107,12 @@ export function restoreAppStateBeforeImages(): PersistedState | null {
         showDetectionBoxes.set(state.showDetectionBoxes);
         nsfwMode.set(state.nsfwMode);
         embeddingViewState.set(state.embeddingViewState);
+        // Pins are restored optimistically; Sidebar prunes ids whose collection
+        // no longer exists once the collection list arrives.
+        pinnedCollections.set(state.pinnedCollectionIds ?? []);
+        pinnedCollection.set(state.pinnedCollectionId ?? null);
+        expandedFolders.set(new Set(state.expandedFolders ?? []));
+        sidebarSectionsCollapsed.set(new Set(state.sidebarSectionsCollapsed ?? []));
         return state;
     } catch {
         return null;

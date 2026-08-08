@@ -73,7 +73,7 @@
 
 	.label {
 		font-size: 14px;
-		color: #7a7fa0;
+		color: var(--text-secondary);
 		margin-bottom: 8px;
 	}
 
@@ -94,7 +94,7 @@
 
 	.caption {
 		font-size: 14px;
-		color: #7a7fa0;
+		color: var(--text-secondary);
 		margin-top: auto;
 		padding-top: 24px;
 	}
@@ -111,6 +111,6 @@
 		max-height: 80%;
 		object-fit: cover;
 		border-radius: 4px;
-		border: 1px solid #1a1a2e;
+		border: 1px solid var(--border);
 	}
 </style>

@@ -17,6 +17,7 @@ commands.allow = [
   "regenerate_single_thumbnail",
   "regenerate_thumbnails",
   "regenerate_thumbnails_by_ids",
+  "rename_folder",
   "rename_image",
   "rescan_sources",
   "rotate_image",

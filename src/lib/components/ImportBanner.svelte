@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { importBatchFilter, importBatchImageIds, pinnedCollection, collections, activeCollection, activeFolder, activeSmartCollection, activeDetectedClass, showToast, requestTextInput } from '$lib/stores';
+    import { importBatchFilter, importBatchImageIds, pinnedCollection, collections, activeCollection, activeFolder, activeSmartCollection, activeDetectedClass, showToast, requestTextInput, showRejected } from '$lib/stores';
     import { createCollection, addToCollection, listCollections, getBatchImages, getGenerationRun } from '$lib/api';
     import { invalidateImageCache, loadAllImages } from '$lib/image-loading';
     import { generateImportCollectionName, type ImportCollectionNameItem } from '$lib/collection-name';
@@ -29,7 +29,7 @@
 
         try {
             const collectionId = await createCollection(name.trim());
-            const ids = get(importBatchImageIds);
+            const ids = (await getBatchImages(batchId, true)).map(img => img.image.id);
             await addToCollection(collectionId, ids);
             invalidateImageCache();
 
@@ -41,7 +41,7 @@
             activeDetectedClass.set(null);
 
             // Refresh collections list
-            const c = await listCollections();
+            const c = await listCollections($showRejected);
             collections.set(c);
 
             importBatchFilter.set(null);
@@ -57,7 +57,7 @@
     async function buildDefaultCollectionName(batchId: string): Promise<string> {
         const now = new Date();
         try {
-            const batchImages = await getBatchImages(batchId);
+            const batchImages = await getBatchImages(batchId, true);
             const generationPrompts = new Map<string, string | null>();
             const promptCandidates = batchImages
                 .filter(img => !img.image.ai_prompt)
@@ -100,30 +100,30 @@
         align-items: center;
         gap: 12px;
         padding: 6px 16px;
-        background: var(--bg-elevated, #2a2a3e);
-        border-bottom: 1px solid var(--border, #333);
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
         font-size: 13px;
         z-index: 10;
     }
     .count {
-        color: var(--accent, #8cc63f);
+        color: var(--green);
         font-weight: 600;
     }
     .banner-action {
         background: none;
-        border: 1px solid var(--border, #444);
-        color: var(--text-secondary, #aaa);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
         padding: 3px 10px;
         border-radius: 4px;
         cursor: pointer;
         font-size: 12px;
     }
     .banner-action:hover {
-        background: var(--bg-hover, #333);
-        color: var(--text-primary, #eee);
+        background: var(--border);
+        color: var(--text);
     }
     .banner-action.primary {
-        border-color: var(--accent, #8cc63f);
-        color: var(--accent, #8cc63f);
+        border-color: var(--green);
+        color: var(--green);
     }
 </style>

@@ -30,7 +30,8 @@ describe('Preview Display monitor placement contract', () => {
         expect(menu).toContain('"preview_display_fullscreen"');
         expect(frontendMenu).toContain("case 'preview_display_move_monitor'");
         expect(frontendMenu).toContain("case 'preview_display_fullscreen'");
-        expect(frontendMenu).toContain('listPreviewDisplayMonitors');
-        expect(frontendMenu).toContain('placePreviewDisplay');
+        const previewActions = source('src/lib/preview-display-actions.ts');
+        expect(previewActions).toContain('listPreviewDisplayMonitors');
+        expect(previewActions).toContain('placePreviewDisplay');
     });
 });

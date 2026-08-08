@@ -1,5 +1,8 @@
 use std::path::Path;
 
+#[cfg(target_os = "macos")]
+const PLATFORM_DECODE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 #[derive(Debug)]
 pub struct DecodedImage {
     pub image: image::DynamicImage,
@@ -54,34 +57,98 @@ fn decode_with_platform(path: &Path, ext: &str) -> Result<image::DynamicImage, S
         return Err(format!("No platform decoder configured for .{} files", ext));
     }
 
+    decode_with_sips(path, None)
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn decode_pdf_preview_with_platform(
+    path: &Path,
+    max_dimension: u32,
+) -> Result<image::DynamicImage, String> {
+    decode_with_sips(path, Some(max_dimension)).map(flatten_transparency_onto_white)
+}
+
+#[cfg(target_os = "macos")]
+fn flatten_transparency_onto_white(image: image::DynamicImage) -> image::DynamicImage {
+    let rgba = image.into_rgba8();
+    let flattened = image::RgbImage::from_fn(rgba.width(), rgba.height(), |x, y| {
+        let [red, green, blue, alpha] = rgba.get_pixel(x, y).0;
+        let alpha = u16::from(alpha);
+        let inverse_alpha = 255 - alpha;
+        let flatten =
+            |channel: u8| ((u16::from(channel) * alpha + 255 * inverse_alpha + 127) / 255) as u8;
+
+        image::Rgb([flatten(red), flatten(green), flatten(blue)])
+    });
+
+    image::DynamicImage::ImageRgb8(flattened)
+}
+
+#[cfg(target_os = "macos")]
+fn decode_with_sips(
+    path: &Path,
+    max_dimension: Option<u32>,
+) -> Result<image::DynamicImage, String> {
+    use std::process::Stdio;
+
     let temp = tempfile::Builder::new()
         .prefix("cull-decode-")
         .suffix(".png")
         .tempfile()
         .map_err(|e| format!("Failed to create decode temp file: {}", e))?;
 
-    let output = std::process::Command::new("/usr/bin/sips")
-        .arg("-s")
-        .arg("format")
-        .arg("png")
+    let mut command = std::process::Command::new("/usr/bin/sips");
+    command.arg("-s").arg("format").arg("png");
+    if let Some(max_dimension) = max_dimension {
+        command
+            .arg("--resampleHeightWidthMax")
+            .arg(max_dimension.to_string());
+    }
+    let mut child = command
         .arg(path)
         .arg("--out")
         .arg(temp.path())
-        .output()
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
         .map_err(|e| format!("Failed to run macOS ImageIO decoder: {}", e))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let detail = if stderr.trim().is_empty() {
-            stdout.trim()
-        } else {
-            stderr.trim()
-        };
-        return Err(format!("sips exited with {}: {}", output.status, detail));
+    let status = wait_for_child_with_timeout(&mut child, PLATFORM_DECODE_TIMEOUT)?;
+    if !status.success() {
+        return Err(format!("sips exited with {}", status));
     }
 
     image::open(temp.path()).map_err(|e| format!("sips produced unreadable PNG: {}", e))
+}
+
+#[cfg(target_os = "macos")]
+fn wait_for_child_with_timeout(
+    child: &mut std::process::Child,
+    timeout: std::time::Duration,
+) -> Result<std::process::ExitStatus, String> {
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) if started.elapsed() < timeout => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "macOS ImageIO decoder timed out after {} seconds",
+                    timeout.as_secs_f32()
+                ));
+            }
+            Err(error) => {
+                return Err(format!(
+                    "Failed waiting for macOS ImageIO decoder: {}",
+                    error
+                ))
+            }
+        }
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -122,5 +189,51 @@ mod tests {
         assert_eq!(decoded.image.width(), 64);
         assert_eq!(decoded.image.height(), 48);
         assert!(decoded.raw_metadata.is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn decodes_a_real_pdf_first_page_with_the_bounded_macos_fallback() {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pdf/sample_two_page.pdf");
+
+        let preview = decode_pdf_preview_with_platform(&path, 1200).unwrap();
+
+        assert!(preview.width() > 0);
+        assert!(preview.height() > preview.width());
+        assert!(preview.width().max(preview.height()) <= 1200);
+
+        // ImageIO represents the white PDF page as transparent pixels with
+        // black RGB values. Dropping that alpha while encoding JPEG turns the
+        // entire thumbnail black, so the platform decoder must flatten onto a
+        // white background before returning the preview.
+        let rgb = preview.to_rgb8();
+        let pixel_count = u64::from(rgb.width()) * u64::from(rgb.height());
+        let luminance_sum: u64 = rgb
+            .pixels()
+            .map(|pixel| pixel.0.into_iter().map(u64::from).sum::<u64>() / 3)
+            .sum();
+
+        assert!(luminance_sum / pixel_count > 200);
+        assert!(rgb
+            .pixels()
+            .any(|pixel| pixel.0.iter().all(|value| *value < 64)));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn platform_decoder_terminates_a_child_that_exceeds_its_deadline() {
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("5")
+            .spawn()
+            .unwrap();
+        let started = std::time::Instant::now();
+
+        let result = wait_for_child_with_timeout(&mut child, std::time::Duration::from_millis(25));
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("timed out"));
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        assert!(child.try_wait().unwrap().is_some());
     }
 }

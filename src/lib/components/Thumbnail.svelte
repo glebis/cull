@@ -59,13 +59,16 @@
     let imgError = $state(false);
     let regenerating = $state(false);
     let pdfPageCount = $state<number | null>(null);
-    let pageLookupSeq = $state(0);
+    // Request identity is deliberately non-reactive. Making this a rune causes
+    // the effect below to subscribe to its own increment and rerun forever.
+    let pageLookupSeq = 0;
     const isPdf = $derived(item.image.format.toLowerCase() === 'pdf');
 
     $effect(() => {
         const imageId = item.image.id;
 
         if (!isPdf) {
+            pageLookupSeq += 1;
             pdfPageCount = null;
             return;
         }
@@ -138,6 +141,7 @@
 
 <div
     class="thumb {borderClass}"
+    class:micro={size < 40}
     style="width: {size}px; height: {size}px;"
     role="gridcell"
     tabindex={focused ? 0 : -1}
@@ -236,6 +240,13 @@
         border-color: var(--blue);
         box-shadow: 0 0 0 1px var(--green);
     }
+    .thumb.micro { border-width: 1px; }
+    .thumb.micro .rating,
+    .thumb.micro .source-tag,
+    .thumb.micro .pdf-badge,
+    .thumb.micro .badge,
+    .thumb.micro .missing-badge,
+    .thumb.micro .fallback-text { display: none; }
     img {
         max-width: 100%;
         max-height: 100%;
@@ -283,7 +294,7 @@
         padding: 1px 5px;
         border-radius: 3px;
         background: rgba(0, 0, 0, 0.65);
-        color: var(--purple, #bb9af7);
+        color: var(--purple);
         backdrop-filter: blur(4px);
         line-height: 1.4;
     }
@@ -346,8 +357,8 @@
     .missing-badge {
         font-size: 9px;
         font-weight: 600;
-        color: #f87171;
-        background: rgba(127, 29, 29, 0.6);
+        color: var(--red);
+        background: color-mix(in srgb, var(--red) 60%, transparent);
         padding: 1px 6px;
         border-radius: 3px;
     }

@@ -18,7 +18,7 @@ describe('Preview Display native window contract', () => {
         // Cmd+Shift+D ("Display") — Cmd+Shift+P is reserved for the command palette alias.
         expect(menu).toContain('Some::<&str>("CmdOrCtrl+Shift+D")');
         expect(menu).toMatch(/"view_preview_display"[\s\S]*app\.emit\("menu-action", id\)/);
-        expect(frontendMenu).toContain('openPreviewDisplay');
+        expect(frontendMenu + source('src/lib/preview-display-actions.ts')).toContain('openPreviewDisplay');
         expect(frontendMenu).toContain("case 'view_preview_display'");
     });
 

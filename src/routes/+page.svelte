@@ -27,6 +27,7 @@
     import UndoHistoryPanel from '$lib/components/UndoHistoryPanel.svelte';
     import AboutDialog from '$lib/components/AboutDialog.svelte';
     import AgentSkillsDialog from '$lib/components/AgentSkillsDialog.svelte';
+    import ApplePhotosCatalogDialog from '$lib/components/ApplePhotosCatalogDialog.svelte';
     import AgentProposalDock from '$lib/components/AgentProposalDock.svelte';
     import ActionProposalReviewDialog from '$lib/components/ActionProposalReviewDialog.svelte';
     import JobProgressPanel from '$lib/components/JobProgressPanel.svelte';
@@ -37,8 +38,8 @@
     import GenerationResultsStrip from '$lib/components/GenerationResultsStrip.svelte';
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, searchOpen, showMissing, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel, agentPanelPinned, agentPanelVisible, agentVisualLevel, activeAgentProposalId, activeAgentSelectionPresetId, cycleAgentVisualLevel } from '$lib/stores';
-    import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listCollections, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, cancelClaudeAgentChatTurn, undo, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ClaudeAgentStreamEvent, type ImageWithFile, type PreviewState } from '$lib/api';
+    import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, applePhotosCatalogOpen, searchOpen, showMissing, showRejected, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel, agentPanelPinned, agentPanelVisible, agentVisualLevel, activeAgentProposalId, activeAgentSelectionPresetId, undoHistoryOpen, cycleAgentVisualLevel } from '$lib/stores';
+    import { trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listCollections, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, failAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, cancelClaudeAgentChatTurn, undo, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ClaudeAgentStreamEvent, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
     import { loadInstalledPlugins, activateBundledPlugins } from '$lib/plugins/loader';
@@ -73,10 +74,20 @@
     import { effectiveAgentVisualLevel } from '$lib/agent-visual-context';
     import { listen } from '@tauri-apps/api/event';
     import { onMount } from 'svelte';
+    import { requestTrashImages, resolveTrashRequestIds, TRASH_IMAGES_REQUESTED_EVENT, type TrashImagesRequestDetail } from '$lib/trash-actions';
 
     let dragOver = $state(false);
     let trashConfirmVisible = $state(false);
     let trashConfirmFileName = $state('');
+    let pendingTrashIds = $state<string[]>([]);
+    let pendingTrashProposal = $state<{ proposalId: string; approvedImageIds: string[] } | null>(null);
+    let pendingTrashProposalCompletion = $state<{
+        proposalId: string;
+        approvedImageIds: string[];
+        resultJson: string;
+    } | null>(null);
+    let trashProposalCompletionInFlight = $state(false);
+    let trashInFlight = $state(false);
     let skipTrashConfirmSession = $state(false);
     const previewDisplayWindow = isPreviewDisplayRoute();
     let previewSyncState = $state<PreviewState | null>(null);
@@ -125,7 +136,7 @@
 
     async function restoreSmartCollectionScope(restored: PersistedState | null) {
         if (!restored?.activeSmartCollectionId) return;
-        const restoredSmartCollections = await listSmartCollections();
+        const restoredSmartCollections = await listSmartCollections($showRejected);
         smartCollections.set(restoredSmartCollections);
         const active = restoredSmartCollections.find(sc => sc.id === restored.activeSmartCollectionId);
         if (!active) return;
@@ -147,53 +158,211 @@
 
     async function refreshCollectionCountsAfterRemoval(context: string) {
         try {
-            collections.set(await listCollections());
+            collections.set(await listCollections($showRejected));
         } catch (e) {
             console.error(`Failed to refresh collection counts after ${context}:`, e);
         }
     }
 
-    async function executeTrash() {
+    function defaultTrashIds(): string[] {
         const imgs = $images;
         const idx = $focusedIndex;
         const img = imgs[idx];
-        if (!img) return;
+        if (!img) return [];
+        if ($selectedIds.has(img.image.id)) {
+            return imgs
+                .map(item => item.image.id)
+                .filter(imageId => $selectedIds.has(imageId));
+        }
+        return [img.image.id];
+    }
+
+    async function executeTrash() {
+        const ids = [...pendingTrashIds];
+        if (ids.length === 0) return;
+        const proposalContext = pendingTrashProposal;
+        pendingTrashIds = [];
+        pendingTrashProposal = null;
+        trashInFlight = true;
+        const imgs = $images;
+        const idx = $focusedIndex;
         const nextFocusIndex = nextFocusIndexAfterFocusedRemoval(idx, imgs.length);
-        const count = await trashImages([img.image.id]);
-        if (count > 0) {
-            const name = img.path.split('/').pop() ?? '';
-            showToast(`Moved to Trash`, { detail: name, type: 'info', duration: 5000 });
+        let result: Awaited<ReturnType<typeof trashImagesDetailed>>;
+        try {
+            result = await trashImagesDetailed(ids);
+        } catch (error) {
+            showToast('Trash failed', { detail: String(error), type: 'error', duration: 8000 });
+            if (proposalContext) reviewProposalId = proposalContext.proposalId;
+            return;
+        } finally {
+            trashInFlight = false;
+        }
+        const trashed = new Set(result.results
+            .filter(item => item.status === 'trashed')
+            .map(item => item.image_id));
+        const warning = result.results.find(item => item.status === 'trashed' && item.error)?.error;
+        if (trashed.size > 0) {
+            const detail = warning ?? (result.failed > 0
+                ? `${result.succeeded} moved, ${result.failed} failed`
+                : result.succeeded === 1
+                    ? imgs.find(item => trashed.has(item.image.id))?.path.split('/').pop() ?? '1 image'
+                    : `${result.succeeded} images`);
+            if (!proposalContext) {
+                showToast('Moved to Trash', {
+                    detail,
+                    type: result.failed > 0 || warning ? 'warning' : 'info',
+                    duration: result.failed > 0 || warning ? 8000 : 5000,
+                    actions: [{
+                        label: 'Undo in Action History',
+                        onclick: () => undoHistoryOpen.set(true),
+                    }],
+                });
+            }
             invalidateImageCache();
-            removeVisibleImageById(img.image.id, nextFocusIndex);
+            images.update(list => list.filter(item => !trashed.has(item.image.id)));
+            focusedIndex.set(clampFocusIndexToList(nextFocusIndex, $images.length));
+            selectedIds.update(selected => {
+                const next = new Set(selected);
+                for (const imageId of trashed) next.delete(imageId);
+                return next;
+            });
             refreshImageCount().catch(e => console.error('Failed to refresh image count after trash:', e));
             refreshCollectionCountsAfterRemoval('trash');
+        } else if (result.failed > 0 && !proposalContext) {
+            const firstError = result.results.find(item => item.error)?.error;
+            showToast('Trash failed', {
+                detail: firstError ?? `${result.failed} images could not be moved`,
+                type: 'error',
+                duration: 8000,
+            });
+        }
+        if (proposalContext) {
+            await finalizeTrashProposal({
+                ...proposalContext,
+                resultJson: JSON.stringify(result),
+            }, result);
         }
     }
 
-    async function handleTrash() {
-        const img = $images[$focusedIndex];
-        if (!img) return;
+    async function finalizeTrashProposal(
+        completion: { proposalId: string; approvedImageIds: string[]; resultJson: string },
+        result?: Awaited<ReturnType<typeof trashImagesDetailed>>,
+    ) {
+        if (trashProposalCompletionInFlight) return;
+        trashProposalCompletionInFlight = true;
+        try {
+            try {
+                await applyActionProposal(
+                    completion.proposalId,
+                    completion.approvedImageIds,
+                    completion.resultJson,
+                );
+            } catch (error) {
+                pendingTrashProposalCompletion = completion;
+                showToast('Images moved, but proposal update failed', {
+                    detail: String(error),
+                    type: 'error',
+                    duration: 10000,
+                    actions: [{
+                        label: 'Retry update',
+                        onclick: () => { void retryTrashProposalCompletion(); },
+                    }],
+                });
+                return;
+            }
+            pendingTrashProposalCompletion = null;
+            if (result) {
+                showToast('Trash proposal applied', {
+                    detail: `${result.succeeded} moved to Trash, ${result.failed} failed`,
+                    type: result.failed > 0 ? 'warning' : 'info',
+                    duration: 6000,
+                    actions: [
+                        { label: 'Undo', onclick: () => { void undoLastTrashProposal(); } },
+                    ],
+                });
+            }
+            reviewProposalId = null;
+            activeAgentProposalId.set(null);
+            try {
+                await refreshAgentPanelData();
+            } catch (error) {
+                console.error('Failed to refresh agent proposals after Trash:', error);
+                showToast('Proposal applied; refresh failed', {
+                    detail: String(error),
+                    type: 'warning',
+                    duration: 8000,
+                });
+            }
+        } finally {
+            trashProposalCompletionInFlight = false;
+        }
+    }
+
+    async function retryTrashProposalCompletion() {
+        const completion = pendingTrashProposalCompletion;
+        if (!completion) return;
+        await finalizeTrashProposal(completion);
+    }
+
+    async function handleTrashRequest(event: Event) {
+        if (trashInFlight || pendingTrashIds.length > 0 || trashConfirmVisible) {
+            showToast('Trash is already in progress', { type: 'warning' });
+            return;
+        }
+        const requestedIds = event instanceof CustomEvent
+            ? (event as CustomEvent<TrashImagesRequestDetail>).detail?.imageIds ?? []
+            : [];
+        const ids = resolveTrashRequestIds(requestedIds, defaultTrashIds());
+        if (ids.length === 0) return;
+        pendingTrashIds = [...new Set(ids)];
 
         if (skipTrashConfirmSession) {
             await executeTrash();
             return;
         }
 
-        const alwaysSkip = await getAppSetting('skip_trash_confirm');
+        let alwaysSkip: string | null = null;
+        try {
+            alwaysSkip = await getAppSetting('skip_trash_confirm');
+        } catch (error) {
+            console.warn('Could not read Trash confirmation setting:', error);
+        }
         if (alwaysSkip === 'true') {
             await executeTrash();
             return;
         }
 
-        trashConfirmFileName = img.path.split('/').pop() ?? '';
+        trashConfirmFileName = pendingTrashIds.length === 1
+            ? $images.find(item => item.image.id === pendingTrashIds[0])?.path.split('/').pop() ?? '1 image'
+            : `${pendingTrashIds.length} images`;
         trashConfirmVisible = true;
     }
 
     async function handleTrashConfirm(suppress: 'none' | 'session' | 'always') {
         trashConfirmVisible = false;
         if (suppress === 'session') skipTrashConfirmSession = true;
-        if (suppress === 'always') await setAppSetting('skip_trash_confirm', 'true');
+        if (suppress === 'always') {
+            try {
+                await setAppSetting('skip_trash_confirm', 'true');
+            } catch (error) {
+                console.error('Could not save Trash confirmation preference:', error);
+                showToast('Could not save Trash preference', {
+                    detail: 'This Trash action will still continue.',
+                    type: 'warning',
+                    duration: 6000,
+                });
+            }
+        }
         await executeTrash();
+    }
+
+    function cancelTrashConfirmation() {
+        trashConfirmVisible = false;
+        pendingTrashIds = [];
+        if (pendingTrashProposal) {
+            reviewProposalId = pendingTrashProposal.proposalId;
+            pendingTrashProposal = null;
+        }
     }
 
     async function handlePermanentDelete() {
@@ -387,6 +556,15 @@
             });
         } catch (e) {
             showToast('Agent snapshot failed', { detail: String(e), type: 'error', duration: 8000 });
+            // Tell the waiting caller why. Swallowing this turned a clear error
+            // into a 15-second "timed out waiting for the visible app".
+            if (options.requestId) {
+                try {
+                    await failAgentViewSnapshot(options.requestId, String(e));
+                } catch (reportError) {
+                    console.error('Failed to report agent snapshot failure:', reportError);
+                }
+            }
         }
     }
 
@@ -674,21 +852,24 @@
         const proposal = agentProposals.find(item => item.id === proposalId);
         if (!proposal) return;
         if (proposal.kind === 'trash_images') {
-            const trashResult = await trashImagesDetailed(approvedImageIds);
-            await applyActionProposal(proposalId, approvedImageIds, JSON.stringify(trashResult));
-            const trashed = new Set(trashResult.results.filter(item => item.status === 'trashed').map(item => item.image_id));
-            images.update(list => list.filter(item => !trashed.has(item.image.id)));
-            invalidateImageCache();
-            refreshImageCount().catch(e => console.error('Failed to refresh image count after proposal trash:', e));
-            refreshCollectionCountsAfterRemoval('proposal trash');
-            showToast('Trash proposal applied', {
-                detail: `${trashResult.succeeded} moved to Trash, ${trashResult.failed} failed`,
-                type: trashResult.failed > 0 ? 'warning' : 'info',
-                duration: 6000,
-                actions: [
-                    { label: 'Undo', onclick: () => { void undoLastTrashProposal(); } },
-                ],
-            });
+            if (
+                trashInFlight
+                || pendingTrashIds.length > 0
+                || trashConfirmVisible
+                || pendingTrashProposalCompletion
+                || trashProposalCompletionInFlight
+            ) {
+                showToast('Trash is already in progress', { type: 'warning' });
+                return;
+            }
+            if (approvedImageIds.length === 0) {
+                showToast('No images approved for Trash', { type: 'warning' });
+                return;
+            }
+            pendingTrashProposal = { proposalId, approvedImageIds: [...approvedImageIds] };
+            reviewProposalId = null;
+            requestTrashImages(approvedImageIds);
+            return;
         } else {
             const visibleIds = new Set($images.map(item => item.image.id));
             const visibleApprovedIds = approvedImageIds.filter(id => visibleIds.has(id));
@@ -805,17 +986,25 @@
                 console.error('Library health check failed:', e);
             }
         };
-        init().catch(e => {
+        const initPromise = init();
+        initPromise.catch(e => {
             console.error('Failed to initialize app:', e);
             showToast('App initialization failed', { detail: String(e), type: 'error', duration: 10000 });
         });
+        if (import.meta.env.CULL_NATIVE_INTERACTION_SMOKE) {
+            initPromise.finally(() => {
+                import('$lib/native-interaction-smoke')
+                    .then(({ runNativeInteractionSmoke }) => runNativeInteractionSmoke())
+                    .catch(e => console.error('[native-interaction-smoke] failed to start:', e));
+            }).catch(() => {});
+        }
         initMenu().catch(e => console.error('Failed to init menu:', e));
 
         const dragUnlisten = listen<boolean>('drag-hover', (event) => {
             dragOver = event.payload;
         });
 
-        window.addEventListener('trash-focused-image', handleTrash);
+        window.addEventListener(TRASH_IMAGES_REQUESTED_EVENT, handleTrashRequest);
         window.addEventListener('delete-focused-image', handlePermanentDelete);
         const handleReloadImages = () => loadImages({ resetFocus: false, force: true, invalidateCache: true }).catch(e => console.error('Failed to reload:', e));
         window.addEventListener('reload-images', handleReloadImages);
@@ -912,7 +1101,7 @@
             panicUnlisten.then(fn => fn());
             taskFailUnlisten.then(fn => fn());
             cloudUnlisten.then(fn => fn());
-            window.removeEventListener('trash-focused-image', handleTrash);
+            window.removeEventListener(TRASH_IMAGES_REQUESTED_EVENT, handleTrashRequest);
             window.removeEventListener('delete-focused-image', handlePermanentDelete);
             window.removeEventListener('reload-images', handleReloadImages);
             window.removeEventListener('create-agent-test-proposal', handleCreateAgentTestProposal);
@@ -1032,11 +1221,15 @@
         <AgentSkillsDialog onclose={() => agentSkillsOpen.set(false)} />
     {/if}
 
+    {#if $applePhotosCatalogOpen}
+        <ApplePhotosCatalogDialog onclose={() => applePhotosCatalogOpen.set(false)} />
+    {/if}
+
     <TrashConfirmDialog
         visible={trashConfirmVisible}
         fileName={trashConfirmFileName}
         onconfirm={handleTrashConfirm}
-        oncancel={() => trashConfirmVisible = false}
+        oncancel={cancelTrashConfirmation}
     />
 
     <ActionProposalReviewDialog

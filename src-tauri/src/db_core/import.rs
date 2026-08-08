@@ -36,6 +36,21 @@ pub fn sync_file(
     file_path: &Path,
     app_data_dir: &Path,
 ) -> Result<SyncOutcome, String> {
+    sync_file_cancellable(db, file_path, app_data_dir, &|| false)
+}
+
+pub fn sync_file_cancellable<C>(
+    db: &Database,
+    file_path: &Path,
+    app_data_dir: &Path,
+    should_cancel: &C,
+) -> Result<SyncOutcome, String>
+where
+    C: Fn() -> bool + ?Sized,
+{
+    if should_cancel() {
+        return Err("Import cancelled".to_string());
+    }
     let ext = file_path
         .extension()
         .and_then(|e| e.to_str())
@@ -92,7 +107,7 @@ pub fn sync_file(
             return Ok(SyncOutcome::Restored);
         }
 
-        let hash = hash_file(file_path).map_err(|e| format!("Read error: {}", e))?;
+        let hash = hash_file_cancellable(file_path, should_cancel)?;
 
         if let Some(img) = db.find_by_hash(&hash).map_err(|e| e.to_string())? {
             if img.id == existing_file.image_id {
@@ -105,19 +120,27 @@ pub fn sync_file(
             }
             if can_decode {
                 let _ = db.repoint_image_file(&existing_file.id, &img.id, file_size, &mtime);
+                if should_cancel() {
+                    return Ok(SyncOutcome::ContentChanged { image_id: img.id });
+                }
                 match crate::db_core::image_decode::decode_image(file_path, module_raw) {
                     Ok(decoded) => {
-                        let _ = thumbnails::generate_thumbnail_from_image(
-                            &decoded.image,
-                            app_data_dir,
-                            &img.id,
-                        );
+                        if !should_cancel() {
+                            let _ = thumbnails::generate_thumbnail_from_image(
+                                &decoded.image,
+                                app_data_dir,
+                                &img.id,
+                            );
+                        }
                     }
                     Err(e) => {
                         crate::safe_eprintln!("Thumbnail decode failed for {}: {}", path_str, e)
                     }
                 }
             } else if is_document {
+                if should_cancel() {
+                    return Ok(SyncOutcome::ContentChanged { image_id: img.id });
+                }
                 validate_pdf_import(file_path)?;
                 let _ = db.repoint_image_file(&existing_file.id, &img.id, file_size, &mtime);
                 let _ = thumbnails::generate_document_thumbnail(file_path, app_data_dir, &img.id);
@@ -127,38 +150,37 @@ pub fn sync_file(
         }
 
         // New content: only now read the bytes (source detection / decode need them).
-        let data = fs::read(file_path).map_err(|e| format!("Read error: {}", e))?;
-        let (image_id, decoded) =
-            create_image_record(db, file_path, &hash, &ext, &data, can_decode, module_raw)?;
+        let data = read_file_cancellable(file_path, should_cancel)?;
+        let (image_id, decoded) = create_image_record(
+            db,
+            file_path,
+            &hash,
+            &ext,
+            &data,
+            can_decode,
+            module_raw,
+            should_cancel,
+        )?;
         let _ = db.repoint_image_file(&existing_file.id, &image_id, file_size, &mtime);
         if can_decode {
-            let decoded_dims = decoded
-                .as_ref()
-                .map(|d| (d.image.width(), d.image.height()));
-            if let Some(decoded) = &decoded {
-                let _ = thumbnails::generate_thumbnail_from_image(
-                    &decoded.image,
-                    app_data_dir,
-                    &image_id,
-                );
-                if let Some(metadata) = &decoded.raw_metadata {
-                    if let Ok(meta_json) = serde_json::to_string(metadata) {
-                        let _ = db.update_raw_metadata(&image_id, &meta_json);
-                    }
-                }
-            } else {
-                let _ = thumbnails::generate_thumbnail(file_path, app_data_dir, &image_id);
-            }
-            run_source_detection(db, file_path, &image_id, &ext, decoded_dims);
-            run_sidecar_detection(db, file_path, &image_id);
-            run_perceptual_hash(db, file_path, &image_id, decoded.as_ref().map(|d| &d.image));
-            run_color_metrics(db, file_path, &image_id, decoded.as_ref().map(|d| &d.image));
+            enrich_image(
+                db,
+                file_path,
+                app_data_dir,
+                &image_id,
+                &ext,
+                decoded.as_ref(),
+            );
+        } else if is_document {
+            validate_pdf_import(file_path)?;
+            let _ = thumbnails::generate_document_thumbnail(file_path, app_data_dir, &image_id);
+            persist_pdf_media_metadata(db, file_path, &image_id)?;
         }
         return Ok(SyncOutcome::ContentChanged { image_id });
     }
 
     // New path
-    let hash = hash_file(file_path).map_err(|e| format!("Read error: {}", e))?;
+    let hash = hash_file_cancellable(file_path, should_cancel)?;
 
     if let Some(existing_img) = db.find_by_hash(&hash).map_err(|e| e.to_string())? {
         let file_record = ImageFile {
@@ -178,13 +200,21 @@ pub fn sync_file(
     }
 
     // New content: only now read the bytes (source detection / decode need them).
-    let data = fs::read(file_path).map_err(|e| format!("Read error: {}", e))?;
+    let data = read_file_cancellable(file_path, should_cancel)?;
     if is_document {
         validate_pdf_import(file_path)?;
     }
 
-    let (image_id, decoded) =
-        create_image_record(db, file_path, &hash, &ext, &data, can_decode, module_raw)?;
+    let (image_id, decoded) = create_image_record(
+        db,
+        file_path,
+        &hash,
+        &ext,
+        &data,
+        can_decode,
+        module_raw,
+        should_cancel,
+    )?;
     let file_record = ImageFile {
         id: Uuid::new_v4().to_string(),
         image_id: image_id.clone(),
@@ -198,24 +228,14 @@ pub fn sync_file(
         .map_err(|e| e.to_string())?;
 
     if can_decode {
-        let decoded_dims = decoded
-            .as_ref()
-            .map(|d| (d.image.width(), d.image.height()));
-        if let Some(decoded) = &decoded {
-            let _ =
-                thumbnails::generate_thumbnail_from_image(&decoded.image, app_data_dir, &image_id);
-            if let Some(metadata) = &decoded.raw_metadata {
-                if let Ok(meta_json) = serde_json::to_string(metadata) {
-                    let _ = db.update_raw_metadata(&image_id, &meta_json);
-                }
-            }
-        } else {
-            let _ = thumbnails::generate_thumbnail(file_path, app_data_dir, &image_id);
-        }
-        run_source_detection(db, file_path, &image_id, &ext, decoded_dims);
-        run_sidecar_detection(db, file_path, &image_id);
-        run_perceptual_hash(db, file_path, &image_id, decoded.as_ref().map(|d| &d.image));
-        run_color_metrics(db, file_path, &image_id, decoded.as_ref().map(|d| &d.image));
+        enrich_image(
+            db,
+            file_path,
+            app_data_dir,
+            &image_id,
+            &ext,
+            decoded.as_ref(),
+        );
         Ok(SyncOutcome::NewImport { image_id })
     } else if is_document {
         let _ = thumbnails::generate_document_thumbnail(file_path, app_data_dir, &image_id);
@@ -312,7 +332,19 @@ pub fn import_file(
     file_path: &Path,
     app_data_dir: &Path,
 ) -> Result<Option<String>, String> {
-    match sync_file(db, file_path, app_data_dir)? {
+    import_file_cancellable(db, file_path, app_data_dir, &|| false)
+}
+
+pub fn import_file_cancellable<C>(
+    db: &Database,
+    file_path: &Path,
+    app_data_dir: &Path,
+    should_cancel: &C,
+) -> Result<Option<String>, String>
+where
+    C: Fn() -> bool + ?Sized,
+{
+    match sync_file_cancellable(db, file_path, app_data_dir, should_cancel)? {
         SyncOutcome::NewImport { image_id } | SyncOutcome::ContentChanged { image_id } => {
             Ok(Some(image_id))
         }
@@ -328,7 +360,11 @@ fn create_image_record(
     data: &[u8],
     can_decode: bool,
     module_raw: bool,
+    should_cancel: &(impl Fn() -> bool + ?Sized),
 ) -> Result<(String, Option<crate::db_core::image_decode::DecodedImage>), String> {
+    if should_cancel() {
+        return Err("Import cancelled".to_string());
+    }
     let decoded = if can_decode {
         Some(crate::db_core::image_decode::decode_image(
             file_path, module_raw,
@@ -336,6 +372,9 @@ fn create_image_record(
     } else {
         None
     };
+    if should_cancel() {
+        return Err("Import cancelled".to_string());
+    }
     let (width, height) = if crate::extensions::is_document_extension(ext) {
         (DOCUMENT_PREVIEW_DIMENSION, DOCUMENT_PREVIEW_DIMENSION)
     } else {
@@ -385,19 +424,98 @@ fn import_size_within_limit(size: u64) -> bool {
 
 /// Stream a file through SHA-256 in fixed-size chunks so the whole file never
 /// needs to live in a single `Vec<u8>` just to compute its content hash.
+#[cfg(test)]
 fn hash_file(path: &Path) -> std::io::Result<String> {
+    hash_file_cancellable(path, &|| false).map_err(std::io::Error::other)
+}
+
+fn hash_file_cancellable(
+    path: &Path,
+    should_cancel: &(impl Fn() -> bool + ?Sized),
+) -> Result<String, String> {
     use std::io::Read;
-    let mut file = fs::File::open(path)?;
+    let mut file = fs::File::open(path).map_err(|error| format!("Read error: {error}"))?;
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 64 * 1024];
     loop {
-        let n = file.read(&mut buf)?;
+        if should_cancel() {
+            return Err("Import cancelled".to_string());
+        }
+        let n = file
+            .read(&mut buf)
+            .map_err(|error| format!("Read error: {error}"))?;
         if n == 0 {
             break;
         }
         hasher.update(&buf[..n]);
     }
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn read_file_cancellable(
+    path: &Path,
+    should_cancel: &(impl Fn() -> bool + ?Sized),
+) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut file = fs::File::open(path).map_err(|error| format!("Read error: {error}"))?;
+    let capacity = file
+        .metadata()
+        .ok()
+        .and_then(|metadata| usize::try_from(metadata.len()).ok())
+        .unwrap_or(0);
+    let mut data = Vec::with_capacity(capacity);
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        if should_cancel() {
+            return Err("Import cancelled".to_string());
+        }
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("Read error: {error}"))?;
+        if read == 0 {
+            return Ok(data);
+        }
+        data.extend_from_slice(&buffer[..read]);
+    }
+}
+
+fn enrich_image(
+    db: &Database,
+    file_path: &Path,
+    app_data_dir: &Path,
+    image_id: &str,
+    ext: &str,
+    decoded: Option<&crate::db_core::image_decode::DecodedImage>,
+) {
+    // Once the image/file rows are committed, finish this image's enrichment as
+    // one logical unit. Cancellation is observed before that commit and again
+    // before the next file, avoiding a permanently half-enriched unchanged row.
+    if let Some(decoded) = decoded {
+        let _ = thumbnails::generate_thumbnail_from_image(&decoded.image, app_data_dir, image_id);
+        if let Some(metadata) = &decoded.raw_metadata {
+            if let Ok(meta_json) = serde_json::to_string(metadata) {
+                let _ = db.update_raw_metadata(image_id, &meta_json);
+            }
+        }
+    } else {
+        let _ = thumbnails::generate_thumbnail(file_path, app_data_dir, image_id);
+    }
+
+    let decoded_dims = decoded.map(|decoded| (decoded.image.width(), decoded.image.height()));
+    run_source_detection(db, file_path, image_id, ext, decoded_dims);
+    run_sidecar_detection(db, file_path, image_id);
+    run_perceptual_hash(
+        db,
+        file_path,
+        image_id,
+        decoded.map(|decoded| &decoded.image),
+    );
+    run_color_metrics(
+        db,
+        file_path,
+        image_id,
+        decoded.map(|decoded| &decoded.image),
+    );
 }
 
 fn run_source_detection(
@@ -513,6 +631,7 @@ mod tests {
     use super::*;
     use rusqlite::params;
     use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn raw_module_default_is_enabled() {
@@ -551,6 +670,32 @@ mod tests {
     }
 
     #[test]
+    fn streaming_hash_stops_between_chunks_when_cancelled() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large.bin");
+        std::fs::write(&path, vec![7_u8; 256 * 1024]).unwrap();
+        let checks = AtomicUsize::new(0);
+
+        let result = hash_file_cancellable(&path, &|| checks.fetch_add(1, Ordering::SeqCst) >= 1);
+
+        assert_eq!(result.unwrap_err(), "Import cancelled");
+        assert_eq!(checks.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn buffered_read_stops_between_chunks_when_cancelled() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large.bin");
+        std::fs::write(&path, vec![9_u8; 256 * 1024]).unwrap();
+        let checks = AtomicUsize::new(0);
+
+        let result = read_file_cancellable(&path, &|| checks.fetch_add(1, Ordering::SeqCst) >= 1);
+
+        assert_eq!(result.unwrap_err(), "Import cancelled");
+        assert_eq!(checks.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
     fn pdf_import_returns_image_id() {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::open(&dir.path().join("test.db")).unwrap();
@@ -580,6 +725,34 @@ mod tests {
         let image_id = import_file(&db, &pdf_path, &app_data_dir).unwrap().unwrap();
 
         assert!(crate::db_core::thumbnails::thumbnail_path(&app_data_dir, &image_id).exists());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn changed_pdf_content_generates_a_preview_for_the_replacement_image() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        let app_data_dir = dir.path().join("app-data");
+        let pdf_path = dir.path().join("changing.pdf");
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pdf/sample_two_page.pdf");
+        std::fs::copy(&fixture, &pdf_path).unwrap();
+
+        let original_id = import_file(&db, &pdf_path, &app_data_dir).unwrap().unwrap();
+        let mut changed = std::fs::read(&fixture).unwrap();
+        changed.extend_from_slice(b"\n% changed content\n");
+        std::fs::write(&pdf_path, changed).unwrap();
+
+        let outcome = sync_file(&db, &pdf_path, &app_data_dir).unwrap();
+        let replacement_id = match outcome {
+            SyncOutcome::ContentChanged { image_id } => image_id,
+            other => panic!("expected changed PDF content, got {other:?}"),
+        };
+
+        assert_ne!(replacement_id, original_id);
+        assert!(
+            crate::db_core::thumbnails::thumbnail_path(&app_data_dir, &replacement_id).exists()
+        );
     }
 
     #[test]

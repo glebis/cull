@@ -15,6 +15,7 @@ pub struct ClipEmbeddingRunRequest<'a> {
     pub jobs: Option<&'a JobRegistry>,
     pub job_id: Option<&'a str>,
     pub cancel: Option<&'a CancellationToken>,
+    pub mode: Option<&'a str>,
     pub app: Option<&'a AppHandle>,
     pub image_ids: &'a [String],
 }
@@ -26,6 +27,7 @@ pub struct EmbeddingRunRequest<'a> {
     pub jobs: Option<&'a JobRegistry>,
     pub job_id: Option<&'a str>,
     pub cancel: Option<&'a CancellationToken>,
+    pub mode: Option<&'a str>,
     pub app: Option<&'a AppHandle>,
     pub model_id: &'a str,
     pub image_ids: &'a [String],
@@ -75,6 +77,7 @@ pub fn run_clip_embeddings(
         jobs: request.jobs,
         job_id: request.job_id,
         cancel: request.cancel,
+        mode: request.mode,
         app: request.app,
         model_id: CLIP_MODEL_ID,
         image_ids: request.image_ids,
@@ -141,32 +144,7 @@ pub fn run_embedding_model(request: EmbeddingRunRequest<'_>) -> Result<Embedding
 
     for (i, image_id) in request.image_ids.iter().enumerate() {
         if request.cancel.map(|c| c.is_cancelled()).unwrap_or(false) {
-            let summary = serde_json::json!({
-                "generated": generated,
-                "failed": failed,
-                "total": total,
-                "cancelled_at": i,
-            })
-            .to_string();
-            request
-                .db
-                .update_model_run_terminal(&model_run_id, "cancelled", &summary, None)
-                .map_err(|e| e.to_string())?;
-            emit_model_run_event(
-                request.app,
-                &model_run_id,
-                request.job_id,
-                "cancelled",
-                i as u32,
-                total,
-            );
-            return Ok(EmbeddingRunResult {
-                model_run_id,
-                generated,
-                failed,
-                total,
-                status: "cancelled".to_string(),
-            });
+            return cancel_embedding_run(&request, model_run_id, generated, failed, total, i);
         }
 
         let current = (i + 1) as u32;
@@ -207,6 +185,9 @@ pub fn run_embedding_model(request: EmbeddingRunRequest<'_>) -> Result<Embedding
         };
 
         let ml_path = resolve_image_path_for_ml(&image, request.app_data_dir);
+        if request.cancel.map(|c| c.is_cancelled()).unwrap_or(false) {
+            return cancel_embedding_run(&request, model_run_id, generated, failed, total, i);
+        }
         let embedding = {
             let engine = request.embedding_engine.lock();
             engine.generate_embedding_for(spec.model_id, &ml_path)
@@ -285,6 +266,42 @@ pub fn run_embedding_model(request: EmbeddingRunRequest<'_>) -> Result<Embedding
     })
 }
 
+fn cancel_embedding_run(
+    request: &EmbeddingRunRequest<'_>,
+    model_run_id: String,
+    generated: u32,
+    failed: u32,
+    total: u32,
+    cancelled_at: usize,
+) -> Result<EmbeddingRunResult, String> {
+    let summary = serde_json::json!({
+        "generated": generated,
+        "failed": failed,
+        "total": total,
+        "cancelled_at": cancelled_at,
+    })
+    .to_string();
+    request
+        .db
+        .update_model_run_terminal(&model_run_id, "cancelled", &summary, None)
+        .map_err(|error| error.to_string())?;
+    emit_model_run_event(
+        request.app,
+        &model_run_id,
+        request.job_id,
+        "cancelled",
+        cancelled_at as u32,
+        total,
+    );
+    Ok(EmbeddingRunResult {
+        model_run_id,
+        generated,
+        failed,
+        total,
+        status: "cancelled".to_string(),
+    })
+}
+
 fn load_image(db: &Database, image_id: &str) -> Result<Option<ImageWithFile>, String> {
     let id_refs = vec![image_id];
     let images = db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
@@ -334,14 +351,39 @@ fn update_progress(
     if let Some(app) = request.app {
         let _ = app.emit(
             "embedding-progress",
-            serde_json::json!({
-                "current": current,
-                "total": total,
-                "model": request.model_id,
-                "model_run_id": model_run_id,
-            }),
+            embedding_progress_payload(
+                current,
+                total,
+                request.model_id,
+                model_run_id,
+                request.job_id,
+                request.mode,
+                "running",
+            ),
         );
     }
+}
+
+fn embedding_progress_payload(
+    current: u32,
+    total: u32,
+    model: &str,
+    model_run_id: &str,
+    job_id: Option<&str>,
+    mode: Option<&str>,
+    status: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "job_id": job_id,
+        "kind": "embeddings",
+        "current": current,
+        "total": total,
+        "model": model,
+        "model_run_id": model_run_id,
+        "mode": mode,
+        "status": status,
+        "error": null,
+    })
 }
 
 fn emit_model_run_event(
@@ -405,6 +447,7 @@ mod tests {
             jobs: None,
             job_id: None,
             cancel: None,
+            mode: None,
             app: None,
             image_ids: &image_ids,
         })
@@ -445,6 +488,7 @@ mod tests {
             jobs: None,
             job_id: None,
             cancel: None,
+            mode: None,
             app: None,
             model_id: "dinov2-vits14",
             image_ids: &image_ids,
@@ -458,5 +502,56 @@ mod tests {
         let run = db.get_model_run(&result.model_run_id).unwrap().unwrap();
         assert_eq!(run.model_id, "dinov2-vits14");
         assert!(run.params_json.contains("\"output_dims\":384"));
+    }
+
+    #[test]
+    fn embedding_pipeline_honors_pre_cancelled_registered_job() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let app_data_dir = tmp.path().to_path_buf();
+        let model_dir = tmp.path().join("models");
+        let embedding_engine = Mutex::new(EmbeddingEngine::new(&model_dir));
+        let image_ids = vec!["never-processed".to_string()];
+        let jobs = JobRegistry::default();
+        let (job_id, cancel) = jobs.create_job("embeddings", 1);
+        cancel.cancel();
+
+        let result = run_embedding_model(EmbeddingRunRequest {
+            db: &db,
+            app_data_dir: &app_data_dir,
+            embedding_engine: &embedding_engine,
+            jobs: Some(&jobs),
+            job_id: Some(&job_id),
+            cancel: Some(&cancel),
+            mode: Some("missing"),
+            app: None,
+            model_id: "dinov2-vits14",
+            image_ids: &image_ids,
+        })
+        .unwrap();
+
+        assert_eq!(result.generated, 0);
+        assert_eq!(result.status, "cancelled");
+        assert_eq!(jobs.get(&job_id).unwrap().current, 0);
+    }
+
+    #[test]
+    fn embedding_progress_payload_identifies_background_job_and_mode() {
+        let payload = embedding_progress_payload(
+            2,
+            5,
+            "dinov2-vits14",
+            "run-1",
+            Some("job-1"),
+            Some("missing"),
+            "running",
+        );
+
+        assert_eq!(payload["job_id"], "job-1");
+        assert_eq!(payload["model"], "dinov2-vits14");
+        assert_eq!(payload["mode"], "missing");
+        assert_eq!(payload["status"], "running");
+        assert_eq!(payload["current"], 2);
+        assert_eq!(payload["total"], 5);
     }
 }
