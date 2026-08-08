@@ -2587,30 +2587,26 @@
         {#if clusters.length > 0}
             <div class="panel-section">
                 <div class="section-header">CLUSTERS</div>
-                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <div class="cluster-item all" class:active={highlightedCluster === null} onclick={() => { highlightedCluster = null; activeZLayerKey = null; fitView(); requestDraw(); saveViewState(); }}>
+                <button type="button" class="cluster-item all" class:active={highlightedCluster === null} aria-pressed={highlightedCluster === null} onclick={() => { highlightedCluster = null; activeZLayerKey = null; fitView(); requestDraw(); saveViewState(); }}>
                     <span class="cluster-dot" style="background: var(--text-secondary)"></span>
                     All Images
                     <span class="cluster-count">({points.length})</span>
-                </div>
+                </button>
                 {#each clusters as cluster}
-                    <!-- svelte-ignore a11y_click_events_have_key_events -->
-                    <!-- svelte-ignore a11y_no_static_element_interactions -->
-                    <div class="cluster-item" class:active={highlightedCluster === cluster.id} onclick={() => focusCluster(cluster.id)}>
-                        <div class="cluster-info-row">
+                    <button type="button" class="cluster-item" class:active={highlightedCluster === cluster.id} aria-pressed={highlightedCluster === cluster.id} onclick={() => focusCluster(cluster.id)}>
+                        <span class="cluster-info-row">
                             <span class="cluster-dot" style="background: {cluster.color}"></span>
                             <span class="cluster-name">{cluster.label}</span>
                             <span class="cluster-count">({cluster.count})</span>
-                        </div>
+                        </span>
                         {#if cluster.previewPaths.length > 0}
-                            <div class="cluster-previews">
+                            <span class="cluster-previews">
                                 {#each cluster.previewPaths.slice(0, 4) as preview}
                                     <img src={convertFileSrc(preview)} class="cluster-thumb" alt="" />
                                 {/each}
-                            </div>
+                            </span>
                         {/if}
-                    </div>
+                    </button>
                 {/each}
             </div>
         {/if}
@@ -3156,10 +3152,15 @@
     .cluster-item {
         display: flex;
         flex-direction: column;
+        width: 100%;
         gap: 4px;
         font-size: 11px;
+        font-family: inherit;
+        text-align: left;
         padding: 5px 4px;
         color: var(--text);
+        background: transparent;
+        border: 0;
         cursor: pointer;
         border-radius: var(--radius);
         transition: background 0.15s;
