@@ -51,7 +51,7 @@ tauri-plugin-process = "2"
 regex = "1"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 png = "0.18"
-printpdf = "0.7"
+printpdf = "0.10"
 thiserror = "2"
 parking_lot = "0.12"
 schemars = "1.2"
