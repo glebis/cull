@@ -764,6 +764,12 @@ export async function createCollection(name: string): Promise<string> {
     return result;
 }
 
+export async function createCollectionWithImages(name: string, imageIds: string[]): Promise<string> {
+    const result = await invoke<string>('create_collection_with_images', { name, imageIds });
+    emitSessionEventsRefresh();
+    return result;
+}
+
 export async function listCollections(includeRejected = false): Promise<[string, string, number][]> {
     return invoke('list_collections', { includeRejected });
 }

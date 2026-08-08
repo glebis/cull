@@ -18,6 +18,29 @@ impl Database {
         Ok(id)
     }
 
+    pub fn create_collection_with_images(&self, name: &str, image_ids: &[&str]) -> Result<String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO projects (id, name, description, created_at) VALUES (?1, ?2, NULL, ?3)",
+            params![id, name, now],
+        )?;
+        for (position, image_id) in image_ids.iter().enumerate() {
+            let inserted = tx.execute(
+                "INSERT INTO collection_items (collection_id, image_id, position)
+                 SELECT ?1, id, ?3 FROM images WHERE id = ?2",
+                params![id, image_id, position as i64],
+            )?;
+            if inserted != 1 {
+                return Err(rusqlite::Error::QueryReturnedNoRows);
+            }
+        }
+        tx.commit()?;
+        Ok(id)
+    }
+
     pub fn list_collections(&self) -> Result<Vec<(String, String, u32)>> {
         self.list_collections_with_visibility(true)
     }
@@ -236,5 +259,82 @@ impl Database {
             Some(Err(err)) => Err(err),
             None => Ok(None),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn open_test_db() -> Database {
+        Database::open(std::path::Path::new(":memory:")).unwrap()
+    }
+
+    fn insert_test_image(db: &Database, id: &str) {
+        let conn = db.conn.lock();
+        conn.execute(
+            "INSERT INTO images (id, sha256_hash, width, height, format, file_size, created_at, imported_at, ai_prompt)
+             VALUES (?1, ?2, 100, 100, 'png', 1000, '2026-01-01', '2026-01-01', NULL)",
+            params![id, format!("hash_{id}")],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn create_collection_with_images_rolls_back_everything_when_membership_fails() {
+        let db = open_test_db();
+        insert_test_image(&db, "valid-image");
+
+        let result =
+            db.create_collection_with_images("Atomic selection", &["valid-image", "missing-image"]);
+        assert!(result.is_err());
+
+        let conn = db.conn.lock();
+        let project_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM projects WHERE name = 'Atomic selection'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let item_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM collection_items", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(project_count, 0);
+        assert_eq!(item_count, 0);
+    }
+
+    #[test]
+    fn create_collection_with_images_commits_name_membership_and_order_together() {
+        let db = open_test_db();
+        insert_test_image(&db, "first-image");
+        insert_test_image(&db, "second-image");
+
+        let collection_id = db
+            .create_collection_with_images("Map selection", &["second-image", "first-image"])
+            .unwrap();
+
+        let conn = db.conn.lock();
+        let name: String = conn
+            .query_row(
+                "SELECT name FROM projects WHERE id = ?1",
+                params![collection_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT image_id FROM collection_items WHERE collection_id = ?1 ORDER BY position",
+            )
+            .unwrap();
+        let image_ids = stmt
+            .query_map(params![collection_id], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(name, "Map selection");
+        assert_eq!(image_ids, vec!["second-image", "first-image"]);
     }
 }

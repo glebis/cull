@@ -585,6 +585,7 @@ pub fn run() {
             commands::agent_proposals::cancel_claude_agent_chat_turn,
             commands::deeplink::open_with_params,
             commands::collections::create_collection,
+            commands::collections::create_collection_with_images,
             commands::collections::list_collections,
             commands::collections::rename_collection,
             commands::collections::add_to_collection,
