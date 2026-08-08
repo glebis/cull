@@ -31,10 +31,6 @@
         listEmbeddingProviders,
         downloadEmbeddingModel,
         generateModelEmbeddings,
-        getEmbeddingPage,
-        getEmbeddingCount,
-        getImageCount,
-        listImageIds,
         hasApiKey,
         getImagesByIds,
         getGenerationRun,
@@ -45,6 +41,12 @@
     } from '$lib/api';
     import type { EmbeddingModelDownloadInfo, EmbeddingPage, GenerationRun, ImageWithFile } from '$lib/api';
     import { isAssetProtocolSafePath, safeAssetPreviewPath } from '$lib/view-utils';
+    import { libraryScope, libraryScopeKey, type LibraryScope } from '$lib/library-scope';
+    import {
+        getEmbeddingCountForScope,
+        getEmbeddingPageForScope,
+        listImageIdsForScope,
+    } from '$lib/embedding-scope';
 
     // State
     let downloading = $state(false);
@@ -409,13 +411,18 @@
 
     async function loadEmbeddingState() {
         try {
-            const imageTotal = await getImageCount(true);
+            const scope = get(libraryScope);
+            const requestedScopeKey = libraryScopeKey(scope);
+            const scopedIds = await listImageIdsForScope(scope);
+            if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return;
+            const imageTotal = scopedIds.length;
             const countEntries = await Promise.all(
                 modelOptions.map(async option => [
                     option.id,
-                    await getEmbeddingCount(option.modelName),
+                    await getEmbeddingCountForScope(scope, option.modelName),
                 ] as const)
             );
+            if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return;
             totalImages = imageTotal;
             const nextLocalCounts = { ...localEmbeddingCounts };
             const nextRemoteCounts = { ...remoteEmbeddingCounts };
@@ -431,7 +438,7 @@
             localEmbeddingCounts = nextLocalCounts;
             remoteEmbeddingCounts = nextRemoteCounts;
             if (selectedCount > 0) {
-                await loadProjection();
+                await loadProjection(scope);
             } else {
                 points = [];
                 clusters = [];
@@ -470,6 +477,24 @@
         prevSettingsOpen = isOpen;
     });
 
+    let observedScopeKey = '';
+    $effect(() => {
+        const nextScopeKey = libraryScopeKey($libraryScope);
+        if (observedScopeKey === '') {
+            observedScopeKey = nextScopeKey;
+            return;
+        }
+        if (nextScopeKey === observedScopeKey) return;
+        observedScopeKey = nextScopeKey;
+        resetProjectionWorker();
+        points = [];
+        clusters = [];
+        selectedPoint = null;
+        highlightedCluster = null;
+        resetThumbnailCache();
+        void loadEmbeddingState();
+    });
+
     async function handleProviderChange() {
         resetProjectionWorker();
         points = [];
@@ -498,13 +523,14 @@
         );
 
         try {
-            const imageIds = await listImageIds();
+            const scope = get(libraryScope);
+            const imageIds = await listImageIdsForScope(scope);
             totalImages = imageIds.length;
             await generateModelEmbeddings(modelName, imageIds);
-            const count = await getEmbeddingCount(modelName);
+            const count = await getEmbeddingCountForScope(scope, modelName);
             remoteEmbeddingCounts = { ...remoteEmbeddingCounts, [provider]: count };
             if (count > 0) {
-                await loadProjection();
+                await loadProjection(scope);
             }
         } catch (e) {
             console.error(`${provider} generate failed:`, e);
@@ -584,13 +610,14 @@
         );
 
         try {
-            const imageIds = await listImageIds();
+            const scope = get(libraryScope);
+            const imageIds = await listImageIdsForScope(scope);
             totalImages = imageIds.length;
             await generateModelEmbeddings(modelName, imageIds);
-            const count = await getEmbeddingCount(modelName);
+            const count = await getEmbeddingCountForScope(scope, modelName);
             localEmbeddingCounts = { ...localEmbeddingCounts, [provider]: count };
             if (count > 0) {
-                await loadProjection();
+                await loadProjection(scope);
             }
         } catch (e) {
             console.error('Generate failed:', e);
@@ -1228,12 +1255,19 @@
         projectionWorker = null;
     }
 
-    async function loadProjection() {
+    async function loadProjection(scope: LibraryScope = get(libraryScope)) {
         const loadSeq = ++projectionLoadSeq;
         try {
             const modelName = modelNameForProvider(selectedProvider);
-            const embeddingPage = await getEmbeddingPage(modelName, PROJECTION_EMBEDDING_LIMIT, 0);
+            const requestedScopeKey = libraryScopeKey(scope);
+            const embeddingPage = await getEmbeddingPageForScope(
+                scope,
+                modelName,
+                PROJECTION_EMBEDDING_LIMIT,
+                0,
+            );
             if (loadSeq !== projectionLoadSeq) return;
+            if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return;
             if (embeddingPage.ids.length < 2) {
                 points = [];
                 clusters = [];
