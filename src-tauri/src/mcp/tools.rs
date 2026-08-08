@@ -3,7 +3,7 @@
 
 use rmcp::{
     handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
-    model::{CallToolRequestParams, CallToolResult, ServerCapabilities, ServerInfo},
+    model::{CallToolRequestParams, CallToolResponse, ServerCapabilities, ServerInfo},
     schemars,
     service::RequestContext,
     tool, tool_router, ErrorData, RoleServer, ServerHandler,
@@ -1080,8 +1080,7 @@ impl ServerHandler for CullMcp {
         crate::safe_eprintln!("MCP list_tools: returning {} tools", tools.len());
         Ok(rmcp::model::ListToolsResult {
             tools,
-            next_cursor: None,
-            meta: None,
+            ..Default::default()
         })
     }
 
@@ -1089,7 +1088,7 @@ impl ServerHandler for CullMcp {
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<CallToolResult, ErrorData>> + Send + '_ {
+    ) -> impl std::future::Future<Output = Result<CallToolResponse, ErrorData>> + Send + '_ {
         async move {
             let tool_name = request.name.to_string();
             let params_json = request
@@ -1112,13 +1111,14 @@ impl ServerHandler for CullMcp {
 
             let status = match &result {
                 Err(_) => "error",
-                Ok(r) => {
+                Ok(CallToolResponse::Complete(r)) => {
                     if r.is_error.unwrap_or(false) {
                         "error"
                     } else {
                         "ok"
                     }
                 }
+                Ok(_) => "ok",
             };
             self.log_tool_call(&tool_name, params_json.as_deref(), status);
 
