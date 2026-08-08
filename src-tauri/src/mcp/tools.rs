@@ -13,6 +13,7 @@ use tauri::{Emitter, Manager};
 use super::auth::{require_capability, AuthContext};
 use crate::db_core::canvas_document::CanvasDocument;
 use crate::db_core::models::{Canvas, TokenScope};
+use crate::services::ai::{self as ai_service, SearchByObjectParams};
 use crate::services::curation::{self as curation_service, SetRatingParams};
 use crate::services::tokens;
 use crate::AppState;
@@ -695,14 +696,6 @@ pub struct FindSimilarParams {
     pub limit: Option<u32>,
     #[schemars(description = "Embedding model: 'clip-vit-b32' or 'dinov2-vits14'")]
     pub model: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct SearchByObjectParams {
-    #[schemars(description = "Object class to search for, e.g. 'person', 'car', 'dog'")]
-    pub class_name: String,
-    #[schemars(description = "Max results (default 50)")]
-    pub limit: Option<u32>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
