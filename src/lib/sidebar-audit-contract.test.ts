@@ -6,6 +6,7 @@ const sidebar = readFileSync(join(process.cwd(), 'src/lib/components/Sidebar.sve
 const sessionSwitcher = readFileSync(join(process.cwd(), 'src/lib/components/SessionSwitcher.svelte'), 'utf8');
 const page = readFileSync(join(process.cwd(), 'src/routes/+page.svelte'), 'utf8');
 const stores = readFileSync(join(process.cwd(), 'src/lib/stores.ts'), 'utf8');
+const palette = readFileSync(join(process.cwd(), 'src/lib/command-palette.ts'), 'utf8');
 
 describe('sidebar audit fixes contract', () => {
     it('renders errors in error styling, not success green (H1)', () => {
@@ -19,10 +20,29 @@ describe('sidebar audit fixes contract', () => {
         expect(presets).toContain('flex-wrap: wrap');
     });
 
-    it('does not expose a fake ARIA tree (H3)', () => {
-        expect(sidebar).not.toContain('role="tree"');
-        expect(sidebar).not.toContain('role="treeitem"');
-        expect(sidebar).not.toContain('aria-level');
+    // Supersedes the earlier "does not expose a fake ARIA tree" contract. That
+    // rule existed because the roles were present with no keyboard behaviour
+    // behind them. The behaviour now exists, so the requirement inverts: the
+    // roles must be there, and they must stay backed by real key handling.
+    it('exposes a real ARIA tree backed by keyboard navigation (H3)', () => {
+        expect(sidebar).toContain('role="tree"');
+        expect(sidebar).toContain('role="treeitem"');
+        expect(sidebar).toContain('aria-level');
+        expect(sidebar).toContain('handleTreeKeydown');
+        for (const key of ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End']) {
+            expect(sidebar).toContain(`'${key}'`);
+        }
+        // Roving tabindex: exactly one row is tabbable at a time, and the index
+        // is clamped so a shrinking list (filter typed, ancestor collapsed)
+        // cannot leave the tree with no tabbable row.
+        expect(sidebar).toContain('tabindex={i === treeTabIndex ? 0 : -1}');
+        expect(sidebar).toContain('Math.min(treeFocusIndex, visibleFolders.length - 1)');
+    });
+
+    it('keeps folder removal available from the keyboard tree', () => {
+        expect(sidebar).toContain("case 'Delete':");
+        expect(sidebar).toContain('handleDeleteFolder(event, row.fullPath)');
+        expect(sidebar).toContain("aria-keyshortcuts={folder.isGroup ? undefined : 'Delete'}");
     });
 
     it('session switcher dropdown is dismissible and announced (H4)', () => {
@@ -40,8 +60,12 @@ describe('sidebar audit fixes contract', () => {
         expect(page).toContain('<ConfirmDialog');
     });
 
-    it('orders content sections before utilities, with Collections and Clipboard high (M1)', () => {
-        const order = ['LIBRARY', 'COLLECTIONS', 'CLIPBOARD MONITOR', 'SMART', 'FILTERS', 'AI MODELS'];
+    // Revises M1's ordering. The original principle — content first, utilities
+    // last — is kept, but Clipboard Monitor is a capture utility, not content,
+    // so ranking it above Smart contradicted the rule it was written under.
+    // Navigation targets (Library/Collections/Smart) now come first.
+    it('orders navigation targets before utilities (M1)', () => {
+        const order = ['LIBRARY', 'COLLECTIONS', 'Smart', 'FILTERS', 'Clipboard Monitor'];
         const positions = order.map(label => sidebar.indexOf(`>${label}<`) !== -1
             ? sidebar.indexOf(`>${label}<`)
             : sidebar.indexOf(label));
@@ -56,10 +80,10 @@ describe('sidebar audit fixes contract', () => {
         expect(sidebar).toContain('copyPublishUrl');
     });
 
-    it('names batch analysis actions distinctly with remaining counts (M6)', () => {
-        expect(sidebar).toContain('Detect objects');
-        expect(sidebar).toContain('Describe images');
-        expect(sidebar).toContain('remaining');
+    it('moves distinctly named batch analysis actions to the command palette (M6)', () => {
+        expect(palette).toContain('Detect Objects in Library');
+        expect(palette).toContain('Describe Images in Library');
+        expect(palette).toContain('only on pending images');
         expect(sidebar).not.toContain('Analyze uncatalogued images');
     });
 

@@ -21,17 +21,26 @@ BROWSER_EXECUTABLE = os.environ.get("CULL_E2E_BROWSER", DEFAULT_CHROME_BETA)
 
 
 class Smoke:
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, page_errors: list[str]) -> None:
         self.page = page
+        self.page_errors = page_errors
         self.failures: list[str] = []
 
     def step(self, name: str, fn: Callable[[], None]) -> None:
+        error_count = len(self.page_errors)
         try:
             wait_for_app(self.page)
             fn()
+            new_errors = self.page_errors[error_count:]
+            if new_errors:
+                raise AssertionError("browser page error:\n" + "\n\n".join(new_errors))
             print(f"  PASS {name}")
         except Exception as exc:
-            self.failures.append(f"{name}: {exc}")
+            new_errors = self.page_errors[error_count:]
+            details = str(exc)
+            if new_errors and "browser page error:" not in details:
+                details += "\nBrowser page errors:\n" + "\n\n".join(new_errors)
+            self.failures.append(f"{name}: {details}")
             screenshot = SHOTS / f"{len(self.failures):02d}-{slug(name)}.png"
             self.page.screenshot(path=str(screenshot), full_page=True)
             print(f"  FAIL {name}")
@@ -72,7 +81,8 @@ def press(page: Page, shortcut: str) -> None:
 
 
 def wait_mode(page: Page, mode: str) -> None:
-    expect(page.locator(".statusbar .mode")).to_have_text(mode, timeout=5_000)
+    visible_label = "Speed Review" if mode == "tinder" else mode
+    expect(page.locator(".statusbar .mode")).to_have_text(visible_label, timeout=5_000)
 
 
 def focused_label(page: Page) -> str:
@@ -135,6 +145,23 @@ def ensure_nsfw_mode(page: Page, mode: str) -> None:
             return
         press(page, "b")
     raise AssertionError(f"could not reach {expected}")
+
+
+def test_sidebar_folder_rename(page: Page) -> None:
+    """S28b — folder context rename updates the sidebar through one backend action."""
+    wait_for_app(page, f"{URL}?folderRename=1")
+    row = page.locator('.folder-row').filter(has_text='folder-rename')
+    expect(row).to_be_visible()
+    row.click(button='right')
+    rename = page.get_by_role('menuitem', name='Rename...')
+    expect(rename).to_be_visible()
+    rename.click()
+    dialog = page.get_by_role('dialog', name='Rename Folder')
+    expect(dialog).to_be_visible()
+    dialog.locator('#text-input-dialog-input').fill('renamed')
+    dialog.get_by_role('button', name='Rename').click()
+    expect(page.locator('.folder-row').filter(has_text='renamed')).to_be_visible()
+    expect(page.get_by_text('Folder renamed', exact=True)).to_be_visible()
 
 
 def set_search_value(page: Page, value: str) -> None:
@@ -205,9 +232,9 @@ def test_view_switching(page: Page) -> None:
     expect(page.locator(".tinder-container")).to_be_visible(timeout=5_000)
 
     press(page, "Meta+1")
-    press(page, "Tab")
+    press(page, "Control+Tab")
     wait_mode(page, "loupe")
-    press(page, "Shift+Tab")
+    press(page, "Control+Shift+Tab")
     wait_mode(page, "grid")
 
 
@@ -294,7 +321,7 @@ def test_compare_shift_period_cycles_to_image_only(page: Page) -> None:
 def test_export_shift_period_cycles_to_image_only(page: Page) -> None:
     press(page, "Meta+7")
     wait_mode(page, "export")
-    expect(page.locator(".export-toolbar")).to_be_visible(timeout=10_000)
+    expect(page.locator(".master-panel")).to_be_visible(timeout=10_000)
     expect(page.locator(".preview-card").first).to_be_visible(timeout=10_000)
 
     def metrics() -> dict:
@@ -308,7 +335,7 @@ def test_export_shift_period_cycles_to_image_only(page: Page) -> None:
                 return {
                     imageOnly: view?.classList.contains('images-only') ?? false,
                     statusbarCount: document.querySelectorAll('.statusbar').length,
-                    toolbarCount: document.querySelectorAll('.export-toolbar').length,
+                    masterPanelCount: document.querySelectorAll('.master-panel').length,
                     buttonCount: document.querySelectorAll('.export-view button').length,
                     selectCount: document.querySelectorAll('.export-view select').length,
                     labelCount: document.querySelectorAll('.export-view .preview-label').length,
@@ -327,14 +354,14 @@ def test_export_shift_period_cycles_to_image_only(page: Page) -> None:
     zen = metrics()
     assert zen["statusbarCount"] == 0, zen
     assert zen["imageOnly"] is False, zen
-    assert zen["toolbarCount"] == 1, zen
+    assert zen["masterPanelCount"] == 1, zen
     assert zen["labelCount"] > 0, zen
 
     press(page, "Shift+.")
     image_only = metrics()
     assert image_only["statusbarCount"] == 0, image_only
     assert image_only["imageOnly"] is True, image_only
-    assert image_only["toolbarCount"] == 0, image_only
+    assert image_only["masterPanelCount"] == 0, image_only
     assert image_only["buttonCount"] == 0, image_only
     assert image_only["selectCount"] == 0, image_only
     assert image_only["labelCount"] == 0, image_only
@@ -348,7 +375,7 @@ def test_export_shift_period_cycles_to_image_only(page: Page) -> None:
     wait_mode(page, "export")
     normal = metrics()
     assert normal["imageOnly"] is False, normal
-    assert normal["toolbarCount"] == 1, normal
+    assert normal["masterPanelCount"] == 1, normal
     assert normal["labelCount"] > 0, normal
 
 
@@ -387,13 +414,13 @@ def test_loupe_navigation(page: Page) -> None:
     press(page, "Enter")
     wait_mode(page, "loupe")
     ensure_nsfw_mode(page, "show")
-    expect(page.locator(".statusbar")).to_contain_text("image-0.png | 1920x1080 | png")
+    expect(page.locator(".overlay-bar")).to_contain_text("image-0.png | 1920x1080 | png")
 
     press(page, "ArrowRight")
-    expect(page.locator(".statusbar")).to_contain_text("image-1.png | 1920x1080 | png")
+    expect(page.locator(".overlay-bar")).to_contain_text("image-1.png | 1920x1080 | png")
 
     press(page, "+")
-    expect(page.locator(".loupe-container img").first).to_have_attribute("style", re.compile(r"scale\(1\.25\)"))
+    expect(page.locator(".overlay-bar .zoom")).to_have_text("100%")
 
     press(page, "Home")
     expect(page.locator(".loupe-container img").first).to_have_attribute("style", re.compile(r"scale\(1\)"))
@@ -542,24 +569,24 @@ def test_tab_cycling(page: Page) -> None:
     press(page, "Meta+1")
     wait_mode(page, "grid")
 
-    # Tab cycles forward: grid -> loupe -> compare -> canvas -> ...
-    press(page, "Tab")
+    # Ctrl+Tab cycles forward: grid -> loupe -> compare -> canvas -> ...
+    press(page, "Control+Tab")
     wait_mode(page, "loupe")
 
-    press(page, "Tab")
+    press(page, "Control+Tab")
     wait_mode(page, "compare")
 
-    press(page, "Tab")
+    press(page, "Control+Tab")
     wait_mode(page, "canvas")
 
-    # Shift+Tab cycles backward: canvas -> compare
-    press(page, "Shift+Tab")
+    # Ctrl+Shift+Tab cycles backward: canvas -> compare
+    press(page, "Control+Shift+Tab")
     wait_mode(page, "compare")
 
-    press(page, "Shift+Tab")
+    press(page, "Control+Shift+Tab")
     wait_mode(page, "loupe")
 
-    press(page, "Shift+Tab")
+    press(page, "Control+Shift+Tab")
     wait_mode(page, "grid")
 
 
@@ -725,7 +752,7 @@ def test_loupe_enter_escape(page: Page) -> None:
     press(page, "Enter")
     wait_mode(page, "loupe")
     expect(page.locator(".loupe-container")).to_be_visible()
-    expect(page.locator(".statusbar")).to_contain_text("image-0.png")
+    expect(page.locator(".overlay-bar")).to_contain_text("image-0.png")
 
     press(page, "Escape")
     wait_mode(page, "grid")
@@ -742,24 +769,19 @@ def test_loupe_zoom(page: Page) -> None:
 
     # Zoom in
     press(page, "+")
-    img_style = page.locator(".loupe-container img").first.get_attribute("style") or ""
-    assert "scale(1.25)" in img_style, f"Expected scale(1.25) in style, got: {img_style}"
+    expect(page.locator(".overlay-bar .zoom")).to_have_text("100%")
 
     # Zoom in further
     press(page, "+")
-    img_style = page.locator(".loupe-container img").first.get_attribute("style") or ""
-    # 1.25 * 1.25 = 1.5625
-    assert "scale(1)" not in img_style or "scale(1.5" in img_style, "Should be zoomed past 1x"
+    expect(page.locator(".overlay-bar .zoom")).to_have_text("125%")
 
     # Zoom out
     press(page, "-")
+    expect(page.locator(".overlay-bar .zoom")).to_have_text("100%")
 
     # Actual Size with Cmd+0
     dispatch_key(page, "0", meta=True)
-    img_style = page.locator(".loupe-container img").first.get_attribute("style") or ""
-    actual_scale_match = re.search(r"scale\(([\d.]+)\)", img_style)
-    assert actual_scale_match, f"Cmd+0 should set an explicit zoom scale, got: {img_style}"
-    assert float(actual_scale_match.group(1)) > 1, f"Cmd+0 should zoom to actual size, got: {img_style}"
+    expect(page.locator(".overlay-bar .zoom")).to_have_text("100%")
 
     # Zoom in again before checking Home reset
     press(page, "+")
@@ -779,16 +801,16 @@ def test_loupe_arrow_navigation(page: Page) -> None:
     press(page, "Home")
     press(page, "Enter")
     wait_mode(page, "loupe")
-    expect(page.locator(".statusbar")).to_contain_text("image-0.png")
+    expect(page.locator(".overlay-bar")).to_contain_text("image-0.png")
 
     press(page, "ArrowRight")
-    expect(page.locator(".statusbar")).to_contain_text("image-1.png")
+    expect(page.locator(".overlay-bar")).to_contain_text("image-1.png")
 
     press(page, "ArrowRight")
-    expect(page.locator(".statusbar")).to_contain_text("image-2.png")
+    expect(page.locator(".overlay-bar")).to_contain_text("image-2.png")
 
     press(page, "ArrowLeft")
-    expect(page.locator(".statusbar")).to_contain_text("image-1.png")
+    expect(page.locator(".overlay-bar")).to_contain_text("image-1.png")
 
     press(page, "Escape")
 
@@ -899,8 +921,8 @@ def test_command_palette_navigate_and_execute(page: Page) -> None:
     wait_mode(page, "grid")
 
 
-def test_command_palette_arrows_and_favorite(page: Page) -> None:
-    """S19 (zu0.8) — Arrow keys move selection; row context menu favorites a result."""
+def test_command_palette_arrows_and_pin(page: Page) -> None:
+    """S19 (zu0.8) — Arrow keys move selection; row context menu pins a result."""
     press(page, "Meta+1")
     wait_mode(page, "grid")
 
@@ -918,16 +940,53 @@ def test_command_palette_arrows_and_favorite(page: Page) -> None:
     second_selected = page.locator(".palette-row.selected").first.get_attribute("id")
     assert first_selected != second_selected, "ArrowDown did not move palette selection"
 
-    # Right-click the first row to open the result context menu and Favorite it.
+    # Right-click the first row to open the result context menu and pin it.
     page.locator(".palette-row").first.click(button="right")
     expect(page.locator(".palette-context-menu")).to_be_visible()
-    expect(page.locator(".palette-context-menu")).to_contain_text("Favorite")
-    page.locator(".palette-context-menu button", has_text="Favorite").first.click()
+    expect(page.locator(".palette-context-menu")).to_contain_text("Pin")
+    page.locator(".palette-context-menu button", has_text="Pin").first.click()
 
-    # A favorited row now carries the pin mark.
+    # A pinned row now carries the pin mark.
     expect(page.locator(".palette-row .row-mark", has_text="*").first).to_be_visible()
 
     palette_input.press("Escape")
+
+
+def test_ai_settings_and_library_commands(page: Page) -> None:
+    """Settings owns AI configuration; library processing lives in the palette."""
+    press(page, "Meta+Shift+P")
+    set_input_value(page, ".palette-input", "open settings")
+    page.locator(".palette-input").press("Enter")
+    expect(page.get_by_role("dialog", name="Settings")).to_be_visible()
+
+    tabs = page.get_by_role("tab")
+    assert tabs.all_inner_texts() == ["General", "Appearance", "AI", "Agent Access", "Privacy", "Plugins"]
+
+    page.get_by_role("tab", name="AI", exact=True).click()
+    expect(page.get_by_role("tabpanel")).to_be_visible()
+    assert page.get_by_role("tabpanel").locator("h3").all_text_contents() == [
+        "Provider Credentials", "Local Models", "Embedding Models"
+    ]
+    expect(page.get_by_role("tabpanel")).not_to_contain_text("Detect remaining")
+
+    page.get_by_role("tab", name="Agent Access", exact=True).click()
+    agent_panel = page.get_by_role("tabpanel")
+    expect(agent_panel.locator("h3").first).to_contain_text("Install the Cull Skill")
+    expect(agent_panel).to_contain_text("npx skills add glebis/claude-skills --skill cull")
+    page.get_by_role("button", name="Close settings").click()
+
+    expect(page.locator(".sidebar")).not_to_contain_text("AI MODELS")
+    expect(page.locator(".sidebar")).to_contain_text("DETECTED OBJECTS")
+
+    for title in [
+        "Detect Objects in Library",
+        "Scan Library for Sensitive Content",
+        "Describe Images in Library",
+    ]:
+        press(page, "Meta+Shift+P")
+        set_input_value(page, ".palette-input", title)
+        expect(page.locator(".palette-row .row-title").first).to_have_text(title)
+        page.locator(".palette-input").press("Escape")
     expect(page.locator(".palette-panel")).to_have_count(0)
 
 
@@ -991,14 +1050,26 @@ def test_context_menu(page: Page) -> None:
 
     expect(menu).to_contain_text("Rate")
     expect(menu).to_contain_text("Copy")
+    expect(menu.locator('[data-shortcut-for="image.decision.accept"]')).to_have_text("A")
+    expect(menu.locator('[data-shortcut-for="image.decision.reject"]')).to_have_text("X")
+    expect(menu.locator('[data-shortcut-for="image.trash"]')).to_have_text("Backspace")
     menu.get_by_role("menuitem").first.focus()
     expect(menu.get_by_role("menuitem").first).to_be_focused()
 
     menu.locator('button[data-submenu-key="rate"]').hover()
     expect(menu.locator(".submenu").first).to_be_visible()
+    expect(menu.locator('[data-shortcut-for="image.rating.3"]')).to_have_text("3")
 
     # Menu-local Escape closes the submenu first; the capture fallback must not
     # collapse the entire menu while focus is inside it.
+    page.keyboard.press("Escape")
+    expect(menu).to_be_visible()
+    expect(menu.locator(".submenu")).to_have_count(0)
+
+    menu.locator('button[data-submenu-key="copy"]').hover()
+    expect(menu.locator(".submenu").first).to_be_visible()
+    expect(menu.locator('[data-shortcut-for="image.copy"]')).to_have_text("Cmd+C")
+    expect(menu.locator("[data-shortcut-for='image.copy']").locator("..")).to_contain_text("Copy Image")
     page.keyboard.press("Escape")
     expect(menu).to_be_visible()
     expect(menu.locator(".submenu")).to_have_count(0)
@@ -1280,10 +1351,9 @@ def main() -> int:
         page = browser.new_page(viewport={"width": 1440, "height": 960})
         page.add_init_script("window.localStorage.clear(); window.sessionStorage.clear();")
         page_errors: list[str] = []
-        page.on("pageerror", lambda error: page_errors.append(str(error)))
+        page.on("pageerror", lambda error: page_errors.append(getattr(error, "stack", None) or str(error)))
 
-        smoke = Smoke(page)
-        wait_for_app(page)
+        smoke = Smoke(page, page_errors)
         smoke.step("S01 view switching", lambda: test_view_switching(page))
         smoke.step("S01c compare layout bounded by status bar", lambda: test_compare_statusbar_does_not_resize_layout(page))
         smoke.step("S01d compare Shift+. image-only mode", lambda: test_compare_shift_period_cycles_to_image_only(page))
@@ -1312,12 +1382,14 @@ def main() -> int:
         smoke.step("S03c loupe arrow navigation", lambda: test_loupe_arrow_navigation(page))
         smoke.step("S03d loupe double-click return", lambda: test_loupe_dblclick_return(page))
         smoke.step("S28a sidebar toggle Cmd+B", lambda: test_sidebar_toggle(page))
+        smoke.step("S28b atomic folder rename", lambda: test_sidebar_folder_rename(page))
         smoke.step("S29a zen mode", lambda: test_zen_mode(page))
         smoke.step("S19a command palette open/close", lambda: test_command_palette_open_close(page))
         smoke.step("S19b command palette navigate and execute", lambda: test_command_palette_navigate_and_execute(page))
-        smoke.step("S19c command palette arrows and favorite", lambda: test_command_palette_arrows_and_favorite(page))
+        smoke.step("S19c command palette arrows and pin", lambda: test_command_palette_arrows_and_pin(page))
         smoke.step("S19d keyboard shortcuts panel", lambda: test_keyboard_shortcuts_panel(page))
         smoke.step("S19e palette does not hijack text input", lambda: test_palette_does_not_hijack_text_input(page))
+        smoke.step("S19f AI settings and library commands", lambda: test_ai_settings_and_library_commands(page))
         smoke.step("S27 context menu", lambda: test_context_menu(page))
         smoke.step("S27a context submenu right edge", lambda: test_context_submenu_flips_at_right_edge(page))
         smoke.step("S27b context menu Escape stays in Loupe", lambda: test_context_menu_escape_stays_in_loupe(page))
@@ -1328,13 +1400,14 @@ def main() -> int:
         smoke.step("S11a selection Space toggle", lambda: test_grid_selection_space(page))
         smoke.step("S11b Shift+click range select", lambda: test_grid_shift_click_range_select(page))
 
-        browser.close()
         if page_errors:
             print("\nPage errors:")
             for error in page_errors:
                 print(f"  - {error}")
-            return 1
+            if not smoke.failures:
+                smoke.failures.append("Browser page errors:\n" + "\n\n".join(page_errors))
         smoke.finish()
+        browser.close()
     return 0
 
 

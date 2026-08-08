@@ -33,6 +33,7 @@ vi.mock('./stores', () => ({
     pinnedCollection: { subscribe: vi.fn((run) => { run(null); return vi.fn(); }) },
     importBatchFilter: { set: vi.fn() },
     importBatchImageIds: { set: vi.fn() },
+    showRejected: { subscribe: vi.fn((run) => { run(false); return vi.fn(); }) },
     embeddingViewState: { set: vi.fn(), subscribe: vi.fn(() => vi.fn()) },
 }));
 
@@ -48,6 +49,7 @@ vi.mock('./api', () => ({
     getImageByPath: vi.fn(),
     drainPendingOpenParams: vi.fn(),
     openDeepLinkUrls: vi.fn(),
+    completeDeepLinkNavigation: vi.fn(),
 }));
 
 vi.mock('./image-loading', () => ({
@@ -57,6 +59,14 @@ vi.mock('./image-loading', () => ({
     loadImagesForCurrentScope: vi.fn(),
     loadImagesUntil: vi.fn(),
     resetImagePaging: vi.fn(),
+}));
+
+vi.mock('./settings-navigation', () => ({
+    openSettings: vi.fn(),
+}));
+
+vi.mock('./clipboard-monitor', () => ({
+    applyClipboardMonitorCollection: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -70,10 +80,12 @@ vi.mock('@tauri-apps/plugin-deep-link', () => ({
 
 import { handleParams, initDeepLink } from './deeplink';
 import { thumbnailSize, focusedIndex, focusedImageOverride, images, gridGap, loupeScale, activeFolder, navigateTo } from './stores';
-import { importFolder, importFiles, getBatchImages, listFolders, listImagesByFolder, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls } from './api';
+import { importFolder, importFiles, getBatchImages, listFolders, listImagesByFolder, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls, completeDeepLinkNavigation } from './api';
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
+import { applyClipboardMonitorCollection } from './clipboard-monitor';
 import { listen } from '@tauri-apps/api/event';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
+import { openSettings } from './settings-navigation';
 
 beforeEach(() => {
     vi.clearAllMocks();
@@ -87,12 +99,105 @@ beforeEach(() => {
     vi.mocked(getImageByPath).mockResolvedValue(null as never);
     vi.mocked(drainPendingOpenParams).mockResolvedValue([] as never);
     vi.mocked(loadImagesUntil).mockResolvedValue(-1);
+    vi.mocked(completeDeepLinkNavigation).mockResolvedValue(undefined as never);
 });
 
 describe('handleParams', () => {
+    it('opens every supported settings tab from structured deep-link params', async () => {
+        const tabs = ['general', 'appearance', 'ai', 'agent-access', 'privacy', 'plugins'] as const;
+
+        for (const tab of tabs) {
+            await handleParams({ settings_tab: tab });
+            expect(openSettings).toHaveBeenLastCalledWith(tab);
+        }
+
+        expect(openSettings).toHaveBeenCalledTimes(tabs.length);
+    });
+
+    it('falls back to General for an invalid structured settings tab', async () => {
+        await handleParams({ settings_tab: 'unknown' as never });
+
+        expect(openSettings).toHaveBeenCalledWith('general');
+    });
+
     it('sets view mode via navigateTo for valid views', async () => {
         await handleParams({ view: 'loupe' });
         expect(navigateTo).toHaveBeenCalledWith('loupe');
+    });
+
+    it('navigates to a collection from open params before the folder branch', async () => {
+        await handleParams({ collection: 'col_xyz', view: 'grid' });
+        expect(applyClipboardMonitorCollection).toHaveBeenCalledWith('col_xyz');
+        expect(importFolder).not.toHaveBeenCalled();
+    });
+
+    it('acks a navigation that carries a request_id', async () => {
+        await handleParams({ collection: 'col_xyz', request_id: 'nav_1' });
+        expect(completeDeepLinkNavigation).toHaveBeenCalledWith('nav_1', true, null);
+    });
+
+    it('does not ack navigations without a request_id', async () => {
+        await handleParams({ collection: 'col_xyz' });
+        expect(completeDeepLinkNavigation).not.toHaveBeenCalled();
+    });
+
+    it('acks a folder navigation before the import finishes', async () => {
+        // A slow import must not make the caller time out on a navigation that
+        // already visibly happened.
+        let ackedBeforeImport = false;
+        vi.mocked(importFolder).mockImplementation((async () => {
+            ackedBeforeImport = vi.mocked(completeDeepLinkNavigation).mock.calls.length > 0;
+            return { imported: 0, skipped: 0, errors: [], batch_id: null, image_ids: [] };
+        }) as never);
+
+        await handleParams({ folder: '/test', request_id: 'nav_folder' });
+
+        expect(ackedBeforeImport).toBe(true);
+        expect(completeDeepLinkNavigation).toHaveBeenCalledTimes(1);
+        expect(completeDeepLinkNavigation).toHaveBeenCalledWith('nav_folder', true, null);
+    });
+
+    it('acks a failure when the requested image cannot be found', async () => {
+        // focusImageById resolves false for a missing image; acking success
+        // would tell show_image's caller the image is on screen when it isn't.
+        vi.mocked(getImagesByIds).mockResolvedValue([] as never);
+
+        await handleParams({ image_id: 'missing-1', request_id: 'nav_missing' });
+
+        expect(completeDeepLinkNavigation).toHaveBeenCalledWith(
+            'nav_missing',
+            false,
+            'Image not found: missing-1'
+        );
+    });
+
+    it('retries the ack when the first attempt fails to reach Rust', async () => {
+        // A failed ack IPC must not latch, or a navigation that succeeded gets
+        // reported as a timeout.
+        vi.mocked(completeDeepLinkNavigation)
+            .mockRejectedValueOnce(new Error('ipc down'))
+            .mockResolvedValueOnce(undefined as never);
+
+        await handleParams({ folder: '/test', request_id: 'nav_retry' });
+
+        expect(completeDeepLinkNavigation).toHaveBeenCalledTimes(2);
+        expect(completeDeepLinkNavigation).toHaveBeenLastCalledWith('nav_retry', true, null);
+    });
+
+    it('acks a failure when handling throws', async () => {
+        vi.mocked(applyClipboardMonitorCollection).mockRejectedValueOnce(new Error('boom'));
+
+        await expect(handleParams({ collection: 'col_xyz', request_id: 'nav_2' })).rejects.toThrow('boom');
+
+        expect(completeDeepLinkNavigation).toHaveBeenCalledWith('nav_2', false, 'boom');
+    });
+
+    it('still navigates when the ack itself fails', async () => {
+        vi.mocked(completeDeepLinkNavigation).mockRejectedValueOnce(new Error('ipc down'));
+
+        await handleParams({ collection: 'col_xyz', request_id: 'nav_3' });
+
+        expect(applyClipboardMonitorCollection).toHaveBeenCalledWith('col_xyz');
     });
 
     it('ignores invalid view modes', async () => {
@@ -145,7 +250,7 @@ describe('handleParams', () => {
 
         expect(navigateTo).not.toHaveBeenCalledWith('grid');
         expect(importFolder).toHaveBeenCalledWith('/test', null);
-        expect(listImagesByFolder).toHaveBeenCalledWith('/test', 250, 0);
+        expect(listImagesByFolder).toHaveBeenCalledWith('/test', 250, 0, false);
         expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({
             type: 'canvas-import-drop',
             detail: expect.objectContaining({
@@ -241,9 +346,15 @@ describe('handleParams', () => {
     });
 
     it('imports multiple paths', async () => {
-        const fakeImages = [{ path: '/a.jpg' }, { path: '/b.jpg' }];
+        const fakeImages = [
+            { image: { id: '1' }, path: '/a.jpg' },
+            { image: { id: '2' }, path: '/b.jpg' },
+        ];
         vi.mocked(importFiles).mockResolvedValue({ imported: 2, skipped: 0, image_ids: ['1', '2'], batch_id: 'b1' } as never);
         vi.mocked(getBatchImages).mockResolvedValue(fakeImages as never);
+        vi.mocked(loadImagesForCurrentScope).mockImplementationOnce(async () => {
+            images.set(await getBatchImages('b1'));
+        });
 
         await handleParams({ paths: ['/a.jpg', '/b.jpg'] });
 

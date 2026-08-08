@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -31,6 +32,7 @@ function createFixture(options: {
   packageLock?: string;
   tauriJson?: string;
   gate?: string | string[];
+  regressionGateCode?: string;
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'cull-release-cli-'));
   const versionFiles = [
@@ -48,6 +50,10 @@ function createFixture(options: {
     worktree: '.',
     stateDir: '.release-state',
     gate: options.gate ?? [process.execPath, '-e', options.gateCode ?? 'process.exit(0)'],
+    regressionGate: {
+      command: [process.execPath, '-e', options.regressionGateCode ?? 'process.exit(0)'],
+      contracts: [{ id: 'fixture-contract', tests: ['fixture.behavior.test.ts'] }],
+    },
     extraGate: [],
     changelog: { path: 'CHANGELOG.md' },
     compatibility: { path: 'docs/COMPATIBILITY.md' },
@@ -134,6 +140,26 @@ function run(
 
 function head(fixture: string) {
   return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: fixture, encoding: 'utf8' }).trim();
+}
+
+function advanceOriginMainWithoutMovingHead(fixture: string) {
+  const source = head(fixture);
+  const tree = execFileSync('git', ['rev-parse', `${source}^{tree}`], {
+    cwd: fixture, encoding: 'utf8',
+  }).trim();
+  const newerMain = execFileSync('git', ['commit-tree', tree, '-p', source, '-m', 'verified origin main fix'], {
+    cwd: fixture,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'Cull Test',
+      GIT_AUTHOR_EMAIL: 'cull@example.test',
+      GIT_COMMITTER_NAME: 'Cull Test',
+      GIT_COMMITTER_EMAIL: 'cull@example.test',
+    },
+  }).trim();
+  execFileSync('git', ['update-ref', 'refs/remotes/origin/main', newerMain], { cwd: fixture });
+  return { source, newerMain };
 }
 
 function prepareArgs(fixture: string, source = head(fixture)) {
@@ -245,6 +271,63 @@ describe('Cull release readiness CLI', () => {
     });
     expect(result.stderr).not.toContain('TAURI_SIGNING_PRIVATE_KEY');
     expect(readFileSync(join(fixture, 'package.json'), 'utf8')).toBe(before);
+  });
+
+  it('blocks check when a named release regression contract fails', () => {
+    const fixture = createFixture({
+      regressionGateCode: "process.stderr.write('grid-hover-preview failed\\n'); process.exit(17)",
+    });
+
+    const result = runCheck(fixture);
+
+    expect(result.status).toBe(3);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      event: 'error',
+      code: 'BLOCKED',
+      message: expect.stringContaining('release regression gate'),
+      details: expect.objectContaining({
+        status: 17,
+        stderr: expect.stringContaining('grid-hover-preview failed'),
+      }),
+    });
+  });
+
+  it('reports a stale release source that omits verified origin/main commits', () => {
+    const fixture = createFixture();
+    const { source, newerMain } = advanceOriginMainWithoutMovingHead(fixture);
+
+    const result = runCheck(fixture);
+
+    expect(result.status).toBe(3);
+    expect(JSON.parse(result.stdout).result.blockers).toContainEqual({
+      code: 'STALE_RELEASE_SOURCE',
+      message: 'Release source omits commits already on origin/main',
+      releaseSha: source,
+      originMain: newerMain,
+    });
+  });
+
+  it('blocks readiness when the configured Homebrew cask is not SHA-pinned', () => {
+    const fixture = createFixture();
+    const result = runCheck(fixture, { env: {
+      CULL_RELEASE_TEST_CASK: 'version "1.2.3"\nsha256 :no_check\n',
+    } });
+
+    expect(result.status).toBe(3);
+    expect(JSON.parse(result.stdout).result.blockers).toContainEqual({
+      code: 'HOMEBREW_CASK_NO_CHECK',
+      message: 'Configured Homebrew cask uses sha256 :no_check',
+    });
+  });
+
+  it('accepts a canonical SHA-pinned Homebrew cask during readiness', () => {
+    const fixture = createFixture();
+    const result = runCheck(fixture, { env: {
+      CULL_RELEASE_TEST_CASK: `version "1.2.3"\nsha256 "${'a'.repeat(64)}"\n`,
+    } });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).result.blockers).toEqual([]);
   });
 
   it('disables optional Git locks and leaves repository and index state byte-for-byte unchanged', () => {
@@ -403,6 +486,30 @@ describe('Cull release readiness CLI', () => {
     });
     expect(readFileSync(join(fixture, 'package.json'), 'utf8')).toBe(before);
   });
+
+  it('blocks on an independently queried open P0 release incident without local state', () => {
+    const fixture = createFixture();
+    const result = runCheck(fixture, { env: {
+      CULL_RELEASE_TEST_BD_LIST_JSON: JSON.stringify([{
+        id: 'imageview-public-release', status: 'open', priority: 0,
+        external_ref: 'cull-release-1.2.3-post-publish',
+      }]),
+    } });
+    expect(result.status).toBe(3);
+    expect(JSON.parse(result.stdout).result.blockers).toContain(
+      'Unresolved P0 release incident imageview-public-release blocks later releases',
+    );
+    expect(existsSync(join(fixture, '.release-state'))).toBe(false);
+  });
+
+  it('fails closed when independent P0 incident lookup fails', () => {
+    const fixture = createFixture();
+    const result = runCheck(fixture, { env: { CULL_RELEASE_TEST_BD_FAIL: '1' } });
+    expect(result.status).toBe(3);
+    expect(JSON.parse(result.stdout).result.blockers).toContain(
+      'Release incident lookup failed; publication readiness is unknown',
+    );
+  });
 });
 
 describe('Cull release prepare, resume, and state CLI', () => {
@@ -417,6 +524,45 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(execution.status).toBe(0);
     expect(output.result.diff).toBe('');
     expect(repositorySnapshot(fixture)).toEqual(before);
+  });
+
+  it('blocks prepare on a failed named regression contract and restores release-owned files', () => {
+    const fixture = createReleaseFixture({
+      regressionGateCode: "process.stderr.write('thumbnail-prefetch failed\\n'); process.exit(19)",
+    });
+    const before = prepareSafetySnapshot(fixture);
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture));
+
+    expect(result.execution.status).toBe(3);
+    expect(result.output).toMatchObject({
+      code: 'BLOCKED',
+      message: expect.stringContaining('release regression gate'),
+      details: expect.objectContaining({
+        status: 19,
+        stderr: expect.stringContaining('thumbnail-prefetch failed'),
+      }),
+    });
+    expect(prepareSafetySnapshot(fixture)).toEqual(before);
+    expect(head(fixture)).toBe(execFileSync('git', ['rev-parse', 'origin/main'], {
+      cwd: fixture, encoding: 'utf8',
+    }).trim());
+  });
+
+  it('blocks prepare before edits when the source omits verified origin/main commits', () => {
+    const fixture = createReleaseFixture();
+    const before = prepareSafetySnapshot(fixture);
+    const { source, newerMain } = advanceOriginMainWithoutMovingHead(fixture);
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture, source));
+
+    expect(result.execution.status).toBe(3);
+    expect(result.output).toMatchObject({
+      code: 'BLOCKED',
+      message: 'Release source omits commits already on origin/main',
+      details: { releaseSha: source, originMain: newerMain },
+    });
+    expect(prepareSafetySnapshot(fixture)).toEqual(before);
   });
 
   it('rejects source and version races before writing', () => {
@@ -802,6 +948,371 @@ describe('Cull release prepare, resume, and state CLI', () => {
     });
   });
 
+  it('rejects unstable release failure codes', () => {
+    const fixture = createFixture();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'published',
+      releaseCommit: head(fixture), tag: 'v1.2.4', workflowRunId: 42,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+
+    const failed = run(fixture, 'state', [
+      'fail', '--version', '1.2.4', '--code', 'whatever happened',
+      '--evidence-json', '{"stage":"verify"}',
+    ]);
+
+    expect(failed.execution.status).toBe(2);
+    expect(failed.output.code).toBe('INPUT_INVALID');
+  });
+
+  it('requires a new version after an immutable tagged release fails artifact assembly', () => {
+    const fixture = createFixture();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'tagged',
+      releaseCommit: head(fixture), tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: {
+        code: 'ARTIFACT_INVALID',
+        evidence: { workflowRunId: 31169457762, publicRelease: false },
+        at: '2026-07-11T12:01:00.000Z',
+      },
+    }));
+    const evidence = {
+      commit: true, tag: true, workflow: false, releaseAsset: false,
+      publishedRelease: false, tapCommit: false, postPublishVerified: false,
+    };
+
+    const resumed = run(fixture, 'resume', ['--version', '1.2.4'], {
+      CULL_RELEASE_TEST_EVIDENCE: JSON.stringify(evidence),
+    });
+
+    expect(resumed.execution.status).toBe(0);
+    expect(resumed.output.result).toMatchObject({
+      nextState: null,
+      nextAction: 'prepare-new-version',
+      evidence,
+      failure: { code: 'ARTIFACT_INVALID' },
+    });
+  });
+
+  it('reports an immutable conflicting tag instead of recommending a tag push', () => {
+    const fixture = createFixture();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    const releaseCommit = head(fixture);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'prepared',
+      releaseCommit, tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+    const actualCommit = 'b'.repeat(40);
+    const evidence = {
+      commit: true,
+      tag: false,
+      tagConflict: { expectedCommit: releaseCommit, actualCommit, tagObjectSha: 'c'.repeat(40) },
+      workflow: false,
+      releaseAsset: false,
+      publishedRelease: false,
+      tapCommit: false,
+      postPublishVerified: false,
+    };
+
+    const resumed = run(fixture, 'resume', ['--version', '1.2.4'], {
+      CULL_RELEASE_TEST_EVIDENCE: JSON.stringify(evidence),
+    });
+
+    expect(resumed.execution.status).toBe(0);
+    expect(resumed.output.result).toEqual({
+      nextState: null,
+      nextAction: 'prepare-new-version',
+      evidence,
+      failure: {
+        code: 'CONFLICTING_TAG',
+        tag: 'v1.2.4',
+        expectedCommit: releaseCommit,
+        actualCommit,
+        tagObjectSha: 'c'.repeat(40),
+      },
+    });
+  });
+
+  it('creates and pushes an annotated tag for the exact prepared commit', () => {
+    const fixture = createFixture();
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(release): v1.2.4'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    const releaseCommit = head(fixture);
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', releaseCommit], { cwd: fixture });
+    const remote = mkdtempSync(join(tmpdir(), 'cull-release-tag-remote-'));
+    execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: fixture });
+    execFileSync('git', ['push', 'origin', 'main'], { cwd: fixture, stdio: 'ignore' });
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    const statePath = join(stateDir, '1.2.4.json');
+    writeFileSync(statePath, JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'prepared',
+      releaseCommit, tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+
+    const tagged = run(fixture, 'tag', [
+      '--version', '1.2.4', '--expected-source', releaseCommit,
+    ], { CULL_RELEASE_NOW: '2026-07-11T12:02:00.000Z' });
+
+    expect(tagged.execution.status).toBe(0);
+    expect(tagged.output.result).toMatchObject({
+      version: '1.2.4',
+      tag: 'v1.2.4',
+      releaseCommit,
+      state: 'tagged',
+      pushed: true,
+    });
+    expect(execFileSync('git', ['rev-parse', 'refs/tags/v1.2.4^{}'], {
+      cwd: remote,
+      encoding: 'utf8',
+    }).trim()).toBe(releaseCommit);
+    expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({
+      state: 'tagged',
+      releaseCommit,
+      gates: { tag: 'v1.2.4' },
+    });
+  });
+
+  it('rechecks Homebrew readiness immediately before creating a tag', () => {
+    const fixture = createFixture();
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(release): v1.2.4'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    const releaseCommit = head(fixture);
+    const remote = mkdtempSync(join(tmpdir(), 'cull-release-tag-readiness-'));
+    execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: fixture });
+    execFileSync('git', ['push', 'origin', 'main'], { cwd: fixture, stdio: 'ignore' });
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', releaseCommit], { cwd: fixture });
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    const statePath = join(stateDir, '1.2.4.json');
+    writeFileSync(statePath, JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'prepared',
+      releaseCommit, tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+
+    const tagged = run(fixture, 'tag', [
+      '--version', '1.2.4', '--expected-source', releaseCommit,
+    ], { CULL_RELEASE_TEST_CASK: 'version "1.2.3"\nsha256 :no_check\n' });
+
+    expect(tagged.execution.status).toBe(3);
+    expect(tagged.output).toMatchObject({
+      code: 'BLOCKED',
+      details: { blockers: [{ code: 'HOMEBREW_CASK_NO_CHECK' }] },
+    });
+    expect(JSON.parse(readFileSync(statePath, 'utf8')).state).toBe('prepared');
+    expect(() => execFileSync('git', ['rev-parse', 'refs/tags/v1.2.4'], {
+      cwd: remote,
+      stdio: 'ignore',
+    })).toThrow();
+  });
+
+  it('refuses to tag when the immutable remote tag points to a merge commit', () => {
+    const fixture = createFixture();
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(release): v1.2.4'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    const releaseCommit = head(fixture);
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'Merge pull request #80'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    const mergeCommit = head(fixture);
+    const remote = mkdtempSync(join(tmpdir(), 'cull-release-conflict-remote-'));
+    execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: fixture });
+    execFileSync('git', ['tag', '-a', 'v1.2.4', mergeCommit, '-m', 'Cull v1.2.4'], { cwd: fixture });
+    execFileSync('git', ['push', 'origin', 'main', 'refs/tags/v1.2.4'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', mergeCommit], { cwd: fixture });
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'prepared',
+      releaseCommit, tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+
+    const tagged = run(fixture, 'tag', [
+      '--version', '1.2.4', '--expected-source', releaseCommit,
+    ]);
+
+    expect(tagged.execution.status).toBe(5);
+    expect(tagged.output).toMatchObject({
+      code: 'CONFLICTING_TAG',
+      details: { expectedCommit: releaseCommit, actualCommit: mergeCommit },
+    });
+    expect(JSON.parse(readFileSync(join(stateDir, '1.2.4.json'), 'utf8')).state).toBe('prepared');
+  });
+
+  it('refuses a tagged state transition when the remote tag points elsewhere', () => {
+    const fixture = createFixture();
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(release): v1.2.4'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    const releaseCommit = head(fixture);
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'Merge pull request #80'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    const mergeCommit = head(fixture);
+    const remote = mkdtempSync(join(tmpdir(), 'cull-release-transition-conflict-'));
+    execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: fixture });
+    execFileSync('git', ['tag', '-a', 'v1.2.4', mergeCommit, '-m', 'Cull v1.2.4'], { cwd: fixture });
+    execFileSync('git', ['push', 'origin', 'main', 'refs/tags/v1.2.4'], {
+      cwd: fixture,
+      stdio: 'ignore',
+    });
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    const statePath = join(stateDir, '1.2.4.json');
+    writeFileSync(statePath, JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'prepared',
+      releaseCommit, tag: 'v1.2.4', workflowRunId: null,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+
+    const transitioned = run(fixture, 'state', [
+      'transition', '--version', '1.2.4', '--to', 'tagged',
+      '--evidence-json', '{"tag":"v1.2.4"}',
+    ]);
+
+    expect(transitioned.execution.status).toBe(5);
+    expect(transitioned.output).toMatchObject({
+      code: 'CONFLICTING_TAG',
+      details: { expectedCommit: releaseCommit, actualCommit: mergeCommit },
+    });
+    expect(JSON.parse(readFileSync(statePath, 'utf8')).state).toBe('prepared');
+  });
+
+  it('files one P0 incident, updates it idempotently, and prepares a patch plan after public verification fails', () => {
+    const fixture = createFixture();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    const statePath = join(stateDir, '1.2.4.json');
+    writeFileSync(statePath, JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'homebrew-promoted',
+      releaseCommit: head(fixture), tag: 'v1.2.4', workflowRunId: 42,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+    const bin = mkdtempSync(join(tmpdir(), 'cull-release-npm-wrapper-'));
+    const log = join(bin, 'npm.jsonl');
+    const fakeNpm = join(bin, 'npm');
+    writeFileSync(fakeNpm, [
+      '#!/usr/bin/env node',
+      "const fs = require('node:fs');",
+      "fs.appendFileSync(process.env.CULL_TEST_BD_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');",
+      "if (process.argv.includes('list')) process.stdout.write('[]\\n');",
+      "else if (process.argv.includes('show')) process.stdout.write(JSON.stringify({id:'imageview-release-p0',status:'open',priority:0}) + '\\n');",
+      "if (process.argv.includes('create')) process.stdout.write('imageview-release-p0\\n');",
+      '',
+    ].join('\n'));
+    chmodSync(fakeNpm, 0o755);
+    const env = { PATH: `${bin}:${process.env.PATH}`, CULL_TEST_BD_LOG: log };
+
+    const first = run(fixture, 'state', [
+      'fail', '--version', '1.2.4', '--code', 'POST_PUBLISH_VERIFY_FAILED',
+      '--evidence-json', '{"check":"homebrew-launch","runId":42}',
+    ], env);
+    expect(first.execution.status).toBe(0);
+    expect(first.output.result.failure).toMatchObject({
+      code: 'POST_PUBLISH_VERIFY_FAILED',
+      incidentId: 'imageview-release-p0',
+      evidence: { check: 'homebrew-launch', runId: 42 },
+    });
+
+    const second = run(fixture, 'state', [
+      'fail', '--version', '1.2.4', '--code', 'POST_PUBLISH_VERIFY_FAILED',
+      '--evidence-json', '{"check":"homebrew-launch","runId":43}',
+    ], env);
+    expect(second.execution.status).toBe(0);
+    expect(second.output.result.failure.incidentId).toBe('imageview-release-p0');
+    expect(readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line))).toEqual([
+      expect.arrayContaining(['run', 'bd', '--', 'list', '--json']),
+      expect.arrayContaining(['run', 'bd', '--', 'create', '--type', 'task', '-p', 'P0']),
+      expect.arrayContaining(['run', 'bd', '--', 'update', 'imageview-release-p0', '--status', 'open']),
+    ]);
+
+    const evidence = {
+      commit: true, tag: true, workflow: true, releaseAsset: true,
+      publishedRelease: true, tapCommit: true, postPublishVerified: false,
+    };
+    const resumed = run(fixture, 'resume', ['--version', '1.2.4'], {
+      ...env, CULL_RELEASE_TEST_EVIDENCE: JSON.stringify(evidence),
+    });
+    expect(resumed.execution.status).toBe(0);
+    expect(resumed.output.result).toMatchObject({
+      nextState: null,
+      nextAction: 'prepare-patch-plan',
+      evidence,
+      failure: { code: 'POST_PUBLISH_VERIFY_FAILED', incidentId: 'imageview-release-p0' },
+    });
+
+    const checked = runCheck(fixture, { env: {
+      ...env,
+      CULL_RELEASE_TEST_BD_LIST_JSON: JSON.stringify([{
+        id: 'imageview-release-p0', status: 'open', priority: 0,
+        external_ref: 'cull-release-1.2.4-post-publish',
+      }]),
+    } });
+    expect(checked.status).toBe(3);
+    expect(JSON.parse(checked.stdout).result.blockers).toContain(
+      'Unresolved P0 release incident imageview-release-p0 blocks later releases',
+    );
+    expect(readFileSync(statePath, 'utf8')).toContain('POST_PUBLISH_VERIFY_FAILED');
+  });
+
+  it('resumes at Homebrew promotion when a valid public release is ahead of the tap', () => {
+    const fixture = createFixture();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'requested',
+      releaseCommit: head(fixture), tag: 'v1.2.4', workflowRunId: 42,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+    const evidence = {
+      commit: true, tag: true, workflow: true, releaseAsset: true,
+      publishedRelease: true, tapCommit: false, postPublishVerified: false,
+    };
+
+    const resumed = run(fixture, 'resume', ['--version', '1.2.4'], {
+      CULL_RELEASE_TEST_EVIDENCE: JSON.stringify(evidence),
+    });
+
+    expect(resumed.execution.status).toBe(0);
+    expect(resumed.output.result).toEqual({
+      nextState: 'homebrew-promoted', nextAction: 'promote-homebrew', evidence,
+    });
+  });
+
   it('derives resume from evidence without rewriting stale local state', () => {
     const fixture = createFixture();
     const stateDir = join(fixture, '.release-state');
@@ -936,33 +1447,68 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(result.output.code).toBe('STATE_INVALID');
   });
 
-  it('reaches the terminal state from production commit, tag, public, tap, and provenance probes', () => {
+  it('reaches terminal state from strict public truth despite stale cached commit and run', () => {
     const fixture = createFixture();
     execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(release): v1.2.4'], {
       cwd: fixture, stdio: 'ignore',
     });
     const releaseCommit = head(fixture);
-    execFileSync('git', ['tag', 'v1.2.4'], { cwd: fixture });
+    execFileSync('git', ['tag', '-a', 'v1.2.4', '-m', 'Release v1.2.4'], { cwd: fixture });
+    execFileSync('git', ['remote', 'add', 'origin', fixture], { cwd: fixture });
+    const tagObjectSha = execFileSync('git', ['rev-parse', 'refs/tags/v1.2.4'], {
+      cwd: fixture, encoding: 'utf8',
+    }).trim();
     const stateDir = join(fixture, '.release-state');
     mkdirSync(stateDir);
     writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
       schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'requested',
-      releaseCommit, tag: 'v1.2.4', workflowRunId: 42,
+      releaseCommit: 'f'.repeat(40), tag: 'v1.2.4', workflowRunId: null,
       requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
       gates: {}, assets: {}, failure: null,
     }));
     const bin = mkdtempSync(join(tmpdir(), 'cull-release-gh-probes-'));
     const fakeGh = join(bin, 'gh');
-    const cask = Buffer.from('version "1.2.4"\n').toString('base64');
+    const dmgSha256 = 'a'.repeat(64);
+    const cask = Buffer.from(`version "1.2.4"\nsha256 "${dmgSha256}"\n`).toString('base64');
+    const checks = Object.fromEntries([
+      'exactInventory', 'updaterMetadata', 'updaterSignature', 'dmgMountedReadOnly',
+      'embeddedVersion', 'arm64Only', 'codeSignature', 'gatekeeper', 'stapledNotarization',
+    ].map((name) => [name, true]));
+    const provenance = {
+      schema: 'cull.release.provenance.v1', version: '1.2.4', tag: 'v1.2.4',
+      commit: releaseCommit, tagObjectSha, workflowRunId: 42,
+      assets: { 'Cull_1.2.4.dmg': { sha256: dmgSha256, size: 123 } }, checks,
+    };
+    const rawProvenance = `${JSON.stringify(provenance)}\n`;
+    const rawChecksums = `${dmgSha256}  Cull_1.2.4.dmg\n`;
+    const evidenceAsset = (name: string, contents: string) => ({
+      name, state: 'uploaded', size: Buffer.byteLength(contents),
+      digest: `sha256:${createHash('sha256').update(contents).digest('hex')}`,
+    });
+    const release = {
+      isDraft: false,
+      assets: [
+        { name: 'Cull_1.2.4.dmg', state: 'uploaded', size: 123, digest: `sha256:${dmgSha256}` },
+        evidenceAsset('release-provenance.json', rawProvenance),
+        evidenceAsset('checksums.txt', rawChecksums),
+      ],
+    };
     writeFileSync(fakeGh, [
       '#!/usr/bin/env node',
       `const releaseCommit = ${JSON.stringify(releaseCommit)};`,
       `const cask = ${JSON.stringify(cask)};`,
+      `const provenance = ${JSON.stringify(provenance)};`,
+      `const release = ${JSON.stringify(release)};`,
+      `const rawChecksums = ${JSON.stringify(rawChecksums)};`,
       "const args = process.argv.slice(2);",
-      "if (args[0] === 'run') console.log(JSON.stringify({conclusion:'success'}));",
+      "if (args[0] === 'run' && args[1] === 'list') console.log(JSON.stringify([{databaseId:84,conclusion:'success',displayTitle:'Promote Cull v1.2.4',event:'workflow_dispatch'}]));",
+      "else if (args[0] === 'run') console.log(JSON.stringify({conclusion:'success'}));",
+      "else if (args[0] === 'api' && args[1].includes('/actions/runs/')) console.log(JSON.stringify({id:42,path:'.github/workflows/release.yml',repository:{full_name:'glebis/cull'},status:'completed',conclusion:'success',event:'workflow_dispatch',head_branch:'main'}));",
+      "else if (args[0] === 'api' && args[1].includes('/releases/tags/')) console.log(JSON.stringify({tag_name:'v1.2.4',draft:release.isDraft,prerelease:false,assets:release.assets}));",
       "else if (args[0] === 'api') console.log(JSON.stringify({content:cask}));",
-      "else if (args[0] === 'release' && args[1] === 'view') console.log(JSON.stringify({isDraft:false,assets:[{name:'Cull_1.2.4.dmg'}]}));",
-      "else if (args[0] === 'release' && args[1] === 'download') console.log(JSON.stringify({schema:'cull.release.provenance.v1',version:'1.2.4',tag:'v1.2.4',releaseCommit,postPublishVerified:true}));",
+      "else if (args[0] === 'release' && args[1] === 'view') console.log(JSON.stringify(release));",
+      "else if (args[0] === 'release' && args[1] === 'download' && args.includes('checksums.txt')) process.stdout.write(rawChecksums);",
+      "else if (args[0] === 'release' && args[1] === 'download') console.log(JSON.stringify(provenance));",
       'else process.exit(9);',
       '',
     ].join('\n'));
@@ -973,11 +1519,138 @@ describe('Cull release prepare, resume, and state CLI', () => {
     };
 
     const result = run(fixture, 'resume', ['--version', '1.2.4'], {
-      PATH: `${bin}:${process.env.PATH}`,
+      PATH: `${bin}:${process.env.PATH}`, CULL_RELEASE_TEST_REPOSITORY: 'glebis/cull',
     });
 
     expect(result.execution.status).toBe(0);
     expect(result.output.result).toEqual({ nextState: null, nextAction: 'complete', evidence });
+  });
+
+  it('treats a same-version tap with the wrong DMG SHA as behind the published release', () => {
+    const fixture = createFixture();
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(release): v1.2.4'], {
+      cwd: fixture, stdio: 'ignore',
+    });
+    const releaseCommit = head(fixture);
+    execFileSync('git', ['tag', '-a', 'v1.2.4', '-m', 'Release v1.2.4'], { cwd: fixture });
+    execFileSync('git', ['remote', 'add', 'origin', fixture], { cwd: fixture });
+    const tagObjectSha = execFileSync('git', ['rev-parse', 'refs/tags/v1.2.4'], {
+      cwd: fixture, encoding: 'utf8',
+    }).trim();
+    const stateDir = join(fixture, '.release-state');
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, '1.2.4.json'), JSON.stringify({
+      schema: 'cull.release.v1', version: '1.2.4', bump: 'patch', state: 'requested',
+      releaseCommit, tag: 'v1.2.4', workflowRunId: 42,
+      requestedAt: '2026-07-11T12:00:00.000Z', updatedAt: '2026-07-11T12:00:00.000Z',
+      gates: {}, assets: {}, failure: null,
+    }));
+    const bin = mkdtempSync(join(tmpdir(), 'cull-release-wrong-tap-sha-'));
+    const fakeGh = join(bin, 'gh');
+    const cask = Buffer.from(`version "1.2.4"\nsha256 "${'b'.repeat(64)}"\n`).toString('base64');
+    const dmgSha256 = 'a'.repeat(64);
+    const checks = Object.fromEntries([
+      'exactInventory', 'updaterMetadata', 'updaterSignature', 'dmgMountedReadOnly',
+      'embeddedVersion', 'arm64Only', 'codeSignature', 'gatekeeper', 'stapledNotarization',
+    ].map((name) => [name, true]));
+    const provenance = {
+      schema: 'cull.release.provenance.v1', version: '1.2.4', tag: 'v1.2.4',
+      commit: releaseCommit, tagObjectSha, workflowRunId: 42,
+      assets: { 'Cull_1.2.4.dmg': { sha256: dmgSha256, size: 123 } }, checks,
+    };
+    const rawProvenance = `${JSON.stringify(provenance)}\n`;
+    const rawChecksums = `${dmgSha256}  Cull_1.2.4.dmg\n`;
+    const evidenceAsset = (name: string, contents: string) => ({
+      name, state: 'uploaded', size: Buffer.byteLength(contents),
+      digest: `sha256:${createHash('sha256').update(contents).digest('hex')}`,
+    });
+    const release = { isDraft: false, assets: [
+      { name: 'Cull_1.2.4.dmg', state: 'uploaded', size: 123, digest: `sha256:${dmgSha256}` },
+      evidenceAsset('release-provenance.json', rawProvenance),
+      evidenceAsset('checksums.txt', rawChecksums),
+    ] };
+    writeFileSync(fakeGh, [
+      '#!/usr/bin/env node',
+      `const cask = ${JSON.stringify(cask)};`,
+      `const provenance = ${JSON.stringify(provenance)};`,
+      `const release = ${JSON.stringify(release)};`,
+      `const rawChecksums = ${JSON.stringify(rawChecksums)};`,
+      "const args = process.argv.slice(2);",
+      "if (args[0] === 'run' && args[1] === 'list') console.log(JSON.stringify([{databaseId:84,conclusion:'success',displayTitle:'Promote Cull v1.2.4',event:'workflow_dispatch'}]));",
+      "else if (args[0] === 'run') console.log(JSON.stringify({conclusion:'success'}));",
+      "else if (args[0] === 'api' && args[1].includes('/actions/runs/')) console.log(JSON.stringify({id:42,path:'.github/workflows/release.yml',repository:{full_name:'glebis/cull'},status:'completed',conclusion:'success',event:'push',head_sha:'" + releaseCommit + "'}));",
+      "else if (args[0] === 'api' && args[1].includes('/releases/tags/')) console.log(JSON.stringify({tag_name:'v1.2.4',draft:release.isDraft,prerelease:false,assets:release.assets}));",
+      "else if (args[0] === 'api') console.log(JSON.stringify({content:cask}));",
+      "else if (args[0] === 'release' && args[1] === 'view') console.log(JSON.stringify(release));",
+      "else if (args[0] === 'release' && args[1] === 'download' && args.includes('checksums.txt')) process.stdout.write(rawChecksums);",
+      "else if (args[0] === 'release' && args[1] === 'download') console.log(JSON.stringify(provenance));",
+      'else process.exit(9);',
+      '',
+    ].join('\n'));
+    chmodSync(fakeGh, 0o755);
+
+    const result = run(fixture, 'resume', ['--version', '1.2.4'], {
+      PATH: `${bin}:${process.env.PATH}`, CULL_RELEASE_TEST_REPOSITORY: 'glebis/cull',
+    });
+
+    expect(result.execution.status).toBe(0);
+    expect(result.output.result.nextAction).toBe('promote-homebrew');
+    expect(result.output.result.evidence).toMatchObject({ publishedRelease: true, tapCommit: false });
+
+    const malformedProvenance = { ...provenance, schema: 'untrusted.provenance' };
+    const malformedRaw = `${JSON.stringify(malformedProvenance)}\n`;
+    const malformedRelease = { ...release, assets: release.assets.map((asset) =>
+      asset.name === 'release-provenance.json'
+        ? evidenceAsset('release-provenance.json', malformedRaw)
+        : asset) };
+    writeFileSync(fakeGh, [
+      '#!/usr/bin/env node',
+      `const cask = ${JSON.stringify(cask)};`,
+      `const provenance = ${JSON.stringify(malformedProvenance)};`,
+      `const release = ${JSON.stringify(malformedRelease)};`,
+      `const rawChecksums = ${JSON.stringify(rawChecksums)};`,
+      "const args = process.argv.slice(2);",
+      "if (args[0] === 'run') console.log(JSON.stringify({databaseId:42,conclusion:'success',status:'completed',event:'push',headSha:'" + releaseCommit + "',workflowName:'Release',url:'https://github.com/glebis/cull/actions/runs/42'}));",
+      "else if (args[0] === 'api' && args[1].includes('/releases/tags/')) console.log(JSON.stringify({draft:release.isDraft,prerelease:false,tag_name:'v1.2.4',assets:release.assets}));",
+      "else if (args[0] === 'api') console.log(JSON.stringify({content:cask}));",
+      "else if (args[0] === 'release' && args[1] === 'download' && args.includes('checksums.txt')) process.stdout.write(rawChecksums);",
+      "else if (args[0] === 'release' && args[1] === 'download') console.log(JSON.stringify(provenance));",
+      'else process.exit(9);',
+      '',
+    ].join('\n'));
+
+    const unsafe = run(fixture, 'resume', ['--version', '1.2.4'], {
+      PATH: `${bin}:${process.env.PATH}`, CULL_RELEASE_TEST_REPOSITORY: 'glebis/cull',
+    });
+    expect(unsafe.execution.status).toBe(0);
+    expect(unsafe.output.result.nextAction).not.toBe('promote-homebrew');
+    expect(unsafe.output.result.evidence).toMatchObject({
+      workflow: false, releaseAsset: false, publishedRelease: false, tapCommit: false,
+    });
+
+    writeFileSync(fakeGh, [
+      '#!/usr/bin/env node',
+      `const cask = ${JSON.stringify(cask)};`,
+      `const provenance = ${JSON.stringify(provenance)};`,
+      `const release = ${JSON.stringify(release)};`,
+      `const rawChecksums = ${JSON.stringify(rawChecksums)};`,
+      "const args = process.argv.slice(2);",
+      "if (args[0] === 'api' && args[1].includes('/actions/runs/')) console.log(JSON.stringify({id:42,path:'.github/workflows/ci.yml',repository:{full_name:'glebis/cull'},status:'completed',conclusion:'success',event:'push',head_sha:'" + releaseCommit + "'}));",
+      "else if (args[0] === 'api' && args[1].includes('/releases/tags/')) console.log(JSON.stringify({draft:false,prerelease:false,tag_name:'v1.2.4',assets:release.assets}));",
+      "else if (args[0] === 'api') console.log(JSON.stringify({content:cask}));",
+      "else if (args[0] === 'release' && args[1] === 'download' && args.includes('checksums.txt')) process.stdout.write(rawChecksums);",
+      "else if (args[0] === 'release' && args[1] === 'download') console.log(JSON.stringify(provenance));",
+      'else process.exit(9);',
+      '',
+    ].join('\n'));
+    const unrelated = run(fixture, 'resume', ['--version', '1.2.4'], {
+      PATH: `${bin}:${process.env.PATH}`, CULL_RELEASE_TEST_REPOSITORY: 'glebis/cull',
+    });
+    expect(unrelated.execution.status).toBe(0);
+    expect(unrelated.output.result.nextAction).not.toBe('promote-homebrew');
+    expect(unrelated.output.result.evidence).toMatchObject({
+      workflow: false, releaseAsset: false, publishedRelease: false, tapCommit: false,
+    });
   });
 
   it('rejects duplicate options, option-looking values, and invalid evidence JSON', () => {

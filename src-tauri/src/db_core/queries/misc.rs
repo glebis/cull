@@ -28,6 +28,12 @@ impl Database {
         Ok(())
     }
 
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
     pub fn set_client_feedback(
         &self,
         image_id: &str,
@@ -797,14 +803,22 @@ impl Database {
         source: &str,
         fields: &std::collections::HashMap<String, String>,
     ) -> Result<()> {
-        let conn = self.conn.lock();
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
         for (key, value) in fields {
-            conn.execute(
+            tx.execute(
                 "INSERT OR REPLACE INTO image_metadata (image_id, key, value, source) VALUES (?1, ?2, ?3, ?4)",
                 params![image_id, key, value, source],
             )?;
         }
-        Ok(())
+        tx.execute(
+            "INSERT INTO image_analysis_status (image_id, analysis_kind, model_name, completed_at)
+             VALUES (?1, 'vision', ?2, ?3)
+             ON CONFLICT(image_id, analysis_kind, model_name) DO UPDATE SET
+                completed_at = excluded.completed_at",
+            params![image_id, source, chrono::Utc::now().to_rfc3339()],
+        )?;
+        tx.commit()
     }
 
     pub fn delete_image_metadata_source(&self, image_id: &str, source: &str) -> Result<u32> {

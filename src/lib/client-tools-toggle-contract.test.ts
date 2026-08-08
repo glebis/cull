@@ -66,15 +66,15 @@ describe('client tools + voice dictation toggle contract', () => {
     });
 
     it('exposes both toggles in Settings, default off, following the module pattern', () => {
-        const settings = readProjectFile('src/lib/components/McpSettings.svelte');
+        const settings = readProjectFile('src/lib/components/GeneralSettings.svelte');
         const page = readProjectFile('src/routes/+page.svelte');
 
         expect(settings).toContain("getAppSetting('module_client_tools')");
         expect(settings).toContain("getAppSetting('module_voice_dictation')");
-        expect(settings).toContain("setAppSetting('module_client_tools'");
-        expect(settings).toContain("setAppSetting('module_voice_dictation'");
-        expect(settings).toContain("clientToolsSetting === 'true'");
-        expect(settings).toContain("voiceDictationSetting === 'true'");
+        expect(settings).toContain("toggle('module_client_tools'");
+        expect(settings).toContain("toggle('module_voice_dictation'");
+        expect(settings).toContain("client === 'true'");
+        expect(settings).toContain("voice === 'true'");
         expect(page).toContain("getAppSetting('module_client_tools')");
         expect(page).toContain("getAppSetting('module_voice_dictation')");
     });
@@ -85,13 +85,17 @@ describe('client tools + voice dictation toggle contract', () => {
         expect(ids).toContain('client.toggle-favorite');
         expect(ids).toContain('client.add-comment');
 
+        // Preview Display handlers live in preview-display-actions.ts so the
+        // command palette can share them with the native menu; the menu still
+        // dispatches into them.
         const menu = readProjectFile('src/lib/menu.ts');
-        expect(menu).toContain('openPreviewDisplay');
-        expect(menu).toContain('startPreviewDisplayWebStream');
+        const previewActions = readProjectFile('src/lib/preview-display-actions.ts');
+        expect(previewActions).toContain('openPreviewDisplay');
+        expect(previewActions).toContain('startPreviewDisplayWebStream');
         expect(menu).not.toContain('clientToolsEnabled');
         expect(menu).not.toContain('voiceDictationEnabled');
 
-        for (const source of ['src/lib/menu.ts', 'src/lib/components/McpSettings.svelte', 'src/routes/+page.svelte']) {
+        for (const source of ['src/lib/menu.ts', 'src/lib/components/GeneralSettings.svelte', 'src/routes/+page.svelte']) {
             const content = readProjectFile(source);
             expect(content).not.toContain('module_preview_display');
             expect(content).not.toContain('module_client_feedback');

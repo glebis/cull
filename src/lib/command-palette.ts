@@ -20,6 +20,8 @@ import {
     groupRankingOpen,
     focusedIndex,
     images,
+    importBatchFilter,
+    importBatchImageIds,
     requestCollectionTarget,
     requestTextInput,
     searchOpen,
@@ -28,10 +30,10 @@ import {
     undoHistoryOpen,
     shortcutsOpen,
     sessionCanvases,
-    settingsOpen,
     showDetectionBoxes,
     showDetectionInspector,
     showToast,
+    showRejected,
     sidebarVisible,
     smartCollections,
     folders,
@@ -48,14 +50,47 @@ import {
     type ViewMode,
 } from './stores';
 import { invalidateImageCache, loadAllImages, loadImagesForCurrentScope } from './image-loading';
-import { addToCollection, createCollection, getClientFeedback, listCanvases, listClientFeedback, listCollections, redo, saveTextToPath, setClientFeedback, setDecision, setRating, undo, validateSessionFolder, type Canvas, type Session } from './api';
-import { withDecision, withRating, type ImageDecision } from './selection-updates';
+import { addToCollection, analyzeImages, checkOllama, createCollection, detectNsfw, detectObjects, getAppSetting, getClientFeedback, getOllamaConfig, isNudenetAvailable, isYoloAvailable, listCanvases, listClientFeedback, listCollections, listImageIdsMissingDetection, listImageIdsMissingVision, redo, saveTextToPath, setClientFeedback, setDecision, setRating, undo, validateSessionFolder, type Canvas, type Session } from './api';
+import { activateImportBatch } from './import-batch-navigation';
+import { withRating, type ImageDecision } from './selection-updates';
+import { applyDecisionToCurrentView } from './rejected-visibility';
 import { createWorkflow, readWorkflows, runWorkflow, type CommandWorkflow } from './workflows';
 import { buildDeliveryCsv, type DeliveryRow } from './delivery-csv';
 import { loadSimilarImages } from './similarity';
 import { getPluginPaletteCommands } from './plugins/loader';
 import { tabRegistry } from './plugins/tab-registry';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { runAiLibraryJob, type AiLibraryJobKind } from './ai-library-jobs';
+import { openSettings } from './settings-navigation';
+import { requestTrashImages } from './trash-actions';
+import { copyCurrentImageToClipboard } from './image-copy-action';
+import { currentImageIndex } from './current-image-target';
+import {
+    previewDisplayAlwaysOnTop,
+    previewDisplayBlanked,
+    previewDisplayFrozen,
+    previewDisplayLayout,
+    previewDisplayMode,
+    previewDisplayOverlay,
+    previewDisplayWebStreamStatus,
+} from './preview-display-store';
+import type { PreviewDisplayField } from './preview-display';
+import type { PreviewDisplayLayout, PreviewDisplayMode } from './api';
+import {
+    copyPreviewDisplayWebStreamUrl,
+    handleOpenPreviewDisplay,
+    handlePreviewDisplayAlwaysOnTop,
+    handlePreviewDisplayBlank,
+    handlePreviewDisplayField,
+    handlePreviewDisplayFreeze,
+    handlePreviewDisplayFullscreen,
+    handlePreviewDisplayLayout,
+    handlePreviewDisplayMoveMonitor,
+    handlePreviewDisplayPreset,
+    handlePreviewDisplayStartWebStream,
+    handlePreviewDisplayStopWebStream,
+    requestPreviewDisplayCapture,
+} from './preview-display-actions';
 
 export type CommandPaletteItemKind = 'command' | 'destination';
 
@@ -67,6 +102,7 @@ export interface CommandPaletteItem {
     kind: CommandPaletteItemKind;
     keywords?: string[];
     defaultShortcut?: string;
+    handlesDefaultShortcut?: boolean;
     disabled?: boolean;
     when?: () => boolean;
     run: () => void | Promise<void>;
@@ -261,6 +297,25 @@ export function shortcutForItem(item: CommandPaletteItem, hotkeys: Record<string
     return hotkeys[item.id] ?? item.defaultShortcut;
 }
 
+export function commandShortcutHints(commandIds: string[]): Record<string, string> {
+    const wanted = new Set(commandIds);
+    const hotkeys = readCommandHotkeys();
+    const compareMode = get(viewMode) === 'compare';
+    return Object.fromEntries(
+        getCommandPaletteItems('all')
+            .filter(item => wanted.has(item.id) && isCommandPaletteItemVisible(item))
+            .flatMap(item => {
+                const shortcut = shortcutForItem(item, hotkeys);
+                if (
+                    compareMode
+                    && !hotkeys[item.id]
+                    && (item.id === 'image.rating.1' || item.id === 'image.rating.2')
+                ) return [];
+                return shortcut ? [[item.id, shortcut] as const] : [];
+            }),
+    );
+}
+
 // Clear every custom hotkey assignment, reverting all commands to their defaults.
 export function resetCommandHotkeys(): Record<string, string> {
     writeJson(COMMAND_HOTKEYS_STORAGE_KEY, {});
@@ -301,10 +356,25 @@ export function listCommandShortcuts(
     });
 }
 
-function clearNavigationScope() {
+function clearSessionScope() {
     activeSession.set(null);
     sessionCanvases.set([]);
     activeCanvas.set(null);
+}
+
+function clearImportScope() {
+    importBatchFilter.set(null);
+    importBatchImageIds.set([]);
+}
+
+function clearNavigationScope() {
+    clearSessionScope();
+    clearImportScope();
+}
+
+async function openCurrentImportBatch(batchId: string) {
+    clearSessionScope();
+    await activateImportBatch(batchId);
 }
 
 async function openAllImages() {
@@ -363,6 +433,7 @@ async function openSession(session: Session) {
     } catch {
         sessionCanvases.set([]);
     }
+    clearImportScope();
     activeSmartCollection.set(null);
     activeFolder.set(null);
     activeCollection.set(null);
@@ -372,12 +443,13 @@ async function openSession(session: Session) {
 }
 
 function openCanvas(canvas: Canvas) {
+    clearImportScope();
     activeCanvas.set(canvas);
     navigateTo('canvas');
 }
 
 async function setFocusedRating(rating: number) {
-    const idx = get(focusedIndex);
+    const idx = currentImageIndex();
     const image = get(images)[idx];
     if (!image) return;
     await setRating(image.image.id, rating, get(activeSession)?.id ?? null);
@@ -390,16 +462,12 @@ async function setFocusedRating(rating: number) {
 }
 
 async function setFocusedDecision(decision: ImageDecision) {
-    const idx = get(focusedIndex);
+    const idx = currentImageIndex();
     const image = get(images)[idx];
     if (!image) return;
     await setDecision(image.image.id, decision, get(activeSession)?.id ?? null);
     invalidateImageCache();
-    images.update(all => {
-        const next = [...all];
-        next[idx] = withDecision(next[idx], decision);
-        return next;
-    });
+    applyDecisionToCurrentView(image.image.id, decision);
 }
 
 function focusedImageTitle(): string {
@@ -433,7 +501,7 @@ async function createCollectionFromImageSet(inverse = false) {
 
     const collectionId = await createCollection(name.trim());
     await addToCollection(collectionId, imageIds);
-    collections.set(await listCollections());
+    collections.set(await listCollections(get(showRejected)));
     statusHint.set(`Created "${name.trim()}" with ${imageIds.length} images`);
     setTimeout(() => statusHint.set(null), 2000);
 }
@@ -462,7 +530,7 @@ async function toggleCollectMode() {
         targetId = target.collectionId;
     } else {
         targetId = await createCollection(target.name);
-        collections.set(await listCollections());
+        collections.set(await listCollections(get(showRejected)));
     }
 
     collectMode.set(true);
@@ -478,7 +546,7 @@ async function addFocusedImageToCollectTarget() {
 
     await addToCollection(target, [image.image.id]);
     invalidateImageCache();
-    collections.set(await listCollections());
+    collections.set(await listCollections(get(showRejected)));
     if (get(activeCollection) === target) {
         await loadImagesForCurrentScope({ resetFocus: false, force: true });
     }
@@ -489,6 +557,27 @@ function toggleAgentPanel() {
     const open = get(agentPanelVisible) || get(agentPanelPinned);
     agentPanelVisible.set(!open);
     agentPanelPinned.set(!open);
+}
+
+async function runLibraryAiJob(kind: AiLibraryJobKind) {
+    await runAiLibraryJob(kind, {
+        getAppSetting,
+        isYoloAvailable,
+        isNudenetAvailable,
+        checkOllama,
+        getOllamaConfig,
+        listMissingDetection: listImageIdsMissingDetection,
+        listMissingVision: listImageIdsMissingVision,
+        detectObjects,
+        detectNsfw,
+        analyzeImages,
+        toast: showToast,
+        openAiSettings: () => openSettings('ai'),
+        refreshLibrary: async (detectionsChanged) => {
+            if (detectionsChanged) window.dispatchEvent(new CustomEvent('detected-classes-changed'));
+            await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
+        },
+    });
 }
 
 export const WORKFLOW_CREATE_COMMAND_ID = 'workflow.create-from-recents';
@@ -637,11 +726,11 @@ function commandItems(): CommandPaletteItem[] {
         {
             id: 'app.settings',
             title: 'Open Settings',
-            subtitle: 'MCP, publishing, and app settings',
+            subtitle: 'App, AI, agent access, privacy, and plugin settings',
             category: 'App',
             kind: 'command',
             keywords: ['preferences', 'configuration', 'mcp'],
-            run: () => settingsOpen.set(true),
+            run: () => openSettings('general'),
         },
         {
             id: WORKFLOW_CREATE_COMMAND_ID,
@@ -932,6 +1021,18 @@ function commandItems(): CommandPaletteItem[] {
             run: addFocusedImageToCollectTarget,
         },
         {
+            id: 'image.copy',
+            title: 'Copy Focused Image',
+            subtitle: focusedImageTitle(),
+            category: 'Image',
+            kind: 'command',
+            keywords: ['clipboard', 'copy'],
+            defaultShortcut: 'Cmd+C',
+            handlesDefaultShortcut: true,
+            disabled: !hasImage,
+            run: copyCurrentImageToClipboard,
+        },
+        {
             id: 'image.trash',
             title: 'Move Focused Image to Trash',
             subtitle: focusedImageTitle(),
@@ -939,10 +1040,9 @@ function commandItems(): CommandPaletteItem[] {
             kind: 'command',
             keywords: ['delete', 'remove'],
             defaultShortcut: 'Backspace',
+            handlesDefaultShortcut: true,
             disabled: !hasImage,
-            run: () => {
-                window.dispatchEvent(new CustomEvent('trash-focused-image'));
-            },
+            run: () => requestTrashImages(),
         },
         {
             id: 'image.delete-permanently',
@@ -952,6 +1052,7 @@ function commandItems(): CommandPaletteItem[] {
             kind: 'command',
             keywords: ['remove', 'destroy'],
             defaultShortcut: 'Cmd+Backspace',
+            handlesDefaultShortcut: true,
             disabled: !hasImage,
             run: () => {
                 window.dispatchEvent(new CustomEvent('delete-focused-image'));
@@ -964,6 +1065,8 @@ function commandItems(): CommandPaletteItem[] {
             category: 'Image',
             kind: 'command',
             keywords: ['star', 'rank', 'score'],
+            defaultShortcut: String(rating),
+            handlesDefaultShortcut: true,
             disabled: !hasImage,
             run: () => setFocusedRating(rating),
         })),
@@ -974,6 +1077,8 @@ function commandItems(): CommandPaletteItem[] {
             category: 'Image',
             kind: 'command',
             keywords: ['pick', 'cull', 'triage'],
+            defaultShortcut: decision === 'accept' ? 'A' : decision === 'reject' ? 'X' : 'U',
+            handlesDefaultShortcut: true,
             disabled: !hasImage,
             run: () => setFocusedDecision(decision),
         })),
@@ -996,6 +1101,33 @@ function commandItems(): CommandPaletteItem[] {
                 }
                 setTimeout(() => statusHint.set(null), 2500);
             },
+        },
+        {
+            id: 'ai.detect-library',
+            title: 'Detect Objects in Library',
+            subtitle: 'Run the active YOLO model only on pending images',
+            category: 'AI',
+            kind: 'command',
+            keywords: ['yolo', 'objects', 'library', 'batch'],
+            run: () => runLibraryAiJob('objects'),
+        },
+        {
+            id: 'ai.scan-sensitive-library',
+            title: 'Scan Library for Sensitive Content',
+            subtitle: 'Run NudeNet only on pending images',
+            category: 'AI',
+            kind: 'command',
+            keywords: ['nudenet', 'nsfw', 'safety', 'library', 'batch'],
+            run: () => runLibraryAiJob('sensitive-content'),
+        },
+        {
+            id: 'ai.describe-library',
+            title: 'Describe Images in Library',
+            subtitle: 'Run the configured Ollama vision model only on pending images',
+            category: 'AI',
+            kind: 'command',
+            keywords: ['ollama', 'vision', 'describe', 'caption', 'library', 'batch'],
+            run: () => runLibraryAiJob('descriptions'),
         },
         {
             id: 'curation.best-of-group',
@@ -1024,6 +1156,195 @@ function commandItems(): CommandPaletteItem[] {
             keywords: ['objects', 'metadata', 'panel'],
             run: () => showDetectionInspector.update(value => !value),
         },
+        ...previewDisplayItems(),
+    ];
+}
+
+/**
+ * Preview Display (second-screen output) commands.
+ *
+ * Every entry delegates to the same handler the native menu uses — see
+ * `preview-display-actions.ts`. Keywords are deliberately generous because
+ * people call this surface by the hardware ("projector", "beamer",
+ * "second screen") far more often than by its in-app name.
+ */
+function previewDisplayItems(): CommandPaletteItem[] {
+    const frozen = get(previewDisplayFrozen);
+    const blanked = get(previewDisplayBlanked);
+    const onTop = get(previewDisplayAlwaysOnTop);
+    const mode = get(previewDisplayMode);
+    const layout = get(previewDisplayLayout);
+    const overlay = get(previewDisplayOverlay);
+    const stream = get(previewDisplayWebStreamStatus);
+
+    // Shared vocabulary so any of these words finds any preview command.
+    const base = ['preview', 'display', 'second screen', 'secondary screen', 'external display',
+        'projector', 'beamer', 'monitor', 'output', 'presentation', 'client'];
+
+    const presets: Array<{ mode: PreviewDisplayMode; title: string; subtitle: string; extra: string[] }> = [
+        { mode: 'image_only', title: 'Preview: Image Only', subtitle: 'Clean full-bleed image, no overlays', extra: ['clean', 'bare', 'preset'] },
+        { mode: 'client_review', title: 'Preview: Client Review', subtitle: 'Filename, rating and decision overlay', extra: ['review', 'preset'] },
+        { mode: 'metadata_review', title: 'Preview: Metadata Review', subtitle: 'Full metadata rail alongside the image', extra: ['metadata', 'rail', 'preset'] },
+    ];
+
+    const layouts: Array<{ layout: PreviewDisplayLayout; title: string; subtitle: string; extra: string[] }> = [
+        { layout: 'single', title: 'Preview Layout: Single', subtitle: 'One image fills the preview display', extra: ['one', 'solo'] },
+        { layout: 'compare', title: 'Preview Layout: Compare', subtitle: 'Side-by-side comparison on the preview display', extra: ['side by side', 'ab'] },
+        { layout: 'grid', title: 'Preview Layout: Grid', subtitle: 'Contact-sheet grid on the preview display', extra: ['contact sheet', 'tiles'] },
+    ];
+
+    const fields: Array<{ field: PreviewDisplayField; id: string; label: string; extra: string[] }> = [
+        { field: 'showFilename', id: 'filename', label: 'Filename', extra: ['name', 'file'] },
+        { field: 'showRating', id: 'rating', label: 'Rating', extra: ['stars'] },
+        { field: 'showDecision', id: 'decision', label: 'Decision', extra: ['pick', 'reject', 'flag'] },
+        { field: 'showDimensions', id: 'dimensions', label: 'Dimensions', extra: ['size', 'pixels', 'resolution'] },
+        { field: 'showFormat', id: 'format', label: 'Format', extra: ['type', 'extension'] },
+    ];
+
+    return [
+        {
+            id: 'preview.open',
+            title: 'Open Preview Display',
+            subtitle: 'Show the second-screen output window',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'open', 'show', 'window'],
+            run: handleOpenPreviewDisplay,
+        },
+        {
+            id: 'preview.move-monitor',
+            title: 'Move Preview Display to Display…',
+            subtitle: 'Pick which physical display shows the preview',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'move', 'screen', 'place'],
+            run: handlePreviewDisplayMoveMonitor,
+        },
+        {
+            id: 'preview.fullscreen',
+            title: 'Preview Display Fullscreen',
+            subtitle: 'Take the preview display fullscreen',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'fullscreen', 'full screen', 'maximise', 'maximize'],
+            run: handlePreviewDisplayFullscreen,
+        },
+        {
+            id: 'preview.toggle-always-on-top',
+            title: onTop ? 'Preview Display: Normal Stacking' : 'Preview Display: Always on Top',
+            subtitle: onTop ? 'Let other windows cover the preview display' : 'Keep the preview display above other windows',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'always on top', 'float', 'stacking', 'front'],
+            run: handlePreviewDisplayAlwaysOnTop,
+        },
+        {
+            id: 'preview.toggle-freeze',
+            title: frozen ? 'Unfreeze Preview Display' : 'Freeze Preview Display',
+            subtitle: frozen ? 'Resume following the focused image' : 'Hold the current image while you browse',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'freeze', 'unfreeze', 'hold', 'lock', 'pause', 'live'],
+            run: handlePreviewDisplayFreeze,
+        },
+        {
+            id: 'preview.toggle-blank',
+            title: blanked ? 'Unblank Preview Display' : 'Blank Preview Display',
+            subtitle: blanked ? 'Show the image again' : 'Black out the preview display',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'blank', 'unblank', 'black', 'hide', 'mute'],
+            run: handlePreviewDisplayBlank,
+        },
+        ...presets.map(preset => ({
+            id: `preview.preset-${preset.mode}`,
+            title: preset.title,
+            subtitle: mode === preset.mode ? `${preset.subtitle} (current)` : preset.subtitle,
+            category: 'Preview',
+            kind: 'command' as const,
+            keywords: [...base, ...preset.extra],
+            run: () => handlePreviewDisplayPreset(preset.mode),
+        })),
+        ...layouts.map(entry => ({
+            id: `preview.layout-${entry.layout}`,
+            title: entry.title,
+            subtitle: layout === entry.layout ? `${entry.subtitle} (current)` : entry.subtitle,
+            category: 'Preview',
+            kind: 'command' as const,
+            keywords: [...base, 'layout', ...entry.extra],
+            run: () => handlePreviewDisplayLayout(entry.layout),
+        })),
+        ...fields.map(entry => ({
+            id: `preview.field-${entry.id}`,
+            title: overlay[entry.field]
+                ? `Preview Overlay: Hide ${entry.label}`
+                : `Preview Overlay: Show ${entry.label}`,
+            subtitle: overlay[entry.field]
+                ? `${entry.label} is currently shown on the preview display`
+                : `${entry.label} is currently hidden on the preview display`,
+            category: 'Preview',
+            kind: 'command' as const,
+            keywords: [...base, 'overlay', 'field', ...entry.extra],
+            run: () => handlePreviewDisplayField(entry.field),
+        })),
+        {
+            id: 'preview.copy-to-clipboard',
+            title: 'Copy Preview Display to Clipboard',
+            subtitle: 'Capture what the preview display is showing',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'copy', 'clipboard', 'capture', 'screenshot'],
+            run: () => requestPreviewDisplayCapture('clipboard'),
+        },
+        {
+            id: 'preview.export-png',
+            title: 'Export Preview Display as PNG',
+            subtitle: 'Save what the preview display is showing to a file',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'export', 'png', 'save', 'capture', 'screenshot'],
+            run: () => requestPreviewDisplayCapture('png'),
+        },
+        {
+            id: 'preview.start-web-stream',
+            title: 'Start Preview Web Stream (This Mac)',
+            subtitle: 'Serve the preview display on localhost',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'web', 'stream', 'browser', 'localhost', 'serve', 'share'],
+            when: () => !get(previewDisplayWebStreamStatus).active,
+            run: () => handlePreviewDisplayStartWebStream('127.0.0.1'),
+        },
+        {
+            id: 'preview.start-lan-web-stream',
+            title: 'Start Preview Web Stream (Local Network)',
+            subtitle: 'Serve the preview display to other devices on this network',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'web', 'stream', 'lan', 'network', 'wifi', 'remote', 'share', 'ipad', 'phone'],
+            when: () => !get(previewDisplayWebStreamStatus).active,
+            run: () => handlePreviewDisplayStartWebStream('0.0.0.0'),
+        },
+        {
+            id: 'preview.copy-web-stream-url',
+            title: 'Copy Preview Web Stream URL',
+            subtitle: stream.url ?? 'Stream URL',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'web', 'stream', 'url', 'copy', 'link', 'address'],
+            when: () => get(previewDisplayWebStreamStatus).active,
+            run: () => copyPreviewDisplayWebStreamUrl(),
+        },
+        {
+            id: 'preview.stop-web-stream',
+            title: 'Stop Preview Web Stream',
+            subtitle: 'Shut down the preview web server',
+            category: 'Preview',
+            kind: 'command',
+            keywords: [...base, 'web', 'stream', 'stop', 'end', 'close'],
+            when: () => get(previewDisplayWebStreamStatus).active,
+            run: handlePreviewDisplayStopWebStream,
+        },
     ];
 }
 
@@ -1034,6 +1355,9 @@ function destinationItems(): CommandPaletteItem[] {
     const activeSessionId = get(activeSession)?.id ?? null;
     const activeCanvasId = get(activeCanvas)?.id ?? null;
     const activeClass = get(activeDetectedClass);
+    const currentImportBatch = get(importBatchFilter);
+    const currentImportImageIds = get(importBatchImageIds);
+    const currentImportCount = currentImportImageIds.length;
 
     return [
         {
@@ -1045,6 +1369,15 @@ function destinationItems(): CommandPaletteItem[] {
             keywords: ['library', 'root'],
             run: openAllImages,
         },
+        ...(currentImportBatch ? [{
+            id: `scope.import.${currentImportBatch}`,
+            title: 'Current Import',
+            subtitle: `${currentImportCount} image${currentImportCount === 1 ? '' : 's'} · ${currentImportBatch}`,
+            category: 'Import',
+            kind: 'destination' as const,
+            keywords: ['import', 'batch', 'recent', currentImportBatch],
+            run: () => openCurrentImportBatch(currentImportBatch),
+        }] : []),
         ...get(sessions).map((session): CommandPaletteItem => ({
             id: `scope.session.${session.id}`,
             title: session.name,
@@ -1293,7 +1626,8 @@ export function commandForKeyboardEvent(event: KeyboardEvent): CommandPaletteIte
     const items = getCommandPaletteItems('all');
     const item = items.find(candidate => {
         if (!isCommandPaletteItemVisible(candidate)) return false;
-        const shortcut = hotkeys[candidate.id];
+        const shortcut = hotkeys[candidate.id]
+            ?? (candidate.handlesDefaultShortcut ? candidate.defaultShortcut : undefined);
         return shortcut ? eventMatchesShortcut(event, shortcut) : false;
     });
     return item && !item.disabled ? item : null;

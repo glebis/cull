@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use super::db::{row_u64, Database};
 use super::models::ImageWithFile;
+use super::visibility::RejectedVisibility;
 
 // --- Filename stem extraction ---
 
@@ -336,8 +337,16 @@ impl Database {
     }
 
     pub fn get_batch_images(&self, batch_id: &str) -> Result<Vec<ImageWithFile>> {
+        self.get_batch_images_with_visibility(batch_id, true)
+    }
+
+    pub fn get_batch_images_with_visibility(
+        &self,
+        batch_id: &str,
+        include_rejected: bool,
+    ) -> Result<Vec<ImageWithFile>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
+        let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
@@ -345,10 +354,12 @@ impl Database {
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE i.import_batch_id = ?1
+             WHERE i.import_batch_id = ?1 AND {}
              GROUP BY i.id
              ORDER BY i.imported_at ASC",
-        )?;
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![batch_id], |row| {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;

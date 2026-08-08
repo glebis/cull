@@ -69,11 +69,27 @@ pub async fn complete_agent_view_snapshot(
 
     if let Some(request_id) = request.request_id {
         if let Some(sender) = state.agent_snapshot_requests.lock().remove(&request_id) {
-            let _ = sender.send(package.clone());
+            let _ = sender.send(Ok(package.clone()));
         }
     }
 
     Ok(snapshot_response_value(&package, false))
+}
+
+/// Frontend report that a requested snapshot could not be captured. Without
+/// this the failure is swallowed in the webview and the caller waits out the
+/// full timeout, turning a clear error ("window has no captureable size") into
+/// an uninformative "timed out".
+#[tauri::command]
+pub async fn fail_agent_view_snapshot(
+    state: State<'_, AppState>,
+    request_id: String,
+    error: String,
+) -> Result<(), String> {
+    if let Some(sender) = state.agent_snapshot_requests.lock().remove(&request_id) {
+        let _ = sender.send(Err(error));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -103,11 +119,16 @@ pub async fn request_agent_view_snapshot(
         clipboard,
         capture_reason: "mcp".to_string(),
     };
-    let (sender, receiver) = tokio::sync::oneshot::channel::<AgentSnapshotPackage>();
+    let (sender, receiver) =
+        tokio::sync::oneshot::channel::<Result<AgentSnapshotPackage, String>>();
     state
         .agent_snapshot_requests
         .lock()
         .insert(request_id.clone(), sender);
+
+    // A hidden tray window has no captureable size, so reveal it first rather
+    // than letting the capture fail.
+    crate::reveal_main_window(&app);
 
     if let Err(e) = app.emit("agent-view-snapshot:request", payload) {
         state.agent_snapshot_requests.lock().remove(&request_id);
@@ -120,7 +141,8 @@ pub async fn request_agent_view_snapshot(
     )
     .await
     {
-        Ok(Ok(package)) => Ok(snapshot_response_value(&package, false)),
+        Ok(Ok(Ok(package))) => Ok(snapshot_response_value(&package, false)),
+        Ok(Ok(Err(e))) => Err(format!("The app could not capture a snapshot: {}", e)),
         Ok(Err(_)) => Err("Agent snapshot request was cancelled".to_string()),
         Err(_) => {
             state.agent_snapshot_requests.lock().remove(&request_id);
@@ -171,6 +193,16 @@ fn capture_main_window_png(app: &AppHandle) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("Failed to run screencapture: {}", e))?;
     if !status.success() {
         return Err(format!("screencapture failed with status {}", status));
+    }
+    // screencapture exits 0 even when it wrote nothing ("cannot write file to
+    // intended destination"), which in practice means macOS denied it Screen
+    // Recording access for this app. Say so instead of reporting a bare ENOENT.
+    if !output.exists() {
+        return Err(format!(
+            "screencapture produced no file at {}. Grant Cull the Screen Recording \
+             permission in System Settings > Privacy & Security > Screen Recording",
+            output.display()
+        ));
     }
     std::fs::read(&output).map_err(|e| format!("Failed to read captured window PNG: {}", e))
 }

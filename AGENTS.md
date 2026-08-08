@@ -4,6 +4,10 @@
 
 Cull is a Tauri 2 + SvelteKit 5 + Rust desktop image viewer focused on AI-generated art. Uses SQLite (rusqlite), CLIP embeddings (ONNX), and Svelte 5 runes.
 
+Canonical modular release skills live in `~/ai_projects/claude-skills/` and are
+installed into `~/.agents/skills/`. Repository-local release policy and commands
+remain authoritative when a skill is unavailable.
+
 ## Architecture
 
 - **Rust backend**: `src-tauri/src/db_core/` — models, DB, smart collections, NL parser, source detection
@@ -256,19 +260,23 @@ generic Go/Nix checklist (`go test`, `golangci-lint`, `gofmt`, `go.sum`,
 
 ## Feature Landing Flow
 
-Use the feature landing flow when a feature branch is complete and the user asks
-to merge, build, land it on `main`, or make it part of the latest main builds.
-Do not use it for WIP branches, dirty worktrees, PR-only review, or signed
-release packaging.
+Use the feature landing flow when a focused feature branch is complete and the
+user asks to merge, build, land it on `main`, or make it part of the latest main
+builds. Do not use it for WIP branches, dirty worktrees, review-only pull
+requests, or signed release packaging.
 
 ```bash
 npm run land:feature -- <feature-branch>
 ```
 
-The flow merges the feature branch into `main`, runs `npm run check`,
-`npm test`, and `npm run build`, falls back from unavailable `npm run bd -- sync` to
-`npm run bd -- vc status`, pushes `main`, and watches main CI. Signed app artifacts are a
-separate tag/manual Release workflow step.
+The flow prints the scoped commit list and diff stat, runs the full local
+preflight, pushes only the feature branch, creates or updates its pull request,
+verifies the exact head commit, waits for all GitHub required checks, and merges
+through GitHub. It fails closed when required checks are absent or fail. After
+GitHub confirms the merge, it fast-forwards local `main` from `origin/main` and
+removes the merged remote feature branch; it never merges into or pushes `main`
+locally. Signed app artifacts remain a separate tag/manual Release workflow
+step.
 
 Hook behavior is documented in `docs/dev-workflow-hooks.md`. The hook installer
 uses bd chaining and Cull-managed markers so existing user hook content outside

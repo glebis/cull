@@ -65,7 +65,7 @@ function makeMockImage(i: number) {
     },
     path: mockImagePath(i),
     thumbnail_path: mockThumbnailPath(i),
-    selection: i % 3 === 0 ? {
+    selection: i > 0 && i % 3 === 0 ? {
       image_id: `img-${i}`,
       project_id: null,
       star_rating: Math.min(5, Math.floor(i / 2) + 1),
@@ -77,6 +77,12 @@ function makeMockImage(i: number) {
 
 let mockImages = Array.from({ length: 20 }, (_, i) => makeMockImage(i));
 let lastTrashedImages: ReturnType<typeof makeMockImage>[] = [];
+let mockFolderPath = '/mock/folder-rename';
+
+function useFolderRenameFixture(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('folderRename') === '1';
+}
 
 function mockImageFixtureIndex(item: ReturnType<typeof makeMockImage>): number {
   return Number(item.image.id.replace('img-', ''));
@@ -174,6 +180,15 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   'plugin:opener|open_url': () => undefined,
   'plugin:opener|open_path': () => undefined,
   'plugin:opener|reveal_item_in_dir': () => undefined,
+
+  drain_pending_open_params: () => [],
+  list_action_proposals: () => [],
+  list_agent_selection_presets: () => [],
+  get_image_file_bytes: (_: any, args: { imageId: string }) => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#0c0c12"/><text x="320" y="180" text-anchor="middle" fill="#e0e0e0">${args.imageId}</text></svg>`;
+    return { bytes: Array.from(new TextEncoder().encode(svg)), mime_type: 'image/svg+xml' };
+  },
+  stop_dictation: () => undefined,
 
   list_smart_collections: () => [...MOCK_SMART_COLLECTIONS, ...userCollections],
 
@@ -810,8 +825,16 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     },
   ],
   list_similarity_group_images: () => Array.from({ length: 4 }, (_, i) => makeMockImage(i)),
-  list_folders: () => [],
+  list_folders: () => useFolderRenameFixture() ? [[mockFolderPath, 2]] : [],
   delete_folder: () => 0,
+  rename_folder: (_: any, args: { folder: string; newName: string }) => {
+    if (!useFolderRenameFixture() || args.folder !== mockFolderPath) {
+      throw new Error('Folder not found');
+    }
+    const oldPath = mockFolderPath;
+    mockFolderPath = `${oldPath.slice(0, oldPath.lastIndexOf('/'))}/${args.newName}`;
+    return { oldPath, newPath: mockFolderPath, imageCount: 2 };
+  },
   list_collections: () => mockCollections,
   create_collection: (_: any, args: { name: string }) => {
     const id = `col-${nextId++}`;
@@ -824,7 +847,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     const index = mockCollections.findIndex(([id]) => id === args.collectionId);
     if (index >= 0) mockCollections.splice(index, 1);
   },
-  list_images_by_folder: () => [],
+  list_images_by_folder: () => useFolderRenameFixture() ? mockImages.slice(0, 2) : [],
   list_images_filtered: () => [],
   list_collection_images: (_: any, args: { collectionId: string }) =>
     args.collectionId === 'col_clipboard_mock' ? [makeMockImage(0), makeMockImage(1)] : [],
@@ -839,7 +862,9 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   detect_objects: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   detect_nsfw: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   get_detection_count: (_: any, args: { model: string }) => args.model === 'yolo11m' ? 5 : 1,
+  list_image_ids_missing_detection: (_: any, args: { model: string }) => args.model === 'nudenet' ? ['img-2'] : ['img-1', 'img-2'],
   count_by_detected_class: (_: any, args: { className: string }) => args.className === 'person' ? 5 : 0,
+  list_detected_classes: () => [['person', 5], ['truck', 2]],
   search_by_detected_class: () => [['img-0', 0.95], ['img-1', 0.9]],
   list_images_by_detected_class: () => [makeMockImage(0), makeMockImage(1)],
   get_detections: () => [
@@ -852,6 +877,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   analyze_images: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   get_vision_metadata: () => [],
   get_vision_count: () => 0,
+  list_image_ids_missing_vision: () => ['img-1', 'img-2'],
   rescan_sources: () => 20,
   list_lineage_groups: () => [],
   get_lineage_group_images: () => [],

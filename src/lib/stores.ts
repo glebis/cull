@@ -197,16 +197,35 @@ export function cycleAgentVisualLevel() {
 }
 
 export const GRID_PRESETS = [
+    { name: 'pixels', size: 4, gap: 0 },
+    { name: 'overview', size: 12, gap: 0 },
+    { name: 'contact', size: 32, gap: 1 },
     { name: 'compact', size: 80, gap: 2 },
     { name: 'normal', size: 160, gap: 4 },
-    { name: 'large', size: 280, gap: 8 },
-    { name: 'xl', size: 400, gap: 12 },
+    { name: 'large', size: 320, gap: 8 },
+    { name: 'detail', size: 640, gap: 12 },
 ];
 
-export const gridPreset = writable<number>(1);
+export const gridPreset = writable<number>(4);
 export const gridGap = writable<number>(4);
 
+export function setGridThumbnailSize(size: number) {
+    let closest = 0;
+    let distance = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < GRID_PRESETS.length; i += 1) {
+        const nextDistance = Math.abs(GRID_PRESETS[i].size - size);
+        if (nextDistance < distance) {
+            closest = i;
+            distance = nextDistance;
+        }
+    }
+    thumbnailSize.set(size);
+    gridPreset.set(closest);
+    gridGap.set(GRID_PRESETS[closest]?.gap ?? 0);
+}
+
 export const zenMode = writable<boolean>(false);
+export const showRejected = writable<boolean>(false);
 
 export const compareImages = writable<ImageWithFile[]>([]);
 export const compareIndex = writable<number>(0);
@@ -443,6 +462,16 @@ export const pinnedCollection = writable<string | null>(null);
 // Sidebar collection pins, ordered by the time they were pinned.
 export const pinnedCollections = writable<string[]>([]);
 
+// Folder-tree rows the user has expanded, keyed by full folder path. Persisted,
+// so a deep working branch survives a relaunch.
+export const expandedFolders = writable<Set<string>>(new Set());
+// Sidebar sections the user has collapsed, keyed by section id. Collapsed (not
+// expanded) is the stored state so a section added later defaults to open.
+export const sidebarSectionsCollapsed = writable<Set<string>>(new Set());
+// Free-text filter narrowing folders, collections and smart collections in the
+// sidebar. Transient by design — a stale filter on launch reads as data loss.
+export const sidebarFilter = writable<string>('');
+
 // Lineage tab layout preference
 export type LineageLayout = 'timeline' | 'comparison';
 export const lineageLayout = writable<LineageLayout>('timeline');
@@ -547,6 +576,8 @@ export const activeCanvas = writable<Canvas | null>(null);
 export const settingsOpen = writable<boolean>(false);
 export const aboutOpen = writable<boolean>(false);
 export const agentSkillsOpen = writable<boolean>(false);
+// Read-only Apple Photos metadata catalog; macOS exposes the native File menu action.
+export const applePhotosCatalogOpen = writable<boolean>(false);
 export const searchOpen = writable<boolean>(false);
 export type CommandPaletteMode = 'all' | 'commands';
 export const commandPaletteOpen = writable<boolean>(false);

@@ -84,6 +84,24 @@ describe('backend init failure produces a distinct error state', () => {
         expect(resolveLibraryViewState(stateInput())).toBe('empty');
     });
 
+    it('a backend request that never settles cannot leave the library loading forever', async () => {
+        vi.useFakeTimers();
+        try {
+            vi.mocked(listImages).mockReturnValue(new Promise(() => {}));
+
+            void loadImagesForCurrentScope({ force: true });
+            await vi.advanceTimersByTimeAsync(15_000);
+
+            const state = get(imageLoadState);
+            expect(state.loading).toBe(false);
+            expect(state.error).toContain('timed out');
+            expect(resolveLibraryViewState(stateInput())).toBe('error');
+        } finally {
+            vi.useRealTimers();
+            resetImagePaging();
+        }
+    });
+
     it('never reports empty before the first query settles', () => {
         expect(
             resolveLibraryViewState({ loading: true, error: null, loaded: false, imageCount: 0 }),
@@ -114,7 +132,6 @@ describe('backend init failure produces a distinct error state', () => {
     it('Sidebar initial loads surface failures instead of console.error-only', () => {
         const sidebar = source('src/lib/components/Sidebar.svelte');
 
-        expect(sidebar).toContain("showToast('Failed to load folders'");
-        expect(sidebar).toContain("showToast('Failed to load collections'");
+        expect(sidebar).toContain("showToast('Failed to refresh library counts'");
     });
 });

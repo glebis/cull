@@ -898,7 +898,7 @@ checksum = "52560adf09603e58c9a7ee1fe1dcb95a16927b17c127f0ac02d6e768a0e25bc1"
 
 [[package]]
 name = "cull"
-version = "0.2.5"
+version = "0.3.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -917,12 +917,14 @@ dependencies = [
  "hyper-util",
  "image",
  "keyring",
+ "libc",
  "ndarray",
  "notify",
  "objc2",
  "objc2-app-kit",
  "objc2-avf-audio",
  "objc2-foundation",
+ "objc2-photos",
  "objc2-speech",
  "objc2-vision",
  "ort",
@@ -3269,6 +3271,18 @@ dependencies = [
  "bitflags 2.11.1",
  "objc2",
  "objc2-app-kit",
+ "objc2-foundation",
+]
+
+[[package]]
+name = "objc2-photos"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6ea9a706f18e32cf8a0723e99855af4f135282891e07259301bae9135ae3872"
+dependencies = [
+ "bitflags 2.11.1",
+ "block2",
+ "objc2",
  "objc2-foundation",
 ]
 

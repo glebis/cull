@@ -351,6 +351,91 @@ pub struct EmbeddingPage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageIdPage {
+    pub ids: Vec<String>,
+    pub total: u32,
+    pub offset: u32,
+    pub limit: u32,
+    pub has_more: bool,
+}
+
+/// A stable, serializable description of the visible library slice used by
+/// the grid and Embedding Explorer. Scope filtering is applied in SQLite
+/// before paging so callers never receive a globally-paged approximation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EmbeddingScope {
+    All {
+        include_rejected: bool,
+    },
+    Folder {
+        path: String,
+        min_size: u32,
+        include_rejected: bool,
+    },
+    Filtered {
+        min_size: u32,
+        include_rejected: bool,
+    },
+    Collection {
+        id: String,
+        include_rejected: bool,
+    },
+    Smart {
+        id: String,
+        filter_json: String,
+        include_rejected: bool,
+    },
+    DetectedClass {
+        class_name: String,
+        include_rejected: bool,
+    },
+    ImportBatch {
+        batch_id: String,
+        include_rejected: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmbeddingClusterMembership {
+    pub cluster_id: u32,
+    pub image_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmbeddingClusterName {
+    pub cluster_id: u32,
+    pub label: String,
+    pub source: String,
+}
+
+impl EmbeddingScope {
+    pub fn include_rejected(&self) -> bool {
+        match self {
+            Self::All { include_rejected }
+            | Self::Folder {
+                include_rejected, ..
+            }
+            | Self::Filtered {
+                include_rejected, ..
+            }
+            | Self::Collection {
+                include_rejected, ..
+            }
+            | Self::Smart {
+                include_rejected, ..
+            }
+            | Self::DetectedClass {
+                include_rejected, ..
+            }
+            | Self::ImportBatch {
+                include_rejected, ..
+            } => *include_rejected,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpToken {
     pub id: String,
     pub name: String,
@@ -615,4 +700,50 @@ pub struct TrashImagesDetailedResult {
     pub succeeded: u32,
     pub failed: u32,
     pub results: Vec<TrashImageResult>,
+}
+
+#[cfg(test)]
+mod embedding_scope_tests {
+    use super::EmbeddingScope;
+
+    #[test]
+    fn embedding_scope_serde_matches_frontend_descriptor() {
+        let scope = EmbeddingScope::Folder {
+            path: "/art/set".to_string(),
+            min_size: 768,
+            include_rejected: true,
+        };
+        let value = serde_json::to_value(&scope).unwrap();
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "type": "folder",
+                "path": "/art/set",
+                "min_size": 768,
+                "include_rejected": true,
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<EmbeddingScope>(value).unwrap(),
+            scope
+        );
+    }
+
+    #[test]
+    fn embedding_scope_serde_uses_snake_case_variant_names() {
+        let detected = serde_json::to_value(EmbeddingScope::DetectedClass {
+            class_name: "person".to_string(),
+            include_rejected: false,
+        })
+        .unwrap();
+        let batch = serde_json::to_value(EmbeddingScope::ImportBatch {
+            batch_id: "batch-1".to_string(),
+            include_rejected: false,
+        })
+        .unwrap();
+
+        assert_eq!(detected["type"], "detected_class");
+        assert_eq!(batch["type"], "import_batch");
+    }
 }

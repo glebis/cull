@@ -44,7 +44,7 @@ describe('static publishing navigation contract', () => {
     });
 
     it('keeps the publishing workflow out of Settings content', () => {
-        const settings = readProjectFile('src/lib/components/McpSettings.svelte');
+        const settings = readProjectFile('src/lib/components/GeneralSettings.svelte');
 
         expect(settings).toContain('module_static_publishing');
         expect(settings).not.toContain("activeSettingsTab === 'static-publishing'");

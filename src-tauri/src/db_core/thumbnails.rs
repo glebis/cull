@@ -99,13 +99,49 @@ pub fn generate_document_thumbnail(
     image_id: &str,
 ) -> Result<PathBuf, String> {
     let thumb_path = thumbnail_path(app_data_dir, image_id);
-    if thumb_path.exists() {
+    if thumb_path.exists() && !is_legacy_document_placeholder(&thumb_path) {
         return Ok(thumb_path);
     }
 
     let preview = render_pdf_first_page_thumbnail(source_path)
         .unwrap_or_else(|_| placeholder_document_thumbnail());
     generate_thumbnail_from_image(&preview, app_data_dir, image_id)
+}
+
+/// The first PDF implementation wrote the same dark diagonal placeholder for
+/// every document when the unbundled PDFium library was unavailable. Detect
+/// that generated image by its pixels so existing libraries can repair it once
+/// without regenerating legitimate PDF previews on every launch.
+pub fn is_legacy_document_placeholder(path: &Path) -> bool {
+    let Ok(existing) = image::open(path) else {
+        return false;
+    };
+    if existing.width() != existing.height() {
+        return false;
+    }
+
+    let expected = placeholder_document_thumbnail();
+    let sample_size = 64;
+    let existing = existing
+        .resize_exact(sample_size, sample_size, FilterType::Triangle)
+        .to_rgb8();
+    let expected = expected
+        .resize_exact(sample_size, sample_size, FilterType::Triangle)
+        .to_rgb8();
+    let total_difference: u64 = existing
+        .pixels()
+        .zip(expected.pixels())
+        .flat_map(|(actual, expected)| {
+            actual
+                .0
+                .into_iter()
+                .zip(expected.0)
+                .map(|(actual, expected)| actual.abs_diff(expected) as u64)
+        })
+        .sum();
+    let channel_count = (sample_size * sample_size * 3) as u64;
+
+    total_difference / channel_count <= 3
 }
 
 pub fn read_pdf_page_count(source_path: &Path) -> Result<u32, String> {
@@ -173,6 +209,18 @@ pub fn read_pdf_page_metrics(
 }
 
 fn render_pdf_first_page_thumbnail(source_path: &Path) -> Result<DynamicImage, String> {
+    #[cfg(target_os = "macos")]
+    {
+        // Cull is a macOS app. ImageIO (via sips) is available in packaged
+        // builds, unlike the optional PDFium dylib, and the decoder enforces a
+        // hard child-process deadline so a bad document cannot hang the app.
+        return crate::db_core::image_decode::decode_pdf_preview_with_platform(
+            source_path,
+            DOCUMENT_PREVIEW_DIMENSION,
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
     with_open_pdf(source_path, |document| {
         let page = document
             .pages()
@@ -256,6 +304,26 @@ pub fn sized_thumbnail_path(app_data_dir: &Path, image_id: &str, size: u32) -> P
     }
 }
 
+/// Remove every thumbnail file (base + sized variants) for a single image.
+/// Best-effort: individual failures are logged and otherwise ignored, since
+/// thumbnail cleanup must never fail the caller's delete operation.
+pub fn remove_thumbnails_for_image(app_data_dir: &Path, image_id: &str) {
+    let base = thumbnail_path(app_data_dir, image_id);
+    if base.exists() {
+        if let Err(e) = std::fs::remove_file(&base) {
+            crate::safe_eprintln!("Failed to remove thumbnail {}: {}", base.display(), e);
+        }
+    }
+    for &size in THUMBNAIL_SIZES.iter() {
+        let sized = sized_thumbnail_path(app_data_dir, image_id, size);
+        if sized.exists() {
+            if let Err(e) = std::fs::remove_file(&sized) {
+                crate::safe_eprintln!("Failed to remove thumbnail {}: {}", sized.display(), e);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,5 +402,33 @@ mod tests {
         let page_two = texts[1].1.as_deref().unwrap_or("");
         assert!(page_one.contains("page one"), "page 0 text: {:?}", page_one);
         assert!(page_two.contains("page two"), "page 1 text: {:?}", page_two);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn legacy_document_placeholder_is_detected_and_replaced_by_a_real_preview() {
+        let dir = tempfile::tempdir().unwrap();
+        let image_id = "legacy-pdf";
+        let placeholder = placeholder_document_thumbnail();
+        generate_thumbnail_from_image(&placeholder, dir.path(), image_id).unwrap();
+        let path = thumbnail_path(dir.path(), image_id);
+
+        assert!(is_legacy_document_placeholder(&path));
+
+        generate_document_thumbnail(&fixture_pdf(), dir.path(), image_id).unwrap();
+        let preview = image::open(&path).unwrap();
+        assert!(preview.height() > preview.width());
+        assert!(!is_legacy_document_placeholder(&path));
+
+        let rgb = preview.to_rgb8();
+        let pixel_count = u64::from(rgb.width()) * u64::from(rgb.height());
+        let luminance_sum: u64 = rgb
+            .pixels()
+            .map(|pixel| pixel.0.into_iter().map(u64::from).sum::<u64>() / 3)
+            .sum();
+        assert!(luminance_sum / pixel_count > 200);
+        assert!(rgb
+            .pixels()
+            .any(|pixel| pixel.0.iter().all(|value| *value < 64)));
     }
 }

@@ -52,6 +52,43 @@ jobs:
       - name: Rust checks
         run: bash scripts/check-ci.sh rust
 
+  packaged-interaction-smoke:
+    name: Packaged production interaction smoke
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+
+      - name: Cache packaged app build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run packaged production interaction smoke
+        env:
+          CULL_NATIVE_SMOKE_SHOTS: ${{ runner.temp }}/cull-native-interaction-smoke
+        run: bash tests/native/run-packaged-interaction-smoke.sh
+
+      - name: Upload packaged smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: packaged-interaction-smoke-${{ github.run_id }}
+          path: ${{ runner.temp }}/cull-native-interaction-smoke
+          if-no-files-found: warn
+          retention-days: 14
+
   site:
     name: Site checks
     runs-on: ubuntu-latest

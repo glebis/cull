@@ -2,14 +2,12 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen } from '$lib/stores';
-    import { importFolder as apiImportFolder, listImageIds, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, isYoloAvailable, isNudenetAvailable, getDetectionCount, countByDetectedClass, detectObjects, detectNsfw, regenerateThumbnails, rescanSources, checkOllama, analyzeImages, getVisionCount, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
+    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen } from '$lib/stores';
+    import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, renameFolder as apiRenameFolder, listCollections, createCollection, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, countByDetectedClass, listDetectedClasses, regenerateThumbnails, rescanSources, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, ImageWithFile, SmartCollection } from '$lib/api';
     import { applyClipboardMonitorCollection } from '$lib/clipboard-monitor';
-    import { MODEL_SETUP_GUIDE_URL, resolveAiSectionExpanded } from '$lib/onboarding';
     import { safeAssetPreviewPath } from '$lib/view-utils';
-    import { openUrl } from '@tauri-apps/plugin-opener';
     import { onDestroy, onMount } from 'svelte';
     import { get } from 'svelte/store';
 
@@ -47,21 +45,191 @@
         x: number;
         y: number;
     } | null>(null);
+    let folderContextMenu = $state<{
+        path: string;
+        name: string;
+        isGroup: boolean;
+        x: number;
+        y: number;
+    } | null>(null);
     let collectionPreviewTimer: ReturnType<typeof setTimeout> | null = null;
     let collectionPreviewRequest = 0;
+    let browseCountsRequest = 0;
 
     function setClipboardStatus(status: ClipboardMonitorStatus | null) {
         clipboardStatus = status;
         clipboardMonitorStatus.set(status);
     }
 
-    import { buildDisplayFolders, buildPinnedCollectionRows, formatSidebarCount } from '$lib/sidebar-utils';
+    import { buildDisplayFolders, buildPinnedCollectionRows, formatSidebarCount, formatFolderCount, visibleFolderRows, matchesSidebarFilter, prunePinnedIds, type CollectionRow } from '$lib/sidebar-utils';
+
+    function prunePinsToExistingCollections(rows: CollectionRow[]) {
+        const kept = prunePinnedIds(get(pinnedCollections), rows);
+        if (kept.length !== get(pinnedCollections).length) {
+            pinnedCollections.set(kept);
+        }
+        if (get(pinnedCollection) && !kept.includes(get(pinnedCollection)!)) {
+            pinnedCollection.set(kept[kept.length - 1] ?? null);
+        }
+    }
     import SessionSwitcher from './SessionSwitcher.svelte';
-    import { activeCanvas, activeSession, navigateTo, sessionCanvases } from '$lib/stores';
+    import { activeCanvas, activeSession, navigateTo, sessions, sessionCanvases, expandedFolders, sidebarSectionsCollapsed, sidebarFilter } from '$lib/stores';
     import { createCanvas, type Canvas } from '$lib/api';
+    import { reconcileRenamedCanvas, reconcileRenamedSession, renamedFolderPath } from '$lib/folder-rename-state';
+    import { withCanvasPathMigrationBarrier } from '$lib/canvas-save-coordinator';
+
+    // "All Images" is only the active scope when nothing else narrows it —
+    // including a detected-class filter, which used to leave both All Images
+    // and the class row looking unselected/selected at the same time.
+    let allImagesActive = $derived(
+        $activeFolder === null &&
+        $activeCollection === null &&
+        $activeSmartCollection === null &&
+        $activeDetectedClass === null
+    );
 
     let displayFolders = $derived(buildDisplayFolders($folders));
-    let displayCollections = $derived(buildPinnedCollectionRows($collections, $pinnedCollections));
+    let displayCollections = $derived(
+        buildPinnedCollectionRows($collections, $pinnedCollections)
+            .filter(([, name]) => matchesSidebarFilter(name, $sidebarFilter))
+    );
+
+    // Section collapse. The store holds the COLLAPSED ids, so a section added
+    // later defaults to open for users who already have persisted state.
+    function isSectionCollapsed(collapsed: Set<string>, id: string): boolean {
+        return collapsed.has(id);
+    }
+    function toggleSection(id: string) {
+        sidebarSectionsCollapsed.update(set => {
+            const next = new Set(set);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    }
+
+    // "Recent Imports" is a seeded smart collection, but sixth in a 22-row list
+    // is not where you look after an import. Promote it next to All Images and
+    // drop it from the SMART list so it appears exactly once.
+    const RECENT_IMPORTS_NAME = 'Recent Imports';
+    let recentImportsCollection = $derived(
+        $smartCollections.find(sc => sc.name === RECENT_IMPORTS_NAME && (sc.image_count ?? 0) > 0) ?? null
+    );
+
+    // The rows actually on screen. Both the render loop and the keyboard
+    // handler read this, so arrow keys can never focus a hidden row.
+    let visibleFolders = $derived(visibleFolderRows(displayFolders, $expandedFolders, $sidebarFilter));
+    let treeFocusIndex = $state(0);
+    // While filtering, the tree auto-reveals matches and their subtrees, so
+    // expansion controls are inert and say so rather than looking broken.
+    let filterActive = $derived($sidebarFilter.trim() !== '');
+    // Filtering or collapsing can shrink the list below the remembered index.
+    // Clamping in a $derived (rather than writing back to treeFocusIndex from
+    // an effect) keeps exactly one row tabbable without a self-referential
+    // effect, so Tab can always re-enter the tree.
+    let treeTabIndex = $derived(
+        visibleFolders.length === 0 ? -1 : Math.min(treeFocusIndex, visibleFolders.length - 1)
+    );
+
+    function toggleFolderExpanded(path: string) {
+        // While a filter is active the tree ignores expansion entirely, so a
+        // toggle here would silently rewrite persisted state the user cannot
+        // see — they would only discover it after clearing the filter.
+        if (get(sidebarFilter).trim()) return;
+        expandedFolders.update(set => {
+            const next = new Set(set);
+            if (next.has(path)) next.delete(path); else next.add(path);
+            return next;
+        });
+    }
+
+    function focusTreeRow(index: number) {
+        const clamped = Math.max(0, Math.min(index, visibleFolders.length - 1));
+        treeFocusIndex = clamped;
+        // The row must exist in the DOM before it can take focus; Svelte has
+        // already flushed by the time a keydown handler runs for rows that were
+        // visible, and expand/collapse re-renders synchronously via $derived.
+        queueMicrotask(() => {
+            const el = document.querySelector<HTMLElement>(`[data-tree-row="${clamped}"]`);
+            el?.focus();
+        });
+    }
+
+    function handleTreeKeydown(event: KeyboardEvent) {
+        const rows = visibleFolders;
+        if (rows.length === 0) return;
+        const i = Math.min(treeFocusIndex, rows.length - 1);
+        const row = rows[i];
+
+        switch (event.key) {
+            case 'Enter':
+            case ' ':
+                // Focus lives on the treeitem, not the inner button, so the
+                // row has to activate itself.
+                event.preventDefault();
+                selectFolder(row.fullPath);
+                break;
+            case 'ArrowDown':
+                event.preventDefault();
+                focusTreeRow(i + 1);
+                break;
+            case 'ArrowUp':
+                event.preventDefault();
+                focusTreeRow(i - 1);
+                break;
+            case 'Home':
+                event.preventDefault();
+                focusTreeRow(0);
+                break;
+            case 'End':
+                event.preventDefault();
+                focusTreeRow(rows.length - 1);
+                break;
+            case 'ArrowRight':
+                event.preventDefault();
+                // Standard tree behaviour: open a closed node, then step into it.
+                // Filtering already reveals every subtree, so there is nothing
+                // to open and Right simply steps in.
+                if (row.hasChildren && !filterActive && !get(expandedFolders).has(row.fullPath)) {
+                    toggleFolderExpanded(row.fullPath);
+                } else if (row.hasChildren) {
+                    focusTreeRow(i + 1);
+                }
+                break;
+            case 'ArrowLeft':
+                event.preventDefault();
+                if (row.hasChildren && !filterActive && get(expandedFolders).has(row.fullPath)) {
+                    toggleFolderExpanded(row.fullPath);
+                } else {
+                    // Jump to the nearest shallower row — the visual parent.
+                    for (let k = i - 1; k >= 0; k--) {
+                        if (rows[k].depth < row.depth) { focusTreeRow(k); break; }
+                    }
+                }
+                break;
+            case 'Delete':
+                if (!row.isGroup) {
+                    event.preventDefault();
+                    void handleDeleteFolder(event, row.fullPath);
+                }
+                break;
+        }
+    }
+
+    // A running monitor forces the section open — a background capture that the
+    // user cannot see the state of is worse than the space it costs.
+    let clipboardCollapsed = $derived(
+        isSectionCollapsed($sidebarSectionsCollapsed, 'clipboard') && !clipboardStatus?.running
+    );
+
+    // Smart collections seed ~22 presets. Hiding the empty ones keeps the list
+    // proportional to the library instead of to the seed table.
+    let visibleSmartCollections = $derived(
+        $smartCollections.filter(sc =>
+            (sc.image_count ?? 0) > 0 &&
+            sc.id !== recentImportsCollection?.id &&
+            matchesSidebarFilter(sc.name, $sidebarFilter)
+        )
+    );
 
     function clearCollectionPreviewTimer() {
         if (!collectionPreviewTimer) return;
@@ -90,7 +258,7 @@
         collectionPreviewTimer = setTimeout(async () => {
             collectionPreview = { collectionId, name, count, images: [], loading: true, x, y };
             try {
-                const images = await listCollectionImages(collectionId, 4, 0);
+                const images = await listCollectionImages(collectionId, 4, 0, $showRejected);
                 if (requestId !== collectionPreviewRequest) return;
                 collectionPreview = { collectionId, name, count, images, loading: false, x, y };
             } catch (e) {
@@ -113,6 +281,7 @@
         event.preventDefault();
         event.stopPropagation();
         hideCollectionPreview(collectionId);
+        folderContextMenu = null;
         collectionContextMenu = {
             collectionId,
             name,
@@ -126,32 +295,30 @@
         collectionContextMenu = null;
     }
 
+    function openFolderContextMenu(event: MouseEvent, path: string, name: string, isGroup: boolean) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeCollectionContextMenu();
+        folderContextMenu = {
+            path,
+            name,
+            isGroup,
+            x: Math.min(event.clientX, window.innerWidth - 208),
+            y: Math.min(event.clientY, window.innerHeight - 128),
+        };
+    }
+
+    function closeFolderContextMenu() {
+        folderContextMenu = null;
+    }
+
     onDestroy(() => {
         clearCollectionPreviewTimer();
+        window.removeEventListener('detected-classes-changed', handleDetectedClassesChanged);
+        window.removeEventListener('cull:decision-changed', handleDecisionChanged);
     });
 
     onMount(async () => {
-        try {
-            const f = await listFolders();
-            folders.set(f);
-        } catch (e) {
-            console.error('Failed to load folders:', e);
-            showToast('Failed to load folders', { detail: String(e), type: 'error', duration: 8000 });
-        }
-        try {
-            const c = await listCollections();
-            collections.set(c);
-        } catch (e) {
-            console.error('Failed to load collections:', e);
-            showToast('Failed to load collections', { detail: String(e), type: 'error', duration: 8000 });
-        }
-        try {
-            const sc = await listSmartCollections();
-            smartCollections.set(sc);
-        } catch (e) {
-            console.error('Failed to load smart collections:', e);
-            showToast('Failed to load smart collections', { detail: String(e), type: 'error', duration: 8000 });
-        }
         try {
             setClipboardStatus(await getClipboardMonitorStatus());
         } catch (e) {
@@ -160,7 +327,7 @@
         try {
             await listen('clipboard-monitor:capture', async () => {
                 setClipboardStatus(await getClipboardMonitorStatus());
-                const c = await listCollections();
+                const c = await listCollections($showRejected);
                 collections.set(c);
                 if (clipboardStatus?.collection_id && get(activeCollection) === clipboardStatus.collection_id) {
                     await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
@@ -169,8 +336,43 @@
         } catch (e) {
             console.error('Failed to listen for clipboard monitor captures:', e);
         }
-        loadAiState().catch(e => console.error('Failed to load AI state:', e));
+        window.addEventListener('detected-classes-changed', handleDetectedClassesChanged);
+        window.addEventListener('cull:decision-changed', handleDecisionChanged);
     });
+
+    async function refreshBrowseCounts(includeRejected: boolean) {
+        const request = ++browseCountsRequest;
+        try {
+            const [count, nextFolders, nextCollections, nextSmartCollections, nextDetectedClasses] = await Promise.all([
+                getImageCount(includeRejected),
+                listFolders(includeRejected),
+                listCollections(includeRejected),
+                listSmartCollections(includeRejected),
+                listDetectedClasses(includeRejected),
+            ]);
+            if (request !== browseCountsRequest) return;
+            totalCount.set(count);
+            folders.set(nextFolders);
+            collections.set(nextCollections);
+            prunePinsToExistingCollections(nextCollections);
+            smartCollections.set(nextSmartCollections);
+            detectedClasses = nextDetectedClasses;
+            detectedClassesStore.set(nextDetectedClasses);
+        } catch (e) {
+            if (request === browseCountsRequest) {
+                console.error('Failed to refresh library counts:', e);
+                showToast('Failed to refresh library counts', {
+                    detail: String(e),
+                    type: 'error',
+                    duration: 8000,
+                });
+            }
+        }
+    }
+
+    function handleDecisionChanged() { void refreshBrowseCounts($showRejected); }
+
+    $effect(() => { void refreshBrowseCounts($showRejected); });
 
     function folderName(path: string): string {
         const parts = path.split('/');
@@ -215,7 +417,7 @@
         if (!name || !name.trim() || name.trim() === currentName) return;
         try {
             await renameCollectionApi(collectionId, name.trim());
-            collections.set(await listCollections());
+            collections.set(await listCollections($showRejected));
             showToast('Collection renamed', { type: 'success', duration: 3000 });
         } catch (e) {
             console.error('Failed to rename collection:', e);
@@ -303,7 +505,7 @@
         if (!name || !name.trim()) return;
         try {
             await createCollection(name.trim());
-            const c = await listCollections();
+            const c = await listCollections($showRejected);
             collections.set(c);
         } catch (e) {
             console.error('Failed to create collection:', e);
@@ -333,7 +535,7 @@
                 activeDetectedClass.set(null);
                 await loadImagesForCurrentScope({ force: true, invalidateCache: true });
             }
-            const c = await listCollections();
+            const c = await listCollections($showRejected);
             collections.set(c);
         } catch (e) {
             console.error('Failed to delete collection:', e);
@@ -363,6 +565,44 @@
         }
     }
 
+    async function handleRenameFolder(folder: string, currentName: string) {
+        closeFolderContextMenu();
+        const name = await requestTextInput({
+            title: 'Rename Folder',
+            label: 'Folder name',
+            initialValue: currentName,
+            placeholder: 'Folder name',
+            confirmLabel: 'Rename',
+        });
+        if (!name || !name.trim() || name.trim() === currentName) return;
+        try {
+            const result = await withCanvasPathMigrationBarrier(async () => {
+                const result = await apiRenameFolder(folder, name.trim());
+                activeFolder.update(path => path ? renamedFolderPath(path, result.oldPath, result.newPath) : null);
+                expandedFolders.update(paths => new Set(
+                    [...paths].map(path => renamedFolderPath(path, result.oldPath, result.newPath))
+                ));
+                sessions.update(items => items.map(session => reconcileRenamedSession(session, result.oldPath, result.newPath)));
+                activeSession.update(session => session ? reconcileRenamedSession(session, result.oldPath, result.newPath) : null);
+                sessionCanvases.update(canvases => canvases.map(canvas => reconcileRenamedCanvas(canvas, result.oldPath, result.newPath)));
+                activeCanvas.update(canvas => canvas ? reconcileRenamedCanvas(canvas, result.oldPath, result.newPath) : null);
+                return result;
+            });
+            await refreshBrowseCounts($showRejected);
+            if (get(activeFolder)) {
+                await loadImagesForCurrentScope({ force: true, invalidateCache: true });
+            }
+            showToast('Folder renamed', {
+                detail: `${result.oldPath} → ${result.newPath}`,
+                type: 'success',
+                duration: 5000,
+            });
+        } catch (e) {
+            console.error('Failed to rename folder:', e);
+            showToast('Failed to rename folder', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
     async function handleToggleClipboardMonitor() {
         const wasRunning = clipboardStatus?.running ?? false;
         try {
@@ -370,7 +610,7 @@
                 ? await stopClipboardMonitor()
                 : await startClipboardMonitor(null);
             setClipboardStatus(nextStatus);
-            const c = await listCollections();
+            const c = await listCollections($showRejected);
             collections.set(c);
             if (!wasRunning && nextStatus.collection_id) {
                 await applyClipboardMonitorCollection(nextStatus.collection_id);
@@ -485,39 +725,54 @@
         if (!selected) return;
 
         importing = true;
+        const progressId = crypto.randomUUID();
         importCurrent = 0;
         importTotal = 0;
         setLastResult('');
 
         // Listen for progress events
         let lastRefresh = 0;
-        const unlisten: UnlistenFn = await listen<{ current: number; total: number; filename: string }>(
+        const unlisten: UnlistenFn = await listen<{ progress_id?: string; current: number; total: number; filename: string }>(
             'import-progress',
             async (event) => {
+                if (event.payload.progress_id !== progressId) return;
                 importCurrent = event.payload.current;
                 importTotal = event.payload.total;
 
                 // Refresh image count every 20 imports
                 if (importCurrent - lastRefresh >= 20) {
                     lastRefresh = importCurrent;
-                    const count = await getImageCount();
+                    const count = await getImageCount($showRejected);
                     totalCount.set(count);
                 }
             }
         );
 
         try {
-            const result = await apiImportFolder(selected as string);
+            const result = await apiImportFolder(selected as string, null, progressId);
             const folderName = (selected as string).split('/').filter(Boolean).pop() ?? selected;
             let summary = `+${result.imported} imported, ${result.skipped} skipped`;
             if (result.errors.length > 0) {
                 summary += `, ${result.errors.length} errors`;
             }
+            if (result.cancelled) {
+                setLastResult(`Cancelled: ${summary}`);
+                showToast('Import cancelled', { detail: summary, type: 'warning', duration: 8000 });
+                await refreshImages();
+                return;
+            }
             setLastResult(summary, result.errors.length > 0 ? 'error' : 'success');
+            const importedFolder = selected as string;
             showToast(`Imported "${folderName}"`, {
                 detail: summary,
                 type: 'success',
                 duration: 8000,
+                // "Where did what I just imported go?" is the question every
+                // import ends on; answer it in the toast instead of making the
+                // user hunt for the folder in the tree.
+                actions: result.imported > 0
+                    ? [{ label: 'View imported', onclick: () => { selectFolder(importedFolder); } }]
+                    : undefined,
             });
             await refreshImages();
         } catch (e) {
@@ -529,96 +784,22 @@
         }
     }
 
-    // AI Models state. Collapsed by default until the library has images
-    // so first-run users see content sections, not model jargon; a manual
-    // toggle always wins.
-    let aiToggled = $state<boolean | null>(null);
-    let aiExpanded = $derived(resolveAiSectionExpanded(aiToggled, $totalCount));
-    let yoloReady = $state(false);
-    let nudenetReady = $state(false);
-    let yoloProcessed = $state(0);
-    let nudenetProcessed = $state(0);
-    let selectedYoloVariant = $state('medium');
     let detectedClasses = $state<[string, number][]>([]);
-    let detectingBatch = $state(false);
-    let ollamaModels = $state<string[]>([]);
-    let ollamaReady = $derived(ollamaModels.length > 0);
-    let visionProcessed = $state(0);
-    let analyzingBatch = $state(false);
 
-    function openModelSetupGuide() {
-        openUrl(MODEL_SETUP_GUIDE_URL).catch(e => console.error('Failed to open setup guide:', e));
-    }
+    function handleDetectedClassesChanged() { void loadDetectedClasses(); }
 
-    async function loadAiState() {
+    async function loadDetectedClasses(includeRejected = $showRejected) {
         try {
-            yoloReady = await isYoloAvailable(selectedYoloVariant);
-            nudenetReady = await isNudenetAvailable();
-            if (yoloReady) {
-                const variantName = selectedYoloVariant === 'nano' ? 'yolo11n' : selectedYoloVariant === 'small' ? 'yolo11s' : 'yolo11m';
-                yoloProcessed = await getDetectionCount(variantName);
-            }
-            if (nudenetReady) {
-                nudenetProcessed = await getDetectionCount('nudenet');
-            }
-            await loadDetectedClasses();
+            const next = await listDetectedClasses(includeRejected);
+            if (includeRejected !== $showRejected) return;
+            detectedClasses = next;
+            detectedClassesStore.set(next);
         } catch (_) {}
-        try {
-            ollamaModels = await checkOllama();
-            visionProcessed = await getVisionCount();
-        } catch (_) {
-            ollamaModels = [];
-        }
-    }
-
-    async function handleAnalyzeBatch() {
-        if (analyzingBatch) return;
-        analyzingBatch = true;
-        try {
-            const allIds = await listImageIds();
-            await analyzeImages(allIds);
-            await loadAiState();
-            await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
-        } catch (e) {
-            console.error('Vision analysis error:', e);
-        } finally {
-            analyzingBatch = false;
-        }
-    }
-
-    async function loadDetectedClasses() {
-        const commonClasses = ['person', 'dog', 'cat', 'car', 'bicycle', 'bird', 'horse', 'chair', 'bottle', 'laptop', 'phone', 'book'];
-        const results: [string, number][] = [];
-        for (const cls of commonClasses) {
-            try {
-                const count = await countByDetectedClass(cls);
-                if (count > 0) results.push([cls, count]);
-            } catch (_) {}
-        }
-        results.sort((a, b) => b[1] - a[1]);
-        detectedClasses = results;
-        detectedClassesStore.set(results);
-    }
-
-    async function handleDetectRemaining() {
-        if (detectingBatch) return;
-        detectingBatch = true;
-        try {
-            const allIds = await listImageIds();
-            if (yoloReady) await detectObjects(allIds, selectedYoloVariant);
-            if (nudenetReady) await detectNsfw(allIds);
-            await loadAiState();
-            await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
-        } catch (e) {
-            console.error('Batch detection error:', e);
-        } finally {
-            detectingBatch = false;
-        }
     }
 
     async function filterByClass(className: string) {
         try {
-            const count = await countByDetectedClass(className);
+            const count = await countByDetectedClass(className, $showRejected);
             if (count === 0) return;
             activeSession.set(null);
             sessionCanvases.set([]);
@@ -639,20 +820,20 @@
     }
 
     async function refreshImages() {
-        const count = await getImageCount();
+        const count = await getImageCount($showRejected);
         totalCount.set(count);
         await loadImagesForCurrentScope({ force: true, invalidateCache: true });
         // Refresh folders too
         try {
-            const f = await listFolders();
+            const f = await listFolders($showRejected);
             folders.set(f);
         } catch (_) {}
     }
 </script>
 
 <svelte:window
-    onclick={closeCollectionContextMenu}
-    onkeydown={(e) => { if (e.key === 'Escape') { closeCollectionContextMenu(); hideCollectionPreview(); } }}
+    onclick={() => { closeCollectionContextMenu(); closeFolderContextMenu(); }}
+    onkeydown={(e) => { if (e.key === 'Escape') { closeCollectionContextMenu(); closeFolderContextMenu(); hideCollectionPreview(); } }}
 />
 
 <aside class="sidebar" aria-label="Library sidebar">
@@ -685,18 +866,43 @@
         </div>
     {/if}
 
+    <div class="sidebar-filter">
+        <input
+            type="search"
+            class="sidebar-filter-input"
+            placeholder="Filter folders &amp; collections"
+            aria-label="Filter folders and collections"
+            bind:value={$sidebarFilter}
+            onkeydown={(e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); sidebarFilter.set(''); } }}
+        />
+    </div>
+
     <div class="section">
         <div class="section-header">LIBRARY</div>
         <button
             class="section-item"
-            class:active={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null}
+            class:active={allImagesActive}
             onclick={() => selectFolder(null)}
-            aria-current={$activeFolder === null && $activeCollection === null && $activeSmartCollection === null ? 'true' : undefined}
+            aria-current={allImagesActive ? 'true' : undefined}
         >
             <span class="icon">&#9632;</span>
             <span class="item-label">All Images</span>
             <span class="count">{formatSidebarCount($totalCount)}</span>
         </button>
+
+        {#if recentImportsCollection}
+            <button
+                class="section-item"
+                class:active={$activeSmartCollection?.id === recentImportsCollection.id}
+                onclick={() => selectSmartCollection(recentImportsCollection!)}
+                aria-current={$activeSmartCollection?.id === recentImportsCollection.id ? 'true' : undefined}
+                title="Images imported in the last 7 days"
+            >
+                <span class="icon">&#9200;</span>
+                <span class="item-label">Recent Imports</span>
+                <span class="count">{formatSidebarCount(recentImportsCollection.image_count)}</span>
+            </button>
+        {/if}
 
         {#if displayFolders.length > 0}
             <button
@@ -710,34 +916,73 @@
             </button>
 
             {#if foldersExpanded}
-                <div aria-label="Folder hierarchy">
-                {#each displayFolders as folder}
-                    <div class="folder-row" class:active={$activeFolder === folder.fullPath} style="padding-left: {folder.depth * 12}px">
-                        {#if folder.count > 0}
+                <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
+                <div
+                    class="folder-tree"
+                    role="tree"
+                    tabindex="-1"
+                    aria-label="Folder hierarchy"
+                    onkeydown={handleTreeKeydown}
+                >
+                {#each visibleFolders as folder, i (folder.fullPath)}
+                    {@const isExpanded = $expandedFolders.has(folder.fullPath)}
+                    <div
+                        class="folder-row"
+                        class:active={$activeFolder === folder.fullPath}
+                        style="padding-left: {folder.depth * 12}px"
+                        role="treeitem"
+                        aria-level={folder.depth + 1}
+                        aria-keyshortcuts={folder.isGroup ? undefined : 'Delete'}
+                        aria-selected={$activeFolder === folder.fullPath}
+                        aria-expanded={folder.hasChildren ? (isExpanded || filterActive) : undefined}
+                        aria-label={`${folder.name}, ${folder.subtreeCount} images`}
+                        data-tree-row={i}
+                        tabindex={i === treeTabIndex ? 0 : -1}
+                        onfocusin={() => treeFocusIndex = i}
+                        oncontextmenu={(e) => openFolderContextMenu(e, folder.fullPath, folder.name, folder.isGroup)}
+                    >
+                        {#if folder.hasChildren}
                             <button
-                                class="section-item"
-                                onclick={() => selectFolder(folder.fullPath)}
-                                title={folder.fullPath}
-                                aria-current={$activeFolder === folder.fullPath ? 'true' : undefined}
-                            >
-                                <span class="icon">{folder.hasChildren ? '▾' : '▸'}</span>
-                                <span class="folder-label">{folder.name}</span>
-                                <span class="count">{formatSidebarCount(folder.count)}</span>
-                            </button>
+                                class="twisty"
+                                tabindex="-1"
+                                disabled={filterActive}
+                                onclick={(e: Event) => { e.stopPropagation(); toggleFolderExpanded(folder.fullPath); }}
+                                aria-label={`${isExpanded || filterActive ? 'Collapse' : 'Expand'} ${folder.name}`}
+                                title={filterActive ? 'Expansion is disabled while filtering' : undefined}
+                            >{isExpanded || filterActive ? '▾' : '▸'}</button>
+                        {:else}
+                            <span class="twisty-spacer" aria-hidden="true"></span>
+                        {/if}
+                        <button
+                            class="section-item"
+                            class:folder-group={folder.isGroup}
+                            tabindex="-1"
+                            onclick={() => selectFolder(folder.fullPath)}
+                            title={folder.fullPath}
+                            aria-current={$activeFolder === folder.fullPath ? 'true' : undefined}
+                        >
+                            <span class="folder-label">{folder.name}</span>
+                            <span
+                                class="count"
+                                title={folder.count === folder.subtreeCount
+                                    ? undefined
+                                    : `${folder.count} directly in this folder, ${folder.subtreeCount} including subfolders`}
+                            >{formatFolderCount(folder.count, folder.subtreeCount)}</span>
+                        </button>
+                        {#if !folder.isGroup}
                             <button
                                 class="delete-btn"
+                                tabindex="-1"
                                 onclick={(e: Event) => handleDeleteFolder(e, folder.fullPath)}
                                 title="Remove folder from library"
                                 aria-label={`Remove folder from library: ${folder.name}`}
                             >&times;</button>
-                        {:else}
-                            <span class="section-item folder-group">
-                                <span class="icon">▾</span>
-                                <span class="folder-label">{folder.name}</span>
-                            </span>
                         {/if}
                     </div>
                 {/each}
+                {#if visibleFolders.length === 0}
+                    <div class="section-empty">No folders match "{$sidebarFilter}"</div>
+                {/if}
                 </div>
             {/if}
         {/if}
@@ -798,8 +1043,80 @@
         {/if}
     </div>
 
+    {#if visibleSmartCollections.length > 0}
+    {@const smartCollapsed = isSectionCollapsed($sidebarSectionsCollapsed, 'smart')}
+    <div class="section">
+        <button
+            class="folders-toggle"
+            onclick={() => toggleSection('smart')}
+            aria-expanded={!smartCollapsed}
+        >
+            <span class="toggle-arrow">{smartCollapsed ? '▸' : '▾'}</span>
+            <span class="folders-toggle-label">Smart</span>
+            <span class="count">{formatSidebarCount(visibleSmartCollections.length)}</span>
+        </button>
+        {#if !smartCollapsed}
+            {#each visibleSmartCollections as sc}
+                <button class="section-item"
+                    class:active={$activeSmartCollection?.id === sc.id}
+                    onclick={() => selectSmartCollection(sc)}
+                    aria-current={$activeSmartCollection?.id === sc.id ? 'true' : undefined}>
+                    <span class="icon">&#9733;</span>
+                    <span class="item-label">{sc.name}</span>
+                    <span class="count">{formatSidebarCount(sc.image_count)}</span>
+                </button>
+            {/each}
+        {/if}
+    </div>
+    {/if}
+
+    <div class="section">
+        <div class="section-header">FILTERS</div>
+        <div class="filter-row">
+            <span class="filter-label">Min size</span>
+            <div class="filter-presets">
+                {#each SIZE_PRESETS as preset}
+                    <button
+                        class="preset-btn"
+                        class:active={$minSizeFilter === preset.value}
+                        onclick={() => handleSizeFilter(preset.value)}
+                    >{preset.label}</button>
+                {/each}
+            </div>
+        </div>
+        <label class="show-missing-toggle">
+            <input type="checkbox" bind:checked={$showMissing} />
+            Show missing files
+        </label>
+        {#if detectedClasses.length > 0}
+            <div class="detected-header">DETECTED OBJECTS</div>
+            {#each detectedClasses as [cls, count]}
+                <button
+                    class="section-item detected-class"
+                    class:active={$activeDetectedClass === cls}
+                    onclick={() => filterByClass(cls)}
+                    aria-current={$activeDetectedClass === cls ? 'true' : undefined}
+                >
+                    <span class="class-tag">{cls}</span>
+                    <span class="count">{formatSidebarCount(count)}</span>
+                </button>
+            {/each}
+        {/if}
+    </div>
+
     <div class="section clipboard-monitor">
-        <div class="section-header">CLIPBOARD MONITOR</div>
+        <button
+            class="folders-toggle"
+            onclick={() => toggleSection('clipboard')}
+            aria-expanded={!clipboardCollapsed}
+        >
+            <span class="toggle-arrow">{clipboardCollapsed ? '▸' : '▾'}</span>
+            <span class="folders-toggle-label">Clipboard Monitor</span>
+            {#if clipboardStatus?.running}
+                <span class="count running-dot" title="Monitor running">●</span>
+            {/if}
+        </button>
+        {#if !clipboardCollapsed}
         <button
             class="section-item"
             class:active={clipboardStatus?.running}
@@ -853,132 +1170,6 @@
                 >{clipboardPublishResult.url}</button>
             {/if}
         {/if}
-    </div>
-
-    {#if $smartCollections.length > 0}
-    <div class="section">
-        <div class="section-header">SMART</div>
-        {#each $smartCollections as sc}
-            <button class="section-item"
-                class:active={$activeSmartCollection?.id === sc.id}
-                onclick={() => selectSmartCollection(sc)}
-                aria-current={$activeSmartCollection?.id === sc.id ? 'true' : undefined}>
-                <span class="icon">&#9733;</span>
-                <span class="item-label">{sc.name}</span>
-                <span class="count">{formatSidebarCount(sc.image_count)}</span>
-            </button>
-        {/each}
-    </div>
-    {/if}
-
-    <div class="section">
-        <div class="section-header">FILTERS</div>
-        <div class="filter-row">
-            <span class="filter-label">Min size</span>
-            <div class="filter-presets">
-                {#each SIZE_PRESETS as preset}
-                    <button
-                        class="preset-btn"
-                        class:active={$minSizeFilter === preset.value}
-                        onclick={() => handleSizeFilter(preset.value)}
-                    >{preset.label}</button>
-                {/each}
-            </div>
-        </div>
-        <label class="show-missing-toggle">
-            <input type="checkbox" bind:checked={$showMissing} />
-            Show missing files
-        </label>
-    </div>
-
-    <div class="section">
-        <button
-            class="folders-toggle"
-            onclick={() => aiToggled = !aiExpanded}
-            aria-expanded={aiExpanded}
-        >
-            <span class="toggle-arrow">{aiExpanded ? '▾' : '▸'}</span>
-            <span class="folders-toggle-label">AI MODELS</span>
-        </button>
-
-        {#if aiExpanded}
-            <div class="ai-models-content">
-                <div class="model-row">
-                    <span class="model-name">Object detection YOLO</span>
-                    {#if yoloReady}
-                        <span class="model-status ready">ready</span>
-                    {:else}
-                        <span class="model-status missing">optional</span>
-                    {/if}
-                </div>
-
-                {#if !yoloReady}
-                    <div class="model-download-row">
-                        <select class="variant-select" bind:value={selectedYoloVariant}>
-                            <option value="nano">nano 6MB</option>
-                            <option value="small">small 22MB</option>
-                            <option value="medium">medium 50MB</option>
-                        </select>
-                        <button class="model-help-link" onclick={openModelSetupGuide}>Setup guide ↗</button>
-                    </div>
-                {/if}
-
-                <div class="model-row">
-                    <span class="model-name">Content filter NudeNet</span>
-                    {#if nudenetReady}
-                        <span class="model-status ready">ready</span>
-                    {:else}
-                        <span class="model-status missing">optional</span>
-                    {/if}
-                </div>
-
-                {#if !nudenetReady}
-                    <button class="model-help-link" onclick={openModelSetupGuide}>Setup guide ↗</button>
-                {/if}
-
-                <div class="model-row">
-                    <span class="model-name">Image descriptions Ollama</span>
-                    {#if ollamaReady}
-                        <span class="model-status ready">{ollamaModels.length} models</span>
-                    {:else}
-                        <span class="model-status missing">optional</span>
-                    {/if}
-                </div>
-
-                {#if yoloReady || nudenetReady}
-                    <div class="processed-row">
-                        <span class="processed-label">Detection</span>
-                        <span class="processed-count">{yoloProcessed}/{$totalCount}</span>
-                    </div>
-                    {#if yoloProcessed < $totalCount}
-                        <button class="detect-btn" onclick={handleDetectRemaining} disabled={detectingBatch}>
-                            {detectingBatch ? 'Detecting...' : `Detect objects (${formatSidebarCount($totalCount - yoloProcessed)} remaining)`}
-                        </button>
-                    {/if}
-                {/if}
-
-                {#if ollamaReady}
-                    <div class="processed-row">
-                        <span class="processed-label">Vision</span>
-                        <span class="processed-count">{visionProcessed}/{$totalCount}</span>
-                    </div>
-                    {#if visionProcessed < $totalCount}
-                        <button class="detect-btn" onclick={handleAnalyzeBatch} disabled={analyzingBatch}>
-                            {analyzingBatch ? 'Describing...' : `Describe images (${formatSidebarCount($totalCount - visionProcessed)} remaining)`}
-                        </button>
-                    {/if}
-                {/if}
-
-                {#if detectedClasses.length > 0}
-                    <div class="detected-header">DETECTED</div>
-                    {#each detectedClasses as [cls, count]}
-                        <button class="section-item detected-class" onclick={() => filterByClass(cls)}>
-                            <span class="class-tag">{cls}</span>
-                            <span class="count">{formatSidebarCount(count)}</span>
-                        </button>
-                    {/each}
-                {/if}
-            </div>
         {/if}
     </div>
     </div>
@@ -1027,6 +1218,22 @@
             </button>
             <button type="button" role="menuitem" onclick={() => copyCollectionId(collectionContextMenu!.collectionId)}>Copy Collection ID</button>
             <button type="button" role="menuitem" class="danger" onclick={(e) => handleDeleteCollection(e, collectionContextMenu!.collectionId, collectionContextMenu!.name)}>Delete Collection...</button>
+        </div>
+    {/if}
+
+    {#if folderContextMenu}
+        <div
+            class="collection-context-menu folder-context-menu"
+            style="left: {folderContextMenu.x}px; top: {folderContextMenu.y}px;"
+            role="menu"
+            tabindex="-1"
+        >
+            <div class="context-menu-header">{folderContextMenu.name}</div>
+            <button type="button" role="menuitem" onclick={() => { selectFolder(folderContextMenu!.path); closeFolderContextMenu(); }}>Open Folder</button>
+            <button type="button" role="menuitem" onclick={() => handleRenameFolder(folderContextMenu!.path, folderName(folderContextMenu!.path))}>Rename...</button>
+            {#if !folderContextMenu.isGroup}
+                <button type="button" role="menuitem" class="danger" onclick={(e) => { const path = folderContextMenu!.path; closeFolderContextMenu(); handleDeleteFolder(e, path); }}>Remove from Library...</button>
+            {/if}
         </div>
     {/if}
 
@@ -1200,6 +1407,50 @@
         margin-left: auto;
         font-size: 11px;
         flex: none;
+    }
+    .sidebar-filter {
+        padding: var(--spacing) var(--spacing) 0;
+    }
+    .sidebar-filter-input {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 11px;
+        min-height: 28px;
+        padding: 4px 8px;
+        width: 100%;
+    }
+    .sidebar-filter-input::placeholder {
+        color: var(--text-secondary);
+    }
+    .sidebar-filter-input:focus {
+        border-color: var(--blue);
+        outline: none;
+    }
+    .twisty {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        flex: none;
+        font-family: inherit;
+        font-size: 8px;
+        line-height: 1;
+        padding: 0;
+        width: 14px;
+    }
+    .twisty:hover {
+        color: var(--text);
+    }
+    .twisty-spacer {
+        flex: none;
+        width: 14px;
+    }
+    .running-dot {
+        color: var(--green);
+        font-size: 9px;
     }
     .folder-row {
         display: flex;
@@ -1433,98 +1684,6 @@
         min-height: 32px;
         padding: 2px 6px;
         white-space: normal;
-    }
-    /* AI Models section */
-    .ai-models-content {
-        padding: 0 0 0 8px;
-    }
-    .model-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 6px;
-        padding: 3px 0;
-        font-size: 11px;
-    }
-    .model-name {
-        color: var(--text);
-        font-weight: 600;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .model-status {
-        flex: none;
-        font-size: 10px;
-        white-space: nowrap;
-    }
-    .model-status.ready {
-        color: var(--green);
-    }
-    .model-status.missing {
-        color: var(--text-secondary);
-    }
-    .model-download-row {
-        display: flex;
-        gap: 4px;
-        margin: 2px 0 4px;
-    }
-    .model-help-link {
-        background: none;
-        border: none;
-        color: var(--blue);
-        cursor: pointer;
-        font-family: var(--font);
-        font-size: 10px;
-        min-height: 24px;
-        padding: 2px 0;
-        text-align: left;
-        text-decoration: underline;
-    }
-    .model-help-link:hover {
-        opacity: 0.8;
-    }
-    .variant-select {
-        flex: 1;
-        font-size: 10px;
-        padding: 2px 4px;
-        background: var(--bg);
-        color: var(--text);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        font-family: inherit;
-    }
-    .processed-row {
-        display: flex;
-        justify-content: space-between;
-        font-size: 10px;
-        color: var(--text-secondary);
-        padding: 4px 0 2px;
-    }
-    .processed-label {
-        color: var(--text-secondary);
-    }
-    .processed-count {
-        color: var(--text);
-    }
-    .detect-btn {
-        width: 100%;
-        font-size: 10px;
-        padding: 3px 6px;
-        background: none;
-        color: var(--blue);
-        border: none;
-        cursor: pointer;
-        font-family: inherit;
-        text-align: left;
-    }
-    .detect-btn:hover:not(:disabled) {
-        color: var(--text);
-    }
-    .detect-btn:disabled {
-        color: var(--text-secondary);
-        cursor: not-allowed;
     }
     .detected-header {
         font-size: 9px;

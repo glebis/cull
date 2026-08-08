@@ -21,6 +21,7 @@ pub mod mcp;
 pub mod media;
 pub mod ocr;
 pub mod perceptual_hash;
+pub mod photos;
 pub mod plugins;
 pub mod preview;
 pub mod privacy;

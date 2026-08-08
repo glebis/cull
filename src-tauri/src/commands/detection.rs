@@ -174,9 +174,28 @@ pub async fn search_by_detected_class(
 pub async fn count_by_detected_class(
     state: State<'_, AppState>,
     class_name: String,
+    include_rejected: Option<bool>,
 ) -> Result<u32, String> {
     let ctx = crate::services::ServiceContext::from_app_state(&state, None);
-    crate::services::ai::count_by_detected_class(&ctx, &class_name).map_err(|e| e.to_string())
+    crate::services::ai::count_by_detected_class_with_visibility(
+        &ctx,
+        &class_name,
+        include_rejected.unwrap_or(false),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_detected_classes(
+    state: State<'_, AppState>,
+    include_rejected: Option<bool>,
+) -> Result<Vec<(String, u32)>, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::list_detected_classes_with_visibility(
+        &ctx,
+        include_rejected.unwrap_or(false),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -185,12 +204,14 @@ pub async fn list_images_by_detected_class(
     class_name: String,
     limit: u32,
     offset: u32,
+    include_rejected: Option<bool>,
 ) -> Result<Vec<ImageWithFile>, String> {
     let ctx = crate::services::ServiceContext::from_app_state(&state, None);
-    crate::services::ai::list_images_by_detected_class(
+    crate::services::ai::list_images_by_detected_class_with_visibility(
         &ctx,
         &class_name,
         Pagination::clamped(offset, limit),
+        include_rejected.unwrap_or(false),
     )
     .map_err(|e| e.to_string())
 }
@@ -219,4 +240,13 @@ pub async fn is_nudenet_available(state: State<'_, AppState>) -> Result<bool, St
 pub async fn get_detection_count(state: State<'_, AppState>, model: String) -> Result<u32, String> {
     let ctx = crate::services::ServiceContext::from_app_state(&state, None);
     crate::services::ai::get_detection_count(&ctx, &model).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_image_ids_missing_detection(
+    state: State<'_, AppState>,
+    model: String,
+) -> Result<Vec<String>, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::get_pending_detection_ids(&ctx, &model).map_err(|e| e.to_string())
 }

@@ -1,6 +1,10 @@
 export const CLIPBOARD_PASTE_DATE_FORMAT_SETTING = 'clipboard_paste_date_format';
 export const DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT = '%Y-%m-%d';
 
+export function filenameForPath(path: string): string {
+    return path.split('/').filter(Boolean).pop() ?? path;
+}
+
 export function parentFolderForPath(path: string): string | null {
     const trimmed = path.trim().replace(/\/+$/, '');
     const idx = trimmed.lastIndexOf('/');
