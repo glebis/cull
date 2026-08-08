@@ -22,6 +22,19 @@ pub fn list_images(
     Ok(images)
 }
 
+pub fn list_images_with_visibility(
+    ctx: &ServiceContext,
+    page: Pagination,
+    include_rejected: bool,
+) -> Result<Vec<ImageWithFile>, ServiceError> {
+    let page = Pagination::clamped(page.offset, page.limit);
+    let mut images =
+        ctx.db
+            .list_images_with_visibility(page.limit, page.offset, include_rejected)?;
+    enrich_thumbnails(&mut images, ctx.app_data_dir);
+    Ok(images)
+}
+
 pub fn list_images_by_folder(
     ctx: &ServiceContext,
     folder: &str,
@@ -31,6 +44,23 @@ pub fn list_images_by_folder(
     let mut images = ctx
         .db
         .list_images_by_folder(folder, page.limit, page.offset)?;
+    enrich_thumbnails(&mut images, ctx.app_data_dir);
+    Ok(images)
+}
+
+pub fn list_images_by_folder_with_visibility(
+    ctx: &ServiceContext,
+    folder: &str,
+    page: Pagination,
+    include_rejected: bool,
+) -> Result<Vec<ImageWithFile>, ServiceError> {
+    let page = Pagination::clamped(page.offset, page.limit);
+    let mut images = ctx.db.list_images_by_folder_with_visibility(
+        folder,
+        page.limit,
+        page.offset,
+        include_rejected,
+    )?;
     enrich_thumbnails(&mut images, ctx.app_data_dir);
     Ok(images)
 }
@@ -45,6 +75,25 @@ pub fn list_images_filtered(
     let mut images = ctx
         .db
         .list_images_filtered(min_width, min_height, page.limit, page.offset)?;
+    enrich_thumbnails(&mut images, ctx.app_data_dir);
+    Ok(images)
+}
+
+pub fn list_images_filtered_with_visibility(
+    ctx: &ServiceContext,
+    min_width: Option<u32>,
+    min_height: Option<u32>,
+    page: Pagination,
+    include_rejected: bool,
+) -> Result<Vec<ImageWithFile>, ServiceError> {
+    let page = Pagination::clamped(page.offset, page.limit);
+    let mut images = ctx.db.list_images_filtered_with_visibility(
+        min_width,
+        min_height,
+        page.limit,
+        page.offset,
+        include_rejected,
+    )?;
     enrich_thumbnails(&mut images, ctx.app_data_dir);
     Ok(images)
 }
@@ -84,9 +133,21 @@ pub fn get_image_by_path(
 pub fn list_folders(ctx: &ServiceContext) -> Result<Vec<(String, u32)>, ServiceError> {
     Ok(ctx.db.list_folders()?)
 }
+pub fn list_folders_with_visibility(
+    ctx: &ServiceContext,
+    include_rejected: bool,
+) -> Result<Vec<(String, u32)>, ServiceError> {
+    Ok(ctx.db.list_folders_with_visibility(include_rejected)?)
+}
 
 pub fn get_image_count(ctx: &ServiceContext) -> Result<u32, ServiceError> {
     Ok(ctx.db.image_count()?)
+}
+pub fn get_image_count_with_visibility(
+    ctx: &ServiceContext,
+    include_rejected: bool,
+) -> Result<u32, ServiceError> {
+    Ok(ctx.db.image_count_with_visibility(include_rejected)?)
 }
 
 pub fn list_image_ids(ctx: &ServiceContext) -> Result<Vec<String>, ServiceError> {

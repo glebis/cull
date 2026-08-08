@@ -35,14 +35,15 @@ cull --json call_tool export_images --params_json '{"collection_id":"<collection
 ### Invocation
 
 ```
-cull [FLAGS] [SUBCOMMAND]
+cull [FLAGS] [PATH]
+cull [FLAGS] <SUBCOMMAND>
 ```
 
-With no subcommand, launches the GUI. A bare path argument is shorthand for `open`.
+With no subcommand, Cull launches the GUI. An optional bare path opens a supported image or imports a folder directly.
 
 ```bash
 cull                        # launch GUI
-cull ~/photos               # open folder in GUI (same as: cull open ~/photos)
+cull ~/photos               # import and open folder in GUI
 cull shot.png               # open file in GUI
 ```
 

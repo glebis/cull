@@ -49,4 +49,4 @@ Cull reaches 1.0 when all three surfaces are `stable` and:
 
 ---
 
-Last updated: 0.3.2 (2026-08-07)
+Last updated: 0.3.3 (2026-08-08)

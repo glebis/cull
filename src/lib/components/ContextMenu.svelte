@@ -4,11 +4,12 @@
     import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, trashImages, moveImage, renameImage, listFolders, shareImages, openImagesWithApplication, listOpenWithApplications } from '$lib/api';
     import { loadSimilarImages } from '$lib/similarity';
     import type { ImageWithFile, OpenWithApplication } from '$lib/api';
-    import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast, requestTextInput } from '$lib/stores';
+    import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast, requestTextInput, showRejected } from '$lib/stores';
     import { invalidateImageCache, loadImagesForCurrentScope } from '$lib/image-loading';
     import { clampFloatingPosition, placeAdjacentSubmenu } from '$lib/floating-position';
     import { filterMoveFolders, folderDisplayName, folderParentPath } from '$lib/move-menu-utils';
     import { withDecision, withRating, type ImageDecision } from '$lib/selection-updates';
+    import { applyDecisionToCurrentView } from '$lib/rejected-visibility';
 
     interface Props {
         image: ImageWithFile;
@@ -328,8 +329,8 @@
         onclose();
         await setDecision(image.image.id, d, $activeSession?.id ?? null);
         invalidateImageCache();
-        image.selection = withDecision(image, d).selection;
-        images.update(all => all.map(item => item.image.id === image.image.id ? withDecision(item, d) : item));
+        const result = applyDecisionToCurrentView(image.image.id, d);
+        if (!result.hidden) image.selection = withDecision(image, d).selection;
     }
 
     async function loadCollections() {
@@ -339,7 +340,7 @@
         collectionLoading = true;
         await placeCollectionSubmenu();
         try {
-            collectionList = await listCollections();
+            collectionList = await listCollections($showRejected);
         } catch (e) {
             collectionList = [];
             showToast('Collection list unavailable', { detail: String(e), type: 'warning', duration: 8000 });
@@ -353,7 +354,7 @@
         onclose();
         await addToCollection(colId, targetIds);
         invalidateImageCache();
-        const c = await listCollections();
+        const c = await listCollections($showRejected);
         collections.set(c);
     }
 
@@ -371,7 +372,7 @@
         const colId = await createCollection(name.trim());
         await addToCollection(colId, targetIds);
         invalidateImageCache();
-        const c = await listCollections();
+        const c = await listCollections($showRejected);
         collections.set(c);
     }
 
@@ -382,7 +383,7 @@
         await removeFromCollection(colId, targetIds);
         await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
         focusedIndex.update(i => Math.max(0, Math.min(i, $images.length - 1)));
-        const c = await listCollections();
+        const c = await listCollections($showRejected);
         collections.set(c);
     }
 
@@ -483,7 +484,7 @@
             invalidateCache: true,
             minItems: remainingLoadedCount,
         });
-        const c = await listCollections();
+        const c = await listCollections($showRejected);
         collections.set(c);
         if ($focusedIndex >= $images.length) focusedIndex.set(Math.max(0, $images.length - 1));
     }
@@ -509,7 +510,7 @@
 
     async function loadFolders() {
         openSubmenu = 'moveto';
-        folderList = await listFolders();
+        folderList = await listFolders(true);
     }
 
     function currentFolderPath() {
@@ -521,7 +522,7 @@
     async function refreshAfterMove() {
         await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
         try {
-            folders.set(await listFolders());
+            folders.set(await listFolders($showRejected));
         } catch (e) {
             console.error('Failed to refresh folders after move:', e);
         }

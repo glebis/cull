@@ -30,11 +30,7 @@
         getEmbeddingModelDownloadInfo,
         listEmbeddingProviders,
         downloadEmbeddingModel,
-        generateModelEmbeddings,
-        getEmbeddingPage,
-        getEmbeddingCount,
-        getImageCount,
-        listImageIds,
+        startModelEmbeddingGeneration,
         hasApiKey,
         getImagesByIds,
         getGenerationRun,
@@ -43,13 +39,34 @@
         pauseJob,
         resumeJob,
     } from '$lib/api';
-    import type { EmbeddingModelDownloadInfo, EmbeddingPage, GenerationRun, ImageWithFile } from '$lib/api';
+    import type {
+        EmbeddingGenerationMode,
+        EmbeddingGenerationProgress,
+        EmbeddingModelDownloadInfo,
+        EmbeddingPage,
+        GenerationRun,
+        ImageWithFile,
+    } from '$lib/api';
     import { isAssetProtocolSafePath, safeAssetPreviewPath } from '$lib/view-utils';
+    import { libraryScope, libraryScopeKey, type LibraryScope } from '$lib/library-scope';
+    import {
+        getEmbeddingCountForScope,
+        getEmbeddingPageForScope,
+        getImageCountForScope,
+        listImageIdsForScope,
+    } from '$lib/embedding-scope';
+    import { loadEmbeddingNeighbors, type EmbeddingNeighbor } from '$lib/embedding-neighbors';
 
     // State
     let downloading = $state(false);
-    let generating = $state(false);
-    let genProgress = $state({ current: 0, total: 0 });
+    type ActiveEmbeddingGeneration = EmbeddingGenerationProgress & {
+        provider: EmbeddingProvider;
+        scope: LibraryScope;
+        scopeKey: string;
+    };
+    let activeGeneration = $state<ActiveEmbeddingGeneration | null>(null);
+    let generationUnlisten: UnlistenFn | null = null;
+    let generating = $derived(activeGeneration?.status === 'running' || activeGeneration?.status === 'cancelling');
     let totalImages = $state(0);
     let regeneratingThumbs = $state(false);
     let staleEmbeddingCount = $state(0);
@@ -69,6 +86,7 @@
     let localModelDownloadInfo = $state<Record<LocalProvider, EmbeddingModelDownloadInfo | null>>({ clip: null, dinov2: null });
     let remoteEmbeddingCounts = $state<Record<RemoteProvider, number>>({ gemini: 0, cohere: 0, openai: 0, ollama: 0 });
     let currentEmbeddingCount = $derived(providerEmbeddingCount(selectedProvider));
+    let missingEmbeddingCount = $derived(Math.max(0, totalImages - currentEmbeddingCount));
     let selectedModel = $derived(modelOptions.find(option => option.id === selectedProvider) ?? modelOptions[0] ?? DEFAULT_MODEL_OPTIONS[0]);
     let selectedModelAvailable = $derived(providerReady(selectedProvider));
     let selectedDownloadInfo = $derived(isLocalProvider(selectedProvider) ? localModelDownloadInfo[selectedProvider] : null);
@@ -189,6 +207,10 @@
     let imageMap = $state<Map<string, ImageWithFile>>(new Map());
     let selectedGenerationRun = $state<GenerationRun | null>(null);
     let selectedGenerationLoadSeq = 0;
+    let nearestNeighbors = $state<EmbeddingNeighbor[]>([]);
+    let neighborsLoading = $state(false);
+    let neighborsError = $state<string | null>(null);
+    let neighborLoadSeq = 0;
     let projecting = $state(false);
     let projectionWorker: Worker | null = null;
     let cancelProjectionWork: (() => void) | null = null;
@@ -254,6 +276,39 @@
             })
             .catch(() => {
                 if (loadSeq === selectedGenerationLoadSeq) selectedGenerationRun = null;
+            });
+    });
+
+    $effect(() => {
+        const id = selectedPoint?.id ?? null;
+        const scope = $libraryScope;
+        const requestedScopeKey = libraryScopeKey(scope);
+        const model = modelNameForProvider(selectedProvider);
+        const loadSeq = ++neighborLoadSeq;
+        nearestNeighbors = [];
+        neighborsError = null;
+        if (!id) {
+            neighborsLoading = false;
+            return;
+        }
+
+        neighborsLoading = true;
+        loadEmbeddingNeighbors(scope, id, model, 6)
+            .then(neighbors => {
+                if (loadSeq !== neighborLoadSeq) return;
+                if (selectedPoint?.id !== id) return;
+                if (libraryScopeKey(get(libraryScope)) !== requestedScopeKey) return;
+                if (modelNameForProvider(selectedProvider) !== model) return;
+                nearestNeighbors = neighbors;
+                neighborsLoading = false;
+            })
+            .catch(error => {
+                if (loadSeq !== neighborLoadSeq) return;
+                if (selectedPoint?.id !== id) return;
+                if (libraryScopeKey(get(libraryScope)) !== requestedScopeKey) return;
+                if (modelNameForProvider(selectedProvider) !== model) return;
+                neighborsError = error instanceof Error ? error.message : String(error);
+                neighborsLoading = false;
             });
     });
 
@@ -337,6 +392,8 @@
         })();
 
         return () => {
+            generationUnlisten?.();
+            generationUnlisten = null;
             resetProjectionWorker();
         };
     });
@@ -409,13 +466,17 @@
 
     async function loadEmbeddingState() {
         try {
-            const imageTotal = await getImageCount();
+            const scope = get(libraryScope);
+            const requestedScopeKey = libraryScopeKey(scope);
+            const imageTotal = await getImageCountForScope(scope);
+            if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return;
             const countEntries = await Promise.all(
                 modelOptions.map(async option => [
                     option.id,
-                    await getEmbeddingCount(option.modelName),
+                    await getEmbeddingCountForScope(scope, option.modelName),
                 ] as const)
             );
+            if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return;
             totalImages = imageTotal;
             const nextLocalCounts = { ...localEmbeddingCounts };
             const nextRemoteCounts = { ...remoteEmbeddingCounts };
@@ -431,7 +492,7 @@
             localEmbeddingCounts = nextLocalCounts;
             remoteEmbeddingCounts = nextRemoteCounts;
             if (selectedCount > 0) {
-                await loadProjection();
+                await loadProjection(scope);
             } else {
                 points = [];
                 clusters = [];
@@ -470,6 +531,24 @@
         prevSettingsOpen = isOpen;
     });
 
+    let observedScopeKey = '';
+    $effect(() => {
+        const nextScopeKey = libraryScopeKey($libraryScope);
+        if (observedScopeKey === '') {
+            observedScopeKey = nextScopeKey;
+            return;
+        }
+        if (nextScopeKey === observedScopeKey) return;
+        observedScopeKey = nextScopeKey;
+        resetProjectionWorker();
+        points = [];
+        clusters = [];
+        selectedPoint = null;
+        highlightedCluster = null;
+        resetThumbnailCache();
+        void loadEmbeddingState();
+    });
+
     async function handleProviderChange() {
         resetProjectionWorker();
         points = [];
@@ -482,36 +561,116 @@
         saveViewState();
     }
 
-    async function handleGenerateRemote() {
-        if (!isRemoteProvider(selectedProvider)) return;
+    async function startGeneration(mode: EmbeddingGenerationMode) {
+        if (generating || !selectedModelAvailable) return;
         const provider = selectedProvider;
         const modelName = modelNameForProvider(provider);
-        generating = true;
-        genProgress = { current: 0, total: 0 };
-
-        const unlisten: UnlistenFn = await listen<{ current: number; total: number; provider: string; model?: string }>(
-            'embedding-progress',
-            (event) => {
-                if (event.payload.model && event.payload.model !== modelName) return;
-                genProgress = { current: event.payload.current, total: event.payload.total };
-            }
-        );
+        const scope = get(libraryScope);
+        const scopeKey = libraryScopeKey(scope);
+        activeGeneration = {
+            job_id: '',
+            total: mode === 'missing' ? missingEmbeddingCount : totalImages,
+            model: modelName,
+            mode,
+            current: 0,
+            status: 'running',
+            error: null,
+            provider,
+            scope,
+            scopeKey,
+        };
 
         try {
-            const imageIds = await listImageIds();
-            totalImages = imageIds.length;
-            await generateModelEmbeddings(modelName, imageIds);
-            const count = await getEmbeddingCount(modelName);
-            remoteEmbeddingCounts = { ...remoteEmbeddingCounts, [provider]: count };
-            if (count > 0) {
-                await loadProjection();
+            const pendingProgress = new Map<string, EmbeddingGenerationProgress>();
+            const imageIds = await listImageIdsForScope(scope);
+            if (scopeKey !== libraryScopeKey(get(libraryScope))) {
+                activeGeneration = null;
+                return;
             }
-        } catch (e) {
-            console.error(`${provider} generate failed:`, e);
-        } finally {
-            unlisten();
-            generating = false;
+            totalImages = imageIds.length;
+
+            generationUnlisten?.();
+            generationUnlisten = await listen<EmbeddingGenerationProgress>('embedding-progress', event => {
+                const progress = event.payload;
+                const active = activeGeneration;
+                if (!active || progress.model !== modelName || progress.mode !== mode) return;
+                if (!active.job_id) {
+                    pendingProgress.set(progress.job_id, progress);
+                    return;
+                }
+                if (progress.job_id !== active.job_id) return;
+                activeGeneration = { ...active, ...progress };
+                if (progress.status === 'completed' || progress.status === 'cancelled' || progress.status === 'failed') {
+                    generationUnlisten?.();
+                    generationUnlisten = null;
+                    void refreshAfterGeneration({ ...active, ...progress });
+                }
+            });
+
+            const started = await startModelEmbeddingGeneration(modelName, imageIds, mode);
+            const active = activeGeneration;
+            if (!active) return;
+            const bufferedProgress = pendingProgress.get(started.job_id);
+            activeGeneration = { ...active, ...started, ...bufferedProgress };
+            if (bufferedProgress && (
+                bufferedProgress.status === 'completed'
+                || bufferedProgress.status === 'cancelled'
+                || bufferedProgress.status === 'failed'
+            )) {
+                generationUnlisten?.();
+                generationUnlisten = null;
+                await refreshAfterGeneration(activeGeneration);
+                return;
+            }
+            if (started.total === 0) {
+                activeGeneration = { ...activeGeneration!, status: 'completed', current: 0 };
+                generationUnlisten?.();
+                generationUnlisten = null;
+                await refreshAfterGeneration(activeGeneration);
+            }
+        } catch (error) {
+            generationUnlisten?.();
+            generationUnlisten = null;
+            const message = error instanceof Error ? error.message : String(error);
+            if (activeGeneration) activeGeneration = { ...activeGeneration, status: 'failed', error: message };
         }
+    }
+
+    async function refreshAfterGeneration(generation: ActiveEmbeddingGeneration) {
+        if (generation.scopeKey !== libraryScopeKey(get(libraryScope))) return;
+        try {
+            const count = await getEmbeddingCountForScope(generation.scope, generation.model);
+            if (generation.scopeKey !== libraryScopeKey(get(libraryScope))) return;
+            if (isLocalProvider(generation.provider)) {
+                localEmbeddingCounts = { ...localEmbeddingCounts, [generation.provider]: count };
+            } else {
+                remoteEmbeddingCounts = { ...remoteEmbeddingCounts, [generation.provider]: count };
+            }
+            if (modelNameForProvider(selectedProvider) === generation.model) {
+                await loadProjection(generation.scope);
+            }
+        } catch (error) {
+            console.error('Failed to refresh embedding state after generation:', error);
+        }
+    }
+
+    async function cancelGeneration() {
+        const generation = activeGeneration;
+        if (!generation?.job_id || generation.status !== 'running') return;
+        activeGeneration = { ...generation, status: 'cancelling' };
+        try {
+            await cancelJob(generation.job_id);
+        } catch (error) {
+            activeGeneration = {
+                ...generation,
+                status: 'failed',
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }
+
+    function generationModelLabel(model: string): string {
+        return modelOptions.find(option => option.modelName === model)?.shortLabel ?? model;
     }
 
     async function handleDownload() {
@@ -566,38 +725,6 @@
         if (!downloadJobId) return;
         await cancelJob(downloadJobId);
         downloadProgress = { ...downloadProgress, status: 'cancelled' };
-    }
-
-    async function handleGenerate() {
-        if (!isLocalProvider(selectedProvider)) return;
-        const provider = selectedProvider;
-        const modelName = modelNameForProvider(provider);
-        generating = true;
-        genProgress = { current: 0, total: 0 };
-
-        const unlisten: UnlistenFn = await listen<{ current: number; total: number; model?: string }>(
-            'embedding-progress',
-            (event) => {
-                if (event.payload.model && event.payload.model !== modelName) return;
-                genProgress = { current: event.payload.current, total: event.payload.total };
-            }
-        );
-
-        try {
-            const imageIds = await listImageIds();
-            totalImages = imageIds.length;
-            await generateModelEmbeddings(modelName, imageIds);
-            const count = await getEmbeddingCount(modelName);
-            localEmbeddingCounts = { ...localEmbeddingCounts, [provider]: count };
-            if (count > 0) {
-                await loadProjection();
-            }
-        } catch (e) {
-            console.error('Generate failed:', e);
-        } finally {
-            unlisten();
-            generating = false;
-        }
     }
 
     async function handleRegenerateThumbnails() {
@@ -1001,6 +1128,16 @@
         selectPoint(navigationPoints[nextIndex], interactionMode !== 'map' || largePreviewOpen);
     }
 
+    function openNeighbor(neighbor: EmbeddingNeighbor) {
+        const point = points.find(candidate => candidate.id === neighbor.image.image.id);
+        if (point) {
+            selectPoint(point, true);
+            return;
+        }
+        focusedImageOverride.set(neighbor.image);
+        navigateTo('loupe');
+    }
+
     function fitPointSet(viewPoints: Point[], padding: number) {
         if (viewPoints.length === 0) return;
         const xs = viewPoints.map(p => p.x);
@@ -1228,12 +1365,19 @@
         projectionWorker = null;
     }
 
-    async function loadProjection() {
+    async function loadProjection(scope: LibraryScope = get(libraryScope)) {
         const loadSeq = ++projectionLoadSeq;
         try {
             const modelName = modelNameForProvider(selectedProvider);
-            const embeddingPage = await getEmbeddingPage(modelName, PROJECTION_EMBEDDING_LIMIT, 0);
+            const requestedScopeKey = libraryScopeKey(scope);
+            const embeddingPage = await getEmbeddingPageForScope(
+                scope,
+                modelName,
+                PROJECTION_EMBEDDING_LIMIT,
+                0,
+            );
             if (loadSeq !== projectionLoadSeq) return;
+            if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return;
             if (embeddingPage.ids.length < 2) {
                 points = [];
                 clusters = [];
@@ -1886,8 +2030,7 @@
             </div>
         </div>
 
-        {#if isLocalProvider(selectedProvider)}
-            {#if !selectedModelAvailable}
+        {#if isLocalProvider(selectedProvider) && !selectedModelAvailable}
                 <div class="panel-section">
                     {#if downloading}
                         <div class="download-progress">
@@ -1964,52 +2107,84 @@
                         {/if}
                     </div>
                 </div>
-            {:else}
-                <div class="panel-section">
-                    <div class="stat-row">
-                        <span class="stat-label">Images</span>
-                        <span class="stat-value">{totalImages}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Embeddings</span>
-                        <span class="stat-value">{currentEmbeddingCount}</span>
-                    </div>
+        {:else}
+            <div class="panel-section">
+                <div class="stat-row">
+                    <span class="stat-label">Images</span>
+                    <span class="stat-value">{totalImages}</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Embeddings</span>
+                    <span class="stat-value">{currentEmbeddingCount}</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Need embeddings</span>
+                    <span class="stat-value">{missingEmbeddingCount}</span>
+                </div>
+                {#if isLocalProvider(selectedProvider)}
                     <div class="stat-row">
                         <span class="stat-label">Model</span>
                         <span class="stat-value">{selectedModel.dims}</span>
                     </div>
-                    <button class="action-btn" onclick={handleGenerate} disabled={generating}>
-                        {#if generating}
-                            Generating {genProgress.current}/{genProgress.total}...
-                        {:else if currentEmbeddingCount < totalImages}
-                            Generate Embeddings ({Math.max(0, totalImages - currentEmbeddingCount)} remaining)
-                        {:else}
-                            Regenerate All
-                        {/if}
+                {/if}
+                <div class="generation-actions">
+                    <button
+                        class="action-btn"
+                        onclick={() => startGeneration('missing')}
+                        disabled={generating || !selectedModelAvailable || missingEmbeddingCount === 0}
+                        title={selectedModelAvailable ? '' : providerStatusLabel(selectedProvider)}
+                    >
+                        {missingEmbeddingCount === 0 ? 'Up to date' : `Generate missing (${missingEmbeddingCount})`}
+                    </button>
+                    <button
+                        class="action-btn secondary"
+                        onclick={() => startGeneration('all')}
+                        disabled={generating || !selectedModelAvailable || totalImages === 0}
+                        title={selectedModelAvailable ? '' : providerStatusLabel(selectedProvider)}
+                    >
+                        Regenerate all ({totalImages})
                     </button>
                 </div>
-            {/if}
-	        {:else}
-	            <div class="panel-section">
-	                <div class="stat-row">
-	                    <span class="stat-label">Images</span>
-	                    <span class="stat-value">{totalImages}</span>
-	                </div>
-	                <div class="stat-row">
-	                    <span class="stat-label">Embeddings</span>
-	                    <span class="stat-value">{currentEmbeddingCount}</span>
-	                </div>
-	                <button class="action-btn" onclick={handleGenerateRemote} disabled={generating || !selectedModelAvailable} title={selectedModelAvailable ? '' : providerStatusLabel(selectedProvider)}>
-	                    {#if generating}
-	                        Generating {genProgress.current}/{genProgress.total}...
-	                    {:else if !selectedModelAvailable}
-	                        {selectedProvider === 'ollama' ? 'Start Ollama First' : 'Set API Key First'}
-	                    {:else if currentEmbeddingCount < totalImages}
-	                        Generate Embeddings ({Math.max(0, totalImages - currentEmbeddingCount)} remaining)
-	                    {:else}
-	                        Regenerate All
-	                    {/if}
-                </button>
+            </div>
+        {/if}
+
+        {#if activeGeneration}
+            <div class="panel-section generation-status" aria-live="polite">
+                <div class="section-header">{generationModelLabel(activeGeneration.model).toUpperCase()} GENERATION</div>
+                {#if activeGeneration.status === 'running' || activeGeneration.status === 'cancelling'}
+                    <div class="progress-text">{activeGeneration.current}/{activeGeneration.total} images</div>
+                    <div
+                        class="progress-bar-track"
+                        role="progressbar"
+                        aria-label="{generationModelLabel(activeGeneration.model)} embedding progress"
+                        aria-valuemin="0"
+                        aria-valuenow={activeGeneration.current}
+                        aria-valuemax={Math.max(1, activeGeneration.total)}
+                    >
+                        <div
+                            class="progress-bar-fill"
+                            style="width: {activeGeneration.total > 0 ? (activeGeneration.current / activeGeneration.total) * 100 : 0}%"
+                        ></div>
+                    </div>
+                    <button
+                        class="action-btn secondary"
+                        onclick={cancelGeneration}
+                        disabled={!activeGeneration.job_id || activeGeneration.status === 'cancelling'}
+                        aria-label={!activeGeneration.job_id
+                            ? 'Starting embedding generation'
+                            : activeGeneration.status === 'cancelling'
+                                ? 'Cancelling embedding generation'
+                                : 'Cancel embedding generation'}
+                    >
+                        {!activeGeneration.job_id ? 'Starting…' : activeGeneration.status === 'cancelling' ? 'Cancelling…' : 'Cancel'}
+                    </button>
+                {:else if activeGeneration.status === 'completed'}
+                    <div class="generation-result">Generation completed: {activeGeneration.current}/{activeGeneration.total}</div>
+                {:else if activeGeneration.status === 'cancelled'}
+                    <div class="generation-result">Generation cancelled at {activeGeneration.current}/{activeGeneration.total}</div>
+                {:else}
+                    <div class="generation-result error">Generation failed{activeGeneration.error ? `: ${activeGeneration.error}` : ''}</div>
+                {/if}
             </div>
         {/if}
 
@@ -2087,6 +2262,43 @@
                     <button class="action-btn small" onclick={handleFocusInGrid}>
                         Open in Loupe
                     </button>
+                {/if}
+            </div>
+            <div class="panel-section">
+                <div class="section-header">NEAREST</div>
+                {#if neighborsLoading}
+                    <div class="neighbor-status" role="status" aria-live="polite">Finding similar images...</div>
+                {:else if neighborsError}
+                    <div class="neighbor-status error" role="status" aria-live="polite">Could not load similar images</div>
+                {:else if nearestNeighbors.length === 0}
+                    <div class="neighbor-status" role="status" aria-live="polite">No similar images in this scope</div>
+                {:else}
+                    <div class="sr-only" role="status" aria-live="polite">
+                        {nearestNeighbors.length} similar {nearestNeighbors.length === 1 ? 'image' : 'images'} found
+                    </div>
+                    <div class="neighbor-list">
+                        {#each nearestNeighbors as neighbor (neighbor.image.image.id)}
+                            {@const previewPath = safeAssetPreviewPath(neighbor.image)}
+                            {@const projectedPoint = points.find(point => point.id === neighbor.image.image.id)}
+                            {@const filename = neighbor.image.path.split('/').pop()}
+                            {@const score = `${(neighbor.score * 100).toFixed(1)}%`}
+                            <button
+                                class="neighbor-row"
+                                onclick={() => openNeighbor(neighbor)}
+                                aria-label={projectedPoint
+                                    ? `Select ${filename}, similarity ${score}`
+                                    : `Open ${filename} in Loupe, similarity ${score}`}
+                            >
+                                {#if previewPath}
+                                    <img src={convertFileSrc(previewPath)} alt="" class="neighbor-thumb" />
+                                {:else}
+                                    <span class="neighbor-thumb unavailable" aria-hidden="true"></span>
+                                {/if}
+                                <span class="neighbor-name">{filename}</span>
+                                <span class="neighbor-score">{score}</span>
+                            </button>
+                        {/each}
+                    </div>
                 {/if}
             </div>
         {/if}
@@ -2370,6 +2582,39 @@
         padding: 4px 8px;
     }
 
+    .generation-actions {
+        display: grid;
+        gap: var(--spacing);
+    }
+
+    .action-btn.secondary {
+        background: var(--surface);
+        color: var(--text-secondary);
+    }
+
+    .action-btn.secondary:hover:not(:disabled) {
+        color: var(--text);
+        border-color: var(--text-secondary);
+    }
+
+    .generation-status {
+        display: grid;
+        gap: var(--spacing);
+    }
+
+    .generation-status .action-btn {
+        margin-top: 0;
+    }
+
+    .generation-result {
+        color: var(--text);
+        font-size: 10px;
+    }
+
+    .generation-result.error {
+        color: var(--red);
+    }
+
     .visual-embed-section {
         background: color-mix(in srgb, var(--surface) 88%, var(--bg));
     }
@@ -2644,6 +2889,80 @@
     .preview-dims {
         font-size: 10px;
         color: var(--text-secondary);
+    }
+
+    .neighbor-list {
+        display: grid;
+        gap: var(--spacing);
+    }
+
+    .neighbor-row {
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: var(--spacing);
+        width: 100%;
+        padding: var(--spacing);
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        font-family: var(--font);
+        cursor: pointer;
+        text-align: left;
+    }
+
+    .neighbor-row:hover,
+    .neighbor-row:focus-visible {
+        border-color: var(--blue);
+    }
+
+    .neighbor-thumb {
+        width: 36px;
+        height: 36px;
+        object-fit: cover;
+        border-radius: var(--radius);
+        background: var(--surface);
+    }
+
+    .neighbor-thumb.unavailable {
+        border: 1px solid var(--border);
+    }
+
+    .neighbor-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 10px;
+    }
+
+    .neighbor-score {
+        color: var(--blue);
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .neighbor-status {
+        color: var(--text-secondary);
+        font-size: 10px;
+        line-height: 1.4;
+    }
+
+    .neighbor-status.error {
+        color: var(--red);
+    }
+
+    .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
     }
 
     .right-panel {

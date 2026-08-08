@@ -1,6 +1,7 @@
 <script lang="ts">
     import { untrack } from 'svelte';
     import { shortcutsOpen } from '$lib/stores';
+    import ModalDialog from '$lib/components/ModalDialog.svelte';
     import {
         canAssignCommandHotkey,
         getCommandPaletteItems,
@@ -101,27 +102,19 @@
         shortcutsOpen.set(false);
     }
 
-    function handleBackdropKeydown(event: KeyboardEvent) {
-        if (event.key === 'Escape') close();
-    }
 </script>
 
 {#if $shortcutsOpen}
-    <div
-        class="shortcuts-backdrop"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Keyboard shortcuts"
-        tabindex="-1"
-        onclick={close}
-        onkeydown={handleBackdropKeydown}
+    <ModalDialog
+        titleId="keyboard-shortcuts-title"
+        onclose={close}
+        overlayClass="shortcuts-backdrop"
+        panelClass="shortcuts-panel"
     >
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <div class="shortcuts-panel" role="presentation" onclick={(e) => e.stopPropagation()}>
             <div class="shortcuts-head">
-                <span class="shortcuts-title">Keyboard Shortcuts</span>
+                <span id="keyboard-shortcuts-title" class="shortcuts-title">Keyboard Shortcuts</span>
                 <button class="shortcuts-reset" type="button" onclick={resetAll}>Reset to defaults</button>
-                <button class="shortcuts-close" type="button" onclick={close} aria-label="Close">×</button>
+                <button class="shortcuts-close" type="button" data-modal-initial-focus onclick={close} aria-label="Close">×</button>
             </div>
             <input
                 class="shortcuts-search"
@@ -169,12 +162,12 @@
                     <div class="shortcuts-empty">No commands match “{query}”.</div>
                 {/if}
             </div>
-        </div>
-    </div>
+    </ModalDialog>
 {/if}
 
 <style>
-    .shortcuts-backdrop {
+    :global(.shortcuts-backdrop) {
+        --modal-align-items: flex-start;
         position: fixed;
         inset: 0;
         background: rgba(0, 0, 0, 0.55);
@@ -184,7 +177,7 @@
         padding-top: 8vh;
         z-index: var(--z-modal);
     }
-    .shortcuts-panel {
+    :global(.shortcuts-panel) {
         width: min(680px, 92vw);
         max-height: 78vh;
         display: flex;

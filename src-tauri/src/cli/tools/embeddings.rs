@@ -108,6 +108,7 @@ pub fn generate_embeddings(ctx: &HeadlessContext, params: Value) -> Result<Value
         jobs: None,
         job_id: None,
         cancel: None,
+        mode: None,
         app: None,
         model_id: &model,
         image_ids: &parsed.image_ids,

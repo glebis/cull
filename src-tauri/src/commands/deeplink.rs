@@ -93,7 +93,11 @@ pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams>
         return None;
     }
 
-    let params = OpenParams {
+    validate_open_params(build_file_open_params(file_paths)).ok()
+}
+
+fn build_file_open_params(file_paths: Vec<String>) -> OpenParams {
+    OpenParams {
         path: if file_paths.len() == 1 {
             Some(file_paths[0].clone())
         } else {
@@ -118,9 +122,31 @@ pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams>
         drop_x: None,
         drop_y: None,
         request_id: None,
-    };
+    }
+}
 
-    validate_open_params(params).ok()
+pub fn open_params_for_launch_path(path: &std::path::Path) -> Option<OpenParams> {
+    let canonical = crate::db_core::path_policy::validate_path(
+        path.to_string_lossy().as_ref(),
+        crate::db_core::path_policy::PathMode::UserPicked,
+    )
+    .ok()?;
+
+    if canonical.is_dir() {
+        return Some(OpenParams {
+            folder: Some(canonical.to_string_lossy().into_owned()),
+            view: Some("grid".to_string()),
+            ..OpenParams::default()
+        });
+    }
+
+    if canonical.is_file() && crate::extensions::is_image_path(&canonical, false) {
+        Some(build_file_open_params(vec![canonical
+            .to_string_lossy()
+            .into_owned()]))
+    } else {
+        None
+    }
 }
 
 pub fn open_params_for_urls(urls: &[String]) -> Vec<OpenParams> {
@@ -604,6 +630,72 @@ mod tests {
         assert_eq!(params.path.as_deref(), Some(canonical.as_str()));
         assert_eq!(params.view.as_deref(), Some("loupe"));
         assert!(params.paths.is_none());
+    }
+
+    #[test]
+    fn launch_folder_builds_grid_import_params() {
+        let dir = home_tempdir("cull_launch_folder_");
+        let folder = dir.path().join("Library");
+        std::fs::create_dir(&folder).unwrap();
+
+        let params = open_params_for_launch_path(&folder).unwrap();
+
+        assert_eq!(
+            params.folder,
+            Some(
+                folder
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+        assert_eq!(params.view.as_deref(), Some("grid"));
+        assert_eq!(params.drag_drop, None);
+        assert!(params.path.is_none());
+    }
+
+    #[test]
+    fn launch_path_rejects_unsupported_files() {
+        let dir = home_tempdir("cull_launch_unsupported_");
+        let text = dir.path().join("notes.txt");
+        std::fs::write(&text, b"notes").unwrap();
+
+        assert!(open_params_for_launch_path(&text).is_none());
+    }
+
+    #[test]
+    fn launch_folder_accepts_explicit_path_outside_home() {
+        let folder = tempfile::tempdir().unwrap();
+
+        let params = open_params_for_launch_path(folder.path()).unwrap();
+
+        assert_eq!(
+            params.folder,
+            Some(
+                folder
+                    .path()
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn launch_image_accepts_explicit_path_outside_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let image = dir.path().join("shot.png");
+        std::fs::write(&image, b"image").unwrap();
+
+        let params = open_params_for_launch_path(&image).unwrap();
+
+        assert_eq!(
+            params.path,
+            Some(image.canonicalize().unwrap().to_string_lossy().into_owned())
+        );
+        assert_eq!(params.view.as_deref(), Some("loupe"));
     }
 
     #[test]

@@ -4,6 +4,7 @@
 use crate::db_core::db::{row_u64, Database};
 use crate::db_core::models::*;
 use crate::db_core::smart_collections::{FilterNode, SmartCollection};
+use crate::db_core::visibility::RejectedVisibility;
 use rusqlite::Result;
 
 impl Database {
@@ -25,7 +26,14 @@ impl Database {
     }
 
     pub fn list_smart_collections(&self) -> Result<Vec<SmartCollection>> {
-        let conn = self.conn.lock();
+        self.list_smart_collections_with_visibility(true)
+    }
+
+    pub fn list_smart_collections_with_visibility(
+        &self,
+        include_rejected: bool,
+    ) -> Result<Vec<SmartCollection>> {
+        let conn = self.read_connection();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, collection_type, filter_json, nl_query,
                     is_preset, sort_order, created_at
@@ -54,6 +62,9 @@ impl Database {
             if let Some(ref filter_json) = sc.filter_json {
                 if let Ok(filter) = serde_json::from_str::<FilterNode>(filter_json) {
                     if let Ok((where_clause, params)) = filter.to_sql_clause() {
+                        let visibility =
+                            RejectedVisibility::from_include_rejected(include_rejected)
+                                .for_filter(&filter);
                         let sql = format!(
                             "SELECT COUNT(DISTINCT i.id)
                              FROM images i
@@ -62,8 +73,8 @@ impl Database {
                              LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
                              LEFT JOIN image_color_metrics cm ON cm.image_id = i.id
                              LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
-                             WHERE ({})",
-                            where_clause
+                             WHERE ({}) AND {}",
+                            where_clause, visibility.sql_predicate()
                         );
                         let param_refs: Vec<&dyn rusqlite::types::ToSql> = params
                             .iter()
@@ -108,10 +119,18 @@ impl Database {
     }
 
     pub fn evaluate_smart_collection(&self, filter_json: &str) -> Result<Vec<ImageWithFile>> {
-        self.evaluate_smart_collection_page(filter_json, None, None)
+        self.evaluate_smart_collection_page_with_visibility(filter_json, None, None, true)
     }
 
     pub fn count_smart_collection(&self, filter_json: &str) -> Result<i64> {
+        self.count_smart_collection_with_visibility(filter_json, true)
+    }
+
+    pub fn count_smart_collection_with_visibility(
+        &self,
+        filter_json: &str,
+        include_rejected: bool,
+    ) -> Result<i64> {
         let filter: FilterNode = serde_json::from_str(filter_json)
             .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
 
@@ -119,7 +138,9 @@ impl Database {
             .to_sql_clause()
             .map_err(|e| rusqlite::Error::InvalidParameterName(e))?;
 
-        let conn = self.conn.lock();
+        let visibility =
+            RejectedVisibility::from_include_rejected(include_rejected).for_filter(&filter);
+        let conn = self.read_connection();
         let sql = format!(
             "SELECT COUNT(DISTINCT i.id)
              FROM images i
@@ -128,8 +149,9 @@ impl Database {
              LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
              LEFT JOIN image_color_metrics cm ON cm.image_id = i.id
              LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
-             WHERE ({})",
-            where_clause
+             WHERE ({}) AND {}",
+            where_clause,
+            visibility.sql_predicate()
         );
         let param_refs: Vec<&dyn rusqlite::types::ToSql> = params
             .iter()
@@ -145,6 +167,16 @@ impl Database {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<ImageWithFile>> {
+        self.evaluate_smart_collection_page_with_visibility(filter_json, limit, offset, true)
+    }
+
+    pub fn evaluate_smart_collection_page_with_visibility(
+        &self,
+        filter_json: &str,
+        limit: Option<u32>,
+        offset: Option<u32>,
+        include_rejected: bool,
+    ) -> Result<Vec<ImageWithFile>> {
         let filter: FilterNode = serde_json::from_str(filter_json)
             .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
 
@@ -152,7 +184,9 @@ impl Database {
             .to_sql_clause()
             .map_err(|e| rusqlite::Error::InvalidParameterName(e))?;
 
-        let conn = self.conn.lock();
+        let visibility =
+            RejectedVisibility::from_include_rejected(include_rejected).for_filter(&filter);
+        let conn = self.read_connection();
         let mut sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
@@ -164,10 +198,11 @@ impl Database {
              LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
              LEFT JOIN image_color_metrics cm ON cm.image_id = i.id
              LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
-             WHERE ({})
+             WHERE ({}) AND {}
              GROUP BY i.id
              ORDER BY i.imported_at DESC",
-            where_clause
+            where_clause,
+            visibility.sql_predicate()
         );
 
         if let Some(limit) = limit {

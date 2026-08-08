@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import {
     viewMode, thumbnailSize, gridPreset, gridGap, gridScrollTop,
-    sidebarVisible, zenMode, activeFolder, activeCollection,
+    sidebarVisible, zenMode, showRejected, activeFolder, activeCollection,
     activeSmartCollection, activeDetectedClass, minSizeFilter, loupeScale, loupePanX, loupePanY,
     lineageLayout, showDetectionBoxes, nsfwMode, embeddingViewState,
     focusedIndex, images,
@@ -25,6 +25,7 @@ export interface PersistedState {
     loadedImageCount?: number;
     sidebarVisible: boolean;
     zenMode: boolean;
+    showRejected?: boolean;
     activeFolder: string | null;
     activeCollection: string | null;
     activeSmartCollectionId: string | null;
@@ -57,6 +58,7 @@ export function saveAppState(): void {
         loadedImageCount: get(images).length,
         sidebarVisible: get(sidebarVisible),
         zenMode: get(zenMode),
+        showRejected: get(showRejected),
         activeFolder: get(activeFolder),
         activeCollection: get(activeCollection),
         activeSmartCollectionId: get(activeSmartCollection)?.id ?? null,
@@ -93,6 +95,7 @@ export function restoreAppStateBeforeImages(): PersistedState | null {
         gridGap.set(state.gridGap);
         sidebarVisible.set(state.sidebarVisible);
         zenMode.set(state.zenMode);
+        showRejected.set(state.showRejected ?? false);
         activeFolder.set(state.activeFolder);
         activeCollection.set(state.activeCollection);
         activeDetectedClass.set(state.activeDetectedClass ?? null);

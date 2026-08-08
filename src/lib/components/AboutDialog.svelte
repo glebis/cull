@@ -1,11 +1,9 @@
 <script lang="ts">
-    import { tick } from 'svelte';
     import { openUrl } from '@tauri-apps/plugin-opener';
+    import ModalDialog from '$lib/components/ModalDialog.svelte';
     import packageJson from '../../../package.json';
 
     let { onclose }: { onclose: () => void } = $props();
-
-    let closeButton: HTMLButtonElement | undefined = $state();
 
     const credits = [
         {
@@ -50,15 +48,6 @@
         },
     ];
 
-    tick().then(() => closeButton?.focus());
-
-    function handleKeydown(e: KeyboardEvent) {
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            onclose();
-        }
-    }
-
     async function openExternal(href: string) {
         try {
             await openUrl(href);
@@ -73,19 +62,12 @@
     }
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-<div class="about-overlay" onclick={onclose}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-        class="about-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="about-title"
-        tabindex="-1"
-        onclick={(e: MouseEvent) => e.stopPropagation()}
-    >
+<ModalDialog
+    titleId="about-title"
+    onclose={onclose}
+    overlayClass="about-overlay"
+    panelClass="about-dialog"
+>
         <header class="about-header">
             <img class="app-icon" src="/icon-variants/cull-dark.png" alt="" aria-hidden="true" />
             <div class="title-group">
@@ -94,9 +76,9 @@
                 <p class="version">Version {packageJson.version}</p>
             </div>
             <button
-                bind:this={closeButton}
                 class="close-btn"
                 type="button"
+                data-modal-initial-focus
                 aria-label="Close"
                 onclick={onclose}
             >X</button>
@@ -143,11 +125,10 @@
                 </div>
             </section>
         </div>
-    </div>
-</div>
+ </ModalDialog>
 
 <style>
-    .about-overlay {
+    :global(.about-overlay) {
         position: fixed;
         inset: 0;
         z-index: var(--z-modal);
@@ -158,7 +139,7 @@
         background: color-mix(in srgb, var(--bg) 76%, transparent);
     }
 
-    .about-dialog {
+    :global(.about-dialog) {
         width: min(620px, 100%);
         max-height: calc(100vh - 32px);
         overflow: hidden;

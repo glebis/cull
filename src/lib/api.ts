@@ -2,6 +2,7 @@
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
 import { invoke } from '@tauri-apps/api/core';
+import type { LibraryScope } from './library-scope';
 
 function emitSessionEventsRefresh() {
     if (typeof window !== 'undefined') {
@@ -183,6 +184,7 @@ export interface ImportResponse {
     errors: string[];
     batch_id: string | null;
     image_ids: string[];
+    cancelled: boolean;
 }
 
 export interface GenerationRun {
@@ -238,6 +240,7 @@ export interface CompleteAgentViewSnapshotRequest {
 export interface MenuStatePayload {
     viewMode: string;
     sidebarVisible: boolean;
+    showRejected: boolean;
     hasFocusedImage: boolean;
     selectedCount: number;
     staticPublishingEnabled: boolean;
@@ -575,8 +578,8 @@ export interface ClaudeAgentStreamEvent {
     is_error: boolean;
 }
 
-export async function listImages(limit: number, offset: number): Promise<ImageWithFile[]> {
-    return invoke<ImageWithFile[]>('list_images', { limit, offset });
+export async function listImages(limit: number, offset: number, includeRejected = false): Promise<ImageWithFile[]> {
+    return invoke<ImageWithFile[]>('list_images', { limit, offset, includeRejected });
 }
 
 export async function listMediaAssets(
@@ -607,22 +610,22 @@ export async function listPdfPages(mediaAssetId: string): Promise<PdfPage[]> {
     return invoke<PdfPage[]>('list_pdf_pages', { mediaAssetId });
 }
 
-export async function getImageCount(): Promise<number> {
-    return invoke<number>('get_image_count');
+export async function getImageCount(includeRejected = false): Promise<number> {
+    return invoke<number>('get_image_count', { includeRejected });
 }
 
 export async function listImageIds(): Promise<string[]> {
     return invoke<string[]>('list_image_ids');
 }
 
-export async function importFolder(folderPath: string, sessionId?: string | null): Promise<ImportResponse> {
-    const result = await invoke<ImportResponse>('import_folder', { folderPath, sessionId: sessionId ?? null });
+export async function importFolder(folderPath: string, sessionId?: string | null, progressId?: string | null): Promise<ImportResponse> {
+    const result = await invoke<ImportResponse>('import_folder', { folderPath, sessionId: sessionId ?? null, progressId: progressId ?? null });
     emitSessionEventsRefresh();
     return result;
 }
 
-export async function importFiles(filePaths: string[], sessionId?: string | null): Promise<ImportResponse> {
-    const result = await invoke<ImportResponse>('import_files', { filePaths, sessionId: sessionId ?? null });
+export async function importFiles(filePaths: string[], sessionId?: string | null, progressId?: string | null): Promise<ImportResponse> {
+    const result = await invoke<ImportResponse>('import_files', { filePaths, sessionId: sessionId ?? null, progressId: progressId ?? null });
     emitSessionEventsRefresh();
     return result;
 }
@@ -737,12 +740,12 @@ export async function getIterationSiblings(parentId: string): Promise<ImageWithF
     return invoke<ImageWithFile[]>('get_iteration_siblings', { parentId });
 }
 
-export async function listFolders(): Promise<[string, number][]> {
-    return invoke('list_folders');
+export async function listFolders(includeRejected = false): Promise<[string, number][]> {
+    return invoke('list_folders', { includeRejected });
 }
 
-export async function listImagesByFolder(folder: string, limit: number, offset: number): Promise<ImageWithFile[]> {
-    return invoke('list_images_by_folder', { folder, limit, offset });
+export async function listImagesByFolder(folder: string, limit: number, offset: number, includeRejected = false): Promise<ImageWithFile[]> {
+    return invoke('list_images_by_folder', { folder, limit, offset, includeRejected });
 }
 
 export async function deleteFolder(folder: string): Promise<number> {
@@ -751,8 +754,8 @@ export async function deleteFolder(folder: string): Promise<number> {
     return result;
 }
 
-export async function listImagesFiltered(minWidth: number | null, minHeight: number | null, limit: number, offset: number): Promise<ImageWithFile[]> {
-    return invoke('list_images_filtered', { minWidth, minHeight, limit, offset });
+export async function listImagesFiltered(minWidth: number | null, minHeight: number | null, limit: number, offset: number, includeRejected = false): Promise<ImageWithFile[]> {
+    return invoke('list_images_filtered', { minWidth, minHeight, limit, offset, includeRejected });
 }
 
 export async function createCollection(name: string): Promise<string> {
@@ -761,8 +764,8 @@ export async function createCollection(name: string): Promise<string> {
     return result;
 }
 
-export async function listCollections(): Promise<[string, string, number][]> {
-    return invoke('list_collections');
+export async function listCollections(includeRejected = false): Promise<[string, string, number][]> {
+    return invoke('list_collections', { includeRejected });
 }
 
 export async function renameCollectionApi(collectionId: string, name: string): Promise<void> {
@@ -775,8 +778,8 @@ export async function addToCollection(collectionId: string, imageIds: string[]):
     emitSessionEventsRefresh();
 }
 
-export async function listCollectionImages(collectionId: string, limit?: number, offset?: number): Promise<ImageWithFile[]> {
-    return invoke('list_collection_images', { collectionId, limit: limit ?? null, offset: offset ?? null });
+export async function listCollectionImages(collectionId: string, limit?: number, offset?: number, includeRejected = false): Promise<ImageWithFile[]> {
+    return invoke('list_collection_images', { collectionId, limit: limit ?? null, offset: offset ?? null, includeRejected });
 }
 
 export async function removeFromCollection(collectionId: string, imageIds: string[]): Promise<void> {
@@ -904,8 +907,8 @@ export async function publishClipboardCollection(collectionId?: string | null): 
 
 // Smart Collection commands
 
-export async function listSmartCollections(): Promise<SmartCollection[]> {
-    return invoke('list_smart_collections');
+export async function listSmartCollections(includeRejected = false): Promise<SmartCollection[]> {
+    return invoke('list_smart_collections', { includeRejected });
 }
 
 export async function createSmartCollection(
@@ -918,12 +921,12 @@ export async function createSmartCollection(
     return result;
 }
 
-export async function evaluateSmartCollection(filterJson: string, limit?: number, offset?: number): Promise<ImageWithFile[]> {
-    return invoke('evaluate_smart_collection', { filterJson, limit: limit ?? null, offset: offset ?? null });
+export async function evaluateSmartCollection(filterJson: string, limit?: number, offset?: number, includeRejected = false): Promise<ImageWithFile[]> {
+    return invoke('evaluate_smart_collection', { filterJson, limit: limit ?? null, offset: offset ?? null, includeRejected });
 }
 
-export async function countSmartCollection(filterJson: string): Promise<number> {
-    return invoke<number>('count_smart_collection', { filterJson });
+export async function countSmartCollection(filterJson: string, includeRejected = false): Promise<number> {
+    return invoke<number>('count_smart_collection', { filterJson, includeRejected });
 }
 
 export async function deleteSmartCollectionApi(id: string): Promise<void> {
@@ -1034,6 +1037,29 @@ export async function generateModelEmbeddings(model: string, imageIds: string[])
     return invoke('generate_model_embeddings', { model, imageIds });
 }
 
+export type EmbeddingGenerationMode = 'missing' | 'all';
+
+export interface EmbeddingGenerationStart {
+    job_id: string;
+    total: number;
+    model: string;
+    mode: EmbeddingGenerationMode;
+}
+
+export interface EmbeddingGenerationProgress extends EmbeddingGenerationStart {
+    current: number;
+    status: 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed';
+    error?: string | null;
+}
+
+export async function startModelEmbeddingGeneration(
+    model: string,
+    imageIds: string[],
+    mode: EmbeddingGenerationMode,
+): Promise<EmbeddingGenerationStart> {
+    return invoke('start_model_embedding_generation', { model, imageIds, mode });
+}
+
 export interface EmbeddingPage {
     ids: string[];
     vectors: number[];
@@ -1048,8 +1074,47 @@ export async function getEmbeddingPage(model?: string, limit = 5000, offset = 0)
     return invoke('get_embedding_page', { model: model ?? null, limit, offset });
 }
 
+export async function getScopedEmbeddingPage(
+    scope: LibraryScope,
+    model?: string,
+    limit = 5000,
+    offset = 0,
+): Promise<EmbeddingPage> {
+    return invoke('get_scoped_embedding_page', { scope, model: model ?? null, limit, offset });
+}
+
+export interface ImageIdPage {
+    ids: string[];
+    total: number;
+    offset: number;
+    limit: number;
+    has_more: boolean;
+}
+
+export async function listScopedImageIds(
+    scope: LibraryScope,
+    limit = 100,
+    offset = 0,
+): Promise<ImageIdPage> {
+    return invoke('list_scoped_image_ids', { scope, limit, offset });
+}
+
 export async function findSimilarImages(imageId: string, topK: number, model?: string): Promise<[string, number][]> {
     return invoke('find_similar_images', { imageId, topK, model: model ?? null });
+}
+
+export async function findSimilarImagesInScope(
+    scope: LibraryScope,
+    imageId: string,
+    topK: number,
+    model?: string,
+): Promise<[string, number][]> {
+    return invoke('find_similar_images_in_scope', {
+        scope,
+        imageId,
+        topK,
+        model: model ?? null,
+    });
 }
 
 export async function generateSimilarityGroups(
@@ -1142,16 +1207,16 @@ export async function searchByDetectedClass(className: string, limit?: number): 
     return invoke('search_by_detected_class', { className, limit: limit ?? 100 });
 }
 
-export async function countByDetectedClass(className: string): Promise<number> {
-    return invoke('count_by_detected_class', { className });
+export async function countByDetectedClass(className: string, includeRejected = false): Promise<number> {
+    return invoke('count_by_detected_class', { className, includeRejected });
 }
 
-export async function listDetectedClasses(): Promise<[string, number][]> {
-    return invoke('list_detected_classes');
+export async function listDetectedClasses(includeRejected = false): Promise<[string, number][]> {
+    return invoke('list_detected_classes', { includeRejected });
 }
 
-export async function listImagesByDetectedClass(className: string, limit: number, offset: number): Promise<ImageWithFile[]> {
-    return invoke('list_images_by_detected_class', { className, limit, offset });
+export async function listImagesByDetectedClass(className: string, limit: number, offset: number, includeRejected = false): Promise<ImageWithFile[]> {
+    return invoke('list_images_by_detected_class', { className, limit, offset, includeRejected });
 }
 
 export async function isYoloAvailable(variant?: string): Promise<boolean> {
@@ -1516,8 +1581,8 @@ export async function removeFromLineageGroup(imageId: string): Promise<void> {
     return invoke('remove_from_lineage_group', { imageId });
 }
 
-export async function getBatchImages(batchId: string): Promise<ImageWithFile[]> {
-    return invoke('get_batch_images', { batchId });
+export async function getBatchImages(batchId: string, includeRejected = false): Promise<ImageWithFile[]> {
+    return invoke('get_batch_images', { batchId, includeRejected });
 }
 
 export async function scanLineage(): Promise<number> {
@@ -1746,6 +1811,18 @@ export async function renameImage(imageId: string, newName: string): Promise<str
 
 export async function createSubfolder(parentPath: string, name: string): Promise<string> {
     const result = await invoke<string>('create_subfolder', { parentPath, name });
+    emitSessionEventsRefresh();
+    return result;
+}
+
+export interface RenameFolderResult {
+    oldPath: string;
+    newPath: string;
+    imageCount: number;
+}
+
+export async function renameFolder(folder: string, newName: string): Promise<RenameFolderResult> {
+    const result = await invoke<RenameFolderResult>('rename_folder', { folder, newName });
     emitSessionEventsRefresh();
     return result;
 }

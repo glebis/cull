@@ -247,6 +247,14 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     )?)?;
     view_menu.append(&CheckMenuItem::with_id(
         app,
+        "view_show_rejected",
+        "Show Rejected",
+        true,
+        false,
+        None::<&str>,
+    )?)?;
+    view_menu.append(&CheckMenuItem::with_id(
+        app,
         "view_loupe_histogram",
         "Loupe Histogram",
         true,
@@ -626,6 +634,8 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 pub struct MenuStatePayload {
     view_mode: String,
     sidebar_visible: bool,
+    #[serde(default)]
+    show_rejected: bool,
     has_focused_image: bool,
     selected_count: usize,
     #[serde(default)]
@@ -674,6 +684,7 @@ pub async fn update_menu_state(app: AppHandle, state: MenuStatePayload) -> Resul
     }
 
     set_menu_item_checked(&app, "toggle_sidebar", state.sidebar_visible)?;
+    set_menu_item_checked(&app, "view_show_rejected", state.show_rejected)?;
     set_menu_item_checked(&app, "view_loupe_histogram", state.show_loupe_histogram)?;
     set_menu_item_checked(&app, "preview_display_freeze", state.preview_display_frozen)?;
     set_menu_item_checked(&app, "preview_display_blank", state.preview_display_blanked)?;
@@ -1120,6 +1131,7 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
         | "view_export"
         | "view_tinder"
         | "toggle_sidebar"
+        | "view_show_rejected"
         | "view_loupe_histogram"
         | "view_preview_display"
         | "preview_display_move_monitor"

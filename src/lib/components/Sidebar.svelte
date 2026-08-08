@@ -2,8 +2,8 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen } from '$lib/stores';
-    import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, countByDetectedClass, listDetectedClasses, regenerateThumbnails, rescanSources, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
+    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen } from '$lib/stores';
+    import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, renameFolder as apiRenameFolder, listCollections, createCollection, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, countByDetectedClass, listDetectedClasses, regenerateThumbnails, rescanSources, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, ImageWithFile, SmartCollection } from '$lib/api';
     import { applyClipboardMonitorCollection } from '$lib/clipboard-monitor';
@@ -45,8 +45,16 @@
         x: number;
         y: number;
     } | null>(null);
+    let folderContextMenu = $state<{
+        path: string;
+        name: string;
+        isGroup: boolean;
+        x: number;
+        y: number;
+    } | null>(null);
     let collectionPreviewTimer: ReturnType<typeof setTimeout> | null = null;
     let collectionPreviewRequest = 0;
+    let browseCountsRequest = 0;
 
     function setClipboardStatus(status: ClipboardMonitorStatus | null) {
         clipboardStatus = status;
@@ -65,8 +73,10 @@
         }
     }
     import SessionSwitcher from './SessionSwitcher.svelte';
-    import { activeCanvas, activeSession, navigateTo, sessionCanvases, expandedFolders, sidebarSectionsCollapsed, sidebarFilter } from '$lib/stores';
+    import { activeCanvas, activeSession, navigateTo, sessions, sessionCanvases, expandedFolders, sidebarSectionsCollapsed, sidebarFilter } from '$lib/stores';
     import { createCanvas, type Canvas } from '$lib/api';
+    import { reconcileRenamedCanvas, reconcileRenamedSession, renamedFolderPath } from '$lib/folder-rename-state';
+    import { withCanvasPathMigrationBarrier } from '$lib/canvas-save-coordinator';
 
     // "All Images" is only the active scope when nothing else narrows it —
     // including a detected-class filter, which used to leave both All Images
@@ -248,7 +258,7 @@
         collectionPreviewTimer = setTimeout(async () => {
             collectionPreview = { collectionId, name, count, images: [], loading: true, x, y };
             try {
-                const images = await listCollectionImages(collectionId, 4, 0);
+                const images = await listCollectionImages(collectionId, 4, 0, $showRejected);
                 if (requestId !== collectionPreviewRequest) return;
                 collectionPreview = { collectionId, name, count, images, loading: false, x, y };
             } catch (e) {
@@ -271,6 +281,7 @@
         event.preventDefault();
         event.stopPropagation();
         hideCollectionPreview(collectionId);
+        folderContextMenu = null;
         collectionContextMenu = {
             collectionId,
             name,
@@ -284,34 +295,30 @@
         collectionContextMenu = null;
     }
 
+    function openFolderContextMenu(event: MouseEvent, path: string, name: string, isGroup: boolean) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeCollectionContextMenu();
+        folderContextMenu = {
+            path,
+            name,
+            isGroup,
+            x: Math.min(event.clientX, window.innerWidth - 208),
+            y: Math.min(event.clientY, window.innerHeight - 128),
+        };
+    }
+
+    function closeFolderContextMenu() {
+        folderContextMenu = null;
+    }
+
     onDestroy(() => {
         clearCollectionPreviewTimer();
         window.removeEventListener('detected-classes-changed', handleDetectedClassesChanged);
+        window.removeEventListener('cull:decision-changed', handleDecisionChanged);
     });
 
     onMount(async () => {
-        try {
-            const f = await listFolders();
-            folders.set(f);
-        } catch (e) {
-            console.error('Failed to load folders:', e);
-            showToast('Failed to load folders', { detail: String(e), type: 'error', duration: 8000 });
-        }
-        try {
-            const c = await listCollections();
-            collections.set(c);
-            prunePinsToExistingCollections(c);
-        } catch (e) {
-            console.error('Failed to load collections:', e);
-            showToast('Failed to load collections', { detail: String(e), type: 'error', duration: 8000 });
-        }
-        try {
-            const sc = await listSmartCollections();
-            smartCollections.set(sc);
-        } catch (e) {
-            console.error('Failed to load smart collections:', e);
-            showToast('Failed to load smart collections', { detail: String(e), type: 'error', duration: 8000 });
-        }
         try {
             setClipboardStatus(await getClipboardMonitorStatus());
         } catch (e) {
@@ -320,7 +327,7 @@
         try {
             await listen('clipboard-monitor:capture', async () => {
                 setClipboardStatus(await getClipboardMonitorStatus());
-                const c = await listCollections();
+                const c = await listCollections($showRejected);
                 collections.set(c);
                 if (clipboardStatus?.collection_id && get(activeCollection) === clipboardStatus.collection_id) {
                     await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
@@ -330,8 +337,42 @@
             console.error('Failed to listen for clipboard monitor captures:', e);
         }
         window.addEventListener('detected-classes-changed', handleDetectedClassesChanged);
-        loadDetectedClasses().catch(e => console.error('Failed to load detected classes:', e));
+        window.addEventListener('cull:decision-changed', handleDecisionChanged);
     });
+
+    async function refreshBrowseCounts(includeRejected: boolean) {
+        const request = ++browseCountsRequest;
+        try {
+            const [count, nextFolders, nextCollections, nextSmartCollections, nextDetectedClasses] = await Promise.all([
+                getImageCount(includeRejected),
+                listFolders(includeRejected),
+                listCollections(includeRejected),
+                listSmartCollections(includeRejected),
+                listDetectedClasses(includeRejected),
+            ]);
+            if (request !== browseCountsRequest) return;
+            totalCount.set(count);
+            folders.set(nextFolders);
+            collections.set(nextCollections);
+            prunePinsToExistingCollections(nextCollections);
+            smartCollections.set(nextSmartCollections);
+            detectedClasses = nextDetectedClasses;
+            detectedClassesStore.set(nextDetectedClasses);
+        } catch (e) {
+            if (request === browseCountsRequest) {
+                console.error('Failed to refresh library counts:', e);
+                showToast('Failed to refresh library counts', {
+                    detail: String(e),
+                    type: 'error',
+                    duration: 8000,
+                });
+            }
+        }
+    }
+
+    function handleDecisionChanged() { void refreshBrowseCounts($showRejected); }
+
+    $effect(() => { void refreshBrowseCounts($showRejected); });
 
     function folderName(path: string): string {
         const parts = path.split('/');
@@ -376,7 +417,7 @@
         if (!name || !name.trim() || name.trim() === currentName) return;
         try {
             await renameCollectionApi(collectionId, name.trim());
-            collections.set(await listCollections());
+            collections.set(await listCollections($showRejected));
             showToast('Collection renamed', { type: 'success', duration: 3000 });
         } catch (e) {
             console.error('Failed to rename collection:', e);
@@ -464,7 +505,7 @@
         if (!name || !name.trim()) return;
         try {
             await createCollection(name.trim());
-            const c = await listCollections();
+            const c = await listCollections($showRejected);
             collections.set(c);
         } catch (e) {
             console.error('Failed to create collection:', e);
@@ -494,7 +535,7 @@
                 activeDetectedClass.set(null);
                 await loadImagesForCurrentScope({ force: true, invalidateCache: true });
             }
-            const c = await listCollections();
+            const c = await listCollections($showRejected);
             collections.set(c);
         } catch (e) {
             console.error('Failed to delete collection:', e);
@@ -524,6 +565,44 @@
         }
     }
 
+    async function handleRenameFolder(folder: string, currentName: string) {
+        closeFolderContextMenu();
+        const name = await requestTextInput({
+            title: 'Rename Folder',
+            label: 'Folder name',
+            initialValue: currentName,
+            placeholder: 'Folder name',
+            confirmLabel: 'Rename',
+        });
+        if (!name || !name.trim() || name.trim() === currentName) return;
+        try {
+            const result = await withCanvasPathMigrationBarrier(async () => {
+                const result = await apiRenameFolder(folder, name.trim());
+                activeFolder.update(path => path ? renamedFolderPath(path, result.oldPath, result.newPath) : null);
+                expandedFolders.update(paths => new Set(
+                    [...paths].map(path => renamedFolderPath(path, result.oldPath, result.newPath))
+                ));
+                sessions.update(items => items.map(session => reconcileRenamedSession(session, result.oldPath, result.newPath)));
+                activeSession.update(session => session ? reconcileRenamedSession(session, result.oldPath, result.newPath) : null);
+                sessionCanvases.update(canvases => canvases.map(canvas => reconcileRenamedCanvas(canvas, result.oldPath, result.newPath)));
+                activeCanvas.update(canvas => canvas ? reconcileRenamedCanvas(canvas, result.oldPath, result.newPath) : null);
+                return result;
+            });
+            await refreshBrowseCounts($showRejected);
+            if (get(activeFolder)) {
+                await loadImagesForCurrentScope({ force: true, invalidateCache: true });
+            }
+            showToast('Folder renamed', {
+                detail: `${result.oldPath} → ${result.newPath}`,
+                type: 'success',
+                duration: 5000,
+            });
+        } catch (e) {
+            console.error('Failed to rename folder:', e);
+            showToast('Failed to rename folder', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
     async function handleToggleClipboardMonitor() {
         const wasRunning = clipboardStatus?.running ?? false;
         try {
@@ -531,7 +610,7 @@
                 ? await stopClipboardMonitor()
                 : await startClipboardMonitor(null);
             setClipboardStatus(nextStatus);
-            const c = await listCollections();
+            const c = await listCollections($showRejected);
             collections.set(c);
             if (!wasRunning && nextStatus.collection_id) {
                 await applyClipboardMonitorCollection(nextStatus.collection_id);
@@ -646,33 +725,41 @@
         if (!selected) return;
 
         importing = true;
+        const progressId = crypto.randomUUID();
         importCurrent = 0;
         importTotal = 0;
         setLastResult('');
 
         // Listen for progress events
         let lastRefresh = 0;
-        const unlisten: UnlistenFn = await listen<{ current: number; total: number; filename: string }>(
+        const unlisten: UnlistenFn = await listen<{ progress_id?: string; current: number; total: number; filename: string }>(
             'import-progress',
             async (event) => {
+                if (event.payload.progress_id !== progressId) return;
                 importCurrent = event.payload.current;
                 importTotal = event.payload.total;
 
                 // Refresh image count every 20 imports
                 if (importCurrent - lastRefresh >= 20) {
                     lastRefresh = importCurrent;
-                    const count = await getImageCount();
+                    const count = await getImageCount($showRejected);
                     totalCount.set(count);
                 }
             }
         );
 
         try {
-            const result = await apiImportFolder(selected as string);
+            const result = await apiImportFolder(selected as string, null, progressId);
             const folderName = (selected as string).split('/').filter(Boolean).pop() ?? selected;
             let summary = `+${result.imported} imported, ${result.skipped} skipped`;
             if (result.errors.length > 0) {
                 summary += `, ${result.errors.length} errors`;
+            }
+            if (result.cancelled) {
+                setLastResult(`Cancelled: ${summary}`);
+                showToast('Import cancelled', { detail: summary, type: 'warning', duration: 8000 });
+                await refreshImages();
+                return;
             }
             setLastResult(summary, result.errors.length > 0 ? 'error' : 'success');
             const importedFolder = selected as string;
@@ -701,16 +788,18 @@
 
     function handleDetectedClassesChanged() { void loadDetectedClasses(); }
 
-    async function loadDetectedClasses() {
+    async function loadDetectedClasses(includeRejected = $showRejected) {
         try {
-            detectedClasses = await listDetectedClasses();
-            detectedClassesStore.set(detectedClasses);
+            const next = await listDetectedClasses(includeRejected);
+            if (includeRejected !== $showRejected) return;
+            detectedClasses = next;
+            detectedClassesStore.set(next);
         } catch (_) {}
     }
 
     async function filterByClass(className: string) {
         try {
-            const count = await countByDetectedClass(className);
+            const count = await countByDetectedClass(className, $showRejected);
             if (count === 0) return;
             activeSession.set(null);
             sessionCanvases.set([]);
@@ -731,20 +820,20 @@
     }
 
     async function refreshImages() {
-        const count = await getImageCount();
+        const count = await getImageCount($showRejected);
         totalCount.set(count);
         await loadImagesForCurrentScope({ force: true, invalidateCache: true });
         // Refresh folders too
         try {
-            const f = await listFolders();
+            const f = await listFolders($showRejected);
             folders.set(f);
         } catch (_) {}
     }
 </script>
 
 <svelte:window
-    onclick={closeCollectionContextMenu}
-    onkeydown={(e) => { if (e.key === 'Escape') { closeCollectionContextMenu(); hideCollectionPreview(); } }}
+    onclick={() => { closeCollectionContextMenu(); closeFolderContextMenu(); }}
+    onkeydown={(e) => { if (e.key === 'Escape') { closeCollectionContextMenu(); closeFolderContextMenu(); hideCollectionPreview(); } }}
 />
 
 <aside class="sidebar" aria-label="Library sidebar">
@@ -850,6 +939,7 @@
                         data-tree-row={i}
                         tabindex={i === treeTabIndex ? 0 : -1}
                         onfocusin={() => treeFocusIndex = i}
+                        oncontextmenu={(e) => openFolderContextMenu(e, folder.fullPath, folder.name, folder.isGroup)}
                     >
                         {#if folder.hasChildren}
                             <button
@@ -1128,6 +1218,22 @@
             </button>
             <button type="button" role="menuitem" onclick={() => copyCollectionId(collectionContextMenu!.collectionId)}>Copy Collection ID</button>
             <button type="button" role="menuitem" class="danger" onclick={(e) => handleDeleteCollection(e, collectionContextMenu!.collectionId, collectionContextMenu!.name)}>Delete Collection...</button>
+        </div>
+    {/if}
+
+    {#if folderContextMenu}
+        <div
+            class="collection-context-menu folder-context-menu"
+            style="left: {folderContextMenu.x}px; top: {folderContextMenu.y}px;"
+            role="menu"
+            tabindex="-1"
+        >
+            <div class="context-menu-header">{folderContextMenu.name}</div>
+            <button type="button" role="menuitem" onclick={() => { selectFolder(folderContextMenu!.path); closeFolderContextMenu(); }}>Open Folder</button>
+            <button type="button" role="menuitem" onclick={() => handleRenameFolder(folderContextMenu!.path, folderName(folderContextMenu!.path))}>Rename...</button>
+            {#if !folderContextMenu.isGroup}
+                <button type="button" role="menuitem" class="danger" onclick={(e) => { const path = folderContextMenu!.path; closeFolderContextMenu(); handleDeleteFolder(e, path); }}>Remove from Library...</button>
+            {/if}
         </div>
     {/if}
 

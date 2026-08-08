@@ -8,6 +8,14 @@ mod tools;
 
 use context::HeadlessContext;
 
+pub fn resolve_launch_path(path: &std::path::Path, cwd: &std::path::Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    }
+}
+
 #[derive(Parser, Debug, Clone)]
 #[command(name = "cull")]
 pub struct CliArgs {
@@ -42,6 +50,10 @@ pub struct CliArgs {
     /// Permit MCP HTTP to bind to a non-loopback host. Use only with scoped tokens.
     #[arg(long)]
     pub mcp_http_allow_remote: bool,
+
+    /// Open an image or import a folder in the GUI
+    #[arg(value_name = "PATH")]
+    pub launch_path: Option<PathBuf>,
 
     #[command(subcommand)]
     pub command: Option<CliCommand>,
@@ -344,6 +356,30 @@ mod tests {
     fn test_unknown_flag_errors() {
         let result = CliArgs::try_parse_from(["cull", "--bogus"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_positional_folder_path_is_a_gui_launch_target() {
+        let args = CliArgs::try_parse_from(["cull", "/tmp/photos"]).unwrap();
+        assert_eq!(args.launch_path, Some(PathBuf::from("/tmp/photos")));
+        assert!(args.command.is_none());
+    }
+
+    #[test]
+    fn test_option_directory_is_not_mistaken_for_a_gui_launch_target() {
+        let args = CliArgs::try_parse_from(["cull", "--app-data-dir", "/tmp/cull-data"]).unwrap();
+        assert!(args.launch_path.is_none());
+    }
+
+    #[test]
+    fn test_relative_launch_path_resolves_against_invoking_working_directory() {
+        assert_eq!(
+            resolve_launch_path(
+                PathBuf::from("photos").as_path(),
+                PathBuf::from("/caller").as_path()
+            ),
+            PathBuf::from("/caller/photos")
+        );
     }
 
     #[test]

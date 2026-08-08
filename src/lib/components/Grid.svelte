@@ -2,7 +2,7 @@
     import { onDestroy } from 'svelte';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { open } from '@tauri-apps/plugin-dialog';
-    import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState, showToast, totalCount, folders, gridPreset, GRID_PRESETS, activeSmartCollection, activeCollection, activeDetectedClass, activeFolder, minSizeFilter, clipboardMonitorStatus } from '$lib/stores';
+    import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState, showToast, totalCount, folders, gridPreset, GRID_PRESETS, activeSmartCollection, activeCollection, activeDetectedClass, activeFolder, minSizeFilter, clipboardMonitorStatus, showRejected } from '$lib/stores';
     import { importFolder as apiImportFolder, getImageCount, listFolders } from '$lib/api';
     import { IMAGE_PAGE_SIZE, loadImagesForCurrentScope, loadMoreImagesForCurrentScope } from '$lib/image-loading';
     import { wheelGestureIntent } from '$lib/gesture-interactions';
@@ -328,9 +328,9 @@
             let detail = `+${result.imported} imported, ${result.skipped} skipped`;
             if (result.errors.length > 0) detail += `, ${result.errors.length} errors`;
             showToast(`Imported "${folderName}"`, { detail, type: 'success', duration: 8000 });
-            totalCount.set(await getImageCount());
+            totalCount.set(await getImageCount($showRejected));
             try {
-                folders.set(await listFolders());
+                folders.set(await listFolders($showRejected));
             } catch (_) {}
             await loadImagesForCurrentScope({ force: true, invalidateCache: true });
         } catch (e) {

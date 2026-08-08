@@ -12,6 +12,7 @@
         type ImageWithFile,
     } from '$lib/api';
     import { rankGroupMembers, type GroupMemberInput, type RankedGroup } from '$lib/group-ranking';
+    import ModalDialog from '$lib/components/ModalDialog.svelte';
 
     let groups = $state<SimilarityGroupSummary[]>([]);
     let activeGroupId = $state<string | null>(null);
@@ -116,26 +117,18 @@
         groupRankingOpen.set(false);
     }
 
-    function onBackdropKeydown(event: KeyboardEvent) {
-        if (event.key === 'Escape') close();
-    }
 </script>
 
 {#if $groupRankingOpen}
-    <div
-        class="gr-backdrop"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Best of group ranking"
-        tabindex="-1"
-        onclick={close}
-        onkeydown={onBackdropKeydown}
+    <ModalDialog
+        titleId="group-ranking-title"
+        onclose={close}
+        overlayClass="gr-backdrop"
+        panelClass="gr-panel"
     >
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <div class="gr-panel" role="presentation" onclick={(e) => e.stopPropagation()}>
             <div class="gr-head">
-                <span class="gr-title">Best of Group</span>
-                <button class="gr-close" type="button" onclick={close} aria-label="Close">×</button>
+                <span id="group-ranking-title" class="gr-title">Best of Group</span>
+                <button class="gr-close" type="button" data-modal-initial-focus onclick={close} aria-label="Close">×</button>
             </div>
 
             {#if groups.length === 0}
@@ -186,12 +179,12 @@
                     <p class="gr-empty">Ranking…</p>
                 {/if}
             {/if}
-        </div>
-    </div>
+    </ModalDialog>
 {/if}
 
 <style>
-    .gr-backdrop {
+    :global(.gr-backdrop) {
+        --modal-align-items: flex-start;
         position: fixed;
         inset: 0;
         background: rgba(0, 0, 0, 0.55);
@@ -201,7 +194,7 @@
         padding-top: 8vh;
         z-index: var(--z-modal);
     }
-    .gr-panel {
+    :global(.gr-panel) {
         width: min(560px, 94vw);
         max-height: 82vh;
         overflow-y: auto;

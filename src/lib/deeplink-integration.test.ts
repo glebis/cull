@@ -33,6 +33,7 @@ vi.mock('./stores', () => ({
     pinnedCollection: { subscribe: vi.fn((run) => { run(null); return vi.fn(); }) },
     importBatchFilter: { set: vi.fn() },
     importBatchImageIds: { set: vi.fn() },
+    showRejected: { subscribe: vi.fn((run) => { run(false); return vi.fn(); }) },
     embeddingViewState: { set: vi.fn(), subscribe: vi.fn(() => vi.fn()) },
 }));
 
@@ -249,7 +250,7 @@ describe('handleParams', () => {
 
         expect(navigateTo).not.toHaveBeenCalledWith('grid');
         expect(importFolder).toHaveBeenCalledWith('/test', null);
-        expect(listImagesByFolder).toHaveBeenCalledWith('/test', 250, 0);
+        expect(listImagesByFolder).toHaveBeenCalledWith('/test', 250, 0, false);
         expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({
             type: 'canvas-import-drop',
             detail: expect.objectContaining({
@@ -345,9 +346,15 @@ describe('handleParams', () => {
     });
 
     it('imports multiple paths', async () => {
-        const fakeImages = [{ path: '/a.jpg' }, { path: '/b.jpg' }];
+        const fakeImages = [
+            { image: { id: '1' }, path: '/a.jpg' },
+            { image: { id: '2' }, path: '/b.jpg' },
+        ];
         vi.mocked(importFiles).mockResolvedValue({ imported: 2, skipped: 0, image_ids: ['1', '2'], batch_id: 'b1' } as never);
         vi.mocked(getBatchImages).mockResolvedValue(fakeImages as never);
+        vi.mocked(loadImagesForCurrentScope).mockImplementationOnce(async () => {
+            images.set(await getBatchImages('b1'));
+        });
 
         await handleParams({ paths: ['/a.jpg', '/b.jpg'] });
 

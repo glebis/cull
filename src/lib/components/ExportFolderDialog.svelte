@@ -10,6 +10,7 @@
     } from '$lib/stores';
     import { exportImagesToFolder, listImageIds } from '$lib/api';
     import { buildExportParams, describeExportScope, type ExportScope } from '$lib/export-helpers';
+    import ModalDialog from '$lib/components/ModalDialog.svelte';
 
     let format = $state('original');
     let naming = $state('{name}');
@@ -77,26 +78,18 @@
         if (!exporting) exportFolderOpen.set(false);
     }
 
-    function onBackdropKeydown(event: KeyboardEvent) {
-        if (event.key === 'Escape') close();
-    }
 </script>
 
 {#if $exportFolderOpen}
-    <div
-        class="export-backdrop"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Export images to folder"
-        tabindex="-1"
-        onclick={close}
-        onkeydown={onBackdropKeydown}
+    <ModalDialog
+        titleId="export-folder-title"
+        onclose={close}
+        overlayClass="export-backdrop"
+        panelClass="export-panel"
     >
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <div class="export-panel" role="presentation" onclick={(e) => e.stopPropagation()}>
             <div class="export-head">
-                <span class="export-title">Export to Folder</span>
-                <button class="export-close" type="button" onclick={close} aria-label="Close">×</button>
+                <span id="export-folder-title" class="export-title">Export to Folder</span>
+                <button class="export-close" type="button" data-modal-initial-focus onclick={close} aria-label="Close">×</button>
             </div>
             <p class="export-scope">Exporting <strong>{scopeLabel}</strong>.</p>
 
@@ -131,12 +124,12 @@
                     {exporting ? 'Exporting…' : 'Choose Folder & Export'}
                 </button>
             </div>
-        </div>
-    </div>
+    </ModalDialog>
 {/if}
 
 <style>
-    .export-backdrop {
+    :global(.export-backdrop) {
+        --modal-align-items: flex-start;
         position: fixed;
         inset: 0;
         background: rgba(0, 0, 0, 0.55);
@@ -146,7 +139,7 @@
         padding-top: 12vh;
         z-index: var(--z-modal);
     }
-    .export-panel {
+    :global(.export-panel) {
         width: min(440px, 92vw);
         background: var(--surface);
         border: 1px solid var(--border);

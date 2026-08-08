@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onDestroy, onMount } from 'svelte';
+    import { onMount } from 'svelte';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import {
         activeCanvas,
@@ -40,6 +40,7 @@
     } from '$lib/canvas-view-model';
     import type { CanvasCrop } from '$lib/canvas-document';
     import { safeAssetPreviewPath } from '$lib/view-utils';
+    import { registerCanvasPathMigrationParticipant } from '$lib/canvas-save-coordinator';
     import {
         computeVisibleCanvasItems,
         capCanvasItems,
@@ -96,6 +97,7 @@
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
     let pendingCanvasSaves = new Map<string, PendingCanvasSave>();
     let saveInFlight: Promise<void> | null = null;
+    let pathMigrationInProgress = $state(false);
 
     // Viewport culling + render cap (P2): only mount items intersecting the viewport.
     const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
@@ -124,11 +126,14 @@
         return capCanvasItems(culled, CANVAS_RENDER_CAP);
     });
 
-    onDestroy(() => {
-        void flushPendingCanvasSaves();
-    });
-
     onMount(() => {
+        const unregisterSaveFlusher = registerCanvasPathMigrationParticipant(
+            async () => {
+                await flushPendingCanvasSaves(true);
+                if (pendingCanvasSaves.size > 0) throw new Error('Canvas changes are not saved');
+            },
+            active => pathMigrationInProgress = active,
+        );
         const handleCanvasImportDrop = (event: Event) => {
             const detail = event instanceof CustomEvent ? detailFromCanvasImportDrop(event) : null;
             if (!detail || detail.images.length === 0) {
@@ -154,6 +159,11 @@
             window.removeEventListener('pagehide', flushForPageLifecycle);
             window.removeEventListener('beforeunload', flushForPageLifecycle);
             document.removeEventListener('visibilitychange', flushWhenHidden);
+            // Keep the coordinator barrier registered until every in-flight
+            // old-path save settles, so navigation cannot reopen the race.
+            void flushPendingCanvasSaves(true)
+                .catch(() => undefined)
+                .finally(unregisterSaveFlusher);
         };
     });
 
@@ -232,14 +242,14 @@
         }, delay);
     }
 
-    async function flushPendingCanvasSaves(): Promise<void> {
+    async function flushPendingCanvasSaves(throwOnError = false): Promise<void> {
         if (saveTimer) {
             clearTimeout(saveTimer);
             saveTimer = null;
         }
         if (saveInFlight) {
             await saveInFlight;
-            if (pendingCanvasSaves.size > 0) return flushPendingCanvasSaves();
+            if (pendingCanvasSaves.size > 0) return flushPendingCanvasSaves(throwOnError);
             return;
         }
 
@@ -259,6 +269,7 @@
                         pendingCanvasSaves.set(save.canvasId, save);
                     }
                     showToast('Canvas save failed', { detail: String(e), type: 'error', duration: 10000 });
+                    if (throwOnError) throw e;
                 }
             }
         })();
@@ -731,6 +742,8 @@
     tabindex="0"
     class:space-pan={spacePanActive}
     class:panning={panning}
+    inert={pathMigrationInProgress}
+    aria-busy={pathMigrationInProgress}
 >
     {#if visibleCanvas.droppedCount > 0}
         <div class="canvas-cap-banner" aria-live="polite">

@@ -147,6 +147,23 @@ def ensure_nsfw_mode(page: Page, mode: str) -> None:
     raise AssertionError(f"could not reach {expected}")
 
 
+def test_sidebar_folder_rename(page: Page) -> None:
+    """S28b — folder context rename updates the sidebar through one backend action."""
+    wait_for_app(page, f"{URL}?folderRename=1")
+    row = page.locator('.folder-row').filter(has_text='folder-rename')
+    expect(row).to_be_visible()
+    row.click(button='right')
+    rename = page.get_by_role('menuitem', name='Rename...')
+    expect(rename).to_be_visible()
+    rename.click()
+    dialog = page.get_by_role('dialog', name='Rename Folder')
+    expect(dialog).to_be_visible()
+    dialog.locator('#text-input-dialog-input').fill('renamed')
+    dialog.get_by_role('button', name='Rename').click()
+    expect(page.locator('.folder-row').filter(has_text='renamed')).to_be_visible()
+    expect(page.get_by_text('Folder renamed', exact=True)).to_be_visible()
+
+
 def set_search_value(page: Page, value: str) -> None:
     page.locator(".command-input").evaluate(
         """(el, value) => {
@@ -1353,6 +1370,7 @@ def main() -> int:
         smoke.step("S03c loupe arrow navigation", lambda: test_loupe_arrow_navigation(page))
         smoke.step("S03d loupe double-click return", lambda: test_loupe_dblclick_return(page))
         smoke.step("S28a sidebar toggle Cmd+B", lambda: test_sidebar_toggle(page))
+        smoke.step("S28b atomic folder rename", lambda: test_sidebar_folder_rename(page))
         smoke.step("S29a zen mode", lambda: test_zen_mode(page))
         smoke.step("S19a command palette open/close", lambda: test_command_palette_open_close(page))
         smoke.step("S19b command palette navigate and execute", lambda: test_command_palette_navigate_and_execute(page))

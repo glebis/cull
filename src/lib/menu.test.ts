@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     loadAllImages: vi.fn(),
     loadImagesForCurrentScope: vi.fn(),
     loadImagesUntil: vi.fn(),
+    invalidateImageCache: vi.fn(),
     openUrl: vi.fn(),
     updateMenuState: vi.fn(),
     getPreviewDisplayWebStreamStatus: vi.fn(),
@@ -53,6 +54,7 @@ vi.mock('./api', () => ({
 }));
 
 vi.mock('./image-loading', () => ({
+    invalidateImageCache: mocks.invalidateImageCache,
     loadAllImages: mocks.loadAllImages,
     loadImagesForCurrentScope: mocks.loadImagesForCurrentScope,
     loadImagesUntil: mocks.loadImagesUntil,
@@ -296,6 +298,20 @@ describe('native menu bridge', () => {
                 showLoupeHistogram: true,
             })
         );
+    });
+
+    it('toggles rejected visibility, reloads the active scope, and syncs checked state', async () => {
+        let handler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, next) => { handler = next as (event: { payload: string }) => void; return vi.fn(); });
+        mocks.loadImagesForCurrentScope.mockResolvedValue(undefined as never);
+        const [{ initMenu }, { showRejected }] = await Promise.all([import('./menu'), import('./stores')]);
+        void initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 }); await flushMicrotasks();
+        expect(mocks.updateMenuState).toHaveBeenCalledWith(expect.objectContaining({ showRejected: false }));
+        handler?.({ payload: 'view_show_rejected' }); await flushMicrotasks();
+        expect(get(showRejected)).toBe(true);
+        expect(mocks.invalidateImageCache).toHaveBeenCalled();
+        expect(mocks.loadImagesForCurrentScope).toHaveBeenCalledWith({ resetFocus: true, force: true, invalidateCache: true });
+        expect(mocks.updateMenuState).toHaveBeenCalledWith(expect.objectContaining({ showRejected: true }));
     });
 
     it('routes native Loupe zoom mode actions', async () => {
