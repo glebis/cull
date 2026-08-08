@@ -21,6 +21,7 @@ const ruleBuilder = source('src/lib/components/RuleBuilder.svelte');
 const tabBar = source('src/lib/components/TabBar.svelte');
 const sidebar = source('src/lib/components/Sidebar.svelte');
 const aiSettings = source('src/lib/components/AiSettings.svelte');
+const importBanner = source('src/lib/components/ImportBanner.svelte');
 const paletteRegistry = source('src/lib/command-palette.ts');
 const tauriConfig = JSON.parse(source('src-tauri/tauri.conf.json'));
 
@@ -73,6 +74,10 @@ describe('impeccable audit UI contracts', () => {
         expect(toast).not.toContain('var(--text-primary');
         expect(toast).not.toContain('var(--accent');
         expect(toast).not.toContain('#565f89');
+        expect(importBanner).toContain('background: var(--surface);');
+        expect(importBanner).toContain('color: var(--green);');
+        expect(importBanner).toContain('color: var(--text);');
+        expect(importBanner).not.toMatch(/var\(--[^)]+,/);
     });
 
     it('removes audited visual anti-patterns from product chrome', () => {
