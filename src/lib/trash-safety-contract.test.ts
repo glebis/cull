@@ -19,6 +19,8 @@ describe('shared destructive-action safety contract', () => {
         expect(keys).toContain('requestTrashImages()');
         expect(page).toContain('window.addEventListener(TRASH_IMAGES_REQUESTED_EVENT, handleTrashRequest)');
         expect(page).toContain('await trashImagesDetailed(ids)');
+        expect(page).toContain('pendingTrashProposal = { proposalId, approvedImageIds: [...approvedImageIds] }');
+        expect(page).toContain('requestTrashImages(approvedImageIds)');
         expect(contextMenu).not.toContain('trashImages(');
         expect(menu).not.toContain('trashImages(');
     });

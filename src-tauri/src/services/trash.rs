@@ -1,26 +1,29 @@
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TrashRecord {
     pub original_path: PathBuf,
     pub trashed_path: PathBuf,
 }
 
-pub(crate) enum TrashDestination {
-    Exact(PathBuf),
-    #[cfg(not(target_os = "macos"))]
-    Untracked,
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct TrashActionState {
+    pub image_id: String,
+    pub original_path: PathBuf,
+    pub trashed_path: PathBuf,
+    #[serde(default)]
+    pub trashed: bool,
 }
 
 pub(crate) trait TrashPlatform {
-    fn move_to_trash(&self, source: &Path) -> Result<TrashDestination, String>;
+    fn move_to_trash(&self, source: &Path) -> Result<PathBuf, String>;
 }
 
 pub(crate) struct SystemTrash;
 
 #[cfg(target_os = "macos")]
 impl TrashPlatform for SystemTrash {
-    fn move_to_trash(&self, source: &Path) -> Result<TrashDestination, String> {
+    fn move_to_trash(&self, source: &Path) -> Result<PathBuf, String> {
         use objc2_foundation::{NSFileManager, NSString, NSURL};
 
         let source = source
@@ -37,39 +40,39 @@ impl TrashPlatform for SystemTrash {
         let resulting_path = resulting_url
             .path()
             .ok_or_else(|| "macOS returned a Trash destination without a file path".to_string())?;
-        Ok(TrashDestination::Exact(PathBuf::from(
-            resulting_path.to_string(),
-        )))
+        Ok(PathBuf::from(resulting_path.to_string()))
     }
 }
 
 #[cfg(not(target_os = "macos"))]
 impl TrashPlatform for SystemTrash {
-    fn move_to_trash(&self, source: &Path) -> Result<TrashDestination, String> {
-        trash::delete(source).map_err(|error| error.to_string())?;
-        Ok(TrashDestination::Untracked)
+    fn move_to_trash(&self, _source: &Path) -> Result<PathBuf, String> {
+        Err("Reliable Trash and undo are currently supported on macOS only".to_string())
     }
 }
 
 pub(crate) fn move_to_trash(
     platform: &dyn TrashPlatform,
     source: &Path,
-) -> Result<Option<TrashRecord>, String> {
-    match platform.move_to_trash(source)? {
-        TrashDestination::Exact(trashed_path) => Ok(Some(TrashRecord {
-            original_path: source.to_path_buf(),
-            trashed_path,
-        })),
-        #[cfg(not(target_os = "macos"))]
-        TrashDestination::Untracked => Ok(None),
-    }
+) -> Result<TrashRecord, String> {
+    let trashed_path = platform.move_to_trash(source)?;
+    Ok(TrashRecord {
+        original_path: source.to_path_buf(),
+        trashed_path,
+    })
 }
 
 pub(crate) fn restore_from_trash(record: &TrashRecord) -> Result<(), String> {
+    if record.original_path.exists() && !record.trashed_path.exists() {
+        return Ok(());
+    }
     rename_exclusive(&record.trashed_path, &record.original_path)
 }
 
 pub(crate) fn retrash_exact(record: &TrashRecord) -> Result<(), String> {
+    if record.trashed_path.exists() && !record.original_path.exists() {
+        return Ok(());
+    }
     rename_exclusive(&record.original_path, &record.trashed_path)
 }
 
@@ -112,17 +115,17 @@ fn rename_exclusive(source: &Path, target: &Path) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    struct FakeTrash {
+    pub(crate) struct DirectoryTrash {
         root: PathBuf,
         moved: Mutex<Vec<(PathBuf, PathBuf)>>,
     }
 
-    impl FakeTrash {
-        fn new(root: PathBuf) -> Self {
+    impl DirectoryTrash {
+        pub(crate) fn new(root: PathBuf) -> Self {
             Self {
                 root,
                 moved: Mutex::new(Vec::new()),
@@ -130,8 +133,8 @@ mod tests {
         }
     }
 
-    impl TrashPlatform for FakeTrash {
-        fn move_to_trash(&self, source: &Path) -> Result<TrashDestination, String> {
+    impl TrashPlatform for DirectoryTrash {
+        fn move_to_trash(&self, source: &Path) -> Result<PathBuf, String> {
             let file_name = source.file_name().ok_or("missing file name")?;
             let mut destination = self.root.join(file_name);
             let mut suffix = 2;
@@ -153,7 +156,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((source.to_path_buf(), destination.clone()));
-            Ok(TrashDestination::Exact(destination))
+            Ok(destination)
         }
     }
 
@@ -169,10 +172,10 @@ mod tests {
         let second = second_dir.join("same.png");
         std::fs::write(&first, b"first").unwrap();
         std::fs::write(&second, b"second").unwrap();
-        let platform = FakeTrash::new(trash_volume.path().to_path_buf());
+        let platform = DirectoryTrash::new(trash_volume.path().to_path_buf());
 
-        let first_record = move_to_trash(&platform, &first).unwrap().unwrap();
-        let second_record = move_to_trash(&platform, &second).unwrap().unwrap();
+        let first_record = move_to_trash(&platform, &first).unwrap();
+        let second_record = move_to_trash(&platform, &second).unwrap();
 
         assert_ne!(first_record.trashed_path, second_record.trashed_path);
         assert!(first_record.trashed_path.starts_with(trash_volume.path()));

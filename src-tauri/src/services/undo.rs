@@ -347,6 +347,27 @@ impl ActionManager {
         action_type: &str,
         state_json: &str,
     ) -> Result<(), String> {
+        if action_type == "trash_image" {
+            if let Ok(state) =
+                serde_json::from_str::<crate::services::trash::TrashActionState>(state_json)
+            {
+                let record = crate::services::trash::TrashRecord {
+                    original_path: state.original_path.clone(),
+                    trashed_path: state.trashed_path,
+                };
+                let original_path = state.original_path.to_string_lossy();
+                if state.trashed {
+                    crate::services::trash::retrash_exact(&record)?;
+                    db.mark_file_missing(&original_path)
+                        .map_err(|error| error.to_string())?;
+                } else {
+                    crate::services::trash::restore_from_trash(&record)?;
+                    db.restore_file(&original_path)
+                        .map_err(|error| error.to_string())?;
+                }
+                return Ok(());
+            }
+        }
         let val: serde_json::Value = serde_json::from_str(state_json)
             .map_err(|e| format!("Invalid undo state JSON: {}", e))?;
         match action_type {
@@ -371,22 +392,6 @@ impl ActionManager {
                     .get("trashed")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                if let Some(trashed_path) = val.get("trashed_path").and_then(|value| value.as_str())
-                {
-                    let record = crate::services::trash::TrashRecord {
-                        original_path: std::path::PathBuf::from(path),
-                        trashed_path: std::path::PathBuf::from(trashed_path),
-                    };
-                    if trashed {
-                        crate::services::trash::retrash_exact(&record)?;
-                        db.mark_file_missing(path)
-                            .map_err(|error| error.to_string())?;
-                    } else {
-                        crate::services::trash::restore_from_trash(&record)?;
-                        db.restore_file(path).map_err(|error| error.to_string())?;
-                    }
-                    return Ok(());
-                }
                 if trashed {
                     // Redo: re-trash the file
                     #[cfg(target_os = "macos")]

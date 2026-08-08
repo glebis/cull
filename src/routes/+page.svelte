@@ -74,12 +74,14 @@
     import { effectiveAgentVisualLevel } from '$lib/agent-visual-context';
     import { listen } from '@tauri-apps/api/event';
     import { onMount } from 'svelte';
-    import { TRASH_IMAGES_REQUESTED_EVENT, type TrashImagesRequestDetail } from '$lib/trash-actions';
+    import { requestTrashImages, TRASH_IMAGES_REQUESTED_EVENT, type TrashImagesRequestDetail } from '$lib/trash-actions';
 
     let dragOver = $state(false);
     let trashConfirmVisible = $state(false);
     let trashConfirmFileName = $state('');
     let pendingTrashIds = $state<string[]>([]);
+    let pendingTrashProposal = $state<{ proposalId: string; approvedImageIds: string[] } | null>(null);
+    let trashInFlight = $state(false);
     let skipTrashConfirmSession = $state(false);
     const previewDisplayWindow = isPreviewDisplayRoute();
     let previewSyncState = $state<PreviewState | null>(null);
@@ -170,33 +172,42 @@
     }
 
     async function executeTrash() {
-        const ids = pendingTrashIds;
+        const ids = [...pendingTrashIds];
         if (ids.length === 0) return;
+        const proposalContext = pendingTrashProposal;
+        pendingTrashIds = [];
+        pendingTrashProposal = null;
+        trashInFlight = true;
         const imgs = $images;
         const idx = $focusedIndex;
         const nextFocusIndex = nextFocusIndexAfterFocusedRemoval(idx, imgs.length);
-        let result;
+        let result: Awaited<ReturnType<typeof trashImagesDetailed>>;
         try {
             result = await trashImagesDetailed(ids);
         } catch (error) {
             showToast('Trash failed', { detail: String(error), type: 'error', duration: 8000 });
-            pendingTrashIds = [];
+            if (proposalContext) reviewProposalId = proposalContext.proposalId;
             return;
+        } finally {
+            trashInFlight = false;
         }
         const trashed = new Set(result.results
             .filter(item => item.status === 'trashed')
             .map(item => item.image_id));
+        const warning = result.results.find(item => item.status === 'trashed' && item.error)?.error;
         if (trashed.size > 0) {
-            const detail = result.failed > 0
+            const detail = warning ?? (result.failed > 0
                 ? `${result.succeeded} moved, ${result.failed} failed`
                 : result.succeeded === 1
                     ? imgs.find(item => trashed.has(item.image.id))?.path.split('/').pop() ?? '1 image'
-                    : `${result.succeeded} images`;
-            showToast('Moved to Trash', {
-                detail,
-                type: result.failed > 0 ? 'warning' : 'info',
-                duration: result.failed > 0 ? 8000 : 5000,
-            });
+                    : `${result.succeeded} images`);
+            if (!proposalContext) {
+                showToast('Moved to Trash', {
+                    detail,
+                    type: result.failed > 0 || warning ? 'warning' : 'info',
+                    duration: result.failed > 0 || warning ? 8000 : 5000,
+                });
+            }
             invalidateImageCache();
             images.update(list => list.filter(item => !trashed.has(item.image.id)));
             focusedIndex.set(clampFocusIndexToList(nextFocusIndex, $images.length));
@@ -207,7 +218,7 @@
             });
             refreshImageCount().catch(e => console.error('Failed to refresh image count after trash:', e));
             refreshCollectionCountsAfterRemoval('trash');
-        } else if (result.failed > 0) {
+        } else if (result.failed > 0 && !proposalContext) {
             const firstError = result.results.find(item => item.error)?.error;
             showToast('Trash failed', {
                 detail: firstError ?? `${result.failed} images could not be moved`,
@@ -215,10 +226,31 @@
                 duration: 8000,
             });
         }
-        pendingTrashIds = [];
+        if (proposalContext) {
+            await applyActionProposal(
+                proposalContext.proposalId,
+                proposalContext.approvedImageIds,
+                JSON.stringify(result),
+            );
+            showToast('Trash proposal applied', {
+                detail: `${result.succeeded} moved to Trash, ${result.failed} failed`,
+                type: result.failed > 0 ? 'warning' : 'info',
+                duration: 6000,
+                actions: [
+                    { label: 'Undo', onclick: () => { void undoLastTrashProposal(); } },
+                ],
+            });
+            reviewProposalId = null;
+            activeAgentProposalId.set(null);
+            await refreshAgentPanelData();
+        }
     }
 
     async function handleTrashRequest(event: Event) {
+        if (trashInFlight || pendingTrashIds.length > 0 || trashConfirmVisible) {
+            showToast('Trash is already in progress', { type: 'warning' });
+            return;
+        }
         const requestedIds = event instanceof CustomEvent
             ? (event as CustomEvent<TrashImagesRequestDetail>).detail?.imageIds ?? []
             : [];
@@ -233,7 +265,12 @@
             return;
         }
 
-        const alwaysSkip = await getAppSetting('skip_trash_confirm');
+        let alwaysSkip: string | null = null;
+        try {
+            alwaysSkip = await getAppSetting('skip_trash_confirm');
+        } catch (error) {
+            console.warn('Could not read Trash confirmation setting:', error);
+        }
         if (alwaysSkip === 'true') {
             await executeTrash();
             return;
@@ -255,6 +292,10 @@
     function cancelTrashConfirmation() {
         trashConfirmVisible = false;
         pendingTrashIds = [];
+        if (pendingTrashProposal) {
+            reviewProposalId = pendingTrashProposal.proposalId;
+            pendingTrashProposal = null;
+        }
     }
 
     async function handlePermanentDelete() {
@@ -744,21 +785,14 @@
         const proposal = agentProposals.find(item => item.id === proposalId);
         if (!proposal) return;
         if (proposal.kind === 'trash_images') {
-            const trashResult = await trashImagesDetailed(approvedImageIds);
-            await applyActionProposal(proposalId, approvedImageIds, JSON.stringify(trashResult));
-            const trashed = new Set(trashResult.results.filter(item => item.status === 'trashed').map(item => item.image_id));
-            images.update(list => list.filter(item => !trashed.has(item.image.id)));
-            invalidateImageCache();
-            refreshImageCount().catch(e => console.error('Failed to refresh image count after proposal trash:', e));
-            refreshCollectionCountsAfterRemoval('proposal trash');
-            showToast('Trash proposal applied', {
-                detail: `${trashResult.succeeded} moved to Trash, ${trashResult.failed} failed`,
-                type: trashResult.failed > 0 ? 'warning' : 'info',
-                duration: 6000,
-                actions: [
-                    { label: 'Undo', onclick: () => { void undoLastTrashProposal(); } },
-                ],
-            });
+            if (trashInFlight || pendingTrashIds.length > 0 || trashConfirmVisible) {
+                showToast('Trash is already in progress', { type: 'warning' });
+                return;
+            }
+            pendingTrashProposal = { proposalId, approvedImageIds: [...approvedImageIds] };
+            reviewProposalId = null;
+            requestTrashImages(approvedImageIds);
+            return;
         } else {
             const visibleIds = new Set($images.map(item => item.image.id));
             const visibleApprovedIds = approvedImageIds.filter(id => visibleIds.has(id));
