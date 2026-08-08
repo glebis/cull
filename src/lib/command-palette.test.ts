@@ -453,6 +453,11 @@ describe('command palette destination providers', () => {
         vi.mocked(getBatchImages).mockResolvedValue([{
             image: { id: 'image-1' }, path: '/photos/one.png', thumbnail_path: null, selection: null,
         }] as never);
+        vi.mocked(loadImagesForCurrentScope).mockImplementationOnce(async () => {
+            const batchImages = await getBatchImages('batch-42');
+            images.set(batchImages);
+            importBatchImageIds.set(batchImages.map(item => item.image.id));
+        });
 
         const batch = getCommandPaletteItems('all').find(i => i.id === 'scope.import.batch-42');
 

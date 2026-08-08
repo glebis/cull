@@ -332,7 +332,14 @@
             detectedClasses = nextDetectedClasses;
             detectedClassesStore.set(nextDetectedClasses);
         } catch (e) {
-            if (request === browseCountsRequest) console.error('Failed to refresh library counts:', e);
+            if (request === browseCountsRequest) {
+                console.error('Failed to refresh library counts:', e);
+                showToast('Failed to refresh library counts', {
+                    detail: String(e),
+                    type: 'error',
+                    duration: 8000,
+                });
+            }
         }
     }
 

@@ -2011,6 +2011,18 @@ mod tests {
         );
         assert_eq!(db.image_count_with_visibility(false).unwrap(), 1);
         assert_eq!(db.image_count_with_visibility(true).unwrap(), 2);
+        assert_eq!(
+            db.list_images_filtered_with_visibility(Some(1), Some(1), 20, 0, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.list_images_filtered_with_visibility(Some(1), Some(1), 20, 0, true)
+                .unwrap()
+                .len(),
+            2
+        );
         assert_eq!(db.list_folders_with_visibility(false).unwrap()[0].1, 1);
         assert_eq!(db.list_folders_with_visibility(true).unwrap()[0].1, 2);
         assert_eq!(
@@ -2018,6 +2030,12 @@ mod tests {
                 .unwrap()
                 .len(),
             1
+        );
+        assert_eq!(
+            db.list_images_by_folder_with_visibility("/lib/art", 20, 0, true)
+                .unwrap()
+                .len(),
+            2
         );
     }
 
@@ -2038,6 +2056,26 @@ mod tests {
             .unwrap()
             .2;
         assert_eq!(hidden_count, 1);
+        let included_count = db
+            .list_collections_with_visibility(true)
+            .unwrap()
+            .into_iter()
+            .find(|(id, _, _)| id == &collection_id)
+            .unwrap()
+            .2;
+        assert_eq!(included_count, 2);
+        assert_eq!(
+            db.list_collection_images_with_visibility(&collection_id, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.list_collection_images_with_visibility(&collection_id, true)
+                .unwrap()
+                .len(),
+            2
+        );
         assert_eq!(
             db.list_collection_images_page_with_visibility(&collection_id, 20, 0, false)
                 .unwrap()
@@ -2045,6 +2083,25 @@ mod tests {
             1
         );
         let all_filter = r#"{"type":"group","op":"and","children":[]}"#;
+        let smart_id = db
+            .create_smart_collection("Everything", all_filter, None, false)
+            .unwrap();
+        let hidden_smart_count = db
+            .list_smart_collections_with_visibility(false)
+            .unwrap()
+            .into_iter()
+            .find(|collection| collection.id == smart_id)
+            .unwrap()
+            .image_count;
+        let included_smart_count = db
+            .list_smart_collections_with_visibility(true)
+            .unwrap()
+            .into_iter()
+            .find(|collection| collection.id == smart_id)
+            .unwrap()
+            .image_count;
+        assert_eq!(hidden_smart_count, Some(1));
+        assert_eq!(included_smart_count, Some(2));
         assert_eq!(
             db.evaluate_smart_collection_page_with_visibility(all_filter, Some(20), Some(0), false)
                 .unwrap()
@@ -2099,6 +2156,14 @@ mod tests {
                 .unwrap()
                 .len(),
             1
+        );
+        assert_eq!(
+            db.count_by_class_with_visibility("person", false).unwrap(),
+            1
+        );
+        assert_eq!(
+            db.count_by_class_with_visibility("person", true).unwrap(),
+            2
         );
         assert_eq!(
             db.get_batch_images_with_visibility(&batch_id, false)

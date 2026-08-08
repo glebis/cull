@@ -1,7 +1,8 @@
 import type { ImageWithFile } from './api';
+import { loadImagesForCurrentScope } from './image-loading';
 import { withDecision, type ImageDecision } from './selection-updates';
 import { get } from 'svelte/store';
-import { focusedIndex, images, importBatchImageIds, selectedIds, showRejected, totalCount } from './stores';
+import { activeSmartCollection, focusedIndex, images, importBatchImageIds, selectedIds, showRejected, showToast, totalCount } from './stores';
 
 export interface VisibleDecisionResult { items: ImageWithFile[]; focusedIndex: number; hidden: boolean; }
 
@@ -17,7 +18,11 @@ export function applyVisibleDecision(items: ImageWithFile[], imageId: string, de
 }
 
 export function applyDecisionToCurrentView(imageId: string, decision: ImageDecision): VisibleDecisionResult {
-    const result = applyVisibleDecision(get(images), imageId, decision, get(showRejected), get(focusedIndex));
+    const activeSmart = get(activeSmartCollection);
+    // Smart-filter membership is a backend policy. Keep the row optimistically,
+    // then let the authoritative query below decide whether it remains visible.
+    const includeRejected = get(showRejected) || activeSmart !== null;
+    const result = applyVisibleDecision(get(images), imageId, decision, includeRejected, get(focusedIndex));
     images.set(result.items); focusedIndex.set(result.focusedIndex);
     if (result.hidden) {
         selectedIds.update(ids => { if (!ids.has(imageId)) return ids; const next = new Set(ids); next.delete(imageId); return next; });
@@ -25,5 +30,21 @@ export function applyDecisionToCurrentView(imageId: string, decision: ImageDecis
         totalCount.update(count => Math.max(0, count - 1));
     }
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('cull:decision-changed'));
+    if (activeSmart) {
+        void loadImagesForCurrentScope({
+            resetFocus: false,
+            force: true,
+            invalidateCache: true,
+            throwOnError: true,
+        })
+            .catch(error => {
+                console.error('Failed to refresh smart collection after decision:', error);
+                showToast('Failed to refresh smart collection', {
+                    detail: String(error),
+                    type: 'error',
+                    duration: 8000,
+                });
+            });
+    }
     return result;
 }

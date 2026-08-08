@@ -9,6 +9,7 @@ import {
     imageLoadState,
     images,
     importBatchFilter,
+    importBatchImageIds,
     minSizeFilter,
     showMissing,
     showRejected,
@@ -36,6 +37,7 @@ export interface ImageLoadOptions {
     force?: boolean;
     minItems?: number;
     invalidateCache?: boolean;
+    throwOnError?: boolean;
 }
 
 type ImageScope =
@@ -219,6 +221,7 @@ export function invalidateImageCache() {
 
 export function clearImageScope() {
     importBatchFilter.set(null);
+    importBatchImageIds.set([]);
     activeSmartCollection.set(null);
     activeCollection.set(null);
     activeDetectedClass.set(null);
@@ -260,6 +263,9 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
         nextOffset = cached.nextOffset;
         hasMore = cached.hasMore;
         images.set(cached.items);
+        if (scope.type === 'import-batch') {
+            importBatchImageIds.set(cached.items.map(item => item.image.id));
+        }
         if (resetFocus) focusedIndex.set(cached.focusedIndex);
         gridScrollTop.set(cached.scrollTop);
         loading = false;
@@ -286,6 +292,9 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
         } while (lastRawCount === IMAGE_PAGE_SIZE && loaded.length < minItems);
 
         images.set(loaded);
+        if (scope.type === 'import-batch') {
+            importBatchImageIds.set(loaded.map(item => item.image.id));
+        }
         nextOffset = offset;
         hasMore = lastRawCount === IMAGE_PAGE_SIZE;
         loadedOnce = true;
@@ -295,10 +304,12 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
         }
         rememberScopeState(key);
     } catch (e) {
-        if (seq === requestSeq && key === activeScopeKey) {
+        const isCurrentRequest = seq === requestSeq && key === activeScopeKey;
+        if (isCurrentRequest) {
             loadError = formatLibraryLoadError(e);
             console.error('Failed to load images:', e);
         }
+        if (options.throwOnError && isCurrentRequest) throw e;
     } finally {
         if (seq === requestSeq && key === activeScopeKey) {
             loading = false;
