@@ -3501,6 +3501,164 @@ mod file_watcher_tests {
         assert!(roots.is_empty());
     }
 
+    #[test]
+    fn test_migrate_folder_paths_updates_descendants_and_preserves_metadata() {
+        let db = test_db();
+        insert_test_image(&db, "inside", "hash-inside");
+        insert_test_image(&db, "outside", "hash-outside");
+        db.update_image_file_path("f-inside", "/photos/old/nested/inside.png")
+            .unwrap();
+        db.update_image_file_path("f-outside", "/photos/other/outside.png")
+            .unwrap();
+        db.set_decision("inside", "accept").unwrap();
+        db.add_library_root("/photos/old").unwrap();
+        let session_id = db.create_session("Session", "/photos/old/session").unwrap();
+        let canvas_id = db.create_canvas(&session_id, "Canvas", "manual").unwrap();
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "UPDATE canvases SET layout_json = ?1 WHERE id = ?2",
+                params![
+                    r#"{"version":1,"items":[{"id":"item","imageId":"inside","x":0,"y":0,"width":100,"height":100,"z":0,"hidden":false,"label":null,"groupId":null,"source":{"contentHash":"hash-inside","lastKnownPath":"/photos/old/nested/inside.png"}}]}"#,
+                    canvas_id
+                ],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO generation_runs (id, settings_json, source_type, source_path, imported_at) VALUES ('run', '{}', 'sidecar', '/photos/old/nested/inside.json', '2026-01-01')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let result = db
+            .migrate_folder_paths("/photos/old", "/photos/renamed")
+            .unwrap();
+
+        assert_eq!(result.image_files, 1);
+        assert_eq!(result.library_roots, 1);
+        assert_eq!(result.sessions, 1);
+        assert_eq!(result.canvases, 1);
+        assert_eq!(result.generation_runs, 1);
+        assert!(db
+            .get_image_file_by_path("/photos/renamed/nested/inside.png")
+            .unwrap()
+            .is_some());
+        assert!(db
+            .get_image_file_by_path("/photos/other/outside.png")
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            db.get_selection_for_image("inside")
+                .unwrap()
+                .unwrap()
+                .decision,
+            "accept"
+        );
+        assert_eq!(
+            db.get_session(&session_id).unwrap().folder_path,
+            "/photos/renamed/session"
+        );
+        assert!(db
+            .get_canvas(&canvas_id)
+            .unwrap()
+            .unwrap()
+            .layout_json
+            .contains("/photos/renamed/nested/inside.png"));
+        let conn = db.conn.lock();
+        let generation_source: String = conn
+            .query_row(
+                "SELECT source_path FROM generation_runs WHERE id = 'run'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(generation_source, "/photos/renamed/nested/inside.json");
+    }
+
+    #[test]
+    fn test_migrate_folder_paths_rejects_collisions_without_partial_updates() {
+        let db = test_db();
+        insert_test_image(&db, "inside", "hash-inside");
+        insert_test_image(&db, "collision", "hash-collision");
+        db.update_image_file_path("f-inside", "/photos/old/inside.png")
+            .unwrap();
+        db.update_image_file_path("f-collision", "/photos/new/inside.png")
+            .unwrap();
+        db.add_library_root("/photos/old").unwrap();
+
+        let error = db
+            .migrate_folder_paths("/photos/old", "/photos/new")
+            .unwrap_err();
+
+        assert!(error.to_string().contains("target subtree"));
+        assert!(db
+            .get_image_file_by_path("/photos/old/inside.png")
+            .unwrap()
+            .is_some());
+        assert!(db
+            .list_library_roots()
+            .unwrap()
+            .contains(&"/photos/old".to_string()));
+    }
+
+    #[test]
+    fn test_migrate_folder_paths_preserves_missing_and_last_seen_metadata() {
+        let db = test_db();
+        insert_test_image(&db, "inside", "hash-inside");
+        db.update_image_file_path("f-inside", "/photos/old/inside.png")
+            .unwrap();
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "UPDATE image_files SET last_seen_at = '2025-01-02', missing_at = '2025-02-03' WHERE id = 'f-inside'",
+                [],
+            )
+            .unwrap();
+        }
+
+        db.migrate_folder_paths("/photos/old", "/photos/new")
+            .unwrap();
+
+        let file = db
+            .get_image_file_by_path("/photos/new/inside.png")
+            .unwrap()
+            .unwrap();
+        assert_eq!(file.last_seen_at, "2025-01-02");
+        assert_eq!(file.missing_at.as_deref(), Some("2025-02-03"));
+    }
+
+    #[test]
+    fn test_folder_migration_journal_and_paths_commit_atomically() {
+        let db = test_db();
+        insert_test_image(&db, "source", "hash-source");
+        insert_test_image(&db, "target", "hash-target");
+        db.update_image_file_path("f-source", "/photos/source/image.png")
+            .unwrap();
+        db.update_image_file_path("f-target", "/photos/target/unrelated.png")
+            .unwrap();
+
+        let error = db
+            .migrate_folder_paths_with_journal(
+                "/photos/source",
+                "/photos/target",
+                "pending_folder_rename",
+                r#"{"source":"/photos/source","target":"/photos/target"}"#,
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("target subtree"));
+        assert!(db.get_setting("pending_folder_rename").unwrap().is_none());
+        assert!(db
+            .get_image_file_by_path("/photos/source/image.png")
+            .unwrap()
+            .is_some());
+        assert!(db
+            .get_image_file_by_path("/photos/target/unrelated.png")
+            .unwrap()
+            .is_some());
+    }
+
     // -- get_image_file_by_path --
 
     #[test]

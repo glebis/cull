@@ -917,6 +917,7 @@ dependencies = [
  "hyper-util",
  "image",
  "keyring",
+ "libc",
  "ndarray",
  "notify",
  "objc2",

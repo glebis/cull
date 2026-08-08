@@ -3,7 +3,7 @@
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen } from '$lib/stores';
-    import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, countByDetectedClass, listDetectedClasses, regenerateThumbnails, rescanSources, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
+    import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, renameFolder as apiRenameFolder, listCollections, createCollection, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, countByDetectedClass, listDetectedClasses, regenerateThumbnails, rescanSources, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, ImageWithFile, SmartCollection } from '$lib/api';
     import { applyClipboardMonitorCollection } from '$lib/clipboard-monitor';
@@ -45,6 +45,13 @@
         x: number;
         y: number;
     } | null>(null);
+    let folderContextMenu = $state<{
+        path: string;
+        name: string;
+        isGroup: boolean;
+        x: number;
+        y: number;
+    } | null>(null);
     let collectionPreviewTimer: ReturnType<typeof setTimeout> | null = null;
     let collectionPreviewRequest = 0;
     let browseCountsRequest = 0;
@@ -66,8 +73,10 @@
         }
     }
     import SessionSwitcher from './SessionSwitcher.svelte';
-    import { activeCanvas, activeSession, navigateTo, sessionCanvases, expandedFolders, sidebarSectionsCollapsed, sidebarFilter } from '$lib/stores';
+    import { activeCanvas, activeSession, navigateTo, sessions, sessionCanvases, expandedFolders, sidebarSectionsCollapsed, sidebarFilter } from '$lib/stores';
     import { createCanvas, type Canvas } from '$lib/api';
+    import { reconcileRenamedCanvas, reconcileRenamedSession, renamedFolderPath } from '$lib/folder-rename-state';
+    import { withCanvasPathMigrationBarrier } from '$lib/canvas-save-coordinator';
 
     // "All Images" is only the active scope when nothing else narrows it —
     // including a detected-class filter, which used to leave both All Images
@@ -272,6 +281,7 @@
         event.preventDefault();
         event.stopPropagation();
         hideCollectionPreview(collectionId);
+        folderContextMenu = null;
         collectionContextMenu = {
             collectionId,
             name,
@@ -283,6 +293,23 @@
 
     function closeCollectionContextMenu() {
         collectionContextMenu = null;
+    }
+
+    function openFolderContextMenu(event: MouseEvent, path: string, name: string, isGroup: boolean) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeCollectionContextMenu();
+        folderContextMenu = {
+            path,
+            name,
+            isGroup,
+            x: Math.min(event.clientX, window.innerWidth - 208),
+            y: Math.min(event.clientY, window.innerHeight - 128),
+        };
+    }
+
+    function closeFolderContextMenu() {
+        folderContextMenu = null;
     }
 
     onDestroy(() => {
@@ -538,6 +565,44 @@
         }
     }
 
+    async function handleRenameFolder(folder: string, currentName: string) {
+        closeFolderContextMenu();
+        const name = await requestTextInput({
+            title: 'Rename Folder',
+            label: 'Folder name',
+            initialValue: currentName,
+            placeholder: 'Folder name',
+            confirmLabel: 'Rename',
+        });
+        if (!name || !name.trim() || name.trim() === currentName) return;
+        try {
+            const result = await withCanvasPathMigrationBarrier(async () => {
+                const result = await apiRenameFolder(folder, name.trim());
+                activeFolder.update(path => path ? renamedFolderPath(path, result.oldPath, result.newPath) : null);
+                expandedFolders.update(paths => new Set(
+                    [...paths].map(path => renamedFolderPath(path, result.oldPath, result.newPath))
+                ));
+                sessions.update(items => items.map(session => reconcileRenamedSession(session, result.oldPath, result.newPath)));
+                activeSession.update(session => session ? reconcileRenamedSession(session, result.oldPath, result.newPath) : null);
+                sessionCanvases.update(canvases => canvases.map(canvas => reconcileRenamedCanvas(canvas, result.oldPath, result.newPath)));
+                activeCanvas.update(canvas => canvas ? reconcileRenamedCanvas(canvas, result.oldPath, result.newPath) : null);
+                return result;
+            });
+            await refreshBrowseCounts($showRejected);
+            if (get(activeFolder)) {
+                await loadImagesForCurrentScope({ force: true, invalidateCache: true });
+            }
+            showToast('Folder renamed', {
+                detail: `${result.oldPath} → ${result.newPath}`,
+                type: 'success',
+                duration: 5000,
+            });
+        } catch (e) {
+            console.error('Failed to rename folder:', e);
+            showToast('Failed to rename folder', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
     async function handleToggleClipboardMonitor() {
         const wasRunning = clipboardStatus?.running ?? false;
         try {
@@ -759,8 +824,8 @@
 </script>
 
 <svelte:window
-    onclick={closeCollectionContextMenu}
-    onkeydown={(e) => { if (e.key === 'Escape') { closeCollectionContextMenu(); hideCollectionPreview(); } }}
+    onclick={() => { closeCollectionContextMenu(); closeFolderContextMenu(); }}
+    onkeydown={(e) => { if (e.key === 'Escape') { closeCollectionContextMenu(); closeFolderContextMenu(); hideCollectionPreview(); } }}
 />
 
 <aside class="sidebar" aria-label="Library sidebar">
@@ -866,6 +931,7 @@
                         data-tree-row={i}
                         tabindex={i === treeTabIndex ? 0 : -1}
                         onfocusin={() => treeFocusIndex = i}
+                        oncontextmenu={(e) => openFolderContextMenu(e, folder.fullPath, folder.name, folder.isGroup)}
                     >
                         {#if folder.hasChildren}
                             <button
@@ -1144,6 +1210,22 @@
             </button>
             <button type="button" role="menuitem" onclick={() => copyCollectionId(collectionContextMenu!.collectionId)}>Copy Collection ID</button>
             <button type="button" role="menuitem" class="danger" onclick={(e) => handleDeleteCollection(e, collectionContextMenu!.collectionId, collectionContextMenu!.name)}>Delete Collection...</button>
+        </div>
+    {/if}
+
+    {#if folderContextMenu}
+        <div
+            class="collection-context-menu folder-context-menu"
+            style="left: {folderContextMenu.x}px; top: {folderContextMenu.y}px;"
+            role="menu"
+            tabindex="-1"
+        >
+            <div class="context-menu-header">{folderContextMenu.name}</div>
+            <button type="button" role="menuitem" onclick={() => { selectFolder(folderContextMenu!.path); closeFolderContextMenu(); }}>Open Folder</button>
+            <button type="button" role="menuitem" onclick={() => handleRenameFolder(folderContextMenu!.path, folderName(folderContextMenu!.path))}>Rename...</button>
+            {#if !folderContextMenu.isGroup}
+                <button type="button" role="menuitem" class="danger" onclick={(e) => { const path = folderContextMenu!.path; closeFolderContextMenu(); handleDeleteFolder(e, path); }}>Remove from Library...</button>
+            {/if}
         </div>
     {/if}
 

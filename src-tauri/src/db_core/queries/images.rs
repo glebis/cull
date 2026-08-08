@@ -9,9 +9,282 @@ use crate::db_core::db::{
 use crate::db_core::db::Database;
 use crate::db_core::models::*;
 use crate::db_core::visibility::RejectedVisibility;
-use rusqlite::{params, OptionalExtension, Result};
+use rusqlite::{params, OptionalExtension, Result, Transaction};
+use std::collections::HashSet;
+use std::path::{Component, Path};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FolderPathMigration {
+    pub image_files: usize,
+    pub library_roots: usize,
+    pub sessions: usize,
+    pub canvases: usize,
+    pub generation_runs: usize,
+}
+
+fn invalid_path(message: impl Into<String>) -> rusqlite::Error {
+    rusqlite::Error::InvalidParameterName(message.into())
+}
+
+fn validate_folder_migration_path(path: &str, label: &str) -> Result<()> {
+    let path = Path::new(path);
+    if !path.is_absolute()
+        || path.parent().is_none()
+        || path
+            .components()
+            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+    {
+        return Err(invalid_path(format!("invalid {label} folder path")));
+    }
+    Ok(())
+}
+
+fn rewrite_descendant_path(source: &Path, target: &Path, candidate: &str) -> Option<String> {
+    let candidate = Path::new(candidate);
+    if candidate == source {
+        return Some(target.to_string_lossy().to_string());
+    }
+    let relative = candidate.strip_prefix(source).ok()?;
+    Some(target.join(relative).to_string_lossy().to_string())
+}
+
+fn migrate_path_column(
+    tx: &Transaction<'_>,
+    select_sql: &str,
+    update_sql: &str,
+    source: &Path,
+    target: &Path,
+    reject_collisions: bool,
+) -> Result<usize> {
+    let rows = {
+        let mut stmt = tx.prepare(select_sql)?;
+        let collected = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>>>()?;
+        collected
+    };
+    let moving_ids = rows
+        .iter()
+        .filter(|(_, path)| rewrite_descendant_path(source, target, path).is_some())
+        .map(|(id, _)| id.clone())
+        .collect::<HashSet<_>>();
+    let existing_paths = rows
+        .iter()
+        .filter(|(id, _)| !moving_ids.contains(id))
+        .map(|(_, path)| path.clone())
+        .collect::<HashSet<_>>();
+    if reject_collisions
+        && existing_paths
+            .iter()
+            .any(|path| rewrite_descendant_path(target, target, path).is_some())
+    {
+        return Err(invalid_path(format!(
+            "folder rename target subtree already has persisted paths at {}",
+            target.display()
+        )));
+    }
+    let mut proposed_paths = HashSet::new();
+    let mut changed = 0;
+    for (id, path) in rows {
+        let Some(next_path) = rewrite_descendant_path(source, target, &path) else {
+            continue;
+        };
+        if reject_collisions
+            && (existing_paths.contains(&next_path) || !proposed_paths.insert(next_path.clone()))
+        {
+            return Err(invalid_path(format!(
+                "folder rename path collision at {next_path}"
+            )));
+        }
+        tx.execute(update_sql, params![id, next_path])?;
+        changed += 1;
+    }
+    Ok(changed)
+}
+
+fn rewrite_canvas_paths(value: &mut serde_json::Value, source: &Path, target: &Path) -> bool {
+    match value {
+        serde_json::Value::Array(values) => values.iter_mut().fold(false, |changed, value| {
+            rewrite_canvas_paths(value, source, target) || changed
+        }),
+        serde_json::Value::Object(values) => {
+            values.iter_mut().fold(false, |changed, (key, value)| {
+                let path_changed = if key == "lastKnownPath" {
+                    value
+                        .as_str()
+                        .and_then(|path| rewrite_descendant_path(source, target, path))
+                        .map(|path| {
+                            *value = serde_json::Value::String(path);
+                            true
+                        })
+                        .unwrap_or(false)
+                } else {
+                    rewrite_canvas_paths(value, source, target)
+                };
+                path_changed || changed
+            })
+        }
+        _ => false,
+    }
+}
+
+fn canvas_contains_path_under(value: &serde_json::Value, root: &Path) -> bool {
+    match value {
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| canvas_contains_path_under(value, root)),
+        serde_json::Value::Object(values) => values.iter().any(|(key, value)| {
+            (key == "lastKnownPath"
+                && value
+                    .as_str()
+                    .is_some_and(|path| rewrite_descendant_path(root, root, path).is_some()))
+                || canvas_contains_path_under(value, root)
+        }),
+        _ => false,
+    }
+}
+
+fn migrate_folder_paths_in_transaction(
+    tx: &Transaction<'_>,
+    source_path: &Path,
+    target_path: &Path,
+) -> Result<FolderPathMigration> {
+    let image_files = migrate_path_column(
+        tx,
+        "SELECT id, path FROM image_files",
+        "UPDATE image_files SET path = ?2 WHERE id = ?1",
+        source_path,
+        target_path,
+        true,
+    )?;
+    migrate_path_column(
+        tx,
+        "SELECT id, path FROM media_files",
+        "UPDATE media_files SET path = ?2 WHERE id = ?1",
+        source_path,
+        target_path,
+        true,
+    )?;
+    let library_roots = migrate_path_column(
+        tx,
+        "SELECT id, path FROM library_roots",
+        "UPDATE library_roots SET path = ?2 WHERE id = ?1",
+        source_path,
+        target_path,
+        true,
+    )?;
+    let sessions = migrate_path_column(
+        tx,
+        "SELECT id, folder_path FROM projects WHERE folder_path IS NOT NULL",
+        "UPDATE projects SET folder_path = ?2 WHERE id = ?1",
+        source_path,
+        target_path,
+        true,
+    )?;
+    let generation_runs = migrate_path_column(
+        tx,
+        "SELECT id, source_path FROM generation_runs WHERE source_path IS NOT NULL",
+        "UPDATE generation_runs SET source_path = ?2 WHERE id = ?1",
+        source_path,
+        target_path,
+        true,
+    )?;
+
+    let canvas_rows = {
+        let mut stmt = tx.prepare("SELECT id, layout_json FROM canvases")?;
+        let collected = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>>>()?;
+        collected
+    };
+    let mut canvases = 0;
+    for (id, layout_json) in canvas_rows {
+        let mut layout =
+            serde_json::from_str::<serde_json::Value>(&layout_json).map_err(|error| {
+                invalid_path(format!(
+                    "invalid canvas layout during folder rename: {error}"
+                ))
+            })?;
+        if canvas_contains_path_under(&layout, target_path) {
+            return Err(invalid_path(format!(
+                "folder rename target subtree already has persisted canvas paths at {}",
+                target_path.display()
+            )));
+        }
+        if rewrite_canvas_paths(&mut layout, source_path, target_path) {
+            tx.execute(
+                "UPDATE canvases SET layout_json = ?2, updated_at = datetime('now') WHERE id = ?1",
+                params![
+                    id,
+                    serde_json::to_string(&layout)
+                        .map_err(|error| invalid_path(error.to_string()))?
+                ],
+            )?;
+            canvases += 1;
+        }
+    }
+
+    Ok(FolderPathMigration {
+        image_files,
+        library_roots,
+        sessions,
+        canvases,
+        generation_runs,
+    })
+}
 
 impl Database {
+    pub fn migrate_folder_paths(&self, source: &str, target: &str) -> Result<FolderPathMigration> {
+        validate_folder_migration_path(source, "source")?;
+        validate_folder_migration_path(target, "target")?;
+        if source == target {
+            return Err(invalid_path("source and target folders must differ"));
+        }
+        let source_path = Path::new(source);
+        let target_path = Path::new(target);
+        if target_path.starts_with(source_path) {
+            return Err(invalid_path("target folder cannot be inside source folder"));
+        }
+
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let migration = migrate_folder_paths_in_transaction(&tx, source_path, target_path)?;
+        tx.commit()?;
+        Ok(migration)
+    }
+
+    pub fn migrate_folder_paths_with_journal(
+        &self,
+        source: &str,
+        target: &str,
+        journal_key: &str,
+        journal_value: &str,
+    ) -> Result<FolderPathMigration> {
+        validate_folder_migration_path(source, "source")?;
+        validate_folder_migration_path(target, "target")?;
+        let source_path = Path::new(source);
+        let target_path = Path::new(target);
+        if source == target || target_path.starts_with(source_path) {
+            return Err(invalid_path("invalid folder rename relationship"));
+        }
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        if tx.execute(
+            "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?1, ?2)",
+            params![journal_key, journal_value],
+        )? != 1
+        {
+            return Err(invalid_path("another folder rename requires recovery"));
+        }
+        let migration = migrate_folder_paths_in_transaction(&tx, source_path, target_path)?;
+        tx.commit()?;
+        Ok(migration)
+    }
+
     pub fn insert_image(&self, image: &Image) -> Result<()> {
         let conn = self.conn.lock();
         conn.execute(
