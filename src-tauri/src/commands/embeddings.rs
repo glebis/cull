@@ -428,6 +428,25 @@ pub async fn find_similar_images(
 }
 
 #[tauri::command]
+pub async fn find_similar_images_in_scope(
+    state: State<'_, AppState>,
+    scope: crate::db_core::models::EmbeddingScope,
+    image_id: String,
+    top_k: u32,
+    model: Option<String>,
+) -> Result<Vec<(String, f32)>, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::find_similar_images_in_scope(
+        &ctx,
+        &scope,
+        &image_id,
+        top_k as usize,
+        model.as_deref(),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn generate_similarity_groups(
     state: State<'_, AppState>,
     model: Option<String>,

@@ -243,6 +243,20 @@ mod gui_launch_tests {
             vec![image.to_string_lossy()]
         );
     }
+
+    #[test]
+    fn scoped_neighbor_command_is_registered_and_permitted() {
+        let command_registry = include_str!("lib.rs");
+        let ai_permissions = include_str!("../permissions/app-ai-processing.toml");
+        let command_name = concat!("find_similar_images", "_in_scope");
+        let registry_entry = format!("commands::embeddings::{command_name},");
+        let permission_entry = format!("\"{command_name}\",");
+
+        assert!(command_registry.contains(&registry_entry));
+        assert!(ai_permissions
+            .lines()
+            .any(|line| line.trim() == permission_entry));
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -571,6 +585,7 @@ pub fn run() {
             commands::embeddings::get_scoped_embedding_page,
             commands::embeddings::list_scoped_image_ids,
             commands::embeddings::find_similar_images,
+            commands::embeddings::find_similar_images_in_scope,
             commands::embeddings::generate_similarity_groups,
             commands::embeddings::list_similarity_groups,
             commands::embeddings::list_similarity_group_images,
