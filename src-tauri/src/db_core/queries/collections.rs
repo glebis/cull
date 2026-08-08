@@ -26,7 +26,7 @@ impl Database {
         &self,
         include_rejected: bool,
     ) -> Result<Vec<(String, String, u32)>> {
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let sql = format!(
             "SELECT p.id, p.name, COUNT(DISTINCT f.image_id) as cnt
              FROM projects p
@@ -81,7 +81,7 @@ impl Database {
     }
 
     pub fn image_collection_ids(&self, image_id: &str) -> Result<Vec<String>> {
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let mut stmt =
             conn.prepare("SELECT collection_id FROM collection_items WHERE image_id = ?1")?;
         let rows = stmt.query_map(params![image_id], |row| row.get::<_, String>(0))?;
@@ -97,7 +97,7 @@ impl Database {
         collection_id: &str,
         include_rejected: bool,
     ) -> Result<Vec<ImageWithFile>> {
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
@@ -158,7 +158,7 @@ impl Database {
         offset: u32,
         include_rejected: bool,
     ) -> Result<Vec<ImageWithFile>> {
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
@@ -228,7 +228,7 @@ impl Database {
     }
 
     pub fn get_collection_settings_json(&self, collection_id: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let mut stmt = conn.prepare("SELECT settings_json FROM projects WHERE id = ?1")?;
         let mut rows = stmt.query_map(params![collection_id], |row| row.get(0))?;
         match rows.next() {

@@ -78,6 +78,14 @@ impl JobRegistry {
         }
     }
 
+    pub fn update_total(&self, job_id: &str, total: u32) {
+        let mut jobs = self.jobs.lock().unwrap();
+        if let Some(state) = jobs.get_mut(job_id) {
+            state.snapshot.total = total;
+            state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+        }
+    }
+
     pub fn complete(&self, job_id: &str) {
         let mut jobs = self.jobs.lock().unwrap();
         if let Some(state) = jobs.get_mut(job_id) {
@@ -189,12 +197,18 @@ impl JobRegistry {
     }
 
     pub fn persist_terminal(&self, job_id: &str, db: &crate::db_core::db::Database) {
-        let jobs = self.jobs.lock().unwrap();
-        if let Some(state) = jobs.get(job_id) {
-            let status = &state.snapshot.status;
-            if matches!(status.as_str(), "completed" | "failed" | "cancelled") {
-                let _ = db.save_job(&state.snapshot);
-            }
+        let snapshot = {
+            let jobs = self.jobs.lock().unwrap();
+            jobs.get(job_id).and_then(|state| {
+                matches!(
+                    state.snapshot.status.as_str(),
+                    "completed" | "failed" | "cancelled"
+                )
+                .then(|| state.snapshot.clone())
+            })
+        };
+        if let Some(snapshot) = snapshot {
+            let _ = db.save_job(&snapshot);
         }
     }
 
@@ -287,6 +301,55 @@ mod tests {
         let snapshot = registry.get(&job_id).unwrap();
         assert_eq!(snapshot.current, 42);
         assert_eq!(snapshot.message.as_deref(), Some("Processing image_abc"));
+    }
+
+    #[test]
+    fn test_update_total_after_background_discovery() {
+        let registry = JobRegistry::default();
+        let (job_id, _) = registry.create_job("import", 0);
+
+        registry.update_total(&job_id, 10_000);
+
+        let snapshot = registry.get(&job_id).unwrap();
+        assert_eq!(snapshot.total, 10_000);
+        assert_eq!(snapshot.status, "running");
+    }
+
+    #[test]
+    fn terminal_persistence_does_not_hold_the_registry_lock_during_database_io() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let db = test_db();
+        let registry = JobRegistry::default();
+        let (job_id, _) = registry.create_job("import", 1);
+        registry.complete(&job_id);
+
+        let writer = db.conn.lock();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+        let persist_registry = registry.clone();
+        let persist_db = db.clone();
+        let persist_job_id = job_id.clone();
+        let (started_tx, started_rx) = mpsc::channel();
+        let persist = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            persist_registry.persist_terminal(&persist_job_id, &persist_db);
+        });
+        started_rx.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+
+        let list_registry = registry.clone();
+        let (list_tx, list_rx) = mpsc::channel();
+        std::thread::spawn(move || list_tx.send(list_registry.list()).unwrap());
+        let snapshots = list_rx
+            .recv_timeout(Duration::from_millis(250))
+            .expect("list_jobs must not wait for terminal job persistence");
+        assert_eq!(snapshots.len(), 1);
+
+        writer.execute_batch("ROLLBACK").unwrap();
+        drop(writer);
+        persist.join().unwrap();
     }
 
     #[test]

@@ -33,7 +33,7 @@ impl Database {
         &self,
         include_rejected: bool,
     ) -> Result<Vec<SmartCollection>> {
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, collection_type, filter_json, nl_query,
                     is_preset, sort_order, created_at
@@ -140,7 +140,7 @@ impl Database {
 
         let visibility =
             RejectedVisibility::from_include_rejected(include_rejected).for_filter(&filter);
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let sql = format!(
             "SELECT COUNT(DISTINCT i.id)
              FROM images i
@@ -186,7 +186,7 @@ impl Database {
 
         let visibility =
             RejectedVisibility::from_include_rejected(include_rejected).for_filter(&filter);
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let mut sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,

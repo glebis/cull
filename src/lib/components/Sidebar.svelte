@@ -725,15 +725,17 @@
         if (!selected) return;
 
         importing = true;
+        const progressId = crypto.randomUUID();
         importCurrent = 0;
         importTotal = 0;
         setLastResult('');
 
         // Listen for progress events
         let lastRefresh = 0;
-        const unlisten: UnlistenFn = await listen<{ current: number; total: number; filename: string }>(
+        const unlisten: UnlistenFn = await listen<{ progress_id?: string; current: number; total: number; filename: string }>(
             'import-progress',
             async (event) => {
+                if (event.payload.progress_id !== progressId) return;
                 importCurrent = event.payload.current;
                 importTotal = event.payload.total;
 
@@ -747,11 +749,17 @@
         );
 
         try {
-            const result = await apiImportFolder(selected as string);
+            const result = await apiImportFolder(selected as string, null, progressId);
             const folderName = (selected as string).split('/').filter(Boolean).pop() ?? selected;
             let summary = `+${result.imported} imported, ${result.skipped} skipped`;
             if (result.errors.length > 0) {
                 summary += `, ${result.errors.length} errors`;
+            }
+            if (result.cancelled) {
+                setLastResult(`Cancelled: ${summary}`);
+                showToast('Import cancelled', { detail: summary, type: 'warning', duration: 8000 });
+                await refreshImages();
+                return;
             }
             setLastResult(summary, result.errors.length > 0 ? 'error' : 'success');
             const importedFolder = selected as string;

@@ -365,7 +365,7 @@ impl Database {
         offset: u32,
         include_rejected: bool,
     ) -> Result<Vec<ImageWithFile>> {
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
@@ -460,7 +460,7 @@ impl Database {
         args.push(Value::Integer(limit as i64));
         args.push(Value::Integer(offset as i64));
 
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(rusqlite::params_from_iter(args), map_image_with_file_row)?;
         rows.collect::<Result<Vec<_>>>()
@@ -484,7 +484,7 @@ impl Database {
         offset: u32,
         include_rejected: bool,
     ) -> Result<Vec<ImageWithFile>> {
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let mut sql = String::from(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
@@ -552,7 +552,7 @@ impl Database {
         // The CASE matches std::path::Path::parent exactly: a path with no '/'
         // has no parent (excluded, like `None`); a root-level file ("/x.png")
         // whose stripped prefix is empty maps to "/".
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let sql = format!(
             "SELECT folder, COUNT(*) AS cnt
              FROM (
@@ -594,7 +594,7 @@ impl Database {
         offset: u32,
         include_rejected: bool,
     ) -> Result<Vec<ImageWithFile>> {
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         // Prefix-match on substr rather than LIKE: `_` and `%` are wildcards in
         // LIKE, so a folder named `2025_Trips` would also pull in `2025XTrips`.
         // This mirrors delete_images_by_folder, which avoids LIKE for the same
@@ -650,7 +650,7 @@ impl Database {
     }
 
     pub fn image_count_with_visibility(&self, include_rejected: bool) -> Result<u32> {
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let sql = format!(
             "SELECT COUNT(DISTINCT i.id) FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
@@ -662,7 +662,7 @@ impl Database {
     }
 
     pub fn list_image_ids(&self) -> Result<Vec<String>> {
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let mut stmt = conn.prepare(
             "SELECT DISTINCT i.id
              FROM images i
@@ -677,7 +677,7 @@ impl Database {
         if ids.is_empty() {
             return Ok(vec![]);
         }
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let placeholders: Vec<String> = ids
             .iter()
             .enumerate()
