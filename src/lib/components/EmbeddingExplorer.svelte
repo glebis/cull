@@ -48,6 +48,7 @@
         getImageCountForScope,
         listImageIdsForScope,
     } from '$lib/embedding-scope';
+    import { loadEmbeddingNeighbors, type EmbeddingNeighbor } from '$lib/embedding-neighbors';
 
     // State
     let downloading = $state(false);
@@ -192,6 +193,10 @@
     let imageMap = $state<Map<string, ImageWithFile>>(new Map());
     let selectedGenerationRun = $state<GenerationRun | null>(null);
     let selectedGenerationLoadSeq = 0;
+    let nearestNeighbors = $state<EmbeddingNeighbor[]>([]);
+    let neighborsLoading = $state(false);
+    let neighborsError = $state<string | null>(null);
+    let neighborLoadSeq = 0;
     let projecting = $state(false);
     let projectionWorker: Worker | null = null;
     let cancelProjectionWork: (() => void) | null = null;
@@ -257,6 +262,39 @@
             })
             .catch(() => {
                 if (loadSeq === selectedGenerationLoadSeq) selectedGenerationRun = null;
+            });
+    });
+
+    $effect(() => {
+        const id = selectedPoint?.id ?? null;
+        const scope = $libraryScope;
+        const requestedScopeKey = libraryScopeKey(scope);
+        const model = modelNameForProvider(selectedProvider);
+        const loadSeq = ++neighborLoadSeq;
+        nearestNeighbors = [];
+        neighborsError = null;
+        if (!id) {
+            neighborsLoading = false;
+            return;
+        }
+
+        neighborsLoading = true;
+        loadEmbeddingNeighbors(scope, id, model, 6)
+            .then(neighbors => {
+                if (loadSeq !== neighborLoadSeq) return;
+                if (selectedPoint?.id !== id) return;
+                if (libraryScopeKey(get(libraryScope)) !== requestedScopeKey) return;
+                if (modelNameForProvider(selectedProvider) !== model) return;
+                nearestNeighbors = neighbors;
+                neighborsLoading = false;
+            })
+            .catch(error => {
+                if (loadSeq !== neighborLoadSeq) return;
+                if (selectedPoint?.id !== id) return;
+                if (libraryScopeKey(get(libraryScope)) !== requestedScopeKey) return;
+                if (modelNameForProvider(selectedProvider) !== model) return;
+                neighborsError = error instanceof Error ? error.message : String(error);
+                neighborsLoading = false;
             });
     });
 
@@ -1031,6 +1069,16 @@
         const startIndex = currentIndex >= 0 ? currentIndex : (delta > 0 ? -1 : 0);
         const nextIndex = (startIndex + delta + navigationPoints.length) % navigationPoints.length;
         selectPoint(navigationPoints[nextIndex], interactionMode !== 'map' || largePreviewOpen);
+    }
+
+    function openNeighbor(neighbor: EmbeddingNeighbor) {
+        const point = points.find(candidate => candidate.id === neighbor.image.image.id);
+        if (point) {
+            selectPoint(point, true);
+            return;
+        }
+        focusedImageOverride.set(neighbor.image);
+        navigateTo('loupe');
     }
 
     function fitPointSet(viewPoints: Point[], padding: number) {
@@ -2128,6 +2176,43 @@
                     </button>
                 {/if}
             </div>
+            <div class="panel-section">
+                <div class="section-header">NEAREST</div>
+                {#if neighborsLoading}
+                    <div class="neighbor-status" role="status" aria-live="polite">Finding similar images...</div>
+                {:else if neighborsError}
+                    <div class="neighbor-status error" role="status" aria-live="polite">Could not load similar images</div>
+                {:else if nearestNeighbors.length === 0}
+                    <div class="neighbor-status" role="status" aria-live="polite">No similar images in this scope</div>
+                {:else}
+                    <div class="sr-only" role="status" aria-live="polite">
+                        {nearestNeighbors.length} similar {nearestNeighbors.length === 1 ? 'image' : 'images'} found
+                    </div>
+                    <div class="neighbor-list">
+                        {#each nearestNeighbors as neighbor (neighbor.image.image.id)}
+                            {@const previewPath = safeAssetPreviewPath(neighbor.image)}
+                            {@const projectedPoint = points.find(point => point.id === neighbor.image.image.id)}
+                            {@const filename = neighbor.image.path.split('/').pop()}
+                            {@const score = `${(neighbor.score * 100).toFixed(1)}%`}
+                            <button
+                                class="neighbor-row"
+                                onclick={() => openNeighbor(neighbor)}
+                                aria-label={projectedPoint
+                                    ? `Select ${filename}, similarity ${score}`
+                                    : `Open ${filename} in Loupe, similarity ${score}`}
+                            >
+                                {#if previewPath}
+                                    <img src={convertFileSrc(previewPath)} alt="" class="neighbor-thumb" />
+                                {:else}
+                                    <span class="neighbor-thumb unavailable" aria-hidden="true"></span>
+                                {/if}
+                                <span class="neighbor-name">{filename}</span>
+                                <span class="neighbor-score">{score}</span>
+                            </button>
+                        {/each}
+                    </div>
+                {/if}
+            </div>
         {/if}
     </div>
     {/if}
@@ -2683,6 +2768,80 @@
     .preview-dims {
         font-size: 10px;
         color: var(--text-secondary);
+    }
+
+    .neighbor-list {
+        display: grid;
+        gap: var(--spacing);
+    }
+
+    .neighbor-row {
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: var(--spacing);
+        width: 100%;
+        padding: var(--spacing);
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        font-family: var(--font);
+        cursor: pointer;
+        text-align: left;
+    }
+
+    .neighbor-row:hover,
+    .neighbor-row:focus-visible {
+        border-color: var(--blue);
+    }
+
+    .neighbor-thumb {
+        width: 36px;
+        height: 36px;
+        object-fit: cover;
+        border-radius: var(--radius);
+        background: var(--surface);
+    }
+
+    .neighbor-thumb.unavailable {
+        border: 1px solid var(--border);
+    }
+
+    .neighbor-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 10px;
+    }
+
+    .neighbor-score {
+        color: var(--blue);
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .neighbor-status {
+        color: var(--text-secondary);
+        font-size: 10px;
+        line-height: 1.4;
+    }
+
+    .neighbor-status.error {
+        color: var(--red);
+    }
+
+    .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
     }
 
     .right-panel {

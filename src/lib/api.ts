@@ -1080,6 +1080,20 @@ export async function findSimilarImages(imageId: string, topK: number, model?: s
     return invoke('find_similar_images', { imageId, topK, model: model ?? null });
 }
 
+export async function findSimilarImagesInScope(
+    scope: LibraryScope,
+    imageId: string,
+    topK: number,
+    model?: string,
+): Promise<[string, number][]> {
+    return invoke('find_similar_images_in_scope', {
+        scope,
+        imageId,
+        topK,
+        model: model ?? null,
+    });
+}
+
 export async function generateSimilarityGroups(
     model?: string,
     threshold = 0.88,

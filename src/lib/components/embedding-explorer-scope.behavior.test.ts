@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
+import { get } from 'svelte/store';
 
 const mocks = vi.hoisted(() => ({
     getEmbeddingCountForScope: vi.fn(),
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     listImageIdsForScope: vi.fn(),
     getImagesByIds: vi.fn(),
     generateModelEmbeddings: vi.fn(),
+    loadEmbeddingNeighbors: vi.fn(),
     workerMessages: [] as Array<Record<string, unknown>>,
 }));
 
@@ -34,6 +36,10 @@ vi.mock('$lib/embedding-scope', () => ({
     getEmbeddingPageForScope: mocks.getEmbeddingPageForScope,
     getImageCountForScope: mocks.getImageCountForScope,
     listImageIdsForScope: mocks.listImageIdsForScope,
+}));
+
+vi.mock('$lib/embedding-neighbors', () => ({
+    loadEmbeddingNeighbors: mocks.loadEmbeddingNeighbors,
 }));
 
 vi.mock('$lib/api', () => ({
@@ -60,6 +66,8 @@ import {
     importBatchFilter,
     minSizeFilter,
     showRejected,
+    focusedImageOverride,
+    viewMode,
 } from '$lib/stores';
 
 class FakeWorker {
@@ -136,6 +144,8 @@ beforeEach(() => {
     importBatchFilter.set(null);
     minSizeFilter.set(512);
     showRejected.set(false);
+    focusedImageOverride.set(null);
+    viewMode.set('grid');
 
     mocks.listImageIdsForScope.mockResolvedValue(['in-a', 'in-b']);
     mocks.getImageCountForScope.mockResolvedValue(2);
@@ -151,6 +161,9 @@ beforeEach(() => {
     });
     mocks.getImagesByIds.mockResolvedValue([image('in-b'), image('in-a')]);
     mocks.generateModelEmbeddings.mockResolvedValue(2);
+    mocks.loadEmbeddingNeighbors.mockResolvedValue([
+        { image: image('near-one'), score: 0.934 },
+    ]);
 
     vi.stubGlobal('Worker', FakeWorker);
     vi.stubGlobal('ResizeObserver', class {
@@ -241,4 +254,35 @@ describe('Embedding Explorer library scope', () => {
             .find(row => row.querySelector('.stat-label')?.textContent === 'Embeddings');
         expect(embeddingRow?.querySelector('.stat-value')).toHaveTextContent('0');
     });
+
+    it('loads ranked neighbors for the selected point in the current scope', async () => {
+        const user = userEvent.setup();
+        render(EmbeddingExplorer);
+        await waitFor(() => expect(mocks.workerMessages).toHaveLength(1));
+
+        const explorer = screen.getByRole('application', { name: 'Visual embeddings' });
+        explorer.focus();
+        await user.keyboard('{ArrowRight}');
+
+        await waitFor(() => expect(mocks.loadEmbeddingNeighbors).toHaveBeenCalledWith(
+            {
+                type: 'folder',
+                path: '/photos/scoped',
+                min_size: 512,
+                include_rejected: false,
+            },
+            'in-a',
+            'clip-vit-b32',
+            6,
+        ));
+        expect(await screen.findByText('near-one.png')).toBeInTheDocument();
+        expect(screen.getByText('93.4%')).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', {
+            name: 'Open near-one.png in Loupe, similarity 93.4%',
+        }));
+        expect(get(viewMode)).toBe('loupe');
+        expect(get(focusedImageOverride)?.image.id).toBe('near-one');
+    });
+
 });

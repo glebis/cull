@@ -12,7 +12,7 @@ use crate::services::{Pagination, ServiceContext, ServiceError};
 use std::collections::HashSet;
 
 const MAX_EMBEDDING_PAGE_SIZE: u32 = 5000;
-const MAX_SIMILAR_IMAGES: usize = 250;
+const MAX_SIMILAR_IMAGES: usize = 100;
 const SIMILARITY_GROUPING_METHOD: &str = "greedy_threshold_v1";
 
 /// Upper bound on the number of embeddings `generate_similarity_groups` will
@@ -46,7 +46,7 @@ pub fn find_similar_images_in_scope(
     model: Option<&str>,
 ) -> Result<Vec<(String, f32)>, ServiceError> {
     let model_name = model.unwrap_or("clip-vit-b32");
-    let top_k = top_k.clamp(1, MAX_SIMILAR_IMAGES);
+    let top_k = top_k.min(MAX_SIMILAR_IMAGES);
     ctx.db
         .find_similar_in_scope(image_id, model_name, scope, top_k)?
         .ok_or_else(|| ServiceError::NotFound("Image has no embedding".into()))
@@ -630,7 +630,7 @@ mod tests {
         insert_test_image(&db, "source");
         db.store_embedding("source", "clip-vit-b32", &[1.0, 0.0])
             .unwrap();
-        for index in 0..251 {
+        for index in 0..101 {
             let id = format!("candidate-{index:03}");
             insert_test_image(&db, &id);
             db.store_embedding(&id, "clip-vit-b32", &[1.0, index as f32 / 1_000.0])
@@ -644,8 +644,8 @@ mod tests {
         let minimum = find_similar_images_in_scope(&c, &scope, "source", 0, None).unwrap();
         let maximum = find_similar_images_in_scope(&c, &scope, "source", usize::MAX, None).unwrap();
 
-        assert_eq!(minimum.len(), 1);
-        assert_eq!(maximum.len(), 250);
+        assert!(minimum.is_empty());
+        assert_eq!(maximum.len(), 100);
         assert!(maximum.iter().all(|(id, _)| id != "source"));
     }
 
