@@ -41,6 +41,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
 #[derive(Clone)]
 pub struct Database {
     pub(crate) conn: Arc<Mutex<Connection>>,
+    read_conn: Option<Arc<Mutex<Connection>>>,
 }
 
 pub(crate) fn sql_u64(value: u64) -> rusqlite::Result<i64> {
@@ -258,11 +259,13 @@ impl Database {
         let should_consider_backup = should_consider_migration_backup(db_path);
         let conn = Connection::open(db_path)?;
         Self::configure_connection(&conn)?;
-        let db = Database {
+        let mut db = Database {
             conn: Arc::new(Mutex::new(conn)),
+            read_conn: None,
         };
         db.preflight_migrations(db_path, should_consider_backup)?;
         db.run_migrations()?;
+        db.read_conn = Self::open_read_connection(db_path)?;
         Ok(db)
     }
 
@@ -272,6 +275,21 @@ impl Database {
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "busy_timeout", 5000)?;
         Ok(())
+    }
+
+    fn open_read_connection(db_path: &Path) -> Result<Option<Arc<Mutex<Connection>>>> {
+        if db_path == Path::new(":memory:") {
+            return Ok(None);
+        }
+
+        let conn = Connection::open(db_path)?;
+        Self::configure_connection(&conn)?;
+        conn.pragma_update(None, "query_only", true)?;
+        Ok(Some(Arc::new(Mutex::new(conn))))
+    }
+
+    pub(crate) fn read_connection(&self) -> parking_lot::MutexGuard<'_, Connection> {
+        self.read_conn.as_ref().unwrap_or(&self.conn).lock()
     }
 
     fn preflight_migrations(&self, db_path: &Path, should_consider_backup: bool) -> Result<()> {
@@ -3703,84 +3721,71 @@ mod file_watcher_tests {
     }
 
     #[test]
-    fn test_concurrent_read_write_lock_hold_times() {
-        use std::sync::Arc;
-        use std::thread;
-        use std::time::{Duration, Instant};
+    fn test_file_database_opens_a_query_only_read_connection() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open(&tmp.path().join("read-connection.db")).unwrap();
+        let read_conn = db
+            .read_conn
+            .as_ref()
+            .expect("file databases need a read connection");
+        let conn = read_conn.lock();
+        let query_only: i64 = conn
+            .pragma_query_value(None, "query_only", |row| row.get(0))
+            .unwrap();
+        let timeout: i64 = conn
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .unwrap();
+
+        assert_eq!(query_only, 1);
+        assert_eq!(timeout, 5000);
+    }
+
+    #[test]
+    fn test_library_stats_read_does_not_wait_for_writer_transaction() {
+        use std::sync::mpsc;
+        use std::time::Duration;
 
         let tmp = tempfile::tempdir().unwrap();
-        let db_path = tmp.path().join("bench.db");
-        let db = Arc::new(Database::open(&db_path).unwrap());
+        let db_path = tmp.path().join("concurrent.db");
+        let db = Database::open(&db_path).unwrap();
+        insert_test_image(&db, "visible", "hash-visible");
+        let collection_id = db.create_collection("Visible").unwrap();
+        db.add_to_collection(&collection_id, &["visible"]).unwrap();
 
-        // Seed with images
-        for i in 0..200 {
-            insert_test_image(&db, &format!("img-{}", i), &format!("hash-{}", i));
-        }
+        let writer = db.conn.lock();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        writer
+            .execute(
+                "INSERT INTO images (id, sha256_hash, width, height, format, file_size, created_at, imported_at)
+                 VALUES ('uncommitted', 'hash-uncommitted', 1, 1, 'png', 1, '2026-01-01', '2026-01-01')",
+                [],
+            )
+            .unwrap();
 
-        let db_clone = Arc::clone(&db);
-        let writer = thread::spawn(move || {
-            let mut max_hold = Duration::ZERO;
-            for i in 0..100 {
-                let t0 = Instant::now();
-                {
-                    let conn = db_clone.conn.lock();
-                    let _ = conn.execute(
-                        "INSERT OR REPLACE INTO selections (image_id, project_id, decision, rating, color_label) VALUES (?1, '__global__', 'accept', 3, '')",
-                        rusqlite::params![format!("img-{}", i % 200)],
-                    );
-                }
-                let hold = t0.elapsed();
-                if hold > max_hold {
-                    max_hold = hold;
-                }
-            }
-            max_hold
+        let reader_db = db.clone();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<(u32, usize, usize, usize, usize, usize)> {
+                Ok((
+                    reader_db.image_count()?,
+                    reader_db.list_images(10, 0)?.len(),
+                    reader_db.list_images_by_folder("/tmp", 10, 0)?.len(),
+                    reader_db
+                        .list_images_in_scope(&["/tmp".to_string()], &[], &[], 10, 0)?
+                        .len(),
+                    reader_db.list_collection_images(&collection_id)?.len(),
+                    reader_db.get_images_by_ids(&["visible"])?.len(),
+                ))
+            })();
+            tx.send(result).unwrap();
         });
 
-        let db_clone2 = Arc::clone(&db);
-        let reader = thread::spawn(move || {
-            let mut max_hold = Duration::ZERO;
-            for _ in 0..100 {
-                let t0 = Instant::now();
-                {
-                    let conn = db_clone2.conn.lock();
-                    let _ = conn.query_row("SELECT COUNT(*) FROM images", [], |row| {
-                        row.get::<_, i64>(0)
-                    });
-                }
-                let hold = t0.elapsed();
-                if hold > max_hold {
-                    max_hold = hold;
-                }
-            }
-            max_hold
-        });
+        let browse_counts = rx
+            .recv_timeout(Duration::from_millis(250))
+            .expect("WAL browse queries must stay responsive during a write transaction")
+            .unwrap();
+        assert_eq!(browse_counts, (1, 1, 1, 1, 1, 1));
 
-        let writer_max = writer.join().unwrap();
-        let reader_max = reader.join().unwrap();
-
-        // Document findings: with a single Mutex<Connection>, all access
-        // serializes. WAL mode helps when multiple connections exist, but the
-        // current single-connection architecture means lock contention is the
-        // bottleneck. Report the measured hold times.
-        eprintln!(
-            "Lock hold times — writer max: {:.2}ms, reader max: {:.2}ms",
-            writer_max.as_secs_f64() * 1000.0,
-            reader_max.as_secs_f64() * 1000.0,
-        );
-
-        // Under normal desktop load, holds should be well under 50ms even
-        // with contention from a competing thread.
-        let threshold = Duration::from_millis(50);
-        assert!(
-            writer_max < threshold,
-            "Writer lock hold exceeded threshold: {:.2}ms",
-            writer_max.as_secs_f64() * 1000.0
-        );
-        assert!(
-            reader_max < threshold,
-            "Reader lock hold exceeded threshold: {:.2}ms",
-            reader_max.as_secs_f64() * 1000.0
-        );
+        writer.execute_batch("ROLLBACK").unwrap();
     }
 }

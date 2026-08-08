@@ -183,6 +183,7 @@ export interface ImportResponse {
     errors: string[];
     batch_id: string | null;
     image_ids: string[];
+    cancelled: boolean;
 }
 
 export interface GenerationRun {
@@ -616,14 +617,14 @@ export async function listImageIds(): Promise<string[]> {
     return invoke<string[]>('list_image_ids');
 }
 
-export async function importFolder(folderPath: string, sessionId?: string | null): Promise<ImportResponse> {
-    const result = await invoke<ImportResponse>('import_folder', { folderPath, sessionId: sessionId ?? null });
+export async function importFolder(folderPath: string, sessionId?: string | null, progressId?: string | null): Promise<ImportResponse> {
+    const result = await invoke<ImportResponse>('import_folder', { folderPath, sessionId: sessionId ?? null, progressId: progressId ?? null });
     emitSessionEventsRefresh();
     return result;
 }
 
-export async function importFiles(filePaths: string[], sessionId?: string | null): Promise<ImportResponse> {
-    const result = await invoke<ImportResponse>('import_files', { filePaths, sessionId: sessionId ?? null });
+export async function importFiles(filePaths: string[], sessionId?: string | null, progressId?: string | null): Promise<ImportResponse> {
+    const result = await invoke<ImportResponse>('import_files', { filePaths, sessionId: sessionId ?? null, progressId: progressId ?? null });
     emitSessionEventsRefresh();
     return result;
 }
