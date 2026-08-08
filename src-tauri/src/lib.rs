@@ -598,6 +598,7 @@ pub fn run() {
             commands::embeddings::get_embedding_page,
             commands::embeddings::get_scoped_embedding_page,
             commands::embeddings::list_scoped_image_ids,
+            commands::embeddings::name_embedding_clusters,
             commands::embeddings::find_similar_images,
             commands::embeddings::find_similar_images_in_scope,
             commands::embeddings::generate_similarity_groups,

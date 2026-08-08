@@ -1105,6 +1105,23 @@ export async function listScopedImageIds(
     return invoke('list_scoped_image_ids', { scope, limit, offset });
 }
 
+export interface EmbeddingClusterMembership {
+    cluster_id: number;
+    image_ids: string[];
+}
+
+export interface EmbeddingClusterName {
+    cluster_id: number;
+    label: string;
+    source: 'tag' | 'yolo' | 'filename';
+}
+
+export async function nameEmbeddingClusters(
+    clusters: EmbeddingClusterMembership[],
+): Promise<EmbeddingClusterName[]> {
+    return invoke('name_embedding_clusters', { clusters });
+}
+
 export async function findSimilarImages(imageId: string, topK: number, model?: string): Promise<[string, number][]> {
     return invoke('find_similar_images', { imageId, topK, model: model ?? null });
 }

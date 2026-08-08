@@ -396,6 +396,19 @@ pub enum EmbeddingScope {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmbeddingClusterMembership {
+    pub cluster_id: u32,
+    pub image_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmbeddingClusterName {
+    pub cluster_id: u32,
+    pub label: String,
+    pub source: String,
+}
+
 impl EmbeddingScope {
     pub fn include_rejected(&self) -> bool {
         match self {

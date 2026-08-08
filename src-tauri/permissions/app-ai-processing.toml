@@ -57,6 +57,7 @@ commands.allow = [
   "list_images_by_color_bucket",
   "list_images_by_detected_class",
   "list_scoped_image_ids",
+  "name_embedding_clusters",
   "list_similarity_group_images",
   "list_similarity_groups",
   "rescan_sidecars",

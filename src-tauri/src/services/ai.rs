@@ -1,9 +1,9 @@
 use crate::db_core::color;
 use crate::db_core::detection::Detection;
 use crate::db_core::models::{
-    EmbeddingPage, EmbeddingScope, ImageColorMetrics, ImageIdPage, ImagePerceptualHash,
-    ImageQualityMetrics, ImageWithFile, NearDuplicateImage, SimilarityGroupSummary,
-    SimilarityGroupingResult,
+    EmbeddingClusterMembership, EmbeddingClusterName, EmbeddingPage, EmbeddingScope,
+    ImageColorMetrics, ImageIdPage, ImagePerceptualHash, ImageQualityMetrics, ImageWithFile,
+    NearDuplicateImage, SimilarityGroupSummary, SimilarityGroupingResult,
 };
 use crate::db_core::perceptual_hash::{self, PHASH_ALGORITHM};
 use crate::db_core::quality;
@@ -90,6 +90,35 @@ pub fn list_scoped_image_ids(
 ) -> Result<ImageIdPage, ServiceError> {
     let limit = page.limit.clamp(1, 100);
     Ok(ctx.db.list_scoped_image_ids(scope, limit, page.offset)?)
+}
+
+fn validate_embedding_cluster_memberships(
+    clusters: &[EmbeddingClusterMembership],
+) -> Result<(), ServiceError> {
+    if clusters.len() > 16 {
+        return Err(ServiceError::InvalidInput(
+            "At most 16 embedding clusters can be named at once".to_string(),
+        ));
+    }
+    let total_ids = clusters.iter().try_fold(0usize, |total, cluster| {
+        total
+            .checked_add(cluster.image_ids.len())
+            .ok_or_else(|| ServiceError::InvalidInput("Too many cluster image IDs".to_string()))
+    })?;
+    if total_ids > 5000 {
+        return Err(ServiceError::InvalidInput(
+            "At most 5000 projected image IDs can be named at once".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+pub fn name_embedding_clusters(
+    ctx: &ServiceContext,
+    clusters: &[EmbeddingClusterMembership],
+) -> Result<Vec<EmbeddingClusterName>, ServiceError> {
+    validate_embedding_cluster_memberships(clusters)?;
+    Ok(ctx.db.name_embedding_clusters(clusters)?)
 }
 
 pub fn get_embedding_count(ctx: &ServiceContext, model: Option<&str>) -> Result<u32, ServiceError> {
@@ -466,6 +495,29 @@ mod tests {
     use crate::db_core::secrets::MemoryStore;
     use parking_lot::Mutex;
     use std::path::PathBuf;
+
+    #[test]
+    fn cluster_naming_request_bounds_match_projection_limits() {
+        let too_many_clusters = (0..17)
+            .map(|cluster_id| EmbeddingClusterMembership {
+                cluster_id,
+                image_ids: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            validate_embedding_cluster_memberships(&too_many_clusters),
+            Err(ServiceError::InvalidInput(_))
+        ));
+
+        let too_many_ids = vec![EmbeddingClusterMembership {
+            cluster_id: 0,
+            image_ids: (0..5001).map(|index| format!("image-{index}")).collect(),
+        }];
+        assert!(matches!(
+            validate_embedding_cluster_memberships(&too_many_ids),
+            Err(ServiceError::InvalidInput(_))
+        ));
+    }
 
     fn make_ctx_parts() -> (
         Database,

@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
     loadEmbeddingNeighbors: vi.fn(),
     createCollectionWithImages: vi.fn(),
     listCollections: vi.fn(),
+    nameEmbeddingClusters: vi.fn(),
     eventListeners: new Map<string, Set<(event: { payload: Record<string, unknown> }) => void>>(),
     workerMessages: [] as Array<Record<string, unknown>>,
 }));
@@ -80,6 +81,7 @@ vi.mock('$lib/api', () => ({
     resumeJob: vi.fn(),
     createCollectionWithImages: mocks.createCollectionWithImages,
     listCollections: mocks.listCollections,
+    nameEmbeddingClusters: mocks.nameEmbeddingClusters,
 }));
 
 import EmbeddingExplorer from './EmbeddingExplorer.svelte';
@@ -231,6 +233,7 @@ beforeEach(() => {
     mocks.listEmbeddingProviders.mockResolvedValue([]);
     mocks.createCollectionWithImages.mockResolvedValue('collection-from-map');
     mocks.listCollections.mockResolvedValue([['collection-from-map', 'Map picks', 1]]);
+    mocks.nameEmbeddingClusters.mockResolvedValue([]);
     mocks.loadEmbeddingNeighbors.mockResolvedValue([
         { image: image('near-one'), score: 0.934 },
     ]);
@@ -698,6 +701,42 @@ describe('Embedding Explorer library scope', () => {
         ));
         await waitFor(() => expect(get(collections)).toEqual([['collection-from-map', 'Map picks', 1]]));
         expect(await screen.findByText('0 images selected')).toBeInTheDocument();
+    });
+
+    it('uses backend tag and detection evidence to auto-name projected clusters', async () => {
+        mocks.nameEmbeddingClusters.mockResolvedValue([
+            { cluster_id: 0, label: 'Golden Hour', source: 'tag' },
+        ]);
+        render(EmbeddingExplorer);
+
+        expect(await screen.findByText('Golden Hour')).toBeInTheDocument();
+        expect(mocks.nameEmbeddingClusters).toHaveBeenCalledWith([
+            { cluster_id: 0, image_ids: ['in-a', 'in-b'] },
+        ]);
+    });
+
+    it('renders the projection before naming completes and ignores a stale provider label', async () => {
+        const user = userEvent.setup();
+        let resolveOldName!: (value: Array<{ cluster_id: number; label: string; source: string }>) => void;
+        mocks.nameEmbeddingClusters
+            .mockReturnValueOnce(new Promise(resolve => {
+                resolveOldName = resolve;
+            }))
+            .mockResolvedValueOnce([
+                { cluster_id: 0, label: 'New Provider Cluster', source: 'filename' },
+            ]);
+
+        render(EmbeddingExplorer);
+        expect(await screen.findByText('Cluster 1')).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Configure embedding model' }));
+        await user.selectOptions(screen.getByRole('combobox', { name: 'Embedding provider' }), 'dinov2');
+        expect(await screen.findByText('New Provider Cluster')).toBeInTheDocument();
+
+        resolveOldName([{ cluster_id: 0, label: 'Old Provider Cluster', source: 'tag' }]);
+        await tick();
+        expect(screen.queryByText('Old Provider Cluster')).not.toBeInTheDocument();
+        expect(screen.getByText('New Provider Cluster')).toBeInTheDocument();
     });
 
     it('supports keyboard point selection and Escape from a focused selection control', async () => {
