@@ -27,6 +27,7 @@
     import UndoHistoryPanel from '$lib/components/UndoHistoryPanel.svelte';
     import AboutDialog from '$lib/components/AboutDialog.svelte';
     import AgentSkillsDialog from '$lib/components/AgentSkillsDialog.svelte';
+    import ApplePhotosCatalogDialog from '$lib/components/ApplePhotosCatalogDialog.svelte';
     import AgentProposalDock from '$lib/components/AgentProposalDock.svelte';
     import ActionProposalReviewDialog from '$lib/components/ActionProposalReviewDialog.svelte';
     import JobProgressPanel from '$lib/components/JobProgressPanel.svelte';
@@ -37,7 +38,7 @@
     import GenerationResultsStrip from '$lib/components/GenerationResultsStrip.svelte';
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, searchOpen, showMissing, showRejected, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel, agentPanelPinned, agentPanelVisible, agentVisualLevel, activeAgentProposalId, activeAgentSelectionPresetId, cycleAgentVisualLevel } from '$lib/stores';
+    import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, applePhotosCatalogOpen, searchOpen, showMissing, showRejected, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel, agentPanelPinned, agentPanelVisible, agentVisualLevel, activeAgentProposalId, activeAgentSelectionPresetId, cycleAgentVisualLevel } from '$lib/stores';
     import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listCollections, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, failAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, cancelClaudeAgentChatTurn, undo, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ClaudeAgentStreamEvent, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
@@ -1047,6 +1048,10 @@
 
     {#if $agentSkillsOpen}
         <AgentSkillsDialog onclose={() => agentSkillsOpen.set(false)} />
+    {/if}
+
+    {#if $applePhotosCatalogOpen}
+        <ApplePhotosCatalogDialog onclose={() => applePhotosCatalogOpen.set(false)} />
     {/if}
 
     <TrashConfirmDialog

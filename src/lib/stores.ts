@@ -576,6 +576,8 @@ export const activeCanvas = writable<Canvas | null>(null);
 export const settingsOpen = writable<boolean>(false);
 export const aboutOpen = writable<boolean>(false);
 export const agentSkillsOpen = writable<boolean>(false);
+// Read-only Apple Photos metadata catalog; macOS exposes the native File menu action.
+export const applePhotosCatalogOpen = writable<boolean>(false);
 export const searchOpen = writable<boolean>(false);
 export type CommandPaletteMode = 'all' | 'commands';
 export const commandPaletteOpen = writable<boolean>(false);

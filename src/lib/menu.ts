@@ -45,6 +45,7 @@ import {
     activePluginIds,
     aboutOpen,
     agentSkillsOpen,
+    applePhotosCatalogOpen,
     navigateTo,
     showToast,
     requestTextInput,
@@ -404,6 +405,9 @@ function handleMenuAction(action: string) {
         case 'import_folder':
         case 'open_folder':
             handleOpenFolder();
+            break;
+        case 'import_apple_photos':
+            applePhotosCatalogOpen.set(true);
             break;
         case 'undo':
             undo().then(label => {
