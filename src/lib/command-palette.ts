@@ -63,6 +63,8 @@ import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { runAiLibraryJob, type AiLibraryJobKind } from './ai-library-jobs';
 import { openSettings } from './settings-navigation';
 import { requestTrashImages } from './trash-actions';
+import { copyCurrentImageToClipboard } from './image-copy-action';
+import { currentImageIndex } from './current-image-target';
 import {
     previewDisplayAlwaysOnTop,
     previewDisplayBlanked,
@@ -100,6 +102,7 @@ export interface CommandPaletteItem {
     kind: CommandPaletteItemKind;
     keywords?: string[];
     defaultShortcut?: string;
+    handlesDefaultShortcut?: boolean;
     disabled?: boolean;
     when?: () => boolean;
     run: () => void | Promise<void>;
@@ -294,6 +297,25 @@ export function shortcutForItem(item: CommandPaletteItem, hotkeys: Record<string
     return hotkeys[item.id] ?? item.defaultShortcut;
 }
 
+export function commandShortcutHints(commandIds: string[]): Record<string, string> {
+    const wanted = new Set(commandIds);
+    const hotkeys = readCommandHotkeys();
+    const compareMode = get(viewMode) === 'compare';
+    return Object.fromEntries(
+        getCommandPaletteItems('all')
+            .filter(item => wanted.has(item.id) && isCommandPaletteItemVisible(item))
+            .flatMap(item => {
+                const shortcut = shortcutForItem(item, hotkeys);
+                if (
+                    compareMode
+                    && !hotkeys[item.id]
+                    && (item.id === 'image.rating.1' || item.id === 'image.rating.2')
+                ) return [];
+                return shortcut ? [[item.id, shortcut] as const] : [];
+            }),
+    );
+}
+
 // Clear every custom hotkey assignment, reverting all commands to their defaults.
 export function resetCommandHotkeys(): Record<string, string> {
     writeJson(COMMAND_HOTKEYS_STORAGE_KEY, {});
@@ -427,7 +449,7 @@ function openCanvas(canvas: Canvas) {
 }
 
 async function setFocusedRating(rating: number) {
-    const idx = get(focusedIndex);
+    const idx = currentImageIndex();
     const image = get(images)[idx];
     if (!image) return;
     await setRating(image.image.id, rating, get(activeSession)?.id ?? null);
@@ -440,7 +462,7 @@ async function setFocusedRating(rating: number) {
 }
 
 async function setFocusedDecision(decision: ImageDecision) {
-    const idx = get(focusedIndex);
+    const idx = currentImageIndex();
     const image = get(images)[idx];
     if (!image) return;
     await setDecision(image.image.id, decision, get(activeSession)?.id ?? null);
@@ -999,6 +1021,18 @@ function commandItems(): CommandPaletteItem[] {
             run: addFocusedImageToCollectTarget,
         },
         {
+            id: 'image.copy',
+            title: 'Copy Focused Image',
+            subtitle: focusedImageTitle(),
+            category: 'Image',
+            kind: 'command',
+            keywords: ['clipboard', 'copy'],
+            defaultShortcut: 'Cmd+C',
+            handlesDefaultShortcut: true,
+            disabled: !hasImage,
+            run: copyCurrentImageToClipboard,
+        },
+        {
             id: 'image.trash',
             title: 'Move Focused Image to Trash',
             subtitle: focusedImageTitle(),
@@ -1006,6 +1040,7 @@ function commandItems(): CommandPaletteItem[] {
             kind: 'command',
             keywords: ['delete', 'remove'],
             defaultShortcut: 'Backspace',
+            handlesDefaultShortcut: true,
             disabled: !hasImage,
             run: () => requestTrashImages(),
         },
@@ -1017,6 +1052,7 @@ function commandItems(): CommandPaletteItem[] {
             kind: 'command',
             keywords: ['remove', 'destroy'],
             defaultShortcut: 'Cmd+Backspace',
+            handlesDefaultShortcut: true,
             disabled: !hasImage,
             run: () => {
                 window.dispatchEvent(new CustomEvent('delete-focused-image'));
@@ -1029,6 +1065,8 @@ function commandItems(): CommandPaletteItem[] {
             category: 'Image',
             kind: 'command',
             keywords: ['star', 'rank', 'score'],
+            defaultShortcut: String(rating),
+            handlesDefaultShortcut: true,
             disabled: !hasImage,
             run: () => setFocusedRating(rating),
         })),
@@ -1039,6 +1077,8 @@ function commandItems(): CommandPaletteItem[] {
             category: 'Image',
             kind: 'command',
             keywords: ['pick', 'cull', 'triage'],
+            defaultShortcut: decision === 'accept' ? 'A' : decision === 'reject' ? 'X' : 'U',
+            handlesDefaultShortcut: true,
             disabled: !hasImage,
             run: () => setFocusedDecision(decision),
         })),
@@ -1586,7 +1626,8 @@ export function commandForKeyboardEvent(event: KeyboardEvent): CommandPaletteIte
     const items = getCommandPaletteItems('all');
     const item = items.find(candidate => {
         if (!isCommandPaletteItemVisible(candidate)) return false;
-        const shortcut = hotkeys[candidate.id];
+        const shortcut = hotkeys[candidate.id]
+            ?? (candidate.handlesDefaultShortcut ? candidate.defaultShortcut : undefined);
         return shortcut ? eventMatchesShortcut(event, shortcut) : false;
     });
     return item && !item.disabled ? item : null;

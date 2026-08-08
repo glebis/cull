@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { tick } from 'svelte';
     import {
         activeCollection,
         activeCanvas,
@@ -46,6 +47,7 @@
         WORKFLOW_CREATE_COMMAND_ID,
         type CommandPaletteItem,
     } from '$lib/command-palette';
+    import { clampFloatingPosition, type FloatingPoint } from '$lib/floating-position';
     import ModalDialog from './ModalDialog.svelte';
 
     let query = $state('');
@@ -57,12 +59,15 @@
     let frequencies = $state<Record<string, number>>({});
     let hotkeys = $state<Record<string, string>>({});
     let contextMenu = $state<{ itemId: string; x: number; y: number } | null>(null);
+    let contextMenuEl: HTMLDivElement | undefined = $state();
+    let contextMenuPositionSeq = 0;
     let hotkeyTargetId = $state<string | null>(null);
     let capturedShortcut = $state('');
 
     const COMMAND_PALETTE_RESULTS_ID = 'command-palette-results';
     const COMMAND_PALETTE_TITLE_ID = 'command-palette-title';
     const COMMAND_PALETTE_DESCRIPTION_ID = 'command-palette-description';
+    const CONTEXT_MENU_SIZE = { width: 220, height: 188 };
 
     let visibleItems = $derived(sortCommandPaletteItems(items, query, {
         mode: $commandPaletteMode,
@@ -165,24 +170,43 @@
         event.preventDefault();
         event.stopPropagation();
         selectedIndex = index;
-        const width = 220;
-        const height = 188;
+        showContextMenu(item.id, { x: event.clientX, y: event.clientY });
+    }
+
+    async function showContextMenu(itemId: string, anchor: FloatingPoint) {
+        const positionSeq = ++contextMenuPositionSeq;
+        const initialPosition = clampFloatingPosition(
+            anchor,
+            CONTEXT_MENU_SIZE,
+            { width: window.innerWidth, height: window.innerHeight },
+        );
         contextMenu = {
-            itemId: item.id,
-            x: Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8)),
-            y: Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8)),
+            itemId,
+            ...initialPosition,
         };
+        await tick();
+        if (positionSeq !== contextMenuPositionSeq || contextMenu?.itemId !== itemId || !contextMenuEl) return;
+
+        const rect = contextMenuEl.getBoundingClientRect();
+        const measuredPosition = clampFloatingPosition(
+            anchor,
+            {
+                width: rect.width || CONTEXT_MENU_SIZE.width,
+                height: rect.height || CONTEXT_MENU_SIZE.height,
+            },
+            { width: window.innerWidth, height: window.innerHeight },
+        );
+        contextMenu = { itemId, ...measuredPosition };
     }
 
     function openContextMenuForSelected() {
         const item = selectedItem;
         if (!item) return;
         const rect = inputEl?.getBoundingClientRect();
-        contextMenu = {
-            itemId: item.id,
+        showContextMenu(item.id, {
             x: Math.max(8, (rect?.left ?? 0) + 24),
             y: Math.max(8, (rect?.bottom ?? 0) + 48),
-        };
+        });
     }
 
     function isPinned(item: CommandPaletteItem) {
@@ -441,6 +465,7 @@
 
         {#if contextMenu && contextItem}
             <div
+                bind:this={contextMenuEl}
                 class="palette-context-menu"
                 style={`left: ${contextMenu.x}px; top: ${contextMenu.y}px;`}
                 role="menu"
@@ -451,7 +476,7 @@
                     Run
                 </button>
                 <button type="button" role="menuitem" onclick={() => togglePinned(contextItem)}>
-                    {isPinned(contextItem) ? 'Unfavorite' : 'Favorite'}
+                    {isPinned(contextItem) ? 'Unpin' : 'Pin'}
                 </button>
                 <button type="button" role="menuitem" onclick={() => startHotkeyCapture(contextItem)}>
                     Set Hotkey...
