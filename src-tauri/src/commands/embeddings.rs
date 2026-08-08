@@ -423,7 +423,23 @@ pub async fn start_model_embedding_generation(
         .await;
 
         let terminal = embedding_worker_terminal_outcome(result);
+        let worker_error = match &terminal {
+            crate::services::jobs::WorkerTerminalOutcome::Failed(error) => Some(error.clone()),
+            _ => None,
+        };
         state.jobs.finish_from_worker(&task_job_id, terminal);
+        if let Some(error) = worker_error {
+            if let Err(recovery_error) = state
+                .db
+                .fail_running_model_runs_for_job(&task_job_id, &error)
+            {
+                crate::safe_eprintln!(
+                    "Failed to recover model runs for embedding job {}: {}",
+                    task_job_id,
+                    recovery_error
+                );
+            }
+        }
         state.jobs.persist_terminal(&task_job_id, &state.db);
         if let Some(snapshot) = state.jobs.get(&task_job_id) {
             emit_embedding_job_snapshot(&task_app, &snapshot, &task_model, task_mode);
