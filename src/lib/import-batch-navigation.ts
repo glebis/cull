@@ -1,4 +1,4 @@
-import { getBatchImages } from './api';
+import { get } from 'svelte/store';
 import {
     focusedImageOverride,
     focusedIndex,
@@ -9,17 +9,17 @@ import {
 import {
     clearImageScope,
     invalidateImageCache,
+    loadImagesForCurrentScope,
     resetImagePaging,
 } from './image-loading';
 
 export async function activateImportBatch(batchId: string) {
-    const batchImages = await getBatchImages(batchId);
     invalidateImageCache();
     clearImageScope();
     resetImagePaging();
-    images.set(batchImages);
     importBatchFilter.set(batchId);
-    importBatchImageIds.set(batchImages.map(item => item.image.id));
+    await loadImagesForCurrentScope({ force: true, invalidateCache: true });
+    importBatchImageIds.set(get(images).map(item => item.image.id));
     focusedImageOverride.set(null);
     focusedIndex.set(0);
 }

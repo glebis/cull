@@ -3,6 +3,7 @@
 
 use crate::db_core::db::{row_u64, Database};
 use crate::db_core::models::*;
+use crate::db_core::visibility::RejectedVisibility;
 use rusqlite::{params, Result};
 
 impl Database {
@@ -18,17 +19,27 @@ impl Database {
     }
 
     pub fn list_collections(&self) -> Result<Vec<(String, String, u32)>> {
+        self.list_collections_with_visibility(true)
+    }
+
+    pub fn list_collections_with_visibility(
+        &self,
+        include_rejected: bool,
+    ) -> Result<Vec<(String, String, u32)>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
+        let sql = format!(
             "SELECT p.id, p.name, COUNT(DISTINCT f.image_id) as cnt
              FROM projects p
              LEFT JOIN collection_items ci ON ci.collection_id = p.id
              LEFT JOIN images i ON i.id = ci.image_id
-             LEFT JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+             LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             LEFT JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL AND {}
              WHERE (p.collection_type IS NULL OR p.collection_type = 'manual')
              GROUP BY p.id
              ORDER BY p.created_at DESC",
-        )?;
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
         rows.collect::<Result<Vec<_>>>()
     }
@@ -78,8 +89,16 @@ impl Database {
     }
 
     pub fn list_collection_images(&self, collection_id: &str) -> Result<Vec<ImageWithFile>> {
+        self.list_collection_images_with_visibility(collection_id, true)
+    }
+
+    pub fn list_collection_images_with_visibility(
+        &self,
+        collection_id: &str,
+        include_rejected: bool,
+    ) -> Result<Vec<ImageWithFile>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
+        let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
@@ -88,10 +107,12 @@ impl Database {
              JOIN images i ON i.id = ci.image_id
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE ci.collection_id = ?1
+             WHERE ci.collection_id = ?1 AND {}
              GROUP BY i.id
              ORDER BY ci.position ASC",
-        )?;
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![collection_id], |row| {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
@@ -127,8 +148,18 @@ impl Database {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<ImageWithFile>> {
+        self.list_collection_images_page_with_visibility(collection_id, limit, offset, true)
+    }
+
+    pub fn list_collection_images_page_with_visibility(
+        &self,
+        collection_id: &str,
+        limit: u32,
+        offset: u32,
+        include_rejected: bool,
+    ) -> Result<Vec<ImageWithFile>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
+        let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
@@ -137,11 +168,13 @@ impl Database {
              JOIN images i ON i.id = ci.image_id
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE ci.collection_id = ?1
+             WHERE ci.collection_id = ?1 AND {}
              GROUP BY i.id
              ORDER BY ci.position ASC
              LIMIT ?2 OFFSET ?3",
-        )?;
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![collection_id, limit, offset], |row| {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;

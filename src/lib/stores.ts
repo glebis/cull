@@ -207,6 +207,7 @@ export const gridPreset = writable<number>(1);
 export const gridGap = writable<number>(4);
 
 export const zenMode = writable<boolean>(false);
+export const showRejected = writable<boolean>(false);
 
 export const compareImages = writable<ImageWithFile[]>([]);
 export const compareIndex = writable<number>(0);

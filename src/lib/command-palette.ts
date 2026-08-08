@@ -33,6 +33,7 @@ import {
     showDetectionBoxes,
     showDetectionInspector,
     showToast,
+    showRejected,
     sidebarVisible,
     smartCollections,
     folders,
@@ -51,7 +52,8 @@ import {
 import { invalidateImageCache, loadAllImages, loadImagesForCurrentScope } from './image-loading';
 import { addToCollection, analyzeImages, checkOllama, createCollection, detectNsfw, detectObjects, getAppSetting, getClientFeedback, getOllamaConfig, isNudenetAvailable, isYoloAvailable, listCanvases, listClientFeedback, listCollections, listImageIdsMissingDetection, listImageIdsMissingVision, redo, saveTextToPath, setClientFeedback, setDecision, setRating, undo, validateSessionFolder, type Canvas, type Session } from './api';
 import { activateImportBatch } from './import-batch-navigation';
-import { withDecision, withRating, type ImageDecision } from './selection-updates';
+import { withRating, type ImageDecision } from './selection-updates';
+import { applyDecisionToCurrentView } from './rejected-visibility';
 import { createWorkflow, readWorkflows, runWorkflow, type CommandWorkflow } from './workflows';
 import { buildDeliveryCsv, type DeliveryRow } from './delivery-csv';
 import { loadSimilarImages } from './similarity';
@@ -442,11 +444,7 @@ async function setFocusedDecision(decision: ImageDecision) {
     if (!image) return;
     await setDecision(image.image.id, decision, get(activeSession)?.id ?? null);
     invalidateImageCache();
-    images.update(all => {
-        const next = [...all];
-        next[idx] = withDecision(next[idx], decision);
-        return next;
-    });
+    applyDecisionToCurrentView(image.image.id, decision);
 }
 
 function focusedImageTitle(): string {
@@ -480,7 +478,7 @@ async function createCollectionFromImageSet(inverse = false) {
 
     const collectionId = await createCollection(name.trim());
     await addToCollection(collectionId, imageIds);
-    collections.set(await listCollections());
+    collections.set(await listCollections(get(showRejected)));
     statusHint.set(`Created "${name.trim()}" with ${imageIds.length} images`);
     setTimeout(() => statusHint.set(null), 2000);
 }
@@ -509,7 +507,7 @@ async function toggleCollectMode() {
         targetId = target.collectionId;
     } else {
         targetId = await createCollection(target.name);
-        collections.set(await listCollections());
+        collections.set(await listCollections(get(showRejected)));
     }
 
     collectMode.set(true);
@@ -525,7 +523,7 @@ async function addFocusedImageToCollectTarget() {
 
     await addToCollection(target, [image.image.id]);
     invalidateImageCache();
-    collections.set(await listCollections());
+    collections.set(await listCollections(get(showRejected)));
     if (get(activeCollection) === target) {
         await loadImagesForCurrentScope({ resetFocus: false, force: true });
     }

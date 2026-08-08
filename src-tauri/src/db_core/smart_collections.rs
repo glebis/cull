@@ -166,6 +166,27 @@ impl Field {
 }
 
 impl FilterNode {
+    pub(crate) fn explicitly_requests_rejected(&self) -> bool {
+        match self {
+            FilterNode::Group { children, .. } => children
+                .iter()
+                .any(FilterNode::explicitly_requests_rejected),
+            FilterNode::Not { .. } => false,
+            FilterNode::Rule { field, op, value } => {
+                if !matches!(field, Field::Decision) {
+                    return false;
+                }
+                match (op, value) {
+                    (RuleOp::Eq, FilterValue::String(value)) => value == "reject",
+                    (RuleOp::In, FilterValue::StringArray(values)) => {
+                        values.iter().any(|value| value == "reject")
+                    }
+                    _ => false,
+                }
+            }
+        }
+    }
+
     pub fn to_sql_clause(&self) -> std::result::Result<(String, Vec<SqlValue>), String> {
         match self {
             FilterNode::Group { op, children } => {

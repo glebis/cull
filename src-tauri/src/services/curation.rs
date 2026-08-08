@@ -22,6 +22,12 @@ pub fn create_collection(ctx: &ServiceContext, name: &str) -> Result<String, Ser
 pub fn list_collections(ctx: &ServiceContext) -> Result<Vec<(String, String, u32)>, ServiceError> {
     Ok(ctx.db.list_collections()?)
 }
+pub fn list_collections_with_visibility(
+    ctx: &ServiceContext,
+    include_rejected: bool,
+) -> Result<Vec<(String, String, u32)>, ServiceError> {
+    Ok(ctx.db.list_collections_with_visibility(include_rejected)?)
+}
 
 pub fn rename_collection(
     ctx: &ServiceContext,
@@ -47,6 +53,17 @@ pub fn list_collection_images(
     enrich_thumbnails(&mut images, ctx.app_data_dir);
     Ok(images)
 }
+pub fn list_collection_images_with_visibility(
+    ctx: &ServiceContext,
+    collection_id: &str,
+    include_rejected: bool,
+) -> Result<Vec<ImageWithFile>, ServiceError> {
+    let mut images = ctx
+        .db
+        .list_collection_images_with_visibility(collection_id, include_rejected)?;
+    enrich_thumbnails(&mut images, ctx.app_data_dir);
+    Ok(images)
+}
 
 pub fn list_collection_images_page(
     ctx: &ServiceContext,
@@ -57,6 +74,22 @@ pub fn list_collection_images_page(
     let mut images = ctx
         .db
         .list_collection_images_page(collection_id, page.limit, page.offset)?;
+    enrich_thumbnails(&mut images, ctx.app_data_dir);
+    Ok(images)
+}
+pub fn list_collection_images_page_with_visibility(
+    ctx: &ServiceContext,
+    collection_id: &str,
+    page: Pagination,
+    include_rejected: bool,
+) -> Result<Vec<ImageWithFile>, ServiceError> {
+    let page = Pagination::clamped(page.offset, page.limit);
+    let mut images = ctx.db.list_collection_images_page_with_visibility(
+        collection_id,
+        page.limit,
+        page.offset,
+        include_rejected,
+    )?;
     enrich_thumbnails(&mut images, ctx.app_data_dir);
     Ok(images)
 }
@@ -90,6 +123,14 @@ pub fn create_smart_collection(
 pub fn list_smart_collections(ctx: &ServiceContext) -> Result<Vec<SmartCollection>, ServiceError> {
     Ok(ctx.db.list_smart_collections()?)
 }
+pub fn list_smart_collections_with_visibility(
+    ctx: &ServiceContext,
+    include_rejected: bool,
+) -> Result<Vec<SmartCollection>, ServiceError> {
+    Ok(ctx
+        .db
+        .list_smart_collections_with_visibility(include_rejected)?)
+}
 
 pub fn evaluate_smart_collection(
     ctx: &ServiceContext,
@@ -97,12 +138,35 @@ pub fn evaluate_smart_collection(
 ) -> Result<Vec<ImageWithFile>, ServiceError> {
     Ok(ctx.db.evaluate_smart_collection(filter_json)?)
 }
+pub fn evaluate_smart_collection_with_visibility(
+    ctx: &ServiceContext,
+    filter_json: &str,
+    include_rejected: bool,
+) -> Result<Vec<ImageWithFile>, ServiceError> {
+    let mut images = ctx.db.evaluate_smart_collection_page_with_visibility(
+        filter_json,
+        None,
+        None,
+        include_rejected,
+    )?;
+    enrich_thumbnails(&mut images, ctx.app_data_dir);
+    Ok(images)
+}
 
 pub fn count_smart_collection(
     ctx: &ServiceContext,
     filter_json: &str,
 ) -> Result<i64, ServiceError> {
     Ok(ctx.db.count_smart_collection(filter_json)?)
+}
+pub fn count_smart_collection_with_visibility(
+    ctx: &ServiceContext,
+    filter_json: &str,
+    include_rejected: bool,
+) -> Result<i64, ServiceError> {
+    Ok(ctx
+        .db
+        .count_smart_collection_with_visibility(filter_json, include_rejected)?)
 }
 
 pub fn evaluate_smart_collection_page(
@@ -114,6 +178,22 @@ pub fn evaluate_smart_collection_page(
     let mut images =
         ctx.db
             .evaluate_smart_collection_page(filter_json, Some(page.limit), Some(page.offset))?;
+    enrich_thumbnails(&mut images, ctx.app_data_dir);
+    Ok(images)
+}
+pub fn evaluate_smart_collection_page_with_visibility(
+    ctx: &ServiceContext,
+    filter_json: &str,
+    page: Pagination,
+    include_rejected: bool,
+) -> Result<Vec<ImageWithFile>, ServiceError> {
+    let page = Pagination::clamped(page.offset, page.limit);
+    let mut images = ctx.db.evaluate_smart_collection_page_with_visibility(
+        filter_json,
+        Some(page.limit),
+        Some(page.offset),
+        include_rejected,
+    )?;
     enrich_thumbnails(&mut images, ctx.app_data_dir);
     Ok(images)
 }

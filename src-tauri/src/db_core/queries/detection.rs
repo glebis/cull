@@ -3,6 +3,7 @@
 
 use crate::db_core::db::{row_u64, Database};
 use crate::db_core::models::*;
+use crate::db_core::visibility::RejectedVisibility;
 use rusqlite::{params, Result};
 
 impl Database {
@@ -96,24 +97,47 @@ impl Database {
     }
 
     pub fn count_by_class(&self, class_name: &str) -> Result<u32> {
+        self.count_by_class_with_visibility(class_name, true)
+    }
+
+    pub fn count_by_class_with_visibility(
+        &self,
+        class_name: &str,
+        include_rejected: bool,
+    ) -> Result<u32> {
         let conn = self.conn.lock();
-        conn.query_row(
-            "SELECT COUNT(DISTINCT image_id) FROM detections WHERE class_name = ?1",
-            params![class_name],
-            |row| row.get::<_, u32>(0),
-        )
+        let sql = format!(
+            "SELECT COUNT(DISTINCT d.image_id) FROM detections d
+             JOIN images i ON i.id = d.image_id
+             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+             LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             WHERE d.class_name = ?1 AND {}",
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        conn.query_row(&sql, params![class_name], |row| row.get::<_, u32>(0))
     }
 
     pub fn list_detected_classes(&self) -> Result<Vec<(String, u32)>> {
+        self.list_detected_classes_with_visibility(true)
+    }
+
+    pub fn list_detected_classes_with_visibility(
+        &self,
+        include_rejected: bool,
+    ) -> Result<Vec<(String, u32)>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
+        let sql = format!(
             "SELECT d.class_name, COUNT(DISTINCT d.image_id) AS image_count
              FROM detections d
+             JOIN images i ON i.id = d.image_id
              JOIN image_files f ON f.image_id = d.image_id AND f.missing_at IS NULL
-             WHERE d.model_name GLOB 'yolo*'
+             LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             WHERE d.model_name GLOB 'yolo*' AND {}
              GROUP BY d.class_name
              ORDER BY image_count DESC, d.class_name ASC",
-        )?;
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
         rows.collect::<Result<Vec<_>>>()
     }
@@ -124,8 +148,18 @@ impl Database {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<ImageWithFile>> {
+        self.list_images_by_class_with_visibility(class_name, limit, offset, true)
+    }
+
+    pub fn list_images_by_class_with_visibility(
+        &self,
+        class_name: &str,
+        limit: u32,
+        offset: u32,
+        include_rejected: bool,
+    ) -> Result<Vec<ImageWithFile>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
+        let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
@@ -134,11 +168,13 @@ impl Database {
              JOIN images i ON i.id = d.image_id
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE d.class_name = ?1
+             WHERE d.class_name = ?1 AND {}
              GROUP BY i.id
              ORDER BY MAX(d.confidence) DESC, i.imported_at DESC
              LIMIT ?2 OFFSET ?3",
-        )?;
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![class_name, limit, offset], |row| {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;

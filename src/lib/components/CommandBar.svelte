@@ -1,7 +1,7 @@
 <script lang="ts">
     import { parseNlQuery, countSmartCollection, createSmartCollection, listSmartCollections, startDictation, stopDictation } from '$lib/api';
     import { listen } from '@tauri-apps/api/event';
-    import { smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, searchOpen, viewMode, navigateTo, navigateBack, voiceDictationEnabled } from '$lib/stores';
+    import { smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, searchOpen, viewMode, navigateTo, navigateBack, voiceDictationEnabled, showRejected } from '$lib/stores';
     import type { FilterNode } from '$lib/api';
     import { buildSearchPresetLists, type SearchPreset, type SearchPresetKind } from '$lib/search-presets';
     import RuleBuilder from './RuleBuilder.svelte';
@@ -40,7 +40,7 @@
     let applyDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
     async function rebuildSearchPresetLists(collections = $smartCollections) {
-        const lists = await buildSearchPresetLists(collections, countSmartCollection);
+        const lists = await buildSearchPresetLists(collections, (filterJson) => countSmartCollection(filterJson, $showRejected));
         savedSearchPresets = lists.saved;
         autoSearchPresets = lists.auto;
     }
@@ -49,7 +49,7 @@
         const reqId = ++searchPresetRequestId;
         isLoadingSearchPresets = true;
         try {
-            const updated = await listSmartCollections();
+            const updated = await listSmartCollections($showRejected);
             if (reqId !== searchPresetRequestId) return;
             $smartCollections = updated;
             await rebuildSearchPresetLists(updated);
@@ -81,7 +81,7 @@
     async function applyFilter(filterJson: string, reqId: number) {
         activateAdHocFilter(filterJson, null);
         const [count] = await Promise.all([
-            countSmartCollection(filterJson),
+            countSmartCollection(filterJson, $showRejected),
             loadImagesForCurrentScope({ force: true }),
         ]);
         if (reqId !== applyRequestId) return;
@@ -323,7 +323,7 @@
         const nlQuery = isDirtyFromManualEdit ? query + ' (edited)' : query;
         try {
             await createSmartCollection(collectionName.trim(), filterJson, nlQuery);
-            const updated = await listSmartCollections();
+            const updated = await listSmartCollections($showRejected);
             $smartCollections = updated;
             await rebuildSearchPresetLists(updated);
 

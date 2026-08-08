@@ -18,6 +18,7 @@ const customViewMenuActions = [
     'view_publish',
     'view_export',
     'toggle_sidebar',
+    'view_show_rejected',
     'view_loupe_histogram',
     'view_preview_display',
     'preview_display_move_monitor',

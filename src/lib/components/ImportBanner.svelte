@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { importBatchFilter, importBatchImageIds, pinnedCollection, collections, activeCollection, activeFolder, activeSmartCollection, activeDetectedClass, showToast, requestTextInput } from '$lib/stores';
+    import { importBatchFilter, importBatchImageIds, pinnedCollection, collections, activeCollection, activeFolder, activeSmartCollection, activeDetectedClass, showToast, requestTextInput, showRejected } from '$lib/stores';
     import { createCollection, addToCollection, listCollections, getBatchImages, getGenerationRun } from '$lib/api';
     import { invalidateImageCache, loadAllImages } from '$lib/image-loading';
     import { generateImportCollectionName, type ImportCollectionNameItem } from '$lib/collection-name';
@@ -29,7 +29,7 @@
 
         try {
             const collectionId = await createCollection(name.trim());
-            const ids = get(importBatchImageIds);
+            const ids = (await getBatchImages(batchId, true)).map(img => img.image.id);
             await addToCollection(collectionId, ids);
             invalidateImageCache();
 
@@ -41,7 +41,7 @@
             activeDetectedClass.set(null);
 
             // Refresh collections list
-            const c = await listCollections();
+            const c = await listCollections($showRejected);
             collections.set(c);
 
             importBatchFilter.set(null);
@@ -57,7 +57,7 @@
     async function buildDefaultCollectionName(batchId: string): Promise<string> {
         const now = new Date();
         try {
-            const batchImages = await getBatchImages(batchId);
+            const batchImages = await getBatchImages(batchId, true);
             const generationPrompts = new Map<string, string | null>();
             const promptCandidates = batchImages
                 .filter(img => !img.image.ai_prompt)
