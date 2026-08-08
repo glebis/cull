@@ -37,7 +37,7 @@ pub mod test_support {
 
 use crate::commands::deeplink::{
     emit_open_params, open_params_for_drag_drop_paths, open_params_for_drag_drop_paths_at,
-    open_params_for_file_paths, open_params_for_urls, parse_deep_link,
+    open_params_for_file_paths, open_params_for_launch_path, open_params_for_urls, parse_deep_link,
 };
 use crate::db_core::db::Database;
 use crate::db_core::detection::DetectionEngine;
@@ -216,10 +216,40 @@ fn run_stdio_bridge() {
     });
 }
 
+fn legacy_image_paths(args: &[String], parsed_launch_arg: Option<&std::path::Path>) -> Vec<String> {
+    args.iter()
+        .filter(|arg| !arg.starts_with("cull://"))
+        .map(PathBuf::from)
+        .filter(|path| parsed_launch_arg != Some(path.as_path()))
+        .filter(|path| path.is_file() && crate::extensions::is_image_path(path, false))
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect()
+}
+
+#[cfg(test)]
+mod gui_launch_tests {
+    use super::*;
+
+    #[test]
+    fn parsed_positional_image_is_not_forwarded_twice_by_legacy_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let image = dir.path().join("image.png");
+        std::fs::write(&image, b"image").unwrap();
+        let args = vec!["cull".to_string(), image.to_string_lossy().into_owned()];
+
+        assert!(legacy_image_paths(&args, Some(&image)).is_empty());
+        assert_eq!(
+            legacy_image_paths(&args, None),
+            vec![image.to_string_lossy()]
+        );
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let args = <cli::CliArgs as clap::Parser>::parse();
     let start_hidden = args.tray;
+    let launch_path = args.launch_path.clone();
 
     if let Some(code) = cli::run_headless_if_requested(&args) {
         std::process::exit(code);
@@ -236,10 +266,19 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             crate::safe_eprintln!("[single-instance] Second instance args: {:?}", args);
             reveal_main_window(app);
-            let mut file_paths = Vec::new();
+            let mut parsed_launch_arg = None;
+            if let Ok(parsed) = <cli::CliArgs as clap::Parser>::try_parse_from(args.iter()) {
+                if let Some(path) = parsed.launch_path.as_deref() {
+                    parsed_launch_arg = Some(path.to_path_buf());
+                    let resolved = cli::resolve_launch_path(path, std::path::Path::new(&cwd));
+                    if let Some(params) = open_params_for_launch_path(&resolved) {
+                        let _ = emit_open_params(app, params);
+                    }
+                }
+            }
             for arg in &args {
                 if arg.starts_with("cull://") {
                     crate::safe_eprintln!("[single-instance] Forwarding deep link: {}", arg);
@@ -247,13 +286,9 @@ pub fn run() {
                         Ok(params) => { let _ = emit_open_params(app, params); }
                         Err(e) => crate::safe_eprintln!("[single-instance] Deep link rejected: {}", e),
                     }
-                } else {
-                    let path = PathBuf::from(arg);
-                    if path.is_file() && crate::extensions::is_image_path(&path, false) {
-                        file_paths.push(path.to_string_lossy().into_owned());
-                    }
                 }
             }
+            let file_paths = legacy_image_paths(&args, parsed_launch_arg.as_deref());
             if let Some(params) = open_params_for_file_paths(file_paths) {
                 let _ = emit_open_params(app, params);
             }
@@ -428,6 +463,12 @@ pub fn run() {
                         }
                     }
                 });
+            }
+
+            if let Some(path) = launch_path.as_deref() {
+                if let Some(params) = open_params_for_launch_path(path) {
+                    let _ = emit_open_params(app.handle(), params);
+                }
             }
 
             Ok(())
