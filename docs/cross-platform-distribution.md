@@ -122,8 +122,15 @@ Run these before any release build:
 
 ```bash
 npm ci
+npm run release:cull -- check --bump patch --json
 npm run preflight -- release
 ```
+
+The readiness command and `release:cull prepare` both execute the named release
+regression contracts. They fail closed if the candidate omits any commit on the
+locally verified `origin/main`, if required behavior coverage is missing, or if
+a contract fails. Refresh `origin/main` before local readiness checks; signed
+Release workflows do this explicitly before their immutable gate record.
 
 Run browser E2E when the frontend changed or before publishing a release candidate:
 

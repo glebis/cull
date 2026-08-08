@@ -30,6 +30,7 @@ import { formatLibraryLoadError } from './library-view-state';
 import { currentLibraryScope, libraryScopeKey, type LibraryScope } from './library-scope';
 
 export const IMAGE_PAGE_SIZE = 200;
+export const IMAGE_OVERVIEW_PAGE_SIZE = 5_000;
 const MAX_SCOPE_CACHE_ENTRIES = 5;
 const LIBRARY_LOAD_TIMEOUT_MS = 15_000;
 
@@ -274,7 +275,7 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
     }
 }
 
-export async function loadMoreImagesForCurrentScope() {
+export async function loadMoreImagesForCurrentScope(pageSize = IMAGE_PAGE_SIZE) {
     const scope = currentLibraryScope();
     const key = scopeKey(scope);
     if (key !== activeScopeKey) {
@@ -289,11 +290,12 @@ export async function loadMoreImagesForCurrentScope() {
     setLoadState();
 
     try {
-        const page = await withLibraryLoadTimeout(fetchPage(scope, offset, IMAGE_PAGE_SIZE));
+        const normalizedPageSize = Math.max(1, Math.trunc(pageSize) || IMAGE_PAGE_SIZE);
+        const page = await withLibraryLoadTimeout(fetchPage(scope, offset, normalizedPageSize));
         if (seq !== requestSeq || key !== activeScopeKey) return;
 
-        nextOffset += IMAGE_PAGE_SIZE;
-        hasMore = page.rawCount === IMAGE_PAGE_SIZE;
+        nextOffset += normalizedPageSize;
+        hasMore = page.rawCount === normalizedPageSize;
         if (page.items.length > 0) {
             images.update(existing => {
                 const seen = new Set(existing.map(img => img.image.id));

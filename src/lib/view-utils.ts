@@ -153,6 +153,19 @@ export interface ThumbnailVariantOptions {
     maxDprMultiplier?: number;
 }
 
+export function thumbnailVariantEdge(
+    displayPx: number,
+    dpr = 1,
+    availableSizes: readonly number[] = THUMBNAIL_SIZES,
+    maxDprMultiplier = 2,
+): number {
+    const sizes = [...availableSizes].sort((a, b) => a - b);
+    if (sizes.length === 0) return Math.max(1, Math.ceil(displayPx));
+    const effectiveDpr = Number.isFinite(dpr) && dpr > 0 ? Math.min(dpr, maxDprMultiplier) : 1;
+    const target = Math.max(0, displayPx) * effectiveDpr;
+    return sizes.find(size => size >= target) ?? sizes[sizes.length - 1];
+}
+
 /**
  * Choose the smallest generated thumbnail variant whose pixel size is >= the on-screen
  * display size (times a clamped device pixel ratio). The largest size lives at the base
@@ -174,10 +187,7 @@ export function pickThumbnailVariant(
 
     const dpr = Number.isFinite(opts.dpr) && (opts.dpr as number) > 0 ? (opts.dpr as number) : 1;
     const cap = opts.maxDprMultiplier ?? 2;
-    const effectiveDpr = Math.min(dpr, cap);
-    const target = Math.max(0, displayPx) * effectiveDpr;
-
-    const chosen = sizes.find((s) => s >= target) ?? largest;
+    const chosen = thumbnailVariantEdge(displayPx, dpr, sizes, cap);
 
     // The base file IS the largest variant; only smaller sizes get the `_{size}` suffix.
     if (chosen >= largest) return basePath;

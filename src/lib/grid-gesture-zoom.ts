@@ -1,5 +1,7 @@
-export const GRID_GESTURE_ZOOM_MIN = 80;
-export const GRID_GESTURE_ZOOM_MAX = 400;
+import { THUMBNAIL_ZOOM_MAX, THUMBNAIL_ZOOM_MIN } from './thumbnail-zoom';
+
+export const GRID_GESTURE_ZOOM_MIN = THUMBNAIL_ZOOM_MIN;
+export const GRID_GESTURE_ZOOM_MAX = THUMBNAIL_ZOOM_MAX;
 
 export interface GridGestureZoomPreset {
     name: string;

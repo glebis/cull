@@ -7,17 +7,21 @@ impl CullMcp {
     )]
     fn search_by_object(&self, Parameters(params): Parameters<SearchByObjectParams>) -> String {
         let state = self.app_handle.state::<AppState>();
-        let limit = clamp_limit(params.limit.unwrap_or(50));
-        match state.db.search_by_class(&params.class_name, limit * 2) {
-            Ok(results) => {
-                let r: Vec<serde_json::Value> = results.iter()
-                .filter(|(id, _)| self.check_image_id_scope(id).unwrap_or(false))
-                .take(limit as usize)
-                .map(|(id, confidence)| {
-                    serde_json::json!({"image_id": id, "confidence": confidence})
-                }).collect();
-                serde_json::to_string(&r).unwrap_or_else(|_| "[]".to_string())
+        let result = match self.token_scope() {
+            Some(scope) => {
+                let (folders, collections, tag_norms) = Self::scope_dimensions(&scope);
+                ai_service::search_by_object_in_scope_database(
+                    &state.db,
+                    &params,
+                    &folders,
+                    &collections,
+                    &tag_norms,
+                )
             }
+            None => ai_service::search_by_object_in_database(&state.db, &params),
+        };
+        match result {
+            Ok(results) => serde_json::to_string(&results).unwrap_or_else(|_| "[]".to_string()),
             Err(e) => format!("Error: {}", e),
         }
     }

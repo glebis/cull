@@ -8,7 +8,7 @@ import {
     navigateTo, navigateBack, searchOpen, shortcutsOpen, undoHistoryOpen, focusedImage, activeSession,
     requestTextInput, requestCollectionTarget, selectionAnchorIndex, requestLoupeActualSize, requestLoupeFitIn,
     requestLoupeZoomIn, requestLoupeZoomOut,
-    activeFolder,
+    activeFolder, setGridThumbnailSize,
     showRejected,
 } from './stores';
 import { tabCycleOrder } from './plugins/tab-registry';
@@ -16,7 +16,7 @@ import { computeCompareSwap, nextComparePresentationState } from './compare-util
 import { nextExportPresentationState } from './presentation-utils';
 import type { NsfwMode } from './stores';
 import type { ViewMode } from './stores';
-import { setRating, setDecision, createCollection, addToCollection, listCollections, rotateImage, undo, redo, copyImageToClipboard, pasteImageFromClipboard } from './api';
+import { setRating, setDecision, createCollection, addToCollection, listCollections, rotateImage, undo, redo, pasteImageFromClipboard } from './api';
 import { showToast } from './stores';
 import { invalidateImageCache, loadImagesForCurrentScope } from './image-loading';
 import { focusImagePath } from './transform-results';
@@ -24,7 +24,9 @@ import { commandForKeyboardEvent, openCommandPalette, runCommandPaletteItem } fr
 import { recordShortcutUse, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from './shortcut-reminders';
 import { withRating, type ImageDecision } from './selection-updates';
 import { applyDecisionToCurrentView } from './rejected-visibility';
-import { pasteDestinationForContext } from './clipboard-actions';
+import { filenameForPath, pasteDestinationForContext } from './clipboard-actions';
+import { nudgeThumbnailSize } from './thumbnail-zoom';
+import { currentImageIndex } from './current-image-target';
 
 let waitingForStar = false;
 
@@ -166,12 +168,7 @@ export async function handleDecision(decision: ImageDecision, imageIndex?: numbe
 }
 
 function handleResize(delta: number) {
-    thumbnailSize.update(s => {
-        const next = s + delta;
-        if (next < 80) return 80;
-        if (next > 400) return 400;
-        return next;
-    });
+    setGridThumbnailSize(nudgeThumbnailSize(get(thumbnailSize), delta < 0 ? -1 : 1));
 }
 
 // ---- Compare helpers ----
@@ -191,45 +188,7 @@ function getCompareActiveIndexForSide(side: 0 | 1): number {
 }
 
 function getCompareActiveIndex(): number {
-    const imgs = get(images);
-    const sel = get(selectedIds);
-    const idx = get(focusedIndex);
-    const side = get(compareActiveSide);
-
-    if (sel.size >= 2) {
-        const selArr = Array.from(sel);
-        const targetId = selArr[side] ?? selArr[0];
-        const found = imgs.findIndex(i => i.image.id === targetId);
-        return found >= 0 ? found : idx;
-    }
-    return idx + side;
-}
-
-function filenameForPath(path: string): string {
-    return path.split('/').filter(Boolean).pop() ?? path;
-}
-
-function currentClipboardImage() {
-    if (get(viewMode) === 'compare') {
-        return get(images)[getCompareActiveIndex()] ?? null;
-    }
-    return get(focusedImage);
-}
-
-async function handleCopyCurrentImage() {
-    const img = currentClipboardImage();
-    if (!img) {
-        showToast('No current image to copy', { type: 'warning', duration: 3000 });
-        return;
-    }
-
-    try {
-        await copyImageToClipboard(img.image.id);
-        showToast('Copied image', { detail: filenameForPath(img.path), type: 'success', duration: 2500 });
-    } catch (err) {
-        console.error('Failed to copy image:', err);
-        showToast('Could not copy image', { detail: String(err), type: 'error', duration: 5000 });
-    }
+    return currentImageIndex();
 }
 
 async function handlePasteImage() {
@@ -324,12 +283,6 @@ export function handleKeydown(e: KeyboardEvent) {
     const tag = (e.target as HTMLElement)?.tagName;
     if (['BUTTON', 'A', 'SELECT'].includes(tag) && (e.key === ' ' || e.key === 'Enter')) return;
 
-    if (e.key.toLowerCase() === 'c' && e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey) {
-        e.preventDefault();
-        void handleCopyCurrentImage();
-        return;
-    }
-
     if (e.key.toLowerCase() === 'v' && e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         void handlePasteImage();
@@ -363,14 +316,6 @@ export function handleKeydown(e: KeyboardEvent) {
         return;
     }
 
-    const commandItem = commandForKeyboardEvent(e);
-    if (commandItem) {
-        e.preventDefault();
-        runCommandPaletteItem(commandItem)
-            .catch(err => console.error('Failed to run command hotkey:', err));
-        return;
-    }
-
     // Star rating chord (works in all modes)
     if (waitingForStar) {
         if (e.key === 'Escape') {
@@ -391,6 +336,25 @@ export function handleKeydown(e: KeyboardEvent) {
             }
             return;
         }
+    }
+
+    // Compare reserves bare 1/2 for choosing the winning side. Custom rating
+    // shortcuts still flow through the registry below.
+    if (
+        mode === 'compare'
+        && (e.key === '1' || e.key === '2')
+        && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
+    ) {
+        handleCompareKeys(e);
+        return;
+    }
+
+    const commandItem = commandForKeyboardEvent(e);
+    if (commandItem) {
+        e.preventDefault();
+        runCommandPaletteItem(commandItem)
+            .catch(err => console.error('Failed to run command hotkey:', err));
+        return;
     }
 
     // Shift+. (>) toggles zen mode; compare/export cycle through an image-only state too.
@@ -498,18 +462,6 @@ export function handleKeydown(e: KeyboardEvent) {
         return;
     }
 
-    // Delete: Backspace → trash, Cmd+Backspace → permanent delete
-    if (e.key === 'Backspace' && !e.metaKey) {
-        e.preventDefault();
-        window.dispatchEvent(new CustomEvent('trash-focused-image'));
-        return;
-    }
-    if (e.key === 'Backspace' && e.metaKey) {
-        e.preventDefault();
-        window.dispatchEvent(new CustomEvent('delete-focused-image'));
-        return;
-    }
-
     switch (mode) {
         case 'grid':
             handleGridKeys(e);
@@ -535,16 +487,6 @@ function handleGridKeys(e: KeyboardEvent) {
     const visibleRows = Math.max(1, Math.floor(
         (document.querySelector('.grid-container')?.clientHeight ?? 600) / (get(thumbnailSize) + get(gridGap))
     ));
-
-    // Direct 1-5 rating in grid (without Cmd)
-    if (!e.metaKey && !e.ctrlKey && !e.altKey) {
-        const n = parseInt(e.key);
-        if (n >= 1 && n <= 5) {
-            e.preventDefault();
-            handleStarRating(n);
-            return;
-        }
-    }
 
     switch (e.key) {
         case 'h':
@@ -579,22 +521,6 @@ function handleGridKeys(e: KeyboardEvent) {
             e.preventDefault();
             waitingForStar = true;
             statusHint.set('Rate: press 1-5');
-            break;
-        case '0':
-            e.preventDefault();
-            handleStarRating(0);
-            break;
-        case 'a':
-            e.preventDefault();
-            handleDecision('accept');
-            break;
-        case 'x':
-            e.preventDefault();
-            handleDecision('reject');
-            break;
-        case 'u':
-            e.preventDefault();
-            handleDecision('undecided');
             break;
         case '+':
         case '=':
@@ -781,15 +707,6 @@ function compareSwapFocusedImage(direction: 1 | -1) {
 }
 
 function handleCanvasKeys(e: KeyboardEvent) {
-    if (!e.metaKey && !e.ctrlKey && !e.altKey) {
-        const n = parseInt(e.key);
-        if (n >= 1 && n <= 5) {
-            e.preventDefault();
-            handleStarRating(n);
-            return;
-        }
-    }
-
     switch (e.key) {
         case 'h':
         case 'ArrowLeft':
@@ -823,22 +740,6 @@ function handleCanvasKeys(e: KeyboardEvent) {
             e.preventDefault();
             waitingForStar = true;
             statusHint.set('Rate: press 1-5');
-            break;
-        case '0':
-            e.preventDefault();
-            handleStarRating(0);
-            break;
-        case 'a':
-            e.preventDefault();
-            handleDecision('accept');
-            break;
-        case 'x':
-            e.preventDefault();
-            handleDecision('reject');
-            break;
-        case 'u':
-            e.preventDefault();
-            handleDecision('undecided');
             break;
         case 'Enter':
             e.preventDefault();
@@ -893,26 +794,10 @@ function handleCompareKeys(e: KeyboardEvent) {
             e.preventDefault();
             handleDecision('accept', getCompareActiveIndex());
             break;
-        case 'x':
-            e.preventDefault();
-            handleDecision('reject', getCompareActiveIndex());
-            break;
-        case 'a':
-            e.preventDefault();
-            handleDecision('accept', getCompareActiveIndex());
-            break;
         case 's':
             e.preventDefault();
             waitingForStar = true;
             statusHint.set('Rate: press 1-5');
-            break;
-        case '0':
-            e.preventDefault();
-            handleStarRating(0, getCompareActiveIndex());
-            break;
-        case 'u':
-            e.preventDefault();
-            handleDecision('undecided', getCompareActiveIndex());
             break;
         case 'Escape':
             e.preventDefault();
@@ -922,16 +807,6 @@ function handleCompareKeys(e: KeyboardEvent) {
 }
 
 function handleLoupeKeys(e: KeyboardEvent) {
-    // Direct 1-5 rating in loupe (no chord needed)
-    if (!e.metaKey && !e.ctrlKey && !e.altKey) {
-        const n = parseInt(e.key);
-        if (n >= 1 && n <= 5) {
-            e.preventDefault();
-            handleStarRating(n);
-            return;
-        }
-    }
-
     if (e.key === '[') {
         e.preventDefault();
         const img = get(focusedImage);
@@ -1003,22 +878,6 @@ function handleLoupeKeys(e: KeyboardEvent) {
             e.preventDefault();
             waitingForStar = true;
             statusHint.set('Rate: press 1-5');
-            break;
-        case '0':
-            e.preventDefault();
-            handleStarRating(0);
-            break;
-        case 'a':
-            e.preventDefault();
-            handleDecision('accept');
-            break;
-        case 'x':
-            e.preventDefault();
-            handleDecision('reject');
-            break;
-        case 'u':
-            e.preventDefault();
-            handleDecision('undecided');
             break;
         case 'Escape':
             e.preventDefault();

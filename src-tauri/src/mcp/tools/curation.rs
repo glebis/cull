@@ -4,17 +4,18 @@ use super::*;
 impl CullMcp {
     #[tool(description = "Rate an image from 0 (unrated) to 5 stars")]
     fn set_rating(&self, Parameters(params): Parameters<SetRatingParams>) -> String {
-        if !is_valid_rating(params.rating) {
-            return "Error: Rating must be 0-5".to_string();
-        }
-        match self.check_image_id_scope(&params.image_id) {
+        let validated = match curation_service::validate_set_rating(&params) {
+            Ok(validated) => validated,
+            Err(error) => return format!("Error: {}", error),
+        };
+        match self.check_image_id_scope(validated.image_id()) {
             Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
             Err(e) => return format!("Error: {}", e),
             _ => {}
         }
         let state = self.app_handle.state::<AppState>();
-        match state.db.set_rating(&params.image_id, params.rating) {
-        Ok(()) => serde_json::json!({"status": "ok", "image_id": params.image_id, "rating": params.rating}).to_string(),
+        match curation_service::set_validated_rating(&state.db, &validated) {
+        Ok(()) => serde_json::json!({"status": "ok", "image_id": validated.image_id(), "rating": validated.rating()}).to_string(),
         Err(e) => format!("Error: {}", e),
     }
     }

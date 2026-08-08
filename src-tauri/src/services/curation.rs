@@ -1,10 +1,79 @@
+use crate::db_core::db::Database;
 use crate::db_core::models::ImageWithFile;
 use crate::db_core::smart_collections::SmartCollection;
 use crate::services::library::enrich_thumbnails;
 use crate::services::{Pagination, ServiceContext, ServiceError};
 
 pub fn set_rating(ctx: &ServiceContext, image_id: &str, rating: u8) -> Result<(), ServiceError> {
-    Ok(ctx.db.set_rating(image_id, rating)?)
+    set_rating_in_database(
+        ctx.db,
+        &SetRatingParams {
+            image_id: image_id.to_string(),
+            rating,
+        },
+    )?;
+    Ok(())
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SetRatingParams {
+    #[schemars(description = "The image ID to rate")]
+    pub image_id: String,
+    #[schemars(description = "Rating from 0 (unrated) to 5")]
+    pub rating: u8,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ValidatedRating {
+    image_id: String,
+    rating: u8,
+}
+
+impl ValidatedRating {
+    pub fn image_id(&self) -> &str {
+        &self.image_id
+    }
+
+    pub fn rating(&self) -> u8 {
+        self.rating
+    }
+}
+
+pub fn validate_set_rating(params: &SetRatingParams) -> Result<ValidatedRating, ServiceError> {
+    if params.rating > 5 {
+        return Err(ServiceError::InvalidInput(
+            "Rating must be between 0 and 5".to_string(),
+        ));
+    }
+    let image_id = params.image_id.trim();
+    if image_id.is_empty() {
+        return Err(ServiceError::InvalidInput(
+            "A valid image ID is required".to_string(),
+        ));
+    }
+    Ok(ValidatedRating {
+        image_id: image_id.to_string(),
+        rating: params.rating,
+    })
+}
+
+pub fn set_validated_rating(db: &Database, rating: &ValidatedRating) -> Result<(), ServiceError> {
+    if !db.image_exists(rating.image_id())? {
+        return Err(ServiceError::NotFound(format!(
+            "Image '{}'",
+            rating.image_id()
+        )));
+    }
+    Ok(db.set_rating(rating.image_id(), rating.rating())?)
+}
+
+pub fn set_rating_in_database(
+    db: &Database,
+    params: &SetRatingParams,
+) -> Result<ValidatedRating, ServiceError> {
+    let validated = validate_set_rating(params)?;
+    set_validated_rating(db, &validated)?;
+    Ok(validated)
 }
 
 pub fn set_decision(
@@ -17,6 +86,25 @@ pub fn set_decision(
 
 pub fn create_collection(ctx: &ServiceContext, name: &str) -> Result<String, ServiceError> {
     Ok(ctx.db.create_collection(name)?)
+}
+
+pub fn create_collection_with_images(
+    ctx: &ServiceContext,
+    name: &str,
+    image_ids: &[&str],
+) -> Result<String, ServiceError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(ServiceError::InvalidInput(
+            "Collection name cannot be empty".to_string(),
+        ));
+    }
+    if image_ids.is_empty() || image_ids.iter().any(|image_id| image_id.is_empty()) {
+        return Err(ServiceError::InvalidInput(
+            "At least one valid image ID is required".to_string(),
+        ));
+    }
+    Ok(ctx.db.create_collection_with_images(name, image_ids)?)
 }
 
 pub fn list_collections(ctx: &ServiceContext) -> Result<Vec<(String, String, u32)>, ServiceError> {
@@ -288,6 +376,24 @@ mod tests {
         set_rating(&c, "r1", 4).unwrap();
         let imgs = c.db.get_images_by_ids(&["r1"]).unwrap();
         assert_eq!(imgs[0].selection.as_ref().unwrap().star_rating, Some(4));
+    }
+
+    #[test]
+    fn set_rating_validation_is_shared_and_returns_canonical_id() {
+        let validated = validate_set_rating(&SetRatingParams {
+            image_id: " img1 ".to_string(),
+            rating: 5,
+        })
+        .unwrap();
+        assert_eq!(validated.image_id(), "img1");
+        assert_eq!(validated.rating(), 5);
+        assert!(validate_set_rating(&SetRatingParams {
+            image_id: "img1".to_string(),
+            rating: 6,
+        })
+        .unwrap_err()
+        .to_string()
+        .contains("between 0 and 5"));
     }
 
     #[test]
