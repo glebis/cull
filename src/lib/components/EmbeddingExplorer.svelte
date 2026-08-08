@@ -10,6 +10,10 @@
         navigateTo,
         embeddingViewState,
         settingsOpen,
+        collections,
+        requestTextInput,
+        showRejected,
+        showToast,
         type EmbeddingViewState,
         type EmbeddingProvider,
         type EmbeddingInteractionMode,
@@ -42,6 +46,8 @@
         cancelJob,
         pauseJob,
         resumeJob,
+        createCollectionWithImages,
+        listCollections,
     } from '$lib/api';
     import type {
         EmbeddingGenerationMode,
@@ -208,6 +214,12 @@
     let dragStartY = 0;
     let dragStartPanX = 0;
     let dragStartPanY = 0;
+    type AreaSelectionRect = { startX: number; startY: number; currentX: number; currentY: number };
+    let areaSelectionMode = $state(false);
+    let areaSelectionRect = $state<AreaSelectionRect | null>(null);
+    let areaSelectedIds = $state<Set<string>>(new Set());
+    let creatingAreaCollection = $state(false);
+    let areaSelectedCount = $derived(areaSelectedIds.size);
 
     // Projection identity for view state validation
     let projectionKey = $state<string | null>(null);
@@ -645,6 +657,7 @@
         clusters = [];
         selectedPoint = null;
         highlightedCluster = null;
+        resetAreaSelection();
         resetThumbnailCache();
         void loadEmbeddingState();
     });
@@ -655,6 +668,7 @@
         clusters = [];
         selectedPoint = null;
         highlightedCluster = null;
+        resetAreaSelection();
         activeZLayerKey = null;
         resetThumbnailCache();
         await loadEmbeddingState();
@@ -1331,14 +1345,25 @@
     }
 
     function handleExplorerKeydown(e: KeyboardEvent) {
+        if (e.key === 'Escape' && areaSelectionMode) {
+            e.preventDefault();
+            resetAreaSelection();
+            explorerEl?.focus();
+            return;
+        }
         if (isInteractiveTarget(e.target)) return;
         if (points.length === 0) return;
-        if (e.key === 'ArrowRight') {
+        if ((e.key === ' ' || e.code === 'Space') && areaSelectionMode && selectedPoint) {
+            e.preventDefault();
+            togglePointInAreaSelection(selectedPoint.id);
+        } else if (e.key === 'ArrowRight') {
             e.preventDefault();
             selectRelativePoint(1);
+            if (areaSelectionMode && e.shiftKey && selectedPoint) addPointToAreaSelection(selectedPoint.id);
         } else if (e.key === 'ArrowLeft') {
             e.preventDefault();
             selectRelativePoint(-1);
+            if (areaSelectionMode && e.shiftKey && selectedPoint) addPointToAreaSelection(selectedPoint.id);
         } else if (e.key === 'ArrowDown') {
             e.preventDefault();
             navigateZLayer(1);
@@ -1479,6 +1504,7 @@
             if (loadSeq !== projectionLoadSeq) return;
             if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return;
             if (embeddingPage.ids.length < 2) {
+                resetAreaSelection();
                 points = [];
                 clusters = [];
                 resetThumbnailCache();
@@ -1501,6 +1527,7 @@
             const projection = await runProjectionInWorker(embeddingPage, embeddingImages);
             if (loadSeq !== projectionLoadSeq) return;
 
+            resetAreaSelection();
             points = projection.points;
             clusters = projection.clusters.map(cluster => ({
                 id: cluster.id,
@@ -1628,7 +1655,7 @@
             if (sx < -margin || sx > canvasWidth + margin || sy < -margin || sy > canvasHeight + margin) continue;
 
             const color = CLUSTER_COLORS[p.cluster % CLUSTER_COLORS.length];
-            const isSelected = selectedPoint && selectedPoint.id === p.id;
+            const isSelected = areaSelectedIds.has(p.id) || (selectedPoint && selectedPoint.id === p.id);
             const isHovered = hoveredPoint && hoveredPoint.id === p.id;
             const dimmed = pointIsDimmed(p);
 
@@ -1731,6 +1758,21 @@
                 ctx.fillText(name, tx, ty);
             }
         }
+
+        if (areaSelectionRect) {
+            const left = Math.min(areaSelectionRect.startX, areaSelectionRect.currentX);
+            const top = Math.min(areaSelectionRect.startY, areaSelectionRect.currentY);
+            const width = Math.abs(areaSelectionRect.currentX - areaSelectionRect.startX);
+            const height = Math.abs(areaSelectionRect.currentY - areaSelectionRect.startY);
+            const selectionColor = getComputedStyle(canvas).getPropertyValue('--blue').trim();
+            if (selectionColor) {
+                ctx.save();
+                ctx.strokeStyle = selectionColor;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(left, top, width, height);
+                ctx.restore();
+            }
+        }
     }
 
     function saveViewState() {
@@ -1776,6 +1818,16 @@
 
     function handleMouseDown(e: MouseEvent) {
         explorerEl?.focus();
+        if (areaSelectionMode) {
+            if (e.button !== 0) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            areaSelectionRect = { startX: x, startY: y, currentX: x, currentY: y };
+            hoveredPoint = null;
+            requestDraw();
+            return;
+        }
         dragging = true;
         dragStartX = e.clientX;
         dragStartY = e.clientY;
@@ -1784,6 +1836,21 @@
     }
 
     function handleMouseMove(e: MouseEvent) {
+        if (areaSelectionRect) {
+            const rect = canvas.getBoundingClientRect();
+            areaSelectionRect = {
+                ...areaSelectionRect,
+                currentX: e.clientX - rect.left,
+                currentY: e.clientY - rect.top,
+            };
+            requestDraw();
+            return;
+        }
+        if (areaSelectionMode) {
+            hoveredPoint = null;
+            canvas.style.cursor = 'crosshair';
+            return;
+        }
         if (dragging) {
             panX = dragStartPanX + (e.clientX - dragStartX);
             panY = dragStartPanY + (e.clientY - dragStartY);
@@ -1817,6 +1884,24 @@
     }
 
     function handleMouseUp(e: MouseEvent) {
+        if (areaSelectionRect) {
+            const rect = canvas.getBoundingClientRect();
+            const endX = e.clientX - rect.left;
+            const endY = e.clientY - rect.top;
+            const left = Math.min(areaSelectionRect.startX, endX);
+            const right = Math.max(areaSelectionRect.startX, endX);
+            const top = Math.min(areaSelectionRect.startY, endY);
+            const bottom = Math.max(areaSelectionRect.startY, endY);
+            areaSelectedIds = new Set(getRenderPoints()
+                .filter(point => {
+                    const { sx, sy } = projectPointForCanvas(point);
+                    return sx >= left && sx <= right && sy >= top && sy <= bottom;
+                })
+                .map(point => point.id));
+            areaSelectionRect = null;
+            requestDraw();
+            return;
+        }
         if (dragging) {
             const moved = Math.abs(e.clientX - dragStartX) + Math.abs(e.clientY - dragStartY);
             if (moved < 4 && hoveredPoint) {
@@ -1825,6 +1910,84 @@
         }
         dragging = false;
         saveViewState();
+    }
+
+    function toggleAreaSelection() {
+        areaSelectionMode = !areaSelectionMode;
+        areaSelectionRect = null;
+        if (!areaSelectionMode) areaSelectedIds = new Set();
+        hoveredPoint = null;
+        requestDraw();
+        if (areaSelectionMode) explorerEl?.focus();
+    }
+
+    function addPointToAreaSelection(imageId: string) {
+        areaSelectedIds = new Set([...areaSelectedIds, imageId]);
+        requestDraw();
+    }
+
+    function togglePointInAreaSelection(imageId: string) {
+        const next = new Set(areaSelectedIds);
+        if (next.has(imageId)) {
+            next.delete(imageId);
+        } else {
+            next.add(imageId);
+        }
+        areaSelectedIds = next;
+        requestDraw();
+    }
+
+    function clearAreaSelection() {
+        areaSelectionRect = null;
+        areaSelectedIds = new Set();
+        requestDraw();
+    }
+
+    function resetAreaSelection() {
+        areaSelectionMode = false;
+        clearAreaSelection();
+    }
+
+    function cancelAreaSelectionDrag() {
+        dragging = false;
+        areaSelectionRect = null;
+        hoveredPoint = null;
+        requestDraw();
+    }
+
+    async function createCollectionFromAreaSelection() {
+        const imageIds = getRenderPoints()
+            .filter(point => areaSelectedIds.has(point.id))
+            .map(point => point.id);
+        if (imageIds.length === 0 || creatingAreaCollection) return;
+        const imageLabel = imageIds.length === 1 ? '1 selected image' : `${imageIds.length} selected images`;
+        const name = await requestTextInput({
+            title: 'New Collection from Embedding Map',
+            label: 'Collection name',
+            description: `${imageLabel} will be added.`,
+            placeholder: 'Collection name',
+            confirmLabel: 'Create Collection',
+        });
+        if (!name?.trim()) return;
+
+        creatingAreaCollection = true;
+        try {
+            await createCollectionWithImages(name.trim(), imageIds);
+            areaSelectedIds = new Set();
+            areaSelectionMode = false;
+            showToast(`Collection "${name.trim()}" created`, { type: 'success', duration: 5000 });
+            try {
+                collections.set(await listCollections($showRejected));
+            } catch (refreshError) {
+                console.error('Collection created, but the collection list could not refresh:', refreshError);
+            }
+        } catch (error) {
+            console.error('Failed to create collection from embedding selection:', error);
+            showToast('Failed to create collection', { type: 'error' });
+        } finally {
+            creatingAreaCollection = false;
+            requestDraw();
+        }
     }
 
     function focusImageForLoupe(imageId: string): boolean {
@@ -1877,6 +2040,7 @@
     }
 
     function handleCanvasDblClick(e: MouseEvent) {
+        if (areaSelectionMode) return;
         if (!hoveredPoint) return;
         if (focusImageForLoupe(hoveredPoint.id)) {
             navigateTo('loupe');
@@ -2164,6 +2328,35 @@
                 <button class="layer-step-btn" onclick={() => selectRelativePoint(-1)} disabled={navigationPoints.length === 0} title="Previous image">←</button>
                 <span class="selection-position">{selectedNavigationLabel}</span>
                 <button class="layer-step-btn" onclick={() => selectRelativePoint(1)} disabled={navigationPoints.length === 0} title="Next image">→</button>
+            </div>
+
+            <div class="area-selection-controls" aria-live="polite">
+                <button
+                    class="toggle-pill area-select-toggle"
+                    class:active={areaSelectionMode}
+                    onclick={toggleAreaSelection}
+                    aria-pressed={areaSelectionMode}
+                    aria-label={areaSelectionMode ? 'Exit embedding map area selection' : 'Select an area of the embedding map'}
+                >
+                    {areaSelectionMode ? 'Selecting area' : 'Select area'}
+                </button>
+                <span class="area-selection-status">
+                    {areaSelectedCount} {areaSelectedCount === 1 ? 'image' : 'images'} selected
+                </span>
+                {#if areaSelectionMode}
+                    <span class="area-selection-hint">Drag on the map, or use arrows and Space.</span>
+                {/if}
+                {#if areaSelectedCount > 0}
+                    <button
+                        class="settings-link-btn"
+                        onclick={createCollectionFromAreaSelection}
+                        disabled={creatingAreaCollection}
+                        aria-label={`Create collection from ${areaSelectedCount} selected ${areaSelectedCount === 1 ? 'image' : 'images'}`}
+                    >
+                        {creatingAreaCollection ? 'Creating…' : 'Create collection'}
+                    </button>
+                    <button class="settings-link-btn secondary-link" onclick={clearAreaSelection}>Clear selection</button>
+                {/if}
             </div>
         </div>
 
@@ -2481,9 +2674,9 @@
             onmousemove={handleMouseMove}
             onmouseup={handleMouseUp}
             ondblclick={handleCanvasDblClick}
-            onmouseleave={() => { dragging = false; hoveredPoint = null; requestDraw(); }}
+            onmouseleave={cancelAreaSelectionDrag}
             class:hidden={points.length === 0}
-            style="cursor: grab"
+            style:cursor={areaSelectionMode ? 'crosshair' : 'grab'}
         ></canvas>
 
         {#if (largePreviewOpen && selectedImage) || textOutputOpen}
@@ -2896,6 +3089,29 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+
+    .area-selection-controls {
+        display: grid;
+        gap: var(--spacing);
+        margin-top: var(--spacing);
+    }
+
+    .area-select-toggle {
+        width: 100%;
+    }
+
+    .area-selection-status {
+        color: var(--text-secondary);
+        font-size: 10px;
+        text-align: center;
+    }
+
+    .area-selection-hint {
+        color: var(--text-secondary);
+        font-size: 9px;
+        line-height: 1.4;
+        text-align: center;
     }
 
     .cluster-item {

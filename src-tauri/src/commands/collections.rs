@@ -22,6 +22,31 @@ pub async fn create_collection(state: State<'_, AppState>, name: String) -> Resu
 }
 
 #[tauri::command]
+pub async fn create_collection_with_images(
+    state: State<'_, AppState>,
+    name: String,
+    image_ids: Vec<String>,
+) -> Result<String, String> {
+    let ctx = ServiceContext::from_app_state(&state, None);
+    let refs: Vec<&str> = image_ids.iter().map(String::as_str).collect();
+    let id = svc::create_collection_with_images(&ctx, &name, &refs).map_err(|e| e.to_string())?;
+    let _ = state.db.log_session_event(&NewSessionEvent {
+        session_id: None,
+        event_type: "collection_created".to_string(),
+        actor_type: "user".to_string(),
+        actor_id: None,
+        subject_type: Some("collection".to_string()),
+        subject_id: Some(id.clone()),
+        payload_json: serde_json::json!({
+            "name": name,
+            "image_count": image_ids.len(),
+        })
+        .to_string(),
+    });
+    Ok(id)
+}
+
+#[tauri::command]
 pub async fn list_collections(
     state: State<'_, AppState>,
     include_rejected: Option<bool>,

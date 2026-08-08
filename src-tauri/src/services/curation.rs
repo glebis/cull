@@ -19,6 +19,25 @@ pub fn create_collection(ctx: &ServiceContext, name: &str) -> Result<String, Ser
     Ok(ctx.db.create_collection(name)?)
 }
 
+pub fn create_collection_with_images(
+    ctx: &ServiceContext,
+    name: &str,
+    image_ids: &[&str],
+) -> Result<String, ServiceError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(ServiceError::InvalidInput(
+            "Collection name cannot be empty".to_string(),
+        ));
+    }
+    if image_ids.is_empty() || image_ids.iter().any(|image_id| image_id.is_empty()) {
+        return Err(ServiceError::InvalidInput(
+            "At least one valid image ID is required".to_string(),
+        ));
+    }
+    Ok(ctx.db.create_collection_with_images(name, image_ids)?)
+}
+
 pub fn list_collections(ctx: &ServiceContext) -> Result<Vec<(String, String, u32)>, ServiceError> {
     Ok(ctx.db.list_collections()?)
 }
