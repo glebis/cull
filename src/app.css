@@ -55,6 +55,8 @@
     --border-subtle: #1a1a2e;
     --text: #e0e0e0;
     --text-secondary: #7a7fa0;
+    --text-primary: var(--text);
+    --bg-elevated: var(--surface);
     --green: #9ece6a;
     --blue: #7aa2f7;
     --orange: #e0af68;
@@ -73,6 +75,7 @@
     --macos-titlebar-safe-area: 40px;
     --macos-window-controls-width: 78px;
     --font: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+    --font-mono: var(--font);
     --font-serif: 'EB Garamond', 'Georgia', 'Times New Roman', serif;
 }
 
