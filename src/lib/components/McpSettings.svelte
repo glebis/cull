@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, tick } from 'svelte';
+    import { onMount } from 'svelte';
     import { applyAppIconVariant, getAppSetting, setAppSetting } from '$lib/api';
     import { APP_ICON_VARIANTS, DEFAULT_APP_ICON_VARIANT, normalizeAppIconVariant, type AppIconVariantId } from '$lib/app-icons';
     import { showToast } from '$lib/stores';
@@ -9,6 +9,7 @@
     import GeneralSettings from './GeneralSettings.svelte';
     import PluginsSettings from './PluginsSettings.svelte';
     import PrivacyDashboard from './PrivacyDashboard.svelte';
+    import ModalDialog from '$lib/components/ModalDialog.svelte';
 
     const TABS: { id: SettingsTab; label: string }[] = [
         { id: 'general', label: 'General' },
@@ -19,11 +20,9 @@
         { id: 'plugins', label: 'Plugins' },
     ];
     let { onclose }: { onclose: () => void } = $props();
-    let panelElement = $state<HTMLDivElement | null>(null);
     let appIconVariant = $state<AppIconVariantId>(DEFAULT_APP_ICON_VARIANT);
 
     onMount(async () => {
-        void tick().then(() => panelElement?.focus());
         appIconVariant = normalizeAppIconVariant(await getAppSetting('app_icon_variant'));
     });
 
@@ -56,10 +55,13 @@
     }
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="overlay" onclick={onclose} onkeydown={(event) => event.key === 'Escape' && onclose()} tabindex="-1">
-    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-    <div class="panel" bind:this={panelElement} onclick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1">
+<ModalDialog
+    titleId="settings-title"
+    onclose={onclose}
+    overlayClass="settings-overlay"
+    panelClass="settings-panel"
+    initialFocus=".settings-tab.active"
+>
         <header class="panel-header"><h2 id="settings-title">Settings</h2><button class="close" onclick={onclose} aria-label="Close settings">&times;</button></header>
         <div class="settings-tabs" role="tablist" aria-label="Settings sections">
             {#each TABS as tab, index}
@@ -81,12 +83,11 @@
                 <section class="wrapped"><PluginsSettings /></section>
             {/if}
         </div>
-    </div>
-</div>
+</ModalDialog>
 
 <style>
-    .overlay { position: fixed; inset: 0; z-index: var(--z-modal); display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--bg) 78%, transparent); }
-    .panel { width: min(720px, calc(100vw - 32px)); height: 90vh; display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+    :global(.settings-overlay) { position: fixed; inset: 0; z-index: var(--z-modal); display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--bg) 78%, transparent); }
+    :global(.settings-panel) { width: min(720px, calc(100vw - 32px)); height: 90vh; display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
     .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
     h2 { margin: 0; color: var(--text); font-size: 14px; }
     .close { padding: 0 4px; background: none; border: 0; color: var(--text-secondary); font: 18px var(--font); cursor: pointer; }

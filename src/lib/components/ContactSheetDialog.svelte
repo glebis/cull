@@ -3,6 +3,7 @@
     import { save } from '@tauri-apps/plugin-dialog';
     import { contactSheetOpen, images, selectedIds, showToast } from '$lib/stores';
     import { savePngToPath } from '$lib/api';
+    import ModalDialog from '$lib/components/ModalDialog.svelte';
     import {
         computeContactSheetLayout,
         contactSheetCellLabel,
@@ -145,26 +146,18 @@
         if (!rendering) contactSheetOpen.set(false);
     }
 
-    function onBackdropKeydown(event: KeyboardEvent) {
-        if (event.key === 'Escape') close();
-    }
 </script>
 
 {#if $contactSheetOpen}
-    <div
-        class="cs-backdrop"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Export contact sheet"
-        tabindex="-1"
-        onclick={close}
-        onkeydown={onBackdropKeydown}
+    <ModalDialog
+        titleId="contact-sheet-title"
+        onclose={close}
+        overlayClass="cs-backdrop"
+        panelClass="cs-panel"
     >
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <div class="cs-panel" role="presentation" onclick={(e) => e.stopPropagation()}>
             <div class="cs-head">
-                <span class="cs-title">Export Contact Sheet</span>
-                <button class="cs-close" type="button" onclick={close} aria-label="Close">×</button>
+                <span id="contact-sheet-title" class="cs-title">Export Contact Sheet</span>
+                <button class="cs-close" type="button" data-modal-initial-focus onclick={close} aria-label="Close">×</button>
             </div>
             <p class="cs-scope">{sheetImages.length} image{sheetImages.length === 1 ? '' : 's'} in the sheet.</p>
 
@@ -196,12 +189,12 @@
                     {rendering ? 'Rendering…' : 'Render & Save PNG'}
                 </button>
             </div>
-        </div>
-    </div>
+    </ModalDialog>
 {/if}
 
 <style>
-    .cs-backdrop {
+    :global(.cs-backdrop) {
+        --modal-align-items: flex-start;
         position: fixed;
         inset: 0;
         background: rgba(0, 0, 0, 0.55);
@@ -211,7 +204,7 @@
         padding-top: 12vh;
         z-index: var(--z-modal);
     }
-    .cs-panel {
+    :global(.cs-panel) {
         width: min(460px, 92vw);
         background: var(--surface);
         border: 1px solid var(--border);

@@ -42,9 +42,10 @@ describe('impeccable audit UI contracts', () => {
         expect(trashDialog).toContain('data-modal-initial-focus');
         expect(trashDialog).toContain('id="trash-confirm-title"');
 
-        expect(settings).toContain('role="dialog"');
-        expect(settings).toContain('aria-modal="true"');
-        expect(settings).toContain('aria-labelledby="settings-title"');
+        expect(settings).toContain('import ModalDialog');
+        expect(settings).toContain('<ModalDialog');
+        expect(settings).toContain('titleId="settings-title"');
+        expect(settings).toContain('initialFocus=".settings-tab.active"');
         expect(settings).toContain('aria-label="Close settings"');
     });
 

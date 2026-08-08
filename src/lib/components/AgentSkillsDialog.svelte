@@ -1,12 +1,10 @@
 <script lang="ts">
-    import { tick } from 'svelte';
     import { openUrl } from '@tauri-apps/plugin-opener';
+    import ModalDialog from '$lib/components/ModalDialog.svelte';
     import { showToast } from '$lib/stores';
     import { MCP_CONFIG_SNIPPET } from '$lib/mcp-config';
 
     let { onclose }: { onclose: () => void } = $props();
-
-    let closeButton: HTMLButtonElement | undefined = $state();
 
     const agentDocsUrl = 'https://github.com/glebis/cull/blob/main/docs/agents.md';
     const mcpConfig = MCP_CONFIG_SNIPPET;
@@ -15,15 +13,6 @@
 Use cull --json for headless import, export, library stats, embeddings, and quality analysis.
 Use the same MCP tool names and JSON fields in CLI calls where possible.
 Do not rely on Cull tools as the confirmation layer for destructive operations. Get confirmation in the app, MCP client, shell wrapper, or operator workflow before file removal, token revocation, audit pruning, or broad batch changes.`;
-
-    tick().then(() => closeButton?.focus());
-
-    function handleKeydown(e: KeyboardEvent) {
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            onclose();
-        }
-    }
 
     async function copyText(label: string, text: string) {
         try {
@@ -43,19 +32,12 @@ Do not rely on Cull tools as the confirmation layer for destructive operations. 
     }
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-<div class="agent-skills-overlay" onclick={onclose}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-        class="agent-skills-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="agent-skills-title"
-        tabindex="-1"
-        onclick={(e: MouseEvent) => e.stopPropagation()}
-    >
+<ModalDialog
+    titleId="agent-skills-title"
+    onclose={onclose}
+    overlayClass="agent-skills-overlay"
+    panelClass="agent-skills-dialog"
+>
         <header class="dialog-header">
             <div class="title-group">
                 <p class="eyebrow">Agent integration</p>
@@ -66,9 +48,9 @@ Do not rely on Cull tools as the confirmation layer for destructive operations. 
                 </p>
             </div>
             <button
-                bind:this={closeButton}
                 class="close-btn"
                 type="button"
+                data-modal-initial-focus
                 aria-label="Close"
                 onclick={onclose}
             >X</button>
@@ -118,11 +100,10 @@ Do not rely on Cull tools as the confirmation layer for destructive operations. 
                 </div>
             </div>
         </div>
-    </div>
-</div>
+</ModalDialog>
 
 <style>
-    .agent-skills-overlay {
+    :global(.agent-skills-overlay) {
         position: fixed;
         inset: 0;
         z-index: var(--z-modal);
@@ -133,7 +114,7 @@ Do not rely on Cull tools as the confirmation layer for destructive operations. 
         background: color-mix(in srgb, var(--bg) 76%, transparent);
     }
 
-    .agent-skills-dialog {
+    :global(.agent-skills-dialog) {
         width: min(720px, 100%);
         max-height: calc(100vh - 32px);
         overflow: hidden;
