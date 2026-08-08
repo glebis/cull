@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "app-photos"
+description = "Allows explicit Apple Photos authorization and read-only catalog metadata access."
+commands.allow = [
+  "photos_authorization_status",
+  "photos_list_albums",
+  "photos_list_assets",
+  "photos_request_authorization",
+]
