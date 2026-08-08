@@ -16,9 +16,12 @@ describe('shared destructive-action safety contract', () => {
         expect(contextMenu).toContain('requestTrashImages(targetIds)');
         expect(menu).toContain('requestTrashImages(ids)');
         expect(palette).toContain('run: () => requestTrashImages()');
-        expect(keys).toContain('requestTrashImages()');
+        expect(keys).toContain('const commandItem = commandForKeyboardEvent(e);');
+        expect(keys).toContain('runCommandPaletteItem(commandItem)');
         expect(page).toContain('window.addEventListener(TRASH_IMAGES_REQUESTED_EVENT, handleTrashRequest)');
         expect(page).toContain('await trashImagesDetailed(ids)');
+        expect(page).toContain("label: 'Undo in Action History'");
+        expect(page).toContain('onclick: () => undoHistoryOpen.set(true)');
         expect(page).toContain('pendingTrashProposal = { proposalId, approvedImageIds: [...approvedImageIds] }');
         expect(page).toContain('requestTrashImages(approvedImageIds)');
         expect(contextMenu).not.toContain('trashImages(');
