@@ -144,32 +144,7 @@ pub fn run_embedding_model(request: EmbeddingRunRequest<'_>) -> Result<Embedding
 
     for (i, image_id) in request.image_ids.iter().enumerate() {
         if request.cancel.map(|c| c.is_cancelled()).unwrap_or(false) {
-            let summary = serde_json::json!({
-                "generated": generated,
-                "failed": failed,
-                "total": total,
-                "cancelled_at": i,
-            })
-            .to_string();
-            request
-                .db
-                .update_model_run_terminal(&model_run_id, "cancelled", &summary, None)
-                .map_err(|e| e.to_string())?;
-            emit_model_run_event(
-                request.app,
-                &model_run_id,
-                request.job_id,
-                "cancelled",
-                i as u32,
-                total,
-            );
-            return Ok(EmbeddingRunResult {
-                model_run_id,
-                generated,
-                failed,
-                total,
-                status: "cancelled".to_string(),
-            });
+            return cancel_embedding_run(&request, model_run_id, generated, failed, total, i);
         }
 
         let current = (i + 1) as u32;
@@ -210,6 +185,9 @@ pub fn run_embedding_model(request: EmbeddingRunRequest<'_>) -> Result<Embedding
         };
 
         let ml_path = resolve_image_path_for_ml(&image, request.app_data_dir);
+        if request.cancel.map(|c| c.is_cancelled()).unwrap_or(false) {
+            return cancel_embedding_run(&request, model_run_id, generated, failed, total, i);
+        }
         let embedding = {
             let engine = request.embedding_engine.lock();
             engine.generate_embedding_for(spec.model_id, &ml_path)
@@ -288,6 +266,42 @@ pub fn run_embedding_model(request: EmbeddingRunRequest<'_>) -> Result<Embedding
     })
 }
 
+fn cancel_embedding_run(
+    request: &EmbeddingRunRequest<'_>,
+    model_run_id: String,
+    generated: u32,
+    failed: u32,
+    total: u32,
+    cancelled_at: usize,
+) -> Result<EmbeddingRunResult, String> {
+    let summary = serde_json::json!({
+        "generated": generated,
+        "failed": failed,
+        "total": total,
+        "cancelled_at": cancelled_at,
+    })
+    .to_string();
+    request
+        .db
+        .update_model_run_terminal(&model_run_id, "cancelled", &summary, None)
+        .map_err(|error| error.to_string())?;
+    emit_model_run_event(
+        request.app,
+        &model_run_id,
+        request.job_id,
+        "cancelled",
+        cancelled_at as u32,
+        total,
+    );
+    Ok(EmbeddingRunResult {
+        model_run_id,
+        generated,
+        failed,
+        total,
+        status: "cancelled".to_string(),
+    })
+}
+
 fn load_image(db: &Database, image_id: &str) -> Result<Option<ImageWithFile>, String> {
     let id_refs = vec![image_id];
     let images = db.get_images_by_ids(&id_refs).map_err(|e| e.to_string())?;
@@ -361,12 +375,14 @@ fn embedding_progress_payload(
 ) -> serde_json::Value {
     serde_json::json!({
         "job_id": job_id,
+        "kind": "embeddings",
         "current": current,
         "total": total,
         "model": model,
         "model_run_id": model_run_id,
         "mode": mode,
         "status": status,
+        "error": null,
     })
 }
 
