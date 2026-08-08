@@ -4,7 +4,7 @@ Version: 0.1.0 — Draft, 2026-05-07
 
 Cull ships a single `cull` binary. With no subcommand it launches the GUI. With a subcommand it runs headless and exits. Every operation available in the GUI has a CLI equivalent and a URL scheme equivalent.
 
-> Current implementation note: the shipped headless slice is MCP-aligned. Implemented commands use MCP tool names and JSON parameter field names: `get_library_stats`, `list_images`, `list_folders`, `list_collections`, `import_folder`, `import_files`, `list_export_presets`, `export_images`, embedding/model commands, quality commands, `search_by_object`, and `set_rating`. The broader CLI below remains the draft target.
+> Current implementation note: the shipped headless slice is MCP-aligned. Implemented commands use MCP tool names and JSON parameter field names: `get_library_stats`, `list_images`, `list_folders`, `list_collections`, `import_folder`, `import_files`, `list_export_presets`, `export_images`, embedding/model commands, quality commands, `find_similar`, `search_by_object`, and `set_rating`. The broader CLI below remains the draft target.
 >
 > CLI implementation standards and module ownership rules live in [agent-cli-standards.md](agent-cli-standards.md).
 
@@ -23,6 +23,7 @@ cull --json list_export_presets
 cull --json export_images --image_ids id1,id2 --output_dir /tmp/cull-export --format original
 cull --json export_images --collection_id <collection-id> --output_dir /tmp/cull-export --format webp
 cull --json export_images --folder_path /path/to/images --output_dir /tmp/cull-export --format png --flatten false
+cull --json find_similar --image_id id1 --limit 10 --model clip-vit-b32
 cull --json search_by_object --class_name person --limit 20
 cull --json set_rating --image_id id1 --rating 4
 ```
@@ -32,10 +33,13 @@ For agents that already have MCP-shaped params, `call_tool` accepts the same too
 ```bash
 cull --json call_tool import_folder --params_json '{"folder_path":"/path/to/images"}'
 cull --json call_tool export_images --params_json '{"collection_id":"<collection-id>","output_dir":"/tmp/cull-export","format":"original"}'
+cull --json call_tool find_similar --params_json '{"image_id":"id1","limit":10,"model":"clip-vit-b32"}'
 cull --json call_tool search_by_object --params_json '{"class_name":"person","limit":20}'
 ```
 
 `search_by_object` queries detections already stored in the library; it does not run a detector or download model weights. Results are ordered by highest confidence and contain `image_id` plus `confidence`.
+
+`find_similar` reads stored CLIP or DINOv2 embeddings only; it does not download a model or generate missing embeddings. Results exclude the source image, are ordered by similarity, and contain `image_id`, `similarity`, and `model`.
 
 ### Invocation
 
