@@ -410,20 +410,24 @@ pub async fn start_model_embedding_generation(
             generate_embeddings_for_model(&task_app, &state, &task_model, &targets, Some(control))
                 .await;
 
-        let (status, error) = match result {
-            Ok(outcome) if outcome.cancelled || cancel.is_cancelled() => {
-                state.jobs.mark_cancelled(&task_job_id);
-                ("cancelled", None)
-            }
-            Ok(_) => {
-                state.jobs.complete(&task_job_id);
-                ("completed", None)
-            }
-            Err(error) => {
-                state.jobs.fail(&task_job_id, &error);
-                ("failed", Some(error))
-            }
+        let (terminal, status, error) = match result {
+            Ok(outcome) if outcome.cancelled => (
+                crate::services::jobs::WorkerTerminalOutcome::Cancelled,
+                "cancelled",
+                None,
+            ),
+            Ok(_) => (
+                crate::services::jobs::WorkerTerminalOutcome::Completed,
+                "completed",
+                None,
+            ),
+            Err(error) => (
+                crate::services::jobs::WorkerTerminalOutcome::Failed(error.clone()),
+                "failed",
+                Some(error),
+            ),
         };
+        state.jobs.finish_from_worker(&task_job_id, terminal);
         state.jobs.persist_terminal(&task_job_id, &state.db);
         let snapshot = state.jobs.get(&task_job_id);
         emit_embedding_job_event(
