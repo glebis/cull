@@ -8,12 +8,16 @@ import {
     gridScrollTop,
     imageLoadState,
     images,
+    importBatchFilter,
+    importBatchImageIds,
     minSizeFilter,
     showMissing,
+    showRejected,
     totalCount,
 } from './stores';
 import {
     evaluateSmartCollection,
+    getBatchImages,
     getImageCount,
     listCollectionImages,
     listImagesByDetectedClass,
@@ -33,9 +37,11 @@ export interface ImageLoadOptions {
     force?: boolean;
     minItems?: number;
     invalidateCache?: boolean;
+    throwOnError?: boolean;
 }
 
 type ImageScope =
+    | { type: 'import-batch'; batchId: string }
     | { type: 'smart'; id: string; filterJson: string }
     | { type: 'collection'; id: string }
     | { type: 'detected-class'; className: string }
@@ -82,6 +88,8 @@ let requestSeq = 0;
 const scopeCache = new Map<string, CachedScopeState>();
 
 function currentScope(): ImageScope {
+    const batchId = get(importBatchFilter);
+    if (batchId) return { type: 'import-batch', batchId };
     const smart = get(activeSmartCollection);
     if (smart?.filter_json) {
         return { type: 'smart', id: smart.id, filterJson: smart.filter_json };
@@ -102,19 +110,21 @@ function currentScope(): ImageScope {
 
 function scopeKey(scope: ImageScope): string {
     const missingKey = get(showMissing) ? 'with-missing' : 'without-missing';
+    const rejectedKey = get(showRejected) ? 'with-rejected' : 'without-rejected';
     switch (scope.type) {
+        case 'import-batch': return `import-batch:${scope.batchId}:${missingKey}:${rejectedKey}`;
         case 'smart':
-            return `smart:${scope.id}:${scope.filterJson}:${missingKey}`;
+            return `smart:${scope.id}:${scope.filterJson}:${missingKey}:${rejectedKey}`;
         case 'collection':
-            return `collection:${scope.id}:${missingKey}`;
+            return `collection:${scope.id}:${missingKey}:${rejectedKey}`;
         case 'detected-class':
-            return `detected-class:${scope.className}:${missingKey}`;
+            return `detected-class:${scope.className}:${missingKey}:${rejectedKey}`;
         case 'folder':
-            return `folder:${scope.folder}:${scope.minSize}:${missingKey}`;
+            return `folder:${scope.folder}:${scope.minSize}:${missingKey}:${rejectedKey}`;
         case 'filtered':
-            return `filtered:${scope.minSize}:${missingKey}`;
+            return `filtered:${scope.minSize}:${missingKey}:${rejectedKey}`;
         case 'all':
-            return `all:${missingKey}`;
+            return `all:${missingKey}:${rejectedKey}`;
     }
 }
 
@@ -124,32 +134,37 @@ function applyMissingFilter(items: ImageWithFile[]): ImageWithFile[] {
 }
 
 async function fetchPage(scope: ImageScope, offset: number, limit: number): Promise<PageResult> {
+    const includeRejected = get(showRejected);
     switch (scope.type) {
+        case 'import-batch': {
+            const items = offset === 0 ? await getBatchImages(scope.batchId, includeRejected) : [];
+            return { items: applyMissingFilter(items), rawCount: 0 };
+        }
         case 'smart': {
-            const items = await evaluateSmartCollection(scope.filterJson, limit, offset);
+            const items = await evaluateSmartCollection(scope.filterJson, limit, offset, includeRejected);
             return { items: applyMissingFilter(items), rawCount: items.length };
         }
         case 'collection': {
-            const items = await listCollectionImages(scope.id, limit, offset);
+            const items = await listCollectionImages(scope.id, limit, offset, includeRejected);
             return { items: applyMissingFilter(items), rawCount: items.length };
         }
         case 'detected-class': {
-            const items = await listImagesByDetectedClass(scope.className, limit, offset);
+            const items = await listImagesByDetectedClass(scope.className, limit, offset, includeRejected);
             return { items: applyMissingFilter(items), rawCount: items.length };
         }
         case 'folder': {
-            const items = await listImagesByFolder(scope.folder, limit, offset);
+            const items = await listImagesByFolder(scope.folder, limit, offset, includeRejected);
             const filtered = scope.minSize > 0
                 ? items.filter(img => img.image.width >= scope.minSize && img.image.height >= scope.minSize)
                 : items;
             return { items: applyMissingFilter(filtered), rawCount: items.length };
         }
         case 'filtered': {
-            const items = await listImagesFiltered(scope.minSize, scope.minSize, limit, offset);
+            const items = await listImagesFiltered(scope.minSize, scope.minSize, limit, offset, includeRejected);
             return { items: applyMissingFilter(items), rawCount: items.length };
         }
         case 'all': {
-            const items = await listImages(limit, offset);
+            const items = await listImages(limit, offset, includeRejected);
             return { items: applyMissingFilter(items), rawCount: items.length };
         }
     }
@@ -205,6 +220,8 @@ export function invalidateImageCache() {
 }
 
 export function clearImageScope() {
+    importBatchFilter.set(null);
+    importBatchImageIds.set([]);
     activeSmartCollection.set(null);
     activeCollection.set(null);
     activeDetectedClass.set(null);
@@ -213,7 +230,7 @@ export function clearImageScope() {
 }
 
 export async function refreshImageCount() {
-    totalCount.set(await getImageCount());
+    totalCount.set(await getImageCount(get(showRejected)));
 }
 
 export async function loadAllImages(options: ImageLoadOptions = {}) {
@@ -246,6 +263,9 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
         nextOffset = cached.nextOffset;
         hasMore = cached.hasMore;
         images.set(cached.items);
+        if (scope.type === 'import-batch') {
+            importBatchImageIds.set(cached.items.map(item => item.image.id));
+        }
         if (resetFocus) focusedIndex.set(cached.focusedIndex);
         gridScrollTop.set(cached.scrollTop);
         loading = false;
@@ -272,6 +292,9 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
         } while (lastRawCount === IMAGE_PAGE_SIZE && loaded.length < minItems);
 
         images.set(loaded);
+        if (scope.type === 'import-batch') {
+            importBatchImageIds.set(loaded.map(item => item.image.id));
+        }
         nextOffset = offset;
         hasMore = lastRawCount === IMAGE_PAGE_SIZE;
         loadedOnce = true;
@@ -281,10 +304,12 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
         }
         rememberScopeState(key);
     } catch (e) {
-        if (seq === requestSeq && key === activeScopeKey) {
+        const isCurrentRequest = seq === requestSeq && key === activeScopeKey;
+        if (isCurrentRequest) {
             loadError = formatLibraryLoadError(e);
             console.error('Failed to load images:', e);
         }
+        if (options.throwOnError && isCurrentRequest) throw e;
     } finally {
         if (seq === requestSeq && key === activeScopeKey) {
             loading = false;

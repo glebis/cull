@@ -24,4 +24,5 @@ pub mod smart_collections;
 pub mod source_detection;
 pub mod tags;
 pub mod thumbnails;
+pub(crate) mod visibility;
 pub mod vision;

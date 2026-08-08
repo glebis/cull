@@ -85,7 +85,7 @@ describe('Sidebar detected-class filter behavior', () => {
         expect(allImages).not.toHaveClass('active');
         expect(classButton).toHaveAttribute('aria-current', 'true');
         expect(classButton).toHaveClass('active');
-        expect(countByDetectedClass).toHaveBeenCalledWith('person');
+        expect(countByDetectedClass).toHaveBeenCalledWith('person', false);
         expect(loadImagesForCurrentScope).toHaveBeenCalledOnce();
     });
 });

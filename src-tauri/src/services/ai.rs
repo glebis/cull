@@ -227,9 +227,26 @@ pub fn count_by_detected_class(
 ) -> Result<u32, ServiceError> {
     Ok(ctx.db.count_by_class(class_name)?)
 }
+pub fn count_by_detected_class_with_visibility(
+    ctx: &ServiceContext,
+    class_name: &str,
+    include_rejected: bool,
+) -> Result<u32, ServiceError> {
+    Ok(ctx
+        .db
+        .count_by_class_with_visibility(class_name, include_rejected)?)
+}
 
 pub fn list_detected_classes(ctx: &ServiceContext) -> Result<Vec<(String, u32)>, ServiceError> {
     Ok(ctx.db.list_detected_classes()?)
+}
+pub fn list_detected_classes_with_visibility(
+    ctx: &ServiceContext,
+    include_rejected: bool,
+) -> Result<Vec<(String, u32)>, ServiceError> {
+    Ok(ctx
+        .db
+        .list_detected_classes_with_visibility(include_rejected)?)
 }
 
 pub fn list_images_by_detected_class(
@@ -241,6 +258,22 @@ pub fn list_images_by_detected_class(
     let mut images = ctx
         .db
         .list_images_by_class(class_name, page.limit, page.offset)?;
+    enrich_thumbnails(&mut images, ctx.app_data_dir);
+    Ok(images)
+}
+pub fn list_images_by_detected_class_with_visibility(
+    ctx: &ServiceContext,
+    class_name: &str,
+    page: Pagination,
+    include_rejected: bool,
+) -> Result<Vec<ImageWithFile>, ServiceError> {
+    let page = Pagination::clamped(page.offset, page.limit);
+    let mut images = ctx.db.list_images_by_class_with_visibility(
+        class_name,
+        page.limit,
+        page.offset,
+        include_rejected,
+    )?;
     enrich_thumbnails(&mut images, ctx.app_data_dir);
     Ok(images)
 }

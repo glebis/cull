@@ -16,10 +16,10 @@ describe('sidebar detected-object filters', () => {
     });
 
     it('loads every detected class through one aggregate backend call', () => {
-        expect(apiSource).toContain('export async function listDetectedClasses(): Promise<[string, number][]>');
-        expect(apiSource).toContain("invoke('list_detected_classes')");
+        expect(apiSource).toContain('export async function listDetectedClasses(includeRejected = false): Promise<[string, number][]>');
+        expect(apiSource).toContain("invoke('list_detected_classes', { includeRejected })");
         expect(source).toContain('listDetectedClasses');
-        expect(source).toContain('detectedClasses = await listDetectedClasses()');
+        expect(source).toContain('listDetectedClasses(includeRejected)');
         expect(source).not.toContain('commonClasses');
         expect(source).not.toContain('for (const cls of');
     });

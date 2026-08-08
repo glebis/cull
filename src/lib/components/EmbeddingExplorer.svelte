@@ -409,7 +409,7 @@
 
     async function loadEmbeddingState() {
         try {
-            const imageTotal = await getImageCount();
+            const imageTotal = await getImageCount(true);
             const countEntries = await Promise.all(
                 modelOptions.map(async option => [
                     option.id,

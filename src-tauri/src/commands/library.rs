@@ -6,9 +6,13 @@ use crate::AppState;
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
-pub async fn list_folders(state: State<'_, AppState>) -> Result<Vec<(String, u32)>, String> {
+pub async fn list_folders(
+    state: State<'_, AppState>,
+    include_rejected: Option<bool>,
+) -> Result<Vec<(String, u32)>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::list_folders(&ctx).map_err(|e| e.to_string())
+    svc::list_folders_with_visibility(&ctx, include_rejected.unwrap_or(false))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -17,10 +21,16 @@ pub async fn list_images_by_folder(
     folder: String,
     limit: u32,
     offset: u32,
+    include_rejected: Option<bool>,
 ) -> Result<Vec<ImageWithFile>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::list_images_by_folder(&ctx, &folder, Pagination::clamped(offset, limit))
-        .map_err(|e| e.to_string())
+    svc::list_images_by_folder_with_visibility(
+        &ctx,
+        &folder,
+        Pagination::clamped(offset, limit),
+        include_rejected.unwrap_or(false),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -28,9 +38,15 @@ pub async fn list_images(
     state: State<'_, AppState>,
     limit: u32,
     offset: u32,
+    include_rejected: Option<bool>,
 ) -> Result<Vec<ImageWithFile>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::list_images(&ctx, Pagination::clamped(offset, limit)).map_err(|e| e.to_string())
+    svc::list_images_with_visibility(
+        &ctx,
+        Pagination::clamped(offset, limit),
+        include_rejected.unwrap_or(false),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -73,21 +89,27 @@ pub async fn list_images_filtered(
     min_height: Option<u32>,
     limit: u32,
     offset: u32,
+    include_rejected: Option<bool>,
 ) -> Result<Vec<ImageWithFile>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::list_images_filtered(
+    svc::list_images_filtered_with_visibility(
         &ctx,
         min_width,
         min_height,
         Pagination::clamped(offset, limit),
+        include_rejected.unwrap_or(false),
     )
     .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn get_image_count(state: State<'_, AppState>) -> Result<u32, String> {
+pub async fn get_image_count(
+    state: State<'_, AppState>,
+    include_rejected: Option<bool>,
+) -> Result<u32, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::get_image_count(&ctx).map_err(|e| e.to_string())
+    svc::get_image_count_with_visibility(&ctx, include_rejected.unwrap_or(false))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

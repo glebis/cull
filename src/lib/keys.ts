@@ -9,6 +9,7 @@ import {
     requestTextInput, requestCollectionTarget, selectionAnchorIndex, requestLoupeActualSize, requestLoupeFitIn,
     requestLoupeZoomIn, requestLoupeZoomOut,
     activeFolder,
+    showRejected,
 } from './stores';
 import { tabCycleOrder } from './plugins/tab-registry';
 import { computeCompareSwap, nextComparePresentationState } from './compare-utils';
@@ -21,7 +22,8 @@ import { invalidateImageCache, loadImagesForCurrentScope } from './image-loading
 import { focusImagePath } from './transform-results';
 import { commandForKeyboardEvent, openCommandPalette, runCommandPaletteItem } from './command-palette';
 import { recordShortcutUse, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from './shortcut-reminders';
-import { withDecision, withRating, type ImageDecision } from './selection-updates';
+import { withRating, type ImageDecision } from './selection-updates';
+import { applyDecisionToCurrentView } from './rejected-visibility';
 import { pasteDestinationForContext } from './clipboard-actions';
 
 let waitingForStar = false;
@@ -157,11 +159,7 @@ export async function handleDecision(decision: ImageDecision, imageIndex?: numbe
     try {
         await setDecision(img.image.id, decision, get(activeSession)?.id ?? null);
         invalidateImageCache();
-        images.update(all => {
-            const copy = [...all];
-            copy[idx] = withDecision(copy[idx], decision);
-            return copy;
-        });
+        applyDecisionToCurrentView(img.image.id, decision);
     } catch (e) {
         console.error('Failed to set decision:', e);
     }
@@ -691,7 +689,7 @@ async function handleCreateCollectionFromSelected(inverse: boolean) {
     try {
         const id = await createCollection(name.trim());
         await addToCollection(id, imageIds);
-        const c = await listCollections();
+        const c = await listCollections(get(showRejected));
         collections.set(c);
         statusHint.set(`Created "${name.trim()}" with ${imageIds.length} images`);
         setTimeout(() => statusHint.set(null), 2000);
@@ -729,7 +727,7 @@ async function handleToggleCollectMode() {
     } else {
         try {
             targetId = await createCollection(target.name);
-            const c = await listCollections();
+            const c = await listCollections(get(showRejected));
             collections.set(c);
         } catch (err) {
             console.error('Failed to create collection:', err);
@@ -755,7 +753,7 @@ async function handleCollectModeAdd() {
     try {
         await addToCollection(target, [img.image.id]);
         invalidateImageCache();
-        const c = await listCollections();
+        const c = await listCollections(get(showRejected));
         collections.set(c);
         // If we're viewing this collection, refresh
         if (get(activeCollection) === target) {

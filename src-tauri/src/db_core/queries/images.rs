@@ -8,6 +8,7 @@ use crate::db_core::db::{
 
 use crate::db_core::db::Database;
 use crate::db_core::models::*;
+use crate::db_core::visibility::RejectedVisibility;
 use rusqlite::{params, OptionalExtension, Result};
 
 impl Database {
@@ -82,8 +83,17 @@ impl Database {
     }
 
     pub fn list_images(&self, limit: u32, offset: u32) -> Result<Vec<ImageWithFile>> {
+        self.list_images_with_visibility(limit, offset, true)
+    }
+
+    pub fn list_images_with_visibility(
+        &self,
+        limit: u32,
+        offset: u32,
+        include_rejected: bool,
+    ) -> Result<Vec<ImageWithFile>> {
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
+        let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
@@ -91,10 +101,13 @@ impl Database {
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             WHERE {}
              GROUP BY i.id
              ORDER BY i.imported_at DESC, i.id ASC
              LIMIT ?1 OFFSET ?2",
-        )?;
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![limit, offset], map_image_with_file_row)?;
         rows.collect::<Result<Vec<_>>>()
     }
@@ -187,6 +200,17 @@ impl Database {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<ImageWithFile>> {
+        self.list_images_filtered_with_visibility(min_width, min_height, limit, offset, true)
+    }
+
+    pub fn list_images_filtered_with_visibility(
+        &self,
+        min_width: Option<u32>,
+        min_height: Option<u32>,
+        limit: u32,
+        offset: u32,
+        include_rejected: bool,
+    ) -> Result<Vec<ImageWithFile>> {
         let conn = self.conn.lock();
         let mut sql = String::from(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
@@ -198,6 +222,8 @@ impl Database {
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
              WHERE 1=1",
         );
+        sql.push_str(" AND ");
+        sql.push_str(RejectedVisibility::from_include_rejected(include_rejected).sql_predicate());
         if let Some(w) = min_width {
             sql.push_str(&format!(" AND i.width >= {}", w));
         }
@@ -237,6 +263,13 @@ impl Database {
     }
 
     pub fn list_folders(&self) -> Result<Vec<(String, u32)>> {
+        self.list_folders_with_visibility(true)
+    }
+
+    pub fn list_folders_with_visibility(
+        &self,
+        include_rejected: bool,
+    ) -> Result<Vec<(String, u32)>> {
         // Group/count/sort in SQLite instead of streaming every image path into
         // a Rust HashMap. The parent directory is derived with the standard
         // rtrim dirname trick: rtrim(path, <all non-'/' chars of path>) strips
@@ -247,7 +280,7 @@ impl Database {
         // has no parent (excluded, like `None`); a root-level file ("/x.png")
         // whose stripped prefix is empty maps to "/".
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
+        let sql = format!(
             "SELECT folder, COUNT(*) AS cnt
              FROM (
                  SELECT CASE
@@ -256,12 +289,16 @@ impl Database {
                      ELSE rtrim(rtrim(f.path, replace(f.path, '/', '')), '/')
                  END AS folder
                  FROM image_files f
-                 WHERE f.missing_at IS NULL
+                 JOIN images i ON i.id = f.image_id
+                 LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+                 WHERE f.missing_at IS NULL AND {}
              )
              WHERE folder IS NOT NULL
              GROUP BY folder
              ORDER BY folder",
-        )?;
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
         })?;
@@ -274,6 +311,16 @@ impl Database {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<ImageWithFile>> {
+        self.list_images_by_folder_with_visibility(folder, limit, offset, true)
+    }
+
+    pub fn list_images_by_folder_with_visibility(
+        &self,
+        folder: &str,
+        limit: u32,
+        offset: u32,
+        include_rejected: bool,
+    ) -> Result<Vec<ImageWithFile>> {
         let conn = self.conn.lock();
         // Prefix-match on substr rather than LIKE: `_` and `%` are wildcards in
         // LIKE, so a folder named `2025_Trips` would also pull in `2025XTrips`.
@@ -281,7 +328,7 @@ impl Database {
         // reason.
         let prefix = format!("{}/", folder.trim_end_matches('/'));
         let prefix_len = prefix.chars().count() as i64;
-        let mut stmt = conn.prepare(
+        let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
@@ -289,11 +336,13 @@ impl Database {
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE substr(f.path, 1, ?4) COLLATE BINARY = ?1 COLLATE BINARY
+             WHERE substr(f.path, 1, ?4) COLLATE BINARY = ?1 COLLATE BINARY AND {}
              GROUP BY i.id
              ORDER BY i.imported_at DESC
              LIMIT ?2 OFFSET ?3",
-        )?;
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![prefix, limit, offset, prefix_len], |row| {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
@@ -324,13 +373,19 @@ impl Database {
     }
 
     pub fn image_count(&self) -> Result<u32> {
+        self.image_count_with_visibility(true)
+    }
+
+    pub fn image_count_with_visibility(&self, include_rejected: bool) -> Result<u32> {
         let conn = self.conn.lock();
-        conn.query_row(
+        let sql = format!(
             "SELECT COUNT(DISTINCT i.id) FROM images i
-             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL",
-            [],
-            |row| row.get(0),
-        )
+             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+             LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             WHERE {}",
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        conn.query_row(&sql, [], |row| row.get(0))
     }
 
     pub fn list_image_ids(&self) -> Result<Vec<String>> {

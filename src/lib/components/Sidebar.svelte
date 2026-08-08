@@ -2,7 +2,7 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen } from '$lib/stores';
+    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen } from '$lib/stores';
     import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, listCollections, createCollection, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, countByDetectedClass, listDetectedClasses, regenerateThumbnails, rescanSources, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, ImageWithFile, SmartCollection } from '$lib/api';
@@ -47,6 +47,7 @@
     } | null>(null);
     let collectionPreviewTimer: ReturnType<typeof setTimeout> | null = null;
     let collectionPreviewRequest = 0;
+    let browseCountsRequest = 0;
 
     function setClipboardStatus(status: ClipboardMonitorStatus | null) {
         clipboardStatus = status;
@@ -248,7 +249,7 @@
         collectionPreviewTimer = setTimeout(async () => {
             collectionPreview = { collectionId, name, count, images: [], loading: true, x, y };
             try {
-                const images = await listCollectionImages(collectionId, 4, 0);
+                const images = await listCollectionImages(collectionId, 4, 0, $showRejected);
                 if (requestId !== collectionPreviewRequest) return;
                 collectionPreview = { collectionId, name, count, images, loading: false, x, y };
             } catch (e) {
@@ -287,31 +288,10 @@
     onDestroy(() => {
         clearCollectionPreviewTimer();
         window.removeEventListener('detected-classes-changed', handleDetectedClassesChanged);
+        window.removeEventListener('cull:decision-changed', handleDecisionChanged);
     });
 
     onMount(async () => {
-        try {
-            const f = await listFolders();
-            folders.set(f);
-        } catch (e) {
-            console.error('Failed to load folders:', e);
-            showToast('Failed to load folders', { detail: String(e), type: 'error', duration: 8000 });
-        }
-        try {
-            const c = await listCollections();
-            collections.set(c);
-            prunePinsToExistingCollections(c);
-        } catch (e) {
-            console.error('Failed to load collections:', e);
-            showToast('Failed to load collections', { detail: String(e), type: 'error', duration: 8000 });
-        }
-        try {
-            const sc = await listSmartCollections();
-            smartCollections.set(sc);
-        } catch (e) {
-            console.error('Failed to load smart collections:', e);
-            showToast('Failed to load smart collections', { detail: String(e), type: 'error', duration: 8000 });
-        }
         try {
             setClipboardStatus(await getClipboardMonitorStatus());
         } catch (e) {
@@ -320,7 +300,7 @@
         try {
             await listen('clipboard-monitor:capture', async () => {
                 setClipboardStatus(await getClipboardMonitorStatus());
-                const c = await listCollections();
+                const c = await listCollections($showRejected);
                 collections.set(c);
                 if (clipboardStatus?.collection_id && get(activeCollection) === clipboardStatus.collection_id) {
                     await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
@@ -330,8 +310,42 @@
             console.error('Failed to listen for clipboard monitor captures:', e);
         }
         window.addEventListener('detected-classes-changed', handleDetectedClassesChanged);
-        loadDetectedClasses().catch(e => console.error('Failed to load detected classes:', e));
+        window.addEventListener('cull:decision-changed', handleDecisionChanged);
     });
+
+    async function refreshBrowseCounts(includeRejected: boolean) {
+        const request = ++browseCountsRequest;
+        try {
+            const [count, nextFolders, nextCollections, nextSmartCollections, nextDetectedClasses] = await Promise.all([
+                getImageCount(includeRejected),
+                listFolders(includeRejected),
+                listCollections(includeRejected),
+                listSmartCollections(includeRejected),
+                listDetectedClasses(includeRejected),
+            ]);
+            if (request !== browseCountsRequest) return;
+            totalCount.set(count);
+            folders.set(nextFolders);
+            collections.set(nextCollections);
+            prunePinsToExistingCollections(nextCollections);
+            smartCollections.set(nextSmartCollections);
+            detectedClasses = nextDetectedClasses;
+            detectedClassesStore.set(nextDetectedClasses);
+        } catch (e) {
+            if (request === browseCountsRequest) {
+                console.error('Failed to refresh library counts:', e);
+                showToast('Failed to refresh library counts', {
+                    detail: String(e),
+                    type: 'error',
+                    duration: 8000,
+                });
+            }
+        }
+    }
+
+    function handleDecisionChanged() { void refreshBrowseCounts($showRejected); }
+
+    $effect(() => { void refreshBrowseCounts($showRejected); });
 
     function folderName(path: string): string {
         const parts = path.split('/');
@@ -376,7 +390,7 @@
         if (!name || !name.trim() || name.trim() === currentName) return;
         try {
             await renameCollectionApi(collectionId, name.trim());
-            collections.set(await listCollections());
+            collections.set(await listCollections($showRejected));
             showToast('Collection renamed', { type: 'success', duration: 3000 });
         } catch (e) {
             console.error('Failed to rename collection:', e);
@@ -464,7 +478,7 @@
         if (!name || !name.trim()) return;
         try {
             await createCollection(name.trim());
-            const c = await listCollections();
+            const c = await listCollections($showRejected);
             collections.set(c);
         } catch (e) {
             console.error('Failed to create collection:', e);
@@ -494,7 +508,7 @@
                 activeDetectedClass.set(null);
                 await loadImagesForCurrentScope({ force: true, invalidateCache: true });
             }
-            const c = await listCollections();
+            const c = await listCollections($showRejected);
             collections.set(c);
         } catch (e) {
             console.error('Failed to delete collection:', e);
@@ -531,7 +545,7 @@
                 ? await stopClipboardMonitor()
                 : await startClipboardMonitor(null);
             setClipboardStatus(nextStatus);
-            const c = await listCollections();
+            const c = await listCollections($showRejected);
             collections.set(c);
             if (!wasRunning && nextStatus.collection_id) {
                 await applyClipboardMonitorCollection(nextStatus.collection_id);
@@ -661,7 +675,7 @@
                 // Refresh image count every 20 imports
                 if (importCurrent - lastRefresh >= 20) {
                     lastRefresh = importCurrent;
-                    const count = await getImageCount();
+                    const count = await getImageCount($showRejected);
                     totalCount.set(count);
                 }
             }
@@ -701,16 +715,18 @@
 
     function handleDetectedClassesChanged() { void loadDetectedClasses(); }
 
-    async function loadDetectedClasses() {
+    async function loadDetectedClasses(includeRejected = $showRejected) {
         try {
-            detectedClasses = await listDetectedClasses();
-            detectedClassesStore.set(detectedClasses);
+            const next = await listDetectedClasses(includeRejected);
+            if (includeRejected !== $showRejected) return;
+            detectedClasses = next;
+            detectedClassesStore.set(next);
         } catch (_) {}
     }
 
     async function filterByClass(className: string) {
         try {
-            const count = await countByDetectedClass(className);
+            const count = await countByDetectedClass(className, $showRejected);
             if (count === 0) return;
             activeSession.set(null);
             sessionCanvases.set([]);
@@ -731,12 +747,12 @@
     }
 
     async function refreshImages() {
-        const count = await getImageCount();
+        const count = await getImageCount($showRejected);
         totalCount.set(count);
         await loadImagesForCurrentScope({ force: true, invalidateCache: true });
         // Refresh folders too
         try {
-            const f = await listFolders();
+            const f = await listFolders($showRejected);
             folders.set(f);
         } catch (_) {}
     }

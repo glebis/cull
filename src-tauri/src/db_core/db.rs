@@ -1996,6 +1996,190 @@ mod tests {
     }
 
     #[test]
+    fn visible_library_and_folder_queries_hide_rejected_until_requested() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "kept", "h-kept", "/lib/art/kept.png");
+        insert_test_image_at_path(&db, "rejected", "h-rejected", "/lib/art/rejected.png");
+        db.set_decision("rejected", "reject").unwrap();
+        assert_eq!(
+            db.list_images_with_visibility(20, 0, false).unwrap().len(),
+            1
+        );
+        assert_eq!(
+            db.list_images_with_visibility(20, 0, true).unwrap().len(),
+            2
+        );
+        assert_eq!(db.image_count_with_visibility(false).unwrap(), 1);
+        assert_eq!(db.image_count_with_visibility(true).unwrap(), 2);
+        assert_eq!(
+            db.list_images_filtered_with_visibility(Some(1), Some(1), 20, 0, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.list_images_filtered_with_visibility(Some(1), Some(1), 20, 0, true)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(db.list_folders_with_visibility(false).unwrap()[0].1, 1);
+        assert_eq!(db.list_folders_with_visibility(true).unwrap()[0].1, 2);
+        assert_eq!(
+            db.list_images_by_folder_with_visibility("/lib/art", 20, 0, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.list_images_by_folder_with_visibility("/lib/art", 20, 0, true)
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn visible_collection_and_smart_queries_honor_rejected_policy() {
+        let db = test_db();
+        insert_test_image(&db, "kept", "h-kept");
+        insert_test_image(&db, "rejected", "h-rejected");
+        db.set_decision("rejected", "reject").unwrap();
+        let collection_id = db.create_collection("Review").unwrap();
+        db.add_to_collection(&collection_id, &["kept", "rejected"])
+            .unwrap();
+        let hidden_count = db
+            .list_collections_with_visibility(false)
+            .unwrap()
+            .into_iter()
+            .find(|(id, _, _)| id == &collection_id)
+            .unwrap()
+            .2;
+        assert_eq!(hidden_count, 1);
+        let included_count = db
+            .list_collections_with_visibility(true)
+            .unwrap()
+            .into_iter()
+            .find(|(id, _, _)| id == &collection_id)
+            .unwrap()
+            .2;
+        assert_eq!(included_count, 2);
+        assert_eq!(
+            db.list_collection_images_with_visibility(&collection_id, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.list_collection_images_with_visibility(&collection_id, true)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            db.list_collection_images_page_with_visibility(&collection_id, 20, 0, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        let all_filter = r#"{"type":"group","op":"and","children":[]}"#;
+        let smart_id = db
+            .create_smart_collection("Everything", all_filter, None, false)
+            .unwrap();
+        let hidden_smart_count = db
+            .list_smart_collections_with_visibility(false)
+            .unwrap()
+            .into_iter()
+            .find(|collection| collection.id == smart_id)
+            .unwrap()
+            .image_count;
+        let included_smart_count = db
+            .list_smart_collections_with_visibility(true)
+            .unwrap()
+            .into_iter()
+            .find(|collection| collection.id == smart_id)
+            .unwrap()
+            .image_count;
+        assert_eq!(hidden_smart_count, Some(1));
+        assert_eq!(included_smart_count, Some(2));
+        assert_eq!(
+            db.evaluate_smart_collection_page_with_visibility(all_filter, Some(20), Some(0), false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.count_smart_collection_with_visibility(all_filter, true)
+                .unwrap(),
+            2
+        );
+        let rejected_filter = r#"{"type":"rule","field":"decision","op":"eq","value":"reject"}"#;
+        assert_eq!(
+            db.evaluate_smart_collection_page_with_visibility(
+                rejected_filter,
+                Some(20),
+                Some(0),
+                false
+            )
+            .unwrap()
+            .len(),
+            1,
+            "an explicit Rejected smart collection remains usable"
+        );
+    }
+
+    #[test]
+    fn visible_detection_and_import_batch_queries_hide_rejected_until_requested() {
+        let db = test_db();
+        insert_test_image(&db, "kept", "h-kept");
+        insert_test_image(&db, "rejected", "h-rejected");
+        db.set_decision("rejected", "reject").unwrap();
+        let batch_id = db.create_import_batch("test", 2, None).unwrap();
+        db.set_image_batch("kept", &batch_id).unwrap();
+        db.set_image_batch("rejected", &batch_id).unwrap();
+        {
+            let conn = db.conn.lock();
+            for image_id in ["kept", "rejected"] {
+                conn.execute("INSERT INTO detections (id, image_id, model_name, class_name, confidence, x, y, width, height, created_at) VALUES (?1, ?2, 'yolo-test', 'person', 0.9, 0.0, 0.0, 1.0, 1.0, '2026-01-01')", params![format!("det-{image_id}"), image_id]).unwrap();
+            }
+        }
+        assert_eq!(
+            db.list_detected_classes_with_visibility(false).unwrap()[0].1,
+            1
+        );
+        assert_eq!(
+            db.list_detected_classes_with_visibility(true).unwrap()[0].1,
+            2
+        );
+        assert_eq!(
+            db.list_images_by_class_with_visibility("person", 20, 0, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.count_by_class_with_visibility("person", false).unwrap(),
+            1
+        );
+        assert_eq!(
+            db.count_by_class_with_visibility("person", true).unwrap(),
+            2
+        );
+        assert_eq!(
+            db.get_batch_images_with_visibility(&batch_id, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.get_batch_images_with_visibility(&batch_id, true)
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
     fn list_images_in_scope_collection_paginates_completely() {
         let db = test_db();
         let col = db.create_collection("C1").unwrap();

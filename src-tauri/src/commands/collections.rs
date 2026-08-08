@@ -24,9 +24,11 @@ pub async fn create_collection(state: State<'_, AppState>, name: String) -> Resu
 #[tauri::command]
 pub async fn list_collections(
     state: State<'_, AppState>,
+    include_rejected: Option<bool>,
 ) -> Result<Vec<(String, String, u32)>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::list_collections(&ctx).map_err(|e| e.to_string())
+    svc::list_collections_with_visibility(&ctx, include_rejected.unwrap_or(false))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -76,17 +78,24 @@ pub async fn list_collection_images(
     collection_id: String,
     limit: Option<u32>,
     offset: Option<u32>,
+    include_rejected: Option<bool>,
 ) -> Result<Vec<ImageWithFile>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
     if let Some(limit) = limit {
-        svc::list_collection_images_page(
+        svc::list_collection_images_page_with_visibility(
             &ctx,
             &collection_id,
             Pagination::clamped(offset.unwrap_or(0), limit),
+            include_rejected.unwrap_or(false),
         )
         .map_err(|e| e.to_string())
     } else {
-        svc::list_collection_images(&ctx, &collection_id).map_err(|e| e.to_string())
+        svc::list_collection_images_with_visibility(
+            &ctx,
+            &collection_id,
+            include_rejected.unwrap_or(false),
+        )
+        .map_err(|e| e.to_string())
     }
 }
 

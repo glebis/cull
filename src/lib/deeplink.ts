@@ -21,6 +21,7 @@ import {
     activeDetectedClass,
     activeSession,
     collections,
+    showRejected,
     type ViewMode,
 } from './stores';
 import { importFolder, importFiles, addToCollection, listCollections, listFolders, listImagesByFolder, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls, completeDeepLinkNavigation, type ImageWithFile, type ImportResponse } from './api';
@@ -204,7 +205,7 @@ async function handleParamsInner(params: OpenParams, ack: AckFn) {
             await loadImagesForCurrentScope({ force: true, invalidateCache: true });
             focusIndex(0);
             // Refresh folder list in sidebar
-            const f = await listFolders();
+            const f = await listFolders(get(showRejected));
             folders.set(f);
             const folderTotal = f.find(([path]) => path === params.folder)?.[1] ?? result.imported;
             if (result.imported > 0) {
@@ -228,7 +229,7 @@ async function handleParamsInner(params: OpenParams, ack: AckFn) {
 
             if (pinned && result.image_ids.length > 0) {
                 await addToCollection(pinned, result.image_ids);
-                const c = await listCollections();
+                const c = await listCollections(get(showRejected));
                 collections.set(c);
                 showToast(`Image added to active collection`, { type: 'success', duration: 5000 });
             }
@@ -264,7 +265,7 @@ async function handleParamsInner(params: OpenParams, ack: AckFn) {
             if (pinned && result.image_ids.length > 0) {
                 // Active collection exists — append silently
                 await addToCollection(pinned, result.image_ids);
-                const c = await listCollections();
+                const c = await listCollections(get(showRejected));
                 collections.set(c);
 
                 activeCollection.set(pinned);
@@ -350,7 +351,7 @@ async function handleCanvasFolderDrop(params: OpenParams) {
     try {
         const result = await importFolder(params.folder, get(activeSession)?.id ?? null);
         const folderImages = await listAllImagesByFolder(params.folder);
-        const f = await listFolders();
+        const f = await listFolders(get(showRejected));
         folders.set(f);
         emitCanvasImportDrop({
             images: folderImages,
@@ -369,7 +370,7 @@ async function listAllImagesByFolder(folder: string): Promise<ImageWithFile[]> {
     const allImages: ImageWithFile[] = [];
     for (let page = 0; page < FOLDER_IMAGE_PAGE_LIMIT; page++) {
         const offset = page * FOLDER_IMAGE_PAGE_SIZE;
-        const batch = await listImagesByFolder(folder, FOLDER_IMAGE_PAGE_SIZE, offset);
+        const batch = await listImagesByFolder(folder, FOLDER_IMAGE_PAGE_SIZE, offset, get(showRejected));
         allImages.push(...batch);
         if (batch.length < FOLDER_IMAGE_PAGE_SIZE) break;
     }

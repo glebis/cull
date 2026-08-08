@@ -26,6 +26,7 @@ import {
     focusedIndex,
     focusedImage,
     sidebarVisible,
+    showRejected,
     thumbnailSize,
     showLoupeHistogram,
     activeFolder,
@@ -86,7 +87,7 @@ import {
     handlePreviewDisplayStopWebStream,
     requestPreviewDisplayCapture,
 } from './preview-display-actions';
-import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
+import { invalidateImageCache, loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { folderDisplayName } from './move-menu-utils';
 import { openCommandPalette } from './command-palette';
 import { checkForUpdates } from './update-manager';
@@ -189,7 +190,7 @@ async function reloadAfterImageRemoval(ids: string[]) {
     if (get(focusedIndex) >= get(images).length) {
         focusedIndex.set(Math.max(0, get(images).length - 1));
     }
-    collections.set(await listCollections());
+    collections.set(await listCollections(get(showRejected)));
 }
 
 async function handleImageShare() {
@@ -335,7 +336,7 @@ async function moveMenuImagesToFolder(ids: string[], folder: string) {
 
     await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
     try {
-        folders.set(await listFolders());
+        folders.set(await listFolders(get(showRejected)));
     } catch (e) {
         console.error('Failed to refresh folders after move:', e);
     }
@@ -477,6 +478,13 @@ function handleMenuAction(action: string) {
             break;
         case 'toggle_sidebar':
             sidebarVisible.update((v) => !v);
+            break;
+        case 'view_show_rejected':
+            showRejected.update((visible) => !visible);
+            invalidateImageCache();
+            loadImagesForCurrentScope({ resetFocus: true, force: true, invalidateCache: true }).catch((e) => {
+                showToast('Failed to reload images', { detail: String(e), type: 'error', duration: 8000 });
+            });
             break;
         case 'view_loupe_histogram':
             showLoupeHistogram.update((visible) => !visible);
@@ -678,6 +686,7 @@ function currentMenuStatePayload() {
     return {
         viewMode: get(viewMode),
         sidebarVisible: get(sidebarVisible),
+        showRejected: get(showRejected),
         hasFocusedImage: get(focusedImage) !== null,
         selectedCount: get(selectedIds).size,
         staticPublishingEnabled: publishTabAvailable(),
@@ -739,6 +748,7 @@ function startMenuStateSubscriptions() {
 
     viewMode.subscribe(queueMenuStateUpdate);
     sidebarVisible.subscribe(queueMenuStateUpdate);
+    showRejected.subscribe(queueMenuStateUpdate);
     focusedImage.subscribe(queueMenuStateUpdate);
     selectedIds.subscribe(queueMenuStateUpdate);
     staticPublishingEnabled.subscribe(queueMenuStateUpdate);
