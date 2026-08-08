@@ -1050,14 +1050,26 @@ def test_context_menu(page: Page) -> None:
 
     expect(menu).to_contain_text("Rate")
     expect(menu).to_contain_text("Copy")
+    expect(menu.locator('[data-shortcut-for="image.decision.accept"]')).to_have_text("A")
+    expect(menu.locator('[data-shortcut-for="image.decision.reject"]')).to_have_text("X")
+    expect(menu.locator('[data-shortcut-for="image.trash"]')).to_have_text("Backspace")
     menu.get_by_role("menuitem").first.focus()
     expect(menu.get_by_role("menuitem").first).to_be_focused()
 
     menu.locator('button[data-submenu-key="rate"]').hover()
     expect(menu.locator(".submenu").first).to_be_visible()
+    expect(menu.locator('[data-shortcut-for="image.rating.3"]')).to_have_text("3")
 
     # Menu-local Escape closes the submenu first; the capture fallback must not
     # collapse the entire menu while focus is inside it.
+    page.keyboard.press("Escape")
+    expect(menu).to_be_visible()
+    expect(menu.locator(".submenu")).to_have_count(0)
+
+    menu.locator('button[data-submenu-key="copy"]').hover()
+    expect(menu.locator(".submenu").first).to_be_visible()
+    expect(menu.locator('[data-shortcut-for="image.copy"]')).to_have_text("Cmd+C")
+    expect(menu.locator("[data-shortcut-for='image.copy']").locator("..")).to_contain_text("Copy Image")
     page.keyboard.press("Escape")
     expect(menu).to_be_visible()
     expect(menu.locator(".submenu")).to_have_count(0)
