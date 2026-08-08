@@ -4,7 +4,7 @@ Version: 0.1.0 — Draft, 2026-05-07
 
 Cull ships a single `cull` binary. With no subcommand it launches the GUI. With a subcommand it runs headless and exits. Every operation available in the GUI has a CLI equivalent and a URL scheme equivalent.
 
-> Current implementation note: the first shipped headless slice is MCP-aligned. Implemented commands use MCP tool names and JSON parameter field names: `get_library_stats`, `list_images`, `list_folders`, `list_collections`, `import_folder`, `import_files`, `list_export_presets`, and `export_images`. The broader CLI below remains the draft target.
+> Current implementation note: the shipped headless slice is MCP-aligned. Implemented commands use MCP tool names and JSON parameter field names: `get_library_stats`, `list_images`, `list_folders`, `list_collections`, `import_folder`, `import_files`, `list_export_presets`, `export_images`, embedding/model commands, quality commands, and `set_rating`. The broader CLI below remains the draft target.
 >
 > CLI implementation standards and module ownership rules live in [agent-cli-standards.md](agent-cli-standards.md).
 
@@ -23,6 +23,7 @@ cull --json list_export_presets
 cull --json export_images --image_ids id1,id2 --output_dir /tmp/cull-export --format original
 cull --json export_images --collection_id <collection-id> --output_dir /tmp/cull-export --format webp
 cull --json export_images --folder_path /path/to/images --output_dir /tmp/cull-export --format png --flatten false
+cull --json set_rating --image_id id1 --rating 4
 ```
 
 For agents that already have MCP-shaped params, `call_tool` accepts the same tool name and JSON object:
@@ -201,13 +202,13 @@ cull metadata DSC_4021.jpg
 # {"camera": "Nikon Z6III", "lens": "24-70mm f/2.8", "focal_length": "35mm", ...}
 ```
 
-#### `rate` — Set star rating
+#### `rate` — Set star rating (draft target)
 
 ```bash
 cull rate <path|glob> --stars <0-5>
 ```
 
-Set star rating in the library database. `--stars 0` clears the rating.
+The implemented MCP-aligned form is `cull set_rating --image_id <id> --rating <0-5>`. A future path/glob convenience command may expand this into separately audited single-image operations.
 
 #### `accept` / `reject` / `undecide` — Set curation status
 

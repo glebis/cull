@@ -3,6 +3,7 @@ use serde_json::Value;
 use super::context::HeadlessContext;
 
 mod catalog;
+mod curation;
 mod embeddings;
 mod export;
 mod import;
@@ -31,6 +32,7 @@ pub const SUPPORTED_TOOLS: &[&str] = &[
     "import_folder",
     "import_files",
     "reject_catalog_values",
+    "set_rating",
     "set_catalog_draft_value",
     "set_catalog_draft_values",
     "suggest_catalog_values",
@@ -70,6 +72,7 @@ pub fn execute_named_tool(
         "import_folder" => import::import_folder(ctx, params),
         "import_files" => import::import_files(ctx, params),
         "reject_catalog_values" => catalog::reject_catalog_values(ctx, params),
+        "set_rating" => curation::set_rating(ctx, params),
         "set_catalog_draft_value" => catalog::set_catalog_draft_value(ctx, params),
         "set_catalog_draft_values" => catalog::set_catalog_draft_values(ctx, params),
         "suggest_catalog_values" => catalog::suggest_catalog_values(ctx, params),

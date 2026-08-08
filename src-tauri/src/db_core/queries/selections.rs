@@ -6,6 +6,15 @@ use crate::db_core::models::*;
 use rusqlite::{params, OptionalExtension, Result};
 
 impl Database {
+    pub fn image_exists(&self, image_id: &str) -> Result<bool> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM images WHERE id = ?1)",
+            params![image_id],
+            |row| row.get(0),
+        )
+    }
+
     pub fn set_rating(&self, image_id: &str, rating: u8) -> Result<()> {
         let conn = self.conn.lock();
         conn.execute(
