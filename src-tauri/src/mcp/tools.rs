@@ -13,7 +13,7 @@ use tauri::{Emitter, Manager};
 use super::auth::{require_capability, AuthContext};
 use crate::db_core::canvas_document::CanvasDocument;
 use crate::db_core::models::{Canvas, TokenScope};
-use crate::services::ai::{self as ai_service, SearchByObjectParams};
+use crate::services::ai::{self as ai_service, FindSimilarParams, SearchByObjectParams};
 use crate::services::curation::{self as curation_service, SetRatingParams};
 use crate::services::tokens;
 use crate::AppState;
@@ -686,16 +686,6 @@ pub struct CreateSmartCollectionParams {
         description = "Natural language query like 'landscape photos rated 4+' or raw filter JSON"
     )]
     pub query: String,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct FindSimilarParams {
-    #[schemars(description = "Image ID to find similar images for")]
-    pub image_id: String,
-    #[schemars(description = "Number of results to return (default 10)")]
-    pub limit: Option<u32>,
-    #[schemars(description = "Embedding model: 'clip-vit-b32' or 'dinov2-vits14'")]
-    pub model: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]

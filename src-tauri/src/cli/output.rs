@@ -60,6 +60,24 @@ mod tests {
         assert!(human.contains("\"confidence\""));
         assert!(human.contains('\n'));
     }
+
+    #[test]
+    fn success_output_reports_similarity_matches_in_json_and_human_modes() {
+        let value = serde_json::json!([
+            { "image_id": "near", "similarity": 0.94, "model": "clip-vit-b32" },
+            { "image_id": "far", "similarity": 0.42, "model": "clip-vit-b32" }
+        ]);
+
+        let json = success_output(true, &value);
+        assert_eq!(serde_json::from_str::<Value>(&json).unwrap(), value);
+        assert!(!json.contains('\n'));
+
+        let human = success_output(false, &value);
+        assert!(human.contains("\"near\""));
+        assert!(human.contains("\"similarity\""));
+        assert!(human.contains("\"clip-vit-b32\""));
+        assert!(human.contains('\n'));
+    }
 }
 
 pub fn print_error(json: bool, message: &str) {

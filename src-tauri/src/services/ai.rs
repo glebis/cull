@@ -30,6 +30,93 @@ pub struct SearchByObjectMatch {
     pub confidence: f32,
 }
 
+#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
+pub struct FindSimilarParams {
+    #[schemars(description = "Image ID to find similar images for")]
+    pub image_id: String,
+    #[schemars(description = "Number of results to return (default 10, max 100)")]
+    pub limit: Option<u32>,
+    #[schemars(description = "Embedding model: 'clip-vit-b32' or 'dinov2-vits14'")]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct FindSimilarMatch {
+    pub image_id: String,
+    pub similarity: f32,
+    pub model: String,
+}
+
+pub fn find_similar_in_database(
+    db: &Database,
+    params: &FindSimilarParams,
+) -> Result<Vec<FindSimilarMatch>, ServiceError> {
+    let (image_id, limit, model) = validate_find_similar(params)?;
+    let results = db
+        .find_similar_live(image_id, model, limit)?
+        .ok_or_else(|| missing_embedding_error(image_id, model))?;
+    Ok(similarity_matches(results, model))
+}
+
+pub fn find_similar_in_token_scope_database(
+    db: &Database,
+    params: &FindSimilarParams,
+    folders: &[String],
+    collections: &[String],
+    tag_norms: &[String],
+) -> Result<Vec<FindSimilarMatch>, ServiceError> {
+    let (image_id, limit, model) = validate_find_similar(params)?;
+    let results = db
+        .find_similar_in_token_scope(image_id, model, folders, collections, tag_norms, limit)?
+        .ok_or_else(|| missing_embedding_error(image_id, model))?;
+    Ok(similarity_matches(results, model))
+}
+
+fn validate_find_similar(params: &FindSimilarParams) -> Result<(&str, usize, &str), ServiceError> {
+    let image_id = validated_find_similar_image_id(params)?;
+    let model = params.model.as_deref().unwrap_or("clip-vit-b32").trim();
+    if crate::db_core::embeddings::embedding_model_spec(model).is_none() {
+        return Err(ServiceError::InvalidInput(format!(
+            "Unsupported embedding model '{model}'"
+        )));
+    }
+    Ok((
+        image_id,
+        params
+            .limit
+            .unwrap_or(10)
+            .clamp(1, MAX_SIMILAR_IMAGES as u32) as usize,
+        model,
+    ))
+}
+
+pub fn validated_find_similar_image_id(params: &FindSimilarParams) -> Result<&str, ServiceError> {
+    let image_id = params.image_id.trim();
+    if image_id.is_empty() {
+        return Err(ServiceError::InvalidInput(
+            "image_id must not be empty".to_string(),
+        ));
+    }
+    Ok(image_id)
+}
+
+fn missing_embedding_error(image_id: &str, model: &str) -> ServiceError {
+    ServiceError::NotFound(format!(
+        "Image '{image_id}' has no '{model}' embedding. Run generate_embeddings first."
+    ))
+}
+
+fn similarity_matches(results: Vec<(String, f32)>, model: &str) -> Vec<FindSimilarMatch> {
+    results
+        .into_iter()
+        .map(|(image_id, similarity)| FindSimilarMatch {
+            image_id,
+            similarity,
+            model: model.to_string(),
+        })
+        .collect()
+}
+
 pub fn search_by_object_in_database(
     db: &Database,
     params: &SearchByObjectParams,
@@ -736,6 +823,138 @@ mod tests {
             ServiceError::NotFound(msg) => assert!(msg.contains("no embedding")),
             other => panic!("Expected NotFound, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn find_similar_shared_params_validate_rank_and_model() {
+        let (db, _s, _d, _ee, _de, _se, _tmp) = make_ctx_parts();
+        for (id, vector) in [
+            ("source", vec![1.0, 0.0]),
+            ("near", vec![0.8, 0.6]),
+            ("far", vec![0.0, 1.0]),
+        ] {
+            insert_test_image(&db, id);
+            db.store_embedding(id, "clip-vit-b32", &vector).unwrap();
+        }
+
+        let matches = find_similar_in_database(
+            &db,
+            &FindSimilarParams {
+                image_id: " source ".to_string(),
+                limit: Some(10),
+                model: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].image_id, "near");
+        assert!((matches[0].similarity - 0.8).abs() < 0.000_001);
+        assert_eq!(matches[0].model, "clip-vit-b32");
+        assert_eq!(matches[1].image_id, "far");
+
+        let unsupported = find_similar_in_database(
+            &db,
+            &FindSimilarParams {
+                image_id: "source".to_string(),
+                limit: None,
+                model: Some("unknown-model".to_string()),
+            },
+        );
+        assert!(matches!(unsupported, Err(ServiceError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn find_similar_shared_params_reject_empty_and_missing_embeddings() {
+        let (db, _s, _d, _ee, _de, _se, _tmp) = make_ctx_parts();
+        insert_test_image(&db, "without-vector");
+
+        let empty = find_similar_in_database(
+            &db,
+            &FindSimilarParams {
+                image_id: "   ".to_string(),
+                limit: None,
+                model: None,
+            },
+        );
+        assert!(matches!(empty, Err(ServiceError::InvalidInput(_))));
+
+        let missing = find_similar_in_database(
+            &db,
+            &FindSimilarParams {
+                image_id: "without-vector".to_string(),
+                limit: None,
+                model: None,
+            },
+        );
+        assert!(matches!(missing, Err(ServiceError::NotFound(_))));
+    }
+
+    #[test]
+    fn find_similar_scopes_candidates_before_ranking_and_limit() {
+        let (db, _s, _d, _ee, _de, _se, _tmp) = make_ctx_parts();
+        insert_test_image(&db, "source");
+        db.store_embedding("source", "clip-vit-b32", &[1.0, 0.0])
+            .unwrap();
+        for index in 0..105 {
+            let id = format!("outside-{index:03}");
+            insert_test_image(&db, &id);
+            db.store_embedding(&id, "clip-vit-b32", &[1.0, (index + 1) as f32 / 10_000.0])
+                .unwrap();
+        }
+        insert_test_image(&db, "inside");
+        db.store_embedding("inside", "clip-vit-b32", &[0.0, 1.0])
+            .unwrap();
+        let collection_id = db
+            .create_collection_with_images("Allowed", &["source", "inside"])
+            .unwrap();
+
+        let matches = find_similar_in_token_scope_database(
+            &db,
+            &FindSimilarParams {
+                image_id: "source".to_string(),
+                limit: Some(2),
+                model: None,
+            },
+            &[],
+            &[collection_id],
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].image_id, "inside");
+        assert!(matches.iter().all(|item| item.image_id != "source"));
+    }
+
+    #[test]
+    fn find_similar_defaults_to_ten_and_clamps_to_standard_bounds() {
+        let (db, _s, _d, _ee, _de, _se, _tmp) = make_ctx_parts();
+        insert_test_image(&db, "source");
+        db.store_embedding("source", "clip-vit-b32", &[1.0, 0.0])
+            .unwrap();
+        for index in 0..105 {
+            let id = format!("candidate-{index:03}");
+            insert_test_image(&db, &id);
+            db.store_embedding(&id, "clip-vit-b32", &[1.0, (index + 1) as f32 / 1_000.0])
+                .unwrap();
+        }
+
+        let run = |limit| {
+            find_similar_in_database(
+                &db,
+                &FindSimilarParams {
+                    image_id: "source".to_string(),
+                    limit,
+                    model: None,
+                },
+            )
+            .unwrap()
+        };
+
+        assert_eq!(run(None).len(), 10);
+        assert_eq!(run(Some(0)).len(), 1);
+        assert_eq!(run(Some(u32::MAX)).len(), 100);
     }
 
     #[test]
