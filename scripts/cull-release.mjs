@@ -153,8 +153,13 @@ function runCheck(args) {
   const config = loadReleaseConfig(repoRoot);
   const currentVersion = validateVersionAlignment(readVersionSnapshot(repoRoot, config));
   const source = git('rev-parse', 'HEAD');
+  const originMain = git('rev-parse', 'origin/main');
   const clean = git('status', '--porcelain').length === 0;
-  const syncedWithOriginMain = source === git('rev-parse', 'origin/main');
+  const syncedWithOriginMain = source === originMain;
+  const sourceBlockers = releaseSourceBlockers(source, originMain);
+  if (sourceBlockers.length === 0) {
+    runGate(config.regressionGate?.command, 'release regression gate');
+  }
   const report = buildReadinessReport({
     currentVersion,
     targetVersion: nextVersion(currentVersion, args.bump),
@@ -171,10 +176,34 @@ function runCheck(args) {
     ...report,
     blockers: [
       ...report.blockers,
+      ...sourceBlockers,
       ...homebrewCaskBlockers(config),
       ...releaseIncidentBlockers(config),
     ],
   };
+}
+
+function releaseSourceBlockers(source, originMain) {
+  const result = spawnSync('git', ['merge-base', '--is-ancestor', originMain, source], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.error || ![0, 1].includes(result.status)) {
+    throw externalFailure('Git ancestry probe failed', {
+      status: result.status,
+      signal: result.signal,
+      code: result.error?.code,
+    });
+  }
+  if (result.status === 0) return [];
+  return [{
+    code: 'STALE_RELEASE_SOURCE',
+    message: 'Release source omits commits already on origin/main',
+    releaseSha: source,
+    originMain,
+  }];
 }
 
 function homebrewCaskBlockers(config) {
@@ -264,13 +293,15 @@ function normalizeCommand(commandValue) {
   throw commandError('CONFIG_INVALID', 'Release gates must be non-empty command arrays or strings');
 }
 
-function runGate(commandValue) {
+function runGate(commandValue, label = 'Release gate') {
   const [executable, ...args] = normalizeCommand(commandValue);
   const result = spawnSync(executable, args, { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' });
   if (result.error || result.status !== 0) {
-    throw commandError('BLOCKED', `Release gate failed: ${executable}`, {
+    throw commandError('BLOCKED', `${label} failed: ${executable}`, {
       status: result.status,
       signal: result.signal,
+      stdout: result.stdout?.trim() || undefined,
+      stderr: result.stderr?.trim() || undefined,
     });
   }
 }
@@ -561,6 +592,15 @@ function runPrepare(args) {
     throw commandError('BLOCKED', 'Prepare requires a clean worktree');
   }
   assertDedicatedWorktree(config);
+  const originMain = git('rev-parse', 'origin/main');
+  const sourceBlockers = releaseSourceBlockers(source, originMain);
+  if (sourceBlockers.length > 0) {
+    throw commandError('BLOCKED', sourceBlockers[0].message, {
+      releaseSha: source,
+      originMain,
+    });
+  }
+  runGate(config.regressionGate?.command, 'release regression gate');
   const ownedFiles = captureOwnedPaths(config);
   const currentVersion = validateVersionAlignment(readVersionSnapshot(repoRoot, config));
   const targetVersion = nextVersion(currentVersion, args.bump);

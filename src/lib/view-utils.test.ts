@@ -22,6 +22,7 @@ import {
     safeAssetPreviewPath,
     pickThumbnailVariant,
     THUMBNAIL_SIZES,
+    thumbnailVariantEdge,
     computeScrollDirection,
     computeOverscan,
     computePrefetchIndices,
@@ -936,6 +937,15 @@ describe('safeAssetPreviewPath with display size', () => {
         expect(
             safeAssetPreviewPath({ path: '/etc/passwd', thumbnail_path: null }, { displayPx: 64 })
         ).toBeNull();
+    });
+});
+
+describe('thumbnailVariantEdge', () => {
+    it('returns the decoded edge of the exact generated thumbnail variant', () => {
+        expect(thumbnailVariantEdge(64, 1)).toBe(64);
+        expect(thumbnailVariantEdge(65, 1)).toBe(128);
+        expect(thumbnailVariantEdge(100, 2)).toBe(256);
+        expect(thumbnailVariantEdge(900, 1)).toBe(800);
     });
 });
 
