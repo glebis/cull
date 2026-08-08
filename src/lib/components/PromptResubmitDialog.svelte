@@ -90,7 +90,7 @@
 <ModalDialog
     titleId="prompt-resubmit-title"
     overlayClass="prompt-resubmit-overlay"
-    panelClass="prompt-resubmit-dialog"
+    panelClass="dialog prompt-resubmit-dialog"
     onclose={onclose}
     onkeydown={handleKeydown}
 >
@@ -226,15 +226,6 @@
         font-size: 14px;
         color: var(--text);
     }
-    .close-btn {
-        background: none;
-        border: none;
-        color: var(--text-secondary);
-        font-size: 18px;
-        cursor: pointer;
-        padding: 0 4px;
-    }
-    .close-btn:hover { color: var(--text); }
     .dialog-body {
         padding: calc(var(--spacing) * 2);
         display: flex;
@@ -293,30 +284,6 @@
         gap: var(--spacing);
         padding: calc(var(--spacing) * 2);
         border-top: 1px solid var(--border);
-    }
-    .btn {
-        padding: var(--spacing) calc(var(--spacing) * 2);
-        border-radius: var(--radius);
-        font-size: 13px;
-        font-family: var(--font);
-        cursor: pointer;
-        border: 1px solid var(--border);
-    }
-    .btn.secondary {
-        background: var(--bg);
-        color: var(--text-secondary);
-    }
-    .btn.primary {
-        background: var(--blue);
-        color: var(--bg);
-        border-color: var(--blue);
-    }
-    .btn.primary:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-    .btn:hover:not(:disabled) {
-        filter: brightness(1.1);
     }
     .btn-group {
         display: flex;
