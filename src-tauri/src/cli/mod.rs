@@ -162,6 +162,15 @@ pub enum CliCommand {
     #[command(name = "get_quality_count")]
     GetQualityCount,
 
+    /// Search images by an object class already detected in the library
+    #[command(name = "search_by_object")]
+    SearchByObject {
+        #[arg(long = "class_name", visible_alias = "class-name")]
+        class_name: String,
+        #[arg(long)]
+        limit: Option<u32>,
+    },
+
     /// Set a 0-5 star rating on a library image
     #[command(name = "set_rating")]
     SetRating {
@@ -277,6 +286,11 @@ fn execute_headless(args: &CliArgs) -> Result<Value, String> {
         CliCommand::GetQualityCount => {
             tools::execute_named_tool(&ctx, "get_quality_count", serde_json::json!({}))
         }
+        CliCommand::SearchByObject { class_name, limit } => tools::execute_named_tool(
+            &ctx,
+            "search_by_object",
+            serde_json::json!({ "class_name": class_name, "limit": limit }),
+        ),
         CliCommand::SetRating { image_id, rating } => tools::execute_named_tool(
             &ctx,
             "set_rating",
@@ -528,6 +542,74 @@ mod tests {
             "6",
         ])
         .is_err());
+    }
+
+    #[test]
+    fn test_search_by_object_subcommand_accepts_mcp_field_names() {
+        let args = CliArgs::try_parse_from([
+            "cull",
+            "search_by_object",
+            "--class_name",
+            "person",
+            "--limit",
+            "12",
+        ])
+        .unwrap();
+
+        match args.command {
+            Some(CliCommand::SearchByObject { class_name, limit }) => {
+                assert_eq!(class_name, "person");
+                assert_eq!(limit, Some(12));
+            }
+            other => panic!("expected search_by_object command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_search_by_object_typed_dispatch_reads_temporary_database() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("cull.db");
+        let db = crate::db_core::db::Database::open(&db_path).unwrap();
+        db.conn
+            .lock()
+            .execute(
+                "INSERT INTO images (id, sha256_hash, width, height, format, file_size, created_at, imported_at)
+                 VALUES ('img1', 'hash-img1', 100, 100, 'png', 1000, '2026-01-01', '2026-01-01')",
+                [],
+            )
+            .unwrap();
+        db.store_detections(
+            "img1",
+            "yolo11m",
+            &[crate::db_core::detection::Detection {
+                class_name: "person".to_string(),
+                confidence: 0.88,
+                x: 0.0,
+                y: 0.0,
+                width: 1.0,
+                height: 1.0,
+            }],
+        )
+        .unwrap();
+        drop(db);
+
+        let args = CliArgs::try_parse_from([
+            "cull",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--app-data-dir",
+            tmp.path().to_str().unwrap(),
+            "search_by_object",
+            "--class_name",
+            "person",
+        ])
+        .unwrap();
+
+        let result = execute_headless(&args).unwrap();
+        let matches = result.as_array().unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0]["image_id"], "img1");
+        assert!((matches[0]["confidence"].as_f64().unwrap() - 0.88).abs() < 0.000_001);
     }
 
     #[test]
