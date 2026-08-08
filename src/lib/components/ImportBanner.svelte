@@ -100,30 +100,30 @@
         align-items: center;
         gap: 12px;
         padding: 6px 16px;
-        background: var(--bg-elevated, #2a2a3e);
-        border-bottom: 1px solid var(--border, #333);
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
         font-size: 13px;
         z-index: 10;
     }
     .count {
-        color: var(--accent, #8cc63f);
+        color: var(--green);
         font-weight: 600;
     }
     .banner-action {
         background: none;
-        border: 1px solid var(--border, #444);
-        color: var(--text-secondary, #aaa);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
         padding: 3px 10px;
         border-radius: 4px;
         cursor: pointer;
         font-size: 12px;
     }
     .banner-action:hover {
-        background: var(--bg-hover, #333);
-        color: var(--text-primary, #eee);
+        background: var(--border);
+        color: var(--text);
     }
     .banner-action.primary {
-        border-color: var(--accent, #8cc63f);
-        color: var(--accent, #8cc63f);
+        border-color: var(--green);
+        color: var(--green);
     }
 </style>
