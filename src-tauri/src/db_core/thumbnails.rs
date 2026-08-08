@@ -419,5 +419,16 @@ mod tests {
         let preview = image::open(&path).unwrap();
         assert!(preview.height() > preview.width());
         assert!(!is_legacy_document_placeholder(&path));
+
+        let rgb = preview.to_rgb8();
+        let pixel_count = u64::from(rgb.width()) * u64::from(rgb.height());
+        let luminance_sum: u64 = rgb
+            .pixels()
+            .map(|pixel| pixel.0.into_iter().map(u64::from).sum::<u64>() / 3)
+            .sum();
+        assert!(luminance_sum / pixel_count > 200);
+        assert!(rgb
+            .pixels()
+            .any(|pixel| pixel.0.iter().all(|value| *value < 64)));
     }
 }
