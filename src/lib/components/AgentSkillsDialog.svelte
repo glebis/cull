@@ -67,7 +67,7 @@ Do not rely on Cull tools as the confirmation layer for destructive operations. 
                     >Copy</button>
                 </div>
                 <p class="section-copy">
-                    Put this in the agent runtime's MCP config. The `cull` command opens the app in
+                    Put this in the agent runtime's MCP config. The <code>cull</code> command opens the app in
                     tray mode if it is not already running.
                 </p>
                 <pre><code>{mcpConfig}</code></pre>
@@ -92,7 +92,7 @@ Do not rely on Cull tools as the confirmation layer for destructive operations. 
                 </div>
                 <div>
                     <span class="meta-label">Headless work</span>
-                    <span class="meta-value">Use `cull --json` for import, export, stats, embeddings, and quality jobs.</span>
+                    <span class="meta-value">Use <code>cull --json</code> for import, export, stats, embeddings, and quality jobs.</span>
                 </div>
                 <div>
                     <span class="meta-label">Reference</span>
