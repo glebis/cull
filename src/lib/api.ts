@@ -2,6 +2,7 @@
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
 import { invoke } from '@tauri-apps/api/core';
+import type { LibraryScope } from './library-scope';
 
 function emitSessionEventsRefresh() {
     if (typeof window !== 'undefined') {
@@ -1048,6 +1049,31 @@ export interface EmbeddingPage {
 
 export async function getEmbeddingPage(model?: string, limit = 5000, offset = 0): Promise<EmbeddingPage> {
     return invoke('get_embedding_page', { model: model ?? null, limit, offset });
+}
+
+export async function getScopedEmbeddingPage(
+    scope: LibraryScope,
+    model?: string,
+    limit = 5000,
+    offset = 0,
+): Promise<EmbeddingPage> {
+    return invoke('get_scoped_embedding_page', { scope, model: model ?? null, limit, offset });
+}
+
+export interface ImageIdPage {
+    ids: string[];
+    total: number;
+    offset: number;
+    limit: number;
+    has_more: boolean;
+}
+
+export async function listScopedImageIds(
+    scope: LibraryScope,
+    limit = 100,
+    offset = 0,
+): Promise<ImageIdPage> {
+    return invoke('list_scoped_image_ids', { scope, limit, offset });
 }
 
 export async function findSimilarImages(imageId: string, topK: number, model?: string): Promise<[string, number][]> {

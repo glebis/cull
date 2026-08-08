@@ -568,6 +568,8 @@ pub fn run() {
             commands::embeddings::generate_embeddings,
             commands::embeddings::generate_model_embeddings,
             commands::embeddings::get_embedding_page,
+            commands::embeddings::get_scoped_embedding_page,
+            commands::embeddings::list_scoped_image_ids,
             commands::embeddings::find_similar_images,
             commands::embeddings::generate_similarity_groups,
             commands::embeddings::list_similarity_groups,

@@ -1,8 +1,9 @@
 use crate::db_core::color;
 use crate::db_core::detection::Detection;
 use crate::db_core::models::{
-    EmbeddingPage, ImageColorMetrics, ImagePerceptualHash, ImageQualityMetrics, ImageWithFile,
-    NearDuplicateImage, SimilarityGroupSummary, SimilarityGroupingResult,
+    EmbeddingPage, EmbeddingScope, ImageColorMetrics, ImageIdPage, ImagePerceptualHash,
+    ImageQualityMetrics, ImageWithFile, NearDuplicateImage, SimilarityGroupSummary,
+    SimilarityGroupingResult,
 };
 use crate::db_core::perceptual_hash::{self, PHASH_ALGORITHM};
 use crate::db_core::quality;
@@ -52,6 +53,28 @@ pub fn get_embedding_page(
     let model_name = model.unwrap_or("clip-vit-b32");
     let limit = page.limit.clamp(1, MAX_EMBEDDING_PAGE_SIZE);
     Ok(ctx.db.get_embedding_page(model_name, limit, page.offset)?)
+}
+
+pub fn get_scoped_embedding_page(
+    ctx: &ServiceContext,
+    scope: &EmbeddingScope,
+    model: Option<&str>,
+    page: Pagination,
+) -> Result<EmbeddingPage, ServiceError> {
+    let model_name = model.unwrap_or("clip-vit-b32");
+    let limit = page.limit.clamp(1, MAX_EMBEDDING_PAGE_SIZE);
+    Ok(ctx
+        .db
+        .get_scoped_embedding_page(model_name, scope, limit, page.offset)?)
+}
+
+pub fn list_scoped_image_ids(
+    ctx: &ServiceContext,
+    scope: &EmbeddingScope,
+    page: Pagination,
+) -> Result<ImageIdPage, ServiceError> {
+    let limit = page.limit.clamp(1, 100);
+    Ok(ctx.db.list_scoped_image_ids(scope, limit, page.offset)?)
 }
 
 pub fn get_embedding_count(ctx: &ServiceContext, model: Option<&str>) -> Result<u32, ServiceError> {
@@ -661,6 +684,85 @@ mod tests {
         assert_eq!(page.offset, 1);
         assert_eq!(page.limit, 1);
         assert!(page.has_more);
+    }
+
+    #[test]
+    fn scoped_embedding_page_service_clamps_limit_to_safe_bounds() {
+        let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
+        let c = ctx(&db, &s, &d, &ee, &de, &se);
+        let scope = EmbeddingScope::All {
+            include_rejected: false,
+        };
+
+        let minimum = get_scoped_embedding_page(
+            &c,
+            &scope,
+            None,
+            Pagination {
+                offset: 0,
+                limit: 0,
+            },
+        )
+        .unwrap();
+        let maximum = get_scoped_embedding_page(
+            &c,
+            &scope,
+            None,
+            Pagination {
+                offset: 0,
+                limit: u32::MAX,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(minimum.limit, 1);
+        assert_eq!(maximum.limit, 5_000);
+    }
+
+    #[test]
+    fn scoped_image_id_service_paginates_large_scopes_at_one_hundred() {
+        let (db, s, d, ee, de, se, _tmp) = make_ctx_parts();
+        {
+            let conn = db.conn.lock();
+            conn.execute_batch(
+                "WITH RECURSIVE seq(n) AS (
+                    SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 25001
+                 )
+                 INSERT INTO images (
+                    id, sha256_hash, width, height, format, file_size,
+                    created_at, imported_at, ai_prompt
+                 )
+                 SELECT printf('img-%05d', n), printf('hash-%05d', n), 100, 100,
+                        'png', 1000, '2026-01-01', '2026-01-01', NULL
+                 FROM seq;
+
+                 WITH RECURSIVE seq(n) AS (
+                    SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 25001
+                 )
+                 INSERT INTO image_files (id, image_id, path, last_seen_at, missing_at)
+                 SELECT printf('file-%05d', n), printf('img-%05d', n),
+                        printf('/library/img-%05d.png', n), '2026-01-01', NULL
+                 FROM seq;",
+            )
+            .unwrap();
+        }
+        let c = ctx(&db, &s, &d, &ee, &de, &se);
+        let page = list_scoped_image_ids(
+            &c,
+            &EmbeddingScope::All {
+                include_rejected: false,
+            },
+            Pagination {
+                offset: 25_000,
+                limit: u32::MAX,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(page.total, 25_001);
+        assert_eq!(page.limit, 100);
+        assert_eq!(page.ids, vec!["img-25001"]);
+        assert!(!page.has_more);
     }
 
     #[test]

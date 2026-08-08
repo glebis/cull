@@ -382,6 +382,40 @@ pub async fn get_embedding_page(
 }
 
 #[tauri::command]
+pub async fn get_scoped_embedding_page(
+    state: State<'_, AppState>,
+    scope: crate::db_core::models::EmbeddingScope,
+    model: Option<String>,
+    limit: u32,
+    offset: u32,
+) -> Result<crate::db_core::models::EmbeddingPage, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::get_scoped_embedding_page(
+        &ctx,
+        &scope,
+        model.as_deref(),
+        crate::services::Pagination { offset, limit },
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_scoped_image_ids(
+    state: State<'_, AppState>,
+    scope: crate::db_core::models::EmbeddingScope,
+    limit: u32,
+    offset: u32,
+) -> Result<crate::db_core::models::ImageIdPage, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::list_scoped_image_ids(
+        &ctx,
+        &scope,
+        crate::services::Pagination { offset, limit },
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn find_similar_images(
     state: State<'_, AppState>,
     image_id: String,
