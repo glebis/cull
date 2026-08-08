@@ -26,6 +26,7 @@ import { withRating, type ImageDecision } from './selection-updates';
 import { applyDecisionToCurrentView } from './rejected-visibility';
 import { pasteDestinationForContext } from './clipboard-actions';
 import { nudgeThumbnailSize } from './thumbnail-zoom';
+import { requestTrashImages } from './trash-actions';
 
 let waitingForStar = false;
 
@@ -497,7 +498,7 @@ export function handleKeydown(e: KeyboardEvent) {
     // Delete: Backspace → trash, Cmd+Backspace → permanent delete
     if (e.key === 'Backspace' && !e.metaKey) {
         e.preventDefault();
-        window.dispatchEvent(new CustomEvent('trash-focused-image'));
+        requestTrashImages();
         return;
     }
     if (e.key === 'Backspace' && e.metaKey) {

@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
-    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, trashImages, moveImage, renameImage, listFolders, shareImages, openImagesWithApplication, listOpenWithApplications } from '$lib/api';
+    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, moveImage, renameImage, listFolders, shareImages, openImagesWithApplication, listOpenWithApplications } from '$lib/api';
     import { loadSimilarImages } from '$lib/similarity';
     import type { ImageWithFile, OpenWithApplication } from '$lib/api';
     import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast, requestTextInput, showRejected } from '$lib/stores';
@@ -10,6 +10,7 @@
     import { filterMoveFolders, folderDisplayName, folderParentPath } from '$lib/move-menu-utils';
     import { withDecision, withRating, type ImageDecision } from '$lib/selection-updates';
     import { applyDecisionToCurrentView } from '$lib/rejected-visibility';
+    import { requestTrashImages } from '$lib/trash-actions';
 
     interface Props {
         image: ImageWithFile;
@@ -473,20 +474,9 @@
         }
     }
 
-    async function handleTrash() {
+    function handleTrash() {
         onclose();
-        const ids = new Set(targetIds);
-        await trashImages([...ids]);
-        const remainingLoadedCount = $images.filter(img => !ids.has(img.image.id)).length;
-        await loadImagesForCurrentScope({
-            resetFocus: false,
-            force: true,
-            invalidateCache: true,
-            minItems: remainingLoadedCount,
-        });
-        const c = await listCollections($showRejected);
-        collections.set(c);
-        if ($focusedIndex >= $images.length) focusedIndex.set(Math.max(0, $images.length - 1));
+        requestTrashImages(targetIds);
     }
 
     async function handleRename() {

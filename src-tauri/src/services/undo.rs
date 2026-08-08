@@ -362,11 +362,31 @@ impl ActionManager {
                     .map_err(|e| e.to_string())
             }
             "trash_image" => {
-                let path = val["path"].as_str().ok_or("Missing path")?;
+                let path = val
+                    .get("original_path")
+                    .and_then(|value| value.as_str())
+                    .or_else(|| val.get("path").and_then(|value| value.as_str()))
+                    .ok_or("Missing original path")?;
                 let trashed = val
                     .get("trashed")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
+                if let Some(trashed_path) = val.get("trashed_path").and_then(|value| value.as_str())
+                {
+                    let record = crate::services::trash::TrashRecord {
+                        original_path: std::path::PathBuf::from(path),
+                        trashed_path: std::path::PathBuf::from(trashed_path),
+                    };
+                    if trashed {
+                        crate::services::trash::retrash_exact(&record)?;
+                        db.mark_file_missing(path)
+                            .map_err(|error| error.to_string())?;
+                    } else {
+                        crate::services::trash::restore_from_trash(&record)?;
+                        db.restore_file(path).map_err(|error| error.to_string())?;
+                    }
+                    return Ok(());
+                }
                 if trashed {
                     // Redo: re-trash the file
                     #[cfg(target_os = "macos")]

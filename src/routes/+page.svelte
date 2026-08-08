@@ -39,7 +39,7 @@
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
     import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, applePhotosCatalogOpen, searchOpen, showMissing, showRejected, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel, agentPanelPinned, agentPanelVisible, agentVisualLevel, activeAgentProposalId, activeAgentSelectionPresetId, cycleAgentVisualLevel } from '$lib/stores';
-    import { trashImages, trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listCollections, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, failAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, cancelClaudeAgentChatTurn, undo, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ClaudeAgentStreamEvent, type ImageWithFile, type PreviewState } from '$lib/api';
+    import { trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listCollections, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, failAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, cancelClaudeAgentChatTurn, undo, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ClaudeAgentStreamEvent, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
     import { loadInstalledPlugins, activateBundledPlugins } from '$lib/plugins/loader';
@@ -74,10 +74,12 @@
     import { effectiveAgentVisualLevel } from '$lib/agent-visual-context';
     import { listen } from '@tauri-apps/api/event';
     import { onMount } from 'svelte';
+    import { TRASH_IMAGES_REQUESTED_EVENT, type TrashImagesRequestDetail } from '$lib/trash-actions';
 
     let dragOver = $state(false);
     let trashConfirmVisible = $state(false);
     let trashConfirmFileName = $state('');
+    let pendingTrashIds = $state<string[]>([]);
     let skipTrashConfirmSession = $state(false);
     const previewDisplayWindow = isPreviewDisplayRoute();
     let previewSyncState = $state<PreviewState | null>(null);
@@ -154,26 +156,77 @@
         }
     }
 
-    async function executeTrash() {
+    function defaultTrashIds(): string[] {
         const imgs = $images;
         const idx = $focusedIndex;
         const img = imgs[idx];
-        if (!img) return;
-        const nextFocusIndex = nextFocusIndexAfterFocusedRemoval(idx, imgs.length);
-        const count = await trashImages([img.image.id]);
-        if (count > 0) {
-            const name = img.path.split('/').pop() ?? '';
-            showToast(`Moved to Trash`, { detail: name, type: 'info', duration: 5000 });
-            invalidateImageCache();
-            removeVisibleImageById(img.image.id, nextFocusIndex);
-            refreshImageCount().catch(e => console.error('Failed to refresh image count after trash:', e));
-            refreshCollectionCountsAfterRemoval('trash');
+        if (!img) return [];
+        if ($selectedIds.has(img.image.id)) {
+            return imgs
+                .map(item => item.image.id)
+                .filter(imageId => $selectedIds.has(imageId));
         }
+        return [img.image.id];
     }
 
-    async function handleTrash() {
-        const img = $images[$focusedIndex];
-        if (!img) return;
+    async function executeTrash() {
+        const ids = pendingTrashIds;
+        if (ids.length === 0) return;
+        const imgs = $images;
+        const idx = $focusedIndex;
+        const nextFocusIndex = nextFocusIndexAfterFocusedRemoval(idx, imgs.length);
+        let result;
+        try {
+            result = await trashImagesDetailed(ids);
+        } catch (error) {
+            showToast('Trash failed', { detail: String(error), type: 'error', duration: 8000 });
+            pendingTrashIds = [];
+            return;
+        }
+        const trashed = new Set(result.results
+            .filter(item => item.status === 'trashed')
+            .map(item => item.image_id));
+        if (trashed.size > 0) {
+            const detail = result.failed > 0
+                ? `${result.succeeded} moved, ${result.failed} failed`
+                : result.succeeded === 1
+                    ? imgs.find(item => trashed.has(item.image.id))?.path.split('/').pop() ?? '1 image'
+                    : `${result.succeeded} images`;
+            showToast('Moved to Trash', {
+                detail,
+                type: result.failed > 0 ? 'warning' : 'info',
+                duration: result.failed > 0 ? 8000 : 5000,
+            });
+            invalidateImageCache();
+            images.update(list => list.filter(item => !trashed.has(item.image.id)));
+            focusedIndex.set(clampFocusIndexToList(nextFocusIndex, $images.length));
+            selectedIds.update(selected => {
+                const next = new Set(selected);
+                for (const imageId of trashed) next.delete(imageId);
+                return next;
+            });
+            refreshImageCount().catch(e => console.error('Failed to refresh image count after trash:', e));
+            refreshCollectionCountsAfterRemoval('trash');
+        } else if (result.failed > 0) {
+            const firstError = result.results.find(item => item.error)?.error;
+            showToast('Trash failed', {
+                detail: firstError ?? `${result.failed} images could not be moved`,
+                type: 'error',
+                duration: 8000,
+            });
+        }
+        pendingTrashIds = [];
+    }
+
+    async function handleTrashRequest(event: Event) {
+        const requestedIds = event instanceof CustomEvent
+            ? (event as CustomEvent<TrashImagesRequestDetail>).detail?.imageIds ?? []
+            : [];
+        const availableIds = new Set($images.map(item => item.image.id));
+        const ids = (requestedIds.length > 0 ? requestedIds : defaultTrashIds())
+            .filter(imageId => availableIds.has(imageId));
+        if (ids.length === 0) return;
+        pendingTrashIds = [...new Set(ids)];
 
         if (skipTrashConfirmSession) {
             await executeTrash();
@@ -186,7 +239,9 @@
             return;
         }
 
-        trashConfirmFileName = img.path.split('/').pop() ?? '';
+        trashConfirmFileName = pendingTrashIds.length === 1
+            ? $images.find(item => item.image.id === pendingTrashIds[0])?.path.split('/').pop() ?? '1 image'
+            : `${pendingTrashIds.length} images`;
         trashConfirmVisible = true;
     }
 
@@ -195,6 +250,11 @@
         if (suppress === 'session') skipTrashConfirmSession = true;
         if (suppress === 'always') await setAppSetting('skip_trash_confirm', 'true');
         await executeTrash();
+    }
+
+    function cancelTrashConfirmation() {
+        trashConfirmVisible = false;
+        pendingTrashIds = [];
     }
 
     async function handlePermanentDelete() {
@@ -833,7 +893,7 @@
             dragOver = event.payload;
         });
 
-        window.addEventListener('trash-focused-image', handleTrash);
+        window.addEventListener(TRASH_IMAGES_REQUESTED_EVENT, handleTrashRequest);
         window.addEventListener('delete-focused-image', handlePermanentDelete);
         const handleReloadImages = () => loadImages({ resetFocus: false, force: true, invalidateCache: true }).catch(e => console.error('Failed to reload:', e));
         window.addEventListener('reload-images', handleReloadImages);
@@ -930,7 +990,7 @@
             panicUnlisten.then(fn => fn());
             taskFailUnlisten.then(fn => fn());
             cloudUnlisten.then(fn => fn());
-            window.removeEventListener('trash-focused-image', handleTrash);
+            window.removeEventListener(TRASH_IMAGES_REQUESTED_EVENT, handleTrashRequest);
             window.removeEventListener('delete-focused-image', handlePermanentDelete);
             window.removeEventListener('reload-images', handleReloadImages);
             window.removeEventListener('create-agent-test-proposal', handleCreateAgentTestProposal);
@@ -1058,7 +1118,7 @@
         visible={trashConfirmVisible}
         fileName={trashConfirmFileName}
         onconfirm={handleTrashConfirm}
-        oncancel={() => trashConfirmVisible = false}
+        oncancel={cancelTrashConfirmation}
     />
 
     <ActionProposalReviewDialog

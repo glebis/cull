@@ -62,6 +62,7 @@ import { tabRegistry } from './plugins/tab-registry';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { runAiLibraryJob, type AiLibraryJobKind } from './ai-library-jobs';
 import { openSettings } from './settings-navigation';
+import { requestTrashImages } from './trash-actions';
 import {
     previewDisplayAlwaysOnTop,
     previewDisplayBlanked,
@@ -1006,9 +1007,7 @@ function commandItems(): CommandPaletteItem[] {
             keywords: ['delete', 'remove'],
             defaultShortcut: 'Backspace',
             disabled: !hasImage,
-            run: () => {
-                window.dispatchEvent(new CustomEvent('trash-focused-image'));
-            },
+            run: () => requestTrashImages(),
         },
         {
             id: 'image.delete-permanently',

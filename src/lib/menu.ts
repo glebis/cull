@@ -12,7 +12,6 @@ import {
     openImagesWithApplication,
     renameImage,
     shareImages,
-    trashImages,
     listCollections,
     listFolders,
     updateMenuState,
@@ -66,6 +65,7 @@ import {
     setPreviewDisplayWebStreamStatus,
 } from './preview-display-store';
 import { tabRegistry } from './plugins/tab-registry';
+import { requestTrashImages } from './trash-actions';
 
 /** Publish is plugin-only now: it is reachable iff the bundled cull-publish
  * plugin has registered its tab in the tab registry. */
@@ -368,19 +368,13 @@ async function handleImageMoveTo() {
     await moveMenuImagesToFolder(ids, selected);
 }
 
-async function handleImageTrash() {
+function handleImageTrash() {
     const ids = currentMenuTargetIds();
     if (ids.length === 0) {
         showToast('No image selected', { type: 'warning' });
         return;
     }
-
-    try {
-        await trashImages(ids);
-        await reloadAfterImageRemoval(ids);
-    } catch (e) {
-        showToast('Trash failed', { detail: String(e), type: 'error', duration: 8000 });
-    }
+    requestTrashImages(ids);
 }
 
 async function handleGitHubWiki() {
