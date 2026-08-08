@@ -74,4 +74,21 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn apple_photos_privacy_usage_and_entitlement_are_packaged() {
+        let info = include_str!("../Info.plist");
+        assert!(info.contains("<key>NSPhotoLibraryUsageDescription</key>"));
+
+        let entitlements = include_str!("../Entitlements.plist");
+        assert!(entitlements
+            .contains("<key>com.apple.security.personal-information.photos-library</key>"));
+        assert!(entitlements.contains("<true/>"));
+
+        let conf = config();
+        assert_eq!(
+            conf["bundle"]["macOS"]["entitlements"].as_str(),
+            Some("Entitlements.plist")
+        );
+    }
 }
