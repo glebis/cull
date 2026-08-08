@@ -38,6 +38,9 @@ export interface ApplePhotosPage<T> {
     has_more: boolean;
 }
 
+export type ApplePhotosAlbumPage = ApplePhotosPage<ApplePhotosAlbum>;
+export type ApplePhotosAssetPage = ApplePhotosPage<ApplePhotosAsset>;
+
 export function photosAuthorizationStatus(): Promise<ApplePhotosAuthorization> {
     return invoke<ApplePhotosAuthorization>('photos_authorization_status');
 }
@@ -46,16 +49,16 @@ export function photosRequestAuthorization(): Promise<ApplePhotosAuthorization> 
     return invoke<ApplePhotosAuthorization>('photos_request_authorization');
 }
 
-export function photosListAlbums(offset = 0, limit = 100): Promise<ApplePhotosPage<ApplePhotosAlbum>> {
-    return invoke<ApplePhotosPage<ApplePhotosAlbum>>('photos_list_albums', { offset, limit });
+export function photosListAlbums(offset = 0, limit = 100): Promise<ApplePhotosAlbumPage> {
+    return invoke<ApplePhotosAlbumPage>('photos_list_albums', { offset, limit });
 }
 
 export function photosListAssets(
     albumId: string | null,
     offset = 0,
     limit = 100,
-): Promise<ApplePhotosPage<ApplePhotosAsset>> {
-    return invoke<ApplePhotosPage<ApplePhotosAsset>>('photos_list_assets', { albumId, offset, limit });
+): Promise<ApplePhotosAssetPage> {
+    return invoke<ApplePhotosAssetPage>('photos_list_assets', { albumId, offset, limit });
 }
 
 function emitSessionEventsRefresh() {
