@@ -161,6 +161,15 @@ pub enum CliCommand {
 
     #[command(name = "get_quality_count")]
     GetQualityCount,
+
+    /// Set a 0-5 star rating on a library image
+    #[command(name = "set_rating")]
+    SetRating {
+        #[arg(long = "image_id", visible_alias = "image-id")]
+        image_id: String,
+        #[arg(long, value_parser = clap::value_parser!(u8).range(0..=5))]
+        rating: u8,
+    },
 }
 
 pub fn run_headless_if_requested(args: &CliArgs) -> Option<i32> {
@@ -268,6 +277,11 @@ fn execute_headless(args: &CliArgs) -> Result<Value, String> {
         CliCommand::GetQualityCount => {
             tools::execute_named_tool(&ctx, "get_quality_count", serde_json::json!({}))
         }
+        CliCommand::SetRating { image_id, rating } => tools::execute_named_tool(
+            &ctx,
+            "set_rating",
+            serde_json::json!({ "image_id": image_id, "rating": rating }),
+        ),
     }
 }
 
@@ -487,5 +501,71 @@ mod tests {
             }
             other => panic!("expected analyze_image_quality command, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_set_rating_subcommand_accepts_id_and_rating() {
+        let args =
+            CliArgs::try_parse_from(["cull", "set_rating", "--image_id", "img1", "--rating", "4"])
+                .unwrap();
+        match args.command {
+            Some(CliCommand::SetRating { image_id, rating }) => {
+                assert_eq!(image_id, "img1");
+                assert_eq!(rating, 4);
+            }
+            other => panic!("expected set_rating command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_set_rating_subcommand_rejects_out_of_range_rating() {
+        assert!(CliArgs::try_parse_from([
+            "cull",
+            "set_rating",
+            "--image_id",
+            "img1",
+            "--rating",
+            "6",
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn test_set_rating_typed_dispatch_updates_temporary_database() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("cull.db");
+        let db = crate::db_core::db::Database::open(&db_path).unwrap();
+        db.conn.lock().execute(
+            "INSERT INTO images (id, sha256_hash, width, height, format, file_size, created_at, imported_at)
+             VALUES ('img1', 'hash-img1', 100, 100, 'png', 1000, '2026-01-01', '2026-01-01')",
+            [],
+        ).unwrap();
+        drop(db);
+
+        let args = CliArgs::try_parse_from([
+            "cull",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--app-data-dir",
+            tmp.path().to_str().unwrap(),
+            "set_rating",
+            "--image_id",
+            "img1",
+            "--rating",
+            "5",
+        ])
+        .unwrap();
+
+        let result = execute_headless(&args).unwrap();
+        assert_eq!(result["image_id"], "img1");
+        assert_eq!(result["rating"], 5);
+        let db = crate::db_core::db::Database::open(&db_path).unwrap();
+        assert_eq!(
+            db.get_selection_for_image("img1")
+                .unwrap()
+                .unwrap()
+                .star_rating,
+            Some(5)
+        );
     }
 }
