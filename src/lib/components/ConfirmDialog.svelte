@@ -34,7 +34,12 @@
         <button class="btn secondary" data-modal-initial-focus onclick={cancel}>
             {$confirmDialog.cancelLabel ?? 'Cancel'}
         </button>
-        <button class="btn primary" class:danger={$confirmDialog.danger} onclick={confirm}>
+        <button
+            class="btn"
+            class:primary={!$confirmDialog.danger}
+            class:danger={$confirmDialog.danger}
+            onclick={confirm}
+        >
             {$confirmDialog.confirmLabel ?? 'Confirm'}
         </button>
     </div>
@@ -54,15 +59,6 @@
         font-size: 14px;
         color: var(--text);
     }
-    .close-btn {
-        background: none;
-        border: none;
-        color: var(--text-secondary);
-        font-size: 18px;
-        cursor: pointer;
-        padding: 0 4px;
-    }
-    .close-btn:hover { color: var(--text); }
     .dialog-body {
         padding: calc(var(--spacing) * 2);
     }
@@ -80,42 +76,5 @@
         gap: var(--spacing);
         padding: calc(var(--spacing) * 2);
         border-top: 1px solid var(--border);
-    }
-    .btn {
-        padding: 6px 16px;
-        border-radius: var(--radius);
-        font-size: 12px;
-        font-family: var(--font);
-        cursor: pointer;
-        border: 1px solid var(--border);
-    }
-    .btn:focus-visible, .close-btn:focus-visible {
-        outline: 2px solid var(--blue);
-        outline-offset: 2px;
-    }
-    .btn.secondary {
-        background: var(--surface);
-        color: var(--text-secondary);
-    }
-    .btn.secondary:hover {
-        color: var(--text);
-        border-color: var(--text-secondary);
-    }
-    .btn.primary {
-        background: color-mix(in srgb, var(--green) 16%, var(--surface));
-        border-color: var(--green);
-        color: var(--green);
-    }
-    .btn.primary:hover {
-        background: color-mix(in srgb, var(--green) 24%, var(--surface));
-    }
-    .btn.primary.danger {
-        background: var(--red);
-        border-color: var(--red);
-        color: var(--bg);
-    }
-    .btn.primary.danger:hover {
-        filter: brightness(1.1);
-        background: var(--red);
     }
 </style>

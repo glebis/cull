@@ -245,21 +245,6 @@
         font-weight: 700;
     }
 
-    .close-btn {
-        border: none;
-        background: none;
-        color: var(--text-secondary);
-        cursor: pointer;
-        font-family: var(--font);
-        font-size: 18px;
-        line-height: 1;
-        padding: 0 4px;
-    }
-
-    .close-btn:hover {
-        color: var(--text);
-    }
-
     .dialog-body {
         display: flex;
         flex-direction: column;
@@ -399,37 +384,4 @@
         border-top: 1px solid var(--border);
     }
 
-    .btn {
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        cursor: pointer;
-        font-family: var(--font);
-        font-size: 12px;
-        padding: 6px 14px;
-    }
-
-    .btn:disabled {
-        cursor: not-allowed;
-        opacity: 0.5;
-    }
-
-    .btn.secondary {
-        background: var(--surface);
-        color: var(--text-secondary);
-    }
-
-    .btn.secondary:hover {
-        border-color: var(--text-secondary);
-        color: var(--text);
-    }
-
-    .btn.primary {
-        background: color-mix(in srgb, var(--green) 16%, var(--surface));
-        border-color: var(--green);
-        color: var(--green);
-    }
-
-    .btn.primary:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--green) 24%, var(--surface));
-    }
 </style>
