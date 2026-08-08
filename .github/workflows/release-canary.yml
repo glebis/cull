@@ -122,7 +122,7 @@ jobs:
         run: npm run build
 
       - name: Upload immutable gate record
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cull-canary-gate-${{ github.run_id }}
           path: ${{ runner.temp }}/release-gate.json
@@ -246,7 +246,7 @@ jobs:
           NODE
 
       - name: Upload private signed canary inventory
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cull-canary-${{ github.run_id }}
           path: ${{ runner.temp }}/cull-canary
@@ -320,7 +320,7 @@ jobs:
           test -f "$RUNNER_TEMP/cull-canary-evidence/verification.log"
 
       - name: Upload verification provenance, checksums, and logs
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cull-canary-evidence-${{ github.run_id }}
           path: ${{ runner.temp }}/cull-canary-evidence
