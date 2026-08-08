@@ -133,6 +133,24 @@ describe('Apple Photos catalog dialog', () => {
         expect(catalog.listAlbums).toHaveBeenLastCalledWith(100, 100);
     });
 
+    it('keeps an asset error visible when a later album page succeeds', async () => {
+        const firstAlbums = Array.from({ length: 100 }, (_, index) => album(`album-${index}`, `Album ${index}`));
+        const catalog = client({
+            listAlbums: vi.fn()
+                .mockResolvedValueOnce(page(firstAlbums, 0, 101))
+                .mockResolvedValueOnce(page([album('album-last', 'Last album')], 100, 101)),
+            listAssets: vi.fn().mockRejectedValue(new Error('Asset catalog unavailable')),
+        });
+        const user = userEvent.setup();
+        render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        expect(await screen.findByText('Photos: Asset catalog unavailable')).toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Load more albums' }));
+
+        expect(await screen.findByRole('option', { name: 'Last album' })).toBeInTheDocument();
+        expect(screen.getByText('Photos: Asset catalog unavailable')).toBeInTheDocument();
+    });
+
     it('ignores authorization completion after the dialog has closed', async () => {
         let resolveAuthorization!: (status: 'authorized') => void;
         const authorization = new Promise<'authorized'>(resolve => { resolveAuthorization = resolve; });

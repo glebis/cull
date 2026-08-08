@@ -28,7 +28,9 @@
     let requesting = $state(false);
     let albumsLoading = $state(false);
     let assetsLoading = $state(false);
-    let error = $state<string | null>(null);
+    let authorizationError = $state<string | null>(null);
+    let albumsError = $state<string | null>(null);
+    let assetsError = $state<string | null>(null);
     let authorizationGeneration = 0;
     let albumsGeneration = 0;
     let assetsGeneration = 0;
@@ -50,7 +52,7 @@
     async function loadAlbums(offset = 0, append = false) {
         const generation = ++albumsGeneration;
         albumsLoading = true;
-        error = null;
+        albumsError = null;
         try {
             const page = await client.listAlbums(offset, PAGE_SIZE);
             if (generation !== albumsGeneration) return;
@@ -58,7 +60,7 @@
             albumsHasMore = page.has_more;
         } catch (loadError) {
             if (generation !== albumsGeneration) return;
-            error = messageFrom(loadError);
+            albumsError = messageFrom(loadError);
         } finally {
             if (generation === albumsGeneration) albumsLoading = false;
         }
@@ -67,7 +69,7 @@
     async function loadAssets(albumId: string | null, offset = 0, append = false) {
         const generation = ++assetsGeneration;
         assetsLoading = true;
-        error = null;
+        assetsError = null;
         try {
             const page = await client.listAssets(albumId, offset, PAGE_SIZE);
             if (generation !== assetsGeneration) return;
@@ -76,7 +78,7 @@
             assetsHasMore = page.has_more;
         } catch (loadError) {
             if (generation !== assetsGeneration) return;
-            error = messageFrom(loadError);
+            assetsError = messageFrom(loadError);
         } finally {
             if (generation === assetsGeneration) assetsLoading = false;
         }
@@ -90,7 +92,7 @@
     async function checkAuthorization() {
         const generation = ++authorizationGeneration;
         checking = true;
-        error = null;
+        authorizationError = null;
         try {
             const status = await client.authorizationStatus();
             if (generation !== authorizationGeneration) return;
@@ -98,7 +100,7 @@
             if (status === 'authorized' || status === 'limited') beginCatalogLoad();
         } catch (statusError) {
             if (generation !== authorizationGeneration) return;
-            error = messageFrom(statusError);
+            authorizationError = messageFrom(statusError);
         } finally {
             if (generation === authorizationGeneration) checking = false;
         }
@@ -107,7 +109,7 @@
     async function requestAccess() {
         const generation = ++authorizationGeneration;
         requesting = true;
-        error = null;
+        authorizationError = null;
         try {
             const status = await client.requestAuthorization();
             if (generation !== authorizationGeneration) return;
@@ -115,7 +117,7 @@
             if (status === 'authorized' || status === 'limited') beginCatalogLoad();
         } catch (requestError) {
             if (generation !== authorizationGeneration) return;
-            error = messageFrom(requestError);
+            authorizationError = messageFrom(requestError);
         } finally {
             if (generation === authorizationGeneration) requesting = false;
         }
@@ -169,8 +171,8 @@
     <div class="dialog-content">
         {#if checking}
             <div class="state" role="status">Checking Photos access…</div>
-        {:else if error && !canBrowse}
-            <div class="state error" role="alert">{error}</div>
+        {:else if authorizationError && !canBrowse}
+            <div class="state error" role="alert">{authorizationError}</div>
         {:else if authorization === 'not_determined'}
             <section class="permission-state">
                 <h3>Allow access when you are ready</h3>
@@ -210,8 +212,11 @@
                 </button>
             {/if}
 
-            {#if error}
-                <div class="catalog-error" role="alert">{error}</div>
+            {#if albumsError}
+                <div class="catalog-error" role="alert">Albums: {albumsError}</div>
+            {/if}
+            {#if assetsError}
+                <div class="catalog-error" role="alert">Photos: {assetsError}</div>
             {/if}
 
             <div class="catalog-summary">
