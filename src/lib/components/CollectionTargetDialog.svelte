@@ -1,5 +1,6 @@
 <script lang="ts">
     import { tick } from 'svelte';
+    import ModalDialog from '$lib/components/ModalDialog.svelte';
     import {
         collectionTargetDialog,
         resolveCollectionTargetDialog,
@@ -83,29 +84,22 @@
     }
 
     function handleKeydown(e: KeyboardEvent) {
-        e.stopPropagation();
-        if (e.key === 'Escape') {
+        if (e.key === 'Enter' && (e.target === searchInputEl || e.target === nameInputEl)) {
             e.preventDefault();
-            cancel();
-        }
-        if (e.key === 'Enter') {
-            e.preventDefault();
+            e.stopPropagation();
             submit();
         }
     }
 </script>
 
 {#if $collectionTargetDialog}
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="dialog-overlay" onclick={cancel} onkeydown={handleKeydown}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <dialog
-        open
-        class="dialog"
-        aria-modal="true"
-        aria-labelledby="collection-target-dialog-title"
-        aria-describedby={$collectionTargetDialog.description ? 'collection-target-dialog-description' : undefined}
-        onclick={(e: MouseEvent) => e.stopPropagation()}
+    <ModalDialog
+        titleId="collection-target-dialog-title"
+        descriptionId={$collectionTargetDialog.description ? 'collection-target-dialog-description' : undefined}
+        onclose={cancel}
+        overlayClass="collection-target-dialog-overlay"
+        panelClass="dialog collection-target-dialog"
+        initialFocus={() => mode === 'existing' ? searchInputEl ?? null : nameInputEl ?? null}
         onkeydown={handleKeydown}
     >
         <div class="dialog-header">
@@ -201,12 +195,11 @@
                 {$collectionTargetDialog.confirmLabel ?? 'Start'}
             </button>
         </div>
-    </dialog>
-</div>
+    </ModalDialog>
 {/if}
 
 <style>
-    .dialog-overlay {
+    :global(.collection-target-dialog-overlay) {
         position: fixed;
         inset: 0;
         display: flex;
@@ -217,7 +210,7 @@
         z-index: var(--z-modal);
     }
 
-    .dialog {
+    :global(.dialog.collection-target-dialog) {
         position: static;
         display: block;
         width: min(460px, 100%);

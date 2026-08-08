@@ -160,7 +160,7 @@
         position: fixed;
         inset: 0;
         display: flex;
-        align-items: center;
+        align-items: var(--modal-align-items, center);
         justify-content: center;
         z-index: var(--z-modal);
     }
