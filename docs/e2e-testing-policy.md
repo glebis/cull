@@ -96,3 +96,39 @@ bash tests/e2e/run-e2e.sh
 
 The smoke suite should remain browser/mock-only: it must not touch the real Cull
 database, delete files, or invoke native filesystem actions.
+
+## Blocking release regression contracts
+
+`npm run test:release-regressions` is a required release gate, not an optional
+test recommendation. It runs automatically from both `release:cull check` and
+`release:cull prepare`, from the local `release` preflight tier, and from the
+signed canary and production Release workflows. A missing test file, unknown
+contract, non-zero test result, or stale release source blocks preparation and
+packaging. The CI workflows refresh `origin/main` before evaluating ancestry;
+the candidate must contain every commit on that verified ref and must itself be
+reachable from it.
+
+The gate runs these behavior-level contracts separately so the failing name is
+actionable in terminal and GitHub Actions output:
+
+| Contract | Automated behavior evidence |
+| --- | --- |
+| `sidebar-search-filter` | Sidebar tree search/filter rules and selecting a detected-object filter updates active scope and reloads images. |
+| `settings-ai-reachable` | Settings opens an explicit tab, the AI tab is mounted/reachable, and AI settings render and react to backend readiness. |
+| `grid-deep-zoom-presets` | Minimum-to-maximum grid zoom mapping, presets, gesture anchoring, and zoom bounds. |
+| `grid-hover-preview` | Hover delay/eligibility, preview placement, and cancellation behavior. |
+| `history-palette-deeplink` | History filtering, palette destination execution, and deep-link routing/integration. |
+| `thumbnail-prefetch` | Bounded prefetch cache scheduling, deduplication, eviction, and memory accounting. |
+
+These focused tests avoid screenshot-only assertions. The classified browser
+suite remains complementary and verifies integrated UI flows such as search,
+command palette execution, and Settings → AI when covered paths changed.
+
+Residual manual validation before publishing remains: install the signed DMG on
+a clean macOS account; use a real large image library to inspect hover-preview
+positioning while scrolling and at viewport edges; exercise minimum/maximum
+deep zoom with trackpad and wheel input; confirm selection remains stable while
+virtualized rows recycle; and watch memory/network/decode activity during rapid
+scroll reversals. Native Finder drag/drop, real filesystem permissions, signing,
+notarization, updater, and Homebrew installation also remain manual because the
+browser/mock behavior tests cannot prove them.

@@ -26,6 +26,7 @@ const STATIC_COMMANDS = [
   EXPORT_CONTRACT,
 ];
 const E2E_COMMAND = 'bash tests/e2e/run-e2e.sh';
+const REGRESSION_COMMAND = 'node scripts/release-regression-gate.mjs';
 const BUILD_COMMAND = 'npm run build';
 const VALUE_OPTIONS = new Set(['--tag', '--sha', '--base-tag', '--event', '--json-out']);
 const SEMVER_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -382,6 +383,15 @@ export function buildGateRecord(repoRoot, input) {
   }
   const originMain = gitText(repoRoot, 'rev-parse', '--verify', 'origin/main^{commit}');
   requireAncestor(repoRoot, input.sha, originMain, 'NOT_ON_ORIGIN_MAIN', 'Release SHA is not reachable from origin/main');
+  if (!isAncestor(repoRoot, originMain, input.sha)) {
+    const omittedCommits = gitText(repoRoot, 'log', '--format=%H %s', '--max-count=20', `${input.sha}..${originMain}`)
+      .split('\n').filter(Boolean);
+    throw gateError(
+      'STALE_RELEASE_SOURCE',
+      'Release source omits commits already on origin/main; update the candidate from verified main before packaging',
+      { releaseSha: input.sha, originMain, omittedCommits },
+    );
+  }
 
   const version = input.tag.slice(1);
   const config = loadConfigAt(repoRoot, input.sha);
@@ -392,7 +402,7 @@ export function buildGateRecord(repoRoot, input) {
   const matchedPaths = classifyE2EPaths(paths, config.e2e);
   const e2e = { required: matchedPaths.length > 0, matchedPaths };
   assertE2ERecorded(matchedPaths, e2e);
-  const commands = [...STATIC_COMMANDS, ...(e2e.required ? [E2E_COMMAND] : []), BUILD_COMMAND];
+  const commands = [...STATIC_COMMANDS, REGRESSION_COMMAND, ...(e2e.required ? [E2E_COMMAND] : []), BUILD_COMMAND];
   return {
     schema: 'cull.release.gate.v1',
     event: input.event,

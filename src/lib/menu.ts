@@ -20,6 +20,7 @@ import {
     type ImageWithFile,
     type OpenWithApplication,
 } from './api';
+import { nudgeThumbnailSize } from './thumbnail-zoom';
 import {
     images,
     viewMode,
@@ -28,6 +29,7 @@ import {
     sidebarVisible,
     showRejected,
     thumbnailSize,
+    setGridThumbnailSize,
     showLoupeHistogram,
     activeFolder,
     activeCollection,
@@ -598,14 +600,14 @@ function handleMenuAction(action: string) {
             if (get(viewMode) === 'loupe') {
                 requestLoupeZoomIn();
             } else {
-                thumbnailSize.update((s) => Math.min(s + 40, 600));
+                setGridThumbnailSize(nudgeThumbnailSize(get(thumbnailSize), 1));
             }
             break;
         case 'zoom_out':
             if (get(viewMode) === 'loupe') {
                 requestLoupeZoomOut();
             } else {
-                thumbnailSize.update((s) => Math.max(s - 40, 40));
+                setGridThumbnailSize(nudgeThumbnailSize(get(thumbnailSize), -1));
             }
             break;
         case 'actual_size':

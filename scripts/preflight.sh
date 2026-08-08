@@ -73,6 +73,7 @@ run_release() {
   run bash scripts/supply-chain-audit.sh check
   run cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden
   run cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test export_compat_golden
+  run node scripts/release-regression-gate.mjs
   run npm run build
 }
 

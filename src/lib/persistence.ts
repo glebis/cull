@@ -7,7 +7,7 @@ import {
     focusedIndex, images,
     pinnedCollection, pinnedCollections,
     expandedFolders, sidebarSectionsCollapsed,
-    resetLoupeTransform,
+    resetLoupeTransform, setGridThumbnailSize,
     type ViewMode, type LineageLayout, type NsfwMode, type EmbeddingViewState,
 } from './stores';
 
@@ -90,9 +90,7 @@ export function restoreAppStateBeforeImages(): PersistedState | null {
         const state: PersistedState = JSON.parse(raw);
         if (state._version !== SCHEMA_VERSION) return null;
 
-        thumbnailSize.set(state.thumbnailSize);
-        gridPreset.set(state.gridPreset);
-        gridGap.set(state.gridGap);
+        setGridThumbnailSize(state.thumbnailSize);
         sidebarVisible.set(state.sidebarVisible);
         zenMode.set(state.zenMode);
         showRejected.set(state.showRejected ?? false);
