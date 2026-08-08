@@ -8,12 +8,16 @@ import {
     gridScrollTop,
     imageLoadState,
     images,
+    importBatchFilter,
+    importBatchImageIds,
     minSizeFilter,
     showMissing,
+    showRejected,
     totalCount,
 } from './stores';
 import {
     evaluateSmartCollection,
+    getBatchImages,
     getImageCount,
     listCollectionImages,
     listImagesByDetectedClass,
@@ -23,6 +27,7 @@ import {
     type ImageWithFile,
 } from './api';
 import { formatLibraryLoadError } from './library-view-state';
+import { currentLibraryScope, libraryScopeKey, type LibraryScope } from './library-scope';
 
 export const IMAGE_PAGE_SIZE = 200;
 const MAX_SCOPE_CACHE_ENTRIES = 5;
@@ -33,15 +38,8 @@ export interface ImageLoadOptions {
     force?: boolean;
     minItems?: number;
     invalidateCache?: boolean;
+    throwOnError?: boolean;
 }
-
-type ImageScope =
-    | { type: 'smart'; id: string; filterJson: string }
-    | { type: 'collection'; id: string }
-    | { type: 'detected-class'; className: string }
-    | { type: 'folder'; folder: string; minSize: number }
-    | { type: 'filtered'; minSize: number }
-    | { type: 'all' };
 
 interface PageResult {
     items: ImageWithFile[];
@@ -81,41 +79,9 @@ let loadedOnce = false;
 let requestSeq = 0;
 const scopeCache = new Map<string, CachedScopeState>();
 
-function currentScope(): ImageScope {
-    const smart = get(activeSmartCollection);
-    if (smart?.filter_json) {
-        return { type: 'smart', id: smart.id, filterJson: smart.filter_json };
-    }
-
-    const collection = get(activeCollection);
-    if (collection) return { type: 'collection', id: collection };
-
-    const detectedClass = get(activeDetectedClass);
-    if (detectedClass) return { type: 'detected-class', className: detectedClass };
-
-    const folder = get(activeFolder);
-    const minSize = get(minSizeFilter);
-    if (folder) return { type: 'folder', folder, minSize };
-    if (minSize > 0) return { type: 'filtered', minSize };
-    return { type: 'all' };
-}
-
-function scopeKey(scope: ImageScope): string {
+function scopeKey(scope: LibraryScope): string {
     const missingKey = get(showMissing) ? 'with-missing' : 'without-missing';
-    switch (scope.type) {
-        case 'smart':
-            return `smart:${scope.id}:${scope.filterJson}:${missingKey}`;
-        case 'collection':
-            return `collection:${scope.id}:${missingKey}`;
-        case 'detected-class':
-            return `detected-class:${scope.className}:${missingKey}`;
-        case 'folder':
-            return `folder:${scope.folder}:${scope.minSize}:${missingKey}`;
-        case 'filtered':
-            return `filtered:${scope.minSize}:${missingKey}`;
-        case 'all':
-            return `all:${missingKey}`;
-    }
+    return `${libraryScopeKey(scope)}:${missingKey}`;
 }
 
 function applyMissingFilter(items: ImageWithFile[]): ImageWithFile[] {
@@ -123,33 +89,38 @@ function applyMissingFilter(items: ImageWithFile[]): ImageWithFile[] {
     return items.filter(img => !img.missing_at);
 }
 
-async function fetchPage(scope: ImageScope, offset: number, limit: number): Promise<PageResult> {
+async function fetchPage(scope: LibraryScope, offset: number, limit: number): Promise<PageResult> {
+    const includeRejected = scope.include_rejected;
     switch (scope.type) {
+        case 'import_batch': {
+            const items = offset === 0 ? await getBatchImages(scope.batch_id, includeRejected) : [];
+            return { items: applyMissingFilter(items), rawCount: 0 };
+        }
         case 'smart': {
-            const items = await evaluateSmartCollection(scope.filterJson, limit, offset);
+            const items = await evaluateSmartCollection(scope.filter_json, limit, offset, includeRejected);
             return { items: applyMissingFilter(items), rawCount: items.length };
         }
         case 'collection': {
-            const items = await listCollectionImages(scope.id, limit, offset);
+            const items = await listCollectionImages(scope.id, limit, offset, includeRejected);
             return { items: applyMissingFilter(items), rawCount: items.length };
         }
-        case 'detected-class': {
-            const items = await listImagesByDetectedClass(scope.className, limit, offset);
+        case 'detected_class': {
+            const items = await listImagesByDetectedClass(scope.class_name, limit, offset, includeRejected);
             return { items: applyMissingFilter(items), rawCount: items.length };
         }
         case 'folder': {
-            const items = await listImagesByFolder(scope.folder, limit, offset);
-            const filtered = scope.minSize > 0
-                ? items.filter(img => img.image.width >= scope.minSize && img.image.height >= scope.minSize)
+            const items = await listImagesByFolder(scope.path, limit, offset, includeRejected);
+            const filtered = scope.min_size > 0
+                ? items.filter(img => img.image.width >= scope.min_size && img.image.height >= scope.min_size)
                 : items;
             return { items: applyMissingFilter(filtered), rawCount: items.length };
         }
         case 'filtered': {
-            const items = await listImagesFiltered(scope.minSize, scope.minSize, limit, offset);
+            const items = await listImagesFiltered(scope.min_size, scope.min_size, limit, offset, includeRejected);
             return { items: applyMissingFilter(items), rawCount: items.length };
         }
         case 'all': {
-            const items = await listImages(limit, offset);
+            const items = await listImages(limit, offset, includeRejected);
             return { items: applyMissingFilter(items), rawCount: items.length };
         }
     }
@@ -205,6 +176,8 @@ export function invalidateImageCache() {
 }
 
 export function clearImageScope() {
+    importBatchFilter.set(null);
+    importBatchImageIds.set([]);
     activeSmartCollection.set(null);
     activeCollection.set(null);
     activeDetectedClass.set(null);
@@ -213,7 +186,7 @@ export function clearImageScope() {
 }
 
 export async function refreshImageCount() {
-    totalCount.set(await getImageCount());
+    totalCount.set(await getImageCount(get(showRejected)));
 }
 
 export async function loadAllImages(options: ImageLoadOptions = {}) {
@@ -225,7 +198,7 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
     const resetFocus = options.resetFocus ?? true;
     const force = options.force ?? false;
     const minItems = Math.max(0, options.minItems ?? 0);
-    const scope = currentScope();
+    const scope = currentLibraryScope();
     const key = scopeKey(scope);
     const seq = ++requestSeq;
 
@@ -246,6 +219,9 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
         nextOffset = cached.nextOffset;
         hasMore = cached.hasMore;
         images.set(cached.items);
+        if (scope.type === 'import_batch') {
+            importBatchImageIds.set(cached.items.map(item => item.image.id));
+        }
         if (resetFocus) focusedIndex.set(cached.focusedIndex);
         gridScrollTop.set(cached.scrollTop);
         loading = false;
@@ -272,6 +248,9 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
         } while (lastRawCount === IMAGE_PAGE_SIZE && loaded.length < minItems);
 
         images.set(loaded);
+        if (scope.type === 'import_batch') {
+            importBatchImageIds.set(loaded.map(item => item.image.id));
+        }
         nextOffset = offset;
         hasMore = lastRawCount === IMAGE_PAGE_SIZE;
         loadedOnce = true;
@@ -281,10 +260,12 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
         }
         rememberScopeState(key);
     } catch (e) {
-        if (seq === requestSeq && key === activeScopeKey) {
+        const isCurrentRequest = seq === requestSeq && key === activeScopeKey;
+        if (isCurrentRequest) {
             loadError = formatLibraryLoadError(e);
             console.error('Failed to load images:', e);
         }
+        if (options.throwOnError && isCurrentRequest) throw e;
     } finally {
         if (seq === requestSeq && key === activeScopeKey) {
             loading = false;
@@ -294,7 +275,7 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
 }
 
 export async function loadMoreImagesForCurrentScope() {
-    const scope = currentScope();
+    const scope = currentLibraryScope();
     const key = scopeKey(scope);
     if (key !== activeScopeKey) {
         await loadImagesForCurrentScope({ resetFocus: false });

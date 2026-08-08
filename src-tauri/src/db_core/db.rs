@@ -41,6 +41,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
 #[derive(Clone)]
 pub struct Database {
     pub(crate) conn: Arc<Mutex<Connection>>,
+    read_conn: Option<Arc<Mutex<Connection>>>,
 }
 
 pub(crate) fn sql_u64(value: u64) -> rusqlite::Result<i64> {
@@ -258,11 +259,13 @@ impl Database {
         let should_consider_backup = should_consider_migration_backup(db_path);
         let conn = Connection::open(db_path)?;
         Self::configure_connection(&conn)?;
-        let db = Database {
+        let mut db = Database {
             conn: Arc::new(Mutex::new(conn)),
+            read_conn: None,
         };
         db.preflight_migrations(db_path, should_consider_backup)?;
         db.run_migrations()?;
+        db.read_conn = Self::open_read_connection(db_path)?;
         Ok(db)
     }
 
@@ -272,6 +275,21 @@ impl Database {
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "busy_timeout", 5000)?;
         Ok(())
+    }
+
+    fn open_read_connection(db_path: &Path) -> Result<Option<Arc<Mutex<Connection>>>> {
+        if db_path == Path::new(":memory:") {
+            return Ok(None);
+        }
+
+        let conn = Connection::open(db_path)?;
+        Self::configure_connection(&conn)?;
+        conn.pragma_update(None, "query_only", true)?;
+        Ok(Some(Arc::new(Mutex::new(conn))))
+    }
+
+    pub(crate) fn read_connection(&self) -> parking_lot::MutexGuard<'_, Connection> {
+        self.read_conn.as_ref().unwrap_or(&self.conn).lock()
     }
 
     fn preflight_migrations(&self, db_path: &Path, should_consider_backup: bool) -> Result<()> {
@@ -1996,6 +2014,190 @@ mod tests {
     }
 
     #[test]
+    fn visible_library_and_folder_queries_hide_rejected_until_requested() {
+        let db = test_db();
+        insert_test_image_at_path(&db, "kept", "h-kept", "/lib/art/kept.png");
+        insert_test_image_at_path(&db, "rejected", "h-rejected", "/lib/art/rejected.png");
+        db.set_decision("rejected", "reject").unwrap();
+        assert_eq!(
+            db.list_images_with_visibility(20, 0, false).unwrap().len(),
+            1
+        );
+        assert_eq!(
+            db.list_images_with_visibility(20, 0, true).unwrap().len(),
+            2
+        );
+        assert_eq!(db.image_count_with_visibility(false).unwrap(), 1);
+        assert_eq!(db.image_count_with_visibility(true).unwrap(), 2);
+        assert_eq!(
+            db.list_images_filtered_with_visibility(Some(1), Some(1), 20, 0, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.list_images_filtered_with_visibility(Some(1), Some(1), 20, 0, true)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(db.list_folders_with_visibility(false).unwrap()[0].1, 1);
+        assert_eq!(db.list_folders_with_visibility(true).unwrap()[0].1, 2);
+        assert_eq!(
+            db.list_images_by_folder_with_visibility("/lib/art", 20, 0, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.list_images_by_folder_with_visibility("/lib/art", 20, 0, true)
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn visible_collection_and_smart_queries_honor_rejected_policy() {
+        let db = test_db();
+        insert_test_image(&db, "kept", "h-kept");
+        insert_test_image(&db, "rejected", "h-rejected");
+        db.set_decision("rejected", "reject").unwrap();
+        let collection_id = db.create_collection("Review").unwrap();
+        db.add_to_collection(&collection_id, &["kept", "rejected"])
+            .unwrap();
+        let hidden_count = db
+            .list_collections_with_visibility(false)
+            .unwrap()
+            .into_iter()
+            .find(|(id, _, _)| id == &collection_id)
+            .unwrap()
+            .2;
+        assert_eq!(hidden_count, 1);
+        let included_count = db
+            .list_collections_with_visibility(true)
+            .unwrap()
+            .into_iter()
+            .find(|(id, _, _)| id == &collection_id)
+            .unwrap()
+            .2;
+        assert_eq!(included_count, 2);
+        assert_eq!(
+            db.list_collection_images_with_visibility(&collection_id, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.list_collection_images_with_visibility(&collection_id, true)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            db.list_collection_images_page_with_visibility(&collection_id, 20, 0, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        let all_filter = r#"{"type":"group","op":"and","children":[]}"#;
+        let smart_id = db
+            .create_smart_collection("Everything", all_filter, None, false)
+            .unwrap();
+        let hidden_smart_count = db
+            .list_smart_collections_with_visibility(false)
+            .unwrap()
+            .into_iter()
+            .find(|collection| collection.id == smart_id)
+            .unwrap()
+            .image_count;
+        let included_smart_count = db
+            .list_smart_collections_with_visibility(true)
+            .unwrap()
+            .into_iter()
+            .find(|collection| collection.id == smart_id)
+            .unwrap()
+            .image_count;
+        assert_eq!(hidden_smart_count, Some(1));
+        assert_eq!(included_smart_count, Some(2));
+        assert_eq!(
+            db.evaluate_smart_collection_page_with_visibility(all_filter, Some(20), Some(0), false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.count_smart_collection_with_visibility(all_filter, true)
+                .unwrap(),
+            2
+        );
+        let rejected_filter = r#"{"type":"rule","field":"decision","op":"eq","value":"reject"}"#;
+        assert_eq!(
+            db.evaluate_smart_collection_page_with_visibility(
+                rejected_filter,
+                Some(20),
+                Some(0),
+                false
+            )
+            .unwrap()
+            .len(),
+            1,
+            "an explicit Rejected smart collection remains usable"
+        );
+    }
+
+    #[test]
+    fn visible_detection_and_import_batch_queries_hide_rejected_until_requested() {
+        let db = test_db();
+        insert_test_image(&db, "kept", "h-kept");
+        insert_test_image(&db, "rejected", "h-rejected");
+        db.set_decision("rejected", "reject").unwrap();
+        let batch_id = db.create_import_batch("test", 2, None).unwrap();
+        db.set_image_batch("kept", &batch_id).unwrap();
+        db.set_image_batch("rejected", &batch_id).unwrap();
+        {
+            let conn = db.conn.lock();
+            for image_id in ["kept", "rejected"] {
+                conn.execute("INSERT INTO detections (id, image_id, model_name, class_name, confidence, x, y, width, height, created_at) VALUES (?1, ?2, 'yolo-test', 'person', 0.9, 0.0, 0.0, 1.0, 1.0, '2026-01-01')", params![format!("det-{image_id}"), image_id]).unwrap();
+            }
+        }
+        assert_eq!(
+            db.list_detected_classes_with_visibility(false).unwrap()[0].1,
+            1
+        );
+        assert_eq!(
+            db.list_detected_classes_with_visibility(true).unwrap()[0].1,
+            2
+        );
+        assert_eq!(
+            db.list_images_by_class_with_visibility("person", 20, 0, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.count_by_class_with_visibility("person", false).unwrap(),
+            1
+        );
+        assert_eq!(
+            db.count_by_class_with_visibility("person", true).unwrap(),
+            2
+        );
+        assert_eq!(
+            db.get_batch_images_with_visibility(&batch_id, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            db.get_batch_images_with_visibility(&batch_id, true)
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
     fn list_images_in_scope_collection_paginates_completely() {
         let db = test_db();
         let col = db.create_collection("C1").unwrap();
@@ -3317,6 +3519,164 @@ mod file_watcher_tests {
         assert!(roots.is_empty());
     }
 
+    #[test]
+    fn test_migrate_folder_paths_updates_descendants_and_preserves_metadata() {
+        let db = test_db();
+        insert_test_image(&db, "inside", "hash-inside");
+        insert_test_image(&db, "outside", "hash-outside");
+        db.update_image_file_path("f-inside", "/photos/old/nested/inside.png")
+            .unwrap();
+        db.update_image_file_path("f-outside", "/photos/other/outside.png")
+            .unwrap();
+        db.set_decision("inside", "accept").unwrap();
+        db.add_library_root("/photos/old").unwrap();
+        let session_id = db.create_session("Session", "/photos/old/session").unwrap();
+        let canvas_id = db.create_canvas(&session_id, "Canvas", "manual").unwrap();
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "UPDATE canvases SET layout_json = ?1 WHERE id = ?2",
+                params![
+                    r#"{"version":1,"items":[{"id":"item","imageId":"inside","x":0,"y":0,"width":100,"height":100,"z":0,"hidden":false,"label":null,"groupId":null,"source":{"contentHash":"hash-inside","lastKnownPath":"/photos/old/nested/inside.png"}}]}"#,
+                    canvas_id
+                ],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO generation_runs (id, settings_json, source_type, source_path, imported_at) VALUES ('run', '{}', 'sidecar', '/photos/old/nested/inside.json', '2026-01-01')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let result = db
+            .migrate_folder_paths("/photos/old", "/photos/renamed")
+            .unwrap();
+
+        assert_eq!(result.image_files, 1);
+        assert_eq!(result.library_roots, 1);
+        assert_eq!(result.sessions, 1);
+        assert_eq!(result.canvases, 1);
+        assert_eq!(result.generation_runs, 1);
+        assert!(db
+            .get_image_file_by_path("/photos/renamed/nested/inside.png")
+            .unwrap()
+            .is_some());
+        assert!(db
+            .get_image_file_by_path("/photos/other/outside.png")
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            db.get_selection_for_image("inside")
+                .unwrap()
+                .unwrap()
+                .decision,
+            "accept"
+        );
+        assert_eq!(
+            db.get_session(&session_id).unwrap().folder_path,
+            "/photos/renamed/session"
+        );
+        assert!(db
+            .get_canvas(&canvas_id)
+            .unwrap()
+            .unwrap()
+            .layout_json
+            .contains("/photos/renamed/nested/inside.png"));
+        let conn = db.conn.lock();
+        let generation_source: String = conn
+            .query_row(
+                "SELECT source_path FROM generation_runs WHERE id = 'run'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(generation_source, "/photos/renamed/nested/inside.json");
+    }
+
+    #[test]
+    fn test_migrate_folder_paths_rejects_collisions_without_partial_updates() {
+        let db = test_db();
+        insert_test_image(&db, "inside", "hash-inside");
+        insert_test_image(&db, "collision", "hash-collision");
+        db.update_image_file_path("f-inside", "/photos/old/inside.png")
+            .unwrap();
+        db.update_image_file_path("f-collision", "/photos/new/inside.png")
+            .unwrap();
+        db.add_library_root("/photos/old").unwrap();
+
+        let error = db
+            .migrate_folder_paths("/photos/old", "/photos/new")
+            .unwrap_err();
+
+        assert!(error.to_string().contains("target subtree"));
+        assert!(db
+            .get_image_file_by_path("/photos/old/inside.png")
+            .unwrap()
+            .is_some());
+        assert!(db
+            .list_library_roots()
+            .unwrap()
+            .contains(&"/photos/old".to_string()));
+    }
+
+    #[test]
+    fn test_migrate_folder_paths_preserves_missing_and_last_seen_metadata() {
+        let db = test_db();
+        insert_test_image(&db, "inside", "hash-inside");
+        db.update_image_file_path("f-inside", "/photos/old/inside.png")
+            .unwrap();
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "UPDATE image_files SET last_seen_at = '2025-01-02', missing_at = '2025-02-03' WHERE id = 'f-inside'",
+                [],
+            )
+            .unwrap();
+        }
+
+        db.migrate_folder_paths("/photos/old", "/photos/new")
+            .unwrap();
+
+        let file = db
+            .get_image_file_by_path("/photos/new/inside.png")
+            .unwrap()
+            .unwrap();
+        assert_eq!(file.last_seen_at, "2025-01-02");
+        assert_eq!(file.missing_at.as_deref(), Some("2025-02-03"));
+    }
+
+    #[test]
+    fn test_folder_migration_journal_and_paths_commit_atomically() {
+        let db = test_db();
+        insert_test_image(&db, "source", "hash-source");
+        insert_test_image(&db, "target", "hash-target");
+        db.update_image_file_path("f-source", "/photos/source/image.png")
+            .unwrap();
+        db.update_image_file_path("f-target", "/photos/target/unrelated.png")
+            .unwrap();
+
+        let error = db
+            .migrate_folder_paths_with_journal(
+                "/photos/source",
+                "/photos/target",
+                "pending_folder_rename",
+                r#"{"source":"/photos/source","target":"/photos/target"}"#,
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("target subtree"));
+        assert!(db.get_setting("pending_folder_rename").unwrap().is_none());
+        assert!(db
+            .get_image_file_by_path("/photos/source/image.png")
+            .unwrap()
+            .is_some());
+        assert!(db
+            .get_image_file_by_path("/photos/target/unrelated.png")
+            .unwrap()
+            .is_some());
+    }
+
     // -- get_image_file_by_path --
 
     #[test]
@@ -3361,84 +3721,71 @@ mod file_watcher_tests {
     }
 
     #[test]
-    fn test_concurrent_read_write_lock_hold_times() {
-        use std::sync::Arc;
-        use std::thread;
-        use std::time::{Duration, Instant};
+    fn test_file_database_opens_a_query_only_read_connection() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open(&tmp.path().join("read-connection.db")).unwrap();
+        let read_conn = db
+            .read_conn
+            .as_ref()
+            .expect("file databases need a read connection");
+        let conn = read_conn.lock();
+        let query_only: i64 = conn
+            .pragma_query_value(None, "query_only", |row| row.get(0))
+            .unwrap();
+        let timeout: i64 = conn
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .unwrap();
+
+        assert_eq!(query_only, 1);
+        assert_eq!(timeout, 5000);
+    }
+
+    #[test]
+    fn test_library_stats_read_does_not_wait_for_writer_transaction() {
+        use std::sync::mpsc;
+        use std::time::Duration;
 
         let tmp = tempfile::tempdir().unwrap();
-        let db_path = tmp.path().join("bench.db");
-        let db = Arc::new(Database::open(&db_path).unwrap());
+        let db_path = tmp.path().join("concurrent.db");
+        let db = Database::open(&db_path).unwrap();
+        insert_test_image(&db, "visible", "hash-visible");
+        let collection_id = db.create_collection("Visible").unwrap();
+        db.add_to_collection(&collection_id, &["visible"]).unwrap();
 
-        // Seed with images
-        for i in 0..200 {
-            insert_test_image(&db, &format!("img-{}", i), &format!("hash-{}", i));
-        }
+        let writer = db.conn.lock();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        writer
+            .execute(
+                "INSERT INTO images (id, sha256_hash, width, height, format, file_size, created_at, imported_at)
+                 VALUES ('uncommitted', 'hash-uncommitted', 1, 1, 'png', 1, '2026-01-01', '2026-01-01')",
+                [],
+            )
+            .unwrap();
 
-        let db_clone = Arc::clone(&db);
-        let writer = thread::spawn(move || {
-            let mut max_hold = Duration::ZERO;
-            for i in 0..100 {
-                let t0 = Instant::now();
-                {
-                    let conn = db_clone.conn.lock();
-                    let _ = conn.execute(
-                        "INSERT OR REPLACE INTO selections (image_id, project_id, decision, rating, color_label) VALUES (?1, '__global__', 'accept', 3, '')",
-                        rusqlite::params![format!("img-{}", i % 200)],
-                    );
-                }
-                let hold = t0.elapsed();
-                if hold > max_hold {
-                    max_hold = hold;
-                }
-            }
-            max_hold
+        let reader_db = db.clone();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<(u32, usize, usize, usize, usize, usize)> {
+                Ok((
+                    reader_db.image_count()?,
+                    reader_db.list_images(10, 0)?.len(),
+                    reader_db.list_images_by_folder("/tmp", 10, 0)?.len(),
+                    reader_db
+                        .list_images_in_scope(&["/tmp".to_string()], &[], &[], 10, 0)?
+                        .len(),
+                    reader_db.list_collection_images(&collection_id)?.len(),
+                    reader_db.get_images_by_ids(&["visible"])?.len(),
+                ))
+            })();
+            tx.send(result).unwrap();
         });
 
-        let db_clone2 = Arc::clone(&db);
-        let reader = thread::spawn(move || {
-            let mut max_hold = Duration::ZERO;
-            for _ in 0..100 {
-                let t0 = Instant::now();
-                {
-                    let conn = db_clone2.conn.lock();
-                    let _ = conn.query_row("SELECT COUNT(*) FROM images", [], |row| {
-                        row.get::<_, i64>(0)
-                    });
-                }
-                let hold = t0.elapsed();
-                if hold > max_hold {
-                    max_hold = hold;
-                }
-            }
-            max_hold
-        });
+        let browse_counts = rx
+            .recv_timeout(Duration::from_millis(250))
+            .expect("WAL browse queries must stay responsive during a write transaction")
+            .unwrap();
+        assert_eq!(browse_counts, (1, 1, 1, 1, 1, 1));
 
-        let writer_max = writer.join().unwrap();
-        let reader_max = reader.join().unwrap();
-
-        // Document findings: with a single Mutex<Connection>, all access
-        // serializes. WAL mode helps when multiple connections exist, but the
-        // current single-connection architecture means lock contention is the
-        // bottleneck. Report the measured hold times.
-        eprintln!(
-            "Lock hold times — writer max: {:.2}ms, reader max: {:.2}ms",
-            writer_max.as_secs_f64() * 1000.0,
-            reader_max.as_secs_f64() * 1000.0,
-        );
-
-        // Under normal desktop load, holds should be well under 50ms even
-        // with contention from a competing thread.
-        let threshold = Duration::from_millis(50);
-        assert!(
-            writer_max < threshold,
-            "Writer lock hold exceeded threshold: {:.2}ms",
-            writer_max.as_secs_f64() * 1000.0
-        );
-        assert!(
-            reader_max < threshold,
-            "Reader lock hold exceeded threshold: {:.2}ms",
-            reader_max.as_secs_f64() * 1000.0
-        );
+        writer.execute_batch("ROLLBACK").unwrap();
     }
 }

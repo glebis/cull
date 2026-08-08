@@ -132,7 +132,6 @@ describe('backend init failure produces a distinct error state', () => {
     it('Sidebar initial loads surface failures instead of console.error-only', () => {
         const sidebar = source('src/lib/components/Sidebar.svelte');
 
-        expect(sidebar).toContain("showToast('Failed to load folders'");
-        expect(sidebar).toContain("showToast('Failed to load collections'");
+        expect(sidebar).toContain("showToast('Failed to refresh library counts'");
     });
 });

@@ -8,9 +8,283 @@ use crate::db_core::db::{
 
 use crate::db_core::db::Database;
 use crate::db_core::models::*;
-use rusqlite::{params, OptionalExtension, Result};
+use crate::db_core::visibility::RejectedVisibility;
+use rusqlite::{params, OptionalExtension, Result, Transaction};
+use std::collections::HashSet;
+use std::path::{Component, Path};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FolderPathMigration {
+    pub image_files: usize,
+    pub library_roots: usize,
+    pub sessions: usize,
+    pub canvases: usize,
+    pub generation_runs: usize,
+}
+
+fn invalid_path(message: impl Into<String>) -> rusqlite::Error {
+    rusqlite::Error::InvalidParameterName(message.into())
+}
+
+fn validate_folder_migration_path(path: &str, label: &str) -> Result<()> {
+    let path = Path::new(path);
+    if !path.is_absolute()
+        || path.parent().is_none()
+        || path
+            .components()
+            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+    {
+        return Err(invalid_path(format!("invalid {label} folder path")));
+    }
+    Ok(())
+}
+
+fn rewrite_descendant_path(source: &Path, target: &Path, candidate: &str) -> Option<String> {
+    let candidate = Path::new(candidate);
+    if candidate == source {
+        return Some(target.to_string_lossy().to_string());
+    }
+    let relative = candidate.strip_prefix(source).ok()?;
+    Some(target.join(relative).to_string_lossy().to_string())
+}
+
+fn migrate_path_column(
+    tx: &Transaction<'_>,
+    select_sql: &str,
+    update_sql: &str,
+    source: &Path,
+    target: &Path,
+    reject_collisions: bool,
+) -> Result<usize> {
+    let rows = {
+        let mut stmt = tx.prepare(select_sql)?;
+        let collected = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>>>()?;
+        collected
+    };
+    let moving_ids = rows
+        .iter()
+        .filter(|(_, path)| rewrite_descendant_path(source, target, path).is_some())
+        .map(|(id, _)| id.clone())
+        .collect::<HashSet<_>>();
+    let existing_paths = rows
+        .iter()
+        .filter(|(id, _)| !moving_ids.contains(id))
+        .map(|(_, path)| path.clone())
+        .collect::<HashSet<_>>();
+    if reject_collisions
+        && existing_paths
+            .iter()
+            .any(|path| rewrite_descendant_path(target, target, path).is_some())
+    {
+        return Err(invalid_path(format!(
+            "folder rename target subtree already has persisted paths at {}",
+            target.display()
+        )));
+    }
+    let mut proposed_paths = HashSet::new();
+    let mut changed = 0;
+    for (id, path) in rows {
+        let Some(next_path) = rewrite_descendant_path(source, target, &path) else {
+            continue;
+        };
+        if reject_collisions
+            && (existing_paths.contains(&next_path) || !proposed_paths.insert(next_path.clone()))
+        {
+            return Err(invalid_path(format!(
+                "folder rename path collision at {next_path}"
+            )));
+        }
+        tx.execute(update_sql, params![id, next_path])?;
+        changed += 1;
+    }
+    Ok(changed)
+}
+
+fn rewrite_canvas_paths(value: &mut serde_json::Value, source: &Path, target: &Path) -> bool {
+    match value {
+        serde_json::Value::Array(values) => values.iter_mut().fold(false, |changed, value| {
+            rewrite_canvas_paths(value, source, target) || changed
+        }),
+        serde_json::Value::Object(values) => {
+            values.iter_mut().fold(false, |changed, (key, value)| {
+                let path_changed = if key == "lastKnownPath" {
+                    value
+                        .as_str()
+                        .and_then(|path| rewrite_descendant_path(source, target, path))
+                        .map(|path| {
+                            *value = serde_json::Value::String(path);
+                            true
+                        })
+                        .unwrap_or(false)
+                } else {
+                    rewrite_canvas_paths(value, source, target)
+                };
+                path_changed || changed
+            })
+        }
+        _ => false,
+    }
+}
+
+fn canvas_contains_path_under(value: &serde_json::Value, root: &Path) -> bool {
+    match value {
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| canvas_contains_path_under(value, root)),
+        serde_json::Value::Object(values) => values.iter().any(|(key, value)| {
+            (key == "lastKnownPath"
+                && value
+                    .as_str()
+                    .is_some_and(|path| rewrite_descendant_path(root, root, path).is_some()))
+                || canvas_contains_path_under(value, root)
+        }),
+        _ => false,
+    }
+}
+
+fn migrate_folder_paths_in_transaction(
+    tx: &Transaction<'_>,
+    source_path: &Path,
+    target_path: &Path,
+) -> Result<FolderPathMigration> {
+    let image_files = migrate_path_column(
+        tx,
+        "SELECT id, path FROM image_files",
+        "UPDATE image_files SET path = ?2 WHERE id = ?1",
+        source_path,
+        target_path,
+        true,
+    )?;
+    migrate_path_column(
+        tx,
+        "SELECT id, path FROM media_files",
+        "UPDATE media_files SET path = ?2 WHERE id = ?1",
+        source_path,
+        target_path,
+        true,
+    )?;
+    let library_roots = migrate_path_column(
+        tx,
+        "SELECT id, path FROM library_roots",
+        "UPDATE library_roots SET path = ?2 WHERE id = ?1",
+        source_path,
+        target_path,
+        true,
+    )?;
+    let sessions = migrate_path_column(
+        tx,
+        "SELECT id, folder_path FROM projects WHERE folder_path IS NOT NULL",
+        "UPDATE projects SET folder_path = ?2 WHERE id = ?1",
+        source_path,
+        target_path,
+        true,
+    )?;
+    let generation_runs = migrate_path_column(
+        tx,
+        "SELECT id, source_path FROM generation_runs WHERE source_path IS NOT NULL",
+        "UPDATE generation_runs SET source_path = ?2 WHERE id = ?1",
+        source_path,
+        target_path,
+        true,
+    )?;
+
+    let canvas_rows = {
+        let mut stmt = tx.prepare("SELECT id, layout_json FROM canvases")?;
+        let collected = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>>>()?;
+        collected
+    };
+    let mut canvases = 0;
+    for (id, layout_json) in canvas_rows {
+        let mut layout =
+            serde_json::from_str::<serde_json::Value>(&layout_json).map_err(|error| {
+                invalid_path(format!(
+                    "invalid canvas layout during folder rename: {error}"
+                ))
+            })?;
+        if canvas_contains_path_under(&layout, target_path) {
+            return Err(invalid_path(format!(
+                "folder rename target subtree already has persisted canvas paths at {}",
+                target_path.display()
+            )));
+        }
+        if rewrite_canvas_paths(&mut layout, source_path, target_path) {
+            tx.execute(
+                "UPDATE canvases SET layout_json = ?2, updated_at = datetime('now') WHERE id = ?1",
+                params![
+                    id,
+                    serde_json::to_string(&layout)
+                        .map_err(|error| invalid_path(error.to_string()))?
+                ],
+            )?;
+            canvases += 1;
+        }
+    }
+
+    Ok(FolderPathMigration {
+        image_files,
+        library_roots,
+        sessions,
+        canvases,
+        generation_runs,
+    })
+}
 
 impl Database {
+    pub fn migrate_folder_paths(&self, source: &str, target: &str) -> Result<FolderPathMigration> {
+        validate_folder_migration_path(source, "source")?;
+        validate_folder_migration_path(target, "target")?;
+        if source == target {
+            return Err(invalid_path("source and target folders must differ"));
+        }
+        let source_path = Path::new(source);
+        let target_path = Path::new(target);
+        if target_path.starts_with(source_path) {
+            return Err(invalid_path("target folder cannot be inside source folder"));
+        }
+
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let migration = migrate_folder_paths_in_transaction(&tx, source_path, target_path)?;
+        tx.commit()?;
+        Ok(migration)
+    }
+
+    pub fn migrate_folder_paths_with_journal(
+        &self,
+        source: &str,
+        target: &str,
+        journal_key: &str,
+        journal_value: &str,
+    ) -> Result<FolderPathMigration> {
+        validate_folder_migration_path(source, "source")?;
+        validate_folder_migration_path(target, "target")?;
+        let source_path = Path::new(source);
+        let target_path = Path::new(target);
+        if source == target || target_path.starts_with(source_path) {
+            return Err(invalid_path("invalid folder rename relationship"));
+        }
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        if tx.execute(
+            "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?1, ?2)",
+            params![journal_key, journal_value],
+        )? != 1
+        {
+            return Err(invalid_path("another folder rename requires recovery"));
+        }
+        let migration = migrate_folder_paths_in_transaction(&tx, source_path, target_path)?;
+        tx.commit()?;
+        Ok(migration)
+    }
+
     pub fn insert_image(&self, image: &Image) -> Result<()> {
         let conn = self.conn.lock();
         conn.execute(
@@ -82,8 +356,17 @@ impl Database {
     }
 
     pub fn list_images(&self, limit: u32, offset: u32) -> Result<Vec<ImageWithFile>> {
-        let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
+        self.list_images_with_visibility(limit, offset, true)
+    }
+
+    pub fn list_images_with_visibility(
+        &self,
+        limit: u32,
+        offset: u32,
+        include_rejected: bool,
+    ) -> Result<Vec<ImageWithFile>> {
+        let conn = self.read_connection();
+        let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
@@ -91,10 +374,13 @@ impl Database {
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             WHERE {}
              GROUP BY i.id
              ORDER BY i.imported_at DESC, i.id ASC
              LIMIT ?1 OFFSET ?2",
-        )?;
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![limit, offset], map_image_with_file_row)?;
         rows.collect::<Result<Vec<_>>>()
     }
@@ -174,7 +460,7 @@ impl Database {
         args.push(Value::Integer(limit as i64));
         args.push(Value::Integer(offset as i64));
 
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(rusqlite::params_from_iter(args), map_image_with_file_row)?;
         rows.collect::<Result<Vec<_>>>()
@@ -187,7 +473,18 @@ impl Database {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<ImageWithFile>> {
-        let conn = self.conn.lock();
+        self.list_images_filtered_with_visibility(min_width, min_height, limit, offset, true)
+    }
+
+    pub fn list_images_filtered_with_visibility(
+        &self,
+        min_width: Option<u32>,
+        min_height: Option<u32>,
+        limit: u32,
+        offset: u32,
+        include_rejected: bool,
+    ) -> Result<Vec<ImageWithFile>> {
+        let conn = self.read_connection();
         let mut sql = String::from(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
@@ -198,6 +495,8 @@ impl Database {
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
              WHERE 1=1",
         );
+        sql.push_str(" AND ");
+        sql.push_str(RejectedVisibility::from_include_rejected(include_rejected).sql_predicate());
         if let Some(w) = min_width {
             sql.push_str(&format!(" AND i.width >= {}", w));
         }
@@ -237,6 +536,13 @@ impl Database {
     }
 
     pub fn list_folders(&self) -> Result<Vec<(String, u32)>> {
+        self.list_folders_with_visibility(true)
+    }
+
+    pub fn list_folders_with_visibility(
+        &self,
+        include_rejected: bool,
+    ) -> Result<Vec<(String, u32)>> {
         // Group/count/sort in SQLite instead of streaming every image path into
         // a Rust HashMap. The parent directory is derived with the standard
         // rtrim dirname trick: rtrim(path, <all non-'/' chars of path>) strips
@@ -246,8 +552,8 @@ impl Database {
         // The CASE matches std::path::Path::parent exactly: a path with no '/'
         // has no parent (excluded, like `None`); a root-level file ("/x.png")
         // whose stripped prefix is empty maps to "/".
-        let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
+        let conn = self.read_connection();
+        let sql = format!(
             "SELECT folder, COUNT(*) AS cnt
              FROM (
                  SELECT CASE
@@ -256,12 +562,16 @@ impl Database {
                      ELSE rtrim(rtrim(f.path, replace(f.path, '/', '')), '/')
                  END AS folder
                  FROM image_files f
-                 WHERE f.missing_at IS NULL
+                 JOIN images i ON i.id = f.image_id
+                 LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+                 WHERE f.missing_at IS NULL AND {}
              )
              WHERE folder IS NOT NULL
              GROUP BY folder
              ORDER BY folder",
-        )?;
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
         })?;
@@ -274,14 +584,24 @@ impl Database {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<ImageWithFile>> {
-        let conn = self.conn.lock();
+        self.list_images_by_folder_with_visibility(folder, limit, offset, true)
+    }
+
+    pub fn list_images_by_folder_with_visibility(
+        &self,
+        folder: &str,
+        limit: u32,
+        offset: u32,
+        include_rejected: bool,
+    ) -> Result<Vec<ImageWithFile>> {
+        let conn = self.read_connection();
         // Prefix-match on substr rather than LIKE: `_` and `%` are wildcards in
         // LIKE, so a folder named `2025_Trips` would also pull in `2025XTrips`.
         // This mirrors delete_images_by_folder, which avoids LIKE for the same
         // reason.
         let prefix = format!("{}/", folder.trim_end_matches('/'));
         let prefix_len = prefix.chars().count() as i64;
-        let mut stmt = conn.prepare(
+        let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
                     i.created_at, i.imported_at, f.path,
                     s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
@@ -289,11 +609,13 @@ impl Database {
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE substr(f.path, 1, ?4) COLLATE BINARY = ?1 COLLATE BINARY
+             WHERE substr(f.path, 1, ?4) COLLATE BINARY = ?1 COLLATE BINARY AND {}
              GROUP BY i.id
              ORDER BY i.imported_at DESC
              LIMIT ?2 OFFSET ?3",
-        )?;
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![prefix, limit, offset, prefix_len], |row| {
             let star: Option<u8> = row.get(9)?;
             let color: Option<String> = row.get(10)?;
@@ -324,17 +646,23 @@ impl Database {
     }
 
     pub fn image_count(&self) -> Result<u32> {
-        let conn = self.conn.lock();
-        conn.query_row(
+        self.image_count_with_visibility(true)
+    }
+
+    pub fn image_count_with_visibility(&self, include_rejected: bool) -> Result<u32> {
+        let conn = self.read_connection();
+        let sql = format!(
             "SELECT COUNT(DISTINCT i.id) FROM images i
-             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL",
-            [],
-            |row| row.get(0),
-        )
+             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+             LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             WHERE {}",
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        conn.query_row(&sql, [], |row| row.get(0))
     }
 
     pub fn list_image_ids(&self) -> Result<Vec<String>> {
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let mut stmt = conn.prepare(
             "SELECT DISTINCT i.id
              FROM images i
@@ -349,7 +677,7 @@ impl Database {
         if ids.is_empty() {
             return Ok(vec![]);
         }
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let placeholders: Vec<String> = ids
             .iter()
             .enumerate()

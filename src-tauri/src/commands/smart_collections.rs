@@ -34,9 +34,11 @@ pub async fn create_smart_collection(
 #[tauri::command]
 pub async fn list_smart_collections(
     state: State<'_, AppState>,
+    include_rejected: Option<bool>,
 ) -> Result<Vec<SmartCollection>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::list_smart_collections(&ctx).map_err(|e| e.to_string())
+    svc::list_smart_collections_with_visibility(&ctx, include_rejected.unwrap_or(false))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -45,17 +47,24 @@ pub async fn evaluate_smart_collection(
     filter_json: String,
     limit: Option<u32>,
     offset: Option<u32>,
+    include_rejected: Option<bool>,
 ) -> Result<Vec<ImageWithFile>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
     if let Some(limit) = limit {
-        svc::evaluate_smart_collection_page(
+        svc::evaluate_smart_collection_page_with_visibility(
             &ctx,
             &filter_json,
             Pagination::clamped(offset.unwrap_or(0), limit),
+            include_rejected.unwrap_or(false),
         )
         .map_err(|e| e.to_string())
     } else {
-        svc::evaluate_smart_collection(&ctx, &filter_json).map_err(|e| e.to_string())
+        svc::evaluate_smart_collection_with_visibility(
+            &ctx,
+            &filter_json,
+            include_rejected.unwrap_or(false),
+        )
+        .map_err(|e| e.to_string())
     }
 }
 
@@ -63,9 +72,15 @@ pub async fn evaluate_smart_collection(
 pub async fn count_smart_collection(
     state: State<'_, AppState>,
     filter_json: String,
+    include_rejected: Option<bool>,
 ) -> Result<i64, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::count_smart_collection(&ctx, &filter_json).map_err(|e| e.to_string())
+    svc::count_smart_collection_with_visibility(
+        &ctx,
+        &filter_json,
+        include_rejected.unwrap_or(false),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

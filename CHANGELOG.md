@@ -6,6 +6,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-08-08
+
+### Fixed
+
+- Restored readable PDF first-page previews on macOS; previews no longer render as solid black.
+- Hardened release recovery so an already-verified draft can be published without replacing its assets.
+
 ## [0.3.2] - 2026-08-07
 
 ### Fixed

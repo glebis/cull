@@ -22,6 +22,7 @@
         overlayClass?: string;
         panelClass?: string;
         ariaLabel?: string;
+        onkeydown?: (event: KeyboardEvent) => void;
         children?: Snippet;
     }
 
@@ -37,6 +38,7 @@
         overlayClass = '',
         panelClass = '',
         ariaLabel,
+        onkeydown,
         children,
     }: Props = $props();
 
@@ -97,6 +99,8 @@
     }
 
     function handleKeydown(event: KeyboardEvent) {
+        onkeydown?.(event);
+        if (event.defaultPrevented) return;
         handleModalKeydown(event, {
             closeOnEscape,
             trapFocus,
@@ -156,7 +160,7 @@
         position: fixed;
         inset: 0;
         display: flex;
-        align-items: center;
+        align-items: var(--modal-align-items, center);
         justify-content: center;
         z-index: var(--z-modal);
     }

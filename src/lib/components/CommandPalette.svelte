@@ -1,7 +1,10 @@
 <script lang="ts">
     import {
         activeCollection,
+        activeCanvas,
+        activeDetectedClass,
         activeFolder,
+        activeSession,
         activeSmartCollection,
         collections,
         commandPaletteMode,
@@ -9,10 +12,15 @@
         focusedImage,
         folders,
         images,
+        importBatchFilter,
+        importBatchImageIds,
         requestTextInput,
         selectedIds,
+        sessions,
+        sessionCanvases,
         shortcutsOpen,
         smartCollections,
+        detectedClasses,
         viewMode,
         type CommandPaletteMode,
     } from '$lib/stores';
@@ -96,6 +104,7 @@
         commandPaletteMode.set(mode);
         selectedIndex = 0;
         contextMenu = null;
+        refreshItems();
     }
 
     function closePalette() {
@@ -314,8 +323,16 @@
         $images;
         $selectedIds;
         $activeCollection;
+        $activeCanvas;
+        $activeDetectedClass;
         $activeFolder;
+        $activeSession;
         $activeSmartCollection;
+        $sessions;
+        $sessionCanvases;
+        $detectedClasses;
+        $importBatchFilter;
+        $importBatchImageIds;
         if ($commandPaletteOpen) refreshItems();
     });
 

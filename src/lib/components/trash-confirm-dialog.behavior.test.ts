@@ -16,7 +16,9 @@ describe('TrashConfirmDialog rendered behavior', () => {
             oncancel: vi.fn(),
         });
 
-        await waitFor(() => expect(screen.getByRole('button', { name: 'Move to Trash' })).toHaveFocus());
+        const moveButton = screen.getByRole('button', { name: 'Move to Trash' });
+        expect(moveButton).toHaveClass('btn', 'danger');
+        await waitFor(() => expect(moveButton).toHaveFocus());
     });
 
     it('does not confirm from bare Enter on the dialog itself', async () => {

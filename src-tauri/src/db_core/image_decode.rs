@@ -65,7 +65,23 @@ pub(crate) fn decode_pdf_preview_with_platform(
     path: &Path,
     max_dimension: u32,
 ) -> Result<image::DynamicImage, String> {
-    decode_with_sips(path, Some(max_dimension))
+    decode_with_sips(path, Some(max_dimension)).map(flatten_transparency_onto_white)
+}
+
+#[cfg(target_os = "macos")]
+fn flatten_transparency_onto_white(image: image::DynamicImage) -> image::DynamicImage {
+    let rgba = image.into_rgba8();
+    let flattened = image::RgbImage::from_fn(rgba.width(), rgba.height(), |x, y| {
+        let [red, green, blue, alpha] = rgba.get_pixel(x, y).0;
+        let alpha = u16::from(alpha);
+        let inverse_alpha = 255 - alpha;
+        let flatten =
+            |channel: u8| ((u16::from(channel) * alpha + 255 * inverse_alpha + 127) / 255) as u8;
+
+        image::Rgb([flatten(red), flatten(green), flatten(blue)])
+    });
+
+    image::DynamicImage::ImageRgb8(flattened)
 }
 
 #[cfg(target_os = "macos")]
@@ -186,6 +202,22 @@ mod tests {
         assert!(preview.width() > 0);
         assert!(preview.height() > preview.width());
         assert!(preview.width().max(preview.height()) <= 1200);
+
+        // ImageIO represents the white PDF page as transparent pixels with
+        // black RGB values. Dropping that alpha while encoding JPEG turns the
+        // entire thumbnail black, so the platform decoder must flatten onto a
+        // white background before returning the preview.
+        let rgb = preview.to_rgb8();
+        let pixel_count = u64::from(rgb.width()) * u64::from(rgb.height());
+        let luminance_sum: u64 = rgb
+            .pixels()
+            .map(|pixel| pixel.0.into_iter().map(u64::from).sum::<u64>() / 3)
+            .sum();
+
+        assert!(luminance_sum / pixel_count > 200);
+        assert!(rgb
+            .pixels()
+            .any(|pixel| pixel.0.iter().all(|value| *value < 64)));
     }
 
     #[cfg(target_os = "macos")]

@@ -30,12 +30,12 @@
         getEmbeddingModelDownloadInfo,
         listEmbeddingProviders,
         downloadEmbeddingModel,
-        generateModelEmbeddings,
-        getEmbeddingPage,
-        getEmbeddingCount,
-        getImageCount,
-        listImageIds,
+        startModelEmbeddingGeneration,
         hasApiKey,
+        setApiKey,
+        validateApiKey,
+        getOllamaEmbeddingConfig,
+        setOllamaEmbeddingConfig,
         getImagesByIds,
         getGenerationRun,
         regenerateThumbnails,
@@ -43,13 +43,34 @@
         pauseJob,
         resumeJob,
     } from '$lib/api';
-    import type { EmbeddingModelDownloadInfo, EmbeddingPage, GenerationRun, ImageWithFile } from '$lib/api';
+    import type {
+        EmbeddingGenerationMode,
+        EmbeddingGenerationProgress,
+        EmbeddingModelDownloadInfo,
+        EmbeddingPage,
+        GenerationRun,
+        ImageWithFile,
+    } from '$lib/api';
     import { isAssetProtocolSafePath, safeAssetPreviewPath } from '$lib/view-utils';
+    import { libraryScope, libraryScopeKey, type LibraryScope } from '$lib/library-scope';
+    import {
+        getEmbeddingCountForScope,
+        getEmbeddingPageForScope,
+        getImageCountForScope,
+        listImageIdsForScope,
+    } from '$lib/embedding-scope';
+    import { loadEmbeddingNeighbors, type EmbeddingNeighbor } from '$lib/embedding-neighbors';
 
     // State
     let downloading = $state(false);
-    let generating = $state(false);
-    let genProgress = $state({ current: 0, total: 0 });
+    type ActiveEmbeddingGeneration = EmbeddingGenerationProgress & {
+        provider: EmbeddingProvider;
+        scope: LibraryScope;
+        scopeKey: string;
+    };
+    let activeGeneration = $state<ActiveEmbeddingGeneration | null>(null);
+    let generationUnlisten: UnlistenFn | null = null;
+    let generating = $derived(activeGeneration?.status === 'running' || activeGeneration?.status === 'cancelling');
     let totalImages = $state(0);
     let regeneratingThumbs = $state(false);
     let staleEmbeddingCount = $state(0);
@@ -64,11 +85,17 @@
     let hasCohereKey = $state(false);
     let hasOpenAiKey = $state(false);
     let ollamaEmbeddingReady = $state(false);
+    let providerKeyInput = $state('');
+    let providerConfigStatus = $state<'idle' | 'loading' | 'saving' | 'saved' | 'invalid' | 'error'>('idle');
+    let providerConfigLoadSeq = 0;
+    let ollamaEmbeddingUrl = $state('http://localhost:11434/api/embed');
+    let ollamaEmbeddingModel = $state('embeddinggemma');
     let localModelAvailable = $state<Record<LocalProvider, boolean>>({ clip: false, dinov2: false });
     let localEmbeddingCounts = $state<Record<LocalProvider, number>>({ clip: 0, dinov2: 0 });
     let localModelDownloadInfo = $state<Record<LocalProvider, EmbeddingModelDownloadInfo | null>>({ clip: null, dinov2: null });
     let remoteEmbeddingCounts = $state<Record<RemoteProvider, number>>({ gemini: 0, cohere: 0, openai: 0, ollama: 0 });
     let currentEmbeddingCount = $derived(providerEmbeddingCount(selectedProvider));
+    let missingEmbeddingCount = $derived(Math.max(0, totalImages - currentEmbeddingCount));
     let selectedModel = $derived(modelOptions.find(option => option.id === selectedProvider) ?? modelOptions[0] ?? DEFAULT_MODEL_OPTIONS[0]);
     let selectedModelAvailable = $derived(providerReady(selectedProvider));
     let selectedDownloadInfo = $derived(isLocalProvider(selectedProvider) ? localModelDownloadInfo[selectedProvider] : null);
@@ -189,6 +216,10 @@
     let imageMap = $state<Map<string, ImageWithFile>>(new Map());
     let selectedGenerationRun = $state<GenerationRun | null>(null);
     let selectedGenerationLoadSeq = 0;
+    let nearestNeighbors = $state<EmbeddingNeighbor[]>([]);
+    let neighborsLoading = $state(false);
+    let neighborsError = $state<string | null>(null);
+    let neighborLoadSeq = 0;
     let projecting = $state(false);
     let projectionWorker: Worker | null = null;
     let cancelProjectionWork: (() => void) | null = null;
@@ -257,6 +288,39 @@
             });
     });
 
+    $effect(() => {
+        const id = selectedPoint?.id ?? null;
+        const scope = $libraryScope;
+        const requestedScopeKey = libraryScopeKey(scope);
+        const model = modelNameForProvider(selectedProvider);
+        const loadSeq = ++neighborLoadSeq;
+        nearestNeighbors = [];
+        neighborsError = null;
+        if (!id) {
+            neighborsLoading = false;
+            return;
+        }
+
+        neighborsLoading = true;
+        loadEmbeddingNeighbors(scope, id, model, 6)
+            .then(neighbors => {
+                if (loadSeq !== neighborLoadSeq) return;
+                if (selectedPoint?.id !== id) return;
+                if (libraryScopeKey(get(libraryScope)) !== requestedScopeKey) return;
+                if (modelNameForProvider(selectedProvider) !== model) return;
+                nearestNeighbors = neighbors;
+                neighborsLoading = false;
+            })
+            .catch(error => {
+                if (loadSeq !== neighborLoadSeq) return;
+                if (selectedPoint?.id !== id) return;
+                if (libraryScopeKey(get(libraryScope)) !== requestedScopeKey) return;
+                if (modelNameForProvider(selectedProvider) !== model) return;
+                neighborsError = error instanceof Error ? error.message : String(error);
+                neighborsLoading = false;
+            });
+    });
+
     function isLocalProvider(provider: EmbeddingProvider): provider is LocalProvider {
         return provider === 'clip' || provider === 'dinov2';
     }
@@ -303,8 +367,99 @@
 
     async function selectProvider(provider: EmbeddingProvider) {
         if (provider === selectedProvider) return;
+        providerConfigLoadSeq += 1;
+        providerKeyInput = '';
+        providerConfigStatus = 'idle';
         selectedProvider = provider;
         await handleProviderChange();
+        if (configOpen) await loadSelectedProviderConfig();
+    }
+
+    function handleProviderSelection(event: Event) {
+        const provider = (event.currentTarget as HTMLSelectElement).value as EmbeddingProvider;
+        void selectProvider(provider);
+    }
+
+    function embeddingApiKeyProvider(provider: EmbeddingProvider): 'google' | 'cohere' | 'openai' | null {
+        if (provider === 'gemini') return 'google';
+        if (provider === 'cohere' || provider === 'openai') return provider;
+        return null;
+    }
+
+    async function toggleEmbeddingConfig() {
+        configOpen = !configOpen;
+        if (configOpen) {
+            await loadSelectedProviderConfig();
+        } else {
+            providerConfigLoadSeq += 1;
+            providerKeyInput = '';
+            providerConfigStatus = 'idle';
+        }
+    }
+
+    async function loadSelectedProviderConfig() {
+        const provider = selectedProvider;
+        const requestSeq = ++providerConfigLoadSeq;
+        providerKeyInput = '';
+        providerConfigStatus = provider === 'ollama' ? 'loading' : 'idle';
+        if (provider !== 'ollama') return;
+        try {
+            const [url, model] = await getOllamaEmbeddingConfig();
+            if (requestSeq !== providerConfigLoadSeq || !configOpen || selectedProvider !== provider) return;
+            ollamaEmbeddingUrl = url;
+            ollamaEmbeddingModel = model;
+            providerConfigStatus = 'idle';
+        } catch {
+            if (requestSeq !== providerConfigLoadSeq || !configOpen || selectedProvider !== provider) return;
+            providerConfigStatus = 'error';
+        }
+    }
+
+    async function saveSelectedProviderConfig() {
+        const provider = selectedProvider;
+        const requestSeq = providerConfigLoadSeq;
+        providerConfigStatus = 'saving';
+        try {
+            if (provider === 'ollama') {
+                const url = ollamaEmbeddingUrl.trim() || 'http://localhost:11434/api/embed';
+                const model = ollamaEmbeddingModel.trim() || 'embeddinggemma';
+                ollamaEmbeddingUrl = url;
+                ollamaEmbeddingModel = model;
+                await setOllamaEmbeddingConfig(
+                    url,
+                    model,
+                );
+                await loadProviderOptions();
+                if (selectedProvider === provider) await loadEmbeddingState();
+                if (selectedProvider !== provider) return;
+                providerConfigStatus = 'saved';
+                return;
+            }
+
+            const apiProvider = embeddingApiKeyProvider(provider);
+            const key = providerKeyInput.trim();
+            if (!apiProvider || !key) {
+                providerConfigStatus = 'invalid';
+                return;
+            }
+            const valid = await validateApiKey(apiProvider, key);
+            if (requestSeq !== providerConfigLoadSeq || selectedProvider !== provider) return;
+            if (!valid) {
+                providerConfigStatus = 'invalid';
+                return;
+            }
+            await setApiKey(apiProvider, key);
+            if (apiProvider === 'google') hasGoogleKey = true;
+            if (apiProvider === 'cohere') hasCohereKey = true;
+            if (apiProvider === 'openai') hasOpenAiKey = true;
+            await loadProviderOptions();
+            if (selectedProvider !== provider) return;
+            providerKeyInput = '';
+            providerConfigStatus = 'saved';
+        } catch {
+            if (selectedProvider !== provider) return;
+            providerConfigStatus = 'error';
+        }
     }
 
     function restoreInteractionState(savedState: Partial<EmbeddingViewState>) {
@@ -337,6 +492,8 @@
         })();
 
         return () => {
+            generationUnlisten?.();
+            generationUnlisten = null;
             resetProjectionWorker();
         };
     });
@@ -409,13 +566,17 @@
 
     async function loadEmbeddingState() {
         try {
-            const imageTotal = await getImageCount();
+            const scope = get(libraryScope);
+            const requestedScopeKey = libraryScopeKey(scope);
+            const imageTotal = await getImageCountForScope(scope);
+            if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return;
             const countEntries = await Promise.all(
                 modelOptions.map(async option => [
                     option.id,
-                    await getEmbeddingCount(option.modelName),
+                    await getEmbeddingCountForScope(scope, option.modelName),
                 ] as const)
             );
+            if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return;
             totalImages = imageTotal;
             const nextLocalCounts = { ...localEmbeddingCounts };
             const nextRemoteCounts = { ...remoteEmbeddingCounts };
@@ -431,7 +592,7 @@
             localEmbeddingCounts = nextLocalCounts;
             remoteEmbeddingCounts = nextRemoteCounts;
             if (selectedCount > 0) {
-                await loadProjection();
+                await loadProjection(scope);
             } else {
                 points = [];
                 clusters = [];
@@ -470,6 +631,24 @@
         prevSettingsOpen = isOpen;
     });
 
+    let observedScopeKey = '';
+    $effect(() => {
+        const nextScopeKey = libraryScopeKey($libraryScope);
+        if (observedScopeKey === '') {
+            observedScopeKey = nextScopeKey;
+            return;
+        }
+        if (nextScopeKey === observedScopeKey) return;
+        observedScopeKey = nextScopeKey;
+        resetProjectionWorker();
+        points = [];
+        clusters = [];
+        selectedPoint = null;
+        highlightedCluster = null;
+        resetThumbnailCache();
+        void loadEmbeddingState();
+    });
+
     async function handleProviderChange() {
         resetProjectionWorker();
         points = [];
@@ -482,36 +661,116 @@
         saveViewState();
     }
 
-    async function handleGenerateRemote() {
-        if (!isRemoteProvider(selectedProvider)) return;
+    async function startGeneration(mode: EmbeddingGenerationMode) {
+        if (generating || !selectedModelAvailable) return;
         const provider = selectedProvider;
         const modelName = modelNameForProvider(provider);
-        generating = true;
-        genProgress = { current: 0, total: 0 };
-
-        const unlisten: UnlistenFn = await listen<{ current: number; total: number; provider: string; model?: string }>(
-            'embedding-progress',
-            (event) => {
-                if (event.payload.model && event.payload.model !== modelName) return;
-                genProgress = { current: event.payload.current, total: event.payload.total };
-            }
-        );
+        const scope = get(libraryScope);
+        const scopeKey = libraryScopeKey(scope);
+        activeGeneration = {
+            job_id: '',
+            total: mode === 'missing' ? missingEmbeddingCount : totalImages,
+            model: modelName,
+            mode,
+            current: 0,
+            status: 'running',
+            error: null,
+            provider,
+            scope,
+            scopeKey,
+        };
 
         try {
-            const imageIds = await listImageIds();
-            totalImages = imageIds.length;
-            await generateModelEmbeddings(modelName, imageIds);
-            const count = await getEmbeddingCount(modelName);
-            remoteEmbeddingCounts = { ...remoteEmbeddingCounts, [provider]: count };
-            if (count > 0) {
-                await loadProjection();
+            const pendingProgress = new Map<string, EmbeddingGenerationProgress>();
+            const imageIds = await listImageIdsForScope(scope);
+            if (scopeKey !== libraryScopeKey(get(libraryScope))) {
+                activeGeneration = null;
+                return;
             }
-        } catch (e) {
-            console.error(`${provider} generate failed:`, e);
-        } finally {
-            unlisten();
-            generating = false;
+            totalImages = imageIds.length;
+
+            generationUnlisten?.();
+            generationUnlisten = await listen<EmbeddingGenerationProgress>('embedding-progress', event => {
+                const progress = event.payload;
+                const active = activeGeneration;
+                if (!active || progress.model !== modelName || progress.mode !== mode) return;
+                if (!active.job_id) {
+                    pendingProgress.set(progress.job_id, progress);
+                    return;
+                }
+                if (progress.job_id !== active.job_id) return;
+                activeGeneration = { ...active, ...progress };
+                if (progress.status === 'completed' || progress.status === 'cancelled' || progress.status === 'failed') {
+                    generationUnlisten?.();
+                    generationUnlisten = null;
+                    void refreshAfterGeneration({ ...active, ...progress });
+                }
+            });
+
+            const started = await startModelEmbeddingGeneration(modelName, imageIds, mode);
+            const active = activeGeneration;
+            if (!active) return;
+            const bufferedProgress = pendingProgress.get(started.job_id);
+            activeGeneration = { ...active, ...started, ...bufferedProgress };
+            if (bufferedProgress && (
+                bufferedProgress.status === 'completed'
+                || bufferedProgress.status === 'cancelled'
+                || bufferedProgress.status === 'failed'
+            )) {
+                generationUnlisten?.();
+                generationUnlisten = null;
+                await refreshAfterGeneration(activeGeneration);
+                return;
+            }
+            if (started.total === 0) {
+                activeGeneration = { ...activeGeneration!, status: 'completed', current: 0 };
+                generationUnlisten?.();
+                generationUnlisten = null;
+                await refreshAfterGeneration(activeGeneration);
+            }
+        } catch (error) {
+            generationUnlisten?.();
+            generationUnlisten = null;
+            const message = error instanceof Error ? error.message : String(error);
+            if (activeGeneration) activeGeneration = { ...activeGeneration, status: 'failed', error: message };
         }
+    }
+
+    async function refreshAfterGeneration(generation: ActiveEmbeddingGeneration) {
+        if (generation.scopeKey !== libraryScopeKey(get(libraryScope))) return;
+        try {
+            const count = await getEmbeddingCountForScope(generation.scope, generation.model);
+            if (generation.scopeKey !== libraryScopeKey(get(libraryScope))) return;
+            if (isLocalProvider(generation.provider)) {
+                localEmbeddingCounts = { ...localEmbeddingCounts, [generation.provider]: count };
+            } else {
+                remoteEmbeddingCounts = { ...remoteEmbeddingCounts, [generation.provider]: count };
+            }
+            if (modelNameForProvider(selectedProvider) === generation.model) {
+                await loadProjection(generation.scope);
+            }
+        } catch (error) {
+            console.error('Failed to refresh embedding state after generation:', error);
+        }
+    }
+
+    async function cancelGeneration() {
+        const generation = activeGeneration;
+        if (!generation?.job_id || generation.status !== 'running') return;
+        activeGeneration = { ...generation, status: 'cancelling' };
+        try {
+            await cancelJob(generation.job_id);
+        } catch (error) {
+            activeGeneration = {
+                ...generation,
+                status: 'failed',
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }
+
+    function generationModelLabel(model: string): string {
+        return modelOptions.find(option => option.modelName === model)?.shortLabel ?? model;
     }
 
     async function handleDownload() {
@@ -566,38 +825,6 @@
         if (!downloadJobId) return;
         await cancelJob(downloadJobId);
         downloadProgress = { ...downloadProgress, status: 'cancelled' };
-    }
-
-    async function handleGenerate() {
-        if (!isLocalProvider(selectedProvider)) return;
-        const provider = selectedProvider;
-        const modelName = modelNameForProvider(provider);
-        generating = true;
-        genProgress = { current: 0, total: 0 };
-
-        const unlisten: UnlistenFn = await listen<{ current: number; total: number; model?: string }>(
-            'embedding-progress',
-            (event) => {
-                if (event.payload.model && event.payload.model !== modelName) return;
-                genProgress = { current: event.payload.current, total: event.payload.total };
-            }
-        );
-
-        try {
-            const imageIds = await listImageIds();
-            totalImages = imageIds.length;
-            await generateModelEmbeddings(modelName, imageIds);
-            const count = await getEmbeddingCount(modelName);
-            localEmbeddingCounts = { ...localEmbeddingCounts, [provider]: count };
-            if (count > 0) {
-                await loadProjection();
-            }
-        } catch (e) {
-            console.error('Generate failed:', e);
-        } finally {
-            unlisten();
-            generating = false;
-        }
     }
 
     async function handleRegenerateThumbnails() {
@@ -1001,6 +1228,16 @@
         selectPoint(navigationPoints[nextIndex], interactionMode !== 'map' || largePreviewOpen);
     }
 
+    function openNeighbor(neighbor: EmbeddingNeighbor) {
+        const point = points.find(candidate => candidate.id === neighbor.image.image.id);
+        if (point) {
+            selectPoint(point, true);
+            return;
+        }
+        focusedImageOverride.set(neighbor.image);
+        navigateTo('loupe');
+    }
+
     function fitPointSet(viewPoints: Point[], padding: number) {
         if (viewPoints.length === 0) return;
         const xs = viewPoints.map(p => p.x);
@@ -1228,12 +1465,19 @@
         projectionWorker = null;
     }
 
-    async function loadProjection() {
+    async function loadProjection(scope: LibraryScope = get(libraryScope)) {
         const loadSeq = ++projectionLoadSeq;
         try {
             const modelName = modelNameForProvider(selectedProvider);
-            const embeddingPage = await getEmbeddingPage(modelName, PROJECTION_EMBEDDING_LIMIT, 0);
+            const requestedScopeKey = libraryScopeKey(scope);
+            const embeddingPage = await getEmbeddingPageForScope(
+                scope,
+                modelName,
+                PROJECTION_EMBEDDING_LIMIT,
+                0,
+            );
             if (loadSeq !== projectionLoadSeq) return;
+            if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return;
             if (embeddingPage.ids.length < 2) {
                 points = [];
                 clusters = [];
@@ -1686,46 +1930,83 @@
         <div class="panel-section">
             <div class="section-header-row">
                 <div class="section-header">MODEL</div>
-                <button class="gear-btn" onclick={() => configOpen = !configOpen} title="Settings">
+                <button
+                    class="gear-btn"
+                    onclick={toggleEmbeddingConfig}
+                    aria-label={configOpen ? 'Close embedding configuration' : 'Configure embedding model'}
+                    aria-expanded={configOpen}
+                    title={configOpen ? 'Close configuration' : 'Configure embedding model'}
+                >
                     &#9881;
                 </button>
             </div>
-            <div class="model-list" role="radiogroup" aria-label="Embedding model">
-                {#each modelOptions as option}
-                    <button
-                        class="model-option"
-                        class:active={selectedProvider === option.id}
-                        onclick={() => selectProvider(option.id)}
-                        role="radio"
-                        aria-checked={selectedProvider === option.id}
-                        title={option.label}
-                    >
-                        <span class="model-option-main">
-                            <span class="model-name">{option.shortLabel}</span>
-                            <span class="model-count">{providerEmbeddingCount(option.id)}/{totalImages}</span>
-                        </span>
-                        <span class="model-option-meta">
-                            <span>{option.scope}</span>
-                            <span>{option.dims}</span>
-                            <span class:ready={providerReady(option.id)}>{providerStatusLabel(option.id)}</span>
-                        </span>
-                    </button>
-                {/each}
+            <div class="model-summary">
+                <span class="model-summary-name">{selectedModel.label}</span>
+                <span class="model-summary-count">{currentEmbeddingCount}/{totalImages} images embedded</span>
             </div>
+
+            {#if configOpen}
+                <label class="provider-config-row" for="embedding-provider">
+                    <span>Provider</span>
+                    <select
+                        id="embedding-provider"
+                        class="provider-select"
+                        value={selectedProvider}
+                        onchange={handleProviderSelection}
+                        aria-label="Embedding provider"
+                    >
+                        {#each modelOptions as option}
+                            <option value={option.id}>{option.label}</option>
+                        {/each}
+                    </select>
+                </label>
+                <div class="provider-config-meta">
+                    <span>{selectedModel.scope}</span>
+                    <span>{selectedModel.dims}</span>
+                    <span class:ready={selectedModelAvailable}>{providerStatusLabel(selectedProvider)}</span>
+                </div>
+            {/if}
         </div>
 
-        {#if configOpen && ((selectedProvider === 'gemini' && !hasGoogleKey) || (selectedProvider === 'cohere' && !hasCohereKey) || (selectedProvider === 'openai' && !hasOpenAiKey) || (selectedProvider === 'ollama' && !ollamaEmbeddingReady))}
+        {#if configOpen && !isLocalProvider(selectedProvider)}
             <div class="panel-section config-section">
                 {#if selectedProvider === 'ollama'}
-                    <div class="section-header">OLLAMA EMBEDDINGS OFFLINE</div>
-                    <p class="key-missing-text">Start Ollama and pull an embedding model such as embeddinggemma.</p>
+                    <div class="section-header">OLLAMA EMBEDDINGS</div>
+                    <label class="provider-field">
+                        <span>URL</span>
+                        <input aria-label="Ollama embedding URL" bind:value={ollamaEmbeddingUrl} disabled={providerConfigStatus === 'loading'} />
+                    </label>
+                    <label class="provider-field">
+                        <span>Model</span>
+                        <input aria-label="Ollama embedding model" bind:value={ollamaEmbeddingModel} disabled={providerConfigStatus === 'loading'} />
+                    </label>
                 {:else}
-                    <div class="section-header">{selectedModel.shortLabel.toUpperCase()} API KEY REQUIRED</div>
-                    <p class="key-missing-text">Set your {selectedModel.shortLabel} API key in Settings.</p>
-                    <button class="settings-link-btn" onclick={() => openSettings('ai')}>
-                        Open Settings
-                    </button>
+                    <div class="section-header">{selectedModel.shortLabel.toUpperCase()} CREDENTIALS</div>
+                    <label class="provider-field">
+                        <span>API key</span>
+                        <input
+                            type="password"
+                            aria-label="{selectedModel.shortLabel} API key"
+                            placeholder={selectedModelAvailable ? 'Connected · enter to replace' : 'Enter API key'}
+                            bind:value={providerKeyInput}
+                        />
+                    </label>
                 {/if}
+                <button
+                    class="settings-link-btn"
+                    onclick={saveSelectedProviderConfig}
+                    disabled={providerConfigStatus === 'loading' || providerConfigStatus === 'saving'}
+                >
+                    {providerConfigStatus === 'loading' ? 'Loading…' : providerConfigStatus === 'saving' ? 'Saving…' : selectedProvider === 'ollama' ? 'Save Ollama config' : 'Save API key'}
+                </button>
+                {#if providerConfigStatus === 'saved'}
+                    <p class="provider-config-message ready" role="status">Configuration saved.</p>
+                {:else if providerConfigStatus === 'invalid'}
+                    <p class="provider-config-message error" role="alert">Enter a valid API key.</p>
+                {:else if providerConfigStatus === 'error'}
+                    <p class="provider-config-message error" role="alert">Could not save provider configuration.</p>
+                {/if}
+                <button class="settings-link-btn secondary-link" onclick={() => openSettings('ai')}>More AI settings</button>
             </div>
         {/if}
 
@@ -1886,8 +2167,8 @@
             </div>
         </div>
 
-        {#if isLocalProvider(selectedProvider)}
-            {#if !selectedModelAvailable}
+        {#if isLocalProvider(selectedProvider) && !selectedModelAvailable}
+            {#if configOpen}
                 <div class="panel-section">
                     {#if downloading}
                         <div class="download-progress">
@@ -1964,8 +2245,10 @@
                         {/if}
                     </div>
                 </div>
-            {:else}
-                <div class="panel-section">
+            {/if}
+        {:else}
+            <div class="panel-section">
+                {#if configOpen}
                     <div class="stat-row">
                         <span class="stat-label">Images</span>
                         <span class="stat-value">{totalImages}</span>
@@ -1975,41 +2258,76 @@
                         <span class="stat-value">{currentEmbeddingCount}</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">Model</span>
-                        <span class="stat-value">{selectedModel.dims}</span>
+                        <span class="stat-label">Need embeddings</span>
+                        <span class="stat-value">{missingEmbeddingCount}</span>
                     </div>
-                    <button class="action-btn" onclick={handleGenerate} disabled={generating}>
-                        {#if generating}
-                            Generating {genProgress.current}/{genProgress.total}...
-                        {:else if currentEmbeddingCount < totalImages}
-                            Generate Embeddings ({Math.max(0, totalImages - currentEmbeddingCount)} remaining)
-                        {:else}
-                            Regenerate All
-                        {/if}
+                    {#if isLocalProvider(selectedProvider)}
+                        <div class="stat-row">
+                            <span class="stat-label">Model</span>
+                            <span class="stat-value">{selectedModel.dims}</span>
+                        </div>
+                    {/if}
+                {/if}
+                <div class="generation-actions">
+                    <button
+                        class="action-btn"
+                        onclick={() => startGeneration('missing')}
+                        disabled={generating || !selectedModelAvailable || missingEmbeddingCount === 0}
+                        title={selectedModelAvailable ? '' : providerStatusLabel(selectedProvider)}
+                    >
+                        {missingEmbeddingCount === 0 ? 'Up to date' : `Generate missing (${missingEmbeddingCount})`}
                     </button>
+                    {#if configOpen}
+                        <button
+                            class="action-btn secondary"
+                            onclick={() => startGeneration('all')}
+                            disabled={generating || !selectedModelAvailable || totalImages === 0}
+                            title={selectedModelAvailable ? '' : providerStatusLabel(selectedProvider)}
+                        >
+                            Regenerate all ({totalImages})
+                        </button>
+                    {/if}
                 </div>
-            {/if}
-	        {:else}
-	            <div class="panel-section">
-	                <div class="stat-row">
-	                    <span class="stat-label">Images</span>
-	                    <span class="stat-value">{totalImages}</span>
-	                </div>
-	                <div class="stat-row">
-	                    <span class="stat-label">Embeddings</span>
-	                    <span class="stat-value">{currentEmbeddingCount}</span>
-	                </div>
-	                <button class="action-btn" onclick={handleGenerateRemote} disabled={generating || !selectedModelAvailable} title={selectedModelAvailable ? '' : providerStatusLabel(selectedProvider)}>
-	                    {#if generating}
-	                        Generating {genProgress.current}/{genProgress.total}...
-	                    {:else if !selectedModelAvailable}
-	                        {selectedProvider === 'ollama' ? 'Start Ollama First' : 'Set API Key First'}
-	                    {:else if currentEmbeddingCount < totalImages}
-	                        Generate Embeddings ({Math.max(0, totalImages - currentEmbeddingCount)} remaining)
-	                    {:else}
-	                        Regenerate All
-	                    {/if}
-                </button>
+            </div>
+        {/if}
+
+        {#if activeGeneration}
+            <div class="panel-section generation-status" aria-live="polite">
+                <div class="section-header">{generationModelLabel(activeGeneration.model).toUpperCase()} GENERATION</div>
+                {#if activeGeneration.status === 'running' || activeGeneration.status === 'cancelling'}
+                    <div class="progress-text">{activeGeneration.current}/{activeGeneration.total} images</div>
+                    <div
+                        class="progress-bar-track"
+                        role="progressbar"
+                        aria-label="{generationModelLabel(activeGeneration.model)} embedding progress"
+                        aria-valuemin="0"
+                        aria-valuenow={activeGeneration.current}
+                        aria-valuemax={Math.max(1, activeGeneration.total)}
+                    >
+                        <div
+                            class="progress-bar-fill"
+                            style="width: {activeGeneration.total > 0 ? (activeGeneration.current / activeGeneration.total) * 100 : 0}%"
+                        ></div>
+                    </div>
+                    <button
+                        class="action-btn secondary"
+                        onclick={cancelGeneration}
+                        disabled={!activeGeneration.job_id || activeGeneration.status === 'cancelling'}
+                        aria-label={!activeGeneration.job_id
+                            ? 'Starting embedding generation'
+                            : activeGeneration.status === 'cancelling'
+                                ? 'Cancelling embedding generation'
+                                : 'Cancel embedding generation'}
+                    >
+                        {!activeGeneration.job_id ? 'Starting…' : activeGeneration.status === 'cancelling' ? 'Cancelling…' : 'Cancel'}
+                    </button>
+                {:else if activeGeneration.status === 'completed'}
+                    <div class="generation-result">Generation completed: {activeGeneration.current}/{activeGeneration.total}</div>
+                {:else if activeGeneration.status === 'cancelled'}
+                    <div class="generation-result">Generation cancelled at {activeGeneration.current}/{activeGeneration.total}</div>
+                {:else}
+                    <div class="generation-result error">Generation failed{activeGeneration.error ? `: ${activeGeneration.error}` : ''}</div>
+                {/if}
             </div>
         {/if}
 
@@ -2087,6 +2405,43 @@
                     <button class="action-btn small" onclick={handleFocusInGrid}>
                         Open in Loupe
                     </button>
+                {/if}
+            </div>
+            <div class="panel-section">
+                <div class="section-header">NEAREST</div>
+                {#if neighborsLoading}
+                    <div class="neighbor-status" role="status" aria-live="polite">Finding similar images...</div>
+                {:else if neighborsError}
+                    <div class="neighbor-status error" role="status" aria-live="polite">Could not load similar images</div>
+                {:else if nearestNeighbors.length === 0}
+                    <div class="neighbor-status" role="status" aria-live="polite">No similar images in this scope</div>
+                {:else}
+                    <div class="sr-only" role="status" aria-live="polite">
+                        {nearestNeighbors.length} similar {nearestNeighbors.length === 1 ? 'image' : 'images'} found
+                    </div>
+                    <div class="neighbor-list">
+                        {#each nearestNeighbors as neighbor (neighbor.image.image.id)}
+                            {@const previewPath = safeAssetPreviewPath(neighbor.image)}
+                            {@const projectedPoint = points.find(point => point.id === neighbor.image.image.id)}
+                            {@const filename = neighbor.image.path.split('/').pop()}
+                            {@const score = `${(neighbor.score * 100).toFixed(1)}%`}
+                            <button
+                                class="neighbor-row"
+                                onclick={() => openNeighbor(neighbor)}
+                                aria-label={projectedPoint
+                                    ? `Select ${filename}, similarity ${score}`
+                                    : `Open ${filename} in Loupe, similarity ${score}`}
+                            >
+                                {#if previewPath}
+                                    <img src={convertFileSrc(previewPath)} alt="" class="neighbor-thumb" />
+                                {:else}
+                                    <span class="neighbor-thumb unavailable" aria-hidden="true"></span>
+                                {/if}
+                                <span class="neighbor-name">{filename}</span>
+                                <span class="neighbor-score">{score}</span>
+                            </button>
+                        {/each}
+                    </div>
                 {/if}
             </div>
         {/if}
@@ -2252,46 +2607,12 @@
         margin-bottom: 8px;
     }
 
-    .model-list {
+    .model-summary {
         display: grid;
-        gap: 5px;
+        gap: 4px;
     }
 
-    .model-option {
-        display: grid;
-        gap: 3px;
-        width: 100%;
-        min-height: 46px;
-        padding: 7px 8px;
-        background: var(--bg);
-        color: var(--text-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        font-family: var(--font);
-        cursor: pointer;
-        text-align: left;
-        transition: border-color 0.15s, background 0.15s, color 0.15s;
-    }
-
-    .model-option:hover {
-        border-color: var(--blue);
-        color: var(--text);
-    }
-
-    .model-option.active {
-        background: color-mix(in srgb, var(--blue) 12%, var(--bg));
-        border-color: var(--blue);
-        color: var(--text);
-    }
-
-    .model-option-main,
-    .model-option-meta {
-        display: flex;
-        align-items: center;
-        min-width: 0;
-    }
-
-    .model-name {
+    .model-summary-name {
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -2301,27 +2622,28 @@
         color: var(--text);
     }
 
-    .model-count {
-        margin-left: auto;
-        flex-shrink: 0;
+    .model-summary-count {
         font-size: 10px;
         color: var(--text-secondary);
     }
 
-    .model-option-meta {
-        gap: 6px;
-        font-size: 9px;
+    .provider-config-row {
+        display: grid;
+        gap: 4px;
+        margin-top: var(--spacing);
+        font-size: 10px;
         color: var(--text-secondary);
     }
 
-    .model-option-meta span {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+    .provider-config-meta {
+        display: flex;
+        gap: var(--spacing);
+        margin-top: 4px;
+        color: var(--text-secondary);
+        font-size: 9px;
     }
 
-    .model-option-meta span.ready {
+    .provider-config-meta .ready {
         color: var(--green);
     }
 
@@ -2368,6 +2690,39 @@
     .action-btn.small {
         font-size: 10px;
         padding: 4px 8px;
+    }
+
+    .generation-actions {
+        display: grid;
+        gap: var(--spacing);
+    }
+
+    .action-btn.secondary {
+        background: var(--surface);
+        color: var(--text-secondary);
+    }
+
+    .action-btn.secondary:hover:not(:disabled) {
+        color: var(--text);
+        border-color: var(--text-secondary);
+    }
+
+    .generation-status {
+        display: grid;
+        gap: var(--spacing);
+    }
+
+    .generation-status .action-btn {
+        margin-top: 0;
+    }
+
+    .generation-result {
+        color: var(--text);
+        font-size: 10px;
+    }
+
+    .generation-result.error {
+        color: var(--red);
     }
 
     .visual-embed-section {
@@ -2644,6 +2999,80 @@
     .preview-dims {
         font-size: 10px;
         color: var(--text-secondary);
+    }
+
+    .neighbor-list {
+        display: grid;
+        gap: var(--spacing);
+    }
+
+    .neighbor-row {
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: var(--spacing);
+        width: 100%;
+        padding: var(--spacing);
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        font-family: var(--font);
+        cursor: pointer;
+        text-align: left;
+    }
+
+    .neighbor-row:hover,
+    .neighbor-row:focus-visible {
+        border-color: var(--blue);
+    }
+
+    .neighbor-thumb {
+        width: 36px;
+        height: 36px;
+        object-fit: cover;
+        border-radius: var(--radius);
+        background: var(--surface);
+    }
+
+    .neighbor-thumb.unavailable {
+        border: 1px solid var(--border);
+    }
+
+    .neighbor-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 10px;
+    }
+
+    .neighbor-score {
+        color: var(--blue);
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .neighbor-status {
+        color: var(--text-secondary);
+        font-size: 10px;
+        line-height: 1.4;
+    }
+
+    .neighbor-status.error {
+        color: var(--red);
+    }
+
+    .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
     }
 
     .right-panel {
@@ -3014,23 +3443,62 @@
         background: color-mix(in srgb, var(--bg) 55%, var(--surface));
     }
 
-    .key-missing-text {
-        font-size: 12px;
+    .provider-field {
+        display: grid;
+        gap: 4px;
+        margin-bottom: var(--spacing);
+        font-size: 10px;
         color: var(--text-secondary);
-        margin: 0 0 8px 0;
     }
+
+    .provider-field input {
+        box-sizing: border-box;
+        width: 100%;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 6px 8px;
+        font: 11px var(--font);
+    }
+
     .settings-link-btn {
         background: none;
         border: 1px solid var(--blue);
-        border-radius: var(--radius, 4px);
+        border-radius: var(--radius);
         padding: 4px 12px;
         font-size: 12px;
-        font-family: inherit;
+        font-family: var(--font);
         color: var(--blue);
         cursor: pointer;
     }
+
     .settings-link-btn:hover {
         background: color-mix(in srgb, var(--blue) 10%, transparent);
+    }
+
+    .settings-link-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .secondary-link {
+        margin-left: 4px;
+        color: var(--text-secondary);
+        border-color: var(--border);
+    }
+
+    .provider-config-message {
+        margin: var(--spacing) 0 0;
+        font-size: 10px;
+    }
+
+    .provider-config-message.ready {
+        color: var(--green);
+    }
+
+    .provider-config-message.error {
+        color: var(--red);
     }
 
     @media (max-width: 920px) {

@@ -90,6 +90,7 @@ Current high-level shape:
 Cull has an MCP-aligned headless CLI slice. Command names and JSON fields mirror the MCP tool model where possible:
 
 ```bash
+cull ~/renders
 cull --json get_library_stats
 cull --json import_folder --folder_path ~/renders
 cull --json import_files --file_paths ~/renders/a.png,~/renders/b.png
