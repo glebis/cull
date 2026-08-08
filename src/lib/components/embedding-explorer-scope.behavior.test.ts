@@ -13,6 +13,12 @@ const mocks = vi.hoisted(() => ({
     getImagesByIds: vi.fn(),
     startModelEmbeddingGeneration: vi.fn(),
     cancelJob: vi.fn(),
+    setApiKey: vi.fn(),
+    validateApiKey: vi.fn(),
+    getOllamaEmbeddingConfig: vi.fn(),
+    setOllamaEmbeddingConfig: vi.fn(),
+    isEmbeddingModelAvailable: vi.fn(),
+    listEmbeddingProviders: vi.fn(),
     loadEmbeddingNeighbors: vi.fn(),
     eventListeners: new Map<string, Set<(event: { payload: Record<string, unknown> }) => void>>(),
     workerMessages: [] as Array<Record<string, unknown>>,
@@ -53,12 +59,16 @@ vi.mock('$lib/embedding-neighbors', () => ({
 }));
 
 vi.mock('$lib/api', () => ({
-    isEmbeddingModelAvailable: vi.fn().mockResolvedValue(true),
+    isEmbeddingModelAvailable: mocks.isEmbeddingModelAvailable,
     getEmbeddingModelDownloadInfo: vi.fn().mockResolvedValue(null),
-    listEmbeddingProviders: vi.fn().mockResolvedValue([]),
+    listEmbeddingProviders: mocks.listEmbeddingProviders,
     downloadEmbeddingModel: vi.fn(),
     startModelEmbeddingGeneration: mocks.startModelEmbeddingGeneration,
     hasApiKey: vi.fn().mockResolvedValue(false),
+    setApiKey: mocks.setApiKey,
+    validateApiKey: mocks.validateApiKey,
+    getOllamaEmbeddingConfig: mocks.getOllamaEmbeddingConfig,
+    setOllamaEmbeddingConfig: mocks.setOllamaEmbeddingConfig,
     getImagesByIds: mocks.getImagesByIds,
     getGenerationRun: vi.fn().mockResolvedValue(null),
     regenerateThumbnails: vi.fn(),
@@ -184,6 +194,10 @@ beforeEach(() => {
         model: 'clip-vit-b32',
         mode: 'missing',
     });
+    mocks.validateApiKey.mockResolvedValue(true);
+    mocks.getOllamaEmbeddingConfig.mockResolvedValue(['http://localhost:11434/api/embed', 'embeddinggemma']);
+    mocks.isEmbeddingModelAvailable.mockResolvedValue(true);
+    mocks.listEmbeddingProviders.mockResolvedValue([]);
     mocks.loadEmbeddingNeighbors.mockResolvedValue([
         { image: image('near-one'), score: 0.934 },
     ]);
@@ -213,6 +227,214 @@ beforeEach(() => {
 });
 
 describe('Embedding Explorer library scope', () => {
+    it('keeps provider configuration hidden until the gear is opened', async () => {
+        mocks.getEmbeddingCountForScope.mockResolvedValue(1);
+        const user = userEvent.setup();
+        const { container } = render(EmbeddingExplorer);
+
+        expect(await screen.findByText('CLIP ViT-B/32')).toBeInTheDocument();
+        expect(await screen.findByText('1/2 images embedded')).toBeInTheDocument();
+        expect([...container.querySelectorAll('.stat-label')]).toHaveLength(0);
+        expect(screen.queryByRole('combobox', { name: 'Embedding provider' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Regenerate all (2)' })).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Configure embedding model' }));
+        const provider = screen.getByRole('combobox', { name: 'Embedding provider' });
+        expect(provider).toBeInTheDocument();
+        expect([...container.querySelectorAll('.stat-label')].map(label => label.textContent)).toEqual([
+            'Images', 'Embeddings', 'Need embeddings', 'Model',
+        ]);
+        expect(screen.getByRole('button', { name: 'Regenerate all (2)' })).toBeInTheDocument();
+
+        await user.selectOptions(provider, 'gemini');
+        const keyInput = await screen.findByLabelText('Gemini API key');
+        expect(screen.queryByLabelText('OpenAI API key')).not.toBeInTheDocument();
+        await user.type(keyInput, 'google-secret');
+        await user.click(screen.getByRole('button', { name: 'Save API key' }));
+        await waitFor(() => expect(mocks.validateApiKey).toHaveBeenCalledWith('google', 'google-secret'));
+        expect(mocks.setApiKey).toHaveBeenCalledWith('google', 'google-secret');
+        expect(await screen.findByText('Configuration saved.')).toBeInTheDocument();
+
+        await user.selectOptions(provider, 'ollama');
+        const ollamaUrl = await screen.findByLabelText('Ollama embedding URL');
+        const ollamaModel = screen.getByLabelText('Ollama embedding model');
+        await user.clear(ollamaUrl);
+        await user.type(ollamaUrl, 'http://localhost:11434/api/embed-v2');
+        await user.clear(ollamaModel);
+        await user.type(ollamaModel, 'nomic-embed-text');
+        mocks.listEmbeddingProviders.mockResolvedValue([{
+            id: 'ollama',
+            label: 'Ollama · nomic-embed-text',
+            shortLabel: 'Ollama',
+            modelName: 'ollama:nomic-embed-text',
+            dimensions: 0,
+            dimensionsLabel: 'model',
+            scope: 'local',
+            runtime: 'ollama',
+            status: 'offline',
+            available: false,
+            downloadable: false,
+            downloadLabel: null,
+            expectedSha256: null,
+            expectedSizeBytes: null,
+            spdxLicense: null,
+            sourceRepo: null,
+            modelCardUrl: null,
+            apiKeyProvider: null,
+        }]);
+        await user.click(screen.getByRole('button', { name: 'Save Ollama config' }));
+        await waitFor(() => expect(mocks.setOllamaEmbeddingConfig).toHaveBeenCalledWith(
+            'http://localhost:11434/api/embed-v2',
+            'nomic-embed-text',
+        ));
+        await waitFor(() =>
+            expect(container.querySelector('.model-summary-name')).toHaveTextContent(
+                'Ollama · nomic-embed-text',
+            ),
+        );
+        expect(screen.getByText('offline')).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Close embedding configuration' }));
+        expect(screen.queryByRole('combobox', { name: 'Embedding provider' })).not.toBeInTheDocument();
+    });
+
+    it('clears unsaved credentials synchronously when the provider changes', async () => {
+        mocks.getEmbeddingCountForScope.mockResolvedValue(1);
+        const user = userEvent.setup();
+        render(EmbeddingExplorer);
+
+        await user.click(await screen.findByRole('button', { name: 'Configure embedding model' }));
+        const provider = screen.getByRole('combobox', { name: 'Embedding provider' });
+        await user.selectOptions(provider, 'gemini');
+        await user.type(await screen.findByLabelText('Gemini API key'), 'google-secret-not-saved');
+
+        await user.selectOptions(provider, 'openai');
+        expect(await screen.findByLabelText('OpenAI API key')).toHaveValue('');
+        await user.click(screen.getByRole('button', { name: 'Save API key' }));
+        expect(mocks.validateApiKey).not.toHaveBeenCalled();
+        expect(mocks.setApiKey).not.toHaveBeenCalled();
+    });
+
+    it('ignores a delayed invalid-key result after switching providers', async () => {
+        let resolveValidation!: (value: boolean) => void;
+        mocks.validateApiKey.mockReturnValue(new Promise(resolve => {
+            resolveValidation = resolve;
+        }));
+        const user = userEvent.setup();
+        render(EmbeddingExplorer);
+
+        await user.click(await screen.findByRole('button', { name: 'Configure embedding model' }));
+        const provider = screen.getByRole('combobox', { name: 'Embedding provider' });
+        await user.selectOptions(provider, 'gemini');
+        await user.type(await screen.findByLabelText('Gemini API key'), 'pending-google-key');
+        void user.click(screen.getByRole('button', { name: 'Save API key' }));
+        await waitFor(() => expect(mocks.validateApiKey).toHaveBeenCalledWith('google', 'pending-google-key'));
+
+        await user.selectOptions(provider, 'openai');
+        resolveValidation(false);
+        await waitFor(() => expect(screen.getByLabelText('OpenAI API key')).toHaveValue(''));
+        expect(screen.queryByText('Enter a valid API key.')).not.toBeInTheDocument();
+        expect(mocks.setApiKey).not.toHaveBeenCalled();
+    });
+
+    it('keeps Ollama configuration disabled until the current load resolves', async () => {
+        let resolveConfig!: (value: [string, string]) => void;
+        mocks.getOllamaEmbeddingConfig.mockReturnValue(new Promise(resolve => {
+            resolveConfig = resolve;
+        }));
+        const user = userEvent.setup();
+        render(EmbeddingExplorer);
+
+        await user.click(await screen.findByRole('button', { name: 'Configure embedding model' }));
+        await user.selectOptions(screen.getByRole('combobox', { name: 'Embedding provider' }), 'ollama');
+        const urlInput = await screen.findByLabelText('Ollama embedding URL');
+        expect(urlInput).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Loading…' })).toBeDisabled();
+
+        resolveConfig(['http://127.0.0.1:11434/api/embed', 'snowflake-arctic-embed']);
+        await waitFor(() => expect(urlInput).toBeEnabled());
+        expect(urlInput).toHaveValue('http://127.0.0.1:11434/api/embed');
+        expect(screen.getByLabelText('Ollama embedding model')).toHaveValue('snowflake-arctic-embed');
+    });
+
+    it('saves explicit Ollama defaults when cleared fields are submitted', async () => {
+        const user = userEvent.setup();
+        render(EmbeddingExplorer);
+
+        await user.click(await screen.findByRole('button', { name: 'Configure embedding model' }));
+        await user.selectOptions(screen.getByRole('combobox', { name: 'Embedding provider' }), 'ollama');
+        const urlInput = await screen.findByLabelText('Ollama embedding URL');
+        const modelInput = screen.getByLabelText('Ollama embedding model');
+        await user.clear(urlInput);
+        await user.clear(modelInput);
+        await user.click(screen.getByRole('button', { name: 'Save Ollama config' }));
+
+        await waitFor(() => expect(mocks.setOllamaEmbeddingConfig).toHaveBeenCalledWith(
+            'http://localhost:11434/api/embed',
+            'embeddinggemma',
+        ));
+        expect(urlInput).toHaveValue('http://localhost:11434/api/embed');
+        expect(modelInput).toHaveValue('embeddinggemma');
+    });
+
+    it('uses the newly saved Ollama model for generation', async () => {
+        mocks.getEmbeddingCountForScope.mockResolvedValue(1);
+        mocks.listEmbeddingProviders.mockResolvedValue([{
+            id: 'ollama',
+            label: 'Ollama · nomic-embed-text',
+            shortLabel: 'Ollama',
+            modelName: 'ollama:nomic-embed-text',
+            dimensions: 0,
+            dimensionsLabel: 'model',
+            scope: 'local',
+            runtime: 'ollama',
+            status: 'ready',
+            available: true,
+            downloadable: false,
+            downloadLabel: null,
+            expectedSha256: null,
+            expectedSizeBytes: null,
+            spdxLicense: null,
+            sourceRepo: null,
+            modelCardUrl: null,
+            apiKeyProvider: null,
+        }]);
+        mocks.startModelEmbeddingGeneration.mockResolvedValue({
+            job_id: 'job_ollama_new_model',
+            total: 1,
+            model: 'ollama:nomic-embed-text',
+            mode: 'missing',
+        });
+        const user = userEvent.setup();
+        render(EmbeddingExplorer);
+
+        await user.click(await screen.findByRole('button', { name: 'Configure embedding model' }));
+        await user.selectOptions(screen.getByRole('combobox', { name: 'Embedding provider' }), 'ollama');
+        const modelInput = await screen.findByLabelText('Ollama embedding model');
+        await user.clear(modelInput);
+        await user.type(modelInput, 'nomic-embed-text');
+        await user.click(screen.getByRole('button', { name: 'Save Ollama config' }));
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Generate missing (1)' })).toBeEnabled());
+
+        await user.click(screen.getByRole('button', { name: 'Generate missing (1)' }));
+        await waitFor(() => expect(mocks.startModelEmbeddingGeneration).toHaveBeenCalledWith(
+            'ollama:nomic-embed-text',
+            ['in-a', 'in-b'],
+            'missing',
+        ));
+    });
+
+    it('reveals local model download controls only in configuration', async () => {
+        mocks.isEmbeddingModelAvailable.mockResolvedValue(false);
+        const user = userEvent.setup();
+        render(EmbeddingExplorer);
+
+        await screen.findByText('CLIP ViT-B/32');
+        expect(screen.queryByRole('button', { name: /Download CLIP/i })).not.toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Configure embedding model' }));
+        expect(await screen.findByRole('button', { name: /Download CLIP/i })).toBeInTheDocument();
+    });
+
     it('projects the full active scope and keeps embedding vectors paired with their IDs', async () => {
         render(EmbeddingExplorer);
 
@@ -291,6 +513,7 @@ describe('Embedding Explorer library scope', () => {
             model: 'clip-vit-b32',
             mode: 'all',
         });
+        await user.click(screen.getByRole('button', { name: 'Configure embedding model' }));
         await user.click(screen.getByRole('button', { name: 'Regenerate all (2)' }));
         expect(mocks.startModelEmbeddingGeneration).toHaveBeenLastCalledWith(
             'clip-vit-b32',
@@ -341,16 +564,12 @@ describe('Embedding Explorer library scope', () => {
         );
 
         const user = userEvent.setup();
-        const { container } = render(EmbeddingExplorer);
+        render(EmbeddingExplorer);
         await user.click(await screen.findByRole('button', { name: 'Generate missing (1)' }));
         await waitFor(() => expect(mocks.startModelEmbeddingGeneration).toHaveBeenCalledOnce());
 
         activeCollection.set('new-collection');
-        await waitFor(() => {
-            const embeddingRow = [...container.querySelectorAll('.stat-row')]
-                .find(row => row.querySelector('.stat-label')?.textContent === 'Embeddings');
-            expect(embeddingRow?.querySelector('.stat-value')).toHaveTextContent('0');
-        });
+        await waitFor(() => expect(screen.getByText('0/2 images embedded')).toBeInTheDocument());
 
         emit('embedding-progress', {
             job_id: 'job_embed_1',
@@ -361,9 +580,7 @@ describe('Embedding Explorer library scope', () => {
             total: 1,
         });
         await waitFor(() => expect(screen.getByText('Generation completed: 1/1')).toBeInTheDocument());
-        const embeddingRow = [...container.querySelectorAll('.stat-row')]
-            .find(row => row.querySelector('.stat-label')?.textContent === 'Embeddings');
-        expect(embeddingRow?.querySelector('.stat-value')).toHaveTextContent('0');
+        expect(screen.getByText('0/2 images embedded')).toBeInTheDocument();
     });
 
     it('keeps an active job attributed to its model while another model shows its own missing count', async () => {
@@ -384,7 +601,8 @@ describe('Embedding Explorer library scope', () => {
             total: 2,
         });
 
-        await user.click(screen.getByRole('radio', { name: /DINOv2/i }));
+        await user.click(screen.getByRole('button', { name: 'Configure embedding model' }));
+        await user.selectOptions(screen.getByRole('combobox', { name: 'Embedding provider' }), 'dinov2');
         await waitFor(() => {
             const missingRow = [...container.querySelectorAll('.stat-row')]
                 .find(row => row.querySelector('.stat-label')?.textContent === 'Need embeddings');
