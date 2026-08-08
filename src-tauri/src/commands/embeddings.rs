@@ -625,6 +625,15 @@ pub async fn list_scoped_image_ids(
 }
 
 #[tauri::command]
+pub async fn name_embedding_clusters(
+    state: State<'_, AppState>,
+    clusters: Vec<crate::db_core::models::EmbeddingClusterMembership>,
+) -> Result<Vec<crate::db_core::models::EmbeddingClusterName>, String> {
+    let ctx = crate::services::ServiceContext::from_app_state(&state, None);
+    crate::services::ai::name_embedding_clusters(&ctx, &clusters).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn find_similar_images(
     state: State<'_, AppState>,
     image_id: String,

@@ -48,6 +48,7 @@
         resumeJob,
         createCollectionWithImages,
         listCollections,
+        nameEmbeddingClusters,
     } from '$lib/api';
     import type {
         EmbeddingGenerationMode,
@@ -380,6 +381,7 @@
     async function selectProvider(provider: EmbeddingProvider) {
         if (provider === selectedProvider) return;
         providerConfigLoadSeq += 1;
+        projectionLoadSeq += 1;
         providerKeyInput = '';
         providerConfigStatus = 'idle';
         selectedProvider = provider;
@@ -1490,6 +1492,36 @@
         projectionWorker = null;
     }
 
+    async function applyAutomaticClusterNames(
+        projection: ProjectionWorkerResponse,
+        loadSeq: number,
+        requestedScopeKey: string,
+        requestedProvider: EmbeddingProvider,
+        requestedModelName: string,
+    ) {
+        try {
+            const memberships = projection.clusters.map(cluster => ({
+                cluster_id: cluster.id,
+                image_ids: projection.points
+                    .filter(point => point.cluster === cluster.id)
+                    .map(point => point.id),
+            }));
+            const names = await nameEmbeddingClusters(memberships);
+            if (loadSeq !== projectionLoadSeq) return;
+            if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return;
+            if (selectedProvider !== requestedProvider) return;
+            if (modelNameForProvider(selectedProvider) !== requestedModelName) return;
+            const namedClusters = new Map(names.map(item => [item.cluster_id, item.label]));
+            clusters = clusters.map(cluster => ({
+                ...cluster,
+                label: namedClusters.get(cluster.id) ?? cluster.label,
+            }));
+            requestDraw();
+        } catch (error) {
+            console.warn('Failed to auto-name embedding clusters:', error);
+        }
+    }
+
     async function loadProjection(scope: LibraryScope = get(libraryScope)) {
         const loadSeq = ++projectionLoadSeq;
         try {
@@ -1559,6 +1591,13 @@
 
             resetThumbnailCache();
             requestDraw();
+            void applyAutomaticClusterNames(
+                projection,
+                loadSeq,
+                requestedScopeKey,
+                selectedProvider,
+                modelName,
+            );
         } catch (e) {
             if (e instanceof Error && e.message === 'Projection cancelled') return;
             console.error('Failed to load projection:', e);
