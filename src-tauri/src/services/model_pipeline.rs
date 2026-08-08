@@ -15,6 +15,7 @@ pub struct ClipEmbeddingRunRequest<'a> {
     pub jobs: Option<&'a JobRegistry>,
     pub job_id: Option<&'a str>,
     pub cancel: Option<&'a CancellationToken>,
+    pub mode: Option<&'a str>,
     pub app: Option<&'a AppHandle>,
     pub image_ids: &'a [String],
 }
@@ -26,6 +27,7 @@ pub struct EmbeddingRunRequest<'a> {
     pub jobs: Option<&'a JobRegistry>,
     pub job_id: Option<&'a str>,
     pub cancel: Option<&'a CancellationToken>,
+    pub mode: Option<&'a str>,
     pub app: Option<&'a AppHandle>,
     pub model_id: &'a str,
     pub image_ids: &'a [String],
@@ -75,6 +77,7 @@ pub fn run_clip_embeddings(
         jobs: request.jobs,
         job_id: request.job_id,
         cancel: request.cancel,
+        mode: request.mode,
         app: request.app,
         model_id: CLIP_MODEL_ID,
         image_ids: request.image_ids,
@@ -334,14 +337,37 @@ fn update_progress(
     if let Some(app) = request.app {
         let _ = app.emit(
             "embedding-progress",
-            serde_json::json!({
-                "current": current,
-                "total": total,
-                "model": request.model_id,
-                "model_run_id": model_run_id,
-            }),
+            embedding_progress_payload(
+                current,
+                total,
+                request.model_id,
+                model_run_id,
+                request.job_id,
+                request.mode,
+                "running",
+            ),
         );
     }
+}
+
+fn embedding_progress_payload(
+    current: u32,
+    total: u32,
+    model: &str,
+    model_run_id: &str,
+    job_id: Option<&str>,
+    mode: Option<&str>,
+    status: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "job_id": job_id,
+        "current": current,
+        "total": total,
+        "model": model,
+        "model_run_id": model_run_id,
+        "mode": mode,
+        "status": status,
+    })
 }
 
 fn emit_model_run_event(
@@ -405,6 +431,7 @@ mod tests {
             jobs: None,
             job_id: None,
             cancel: None,
+            mode: None,
             app: None,
             image_ids: &image_ids,
         })
@@ -445,6 +472,7 @@ mod tests {
             jobs: None,
             job_id: None,
             cancel: None,
+            mode: None,
             app: None,
             model_id: "dinov2-vits14",
             image_ids: &image_ids,
@@ -458,5 +486,56 @@ mod tests {
         let run = db.get_model_run(&result.model_run_id).unwrap().unwrap();
         assert_eq!(run.model_id, "dinov2-vits14");
         assert!(run.params_json.contains("\"output_dims\":384"));
+    }
+
+    #[test]
+    fn embedding_pipeline_honors_pre_cancelled_registered_job() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        let app_data_dir = tmp.path().to_path_buf();
+        let model_dir = tmp.path().join("models");
+        let embedding_engine = Mutex::new(EmbeddingEngine::new(&model_dir));
+        let image_ids = vec!["never-processed".to_string()];
+        let jobs = JobRegistry::default();
+        let (job_id, cancel) = jobs.create_job("embeddings", 1);
+        cancel.cancel();
+
+        let result = run_embedding_model(EmbeddingRunRequest {
+            db: &db,
+            app_data_dir: &app_data_dir,
+            embedding_engine: &embedding_engine,
+            jobs: Some(&jobs),
+            job_id: Some(&job_id),
+            cancel: Some(&cancel),
+            mode: Some("missing"),
+            app: None,
+            model_id: "dinov2-vits14",
+            image_ids: &image_ids,
+        })
+        .unwrap();
+
+        assert_eq!(result.generated, 0);
+        assert_eq!(result.status, "cancelled");
+        assert_eq!(jobs.get(&job_id).unwrap().current, 0);
+    }
+
+    #[test]
+    fn embedding_progress_payload_identifies_background_job_and_mode() {
+        let payload = embedding_progress_payload(
+            2,
+            5,
+            "dinov2-vits14",
+            "run-1",
+            Some("job-1"),
+            Some("missing"),
+            "running",
+        );
+
+        assert_eq!(payload["job_id"], "job-1");
+        assert_eq!(payload["model"], "dinov2-vits14");
+        assert_eq!(payload["mode"], "missing");
+        assert_eq!(payload["status"], "running");
+        assert_eq!(payload["current"], 2);
+        assert_eq!(payload["total"], 5);
     }
 }

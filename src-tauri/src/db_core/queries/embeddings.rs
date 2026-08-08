@@ -9,6 +9,7 @@ use crate::db_core::smart_collections::FilterNode;
 use crate::db_core::visibility::RejectedVisibility;
 use rusqlite::types::Value;
 use rusqlite::{params, OptionalExtension, Result, ToSql};
+use std::collections::HashSet;
 
 fn scoped_where_clause(scope: &EmbeddingScope) -> Result<(String, Vec<Value>, RejectedVisibility)> {
     let default_visibility = RejectedVisibility::from_include_rejected(scope.include_rejected());
@@ -86,6 +87,46 @@ fn to_param_refs(params: &[Value]) -> Vec<&dyn ToSql> {
 }
 
 impl Database {
+    /// Returns the first occurrence of each requested image ID that does not
+    /// already have an embedding for `model_name`.
+    pub fn image_ids_without_embedding(
+        &self,
+        image_ids: &[String],
+        model_name: &str,
+    ) -> Result<Vec<String>> {
+        if image_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut unique_ids = Vec::with_capacity(image_ids.len());
+        let mut seen = HashSet::with_capacity(image_ids.len());
+        for image_id in image_ids {
+            if seen.insert(image_id.as_str()) {
+                unique_ids.push(image_id.clone());
+            }
+        }
+
+        let conn = self.read_connection();
+        let mut existing = HashSet::new();
+        for chunk in unique_ids.chunks(500) {
+            let placeholders = (0..chunk.len()).map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!(
+                "SELECT image_id FROM embeddings WHERE model_name = ? AND image_id IN ({placeholders})"
+            );
+            let mut values = Vec::with_capacity(chunk.len() + 1);
+            values.push(Value::Text(model_name.to_string()));
+            values.extend(chunk.iter().cloned().map(Value::Text));
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(to_param_refs(&values).as_slice(), |row| row.get(0))?;
+            existing.extend(rows.collect::<Result<Vec<String>>>()?);
+        }
+
+        Ok(unique_ids
+            .into_iter()
+            .filter(|image_id| !existing.contains(image_id))
+            .collect())
+    }
+
     pub fn store_embedding(&self, image_id: &str, model_name: &str, vector: &[f32]) -> Result<()> {
         self.store_embedding_with_model_run(image_id, model_name, vector, None)
             .map(|_| ())
@@ -625,6 +666,41 @@ mod tests {
         assert_eq!(neighbors[1], ("in-far".to_string(), 0.0));
         assert!(neighbors.iter().all(|(id, _)| id != "source"));
         assert!(neighbors.iter().all(|(id, _)| id != "outside-closest"));
+    }
+
+    #[test]
+    fn image_ids_without_embedding_preserves_order_dedupes_and_is_model_specific() {
+        let db = open_test_db();
+        for id in ["has-selected", "other-model", "missing", "missing-two"] {
+            insert_test_image(&db, id);
+        }
+        db.store_embedding("has-selected", "selected-model", &[1.0, 0.0])
+            .unwrap();
+        db.store_embedding("other-model", "different-model", &[0.0, 1.0])
+            .unwrap();
+
+        let requested = vec![
+            "has-selected".to_string(),
+            "missing".to_string(),
+            "other-model".to_string(),
+            "missing".to_string(),
+            "missing-two".to_string(),
+        ];
+
+        let missing = db
+            .image_ids_without_embedding(&requested, "selected-model")
+            .unwrap();
+
+        assert_eq!(missing, vec!["missing", "other-model", "missing-two"]);
+
+        let large_request = (0..505)
+            .map(|index| format!("unembedded-{index:03}"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            db.image_ids_without_embedding(&large_request, "selected-model")
+                .unwrap(),
+            large_request
+        );
     }
 
     #[test]

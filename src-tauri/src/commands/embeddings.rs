@@ -1,8 +1,10 @@
 use crate::db_core::gemini::GeminiEmbeddingProvider;
 use crate::AppState;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::Path;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tokio_util::sync::CancellationToken;
 
 /// Google Generative Language "list models" endpoint used to validate a key.
 /// The key travels in the `x-goog-api-key` header, never as a query parameter,
@@ -82,6 +84,53 @@ pub struct EmbeddingModelDownloadInfo {
 }
 
 pub type ClipModelDownloadInfo = EmbeddingModelDownloadInfo;
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EmbeddingGenerationMode {
+    Missing,
+    All,
+}
+
+impl EmbeddingGenerationMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::All => "all",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct StartModelEmbeddingGenerationResponse {
+    pub job_id: String,
+    pub total: u32,
+    pub mode: EmbeddingGenerationMode,
+    pub model: String,
+}
+
+#[derive(Clone, Copy)]
+struct EmbeddingJobControl<'a> {
+    jobs: &'a crate::services::jobs::JobRegistry,
+    job_id: &'a str,
+    cancel: &'a CancellationToken,
+    mode: EmbeddingGenerationMode,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EmbeddingGenerationOutcome {
+    generated: u32,
+    cancelled: bool,
+}
+
+fn dedupe_embedding_targets(image_ids: &[String]) -> Vec<String> {
+    let mut seen = HashSet::with_capacity(image_ids.len());
+    image_ids
+        .iter()
+        .filter(|image_id| seen.insert(image_id.as_str()))
+        .cloned()
+        .collect()
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 struct ProviderAvailability {
@@ -290,6 +339,7 @@ pub async fn generate_embeddings(
             jobs: None,
             job_id: None,
             cancel: None,
+            mode: None,
             app: Some(&app),
             image_ids: &image_ids,
         },
@@ -304,7 +354,91 @@ pub async fn generate_model_embeddings(
     model: String,
     image_ids: Vec<String>,
 ) -> Result<u32, String> {
-    generate_embeddings_for_model(&app, &state, &model, &image_ids).await
+    Ok(
+        generate_embeddings_for_model(&app, &state, &model, &image_ids, None)
+            .await?
+            .generated,
+    )
+}
+
+#[tauri::command]
+pub async fn start_model_embedding_generation(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    model: String,
+    image_ids: Vec<String>,
+    mode: EmbeddingGenerationMode,
+) -> Result<StartModelEmbeddingGenerationResponse, String> {
+    let targets = match mode {
+        EmbeddingGenerationMode::Missing => state
+            .db
+            .image_ids_without_embedding(&image_ids, &model)
+            .map_err(|error| error.to_string())?,
+        EmbeddingGenerationMode::All => dedupe_embedding_targets(&image_ids),
+    };
+    let total = u32::try_from(targets.len()).map_err(|_| "Too many images selected")?;
+    let (job_id, cancel) = state.jobs.create_job("embeddings", total);
+    let response = StartModelEmbeddingGenerationResponse {
+        job_id: job_id.clone(),
+        total,
+        mode,
+        model: model.clone(),
+    };
+
+    if targets.is_empty() {
+        state.jobs.complete(&job_id);
+        state.jobs.persist_terminal(&job_id, &state.db);
+        emit_embedding_job_event(&app, &job_id, &model, mode, "completed", 0, 0, None);
+        return Ok(response);
+    }
+
+    emit_embedding_job_event(&app, &job_id, &model, mode, "running", 0, total, None);
+
+    let task_app = app.clone();
+    let task_job_id = job_id.clone();
+    let task_model = model;
+    let task_mode = mode;
+    crate::spawn_guarded(app, "embedding-generation", move || async move {
+        let state = task_app.state::<AppState>();
+        let control = EmbeddingJobControl {
+            jobs: &state.jobs,
+            job_id: &task_job_id,
+            cancel: &cancel,
+            mode: task_mode,
+        };
+        let result =
+            generate_embeddings_for_model(&task_app, &state, &task_model, &targets, Some(control))
+                .await;
+
+        let (status, error) = match result {
+            Ok(outcome) if outcome.cancelled || cancel.is_cancelled() => {
+                state.jobs.mark_cancelled(&task_job_id);
+                ("cancelled", None)
+            }
+            Ok(_) => {
+                state.jobs.complete(&task_job_id);
+                ("completed", None)
+            }
+            Err(error) => {
+                state.jobs.fail(&task_job_id, &error);
+                ("failed", Some(error))
+            }
+        };
+        state.jobs.persist_terminal(&task_job_id, &state.db);
+        let snapshot = state.jobs.get(&task_job_id);
+        emit_embedding_job_event(
+            &task_app,
+            &task_job_id,
+            &task_model,
+            task_mode,
+            status,
+            snapshot.as_ref().map(|job| job.current).unwrap_or(0),
+            total,
+            error.as_deref(),
+        );
+    });
+
+    Ok(response)
 }
 
 async fn generate_embeddings_for_model(
@@ -312,9 +446,10 @@ async fn generate_embeddings_for_model(
     state: &AppState,
     model_id: &str,
     image_ids: &[String],
-) -> Result<u32, String> {
+    control: Option<EmbeddingJobControl<'_>>,
+) -> Result<EmbeddingGenerationOutcome, String> {
     if model_id == GEMINI_EMBEDDING_MODEL_ID {
-        return generate_gemini_embeddings_for(app, state, image_ids).await;
+        return generate_gemini_embeddings_for(app, state, image_ids, control).await;
     }
     if let Some(model) = model_id.strip_prefix("openai:") {
         let model = if model.trim().is_empty() {
@@ -322,7 +457,7 @@ async fn generate_embeddings_for_model(
         } else {
             model.to_string()
         };
-        return generate_openai_text_embeddings(app, state, &model, image_ids).await;
+        return generate_openai_text_embeddings(app, state, &model, image_ids, control).await;
     }
     if let Some(model) = model_id.strip_prefix("cohere:") {
         let model = if model.trim().is_empty() {
@@ -330,7 +465,7 @@ async fn generate_embeddings_for_model(
         } else {
             model.to_string()
         };
-        return generate_cohere_image_embeddings(app, state, &model, image_ids).await;
+        return generate_cohere_image_embeddings(app, state, &model, image_ids, control).await;
     }
     if let Some(model) = model_id.strip_prefix("ollama:") {
         let (_, configured_model) = ollama_embedding_config(state)?;
@@ -339,7 +474,7 @@ async fn generate_embeddings_for_model(
         } else {
             model.to_string()
         };
-        return generate_ollama_text_embeddings(app, state, &model, image_ids).await;
+        return generate_ollama_text_embeddings(app, state, &model, image_ids, control).await;
     }
     if embedding_provider_for_model(model_id).is_none() {
         return Err(format!("Unsupported embedding model '{}'", model_id));
@@ -354,15 +489,43 @@ async fn generate_embeddings_for_model(
             db: &state.db,
             app_data_dir: &state.app_data_dir,
             embedding_engine: &state.embedding_engine,
-            jobs: None,
-            job_id: None,
-            cancel: None,
+            jobs: control.map(|value| value.jobs),
+            job_id: control.map(|value| value.job_id),
+            cancel: control.map(|value| value.cancel),
+            mode: control.map(|value| value.mode.as_str()),
             app: Some(app),
             model_id,
             image_ids,
         },
     )?;
-    Ok(result.generated)
+    Ok(EmbeddingGenerationOutcome {
+        generated: result.generated,
+        cancelled: result.status == "cancelled",
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_embedding_job_event(
+    app: &AppHandle,
+    job_id: &str,
+    model: &str,
+    mode: EmbeddingGenerationMode,
+    status: &str,
+    current: u32,
+    total: u32,
+    error: Option<&str>,
+) {
+    let payload = serde_json::json!({
+        "job_id": job_id,
+        "model": model,
+        "mode": mode.as_str(),
+        "status": status,
+        "current": current,
+        "total": total,
+        "error": error,
+    });
+    let _ = app.emit("embedding-progress", payload.clone());
+    let _ = app.emit("job-status-changed", payload);
 }
 
 #[tauri::command]
@@ -572,6 +735,35 @@ pub async fn set_ollama_embedding_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn all_embedding_generation_targets_preserve_first_seen_order() {
+        let requested = vec![
+            "image-b".to_string(),
+            "image-a".to_string(),
+            "image-b".to_string(),
+        ];
+
+        assert_eq!(
+            dedupe_embedding_targets(&requested),
+            vec!["image-b".to_string(), "image-a".to_string()]
+        );
+    }
+
+    #[test]
+    fn embedding_generation_start_response_keeps_snake_case_job_id() {
+        let response = StartModelEmbeddingGenerationResponse {
+            job_id: "job_123".to_string(),
+            total: 4,
+            mode: EmbeddingGenerationMode::Missing,
+            model: "clip-vit-b32".to_string(),
+        };
+
+        let json = serde_json::to_value(response).unwrap();
+        assert_eq!(json["job_id"], "job_123");
+        assert!(json.get("jobId").is_none());
+        assert_eq!(json["mode"], "missing");
+    }
 
     #[test]
     fn clip_model_download_info_includes_real_model_path_and_curl_command() {
@@ -1005,7 +1197,8 @@ async fn generate_openai_text_embeddings(
     state: &AppState,
     model: &str,
     image_ids: &[String],
-) -> Result<u32, String> {
+    control: Option<EmbeddingJobControl<'_>>,
+) -> Result<EmbeddingGenerationOutcome, String> {
     let api_key = state
         .secrets
         .get("api_key_openai")?
@@ -1025,6 +1218,7 @@ async fn generate_openai_text_embeddings(
             storage_model_id: openai_storage_model_id(model),
             jurisdiction: "US - OpenAI Inc",
         },
+        control,
     )
     .await
 }
@@ -1034,7 +1228,8 @@ async fn generate_cohere_image_embeddings(
     state: &AppState,
     model: &str,
     image_ids: &[String],
-) -> Result<u32, String> {
+    control: Option<EmbeddingJobControl<'_>>,
+) -> Result<EmbeddingGenerationOutcome, String> {
     let api_key = state
         .secrets
         .get("api_key_cohere")?
@@ -1046,6 +1241,15 @@ async fn generate_cohere_image_embeddings(
     let mut generated = 0u32;
 
     for (i, image_id) in image_ids.iter().enumerate() {
+        if control
+            .map(|value| value.cancel.is_cancelled())
+            .unwrap_or(false)
+        {
+            return Ok(EmbeddingGenerationOutcome {
+                generated,
+                cancelled: true,
+            });
+        }
         let id_refs: Vec<&str> = vec![image_id.as_str()];
         let images = state
             .db
@@ -1096,20 +1300,23 @@ async fn generate_cohere_image_embeddings(
             }
         }
 
-        let _ = app.emit(
-            "embedding-progress",
-            serde_json::json!({
-                "current": i + 1,
-                "total": total,
-                "provider": "cohere",
-                "model": storage_model_id,
-            }),
+        update_embedding_job_progress(
+            app,
+            control,
+            "cohere",
+            &storage_model_id,
+            (i + 1) as u32,
+            total,
+            image_id,
         );
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 
-    Ok(generated)
+    Ok(EmbeddingGenerationOutcome {
+        generated,
+        cancelled: false,
+    })
 }
 
 async fn generate_ollama_text_embeddings(
@@ -1117,7 +1324,8 @@ async fn generate_ollama_text_embeddings(
     state: &AppState,
     model: &str,
     image_ids: &[String],
-) -> Result<u32, String> {
+    control: Option<EmbeddingJobControl<'_>>,
+) -> Result<EmbeddingGenerationOutcome, String> {
     let (url, _) = ollama_embedding_config(state)?;
     let endpoint = crate::db_core::remote_embeddings::normalize_ollama_embed_url(&url);
     let jurisdiction = if endpoint.contains("localhost") || endpoint.contains("127.0.0.1") {
@@ -1139,6 +1347,7 @@ async fn generate_ollama_text_embeddings(
             storage_model_id: ollama_storage_model_id(model),
             jurisdiction,
         },
+        control,
     )
     .await
 }
@@ -1157,11 +1366,21 @@ async fn generate_text_embeddings_for(
     state: &AppState,
     image_ids: &[String],
     run: TextEmbeddingRun<'_>,
-) -> Result<u32, String> {
+    control: Option<EmbeddingJobControl<'_>>,
+) -> Result<EmbeddingGenerationOutcome, String> {
     let total = image_ids.len() as u32;
     let mut generated = 0u32;
 
     for (i, image_id) in image_ids.iter().enumerate() {
+        if control
+            .map(|value| value.cancel.is_cancelled())
+            .unwrap_or(false)
+        {
+            return Ok(EmbeddingGenerationOutcome {
+                generated,
+                cancelled: true,
+            });
+        }
         let id_refs: Vec<&str> = vec![image_id.as_str()];
         let images = state
             .db
@@ -1222,14 +1441,14 @@ async fn generate_text_embeddings_for(
             }
         }
 
-        let _ = app.emit(
-            "embedding-progress",
-            serde_json::json!({
-                "current": i + 1,
-                "total": total,
-                "provider": run.provider_name,
-                "model": run.storage_model_id,
-            }),
+        update_embedding_job_progress(
+            app,
+            control,
+            run.provider_name,
+            &run.storage_model_id,
+            (i + 1) as u32,
+            total,
+            image_id,
         );
 
         if run.provider_name == "openai" {
@@ -1237,7 +1456,10 @@ async fn generate_text_embeddings_for(
         }
     }
 
-    Ok(generated)
+    Ok(EmbeddingGenerationOutcome {
+        generated,
+        cancelled: false,
+    })
 }
 
 #[tauri::command]
@@ -1246,14 +1468,19 @@ pub async fn generate_gemini_embeddings(
     state: State<'_, AppState>,
     image_ids: Vec<String>,
 ) -> Result<u32, String> {
-    generate_gemini_embeddings_for(&app, &state, &image_ids).await
+    Ok(
+        generate_gemini_embeddings_for(&app, &state, &image_ids, None)
+            .await?
+            .generated,
+    )
 }
 
 async fn generate_gemini_embeddings_for(
     app: &AppHandle,
     state: &AppState,
     image_ids: &[String],
-) -> Result<u32, String> {
+    control: Option<EmbeddingJobControl<'_>>,
+) -> Result<EmbeddingGenerationOutcome, String> {
     let api_key = state
         .secrets
         .get("api_key_google")?
@@ -1267,6 +1494,15 @@ async fn generate_gemini_embeddings_for(
     let mut generated = 0u32;
 
     for (i, image_id) in image_ids.iter().enumerate() {
+        if control
+            .map(|value| value.cancel.is_cancelled())
+            .unwrap_or(false)
+        {
+            return Ok(EmbeddingGenerationOutcome {
+                generated,
+                cancelled: true,
+            });
+        }
         let id_refs: Vec<&str> = vec![image_id.as_str()];
         let images = state
             .db
@@ -1308,19 +1544,50 @@ async fn generate_gemini_embeddings_for(
             }
         }
 
-        let _ = app.emit(
-            "embedding-progress",
-            serde_json::json!({
-                "current": i + 1,
-                "total": total,
-                "provider": "gemini",
-                "model": GEMINI_EMBEDDING_MODEL_ID,
-            }),
+        update_embedding_job_progress(
+            app,
+            control,
+            "gemini",
+            GEMINI_EMBEDDING_MODEL_ID,
+            (i + 1) as u32,
+            total,
+            image_id,
         );
 
         // Rate limiting
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 
-    Ok(generated)
+    Ok(EmbeddingGenerationOutcome {
+        generated,
+        cancelled: false,
+    })
+}
+
+fn update_embedding_job_progress(
+    app: &AppHandle,
+    control: Option<EmbeddingJobControl<'_>>,
+    provider: &str,
+    model: &str,
+    current: u32,
+    total: u32,
+    image_id: &str,
+) {
+    if let Some(control) = control {
+        control
+            .jobs
+            .update_progress(control.job_id, current, Some(image_id));
+    }
+    let _ = app.emit(
+        "embedding-progress",
+        serde_json::json!({
+            "job_id": control.map(|value| value.job_id),
+            "current": current,
+            "total": total,
+            "provider": provider,
+            "model": model,
+            "mode": control.map(|value| value.mode.as_str()),
+            "status": "running",
+        }),
+    );
 }
