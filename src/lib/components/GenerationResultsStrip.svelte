@@ -58,7 +58,6 @@
     function handleContextMenu(e: MouseEvent, img: ImageWithFile) {
         e.preventDefault();
         e.stopPropagation();
-        openImageInLoupe(img);
         ctxMenu = { visible: true, x: e.clientX, y: e.clientY, image: img };
     }
 </script>
