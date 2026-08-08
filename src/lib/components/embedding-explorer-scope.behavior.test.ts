@@ -299,6 +299,42 @@ describe('Embedding Explorer library scope', () => {
         );
     });
 
+    it('ignores unrelated progress before the start response identifies its job', async () => {
+        mocks.getEmbeddingCountForScope.mockResolvedValue(1);
+        let resolveStart!: (value: {
+            job_id: string;
+            total: number;
+            model: string;
+            mode: 'missing';
+        }) => void;
+        mocks.startModelEmbeddingGeneration.mockReturnValue(new Promise(resolve => {
+            resolveStart = resolve;
+        }));
+        const user = userEvent.setup();
+        render(EmbeddingExplorer);
+
+        await user.click(await screen.findByRole('button', { name: 'Generate missing (1)' }));
+        await waitFor(() => expect(mocks.startModelEmbeddingGeneration).toHaveBeenCalledOnce());
+        emit('embedding-progress', {
+            job_id: 'job_unrelated',
+            model: 'clip-vit-b32',
+            mode: 'missing',
+            status: 'running',
+            current: 1,
+            total: 9,
+        });
+        resolveStart({
+            job_id: 'job_embed_ours',
+            total: 1,
+            model: 'clip-vit-b32',
+            mode: 'missing',
+        });
+
+        await user.click(await screen.findByRole('button', { name: 'Cancel embedding generation' }));
+        expect(mocks.cancelJob).toHaveBeenCalledWith('job_embed_ours');
+        expect(mocks.cancelJob).not.toHaveBeenCalledWith('job_unrelated');
+    });
+
     it('does not let generation from an old scope overwrite the newly selected scope', async () => {
         mocks.getEmbeddingCountForScope.mockImplementation(
             (scope: { type: string }) => Promise.resolve(scope.type === 'collection' ? 0 : 1),

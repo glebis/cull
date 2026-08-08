@@ -581,6 +581,7 @@
         };
 
         try {
+            const pendingProgress = new Map<string, EmbeddingGenerationProgress>();
             const imageIds = await listImageIdsForScope(scope);
             if (scopeKey !== libraryScopeKey(get(libraryScope))) {
                 activeGeneration = null;
@@ -593,7 +594,11 @@
                 const progress = event.payload;
                 const active = activeGeneration;
                 if (!active || progress.model !== modelName || progress.mode !== mode) return;
-                if (active.job_id && progress.job_id !== active.job_id) return;
+                if (!active.job_id) {
+                    pendingProgress.set(progress.job_id, progress);
+                    return;
+                }
+                if (progress.job_id !== active.job_id) return;
                 activeGeneration = { ...active, ...progress };
                 if (progress.status === 'completed' || progress.status === 'cancelled' || progress.status === 'failed') {
                     generationUnlisten?.();
@@ -605,8 +610,17 @@
             const started = await startModelEmbeddingGeneration(modelName, imageIds, mode);
             const active = activeGeneration;
             if (!active) return;
-            if (!active.job_id || active.job_id === started.job_id) {
-                activeGeneration = { ...active, ...started };
+            const bufferedProgress = pendingProgress.get(started.job_id);
+            activeGeneration = { ...active, ...started, ...bufferedProgress };
+            if (bufferedProgress && (
+                bufferedProgress.status === 'completed'
+                || bufferedProgress.status === 'cancelled'
+                || bufferedProgress.status === 'failed'
+            )) {
+                generationUnlisten?.();
+                generationUnlisten = null;
+                await refreshAfterGeneration(activeGeneration);
+                return;
             }
             if (started.total === 0) {
                 activeGeneration = { ...activeGeneration!, status: 'completed', current: 0 };
