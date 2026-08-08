@@ -403,9 +403,16 @@ pub async fn get_scoped_embedding_page(
 pub async fn list_scoped_image_ids(
     state: State<'_, AppState>,
     scope: crate::db_core::models::EmbeddingScope,
-) -> Result<Vec<String>, String> {
+    limit: u32,
+    offset: u32,
+) -> Result<crate::db_core::models::ImageIdPage, String> {
     let ctx = crate::services::ServiceContext::from_app_state(&state, None);
-    crate::services::ai::list_scoped_image_ids(&ctx, &scope).map_err(|e| e.to_string())
+    crate::services::ai::list_scoped_image_ids(
+        &ctx,
+        &scope,
+        crate::services::Pagination { offset, limit },
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

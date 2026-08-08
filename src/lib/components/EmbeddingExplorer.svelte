@@ -45,6 +45,7 @@
     import {
         getEmbeddingCountForScope,
         getEmbeddingPageForScope,
+        getImageCountForScope,
         listImageIdsForScope,
     } from '$lib/embedding-scope';
 
@@ -413,9 +414,8 @@
         try {
             const scope = get(libraryScope);
             const requestedScopeKey = libraryScopeKey(scope);
-            const scopedIds = await listImageIdsForScope(scope);
+            const imageTotal = await getImageCountForScope(scope);
             if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return;
-            const imageTotal = scopedIds.length;
             const countEntries = await Promise.all(
                 modelOptions.map(async option => [
                     option.id,
@@ -507,6 +507,21 @@
         saveViewState();
     }
 
+    async function generateForCurrentScope(modelName: string): Promise<number | null> {
+        const scope = get(libraryScope);
+        const requestedScopeKey = libraryScopeKey(scope);
+        const imageIds = await listImageIdsForScope(scope);
+        if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return null;
+        totalImages = imageIds.length;
+        await generateModelEmbeddings(modelName, imageIds);
+        if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return null;
+        const count = await getEmbeddingCountForScope(scope, modelName);
+        if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return null;
+        await loadProjection(scope);
+        if (requestedScopeKey !== libraryScopeKey(get(libraryScope))) return null;
+        return count;
+    }
+
     async function handleGenerateRemote() {
         if (!isRemoteProvider(selectedProvider)) return;
         const provider = selectedProvider;
@@ -523,14 +538,9 @@
         );
 
         try {
-            const scope = get(libraryScope);
-            const imageIds = await listImageIdsForScope(scope);
-            totalImages = imageIds.length;
-            await generateModelEmbeddings(modelName, imageIds);
-            const count = await getEmbeddingCountForScope(scope, modelName);
-            remoteEmbeddingCounts = { ...remoteEmbeddingCounts, [provider]: count };
-            if (count > 0) {
-                await loadProjection(scope);
+            const count = await generateForCurrentScope(modelName);
+            if (count !== null) {
+                remoteEmbeddingCounts = { ...remoteEmbeddingCounts, [provider]: count };
             }
         } catch (e) {
             console.error(`${provider} generate failed:`, e);
@@ -610,14 +620,9 @@
         );
 
         try {
-            const scope = get(libraryScope);
-            const imageIds = await listImageIdsForScope(scope);
-            totalImages = imageIds.length;
-            await generateModelEmbeddings(modelName, imageIds);
-            const count = await getEmbeddingCountForScope(scope, modelName);
-            localEmbeddingCounts = { ...localEmbeddingCounts, [provider]: count };
-            if (count > 0) {
-                await loadProjection(scope);
+            const count = await generateForCurrentScope(modelName);
+            if (count !== null) {
+                localEmbeddingCounts = { ...localEmbeddingCounts, [provider]: count };
             }
         } catch (e) {
             console.error('Generate failed:', e);

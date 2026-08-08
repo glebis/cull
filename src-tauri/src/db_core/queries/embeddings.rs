@@ -270,24 +270,58 @@ impl Database {
     /// Lists live image IDs in a scope for embedding generation. This query
     /// deliberately does not join `embeddings`: images without a vector must
     /// remain eligible for generation.
-    pub fn list_scoped_image_ids(&self, scope: &EmbeddingScope) -> Result<Vec<String>> {
+    pub fn list_scoped_image_ids(
+        &self,
+        scope: &EmbeddingScope,
+        limit: u32,
+        offset: u32,
+    ) -> Result<ImageIdPage> {
         let (scope_clause, scope_params, visibility) = scoped_where_clause(scope)?;
-        let sql = format!(
-            "SELECT DISTINCT i.id
-             FROM images i
+        let from_and_where = format!(
+            "FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
              LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
              LEFT JOIN image_color_metrics cm ON cm.image_id = i.id
              LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
-             WHERE ({scope_clause}) AND {}
-             ORDER BY i.id",
+             WHERE ({scope_clause}) AND {}",
             visibility.sql_predicate()
         );
-        let conn = self.read_connection();
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(to_param_refs(&scope_params).as_slice(), |row| row.get(0))?;
-        rows.collect::<Result<Vec<_>>>()
+        let (total, ids): (u32, Vec<String>) = {
+            let mut conn = self.read_connection();
+            let transaction = conn.transaction()?;
+            let count_sql = format!("SELECT COUNT(DISTINCT i.id) {from_and_where}");
+            let total = transaction.query_row(
+                &count_sql,
+                to_param_refs(&scope_params).as_slice(),
+                |row| row.get(0),
+            )?;
+            let sql = format!(
+                "SELECT DISTINCT i.id
+                 {from_and_where}
+                 ORDER BY i.id
+                 LIMIT ? OFFSET ?"
+            );
+            let mut page_params = scope_params;
+            page_params.push(Value::Integer(limit as i64));
+            page_params.push(Value::Integer(offset as i64));
+            let ids = {
+                let mut stmt = transaction.prepare(&sql)?;
+                let rows =
+                    stmt.query_map(to_param_refs(&page_params).as_slice(), |row| row.get(0))?;
+                rows.collect::<Result<Vec<_>>>()?
+            };
+            transaction.commit()?;
+            (total, ids)
+        };
+        let returned = ids.len() as u32;
+        Ok(ImageIdPage {
+            ids,
+            total,
+            offset,
+            limit,
+            has_more: offset.saturating_add(returned) < total,
+        })
     }
 
     pub fn get_embedding_vector(
@@ -415,7 +449,7 @@ mod tests {
     }
 
     fn ids_for_scope(db: &Database, scope: &EmbeddingScope) -> Vec<String> {
-        db.list_scoped_image_ids(scope).unwrap()
+        db.list_scoped_image_ids(scope, 25_000, 0).unwrap().ids
     }
 
     /// Straightforward reference implementation of top-k cosine similarity,

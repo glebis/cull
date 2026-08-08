@@ -10,6 +10,7 @@ vi.mock('./api', () => mocks);
 import {
     getEmbeddingCountForScope,
     getEmbeddingPageForScope,
+    getImageCountForScope,
     listImageIdsForScope,
 } from './embedding-scope';
 
@@ -26,7 +27,9 @@ beforeEach(() => {
     mocks.getScopedEmbeddingPage.mockResolvedValue({
         ids: ['folder-a'], vectors: [3, 4], dims: 2, total: 7, offset: 0, limit: 5000, has_more: false,
     });
-    mocks.listScopedImageIds.mockResolvedValue(['folder-a', 'folder-b']);
+    mocks.listScopedImageIds.mockResolvedValue({
+        ids: ['folder-a', 'folder-b'], total: 2, offset: 0, limit: 100, has_more: false,
+    });
 });
 
 describe('embedding scope API routing', () => {
@@ -35,6 +38,7 @@ describe('embedding scope API routing', () => {
             .resolves.toMatchObject({ ids: ['folder-a'], total: 7 });
         await expect(getEmbeddingCountForScope(allScope, 'clip-vit-b32'))
             .resolves.toBe(7);
+        await expect(getImageCountForScope(allScope)).resolves.toBe(2);
         await expect(listImageIdsForScope(allScope)).resolves.toEqual(['folder-a', 'folder-b']);
 
         expect(mocks.getScopedEmbeddingPage).toHaveBeenNthCalledWith(
@@ -44,7 +48,8 @@ describe('embedding scope API routing', () => {
             5000,
             0,
         );
-        expect(mocks.listScopedImageIds).toHaveBeenCalledWith(allScope);
+        expect(mocks.listScopedImageIds).toHaveBeenNthCalledWith(1, allScope, 1, 0);
+        expect(mocks.listScopedImageIds).toHaveBeenNthCalledWith(2, allScope, 100, 0);
     });
 
     it('filters before pagination and generation for an active scope', async () => {
@@ -68,6 +73,20 @@ describe('embedding scope API routing', () => {
             1,
             0,
         );
-        expect(mocks.listScopedImageIds).toHaveBeenCalledWith(folderScope);
+        expect(mocks.listScopedImageIds).toHaveBeenCalledWith(folderScope, 100, 0);
+    });
+
+    it('collects every scoped ID through service-sized pages', async () => {
+        mocks.listScopedImageIds
+            .mockResolvedValueOnce({
+                ids: ['a', 'b'], total: 3, offset: 0, limit: 100, has_more: true,
+            })
+            .mockResolvedValueOnce({
+                ids: ['c'], total: 3, offset: 2, limit: 100, has_more: false,
+            });
+
+        await expect(listImageIdsForScope(folderScope)).resolves.toEqual(['a', 'b', 'c']);
+        expect(mocks.listScopedImageIds).toHaveBeenNthCalledWith(1, folderScope, 100, 0);
+        expect(mocks.listScopedImageIds).toHaveBeenNthCalledWith(2, folderScope, 100, 2);
     });
 });

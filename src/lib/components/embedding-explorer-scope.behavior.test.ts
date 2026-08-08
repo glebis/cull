@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, waitFor } from '@testing-library/svelte';
+import '@testing-library/jest-dom/vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
 
 const mocks = vi.hoisted(() => ({
     getEmbeddingCountForScope: vi.fn(),
     getEmbeddingPageForScope: vi.fn(),
+    getImageCountForScope: vi.fn(),
     listImageIdsForScope: vi.fn(),
     getImagesByIds: vi.fn(),
+    generateModelEmbeddings: vi.fn(),
     workerMessages: [] as Array<Record<string, unknown>>,
 }));
 
@@ -28,6 +32,7 @@ vi.mock('$lib/view-utils', () => ({
 vi.mock('$lib/embedding-scope', () => ({
     getEmbeddingCountForScope: mocks.getEmbeddingCountForScope,
     getEmbeddingPageForScope: mocks.getEmbeddingPageForScope,
+    getImageCountForScope: mocks.getImageCountForScope,
     listImageIdsForScope: mocks.listImageIdsForScope,
 }));
 
@@ -36,7 +41,7 @@ vi.mock('$lib/api', () => ({
     getEmbeddingModelDownloadInfo: vi.fn().mockResolvedValue(null),
     listEmbeddingProviders: vi.fn().mockResolvedValue([]),
     downloadEmbeddingModel: vi.fn(),
-    generateModelEmbeddings: vi.fn(),
+    generateModelEmbeddings: mocks.generateModelEmbeddings,
     hasApiKey: vi.fn().mockResolvedValue(false),
     getImagesByIds: mocks.getImagesByIds,
     getGenerationRun: vi.fn().mockResolvedValue(null),
@@ -133,6 +138,7 @@ beforeEach(() => {
     showRejected.set(false);
 
     mocks.listImageIdsForScope.mockResolvedValue(['in-a', 'in-b']);
+    mocks.getImageCountForScope.mockResolvedValue(2);
     mocks.getEmbeddingCountForScope.mockResolvedValue(2);
     mocks.getEmbeddingPageForScope.mockResolvedValue({
         ids: ['in-a', 'in-b'],
@@ -144,6 +150,7 @@ beforeEach(() => {
         has_more: false,
     });
     mocks.getImagesByIds.mockResolvedValue([image('in-b'), image('in-a')]);
+    mocks.generateModelEmbeddings.mockResolvedValue(2);
 
     vi.stubGlobal('Worker', FakeWorker);
     vi.stubGlobal('ResizeObserver', class {
@@ -185,7 +192,7 @@ describe('Embedding Explorer library scope', () => {
             5000,
             0,
         ));
-        expect(mocks.listImageIdsForScope).toHaveBeenCalledWith(folderScope);
+        expect(mocks.getImageCountForScope).toHaveBeenCalledWith(folderScope);
 
         await waitFor(() => expect(mocks.workerMessages).toHaveLength(1));
         expect(mocks.workerMessages[0].ids).toEqual(['in-a', 'in-b']);
@@ -202,5 +209,36 @@ describe('Embedding Explorer library scope', () => {
             5000,
             0,
         ));
+    });
+
+    it('does not let generation from an old scope overwrite the newly selected scope', async () => {
+        let finishGeneration!: () => void;
+        mocks.generateModelEmbeddings.mockImplementation(
+            () => new Promise<number>(resolve => {
+                finishGeneration = () => resolve(2);
+            }),
+        );
+        mocks.getEmbeddingCountForScope.mockImplementation(
+            (scope: { type: string }) => Promise.resolve(scope.type === 'collection' ? 0 : 1),
+        );
+
+        const user = userEvent.setup();
+        const { container } = render(EmbeddingExplorer);
+        await user.click(await screen.findByRole('button', { name: /Generate Embeddings/ }));
+        await waitFor(() => expect(mocks.generateModelEmbeddings).toHaveBeenCalledOnce());
+
+        activeCollection.set('new-collection');
+        await waitFor(() => {
+            const embeddingRow = [...container.querySelectorAll('.stat-row')]
+                .find(row => row.querySelector('.stat-label')?.textContent === 'Embeddings');
+            expect(embeddingRow?.querySelector('.stat-value')).toHaveTextContent('0');
+        });
+
+        finishGeneration();
+        await waitFor(() => expect(screen.getByRole('button', { name: /Generate Embeddings/ }))
+            .not.toBeDisabled());
+        const embeddingRow = [...container.querySelectorAll('.stat-row')]
+            .find(row => row.querySelector('.stat-label')?.textContent === 'Embeddings');
+        expect(embeddingRow?.querySelector('.stat-value')).toHaveTextContent('0');
     });
 });

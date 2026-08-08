@@ -1060,8 +1060,20 @@ export async function getScopedEmbeddingPage(
     return invoke('get_scoped_embedding_page', { scope, model: model ?? null, limit, offset });
 }
 
-export async function listScopedImageIds(scope: LibraryScope): Promise<string[]> {
-    return invoke('list_scoped_image_ids', { scope });
+export interface ImageIdPage {
+    ids: string[];
+    total: number;
+    offset: number;
+    limit: number;
+    has_more: boolean;
+}
+
+export async function listScopedImageIds(
+    scope: LibraryScope,
+    limit = 100,
+    offset = 0,
+): Promise<ImageIdPage> {
+    return invoke('list_scoped_image_ids', { scope, limit, offset });
 }
 
 export async function findSimilarImages(imageId: string, topK: number, model?: string): Promise<[string, number][]> {
