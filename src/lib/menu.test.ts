@@ -212,6 +212,27 @@ describe('native menu bridge', () => {
         expect(get(stores.viewMode)).toBe('grid');
     });
 
+    it('opens the Apple Photos catalog from the native File menu', async () => {
+        let menuHandler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, handler) => {
+            menuHandler = handler as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+
+        const [{ initMenu }, { applePhotosCatalogOpen }] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+
+        applePhotosCatalogOpen.set(false);
+        await initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        await flushMicrotasks();
+
+        menuHandler?.({ payload: 'import_apple_photos' });
+
+        expect(get(applePhotosCatalogOpen)).toBe(true);
+    });
+
     it('opens the GitHub wiki when the native Help menu action fires', async () => {
         let handler: ((event: { payload: string }) => void) | undefined;
         mocks.listen.mockImplementation(async (_eventName, next) => {

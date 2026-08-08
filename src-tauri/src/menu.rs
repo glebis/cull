@@ -66,6 +66,14 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         true,
         Some::<&str>("CmdOrCtrl+Shift+O"),
     )?)?;
+    #[cfg(target_os = "macos")]
+    file_menu.append(&MenuItem::with_id(
+        app,
+        "import_apple_photos",
+        "Import from Apple Photos...",
+        true,
+        None::<&str>,
+    )?)?;
     file_menu.append(&PredefinedMenuItem::separator(app)?)?;
     file_menu.append(&PredefinedMenuItem::close_window(app, None)?)?;
     menu.append(&file_menu)?;
@@ -1108,6 +1116,7 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
         | "check_update"
         | "open_file"
         | "import_folder"
+        | "import_apple_photos"
         | "open_folder"
         | "settings"
         | "undo"
