@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import {
     canAssignCommandHotkey,
+    commandForKeyboardEvent,
+    commandShortcutHints,
     eventMatchesShortcut,
     findDuplicateCommandHotkeys,
     getCommandPaletteItems,
@@ -113,6 +115,77 @@ describe('command palette helpers', () => {
         clearPluginTabs();
         registerCoreTabs();
     }
+
+    it('resolves context-menu image shortcuts from the command registry', () => {
+        resetCommandContext();
+        images.set([{
+            image: {
+                id: 'image-one',
+                sha256_hash: 'hash-one',
+                width: 100,
+                height: 100,
+                format: 'png',
+                file_size: 100,
+                created_at: '2026-08-08T00:00:00Z',
+                imported_at: '2026-08-08T00:00:00Z',
+                ai_prompt: null,
+                raw_metadata: null,
+            },
+            path: '/images/one.png',
+            thumbnail_path: null,
+            selection: null,
+            source_label: null,
+            missing_at: null,
+        }]);
+
+        expect(commandShortcutHints([
+            'image.rating.0',
+            'image.rating.3',
+            'image.decision.accept',
+            'image.decision.reject',
+            'image.decision.undecided',
+            'image.copy',
+            'image.trash',
+        ])).toEqual({
+            'image.rating.0': '0',
+            'image.rating.3': '3',
+            'image.decision.accept': 'A',
+            'image.decision.reject': 'X',
+            'image.decision.undecided': 'U',
+            'image.copy': 'Cmd+C',
+            'image.trash': 'Backspace',
+        });
+
+        setCommandHotkey('image.decision.accept', 'Shift+A');
+        expect(commandShortcutHints(['image.decision.accept'])).toEqual({
+            'image.decision.accept': 'Shift+A',
+        });
+    });
+
+    it('uses custom image shortcuts as replacements for registry defaults', () => {
+        resetCommandContext();
+        images.set([{
+            image: {
+                id: 'image-one', sha256_hash: 'hash-one', width: 100, height: 100,
+                format: 'png', file_size: 100, created_at: '2026-08-08T00:00:00Z',
+                imported_at: '2026-08-08T00:00:00Z', ai_prompt: null, raw_metadata: null,
+            },
+            path: '/images/one.png', thumbnail_path: null, selection: null,
+            source_label: null, missing_at: null,
+        }]);
+
+        expect(commandForKeyboardEvent(keyEvent('c', { metaKey: true }))?.id).toBe('image.copy');
+        expect(commandForKeyboardEvent(keyEvent('z', { metaKey: true }))).toBeNull();
+        setCommandHotkey('image.copy', 'Shift+C');
+        expect(commandForKeyboardEvent(keyEvent('c', { metaKey: true }))).toBeNull();
+        expect(commandForKeyboardEvent(keyEvent('C', { shiftKey: true }))?.id).toBe('image.copy');
+
+        expect(commandForKeyboardEvent(keyEvent('a'))?.id).toBe('image.decision.accept');
+        setCommandHotkey('image.decision.accept', 'Shift+A');
+        expect(commandForKeyboardEvent(keyEvent('a'))).toBeNull();
+        expect(commandForKeyboardEvent(keyEvent('A', { shiftKey: true }))?.id)
+            .toBe('image.decision.accept');
+    });
 
     it('scores title, category, keyword, and acronym matches', () => {
         const grid = item('view.grid', 'Grid View', 'View', { keywords: ['gallery'] });

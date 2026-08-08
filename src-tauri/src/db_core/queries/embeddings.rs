@@ -5,6 +5,7 @@ use crate::db_core::db::Database;
 use crate::db_core::db::{cosine_similarity, decode_embedding_bytes};
 
 use crate::db_core::models::*;
+use crate::db_core::queries::images::image_scope_filter;
 use crate::db_core::smart_collections::FilterNode;
 use crate::db_core::tags::normalize_tag_name;
 use crate::db_core::visibility::RejectedVisibility;
@@ -635,6 +636,69 @@ impl Database {
         top_k: usize,
     ) -> Result<Option<Vec<(String, f32)>>> {
         let (scope_clause, scope_params, visibility) = scoped_where_clause(scope)?;
+        self.find_similar_with_candidate_filter(
+            image_id,
+            model_name,
+            top_k,
+            &scope_clause,
+            scope_params,
+            visibility.sql_predicate(),
+        )
+    }
+
+    /// Finds nearest live library neighbors without an authorization scope.
+    /// The source image is excluded and ties are ordered by image ID.
+    pub fn find_similar_live(
+        &self,
+        image_id: &str,
+        model_name: &str,
+        top_k: usize,
+    ) -> Result<Option<Vec<(String, f32)>>> {
+        self.find_similar_with_candidate_filter(
+            image_id,
+            model_name,
+            top_k,
+            "1 = 1",
+            Vec::new(),
+            "1 = 1",
+        )
+    }
+
+    /// Finds nearest live neighbors admitted by the MCP token-scope union.
+    /// Scope filtering happens in SQL before vector decoding and ranking.
+    pub fn find_similar_in_token_scope(
+        &self,
+        image_id: &str,
+        model_name: &str,
+        folders: &[String],
+        collections: &[String],
+        tag_norms: &[String],
+        top_k: usize,
+    ) -> Result<Option<Vec<(String, f32)>>> {
+        let Some((scope_clause, scope_params)) =
+            image_scope_filter(folders, collections, tag_norms)
+        else {
+            return Ok(Some(Vec::new()));
+        };
+        self.find_similar_with_candidate_filter(
+            image_id,
+            model_name,
+            top_k,
+            &scope_clause,
+            scope_params,
+            "1 = 1",
+        )
+    }
+
+    fn find_similar_with_candidate_filter(
+        &self,
+        image_id: &str,
+        model_name: &str,
+        top_k: usize,
+        scope_clause: &str,
+        scope_params: Vec<Value>,
+        visibility_predicate: &str,
+    ) -> Result<Option<Vec<(String, f32)>>> {
         let (source_bytes, raw_candidates): (Option<Vec<u8>>, Vec<(String, Vec<u8>)>) = {
             let mut conn = self.read_connection();
             let transaction = conn.transaction()?;
@@ -656,8 +720,7 @@ impl Database {
                  LEFT JOIN image_color_metrics cm ON cm.image_id = i.id
                  LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
                  WHERE e.model_name = ? AND e.image_id != ?
-                   AND ({scope_clause}) AND {}",
-                visibility.sql_predicate()
+                   AND ({scope_clause}) AND {visibility_predicate}"
             );
             let mut candidate_params = vec![
                 Value::Text(model_name.to_string()),
@@ -865,6 +928,40 @@ mod tests {
         assert_eq!(neighbors[1], ("in-far".to_string(), 0.0));
         assert!(neighbors.iter().all(|(id, _)| id != "source"));
         assert!(neighbors.iter().all(|(id, _)| id != "outside-closest"));
+    }
+
+    #[test]
+    fn live_neighbors_exclude_source_missing_files_and_tiebreak_by_id() {
+        let db = open_test_db();
+        for (id, path) in [
+            ("source", "/test/source.png"),
+            ("beta", "/test/beta.png"),
+            ("alpha", "/test/alpha.png"),
+            ("missing", "/test/missing.png"),
+        ] {
+            insert_scoped_image(&db, id, path, 100, 100, None);
+            db.store_embedding(id, "clip-vit-b32", &[1.0, 0.0]).unwrap();
+        }
+        db.conn
+            .lock()
+            .execute(
+                "UPDATE image_files SET missing_at = '2026-08-08' WHERE image_id = 'missing'",
+                [],
+            )
+            .unwrap();
+
+        let neighbors = db
+            .find_similar_live("source", "clip-vit-b32", 10)
+            .unwrap()
+            .expect("source embedding exists");
+
+        assert_eq!(
+            neighbors
+                .iter()
+                .map(|item| item.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "beta"]
+        );
     }
 
     #[test]

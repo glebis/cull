@@ -73,6 +73,7 @@
       "../node_modules/@anthropic-ai/claude-agent-sdk": "node_modules/@anthropic-ai/claude-agent-sdk"
     },
     "macOS": {
+      "entitlements": "Entitlements.plist",
       "files": {
         "Resources/Cull.help": "help/Cull.help"
       },
