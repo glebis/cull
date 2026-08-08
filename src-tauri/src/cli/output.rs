@@ -15,16 +15,68 @@ pub fn load_params(params_json: Option<&str>, params_file: Option<&Path>) -> Res
 }
 
 pub fn print_success(json: bool, value: &Value) {
+    println!("{}", success_output(json, value));
+}
+
+fn success_output(json: bool, value: &Value) -> String {
     if json {
-        println!(
-            "{}",
-            serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
-        );
+        serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
     } else {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(value).unwrap_or_else(|_| "{}".to_string())
-        );
+        serde_json::to_string_pretty(value).unwrap_or_else(|_| "{}".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn success_output_reports_rated_image_in_json_and_human_modes() {
+        let value = serde_json::json!({ "status": "ok", "image_id": "img1", "rating": 5 });
+
+        let json = success_output(true, &value);
+        assert_eq!(serde_json::from_str::<Value>(&json).unwrap(), value);
+        assert!(!json.contains('\n'));
+
+        let human = success_output(false, &value);
+        assert!(human.contains("\"img1\""));
+        assert!(human.contains("\"rating\""));
+        assert!(human.contains('\n'));
+    }
+
+    #[test]
+    fn success_output_reports_object_matches_in_json_and_human_modes() {
+        let value = serde_json::json!([
+            { "image_id": "img-high", "confidence": 0.93 },
+            { "image_id": "img-low", "confidence": 0.71 }
+        ]);
+
+        let json = success_output(true, &value);
+        assert_eq!(serde_json::from_str::<Value>(&json).unwrap(), value);
+        assert!(!json.contains('\n'));
+
+        let human = success_output(false, &value);
+        assert!(human.contains("\"img-high\""));
+        assert!(human.contains("\"confidence\""));
+        assert!(human.contains('\n'));
+    }
+
+    #[test]
+    fn success_output_reports_similarity_matches_in_json_and_human_modes() {
+        let value = serde_json::json!([
+            { "image_id": "near", "similarity": 0.94, "model": "clip-vit-b32" },
+            { "image_id": "far", "similarity": 0.42, "model": "clip-vit-b32" }
+        ]);
+
+        let json = success_output(true, &value);
+        assert_eq!(serde_json::from_str::<Value>(&json).unwrap(), value);
+        assert!(!json.contains('\n'));
+
+        let human = success_output(false, &value);
+        assert!(human.contains("\"near\""));
+        assert!(human.contains("\"similarity\""));
+        assert!(human.contains("\"clip-vit-b32\""));
+        assert!(human.contains('\n'));
     }
 }
 

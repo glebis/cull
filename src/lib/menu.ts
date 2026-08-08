@@ -12,7 +12,6 @@ import {
     openImagesWithApplication,
     renameImage,
     shareImages,
-    trashImages,
     listCollections,
     listFolders,
     updateMenuState,
@@ -20,6 +19,7 @@ import {
     type ImageWithFile,
     type OpenWithApplication,
 } from './api';
+import { nudgeThumbnailSize } from './thumbnail-zoom';
 import {
     images,
     viewMode,
@@ -28,6 +28,7 @@ import {
     sidebarVisible,
     showRejected,
     thumbnailSize,
+    setGridThumbnailSize,
     showLoupeHistogram,
     activeFolder,
     activeCollection,
@@ -43,6 +44,7 @@ import {
     activePluginIds,
     aboutOpen,
     agentSkillsOpen,
+    applePhotosCatalogOpen,
     navigateTo,
     showToast,
     requestTextInput,
@@ -63,6 +65,7 @@ import {
     setPreviewDisplayWebStreamStatus,
 } from './preview-display-store';
 import { tabRegistry } from './plugins/tab-registry';
+import { requestTrashImages } from './trash-actions';
 
 /** Publish is plugin-only now: it is reachable iff the bundled cull-publish
  * plugin has registered its tab in the tab registry. */
@@ -365,19 +368,13 @@ async function handleImageMoveTo() {
     await moveMenuImagesToFolder(ids, selected);
 }
 
-async function handleImageTrash() {
+function handleImageTrash() {
     const ids = currentMenuTargetIds();
     if (ids.length === 0) {
         showToast('No image selected', { type: 'warning' });
         return;
     }
-
-    try {
-        await trashImages(ids);
-        await reloadAfterImageRemoval(ids);
-    } catch (e) {
-        showToast('Trash failed', { detail: String(e), type: 'error', duration: 8000 });
-    }
+    requestTrashImages(ids);
 }
 
 async function handleGitHubWiki() {
@@ -402,6 +399,9 @@ function handleMenuAction(action: string) {
         case 'import_folder':
         case 'open_folder':
             handleOpenFolder();
+            break;
+        case 'import_apple_photos':
+            applePhotosCatalogOpen.set(true);
             break;
         case 'undo':
             undo().then(label => {
@@ -598,14 +598,14 @@ function handleMenuAction(action: string) {
             if (get(viewMode) === 'loupe') {
                 requestLoupeZoomIn();
             } else {
-                thumbnailSize.update((s) => Math.min(s + 40, 600));
+                setGridThumbnailSize(nudgeThumbnailSize(get(thumbnailSize), 1));
             }
             break;
         case 'zoom_out':
             if (get(viewMode) === 'loupe') {
                 requestLoupeZoomOut();
             } else {
-                thumbnailSize.update((s) => Math.max(s - 40, 40));
+                setGridThumbnailSize(nudgeThumbnailSize(get(thumbnailSize), -1));
             }
             break;
         case 'actual_size':

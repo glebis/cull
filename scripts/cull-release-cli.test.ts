@@ -32,6 +32,7 @@ function createFixture(options: {
   packageLock?: string;
   tauriJson?: string;
   gate?: string | string[];
+  regressionGateCode?: string;
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'cull-release-cli-'));
   const versionFiles = [
@@ -49,6 +50,10 @@ function createFixture(options: {
     worktree: '.',
     stateDir: '.release-state',
     gate: options.gate ?? [process.execPath, '-e', options.gateCode ?? 'process.exit(0)'],
+    regressionGate: {
+      command: [process.execPath, '-e', options.regressionGateCode ?? 'process.exit(0)'],
+      contracts: [{ id: 'fixture-contract', tests: ['fixture.behavior.test.ts'] }],
+    },
     extraGate: [],
     changelog: { path: 'CHANGELOG.md' },
     compatibility: { path: 'docs/COMPATIBILITY.md' },
@@ -135,6 +140,26 @@ function run(
 
 function head(fixture: string) {
   return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: fixture, encoding: 'utf8' }).trim();
+}
+
+function advanceOriginMainWithoutMovingHead(fixture: string) {
+  const source = head(fixture);
+  const tree = execFileSync('git', ['rev-parse', `${source}^{tree}`], {
+    cwd: fixture, encoding: 'utf8',
+  }).trim();
+  const newerMain = execFileSync('git', ['commit-tree', tree, '-p', source, '-m', 'verified origin main fix'], {
+    cwd: fixture,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'Cull Test',
+      GIT_AUTHOR_EMAIL: 'cull@example.test',
+      GIT_COMMITTER_NAME: 'Cull Test',
+      GIT_COMMITTER_EMAIL: 'cull@example.test',
+    },
+  }).trim();
+  execFileSync('git', ['update-ref', 'refs/remotes/origin/main', newerMain], { cwd: fixture });
+  return { source, newerMain };
 }
 
 function prepareArgs(fixture: string, source = head(fixture)) {
@@ -246,6 +271,40 @@ describe('Cull release readiness CLI', () => {
     });
     expect(result.stderr).not.toContain('TAURI_SIGNING_PRIVATE_KEY');
     expect(readFileSync(join(fixture, 'package.json'), 'utf8')).toBe(before);
+  });
+
+  it('blocks check when a named release regression contract fails', () => {
+    const fixture = createFixture({
+      regressionGateCode: "process.stderr.write('grid-hover-preview failed\\n'); process.exit(17)",
+    });
+
+    const result = runCheck(fixture);
+
+    expect(result.status).toBe(3);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      event: 'error',
+      code: 'BLOCKED',
+      message: expect.stringContaining('release regression gate'),
+      details: expect.objectContaining({
+        status: 17,
+        stderr: expect.stringContaining('grid-hover-preview failed'),
+      }),
+    });
+  });
+
+  it('reports a stale release source that omits verified origin/main commits', () => {
+    const fixture = createFixture();
+    const { source, newerMain } = advanceOriginMainWithoutMovingHead(fixture);
+
+    const result = runCheck(fixture);
+
+    expect(result.status).toBe(3);
+    expect(JSON.parse(result.stdout).result.blockers).toContainEqual({
+      code: 'STALE_RELEASE_SOURCE',
+      message: 'Release source omits commits already on origin/main',
+      releaseSha: source,
+      originMain: newerMain,
+    });
   });
 
   it('blocks readiness when the configured Homebrew cask is not SHA-pinned', () => {
@@ -465,6 +524,45 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(execution.status).toBe(0);
     expect(output.result.diff).toBe('');
     expect(repositorySnapshot(fixture)).toEqual(before);
+  });
+
+  it('blocks prepare on a failed named regression contract and restores release-owned files', () => {
+    const fixture = createReleaseFixture({
+      regressionGateCode: "process.stderr.write('thumbnail-prefetch failed\\n'); process.exit(19)",
+    });
+    const before = prepareSafetySnapshot(fixture);
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture));
+
+    expect(result.execution.status).toBe(3);
+    expect(result.output).toMatchObject({
+      code: 'BLOCKED',
+      message: expect.stringContaining('release regression gate'),
+      details: expect.objectContaining({
+        status: 19,
+        stderr: expect.stringContaining('thumbnail-prefetch failed'),
+      }),
+    });
+    expect(prepareSafetySnapshot(fixture)).toEqual(before);
+    expect(head(fixture)).toBe(execFileSync('git', ['rev-parse', 'origin/main'], {
+      cwd: fixture, encoding: 'utf8',
+    }).trim());
+  });
+
+  it('blocks prepare before edits when the source omits verified origin/main commits', () => {
+    const fixture = createReleaseFixture();
+    const before = prepareSafetySnapshot(fixture);
+    const { source, newerMain } = advanceOriginMainWithoutMovingHead(fixture);
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture, source));
+
+    expect(result.execution.status).toBe(3);
+    expect(result.output).toMatchObject({
+      code: 'BLOCKED',
+      message: 'Release source omits commits already on origin/main',
+      details: { releaseSha: source, originMain: newerMain },
+    });
+    expect(prepareSafetySnapshot(fixture)).toEqual(before);
   });
 
   it('rejects source and version races before writing', () => {

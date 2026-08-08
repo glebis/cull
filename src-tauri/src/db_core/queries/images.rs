@@ -9,6 +9,7 @@ use crate::db_core::db::{
 use crate::db_core::db::Database;
 use crate::db_core::models::*;
 use crate::db_core::visibility::RejectedVisibility;
+use rusqlite::types::Value;
 use rusqlite::{params, OptionalExtension, Result, Transaction};
 use std::collections::HashSet;
 use std::path::{Component, Path};
@@ -20,6 +21,45 @@ pub struct FolderPathMigration {
     pub sessions: usize,
     pub canvases: usize,
     pub generation_runs: usize,
+}
+
+pub(crate) fn image_scope_filter(
+    folders: &[String],
+    collections: &[String],
+    tag_norms: &[String],
+) -> Option<(String, Vec<Value>)> {
+    let mut clauses = Vec::new();
+    let mut args = Vec::new();
+
+    for folder in folders {
+        let folder = folder.trim_end_matches('/');
+        let prefix = format!("{folder}/");
+        // Use a binary substr prefix rather than LIKE so `%`, `_`, and path
+        // casing remain literal, matching folder browsing semantics.
+        clauses.push(
+            "(f.path = ? OR substr(f.path, 1, ?) COLLATE BINARY = ? COLLATE BINARY)".to_string(),
+        );
+        args.push(Value::Text(folder.to_string()));
+        args.push(Value::Integer(prefix.chars().count() as i64));
+        args.push(Value::Text(prefix));
+    }
+    if !collections.is_empty() {
+        let placeholders = vec!["?"; collections.len()].join(",");
+        clauses.push(format!(
+            "i.id IN (SELECT image_id FROM collection_items WHERE collection_id IN ({placeholders}))"
+        ));
+        args.extend(collections.iter().cloned().map(Value::Text));
+    }
+    if !tag_norms.is_empty() {
+        let placeholders = vec!["?"; tag_norms.len()].join(",");
+        clauses.push(format!(
+            "i.id IN (SELECT it.image_id FROM image_tags it JOIN tags t ON t.id = it.tag_id \
+             WHERE t.normalized_name IN ({placeholders}))"
+        ));
+        args.extend(tag_norms.iter().cloned().map(Value::Text));
+    }
+
+    (!clauses.is_empty()).then(|| (clauses.join(" OR "), args))
 }
 
 fn invalid_path(message: impl Into<String>) -> rusqlite::Error {
@@ -393,55 +433,10 @@ impl Database {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<ImageWithFile>> {
-        use rusqlite::types::Value;
-
-        if folders.is_empty() && collections.is_empty() && tag_norms.is_empty() {
+        let Some((scope_filter, mut args)) = image_scope_filter(folders, collections, tag_norms)
+        else {
             return Ok(Vec::new());
-        }
-
-        let mut clauses: Vec<String> = Vec::new();
-        let mut args: Vec<Value> = Vec::new();
-
-        for folder in folders {
-            let folder = folder.trim_end_matches('/');
-            // Exact folder OR any descendant. The descendant test is a substr
-            // prefix comparison rather than LIKE: `_` and `%` are LIKE
-            // wildcards, so a folder named `2025_Trips` would also pull in
-            // `2025XTrips`, and LIKE is ASCII-case-insensitive, which would
-            // merge `/lib/Art` and `/lib/art` into one result set even though
-            // the sidebar shows them as two folders with separate counts.
-            // COLLATE BINARY keeps both distinctions. Matches
-            // list_images_by_folder and delete_images_by_folder.
-            let prefix = format!("{}/", folder);
-            clauses.push(
-                "(f.path = ? OR substr(f.path, 1, ?) COLLATE BINARY = ? COLLATE BINARY)"
-                    .to_string(),
-            );
-            args.push(Value::Text(folder.to_string()));
-            args.push(Value::Integer(prefix.chars().count() as i64));
-            args.push(Value::Text(prefix));
-        }
-        if !collections.is_empty() {
-            let placeholders = vec!["?"; collections.len()].join(",");
-            clauses.push(format!(
-                "i.id IN (SELECT image_id FROM collection_items WHERE collection_id IN ({}))",
-                placeholders
-            ));
-            for c in collections {
-                args.push(Value::Text(c.clone()));
-            }
-        }
-        if !tag_norms.is_empty() {
-            let placeholders = vec!["?"; tag_norms.len()].join(",");
-            clauses.push(format!(
-                "i.id IN (SELECT it.image_id FROM image_tags it JOIN tags t ON t.id = it.tag_id \
-                 WHERE t.normalized_name IN ({}))",
-                placeholders
-            ));
-            for t in tag_norms {
-                args.push(Value::Text(t.clone()));
-            }
-        }
+        };
 
         let sql = format!(
             "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
@@ -455,7 +450,7 @@ impl Database {
              GROUP BY i.id
              ORDER BY i.imported_at DESC, i.id ASC
              LIMIT ? OFFSET ?",
-            clauses.join(" OR ")
+            scope_filter
         );
         args.push(Value::Integer(limit as i64));
         args.push(Value::Integer(offset as i64));

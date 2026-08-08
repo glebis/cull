@@ -1,6 +1,7 @@
 // Copyright (c) 2026-present Gleb Kalinin. Architecture and design by author.
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
+mod apple_photos;
 mod cli;
 mod cloud;
 mod commands;
@@ -269,6 +270,28 @@ mod gui_launch_tests {
             .lines()
             .any(|line| line.trim() == format!("\"{command_name}\",")));
     }
+
+    #[test]
+    fn apple_photos_commands_are_registered_and_least_privilege_permitted() {
+        let registry = include_str!("lib.rs");
+        let photos_permissions = include_str!("../permissions/app-photos.toml");
+        let broad_permissions = format!(
+            "{}{}",
+            include_str!("../permissions/app-read.toml"),
+            include_str!("../permissions/app-file-access.toml")
+        );
+
+        for command in [
+            "photos_authorization_status",
+            "photos_list_albums",
+            "photos_list_assets",
+            "photos_request_authorization",
+        ] {
+            assert!(registry.contains(&format!("commands::photos::{command},")));
+            assert!(photos_permissions.contains(&format!("\"{command}\"")));
+            assert!(!broad_permissions.contains(&format!("\"{command}\"")));
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -516,6 +539,10 @@ pub fn run() {
             commands::import::regenerate_thumbnails_by_ids,
             commands::import::regenerate_single_thumbnail,
             commands::import::rescan_sources,
+            commands::photos::photos_authorization_status,
+            commands::photos::photos_request_authorization,
+            commands::photos::photos_list_albums,
+            commands::photos::photos_list_assets,
             commands::deeplink::drain_pending_open_params,
             commands::deeplink::complete_deep_link_navigation,
             commands::deeplink::open_deep_link_urls,
@@ -585,6 +612,7 @@ pub fn run() {
             commands::agent_proposals::cancel_claude_agent_chat_turn,
             commands::deeplink::open_with_params,
             commands::collections::create_collection,
+            commands::collections::create_collection_with_images,
             commands::collections::list_collections,
             commands::collections::rename_collection,
             commands::collections::add_to_collection,
@@ -597,6 +625,7 @@ pub fn run() {
             commands::embeddings::get_embedding_page,
             commands::embeddings::get_scoped_embedding_page,
             commands::embeddings::list_scoped_image_ids,
+            commands::embeddings::name_embedding_clusters,
             commands::embeddings::find_similar_images,
             commands::embeddings::find_similar_images_in_scope,
             commands::embeddings::generate_similarity_groups,

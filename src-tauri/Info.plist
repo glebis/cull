@@ -12,5 +12,7 @@
     <string>Cull uses the microphone for voice search dictation.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Cull uses speech recognition for voice-powered image search.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Cull reads photos and albums you choose to import from your Apple Photos library.</string>
 </dict>
 </plist>

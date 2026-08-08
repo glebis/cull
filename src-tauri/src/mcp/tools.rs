@@ -13,6 +13,8 @@ use tauri::{Emitter, Manager};
 use super::auth::{require_capability, AuthContext};
 use crate::db_core::canvas_document::CanvasDocument;
 use crate::db_core::models::{Canvas, TokenScope};
+use crate::services::ai::{self as ai_service, FindSimilarParams, SearchByObjectParams};
+use crate::services::curation::{self as curation_service, SetRatingParams};
 use crate::services::tokens;
 use crate::AppState;
 
@@ -176,10 +178,6 @@ fn collection_summaries_for_mcp(
 
 fn clamp_limit(limit: u32) -> u32 {
     limit.min(100).max(1)
-}
-
-fn is_valid_rating(rating: u8) -> bool {
-    rating <= 5
 }
 
 fn normalize_decision(decision: &str) -> Option<&'static str> {
@@ -643,14 +641,6 @@ pub struct ListFolderImagesParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct SetRatingParams {
-    #[schemars(description = "The image ID to rate")]
-    pub image_id: String,
-    #[schemars(description = "Rating from 0 (unrated) to 5")]
-    pub rating: u8,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SetDecisionParams {
     #[schemars(description = "The image ID")]
     pub image_id: String,
@@ -696,24 +686,6 @@ pub struct CreateSmartCollectionParams {
         description = "Natural language query like 'landscape photos rated 4+' or raw filter JSON"
     )]
     pub query: String,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct FindSimilarParams {
-    #[schemars(description = "Image ID to find similar images for")]
-    pub image_id: String,
-    #[schemars(description = "Number of results to return (default 10)")]
-    pub limit: Option<u32>,
-    #[schemars(description = "Embedding model: 'clip-vit-b32' or 'dinov2-vits14'")]
-    pub model: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct SearchByObjectParams {
-    #[schemars(description = "Object class to search for, e.g. 'person', 'car', 'dog'")]
-    pub class_name: String,
-    #[schemars(description = "Max results (default 50)")]
-    pub limit: Option<u32>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -1545,19 +1517,6 @@ mod tests {
     }
 
     // --- Input validation (tests production helpers) ---
-
-    #[test]
-    fn test_rating_valid_range() {
-        for r in 0..=5u8 {
-            assert!(super::is_valid_rating(r), "Rating {} should be valid", r);
-        }
-    }
-
-    #[test]
-    fn test_rating_invalid() {
-        assert!(!super::is_valid_rating(6));
-        assert!(!super::is_valid_rating(255));
-    }
 
     #[test]
     fn test_decision_valid_values() {

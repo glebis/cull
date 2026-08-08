@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
+import { tick } from 'svelte';
 import { get } from 'svelte/store';
 
 const mocks = vi.hoisted(() => ({
@@ -20,6 +21,9 @@ const mocks = vi.hoisted(() => ({
     isEmbeddingModelAvailable: vi.fn(),
     listEmbeddingProviders: vi.fn(),
     loadEmbeddingNeighbors: vi.fn(),
+    createCollectionWithImages: vi.fn(),
+    listCollections: vi.fn(),
+    nameEmbeddingClusters: vi.fn(),
     eventListeners: new Map<string, Set<(event: { payload: Record<string, unknown> }) => void>>(),
     workerMessages: [] as Array<Record<string, unknown>>,
 }));
@@ -75,6 +79,9 @@ vi.mock('$lib/api', () => ({
     cancelJob: mocks.cancelJob,
     pauseJob: vi.fn(),
     resumeJob: vi.fn(),
+    createCollectionWithImages: mocks.createCollectionWithImages,
+    listCollections: mocks.listCollections,
+    nameEmbeddingClusters: mocks.nameEmbeddingClusters,
 }));
 
 import EmbeddingExplorer from './EmbeddingExplorer.svelte';
@@ -88,6 +95,10 @@ import {
     showRejected,
     embeddingViewState,
     focusedImageOverride,
+    collections,
+    resolveTextInputDialog,
+    settingsOpen,
+    textInputDialog,
     viewMode,
 } from '$lib/stores';
 
@@ -171,7 +182,29 @@ beforeEach(() => {
     importBatchFilter.set(null);
     minSizeFilter.set(512);
     showRejected.set(false);
-    embeddingViewState.update(state => ({ ...state, provider: 'clip' }));
+    settingsOpen.set(false);
+    embeddingViewState.set({
+        panX: 0,
+        panY: 0,
+        scale: 1,
+        selectedPointId: null,
+        highlightedCluster: null,
+        provider: 'clip',
+        projectionKey: null,
+        hasUserView: false,
+        interactionMode: 'map',
+        zPreset: 'cluster',
+        activeZLayerKey: null,
+        focusActiveLayer: false,
+        largePreviewOpen: true,
+        textOutputOpen: false,
+        canvasLabelsOpen: false,
+        spacePreset: 'balanced',
+        spaceSpacing: 1,
+        spaceDepth: 0.35,
+        spaceScale: 1,
+        spacePerspective: 0.3,
+    });
     focusedImageOverride.set(null);
     viewMode.set('grid');
 
@@ -198,6 +231,9 @@ beforeEach(() => {
     mocks.getOllamaEmbeddingConfig.mockResolvedValue(['http://localhost:11434/api/embed', 'embeddinggemma']);
     mocks.isEmbeddingModelAvailable.mockResolvedValue(true);
     mocks.listEmbeddingProviders.mockResolvedValue([]);
+    mocks.createCollectionWithImages.mockResolvedValue('collection-from-map');
+    mocks.listCollections.mockResolvedValue([['collection-from-map', 'Map picks', 1]]);
+    mocks.nameEmbeddingClusters.mockResolvedValue([]);
     mocks.loadEmbeddingNeighbors.mockResolvedValue([
         { image: image('near-one'), score: 0.934 },
     ]);
@@ -215,6 +251,7 @@ beforeEach(() => {
         arc: vi.fn(),
         fill: vi.fn(),
         stroke: vi.fn(),
+        strokeRect: vi.fn(),
         save: vi.fn(),
         restore: vi.fn(),
         translate: vi.fn(),
@@ -640,6 +677,105 @@ describe('Embedding Explorer library scope', () => {
         }));
         expect(get(viewMode)).toBe('loupe');
         expect(get(focusedImageOverride)?.image.id).toBe('near-one');
+    });
+
+    it('creates a collection from exactly the points inside a dragged rectangle', async () => {
+        const user = userEvent.setup();
+        const { container } = render(EmbeddingExplorer);
+        await waitFor(() => expect(mocks.workerMessages).toHaveLength(1));
+
+        await user.click(await screen.findByRole('button', { name: 'Select an area of the embedding map' }));
+        const canvas = container.querySelector('canvas')!;
+        await fireEvent.mouseDown(canvas, { clientX: 100, clientY: 20 });
+        await fireEvent.mouseMove(canvas, { clientX: 300, clientY: 200 });
+        await fireEvent.mouseUp(canvas, { clientX: 300, clientY: 200 });
+
+        expect(await screen.findByText('1 image selected')).toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Create collection from 1 selected image' }));
+        expect(get(textInputDialog)?.description).toBe('1 selected image will be added.');
+        resolveTextInputDialog('Map picks');
+
+        await waitFor(() => expect(mocks.createCollectionWithImages).toHaveBeenCalledWith(
+            'Map picks',
+            ['in-a'],
+        ));
+        await waitFor(() => expect(get(collections)).toEqual([['collection-from-map', 'Map picks', 1]]));
+        expect(await screen.findByText('0 images selected')).toBeInTheDocument();
+    });
+
+    it('uses backend tag and detection evidence to auto-name projected clusters', async () => {
+        mocks.nameEmbeddingClusters.mockResolvedValue([
+            { cluster_id: 0, label: 'Golden Hour', source: 'tag' },
+        ]);
+        render(EmbeddingExplorer);
+
+        expect(await screen.findByText('Golden Hour')).toBeInTheDocument();
+        expect(mocks.nameEmbeddingClusters).toHaveBeenCalledWith([
+            { cluster_id: 0, image_ids: ['in-a', 'in-b'] },
+        ]);
+    });
+
+    it('renders the projection before naming completes and ignores a stale provider label', async () => {
+        const user = userEvent.setup();
+        let resolveOldName!: (value: Array<{ cluster_id: number; label: string; source: string }>) => void;
+        mocks.nameEmbeddingClusters
+            .mockReturnValueOnce(new Promise(resolve => {
+                resolveOldName = resolve;
+            }))
+            .mockResolvedValueOnce([
+                { cluster_id: 0, label: 'New Provider Cluster', source: 'filename' },
+            ]);
+
+        render(EmbeddingExplorer);
+        expect(await screen.findByText('Cluster 1')).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Configure embedding model' }));
+        await user.selectOptions(screen.getByRole('combobox', { name: 'Embedding provider' }), 'dinov2');
+        expect(await screen.findByText('New Provider Cluster')).toBeInTheDocument();
+
+        resolveOldName([{ cluster_id: 0, label: 'Old Provider Cluster', source: 'tag' }]);
+        await tick();
+        expect(screen.queryByText('Old Provider Cluster')).not.toBeInTheDocument();
+        expect(screen.getByText('New Provider Cluster')).toBeInTheDocument();
+    });
+
+    it('supports keyboard point selection and Escape from a focused selection control', async () => {
+        const user = userEvent.setup();
+        render(EmbeddingExplorer);
+        await waitFor(() => expect(mocks.workerMessages).toHaveLength(1));
+
+        await user.click(await screen.findByRole('button', { name: 'Select an area of the embedding map' }));
+        const explorer = screen.getByRole('application', { name: 'Visual embeddings' });
+        expect(explorer).toHaveFocus();
+        await user.keyboard('{ArrowRight} {Shift>}{ArrowRight}{/Shift}');
+        expect(await screen.findByText('2 images selected')).toBeInTheDocument();
+
+        const clearButton = screen.getByRole('button', { name: 'Clear selection' });
+        clearButton.focus();
+        await user.keyboard('{Escape}');
+        expect(screen.getByRole('button', { name: 'Select an area of the embedding map' })).toHaveAttribute('aria-pressed', 'false');
+        expect(screen.getByText('0 images selected')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Clear selection' })).not.toBeInTheDocument();
+        expect(explorer).toHaveFocus();
+    });
+
+    it('clears an area selection when the same scope receives a replacement projection', async () => {
+        const user = userEvent.setup();
+        const { container } = render(EmbeddingExplorer);
+        await waitFor(() => expect(mocks.workerMessages).toHaveLength(1));
+        await user.click(await screen.findByRole('button', { name: 'Select an area of the embedding map' }));
+        const canvas = container.querySelector('canvas')!;
+        await fireEvent.mouseDown(canvas, { clientX: 100, clientY: 20 });
+        await fireEvent.mouseMove(canvas, { clientX: 300, clientY: 200 });
+        await fireEvent.mouseUp(canvas, { clientX: 300, clientY: 200 });
+        expect(await screen.findByText('1 image selected')).toBeInTheDocument();
+
+        settingsOpen.set(true);
+        await tick();
+        settingsOpen.set(false);
+        await waitFor(() => expect(mocks.workerMessages).toHaveLength(2));
+        expect(screen.getByText('0 images selected')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Select an area of the embedding map' })).toHaveAttribute('aria-pressed', 'false');
     });
 
 });

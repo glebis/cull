@@ -3,7 +3,9 @@
 
 use crate::db_core::db::{row_u64, Database};
 use crate::db_core::models::*;
+use crate::db_core::queries::images::image_scope_filter;
 use crate::db_core::visibility::RejectedVisibility;
+use rusqlite::types::Value;
 use rusqlite::{params, Result};
 
 impl Database {
@@ -84,13 +86,48 @@ impl Database {
     }
 
     pub fn search_by_class(&self, class_name: &str, limit: u32) -> Result<Vec<(String, f32)>> {
-        let conn = self.conn.lock();
+        let conn = self.read_connection();
         let mut stmt = conn.prepare(
             "SELECT DISTINCT image_id, MAX(confidence) as max_conf
              FROM detections WHERE class_name = ?1
-             GROUP BY image_id ORDER BY max_conf DESC LIMIT ?2",
+             GROUP BY image_id ORDER BY max_conf DESC, image_id ASC LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![class_name, limit], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, f32>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>>>()
+    }
+
+    pub fn search_by_class_in_scope(
+        &self,
+        class_name: &str,
+        folders: &[String],
+        collections: &[String],
+        tag_norms: &[String],
+        limit: u32,
+    ) -> Result<Vec<(String, f32)>> {
+        let Some((scope_filter, scope_args)) = image_scope_filter(folders, collections, tag_norms)
+        else {
+            return Ok(Vec::new());
+        };
+        let sql = format!(
+            "SELECT d.image_id, MAX(d.confidence) AS max_conf
+             FROM detections d
+             JOIN images i ON i.id = d.image_id
+             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+             WHERE d.class_name = ? AND ({scope_filter})
+             GROUP BY d.image_id
+             ORDER BY max_conf DESC, d.image_id ASC
+             LIMIT ?"
+        );
+        let mut args = Vec::with_capacity(scope_args.len() + 2);
+        args.push(Value::Text(class_name.to_string()));
+        args.extend(scope_args);
+        args.push(Value::Integer(limit as i64));
+
+        let conn = self.read_connection();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(args), |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, f32>(1)?))
         })?;
         rows.collect::<Result<Vec<_>>>()

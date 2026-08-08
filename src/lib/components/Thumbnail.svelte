@@ -141,6 +141,7 @@
 
 <div
     class="thumb {borderClass}"
+    class:micro={size < 40}
     style="width: {size}px; height: {size}px;"
     role="gridcell"
     tabindex={focused ? 0 : -1}
@@ -239,6 +240,13 @@
         border-color: var(--blue);
         box-shadow: 0 0 0 1px var(--green);
     }
+    .thumb.micro { border-width: 1px; }
+    .thumb.micro .rating,
+    .thumb.micro .source-tag,
+    .thumb.micro .pdf-badge,
+    .thumb.micro .badge,
+    .thumb.micro .missing-badge,
+    .thumb.micro .fallback-text { display: none; }
     img {
         max-width: 100%;
         max-height: 100%;

@@ -27,4 +27,14 @@ describe('File menu contract', () => {
         expect(fileMenu.indexOf('"open_file"')).toBeLessThan(fileMenu.indexOf('"import_folder"'));
         expect(menuSource).toContain('"import_folder"');
     });
+
+    it('exposes Apple Photos discovery only in the macOS File menu', () => {
+        const menuSource = readProjectFile('src-tauri/src/menu.rs');
+        const fileMenu = menuSection(menuSource, '// File menu', '// Edit menu');
+
+        expect(fileMenu).toContain('#[cfg(target_os = "macos")]');
+        expect(fileMenu).toContain('"import_apple_photos"');
+        expect(fileMenu).toContain('"Import from Apple Photos..."');
+        expect(fileMenu.indexOf('"import_folder"')).toBeLessThan(fileMenu.indexOf('"import_apple_photos"'));
+    });
 });

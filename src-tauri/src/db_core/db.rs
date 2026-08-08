@@ -2014,6 +2014,39 @@ mod tests {
     }
 
     #[test]
+    fn collection_membership_add_remove_round_trip_is_idempotent() {
+        let db = test_db();
+        let collection_id = db.create_collection("Round Trip").unwrap();
+        insert_test_image(&db, "member", "h-member");
+        insert_test_image(&db, "non-member", "h-non-member");
+
+        db.add_to_collection(&collection_id, &["member"]).unwrap();
+        let member_ids = db
+            .list_collection_images(&collection_id)
+            .unwrap()
+            .into_iter()
+            .map(|image| image.image.id)
+            .collect::<Vec<_>>();
+        assert_eq!(member_ids, vec!["member"]);
+
+        db.add_to_collection(&collection_id, &["member"]).unwrap();
+        assert_eq!(db.list_collection_images(&collection_id).unwrap().len(), 1);
+
+        db.remove_from_collection(&collection_id, "member").unwrap();
+        assert!(db
+            .list_collection_images(&collection_id)
+            .unwrap()
+            .is_empty());
+
+        db.remove_from_collection(&collection_id, "non-member")
+            .unwrap();
+        assert!(db
+            .list_collection_images(&collection_id)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
     fn visible_library_and_folder_queries_hide_rejected_until_requested() {
         let db = test_db();
         insert_test_image_at_path(&db, "kept", "h-kept", "/lib/art/kept.png");

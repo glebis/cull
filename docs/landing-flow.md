@@ -32,3 +32,10 @@ Typical sequence:
    merges it through GitHub, and fast-forwards local `main`.
 4. Trigger the Release workflow separately when a tag/manual release build is
    needed.
+
+Before release preparation, refresh `origin/main` and run
+`npm run release:cull -- check --bump <patch|minor|major> --json`. The check and
+prepare commands both run the blocking named behavior regression gate. A stale
+hotfix line or release worktree cannot package successfully when it omits a
+commit already present on verified `origin/main`; do not bypass this gate with a
+manual tag.

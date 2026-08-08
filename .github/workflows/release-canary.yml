@@ -52,6 +52,9 @@ jobs:
       - name: Install locked project dependencies
         run: npm ci
 
+      - name: Refresh verified origin/main
+        run: git fetch --no-tags origin main
+
       - name: Record immutable release gate evidence
         id: release_gate
         shell: bash
@@ -104,6 +107,9 @@ jobs:
 
       - name: Verify export compatibility contract
         run: cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test export_compat_golden
+
+      - name: Run named release behavior regression gate
+        run: npm run test:release-regressions
 
       - name: Install pinned browser test client
         if: steps.release_gate.outputs.e2e_required == 'true'

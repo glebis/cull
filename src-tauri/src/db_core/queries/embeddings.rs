@@ -5,11 +5,63 @@ use crate::db_core::db::Database;
 use crate::db_core::db::{cosine_similarity, decode_embedding_bytes};
 
 use crate::db_core::models::*;
+use crate::db_core::queries::images::image_scope_filter;
 use crate::db_core::smart_collections::FilterNode;
+use crate::db_core::tags::normalize_tag_name;
 use crate::db_core::visibility::RejectedVisibility;
 use rusqlite::types::Value;
 use rusqlite::{params, OptionalExtension, Result, ToSql};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+
+fn title_case_label(value: &str) -> String {
+    normalize_tag_name(value)
+        .unwrap_or_else(|| value.trim().to_lowercase())
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn filename_candidates(path: &str) -> Vec<String> {
+    const STOP_WORDS: &[&str] = &[
+        "copy",
+        "dsc",
+        "export",
+        "final",
+        "frame",
+        "generated",
+        "image",
+        "img",
+        "output",
+        "photo",
+        "screenshot",
+        "untitled",
+    ];
+    let stem = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    stem.split(|character: char| !character.is_alphabetic())
+        .map(str::to_lowercase)
+        .filter(|token| token.chars().count() >= 3 && !STOP_WORDS.contains(&token.as_str()))
+        .collect()
+}
+
+fn source_priority(source: &str) -> u8 {
+    match source {
+        "tag" => 3,
+        "yolo" => 2,
+        "filename" => 1,
+        _ => 0,
+    }
+}
 
 fn scoped_where_clause(scope: &EmbeddingScope) -> Result<(String, Vec<Value>, RejectedVisibility)> {
     let default_visibility = RejectedVisibility::from_include_rejected(scope.include_rejected());
@@ -87,6 +139,154 @@ fn to_param_refs(params: &[Value]) -> Vec<&dyn ToSql> {
 }
 
 impl Database {
+    pub fn name_embedding_clusters(
+        &self,
+        clusters: &[EmbeddingClusterMembership],
+    ) -> Result<Vec<EmbeddingClusterName>> {
+        let conn = self.read_connection();
+        let mut result = Vec::with_capacity(clusters.len());
+
+        for cluster in clusters {
+            let mut unique_ids = Vec::with_capacity(cluster.image_ids.len());
+            let mut seen = HashSet::with_capacity(cluster.image_ids.len());
+            for image_id in &cluster.image_ids {
+                if seen.insert(image_id.as_str()) {
+                    unique_ids.push(image_id.clone());
+                }
+            }
+            if unique_ids.is_empty() {
+                continue;
+            }
+
+            // Each image contributes at most once to a candidate. The weight
+            // records the strongest available evidence for that image/name.
+            let mut by_image: HashMap<String, HashMap<String, (String, String, u32)>> =
+                HashMap::new();
+            for chunk in unique_ids.chunks(400) {
+                let placeholders = (0..chunk.len()).map(|_| "?").collect::<Vec<_>>().join(",");
+                let values = chunk.iter().cloned().map(Value::Text).collect::<Vec<_>>();
+
+                let tag_sql = format!(
+                    "SELECT it.image_id, t.name, t.tag_type, it.source
+                     FROM image_tags it
+                     JOIN tags t ON t.id = it.tag_id
+                     WHERE it.image_id IN ({placeholders})"
+                );
+                let mut stmt = conn.prepare(&tag_sql)?;
+                let rows = stmt.query_map(to_param_refs(&values).as_slice(), |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })?;
+                for row in rows {
+                    let (image_id, name, tag_type, source) = row?;
+                    let Some(key) = normalize_tag_name(&name) else {
+                        continue;
+                    };
+                    let weight = if source == "manual" || tag_type == "user" {
+                        6
+                    } else if tag_type == "object" {
+                        5
+                    } else {
+                        4
+                    };
+                    let candidates = by_image.entry(image_id).or_default();
+                    let next = (title_case_label(&key), "tag".to_string(), weight);
+                    if candidates
+                        .get(&key)
+                        .is_none_or(|current| current.2 < weight)
+                    {
+                        candidates.insert(key, next);
+                    }
+                }
+
+                let detection_sql = format!(
+                    "SELECT image_id, class_name, MAX(confidence)
+                     FROM detections
+                     WHERE image_id IN ({placeholders})
+                       AND model_name GLOB 'yolo*' AND confidence >= 0.35
+                     GROUP BY image_id, class_name"
+                );
+                let mut stmt = conn.prepare(&detection_sql)?;
+                let rows = stmt.query_map(to_param_refs(&values).as_slice(), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+                for row in rows {
+                    let (image_id, name) = row?;
+                    let Some(key) = normalize_tag_name(&name) else {
+                        continue;
+                    };
+                    let candidates = by_image.entry(image_id).or_default();
+                    if candidates.get(&key).is_none_or(|current| current.2 < 5) {
+                        candidates.insert(key, (title_case_label(&name), "yolo".to_string(), 5));
+                    }
+                }
+
+                let file_sql = format!(
+                    "SELECT image_id, path FROM image_files
+                     WHERE image_id IN ({placeholders}) AND missing_at IS NULL
+                     ORDER BY image_id, path"
+                );
+                let mut stmt = conn.prepare(&file_sql)?;
+                let rows = stmt.query_map(to_param_refs(&values).as_slice(), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+                for row in rows {
+                    let (image_id, path) = row?;
+                    let candidates = by_image.entry(image_id).or_default();
+                    for (index, key) in filename_candidates(&path).into_iter().enumerate() {
+                        let weight = if index == 0 { 2 } else { 1 };
+                        candidates.entry(key.clone()).or_insert_with(|| {
+                            (title_case_label(&key), "filename".to_string(), weight)
+                        });
+                    }
+                }
+            }
+
+            let mut scores: HashMap<String, (String, String, u32, u32, u32)> = HashMap::new();
+            for candidates in by_image.values() {
+                for (key, (label, source, weight)) in candidates {
+                    let score = scores
+                        .entry(key.clone())
+                        .or_insert_with(|| (label.clone(), source.clone(), 0, 0, 0));
+                    score.2 += weight;
+                    score.3 += 1;
+                    if *weight > score.4
+                        || (*weight == score.4
+                            && source_priority(source) > source_priority(&score.1))
+                    {
+                        score.0 = label.clone();
+                        score.1 = source.clone();
+                        score.4 = *weight;
+                    }
+                }
+            }
+
+            let best = scores.into_iter().max_by(
+                |(a_key, (_, _, a_score, a_coverage, _)),
+                 (b_key, (_, _, b_score, b_coverage, _))| {
+                    a_score
+                        .cmp(b_score)
+                        .then_with(|| a_coverage.cmp(b_coverage))
+                        .then_with(|| b_key.cmp(a_key))
+                },
+            );
+            if let Some((_, (label, source, _, _, _))) = best {
+                result.push(EmbeddingClusterName {
+                    cluster_id: cluster.cluster_id,
+                    label,
+                    source,
+                });
+            }
+        }
+
+        result.sort_by_key(|item| item.cluster_id);
+        Ok(result)
+    }
+
     /// Returns the first occurrence of each requested image ID that does not
     /// already have an embedding for `model_name`.
     pub fn image_ids_without_embedding(
@@ -436,6 +636,69 @@ impl Database {
         top_k: usize,
     ) -> Result<Option<Vec<(String, f32)>>> {
         let (scope_clause, scope_params, visibility) = scoped_where_clause(scope)?;
+        self.find_similar_with_candidate_filter(
+            image_id,
+            model_name,
+            top_k,
+            &scope_clause,
+            scope_params,
+            visibility.sql_predicate(),
+        )
+    }
+
+    /// Finds nearest live library neighbors without an authorization scope.
+    /// The source image is excluded and ties are ordered by image ID.
+    pub fn find_similar_live(
+        &self,
+        image_id: &str,
+        model_name: &str,
+        top_k: usize,
+    ) -> Result<Option<Vec<(String, f32)>>> {
+        self.find_similar_with_candidate_filter(
+            image_id,
+            model_name,
+            top_k,
+            "1 = 1",
+            Vec::new(),
+            "1 = 1",
+        )
+    }
+
+    /// Finds nearest live neighbors admitted by the MCP token-scope union.
+    /// Scope filtering happens in SQL before vector decoding and ranking.
+    pub fn find_similar_in_token_scope(
+        &self,
+        image_id: &str,
+        model_name: &str,
+        folders: &[String],
+        collections: &[String],
+        tag_norms: &[String],
+        top_k: usize,
+    ) -> Result<Option<Vec<(String, f32)>>> {
+        let Some((scope_clause, scope_params)) =
+            image_scope_filter(folders, collections, tag_norms)
+        else {
+            return Ok(Some(Vec::new()));
+        };
+        self.find_similar_with_candidate_filter(
+            image_id,
+            model_name,
+            top_k,
+            &scope_clause,
+            scope_params,
+            "1 = 1",
+        )
+    }
+
+    fn find_similar_with_candidate_filter(
+        &self,
+        image_id: &str,
+        model_name: &str,
+        top_k: usize,
+        scope_clause: &str,
+        scope_params: Vec<Value>,
+        visibility_predicate: &str,
+    ) -> Result<Option<Vec<(String, f32)>>> {
         let (source_bytes, raw_candidates): (Option<Vec<u8>>, Vec<(String, Vec<u8>)>) = {
             let mut conn = self.read_connection();
             let transaction = conn.transaction()?;
@@ -457,8 +720,7 @@ impl Database {
                  LEFT JOIN image_color_metrics cm ON cm.image_id = i.id
                  LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
                  WHERE e.model_name = ? AND e.image_id != ?
-                   AND ({scope_clause}) AND {}",
-                visibility.sql_predicate()
+                   AND ({scope_clause}) AND {visibility_predicate}"
             );
             let mut candidate_params = vec![
                 Value::Text(model_name.to_string()),
@@ -666,6 +928,40 @@ mod tests {
         assert_eq!(neighbors[1], ("in-far".to_string(), 0.0));
         assert!(neighbors.iter().all(|(id, _)| id != "source"));
         assert!(neighbors.iter().all(|(id, _)| id != "outside-closest"));
+    }
+
+    #[test]
+    fn live_neighbors_exclude_source_missing_files_and_tiebreak_by_id() {
+        let db = open_test_db();
+        for (id, path) in [
+            ("source", "/test/source.png"),
+            ("beta", "/test/beta.png"),
+            ("alpha", "/test/alpha.png"),
+            ("missing", "/test/missing.png"),
+        ] {
+            insert_scoped_image(&db, id, path, 100, 100, None);
+            db.store_embedding(id, "clip-vit-b32", &[1.0, 0.0]).unwrap();
+        }
+        db.conn
+            .lock()
+            .execute(
+                "UPDATE image_files SET missing_at = '2026-08-08' WHERE image_id = 'missing'",
+                [],
+            )
+            .unwrap();
+
+        let neighbors = db
+            .find_similar_live("source", "clip-vit-b32", 10)
+            .unwrap()
+            .expect("source embedding exists");
+
+        assert_eq!(
+            neighbors
+                .iter()
+                .map(|item| item.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "beta"]
+        );
     }
 
     #[test]
@@ -883,5 +1179,143 @@ mod tests {
             include_rejected: false,
         };
         assert_eq!(ids_for_scope(&db, &smart_rejected), vec!["c-reject"]);
+    }
+
+    #[test]
+    fn cluster_names_prioritize_shared_tags_then_yolo_then_filenames() {
+        let db = open_test_db();
+        for (id, path) in [
+            ("tag-a", "/library/sunset_001.png"),
+            ("tag-b", "/library/sunset_002.png"),
+            ("dog-a", "/library/frame_101.png"),
+            ("dog-b", "/library/frame_102.png"),
+            ("file-a", "/library/mountain_mist_01.png"),
+            ("file-b", "/library/mountain_mist_02.png"),
+        ] {
+            insert_scoped_image(&db, id, path, 500, 500, None);
+        }
+        db.add_image_tag("tag-a", "Golden Hour", "user", "manual", None)
+            .unwrap();
+        db.add_image_tag("tag-b", "Golden Hour", "user", "manual", None)
+            .unwrap();
+        db.conn
+            .lock()
+            .execute(
+                "INSERT INTO detections (
+                    id, image_id, model_name, class_name, confidence,
+                    x, y, width, height, created_at
+                 ) VALUES ('det-tag', 'tag-a', 'yolo11m', 'golden_hour', 0.9, 0, 0, 1, 1, '2026-01-01')",
+                [],
+            )
+            .unwrap();
+        for (index, id) in ["dog-a", "dog-b"].iter().enumerate() {
+            db.conn
+                .lock()
+                .execute(
+                    "INSERT INTO detections (
+                        id, image_id, model_name, class_name, confidence,
+                        x, y, width, height, created_at
+                     ) VALUES (?1, ?2, 'yolo11m', 'dog', 0.9, 0, 0, 1, 1, '2026-01-01')",
+                    params![format!("det-{index}"), id],
+                )
+                .unwrap();
+        }
+
+        let names = db
+            .name_embedding_clusters(&[
+                EmbeddingClusterMembership {
+                    cluster_id: 0,
+                    image_ids: vec!["tag-a".into(), "tag-b".into()],
+                },
+                EmbeddingClusterMembership {
+                    cluster_id: 1,
+                    image_ids: vec!["dog-a".into(), "dog-b".into()],
+                },
+                EmbeddingClusterMembership {
+                    cluster_id: 2,
+                    image_ids: vec!["file-a".into(), "file-b".into()],
+                },
+            ])
+            .unwrap();
+
+        assert_eq!(
+            names,
+            vec![
+                EmbeddingClusterName {
+                    cluster_id: 0,
+                    label: "Golden Hour".into(),
+                    source: "tag".into(),
+                },
+                EmbeddingClusterName {
+                    cluster_id: 1,
+                    label: "Dog".into(),
+                    source: "yolo".into(),
+                },
+                EmbeddingClusterName {
+                    cluster_id: 2,
+                    label: "Mountain".into(),
+                    source: "filename".into(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn cluster_names_dedupe_ids_and_break_equal_scores_alphabetically() {
+        let db = open_test_db();
+        insert_scoped_image(&db, "apple", "/library/apple_01.png", 500, 500, None);
+        insert_scoped_image(&db, "zebra", "/library/zebra_01.png", 500, 500, None);
+
+        let first = db
+            .name_embedding_clusters(&[EmbeddingClusterMembership {
+                cluster_id: 7,
+                image_ids: vec!["zebra".into(), "apple".into(), "apple".into()],
+            }])
+            .unwrap();
+        let second = db
+            .name_embedding_clusters(&[EmbeddingClusterMembership {
+                cluster_id: 7,
+                image_ids: vec!["apple".into(), "zebra".into()],
+            }])
+            .unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(first[0].label, "Apple");
+        assert_eq!(first[0].source, "filename");
+    }
+
+    #[test]
+    fn cluster_names_canonicalize_equal_weight_tag_and_yolo_evidence() {
+        let db = open_test_db();
+        insert_scoped_image(&db, "tagged", "/library/a.png", 500, 500, None);
+        insert_scoped_image(&db, "detected", "/library/b.png", 500, 500, None);
+        db.add_image_tag(
+            "tagged",
+            "golden_hour",
+            "object",
+            "metadata:vision",
+            Some(0.8),
+        )
+        .unwrap();
+        db.conn
+            .lock()
+            .execute(
+                "INSERT INTO detections (
+                    id, image_id, model_name, class_name, confidence,
+                    x, y, width, height, created_at
+                 ) VALUES ('det-mixed', 'detected', 'yolo11m', 'golden hour', 0.9, 0, 0, 1, 1, '2026-01-01')",
+                [],
+            )
+            .unwrap();
+
+        let names = db
+            .name_embedding_clusters(&[EmbeddingClusterMembership {
+                cluster_id: 3,
+                image_ids: vec!["detected".into(), "tagged".into()],
+            }])
+            .unwrap();
+
+        assert_eq!(names[0].label, "Golden Hour");
+        assert_eq!(names[0].source, "tag");
     }
 }
