@@ -11,13 +11,23 @@ const mocks = vi.hoisted(() => ({
     getImageCountForScope: vi.fn(),
     listImageIdsForScope: vi.fn(),
     getImagesByIds: vi.fn(),
-    generateModelEmbeddings: vi.fn(),
+    startModelEmbeddingGeneration: vi.fn(),
+    cancelJob: vi.fn(),
     loadEmbeddingNeighbors: vi.fn(),
+    eventListeners: new Map<string, Set<(event: { payload: Record<string, unknown> }) => void>>(),
     workerMessages: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
-    listen: vi.fn().mockResolvedValue(vi.fn()),
+    listen: vi.fn().mockImplementation(async (
+        eventName: string,
+        callback: (event: { payload: Record<string, unknown> }) => void,
+    ) => {
+        const listeners = mocks.eventListeners.get(eventName) ?? new Set();
+        listeners.add(callback);
+        mocks.eventListeners.set(eventName, listeners);
+        return () => listeners.delete(callback);
+    }),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -47,12 +57,12 @@ vi.mock('$lib/api', () => ({
     getEmbeddingModelDownloadInfo: vi.fn().mockResolvedValue(null),
     listEmbeddingProviders: vi.fn().mockResolvedValue([]),
     downloadEmbeddingModel: vi.fn(),
-    generateModelEmbeddings: mocks.generateModelEmbeddings,
+    startModelEmbeddingGeneration: mocks.startModelEmbeddingGeneration,
     hasApiKey: vi.fn().mockResolvedValue(false),
     getImagesByIds: mocks.getImagesByIds,
     getGenerationRun: vi.fn().mockResolvedValue(null),
     regenerateThumbnails: vi.fn(),
-    cancelJob: vi.fn(),
+    cancelJob: mocks.cancelJob,
     pauseJob: vi.fn(),
     resumeJob: vi.fn(),
 }));
@@ -66,6 +76,7 @@ import {
     importBatchFilter,
     minSizeFilter,
     showRejected,
+    embeddingViewState,
     focusedImageOverride,
     viewMode,
 } from '$lib/stores';
@@ -132,10 +143,16 @@ function image(id: string) {
     };
 }
 
+function emit(eventName: string, payload: Record<string, unknown>) {
+    for (const listener of mocks.eventListeners.get(eventName) ?? []) listener({ payload });
+}
+
 afterEach(() => cleanup());
 
 beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+    mocks.eventListeners.clear();
     mocks.workerMessages.length = 0;
     activeFolder.set('/photos/scoped');
     activeCollection.set(null);
@@ -144,6 +161,7 @@ beforeEach(() => {
     importBatchFilter.set(null);
     minSizeFilter.set(512);
     showRejected.set(false);
+    embeddingViewState.update(state => ({ ...state, provider: 'clip' }));
     focusedImageOverride.set(null);
     viewMode.set('grid');
 
@@ -160,7 +178,12 @@ beforeEach(() => {
         has_more: false,
     });
     mocks.getImagesByIds.mockResolvedValue([image('in-b'), image('in-a')]);
-    mocks.generateModelEmbeddings.mockResolvedValue(2);
+    mocks.startModelEmbeddingGeneration.mockResolvedValue({
+        job_id: 'job_embed_1',
+        total: 1,
+        model: 'clip-vit-b32',
+        mode: 'missing',
+    });
     mocks.loadEmbeddingNeighbors.mockResolvedValue([
         { image: image('near-one'), score: 0.934 },
     ]);
@@ -224,21 +247,103 @@ describe('Embedding Explorer library scope', () => {
         ));
     });
 
-    it('does not let generation from an old scope overwrite the newly selected scope', async () => {
-        let finishGeneration!: () => void;
-        mocks.generateModelEmbeddings.mockImplementation(
-            () => new Promise<number>(resolve => {
-                finishGeneration = () => resolve(2);
-            }),
+    it('offers missing and full regeneration, reports job progress, and cancels the exact job', async () => {
+        mocks.getEmbeddingCountForScope.mockResolvedValue(1);
+        const user = userEvent.setup();
+        render(EmbeddingExplorer);
+
+        await user.click(await screen.findByRole('button', { name: 'Generate missing (1)' }));
+        await waitFor(() => expect(mocks.startModelEmbeddingGeneration).toHaveBeenCalledWith(
+            'clip-vit-b32',
+            ['in-a', 'in-b'],
+            'missing',
+        ));
+
+        emit('embedding-progress', {
+            job_id: 'job_embed_1',
+            model: 'clip-vit-b32',
+            mode: 'missing',
+            status: 'running',
+            current: 1,
+            total: 2,
+        });
+        const progress = await screen.findByRole('progressbar', { name: 'CLIP embedding progress' });
+        expect(progress).toHaveAttribute('aria-valuenow', '1');
+        expect(progress).toHaveAttribute('aria-valuemax', '2');
+
+        await user.click(screen.getByRole('button', { name: 'Cancel embedding generation' }));
+        expect(mocks.cancelJob).toHaveBeenCalledWith('job_embed_1');
+        expect(screen.getByRole('button', { name: 'Cancelling embedding generation' })).toBeDisabled();
+
+        emit('embedding-progress', {
+            job_id: 'job_embed_1',
+            model: 'clip-vit-b32',
+            mode: 'missing',
+            status: 'cancelled',
+            current: 1,
+            total: 2,
+        });
+        await waitFor(() => expect(screen.getByText('Generation cancelled at 1/2')).toBeInTheDocument());
+
+        mocks.startModelEmbeddingGeneration.mockResolvedValue({
+            job_id: 'job_embed_2',
+            total: 2,
+            model: 'clip-vit-b32',
+            mode: 'all',
+        });
+        await user.click(screen.getByRole('button', { name: 'Regenerate all (2)' }));
+        expect(mocks.startModelEmbeddingGeneration).toHaveBeenLastCalledWith(
+            'clip-vit-b32',
+            ['in-a', 'in-b'],
+            'all',
         );
+    });
+
+    it('ignores unrelated progress before the start response identifies its job', async () => {
+        mocks.getEmbeddingCountForScope.mockResolvedValue(1);
+        let resolveStart!: (value: {
+            job_id: string;
+            total: number;
+            model: string;
+            mode: 'missing';
+        }) => void;
+        mocks.startModelEmbeddingGeneration.mockReturnValue(new Promise(resolve => {
+            resolveStart = resolve;
+        }));
+        const user = userEvent.setup();
+        render(EmbeddingExplorer);
+
+        await user.click(await screen.findByRole('button', { name: 'Generate missing (1)' }));
+        await waitFor(() => expect(mocks.startModelEmbeddingGeneration).toHaveBeenCalledOnce());
+        emit('embedding-progress', {
+            job_id: 'job_unrelated',
+            model: 'clip-vit-b32',
+            mode: 'missing',
+            status: 'running',
+            current: 1,
+            total: 9,
+        });
+        resolveStart({
+            job_id: 'job_embed_ours',
+            total: 1,
+            model: 'clip-vit-b32',
+            mode: 'missing',
+        });
+
+        await user.click(await screen.findByRole('button', { name: 'Cancel embedding generation' }));
+        expect(mocks.cancelJob).toHaveBeenCalledWith('job_embed_ours');
+        expect(mocks.cancelJob).not.toHaveBeenCalledWith('job_unrelated');
+    });
+
+    it('does not let generation from an old scope overwrite the newly selected scope', async () => {
         mocks.getEmbeddingCountForScope.mockImplementation(
             (scope: { type: string }) => Promise.resolve(scope.type === 'collection' ? 0 : 1),
         );
 
         const user = userEvent.setup();
         const { container } = render(EmbeddingExplorer);
-        await user.click(await screen.findByRole('button', { name: /Generate Embeddings/ }));
-        await waitFor(() => expect(mocks.generateModelEmbeddings).toHaveBeenCalledOnce());
+        await user.click(await screen.findByRole('button', { name: 'Generate missing (1)' }));
+        await waitFor(() => expect(mocks.startModelEmbeddingGeneration).toHaveBeenCalledOnce());
 
         activeCollection.set('new-collection');
         await waitFor(() => {
@@ -247,12 +352,46 @@ describe('Embedding Explorer library scope', () => {
             expect(embeddingRow?.querySelector('.stat-value')).toHaveTextContent('0');
         });
 
-        finishGeneration();
-        await waitFor(() => expect(screen.getByRole('button', { name: /Generate Embeddings/ }))
-            .not.toBeDisabled());
+        emit('embedding-progress', {
+            job_id: 'job_embed_1',
+            model: 'clip-vit-b32',
+            mode: 'missing',
+            status: 'completed',
+            current: 1,
+            total: 1,
+        });
+        await waitFor(() => expect(screen.getByText('Generation completed: 1/1')).toBeInTheDocument());
         const embeddingRow = [...container.querySelectorAll('.stat-row')]
             .find(row => row.querySelector('.stat-label')?.textContent === 'Embeddings');
         expect(embeddingRow?.querySelector('.stat-value')).toHaveTextContent('0');
+    });
+
+    it('keeps an active job attributed to its model while another model shows its own missing count', async () => {
+        mocks.getEmbeddingCountForScope.mockImplementation(
+            (_scope: unknown, model: string) => Promise.resolve(model === 'clip-vit-b32' ? 1 : 0),
+        );
+        const user = userEvent.setup();
+        const { container } = render(EmbeddingExplorer);
+
+        await user.click(await screen.findByRole('button', { name: 'Generate missing (1)' }));
+        await waitFor(() => expect(mocks.startModelEmbeddingGeneration).toHaveBeenCalledOnce());
+        emit('embedding-progress', {
+            job_id: 'job_embed_1',
+            model: 'clip-vit-b32',
+            mode: 'missing',
+            status: 'running',
+            current: 1,
+            total: 2,
+        });
+
+        await user.click(screen.getByRole('radio', { name: /DINOv2/i }));
+        await waitFor(() => {
+            const missingRow = [...container.querySelectorAll('.stat-row')]
+                .find(row => row.querySelector('.stat-label')?.textContent === 'Need embeddings');
+            expect(missingRow?.querySelector('.stat-value')).toHaveTextContent('2');
+        });
+        expect(screen.getByText('CLIP GENERATION')).toBeInTheDocument();
+        expect(screen.getByRole('progressbar', { name: 'CLIP embedding progress' })).toHaveAttribute('aria-valuenow', '1');
     });
 
     it('loads ranked neighbors for the selected point in the current scope', async () => {

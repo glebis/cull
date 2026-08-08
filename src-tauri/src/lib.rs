@@ -257,6 +257,18 @@ mod gui_launch_tests {
             .lines()
             .any(|line| line.trim() == permission_entry));
     }
+
+    #[test]
+    fn background_embedding_generation_command_is_registered_and_permitted() {
+        let command_registry = include_str!("lib.rs");
+        let ai_permissions = include_str!("../permissions/app-ai-processing.toml");
+        let command_name = "start_model_embedding_generation";
+
+        assert!(command_registry.contains(&format!("commands::embeddings::{command_name},")));
+        assert!(ai_permissions
+            .lines()
+            .any(|line| line.trim() == format!("\"{command_name}\",")));
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -581,6 +593,7 @@ pub fn run() {
             commands::collections::delete_collection,
             commands::embeddings::generate_embeddings,
             commands::embeddings::generate_model_embeddings,
+            commands::embeddings::start_model_embedding_generation,
             commands::embeddings::get_embedding_page,
             commands::embeddings::get_scoped_embedding_page,
             commands::embeddings::list_scoped_image_ids,

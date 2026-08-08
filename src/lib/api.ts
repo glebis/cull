@@ -1037,6 +1037,29 @@ export async function generateModelEmbeddings(model: string, imageIds: string[])
     return invoke('generate_model_embeddings', { model, imageIds });
 }
 
+export type EmbeddingGenerationMode = 'missing' | 'all';
+
+export interface EmbeddingGenerationStart {
+    job_id: string;
+    total: number;
+    model: string;
+    mode: EmbeddingGenerationMode;
+}
+
+export interface EmbeddingGenerationProgress extends EmbeddingGenerationStart {
+    current: number;
+    status: 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed';
+    error?: string | null;
+}
+
+export async function startModelEmbeddingGeneration(
+    model: string,
+    imageIds: string[],
+    mode: EmbeddingGenerationMode,
+): Promise<EmbeddingGenerationStart> {
+    return invoke('start_model_embedding_generation', { model, imageIds, mode });
+}
+
 export interface EmbeddingPage {
     ids: string[];
     vectors: number[];

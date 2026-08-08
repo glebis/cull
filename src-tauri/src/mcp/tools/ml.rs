@@ -465,6 +465,7 @@ impl CullMcp {
                     jobs: Some(&state.jobs),
                     job_id: Some(&job_id),
                     cancel: Some(&cancel_token),
+                    mode: None,
                     app: Some(&app),
                     model_id: &model_id_for_task,
                     image_ids: &image_ids,

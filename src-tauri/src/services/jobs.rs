@@ -25,6 +25,15 @@ pub struct JobState {
     pub pause: PauseController,
 }
 
+/// The terminal result observed by a background worker at its cancellation
+/// checkpoints. Unlike `complete`/`fail`, this deliberately does not infer
+/// status from a cancellation token that may have arrived after work ended.
+pub enum WorkerTerminalOutcome {
+    Completed,
+    Cancelled,
+    Failed(String),
+}
+
 #[derive(Clone)]
 pub struct JobRegistry {
     jobs: Arc<Mutex<HashMap<String, JobState>>>,
@@ -168,6 +177,28 @@ impl JobRegistry {
         let mut jobs = self.jobs.lock().unwrap();
         if let Some(state) = jobs.get_mut(job_id) {
             state.snapshot.status = "cancelled".to_string();
+            state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+        }
+    }
+
+    pub fn finish_from_worker(&self, job_id: &str, outcome: WorkerTerminalOutcome) {
+        let mut jobs = self.jobs.lock().unwrap();
+        if let Some(state) = jobs.get_mut(job_id) {
+            match outcome {
+                WorkerTerminalOutcome::Completed => {
+                    state.snapshot.status = "completed".to_string();
+                    state.snapshot.current = state.snapshot.total;
+                    state.snapshot.error = None;
+                }
+                WorkerTerminalOutcome::Cancelled => {
+                    state.snapshot.status = "cancelled".to_string();
+                    state.snapshot.error = None;
+                }
+                WorkerTerminalOutcome::Failed(error) => {
+                    state.snapshot.status = "failed".to_string();
+                    state.snapshot.error = Some(error);
+                }
+            }
             state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
         }
     }
@@ -484,6 +515,21 @@ mod tests {
         registry.complete(&job_id);
         let snapshot = registry.get(&job_id).unwrap();
         assert_eq!(snapshot.status, "cancelled");
+    }
+
+    #[test]
+    fn worker_completed_outcome_wins_over_late_cancellation_request() {
+        let registry = JobRegistry::default();
+        let (job_id, _) = registry.create_job("embeddings", 2);
+        registry.update_progress(&job_id, 2, None);
+        registry.cancel(&job_id).unwrap();
+
+        registry.finish_from_worker(&job_id, WorkerTerminalOutcome::Completed);
+
+        let snapshot = registry.get(&job_id).unwrap();
+        assert_eq!(snapshot.status, "completed");
+        assert_eq!(snapshot.current, 2);
+        assert_eq!(snapshot.total, 2);
     }
 
     #[test]

@@ -116,6 +116,18 @@ impl Database {
         Ok(())
     }
 
+    pub fn fail_running_model_runs_for_job(&self, job_id: &str, error: &str) -> Result<u32> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let conn = self.conn.lock();
+        let updated = conn.execute(
+            "UPDATE model_runs
+             SET status = 'failed', error = ?2, completed_at = ?3
+             WHERE job_id = ?1 AND status = 'running'",
+            params![job_id, error, now],
+        )?;
+        Ok(updated as u32)
+    }
+
     pub fn insert_model_run_item(&self, item: &NewModelRunItem) -> Result<()> {
         let conn = self.conn.lock();
         conn.execute(
@@ -176,5 +188,70 @@ impl Database {
             },
         )
         .optional()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn model_run(id: &str, status: &str) -> NewModelRun {
+        let now = "2026-08-08T00:00:00Z".to_string();
+        NewModelRun {
+            id: id.to_string(),
+            job_id: Some("job-embedding".to_string()),
+            parent_run_id: None,
+            profile_id: None,
+            task: "embedding".to_string(),
+            provider: "local".to_string(),
+            model_id: "clip-vit-b32".to_string(),
+            model_revision: None,
+            status: status.to_string(),
+            input_scope_json: "{}".to_string(),
+            params_json: "{}".to_string(),
+            output_summary_json: if status == "completed" {
+                "{\"generated\":1}".to_string()
+            } else {
+                "{}".to_string()
+            },
+            cost_estimate_usd: None,
+            cost_actual_usd: None,
+            error: None,
+            created_at: now.clone(),
+            started_at: Some(now.clone()),
+            completed_at: (status == "completed").then_some(now),
+        }
+    }
+
+    #[test]
+    fn failing_running_model_runs_for_job_preserves_terminal_runs() {
+        let db = Database::open(Path::new(":memory:")).unwrap();
+        db.insert_model_run(&model_run("run-running", "running"))
+            .unwrap();
+        db.insert_model_run(&model_run("run-completed", "completed"))
+            .unwrap();
+
+        let updated = db
+            .fail_running_model_runs_for_job("job-embedding", "Embedding generation panicked")
+            .unwrap();
+
+        assert_eq!(updated, 1);
+        let failed = db.get_model_run("run-running").unwrap().unwrap();
+        assert_eq!(failed.status, "failed");
+        assert_eq!(
+            failed.error.as_deref(),
+            Some("Embedding generation panicked")
+        );
+        assert!(failed.completed_at.is_some());
+
+        let completed = db.get_model_run("run-completed").unwrap().unwrap();
+        assert_eq!(completed.status, "completed");
+        assert_eq!(completed.output_summary_json, "{\"generated\":1}");
+        assert_eq!(completed.error, None);
+        assert_eq!(
+            completed.completed_at.as_deref(),
+            Some("2026-08-08T00:00:00Z")
+        );
     }
 }
