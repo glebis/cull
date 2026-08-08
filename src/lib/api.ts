@@ -4,6 +4,63 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { LibraryScope } from './library-scope';
 
+export type ApplePhotosAuthorization =
+    | 'unsupported'
+    | 'not_determined'
+    | 'restricted'
+    | 'denied'
+    | 'limited'
+    | 'authorized';
+
+export type ApplePhotosAlbumKind = 'user' | 'smart';
+
+export interface ApplePhotosAlbum {
+    id: string;
+    title: string | null;
+    kind: ApplePhotosAlbumKind;
+}
+
+export interface ApplePhotosAsset {
+    id: string;
+    filename: string | null;
+    created_at: string | null;
+    modified_at: string | null;
+    pixel_width: number;
+    pixel_height: number;
+    favorite: boolean;
+    media_subtypes: number;
+}
+
+export interface ApplePhotosPage<T> {
+    items: T[];
+    total: number;
+    offset: number;
+    has_more: boolean;
+}
+
+export type ApplePhotosAlbumPage = ApplePhotosPage<ApplePhotosAlbum>;
+export type ApplePhotosAssetPage = ApplePhotosPage<ApplePhotosAsset>;
+
+export function photosAuthorizationStatus(): Promise<ApplePhotosAuthorization> {
+    return invoke<ApplePhotosAuthorization>('photos_authorization_status');
+}
+
+export function photosRequestAuthorization(): Promise<ApplePhotosAuthorization> {
+    return invoke<ApplePhotosAuthorization>('photos_request_authorization');
+}
+
+export function photosListAlbums(offset = 0, limit = 100): Promise<ApplePhotosAlbumPage> {
+    return invoke<ApplePhotosAlbumPage>('photos_list_albums', { offset, limit });
+}
+
+export function photosListAssets(
+    albumId: string | null,
+    offset = 0,
+    limit = 100,
+): Promise<ApplePhotosAssetPage> {
+    return invoke<ApplePhotosAssetPage>('photos_list_assets', { albumId, offset, limit });
+}
+
 function emitSessionEventsRefresh() {
     if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('session-events-refresh'));

@@ -6,38 +6,31 @@ impl CullMcp {
         description = "Find visually similar images using CLIP embeddings. Requires embeddings to be generated first."
     )]
     fn find_similar(&self, Parameters(params): Parameters<FindSimilarParams>) -> String {
-        match self.check_image_id_scope(&params.image_id) {
+        let image_id = match ai_service::validated_find_similar_image_id(&params) {
+            Ok(image_id) => image_id,
+            Err(error) => return format!("Error: {error}"),
+        };
+        match self.check_image_id_scope(image_id) {
             Ok(false) => return "Error: Access denied — image outside token scope".to_string(),
             Err(e) => return format!("Error: {}", e),
             _ => {}
         }
         let state = self.app_handle.state::<AppState>();
-        let top_k = clamp_limit(params.limit.unwrap_or(10)) as usize;
-        let model_id = params.model.as_deref().unwrap_or("clip-vit-b32");
-        if crate::db_core::embeddings::embedding_model_spec(model_id).is_none() {
-            return format!("Error: Unsupported embedding model '{}'", model_id);
-        }
-
-        let query = match state.db.get_embedding_vector(&params.image_id, model_id) {
-            Ok(Some(vector)) => vector,
-            Err(e) => return format!("Error: {}", e),
-            Ok(None) => {
-                return format!(
-                    "Error: Image '{}' has no '{}' embedding. Run generate_embeddings first.",
-                    params.image_id, model_id
+        let result = match self.token_scope() {
+            Some(scope) => {
+                let (folders, collections, tag_norms) = Self::scope_dimensions(&scope);
+                ai_service::find_similar_in_token_scope_database(
+                    &state.db,
+                    &params,
+                    &folders,
+                    &collections,
+                    &tag_norms,
                 )
             }
+            None => ai_service::find_similar_in_database(&state.db, &params),
         };
-        match state.db.find_similar(&query, model_id, top_k * 2) {
-            Ok(results) => {
-                let r: Vec<serde_json::Value> = results
-                .iter()
-                .filter(|(id, _)| self.check_image_id_scope(id).unwrap_or(false))
-                .take(top_k)
-                .map(|(id, score)| serde_json::json!({"image_id": id, "similarity": score, "model": model_id}))
-                .collect();
-                serde_json::to_string(&r).unwrap_or_else(|_| "[]".to_string())
-            }
+        match result {
+            Ok(results) => serde_json::to_string(&results).unwrap_or_else(|_| "[]".to_string()),
             Err(e) => format!("Error: {}", e),
         }
     }
