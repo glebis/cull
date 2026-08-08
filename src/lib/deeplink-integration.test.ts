@@ -345,7 +345,10 @@ describe('handleParams', () => {
     });
 
     it('imports multiple paths', async () => {
-        const fakeImages = [{ path: '/a.jpg' }, { path: '/b.jpg' }];
+        const fakeImages = [
+            { image: { id: '1' }, path: '/a.jpg' },
+            { image: { id: '2' }, path: '/b.jpg' },
+        ];
         vi.mocked(importFiles).mockResolvedValue({ imported: 2, skipped: 0, image_ids: ['1', '2'], batch_id: 'b1' } as never);
         vi.mocked(getBatchImages).mockResolvedValue(fakeImages as never);
 
