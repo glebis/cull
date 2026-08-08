@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 
@@ -176,6 +177,32 @@ describe('native menu bridge', () => {
 
         expect(get(commandPaletteOpen)).toBe(true);
         expect(get(commandPaletteMode)).toBe('commands');
+    });
+
+    it('routes the native Trash action through the shared confirmation request', async () => {
+        let menuHandler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, handler) => {
+            menuHandler = handler as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+        const requestListener = vi.fn();
+        window.addEventListener('trash-images-requested', requestListener);
+        const [{ initMenu }, stores] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+        stores.images.set([makeImage('img-1'), makeImage('img-2')]);
+        stores.focusedIndex.set(0);
+        stores.selectedIds.set(new Set(['img-1', 'img-2']));
+
+        await initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        menuHandler?.({ payload: 'image_trash' });
+
+        expect(requestListener).toHaveBeenCalledTimes(1);
+        expect((requestListener.mock.calls[0][0] as CustomEvent).detail).toEqual({
+            imageIds: ['img-1', 'img-2'],
+        });
+        window.removeEventListener('trash-images-requested', requestListener);
     });
 
     it('imports the selected folder from the native Import Folder menu action', async () => {

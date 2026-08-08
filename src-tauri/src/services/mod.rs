@@ -25,6 +25,7 @@ pub mod model_pipeline;
 pub mod ocr;
 pub mod sessions;
 pub mod tokens;
+pub mod trash;
 pub mod undo;
 
 use crate::db_core::db::Database;
