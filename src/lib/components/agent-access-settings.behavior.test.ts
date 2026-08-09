@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
+import { get } from 'svelte/store';
 import AgentAccessSettings from './AgentAccessSettings.svelte';
 import { createMcpToken, getAppSetting, listMcpTokens, setAppSetting } from '$lib/api';
+import { agentSkillsOpen } from '$lib/stores';
 
 vi.mock('$lib/api', () => ({
     createMcpToken: vi.fn(),
@@ -24,6 +26,7 @@ beforeEach(() => {
         return null;
     });
     vi.mocked(setAppSetting).mockResolvedValue(undefined);
+    agentSkillsOpen.set(false);
 });
 
 async function renderedPortInput(): Promise<HTMLInputElement> {
@@ -164,5 +167,13 @@ describe('Agent Access installation and token accessibility', () => {
 
         expect(await screen.findByText(/Start with the Cull skill and CLI; MCP is not required\./)).toBeVisible();
         expect(screen.getByText(/After installation, start a new agent turn or session if the skill is not discovered immediately\./)).toBeVisible();
+    });
+
+    it('cross-links to the Agent Skills guide', async () => {
+        const user = userEvent.setup();
+        render(AgentAccessSettings);
+
+        await user.click(await screen.findByRole('button', { name: 'Open Agent Skills guide' }));
+        expect(get(agentSkillsOpen)).toBe(true);
     });
 });

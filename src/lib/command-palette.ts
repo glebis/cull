@@ -8,6 +8,7 @@ import {
     activeSmartCollection,
     agentPanelPinned,
     agentPanelVisible,
+    agentSkillsOpen,
     agentVisualLevel,
     collectMode,
     collectModeTarget,
@@ -779,6 +780,15 @@ function commandItems(): CommandPaletteItem[] {
             kind: 'command',
             keywords: ['fullscreen', 'focus', 'immersive'],
             run: () => zenMode.update(value => !value),
+        },
+        {
+            id: 'agent.install-skills',
+            title: 'Install Agent Skills',
+            subtitle: 'Open the Cull skill and agent setup guide',
+            category: 'Agent',
+            kind: 'command',
+            keywords: ['agent', 'skill', 'install', 'setup', 'onboarding', 'mcp', 'claude', 'codex'],
+            run: () => agentSkillsOpen.set(true),
         },
         {
             id: 'agent.toggle-panel',

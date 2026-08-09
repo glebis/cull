@@ -32,6 +32,7 @@ import {
     activeSmartCollection,
     agentPanelPinned,
     agentPanelVisible,
+    agentSkillsOpen,
     agentVisualLevel,
     collectMode,
     collectModeTarget,
@@ -369,6 +370,20 @@ describe('command palette helpers', () => {
         items.find(i => i.id === 'agent.toggle-panel')?.run();
         expect(get(agentPanelVisible)).toBe(true);
         expect(get(agentPanelPinned)).toBe(true);
+    });
+
+    it('opens the Agent Skills guide from the command palette', () => {
+        resetCommandContext();
+        agentSkillsOpen.set(false);
+        const command = getCommandPaletteItems('commands')
+            .find(item => item.id === 'agent.install-skills');
+
+        expect(command).toMatchObject({
+            title: 'Install Agent Skills',
+            category: 'Agent',
+        });
+        command?.run();
+        expect(get(agentSkillsOpen)).toBe(true);
     });
 
     it('shows Publish View as a command only when a plugin registers the publish tab', () => {
