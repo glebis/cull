@@ -99,7 +99,7 @@ describe('impeccable audit UI contracts', () => {
     });
 
     it('clarifies destructive, privacy-sensitive, and publishing copy', () => {
-        expect(sidebar).toContain('Remove folder from library');
+        expect(sidebar).toContain('Remove Folder from Library');
         // Model setup must not imply an in-app auto-download (bd imageview-dkz.19
         // replaced the 'Install model manually' dead-end with a setup-guide link).
         expect(aiSettings).toContain('setup guide');

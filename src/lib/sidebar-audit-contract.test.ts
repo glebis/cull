@@ -41,7 +41,7 @@ describe('sidebar audit fixes contract', () => {
 
     it('keeps folder removal available from the keyboard tree', () => {
         expect(sidebar).toContain("case 'Delete':");
-        expect(sidebar).toContain('handleDeleteFolder(event, row.fullPath)');
+        expect(sidebar).toContain('handleDeleteFolder(row.fullPath)');
         expect(sidebar).toContain("aria-keyshortcuts={folder.isGroup ? undefined : 'Delete'}");
     });
 

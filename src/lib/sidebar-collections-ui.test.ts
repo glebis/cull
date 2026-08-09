@@ -20,9 +20,8 @@ describe('collections sidebar UI contract', () => {
         expect(sidebar).toContain('collection-preview-popover');
         expect(sidebar).toContain('setTimeout(async () =>');
         expect(sidebar).toContain('}, 1000)');
-        expect(sidebar).toContain('collection-context-menu');
-        expect(sidebar).toContain('Rename...');
-        expect(sidebar).toContain('Export to Folder...');
-        expect(sidebar).toContain('Use for Collect Mode');
+        expect(sidebar).toContain('<ActionMenu');
+        expect(sidebar).toContain('buildCollectionContextActions');
+        expect(sidebar).toContain('oncontextmenu={(e) => openCollectionContextMenu(e, id, name, count)}');
     });
 });

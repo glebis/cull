@@ -3,11 +3,12 @@
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen } from '$lib/stores';
-    import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, renameFolder as apiRenameFolder, listCollections, createCollection, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, countByDetectedClass, listDetectedClasses, regenerateThumbnails, rescanSources, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
+    import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, renameFolder as apiRenameFolder, listCollections, createCollection, createCollectionWithImages, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, updateSmartCollectionApi, deleteSmartCollectionApi, countByDetectedClass, listDetectedClasses, regenerateThumbnails, rescanSources, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
-    import type { ClipboardMonitorStatus, ClipboardPublishResult, ImageWithFile, SmartCollection } from '$lib/api';
+    import type { ClipboardMonitorStatus, ClipboardPublishResult, FilterNode, ImageWithFile, SmartCollection } from '$lib/api';
     import { applyClipboardMonitorCollection } from '$lib/clipboard-monitor';
     import { safeAssetPreviewPath } from '$lib/view-utils';
+    import { revealItemInDir } from '@tauri-apps/plugin-opener';
     import { onDestroy, onMount } from 'svelte';
     import { get } from 'svelte/store';
 
@@ -38,20 +39,13 @@
         x: number;
         y: number;
     } | null>(null);
-    let collectionContextMenu = $state<{
-        collectionId: string;
-        name: string;
-        count: number;
-        x: number;
-        y: number;
-    } | null>(null);
-    let folderContextMenu = $state<{
-        path: string;
-        name: string;
-        isGroup: boolean;
-        x: number;
-        y: number;
-    } | null>(null);
+    type SidebarContextTarget =
+        | { kind: 'folder'; folder: string; name: string; renamable: boolean; removable: boolean; x: number; y: number; opener: HTMLElement | null }
+        | { kind: 'collection'; collectionId: string; name: string; count: number; x: number; y: number; opener: HTMLElement | null }
+        | { kind: 'smart'; collection: SmartCollection; x: number; y: number; opener: HTMLElement | null };
+    let sidebarContextMenu = $state<SidebarContextTarget | null>(null);
+    let smartCollectionEditor = $state<SmartCollection | null>(null);
+    let smartCollectionDraft = $state<FilterNode | null>(null);
     let collectionPreviewTimer: ReturnType<typeof setTimeout> | null = null;
     let collectionPreviewRequest = 0;
     let browseCountsRequest = 0;
@@ -77,6 +71,10 @@
     import { createCanvas, type Canvas } from '$lib/api';
     import { reconcileRenamedCanvas, reconcileRenamedSession, renamedFolderPath } from '$lib/folder-rename-state';
     import { withCanvasPathMigrationBarrier } from '$lib/canvas-save-coordinator';
+    import ActionMenu from './ActionMenu.svelte';
+    import ModalDialog from './ModalDialog.svelte';
+    import RuleBuilder from './RuleBuilder.svelte';
+    import { buildCollectionContextActions, buildFolderContextActions, buildSmartCollectionContextActions } from '$lib/sidebar-context-actions';
 
     // "All Images" is only the active scope when nothing else narrows it —
     // including a detected-class filter, which used to leave both All Images
@@ -160,6 +158,21 @@
         const i = Math.min(treeFocusIndex, rows.length - 1);
         const row = rows[i];
 
+        if (isContextMenuKey(event)) {
+            const treeItem = event.target instanceof HTMLElement
+                ? event.target.closest<HTMLElement>('[data-tree-row]')
+                : null;
+            openFolderContextMenu(
+                event,
+                row.fullPath,
+                row.name,
+                row.fullPath !== '/',
+                !row.isGroup && row.fullPath !== '/',
+                treeItem,
+            );
+            return;
+        }
+
         switch (event.key) {
             case 'Enter':
             case ' ':
@@ -209,7 +222,7 @@
             case 'Delete':
                 if (!row.isGroup) {
                     event.preventDefault();
-                    void handleDeleteFolder(event, row.fullPath);
+                    void handleDeleteFolder(row.fullPath);
                 }
                 break;
         }
@@ -221,11 +234,12 @@
         isSectionCollapsed($sidebarSectionsCollapsed, 'clipboard') && !clipboardStatus?.running
     );
 
-    // Smart collections seed ~22 presets. Hiding the empty ones keeps the list
-    // proportional to the library instead of to the seed table.
+    // Smart collections seed ~22 presets. Hide empty built-ins to keep the list
+    // proportional to the library, but retain user collections so their rules
+    // can still be edited when they currently match nothing.
     let visibleSmartCollections = $derived(
         $smartCollections.filter(sc =>
-            (sc.image_count ?? 0) > 0 &&
+            ((sc.image_count ?? 0) > 0 || !sc.is_preset) &&
             sc.id !== recentImportsCollection?.id &&
             matchesSidebarFilter(sc.name, $sidebarFilter)
         )
@@ -277,39 +291,54 @@
         }
     }
 
-    function openCollectionContextMenu(event: MouseEvent, collectionId: string, name: string, count: number) {
+    function contextPoint(event: MouseEvent | KeyboardEvent, anchor?: HTMLElement | null): { x: number; y: number } {
+        if (event instanceof MouseEvent && event.type === 'contextmenu') {
+            return { x: event.clientX, y: event.clientY };
+        }
+        const target = anchor ?? event.currentTarget as HTMLElement | null;
+        const rect = target?.getBoundingClientRect();
+        return rect
+            ? { x: rect.left + Math.min(32, rect.width / 2), y: rect.top + Math.min(24, rect.height) }
+            : { x: 16, y: 16 };
+    }
+
+    function isContextMenuKey(event: KeyboardEvent): boolean {
+        return event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10');
+    }
+
+    function openCollectionContextMenu(event: MouseEvent | KeyboardEvent, collectionId: string, name: string, count: number) {
         event.preventDefault();
         event.stopPropagation();
         hideCollectionPreview(collectionId);
-        folderContextMenu = null;
-        collectionContextMenu = {
-            collectionId,
-            name,
-            count,
-            x: Math.min(event.clientX, window.innerWidth - 208),
-            y: Math.min(event.clientY, window.innerHeight - 224),
+        sidebarContextMenu = {
+            kind: 'collection', collectionId, name, count,
+            ...contextPoint(event),
+            opener: event.currentTarget as HTMLElement | null,
         };
     }
 
-    function closeCollectionContextMenu() {
-        collectionContextMenu = null;
-    }
-
-    function openFolderContextMenu(event: MouseEvent, path: string, name: string, isGroup: boolean) {
+    function openFolderContextMenu(event: MouseEvent | KeyboardEvent, folder: string, name: string, renamable: boolean, removable: boolean, anchor?: HTMLElement | null) {
         event.preventDefault();
         event.stopPropagation();
-        closeCollectionContextMenu();
-        folderContextMenu = {
-            path,
-            name,
-            isGroup,
-            x: Math.min(event.clientX, window.innerWidth - 208),
-            y: Math.min(event.clientY, window.innerHeight - 128),
+        sidebarContextMenu = {
+            kind: 'folder', folder, name, renamable, removable,
+            ...contextPoint(event, anchor),
+            opener: anchor ?? event.currentTarget as HTMLElement | null,
         };
     }
 
-    function closeFolderContextMenu() {
-        folderContextMenu = null;
+    function openSmartCollectionContextMenu(event: MouseEvent | KeyboardEvent, collection: SmartCollection) {
+        event.preventDefault();
+        event.stopPropagation();
+        sidebarContextMenu = {
+            kind: 'smart', collection,
+            ...contextPoint(event),
+            opener: event.currentTarget as HTMLElement | null,
+        };
+    }
+
+    function closeSidebarContextMenu() {
+        sidebarContextMenu = null;
     }
 
     onDestroy(() => {
@@ -406,7 +435,7 @@
     }
 
     async function handleRenameCollection(collectionId: string, currentName: string) {
-        closeCollectionContextMenu();
+        closeSidebarContextMenu();
         const name = await requestTextInput({
             title: 'Rename Collection',
             label: 'Collection name',
@@ -426,13 +455,68 @@
     }
 
     async function handleExportCollection(collectionId: string) {
-        closeCollectionContextMenu();
+        closeSidebarContextMenu();
         await selectCollection(collectionId);
         exportFolderOpen.set(true);
     }
 
+    async function listAllCollectionImageIds(collectionId: string): Promise<string[]> {
+        const pageSize = 500;
+        const ids: string[] = [];
+        for (let offset = 0; ; offset += pageSize) {
+            const page = await listCollectionImages(collectionId, pageSize, offset, true);
+            ids.push(...page.map(item => item.image.id));
+            if (page.length < pageSize) break;
+        }
+        return [...new Set(ids)];
+    }
+
+    async function duplicateCollection(collectionId: string, currentName: string) {
+        const name = await requestTextInput({
+            title: 'Duplicate Collection',
+            label: 'New collection name',
+            initialValue: `${currentName} Copy`,
+            confirmLabel: 'Duplicate',
+        });
+        if (!name?.trim()) return;
+        let ids: string[];
+        try {
+            ids = await listAllCollectionImageIds(collectionId);
+            await createCollectionWithImages(name.trim(), ids);
+        } catch (e) {
+            showToast('Could not duplicate collection', { detail: String(e), type: 'error', duration: 10000 });
+            return;
+        }
+        showToast(`Duplicated “${currentName}”`, {
+            detail: `${ids.length} image${ids.length === 1 ? '' : 's'}`,
+            type: 'success',
+        });
+        try {
+            collections.set(await listCollections($showRejected));
+        } catch (e) {
+            showToast('Collection duplicated, but the sidebar could not refresh', {
+                detail: String(e), type: 'warning', duration: 10000,
+            });
+        }
+    }
+
+    async function publishCollection(collectionId: string) {
+        try {
+            const result = await publishClipboardCollection(collectionId);
+            clipboardPublishResult = result;
+            try {
+                await navigator.clipboard.writeText(result.url);
+                showToast('Collection published; link copied', { detail: result.url, type: 'success', duration: 10000 });
+            } catch (e) {
+                showToast('Collection published', { detail: `${result.url} · Copy failed: ${e}`, type: 'warning', duration: 10000 });
+            }
+        } catch (e) {
+            showToast('Could not publish collection', { detail: String(e), type: 'error', duration: 10000 });
+        }
+    }
+
     async function copyCollectionId(collectionId: string) {
-        closeCollectionContextMenu();
+        closeSidebarContextMenu();
         try {
             await navigator.clipboard.writeText(collectionId);
             showToast('Collection ID copied', { type: 'success', duration: 2500 });
@@ -442,7 +526,7 @@
     }
 
     function setCollectTarget(collectionId: string, name: string) {
-        closeCollectionContextMenu();
+        closeSidebarContextMenu();
         collectMode.set(true);
         collectModeTarget.set(collectionId);
         showToast('Collect mode enabled', { detail: name, type: 'info', duration: 5000 });
@@ -513,9 +597,8 @@
         }
     }
 
-    async function handleDeleteCollection(event: Event, collectionId: string, collectionName: string) {
-        event.stopPropagation();
-        closeCollectionContextMenu();
+    async function handleDeleteCollection(collectionId: string, collectionName: string) {
+        closeSidebarContextMenu();
         const confirmed = await requestConfirm({
             title: 'Delete Collection',
             description: `Delete collection "${collectionName}"? Images stay in the library.`,
@@ -543,8 +626,8 @@
         }
     }
 
-    async function handleDeleteFolder(event: Event, folder: string) {
-        event.stopPropagation();
+    async function handleDeleteFolder(folder: string) {
+        closeSidebarContextMenu();
         const name = folderName(folder);
         const confirmed = await requestConfirm({
             title: 'Remove Folder from Library',
@@ -566,7 +649,7 @@
     }
 
     async function handleRenameFolder(folder: string, currentName: string) {
-        closeFolderContextMenu();
+        closeSidebarContextMenu();
         const name = await requestTextInput({
             title: 'Rename Folder',
             label: 'Folder name',
@@ -600,6 +683,116 @@
         } catch (e) {
             console.error('Failed to rename folder:', e);
             showToast('Failed to rename folder', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    async function revealFolder(folder: string) {
+        try {
+            await revealItemInDir(folder);
+        } catch (e) {
+            showToast('Could not reveal folder in Finder', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    async function rescanFolder(folder: string) {
+        if (importing) return;
+        importing = true;
+        importCurrent = 0;
+        importTotal = 0;
+        try {
+            const result = await apiImportFolder(folder);
+            const summary = `Rescanned “${folderName(folder)}”: ${result.imported} imported, ${result.skipped} unchanged`;
+            setLastResult(result.errors.length > 0 ? `${summary}, ${result.errors.length} errors` : summary, result.errors.length > 0 ? 'error' : 'success');
+            await refreshImages();
+        } catch (e) {
+            setLastResult(`Rescan failed: ${e}`, 'error');
+        } finally {
+            importing = false;
+        }
+    }
+
+    async function beginEditSmartCollection(id: string) {
+        const collection = get(smartCollections).find(item => item.id === id);
+        if (!collection?.filter_json || collection.is_preset) return;
+        try {
+            smartCollectionDraft = JSON.parse(collection.filter_json) as FilterNode;
+            smartCollectionEditor = collection;
+        } catch (e) {
+            showToast('Smart collection rules could not be opened', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    function closeSmartCollectionEditor() {
+        smartCollectionEditor = null;
+        smartCollectionDraft = null;
+    }
+
+    async function saveSmartCollectionRules() {
+        const collection = smartCollectionEditor;
+        const draft = smartCollectionDraft;
+        if (!collection || !draft) return;
+        try {
+            await updateSmartCollectionApi(
+                collection.id,
+                collection.name,
+                JSON.stringify(draft),
+                collection.nl_query ?? undefined,
+            );
+        } catch (e) {
+            showToast('Could not update smart collection', { detail: String(e), type: 'error', duration: 10000 });
+            return;
+        }
+        closeSmartCollectionEditor();
+        try {
+            const updated = await listSmartCollections($showRejected);
+            smartCollections.set(updated);
+            const nextActive = updated.find(item => item.id === collection.id) ?? null;
+            if (get(activeSmartCollection)?.id === collection.id && nextActive) {
+                activeSmartCollection.set(nextActive);
+                await loadImagesForCurrentScope({ force: true, invalidateCache: true });
+            }
+            showToast('Smart collection rules updated', { type: 'success' });
+        } catch (e) {
+            showToast('Smart collection updated, but the view could not refresh', {
+                detail: String(e), type: 'warning', duration: 10000,
+            });
+        }
+    }
+
+    async function deleteSmartCollection(id: string, name: string) {
+        const confirmed = await requestConfirm({
+            title: 'Delete Smart Collection',
+            description: `Delete smart collection “${name}”? Images stay in the library.`,
+            confirmLabel: 'Delete',
+            danger: true,
+        });
+        if (!confirmed) return;
+        try {
+            await deleteSmartCollectionApi(id);
+        } catch (e) {
+            showToast('Could not delete smart collection', { detail: String(e), type: 'error', duration: 10000 });
+            return;
+        }
+        const refreshErrors: string[] = [];
+        if (get(activeSmartCollection)?.id === id) {
+            activeSmartCollection.set(null);
+            try {
+                await loadImagesForCurrentScope({ force: true, invalidateCache: true });
+            } catch (e) {
+                refreshErrors.push(String(e));
+            }
+        }
+        try {
+            smartCollections.set(await listSmartCollections($showRejected));
+        } catch (e) {
+            refreshErrors.push(String(e));
+        }
+        if (refreshErrors.length === 0) {
+            showToast('Smart collection deleted', { type: 'success' });
+        } else {
+            showToast('Smart collection deleted, but the view could not refresh', {
+                detail: refreshErrors.join(' · '), type: 'warning', duration: 10000,
+            });
         }
     }
 
@@ -829,12 +1022,54 @@
             folders.set(f);
         } catch (_) {}
     }
-</script>
 
-<svelte:window
-    onclick={() => { closeCollectionContextMenu(); closeFolderContextMenu(); }}
-    onkeydown={(e) => { if (e.key === 'Escape') { closeCollectionContextMenu(); closeFolderContextMenu(); hideCollectionPreview(); } }}
-/>
+    let sidebarContextItems = $derived.by(() => {
+        const target = sidebarContextMenu;
+        if (!target) return [];
+        if (target.kind === 'folder') {
+            return buildFolderContextActions({
+                folder: target.folder,
+                name: folderName(target.folder),
+                renamable: target.renamable,
+                removable: target.removable,
+                onOpen: selectFolder,
+                onReveal: revealFolder,
+                onRename: handleRenameFolder,
+                onRescan: rescanFolder,
+                onRemove: handleDeleteFolder,
+            });
+        }
+        if (target.kind === 'collection') {
+            return buildCollectionContextActions({
+                collectionId: target.collectionId,
+                name: target.name,
+                count: target.count,
+                pinned: $pinnedCollections.includes(target.collectionId),
+                onOpen: selectCollection,
+                onRename: handleRenameCollection,
+                onDuplicate: duplicateCollection,
+                onExport: handleExportCollection,
+                onPublish: publishCollection,
+                onCollect: setCollectTarget,
+                onTogglePin: togglePinnedCollection,
+                onCopyId: copyCollectionId,
+                onDelete: handleDeleteCollection,
+            });
+        }
+        const collection = target.collection;
+        return buildSmartCollectionContextActions({
+            id: collection.id,
+            name: collection.name,
+            isPreset: collection.is_preset,
+            onOpen: async (id) => {
+                const next = get(smartCollections).find(item => item.id === id);
+                if (next) await selectSmartCollection(next);
+            },
+            onEdit: beginEditSmartCollection,
+            onDelete: deleteSmartCollection,
+        });
+    });
+</script>
 
 <aside class="sidebar" aria-label="Library sidebar">
     <div class="sidebar-scroll">
@@ -939,7 +1174,7 @@
                         data-tree-row={i}
                         tabindex={i === treeTabIndex ? 0 : -1}
                         onfocusin={() => treeFocusIndex = i}
-                        oncontextmenu={(e) => openFolderContextMenu(e, folder.fullPath, folder.name, folder.isGroup)}
+                        oncontextmenu={(e) => openFolderContextMenu(e, folder.fullPath, folder.name, folder.fullPath !== '/', !folder.isGroup && folder.fullPath !== '/')}
                     >
                         {#if folder.hasChildren}
                             <button
@@ -969,15 +1204,14 @@
                                     : `${folder.count} directly in this folder, ${folder.subtreeCount} including subfolders`}
                             >{formatFolderCount(folder.count, folder.subtreeCount)}</span>
                         </button>
-                        {#if !folder.isGroup}
-                            <button
-                                class="delete-btn"
-                                tabindex="-1"
-                                onclick={(e: Event) => handleDeleteFolder(e, folder.fullPath)}
-                                title="Remove folder from library"
-                                aria-label={`Remove folder from library: ${folder.name}`}
-                            >&times;</button>
-                        {/if}
+                        <button
+                            class="menu-btn"
+                            tabindex="-1"
+                            onclick={(event) => openFolderContextMenu(event, folder.fullPath, folder.name, folder.fullPath !== '/', !folder.isGroup && folder.fullPath !== '/')}
+                            title="Folder actions"
+                            aria-label={`Folder actions: ${folder.name}`}
+                            aria-haspopup="menu"
+                        >…</button>
                     </div>
                 {/each}
                 {#if visibleFolders.length === 0}
@@ -1016,6 +1250,7 @@
                     <button
                         class="section-item"
                         onclick={() => selectCollection(id)}
+                        onkeydown={(event) => { if (isContextMenuKey(event)) openCollectionContextMenu(event, id, name, count); }}
                         aria-current={$activeCollection === id ? 'true' : undefined}
                     >
                         <span class="icon">&#9671;</span>
@@ -1033,11 +1268,12 @@
                         <span class="generated-pin" aria-hidden="true"></span>
                     </button>
                     <button
-                        class="delete-btn"
-                        onclick={(e: Event) => handleDeleteCollection(e, id, name)}
-                        title="Delete collection"
-                        aria-label={`Delete collection: ${name}`}
-                    >&times;</button>
+                        class="menu-btn"
+                        onclick={(event) => openCollectionContextMenu(event, id, name, count)}
+                        title="Collection actions"
+                        aria-label={`Collection actions: ${name}`}
+                        aria-haspopup="menu"
+                    >…</button>
                 </div>
             {/each}
         {/if}
@@ -1060,6 +1296,8 @@
                 <button class="section-item"
                     class:active={$activeSmartCollection?.id === sc.id}
                     onclick={() => selectSmartCollection(sc)}
+                    oncontextmenu={(event) => openSmartCollectionContextMenu(event, sc)}
+                    onkeydown={(event) => { if (isContextMenuKey(event)) openSmartCollectionContextMenu(event, sc); }}
                     aria-current={$activeSmartCollection?.id === sc.id ? 'true' : undefined}>
                     <span class="icon">&#9733;</span>
                     <span class="item-label">{sc.name}</span>
@@ -1201,40 +1439,21 @@
         </div>
     {/if}
 
-    {#if collectionContextMenu}
-        <div
-            class="collection-context-menu"
-            style="left: {collectionContextMenu.x}px; top: {collectionContextMenu.y}px;"
-            role="menu"
-            tabindex="-1"
-        >
-            <div class="context-menu-header">{collectionContextMenu.name}</div>
-            <button type="button" role="menuitem" onclick={() => { selectCollection(collectionContextMenu!.collectionId); closeCollectionContextMenu(); }}>Open Collection</button>
-            <button type="button" role="menuitem" onclick={() => handleRenameCollection(collectionContextMenu!.collectionId, collectionContextMenu!.name)}>Rename...</button>
-            <button type="button" role="menuitem" onclick={() => handleExportCollection(collectionContextMenu!.collectionId)} disabled={collectionContextMenu.count === 0}>Export to Folder...</button>
-            <button type="button" role="menuitem" onclick={() => setCollectTarget(collectionContextMenu!.collectionId, collectionContextMenu!.name)}>Use for Collect Mode</button>
-            <button type="button" role="menuitem" onclick={() => togglePinnedCollection(collectionContextMenu!.collectionId)}>
-                {$pinnedCollections.includes(collectionContextMenu.collectionId) ? 'Unpin Collection' : 'Pin Collection'}
-            </button>
-            <button type="button" role="menuitem" onclick={() => copyCollectionId(collectionContextMenu!.collectionId)}>Copy Collection ID</button>
-            <button type="button" role="menuitem" class="danger" onclick={(e) => handleDeleteCollection(e, collectionContextMenu!.collectionId, collectionContextMenu!.name)}>Delete Collection...</button>
-        </div>
-    {/if}
-
-    {#if folderContextMenu}
-        <div
-            class="collection-context-menu folder-context-menu"
-            style="left: {folderContextMenu.x}px; top: {folderContextMenu.y}px;"
-            role="menu"
-            tabindex="-1"
-        >
-            <div class="context-menu-header">{folderContextMenu.name}</div>
-            <button type="button" role="menuitem" onclick={() => { selectFolder(folderContextMenu!.path); closeFolderContextMenu(); }}>Open Folder</button>
-            <button type="button" role="menuitem" onclick={() => handleRenameFolder(folderContextMenu!.path, folderName(folderContextMenu!.path))}>Rename...</button>
-            {#if !folderContextMenu.isGroup}
-                <button type="button" role="menuitem" class="danger" onclick={(e) => { const path = folderContextMenu!.path; closeFolderContextMenu(); handleDeleteFolder(e, path); }}>Remove from Library...</button>
-            {/if}
-        </div>
+    {#if sidebarContextMenu}
+        {#key sidebarContextMenu.kind === 'folder'
+            ? `folder:${sidebarContextMenu.folder}`
+            : sidebarContextMenu.kind === 'collection'
+                ? `collection:${sidebarContextMenu.collectionId}`
+                : `smart:${sidebarContextMenu.collection.id}`}
+            <ActionMenu
+                title={sidebarContextMenu.kind === 'smart' ? sidebarContextMenu.collection.name : sidebarContextMenu.name}
+                x={sidebarContextMenu.x}
+                y={sidebarContextMenu.y}
+                items={sidebarContextItems}
+                opener={sidebarContextMenu.opener}
+                onclose={closeSidebarContextMenu}
+            />
+        {/key}
     {/if}
 
     <div class="sidebar-footer" aria-live="polite" aria-busy={importing || regenerating || rescanning}>
@@ -1277,6 +1496,27 @@
         </div>
     </div>
 </aside>
+
+{#if smartCollectionEditor && smartCollectionDraft}
+    <ModalDialog
+        titleId="smart-collection-editor-title"
+        descriptionId="smart-collection-editor-description"
+        onclose={closeSmartCollectionEditor}
+    >
+        <div class="smart-editor-dialog">
+            <h2 id="smart-collection-editor-title">Edit {smartCollectionEditor.name}</h2>
+            <p id="smart-collection-editor-description">Adjust the rules that decide which images appear in this smart collection.</p>
+            <RuleBuilder
+                filter={smartCollectionDraft}
+                onchange={(next) => smartCollectionDraft = next}
+            />
+            <div class="smart-editor-actions">
+                <button type="button" onclick={closeSmartCollectionEditor}>Cancel</button>
+                <button type="button" class="primary" data-modal-initial-focus onclick={saveSmartCollectionRules}>Save Rules</button>
+            </div>
+        </div>
+    </ModalDialog>
+{/if}
 
 <style>
     .sidebar {
@@ -1472,33 +1712,6 @@
     .folder-row .section-item {
         flex: 1;
         min-width: 0;
-    }
-    .delete-btn {
-        align-items: center;
-        display: inline-flex;
-        height: 24px;
-        justify-content: center;
-        margin-right: 4px;
-        font-size: 14px;
-        line-height: 1;
-        color: var(--text-secondary);
-        cursor: pointer;
-        flex-shrink: 0;
-        background: none;
-        border: none;
-        opacity: 0;
-        padding: 0;
-        pointer-events: none;
-        font-family: inherit;
-        width: 24px;
-    }
-    .folder-row:hover .delete-btn,
-    .folder-row:focus-within .delete-btn {
-        opacity: 1;
-        pointer-events: auto;
-    }
-    .delete-btn:hover {
-        color: var(--red);
     }
     .folders-toggle {
         font-size: 11px;
@@ -1813,46 +2026,68 @@
         object-fit: cover;
         width: 100%;
     }
-    .collection-context-menu {
+    .menu-btn {
+        align-items: center;
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        display: inline-flex;
+        flex-shrink: 0;
+        font: inherit;
+        font-size: 15px;
+        height: 24px;
+        justify-content: center;
+        line-height: 1;
+        margin-right: 4px;
+        opacity: 0;
+        padding: 0;
+        pointer-events: none;
+        width: 24px;
+    }
+    .folder-row:hover .menu-btn,
+    .folder-row:focus-within .menu-btn {
+        opacity: 1;
+        pointer-events: auto;
+    }
+    .menu-btn:hover,
+    .menu-btn:focus-visible {
+        color: var(--text);
+        outline: 1px solid var(--blue);
+    }
+    .smart-editor-dialog {
+        min-width: min(620px, 80vw);
+        padding: calc(var(--spacing) * 2);
+    }
+    .smart-editor-dialog h2 {
+        color: var(--text);
+        font-size: 16px;
+        margin: 0 0 var(--spacing);
+    }
+    .smart-editor-dialog p {
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.5;
+        margin: 0 0 calc(var(--spacing) * 2);
+    }
+    .smart-editor-actions {
+        display: flex;
+        gap: var(--spacing);
+        justify-content: flex-end;
+        margin-top: calc(var(--spacing) * 2);
+    }
+    .smart-editor-actions button {
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: var(--radius);
-        box-shadow: 0 12px 32px color-mix(in srgb, var(--bg) 80%, transparent);
-        display: grid;
-        min-width: 200px;
-        padding: 4px;
-        position: fixed;
-        z-index: var(--z-context-menu);
-    }
-    .context-menu-header {
-        color: var(--text-secondary);
-        font-size: 10px;
-        overflow: hidden;
-        padding: 6px 8px;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .collection-context-menu button {
-        background: none;
-        border: none;
-        border-radius: var(--radius);
         color: var(--text);
         cursor: pointer;
-        font-family: inherit;
-        font-size: 12px;
-        padding: 6px 8px;
-        text-align: left;
+        font: inherit;
+        padding: 7px 12px;
     }
-    .collection-context-menu button:hover:not(:disabled),
-    .collection-context-menu button:focus-visible {
-        background: var(--border);
-    }
-    .collection-context-menu button:disabled {
-        color: var(--text-secondary);
-        cursor: default;
-    }
-    .collection-context-menu button.danger {
-        color: var(--red);
+    .smart-editor-actions button.primary {
+        border-color: var(--blue);
+        color: var(--blue);
     }
     .sr-only {
         border: 0;

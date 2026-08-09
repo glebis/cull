@@ -13,6 +13,7 @@
     import { requestTrashImages } from '$lib/trash-actions';
     import { commandShortcutHints, eventMatchesShortcut } from '$lib/command-palette';
     import { copyImageWithToast } from '$lib/image-copy-action';
+    import { claimContextMenu } from '$lib/context-menu-coordinator';
 
     interface Props {
         image: ImageWithFile;
@@ -164,6 +165,7 @@
     });
 
     onMount(() => {
+        const releaseMenuClaim = claimContextMenu(onclose);
         function handleClickOutside(e: MouseEvent) {
             if (menuEl && !menuEl.contains(e.target as Node)) onclose();
         }
@@ -185,6 +187,7 @@
             window.addEventListener('resize', handleResize);
         });
         return () => {
+            releaseMenuClaim();
             window.removeEventListener('click', handleClickOutside);
             window.removeEventListener('contextmenu', handleClickOutside);
             window.removeEventListener('keydown', handleWindowKeydown, true);
