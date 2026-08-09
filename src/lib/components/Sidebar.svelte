@@ -42,7 +42,8 @@
     type SidebarContextTarget =
         | { kind: 'folder'; folder: string; name: string; renamable: boolean; removable: boolean; x: number; y: number; opener: HTMLElement | null }
         | { kind: 'collection'; collectionId: string; name: string; count: number; x: number; y: number; opener: HTMLElement | null }
-        | { kind: 'smart'; collection: SmartCollection; x: number; y: number; opener: HTMLElement | null };
+        | { kind: 'smart'; collection: SmartCollection; x: number; y: number; opener: HTMLElement | null }
+        | { kind: 'canvas'; canvas: Canvas; x: number; y: number; opener: HTMLElement | null };
     let sidebarContextMenu = $state<SidebarContextTarget | null>(null);
     let smartCollectionEditor = $state<SmartCollection | null>(null);
     let smartCollectionDraft = $state<FilterNode | null>(null);
@@ -68,13 +69,13 @@
     }
     import SessionSwitcher from './SessionSwitcher.svelte';
     import { activeCanvas, activeSession, navigateTo, sessions, sessionCanvases, expandedFolders, sidebarSectionsCollapsed, sidebarFilter } from '$lib/stores';
-    import { createCanvas, type Canvas } from '$lib/api';
+    import { createCanvas, deleteCanvas, addToCollection, listImagesByFolder, type Canvas } from '$lib/api';
     import { reconcileRenamedCanvas, reconcileRenamedSession, renamedFolderPath } from '$lib/folder-rename-state';
     import { withCanvasPathMigrationBarrier } from '$lib/canvas-save-coordinator';
     import ActionMenu from './ActionMenu.svelte';
     import ModalDialog from './ModalDialog.svelte';
     import RuleBuilder from './RuleBuilder.svelte';
-    import { buildCollectionContextActions, buildFolderContextActions, buildSmartCollectionContextActions } from '$lib/sidebar-context-actions';
+    import { buildCanvasContextActions, buildCollectionContextActions, buildFolderContextActions, buildSmartCollectionContextActions } from '$lib/sidebar-context-actions';
 
     // "All Images" is only the active scope when nothing else narrows it —
     // including a detected-class filter, which used to leave both All Images
@@ -332,6 +333,16 @@
         event.stopPropagation();
         sidebarContextMenu = {
             kind: 'smart', collection,
+            ...contextPoint(event),
+            opener: event.currentTarget as HTMLElement | null,
+        };
+    }
+
+    function openCanvasContextMenu(event: MouseEvent | KeyboardEvent, canvas: Canvas) {
+        event.preventDefault();
+        event.stopPropagation();
+        sidebarContextMenu = {
+            kind: 'canvas', canvas,
             ...contextPoint(event),
             opener: event.currentTarget as HTMLElement | null,
         };
@@ -1023,19 +1034,123 @@
         } catch (_) {}
     }
 
+    async function copyFolderPath(folder: string) {
+        try {
+            await navigator.clipboard.writeText(folder);
+            showToast('Folder path copied', { type: 'success', duration: 2500 });
+        } catch (e) {
+            showToast('Copy failed', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    async function listAllFolderImageIds(folder: string): Promise<string[]> {
+        const pageSize = 500;
+        const ids: string[] = [];
+        for (let offset = 0; ; offset += pageSize) {
+            const page = await listImagesByFolder(folder, pageSize, offset, $showRejected);
+            ids.push(...page.map(item => item.image.id));
+            if (page.length < pageSize) break;
+        }
+        return [...new Set(ids)];
+    }
+
+    async function addFolderToCollection(folder: string, collectionId: string) {
+        try {
+            const ids = await listAllFolderImageIds(folder);
+            if (ids.length === 0) {
+                showToast('Folder contains no images to add', { type: 'info', duration: 3500 });
+                return;
+            }
+            await addToCollection(collectionId, ids);
+            collections.set(await listCollections($showRejected));
+            const collectionName = get(collections).find(([id]) => id === collectionId)?.[1] ?? 'collection';
+            showToast(`Added ${ids.length} image${ids.length === 1 ? '' : 's'} to ${collectionName}`, { type: 'success' });
+        } catch (e) {
+            showToast('Could not add folder to collection', { detail: String(e), type: 'error', duration: 10000 });
+        }
+    }
+
+    async function createCollectionFromFolder(folder: string) {
+        const name = await requestTextInput({
+            title: 'New Collection from Folder',
+            label: 'Collection name',
+            initialValue: folderName(folder),
+            confirmLabel: 'Create and Add',
+        });
+        if (!name?.trim()) return;
+        let createdId: string | null = null;
+        try {
+            const ids = await listAllFolderImageIds(folder);
+            createdId = await createCollection(name.trim());
+            if (ids.length > 0) await addToCollection(createdId, ids);
+            collections.set(await listCollections($showRejected));
+            showToast(`Created collection “${name.trim()}”`, {
+                detail: `${ids.length} image${ids.length === 1 ? '' : 's'} added`,
+                type: 'success',
+            });
+        } catch (e) {
+            if (createdId) {
+                try { await deleteCollectionApi(createdId); } catch (_) { /* best-effort rollback */ }
+            }
+            showToast('Could not create collection from folder', { detail: String(e), type: 'error', duration: 10000 });
+        }
+    }
+
+    async function exportSmartCollection(id: string) {
+        const collection = get(smartCollections).find(item => item.id === id);
+        if (!collection) return;
+        await selectSmartCollection(collection);
+        exportFolderOpen.set(true);
+    }
+
+    async function deleteCanvasFromSidebar(canvasId: string, name: string) {
+        const confirmed = await requestConfirm({
+            title: 'Delete Canvas',
+            description: `Delete canvas “${name}”? Images and files stay in the session.`,
+            confirmLabel: 'Delete Canvas',
+            danger: true,
+        });
+        if (!confirmed) return;
+        try {
+            await deleteCanvas(canvasId);
+            sessionCanvases.update(items => items.filter(item => item.id !== canvasId));
+            if (get(activeCanvas)?.id === canvasId) {
+                activeCanvas.set(null);
+            }
+            showToast('Canvas deleted', { type: 'success' });
+        } catch (e) {
+            showToast('Could not delete canvas', { detail: String(e), type: 'error', duration: 10000 });
+        }
+    }
+
     let sidebarContextItems = $derived.by(() => {
         const target = sidebarContextMenu;
         if (!target) return [];
+        if (target.kind === 'canvas') {
+            return buildCanvasContextActions({
+                canvasId: target.canvas.id,
+                name: target.canvas.name,
+                onOpen: (id) => {
+                    const canvas = get(sessionCanvases).find(item => item.id === id);
+                    if (canvas) selectCanvas(canvas);
+                },
+                onDelete: deleteCanvasFromSidebar,
+            });
+        }
         if (target.kind === 'folder') {
             return buildFolderContextActions({
                 folder: target.folder,
                 name: folderName(target.folder),
                 renamable: target.renamable,
                 removable: target.removable,
+                collections: $collections,
                 onOpen: selectFolder,
                 onReveal: revealFolder,
                 onRename: handleRenameFolder,
                 onRescan: rescanFolder,
+                onAddToCollection: addFolderToCollection,
+                onCreateCollection: createCollectionFromFolder,
+                onCopyPath: copyFolderPath,
                 onRemove: handleDeleteFolder,
             });
         }
@@ -1060,12 +1175,14 @@
         return buildSmartCollectionContextActions({
             id: collection.id,
             name: collection.name,
+            count: collection.image_count ?? 0,
             isPreset: collection.is_preset,
             onOpen: async (id) => {
                 const next = get(smartCollections).find(item => item.id === id);
                 if (next) await selectSmartCollection(next);
             },
             onEdit: beginEditSmartCollection,
+            onExport: exportSmartCollection,
             onDelete: deleteSmartCollection,
         });
     });
@@ -1088,15 +1205,30 @@
                 }} aria-label="New canvas">+</button>
             </div>
             {#each $sessionCanvases as canvas}
-                <button
-                    class="section-item"
+                <div
+                    class="folder-row canvas-row"
                     class:active={$activeCanvas?.id === canvas.id}
-                    onclick={() => selectCanvas(canvas)}
-                    aria-current={$activeCanvas?.id === canvas.id ? 'true' : undefined}
+                    oncontextmenu={(event) => openCanvasContextMenu(event, canvas)}
+                    role="group"
+                    aria-label={`Canvas actions: ${canvas.name}`}
                 >
-                    <span class="item-label">{canvas.name}</span>
-                    <span class="count">{canvas.canvas_type}</span>
-                </button>
+                    <button
+                        class="section-item"
+                        onclick={() => selectCanvas(canvas)}
+                        onkeydown={(event) => { if (isContextMenuKey(event)) openCanvasContextMenu(event, canvas); }}
+                        aria-current={$activeCanvas?.id === canvas.id ? 'true' : undefined}
+                    >
+                        <span class="item-label">{canvas.name}</span>
+                        <span class="count">{canvas.canvas_type}</span>
+                    </button>
+                    <button
+                        class="menu-btn"
+                        onclick={(event) => openCanvasContextMenu(event, canvas)}
+                        title="Canvas actions"
+                        aria-label={`Canvas actions: ${canvas.name}`}
+                        aria-haspopup="menu"
+                    >…</button>
+                </div>
             {/each}
         </div>
     {/if}
@@ -1444,9 +1576,15 @@
             ? `folder:${sidebarContextMenu.folder}`
             : sidebarContextMenu.kind === 'collection'
                 ? `collection:${sidebarContextMenu.collectionId}`
-                : `smart:${sidebarContextMenu.collection.id}`}
+                : sidebarContextMenu.kind === 'canvas'
+                    ? `canvas:${sidebarContextMenu.canvas.id}`
+                    : `smart:${sidebarContextMenu.collection.id}`}
             <ActionMenu
-                title={sidebarContextMenu.kind === 'smart' ? sidebarContextMenu.collection.name : sidebarContextMenu.name}
+                title={sidebarContextMenu.kind === 'smart'
+                    ? sidebarContextMenu.collection.name
+                    : sidebarContextMenu.kind === 'canvas'
+                        ? sidebarContextMenu.canvas.name
+                        : sidebarContextMenu.name}
                 x={sidebarContextMenu.x}
                 y={sidebarContextMenu.y}
                 items={sidebarContextItems}
