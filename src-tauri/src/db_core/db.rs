@@ -1814,6 +1814,49 @@ mod tests {
     }
 
     #[test]
+    fn insert_image_rolls_back_when_media_asset_insert_fails() {
+        let db = test_db();
+        {
+            let conn = db.conn.lock();
+            conn.execute_batch(
+                "CREATE TRIGGER fail_media_asset_insert
+                 BEFORE INSERT ON media_assets
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced media asset failure');
+                 END;",
+            )
+            .unwrap();
+        }
+        let img = Image {
+            id: "image-rollback".to_string(),
+            sha256_hash: "hash-image-rollback".to_string(),
+            width: 16,
+            height: 16,
+            format: "png".to_string(),
+            file_size: 128,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            imported_at: "2026-01-01T00:00:00Z".to_string(),
+            ai_prompt: None,
+            raw_metadata: None,
+        };
+
+        let error = db.insert_image(&img).unwrap_err();
+
+        assert!(error.to_string().contains("forced media asset failure"));
+        assert!(db.find_by_hash(&img.sha256_hash).unwrap().is_none());
+        let media_count: i64 = db
+            .conn
+            .lock()
+            .query_row(
+                "SELECT COUNT(*) FROM media_assets WHERE primary_image_id = ?1",
+                params![img.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(media_count, 0);
+    }
+
+    #[test]
     fn insert_pdf_image_creates_pdf_media_asset_row() {
         let db = test_db();
         let img = Image {
@@ -2040,6 +2083,21 @@ mod tests {
 
         db.remove_from_collection(&collection_id, "non-member")
             .unwrap();
+        assert!(db
+            .list_collection_images(&collection_id)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn add_to_collection_rolls_back_the_batch_when_a_membership_fails() {
+        let db = test_db();
+        let collection_id = db.create_collection("Atomic Batch").unwrap();
+        insert_test_image(&db, "member", "h-member");
+
+        let result = db.add_to_collection(&collection_id, &["member", "missing-image"]);
+
+        assert!(result.is_err());
         assert!(db
             .list_collection_images(&collection_id)
             .unwrap()
