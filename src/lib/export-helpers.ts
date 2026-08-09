@@ -1,6 +1,10 @@
 import type { ExportImagesParams } from './api';
 
 export interface ExportScope {
+    // An explicit smart-collection export is an action target, so it takes
+    // precedence over any incidental grid selection.
+    smartCollectionId: string | null;
+    smartCollectionImageIds: string[];
     activeCollection: string | null;
     activeFolder: string | null;
     selectedIds: string[];
@@ -15,9 +19,10 @@ export interface ExportRequest {
     flatten?: boolean;
 }
 
-export type ExportScopeKind = 'selection' | 'collection' | 'folder' | 'all';
+export type ExportScopeKind = 'smart' | 'selection' | 'collection' | 'folder' | 'all';
 
 export function describeExportScope(scope: ExportScope): { kind: ExportScopeKind; count: number } {
+    if (scope.smartCollectionId) return { kind: 'smart', count: scope.smartCollectionImageIds.length };
     if (scope.selectedIds.length > 0) return { kind: 'selection', count: scope.selectedIds.length };
     if (scope.activeCollection) return { kind: 'collection', count: 0 };
     if (scope.activeFolder) return { kind: 'folder', count: 0 };
@@ -35,6 +40,9 @@ export function buildExportParams(scope: ExportScope, request: ExportRequest): E
         flatten: request.flatten ?? true,
     };
 
+    if (scope.smartCollectionId) {
+        return { ...base, image_ids: scope.smartCollectionImageIds };
+    }
     if (scope.selectedIds.length > 0) {
         return { ...base, image_ids: scope.selectedIds };
     }

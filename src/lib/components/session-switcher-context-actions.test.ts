@@ -25,6 +25,10 @@ describe('session switcher context action policy', () => {
         expect(source).toContain('oncontextmenu={(event) => openSessionContextMenu(event, session)}');
         expect(source).toContain('onkeydown={(event) => { if (isContextMenuKey(event)) openSessionContextMenu(event, session); }}');
         expect(source).toContain('class="session-menu-button"');
+        expect(source).toContain('if (sessionContextMenu) return;');
+        expect(source).toContain('opener: event.currentTarget as HTMLElement | null');
+        expect(source).toContain('{#key sessionContextMenu.session.id}');
+        expect(source).toContain('opener={sessionContextMenu.opener}');
         expect(source).toContain('<ActionMenu');
         expect(source).toContain('revealItemInDir(session.folder_path)');
     });

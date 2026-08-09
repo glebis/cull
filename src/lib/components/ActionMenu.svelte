@@ -138,6 +138,28 @@
         const owned = !!menuEl && active instanceof Node && menuEl.contains(active);
         if (active !== document.body && active !== menuEl && !owned) return;
         focusTarget.focus({ preventScroll: true });
+        // Removing the focused menu subtree can move focus back to <body> after
+        // this component's cleanup has run. Re-apply only when unmount did that;
+        // never steal focus from an intentional outside-click target.
+        queueMicrotask(() => {
+            const current = document.activeElement;
+            if (!focusTarget.isConnected) return;
+            if (current === document.body || (current instanceof HTMLElement && !current.isConnected)) {
+                focusTarget.focus({ preventScroll: true });
+            }
+        });
+    }
+
+    function closeFromKeyboard() {
+        const focusTarget = opener ?? fallbackOpener;
+        onclose();
+        window.setTimeout(() => {
+            const current = document.activeElement;
+            if (!focusTarget?.isConnected) return;
+            if (current === document.body || (current instanceof HTMLElement && !current.isConnected)) {
+                focusTarget.focus({ preventScroll: true });
+            }
+        });
     }
 
     onMount(() => {
@@ -155,7 +177,7 @@
             if (menuEl && event.target instanceof Node && menuEl.contains(event.target)) return;
             event.preventDefault();
             event.stopPropagation();
-            onclose();
+            closeFromKeyboard();
         }
         const listenerTimer = window.setTimeout(() => {
             window.addEventListener('click', closeFromOutside);
@@ -244,7 +266,7 @@
             event.preventDefault();
             event.stopPropagation();
             if (inSubmenu || openSubmenuId) void closeSubmenuAndRestoreParent();
-            else onclose();
+            else closeFromKeyboard();
         } else if ((event.key === 'Enter' || event.key === ' ') && event.target instanceof HTMLButtonElement) {
             event.preventDefault();
             event.stopPropagation();

@@ -21,6 +21,10 @@ describe('lineage group context action policy', () => {
         expect(source).toContain('oncontextmenu={(event) => openGroupContextMenu(event, group)}');
         expect(source).toContain('class="group-menu-button"');
         expect(source).toContain('class="group-tab-menu-button"');
+        expect(source).toContain('opener: contextOpener(event)');
+        expect(source).toContain("event.target.closest<HTMLElement>('button, [href], input, select, textarea, [tabindex]')");
+        expect(source).toContain('{#key groupContextMenu.group.id}');
+        expect(source).toContain('opener={groupContextMenu.opener}');
         expect(source).toContain('<ActionMenu');
     });
 });

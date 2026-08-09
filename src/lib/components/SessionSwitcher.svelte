@@ -10,7 +10,7 @@
     let creating = $state(false);
     let newName = $state('');
     let rootEl = $state<HTMLDivElement | undefined>();
-    let sessionContextMenu = $state<{ session: Session; x: number; y: number } | null>(null);
+    let sessionContextMenu = $state<{ session: Session; x: number; y: number; opener: HTMLElement | null } | null>(null);
 
     function close() {
         open = false;
@@ -20,6 +20,7 @@
 
     function handleDocumentPointerdown(e: PointerEvent) {
         if (!open) return;
+        if (sessionContextMenu) return;
         if (rootEl && e.target instanceof Node && !rootEl.contains(e.target)) close();
     }
 
@@ -95,7 +96,7 @@
     function openSessionContextMenu(event: MouseEvent | KeyboardEvent, session: Session) {
         event.preventDefault();
         event.stopPropagation();
-        sessionContextMenu = { session, ...contextPoint(event) };
+        sessionContextMenu = { session, ...contextPoint(event), opener: event.currentTarget as HTMLElement | null };
     }
 
     async function openSession(session: Session) {
@@ -265,13 +266,16 @@
 </div>
 
 {#if sessionContextMenu}
-    <ActionMenu
-        title={sessionContextMenu.session.name}
-        x={sessionContextMenu.x}
-        y={sessionContextMenu.y}
-        items={sessionContextItems}
-        onclose={() => sessionContextMenu = null}
-    />
+    {#key sessionContextMenu.session.id}
+        <ActionMenu
+            title={sessionContextMenu.session.name}
+            x={sessionContextMenu.x}
+            y={sessionContextMenu.y}
+            items={sessionContextItems}
+            opener={sessionContextMenu.opener}
+            onclose={() => sessionContextMenu = null}
+        />
+    {/key}
 {/if}
 
 <style>

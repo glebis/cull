@@ -2,7 +2,7 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen } from '$lib/stores';
+    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen, exportFolderSmartCollection } from '$lib/stores';
     import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, renameFolder as apiRenameFolder, listCollections, createCollection, createCollectionWithImages, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, updateSmartCollectionApi, deleteSmartCollectionApi, countByDetectedClass, listDetectedClasses, regenerateThumbnails, rescanSources, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, FilterNode, ImageWithFile, SmartCollection } from '$lib/api';
@@ -307,6 +307,15 @@
         return event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10');
     }
 
+    function contextOpener(event: MouseEvent | KeyboardEvent, anchor?: HTMLElement | null): HTMLElement | null {
+        if (anchor) return anchor;
+        if (event.target instanceof HTMLElement) {
+            const interactive = event.target.closest<HTMLElement>('button, [href], input, select, textarea, [tabindex]');
+            if (interactive) return interactive;
+        }
+        return event.currentTarget as HTMLElement | null;
+    }
+
     function openCollectionContextMenu(event: MouseEvent | KeyboardEvent, collectionId: string, name: string, count: number) {
         event.preventDefault();
         event.stopPropagation();
@@ -314,7 +323,7 @@
         sidebarContextMenu = {
             kind: 'collection', collectionId, name, count,
             ...contextPoint(event),
-            opener: event.currentTarget as HTMLElement | null,
+            opener: contextOpener(event),
         };
     }
 
@@ -324,7 +333,7 @@
         sidebarContextMenu = {
             kind: 'folder', folder, name, renamable, removable,
             ...contextPoint(event, anchor),
-            opener: anchor ?? event.currentTarget as HTMLElement | null,
+            opener: contextOpener(event, anchor),
         };
     }
 
@@ -334,7 +343,7 @@
         sidebarContextMenu = {
             kind: 'smart', collection,
             ...contextPoint(event),
-            opener: event.currentTarget as HTMLElement | null,
+            opener: contextOpener(event),
         };
     }
 
@@ -344,7 +353,7 @@
         sidebarContextMenu = {
             kind: 'canvas', canvas,
             ...contextPoint(event),
-            opener: event.currentTarget as HTMLElement | null,
+            opener: contextOpener(event),
         };
     }
 
@@ -1055,18 +1064,26 @@
     }
 
     async function addFolderToCollection(folder: string, collectionId: string) {
+        let ids: string[];
         try {
-            const ids = await listAllFolderImageIds(folder);
+            ids = await listAllFolderImageIds(folder);
             if (ids.length === 0) {
                 showToast('Folder contains no images to add', { type: 'info', duration: 3500 });
                 return;
             }
             await addToCollection(collectionId, ids);
-            collections.set(await listCollections($showRejected));
             const collectionName = get(collections).find(([id]) => id === collectionId)?.[1] ?? 'collection';
             showToast(`Added ${ids.length} image${ids.length === 1 ? '' : 's'} to ${collectionName}`, { type: 'success' });
         } catch (e) {
             showToast('Could not add folder to collection', { detail: String(e), type: 'error', duration: 10000 });
+            return;
+        }
+        try {
+            collections.set(await listCollections($showRejected));
+        } catch (e) {
+            showToast('Images added, but the sidebar could not refresh', {
+                detail: String(e), type: 'warning', duration: 10000,
+            });
         }
     }
 
@@ -1078,28 +1095,35 @@
             confirmLabel: 'Create and Add',
         });
         if (!name?.trim()) return;
-        let createdId: string | null = null;
+        let ids: string[];
         try {
-            const ids = await listAllFolderImageIds(folder);
-            createdId = await createCollection(name.trim());
-            if (ids.length > 0) await addToCollection(createdId, ids);
-            collections.set(await listCollections($showRejected));
+            ids = await listAllFolderImageIds(folder);
+            if (ids.length > 0) {
+                await createCollectionWithImages(name.trim(), ids);
+            } else {
+                await createCollection(name.trim());
+            }
             showToast(`Created collection “${name.trim()}”`, {
                 detail: `${ids.length} image${ids.length === 1 ? '' : 's'} added`,
                 type: 'success',
             });
         } catch (e) {
-            if (createdId) {
-                try { await deleteCollectionApi(createdId); } catch (_) { /* best-effort rollback */ }
-            }
             showToast('Could not create collection from folder', { detail: String(e), type: 'error', duration: 10000 });
+            return;
+        }
+        try {
+            collections.set(await listCollections($showRejected));
+        } catch (e) {
+            showToast('Collection created, but the sidebar could not refresh', {
+                detail: String(e), type: 'warning', duration: 10000,
+            });
         }
     }
 
     async function exportSmartCollection(id: string) {
         const collection = get(smartCollections).find(item => item.id === id);
         if (!collection) return;
-        await selectSmartCollection(collection);
+        exportFolderSmartCollection.set(collection);
         exportFolderOpen.set(true);
     }
 

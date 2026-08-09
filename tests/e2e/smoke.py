@@ -1173,8 +1173,8 @@ def test_context_menu_keyboard_submenus(page: Page) -> None:
 
 def test_sidebar_context_menus(page: Page) -> None:
     """S27e — sidebar collections and sequences expose pointer and keyboard menus."""
-    press(page, "Meta+1")
-    wait_mode(page, "grid")
+    # Folder rows are intentionally enabled only by this browser fixture.
+    wait_for_app(page, f"{URL}?folderRename=1")
 
     folder = page.locator('.folder-row[role="treeitem"]').first
     expect(folder).to_be_visible()
@@ -1185,7 +1185,11 @@ def test_sidebar_context_menus(page: Page) -> None:
     expect(menu).to_contain_text("Reveal in Finder")
     expect(menu).to_contain_text("Rescan Folder")
     expect(menu).to_contain_text("Add Contents to Collection")
+    expect(menu.get_by_role("menuitem", name="Open Folder")).to_be_focused()
+    page.keyboard.press("ArrowDown")
     expect(menu.get_by_role("menuitem", name="Reveal in Finder")).to_be_focused()
+    page.keyboard.press("ArrowDown")
+    expect(menu.get_by_role("menuitem", name="Rename…")).to_be_focused()
     page.keyboard.press("ArrowDown")
     expect(menu.get_by_role("menuitem", name="Rescan Folder")).to_be_focused()
     page.keyboard.press("ArrowDown")
@@ -1209,7 +1213,7 @@ def test_sidebar_context_menus(page: Page) -> None:
     expect(menu).to_have_count(0)
     expect(collection).to_be_focused()
 
-    smart = page.locator(".smart-collection-row .section-item").first
+    smart = page.locator(".section-item", has_text="5 Stars").first
     expect(smart).to_be_visible()
     smart.focus()
     page.keyboard.press("Shift+F10")

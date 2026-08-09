@@ -588,6 +588,8 @@ export const shortcutsOpen = writable<boolean>(false);
 export const undoHistoryOpen = writable<boolean>(false);
 // Collection/scope export-to-folder dialog.
 export const exportFolderOpen = writable<boolean>(false);
+// Optional explicit smart-collection target for the sidebar's Export Results action.
+export const exportFolderSmartCollection = writable<SmartCollection | null>(null);
 // Contact sheet export dialog.
 export const contactSheetOpen = writable<boolean>(false);
 // Best-of-group ranking dialog.

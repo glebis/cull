@@ -14,7 +14,7 @@
     let selectedGroupId = $state<string | null>(null);
     let loading = $state(true);
     let contextMenu = $state<{ image: ImageWithFile; x: number; y: number } | null>(null);
-    let groupContextMenu = $state<{ group: LineageGroup; x: number; y: number } | null>(null);
+    let groupContextMenu = $state<{ group: LineageGroup; x: number; y: number; opener: HTMLElement | null } | null>(null);
 
     // Current images from the active context (collection/folder/all)
     let contextImageIds = $derived(new Set($images.map(img => img.image.id)));
@@ -160,10 +160,18 @@
         return event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10');
     }
 
+    function contextOpener(event: MouseEvent | KeyboardEvent): HTMLElement | null {
+        if (event.target instanceof HTMLElement) {
+            const interactive = event.target.closest<HTMLElement>('button, [href], input, select, textarea, [tabindex]');
+            if (interactive) return interactive;
+        }
+        return event.currentTarget as HTMLElement | null;
+    }
+
     function openGroupContextMenu(event: MouseEvent | KeyboardEvent, group: LineageGroup) {
         event.preventDefault();
         event.stopPropagation();
-        groupContextMenu = { group, ...contextPoint(event) };
+        groupContextMenu = { group, ...contextPoint(event), opener: contextOpener(event) };
     }
 
     let groupContextItems = $derived.by((): ActionMenuItem[] => {
@@ -340,13 +348,16 @@
 {/if}
 
 {#if groupContextMenu}
-    <ActionMenu
-        title={groupContextMenu.group.name}
-        x={groupContextMenu.x}
-        y={groupContextMenu.y}
-        items={groupContextItems}
-        onclose={() => groupContextMenu = null}
-    />
+    {#key groupContextMenu.group.id}
+        <ActionMenu
+            title={groupContextMenu.group.name}
+            x={groupContextMenu.x}
+            y={groupContextMenu.y}
+            items={groupContextItems}
+            opener={groupContextMenu.opener}
+            onclose={() => groupContextMenu = null}
+        />
+    {/key}
 {/if}
 
 <style>
@@ -554,7 +565,7 @@
         background: var(--surface);
         border: 1px solid var(--border);
         border-left: none;
-        border-radius: 0 6px 6px 0;
+        border-radius: 0;
         color: var(--text-secondary);
         cursor: pointer;
         font: inherit;
