@@ -90,6 +90,14 @@ mod tests {
             conf["bundle"]["macOS"]["entitlements"].as_str(),
             Some("Entitlements.plist")
         );
+        assert_eq!(
+            conf["bundle"]["macOS"]["hardenedRuntime"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            conf["bundle"]["macOS"]["minimumSystemVersion"].as_str(),
+            Some("11.0")
+        );
 
         let capability: serde_json::Value =
             serde_json::from_str(include_str!("../capabilities/app-photos.json"))

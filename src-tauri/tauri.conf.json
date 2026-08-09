@@ -74,6 +74,8 @@
     },
     "macOS": {
       "entitlements": "Entitlements.plist",
+      "hardenedRuntime": true,
+      "minimumSystemVersion": "11.0",
       "files": {
         "Resources/Cull.help": "help/Cull.help"
       },
