@@ -139,6 +139,7 @@ NODE
 for command_name in node shasum codesign spctl xcrun hdiutil plutil lipo minisign mount; do
   require_command "$command_name"
 done
+[[ -x /usr/libexec/PlistBuddy ]] || die 'required command not found: /usr/libexec/PlistBuddy'
 if [[ $LAUNCH -eq 1 ]]; then
   require_command ditto
   require_command open
@@ -315,12 +316,28 @@ bundle_version="$(plutil -extract CFBundleShortVersionString raw -o - "$info_pli
 [[ "$bundle_version" == "$VERSION" ]] || die "embedded app version is $bundle_version, expected $VERSION"
 bundle_executable="$(plutil -extract CFBundleExecutable raw -o - "$info_plist")" || die 'could not read bundle executable name'
 [[ "$bundle_executable" =~ ^[A-Za-z0-9._+-]+$ ]] || die 'bundle executable name is unsafe'
+photos_usage="$(plutil -extract NSPhotoLibraryUsageDescription raw -o - "$info_plist")" || die 'embedded app is missing NSPhotoLibraryUsageDescription'
+[[ -n "$photos_usage" ]] || die 'embedded NSPhotoLibraryUsageDescription must not be empty'
 executable_path="$app_path/Contents/MacOS/$bundle_executable"
 [[ -f "$executable_path" && ! -L "$executable_path" ]] || die 'bundle executable is missing or is a symlink'
 architectures="$(lipo -archs "$executable_path")" || die 'could not inspect bundle architecture'
 [[ "$architectures" == 'arm64' ]] || die "mounted app must be arm64-only: $architectures"
 
 run_logged codesign codesign --verify --deep --strict --verbose=2 "$app_path"
+signature_details="$(codesign -dv --verbose=4 "$app_path" 2>&1)" || die 'could not inspect code-signing identity'
+printf '== signing-identity ==\n%s\n' "$signature_details" >>"$log_file"
+[[ "$signature_details" == *"flags="*"runtime"* ]] || die 'app signature is missing hardened runtime'
+[[ "$signature_details" != *"(adhoc)"* ]] || die 'app must not use an ad-hoc signature'
+if [[ "$signature_details" =~ TeamIdentifier=([^[:space:]]+) ]]; then
+  team_identifier=${BASH_REMATCH[1]}
+else
+  die 'app signature is missing TeamIdentifier'
+fi
+[[ -n "$team_identifier" && "$team_identifier" != "not" ]] || die 'app signature has no signing team'
+entitlements_path="$work_dir/effective-entitlements.plist"
+codesign -d --entitlements :- "$app_path" >"$entitlements_path" 2>>"$log_file" || die 'could not inspect effective app entitlements'
+photos_entitlement="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.personal-information.photos-library' "$entitlements_path")" || die 'effective app signature is missing Photos entitlement'
+[[ "$photos_entitlement" == 'true' ]] || die 'effective Photos entitlement must be true'
 run_logged gatekeeper spctl --assess --type execute --verbose=4 "$app_path"
 run_logged stapler xcrun stapler validate "$app_path"
 

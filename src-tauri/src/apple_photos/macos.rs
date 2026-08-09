@@ -4,11 +4,29 @@ use super::{
     PhotosAlbum, PhotosAlbumKind, PhotosAsset, PhotosAuthorizationStatus, PhotosError, PhotosPage,
 };
 use block2::RcBlock;
+use objc2::rc::autoreleasepool;
 use objc2_foundation::{NSArray, NSDate, NSPredicate, NSSortDescriptor, NSString};
 use objc2_photos::{
     PHAccessLevel, PHAsset, PHAssetCollection, PHAssetCollectionSubtype, PHAssetCollectionType,
     PHAssetMediaType, PHAssetResource, PHAuthorizationStatus, PHFetchOptions, PHPhotoLibrary,
 };
+
+static PHOTO_KIT_OPERATION: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+fn catch_native<T>(
+    operation: impl FnOnce() -> Result<T, PhotosError> + std::panic::UnwindSafe,
+) -> Result<T, PhotosError> {
+    let _operation_guard = PHOTO_KIT_OPERATION.lock();
+    autoreleasepool(|_| match objc2::exception::catch(operation) {
+        Ok(result) => result,
+        Err(Some(exception)) => Err(PhotosError::Native(format!(
+            "PhotoKit raised a native exception: {exception}"
+        ))),
+        Err(None) => Err(PhotosError::Native(
+            "PhotoKit raised an unknown native exception".to_string(),
+        )),
+    })
+}
 
 fn normalize_status(status: PHAuthorizationStatus) -> PhotosAuthorizationStatus {
     match status {
@@ -29,48 +47,54 @@ fn require_read_access() -> Result<(), PhotosError> {
 }
 
 pub(super) fn authorization_status() -> Result<PhotosAuthorizationStatus, PhotosError> {
-    // SAFETY: This is a class query with no object lifetime or callback requirements.
-    let status =
-        unsafe { PHPhotoLibrary::authorizationStatusForAccessLevel(PHAccessLevel::ReadWrite) };
-    Ok(normalize_status(status))
+    catch_native(|| {
+        // SAFETY: This is a class query with no object lifetime or callback requirements.
+        let status =
+            unsafe { PHPhotoLibrary::authorizationStatusForAccessLevel(PHAccessLevel::ReadWrite) };
+        Ok(normalize_status(status))
+    })
 }
 
 pub(super) fn request_authorization() -> Result<PhotosAuthorizationStatus, PhotosError> {
-    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-    let handler = RcBlock::new(move |status: PHAuthorizationStatus| {
-        let _ = sender.send(normalize_status(status));
-    });
-    // SAFETY: PhotoKit retains the block for the asynchronous request. RcBlock owns
-    // the captured sender, and this function keeps the block alive while waiting.
-    unsafe {
-        PHPhotoLibrary::requestAuthorizationForAccessLevel_handler(
-            PHAccessLevel::ReadWrite,
-            &handler,
-        )
-    };
-    receiver
-        .recv()
-        .map_err(|error| PhotosError::Native(format!("authorization callback failed: {error}")))
+    catch_native(|| {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let handler = RcBlock::new(move |status: PHAuthorizationStatus| {
+            let _ = sender.send(normalize_status(status));
+        });
+        // SAFETY: PhotoKit retains the block for the asynchronous request. RcBlock owns
+        // the captured sender, and this function keeps the block alive while waiting.
+        unsafe {
+            PHPhotoLibrary::requestAuthorizationForAccessLevel_handler(
+                PHAccessLevel::ReadWrite,
+                &handler,
+            )
+        };
+        receiver
+            .recv()
+            .map_err(|error| PhotosError::Native(format!("authorization callback failed: {error}")))
+    })
 }
 
 pub(super) fn list_albums() -> Result<Vec<PhotosAlbum>, PhotosError> {
     require_read_access()?;
-    // SAFETY: Fetch results and every retained object are created, read, and dropped
-    // on this worker thread. No PhotoKit object escapes this adapter.
-    unsafe {
-        let mut albums = Vec::new();
-        collect_albums(
-            PHAssetCollectionType::Album,
-            PhotosAlbumKind::User,
-            &mut albums,
-        );
-        collect_albums(
-            PHAssetCollectionType::SmartAlbum,
-            PhotosAlbumKind::Smart,
-            &mut albums,
-        );
-        Ok(albums)
-    }
+    catch_native(|| {
+        // SAFETY: Fetch results and every retained object are created, read, and dropped
+        // inside this autorelease pool. No PhotoKit object escapes this adapter.
+        unsafe {
+            let mut albums = Vec::new();
+            collect_albums(
+                PHAssetCollectionType::Album,
+                PhotosAlbumKind::User,
+                &mut albums,
+            );
+            collect_albums(
+                PHAssetCollectionType::SmartAlbum,
+                PhotosAlbumKind::Smart,
+                &mut albums,
+            );
+            Ok(albums)
+        }
+    })
 }
 
 unsafe fn collect_albums(
@@ -97,9 +121,9 @@ pub(super) fn list_assets_page(
     limit: u32,
 ) -> Result<PhotosPage<PhotosAsset>, PhotosError> {
     require_read_access()?;
-    // SAFETY: All PhotoKit objects stay within this worker-thread scope. Fetching
-    // asset metadata does not request image bytes or permit an iCloud download.
-    unsafe {
+    catch_native(|| unsafe {
+        // SAFETY: All PhotoKit objects stay within this serialized autorelease-pool
+        // scope. Fetching metadata does not request bytes or permit an iCloud download.
         let options = PHFetchOptions::new();
         let creation_key = NSString::from_str("creationDate");
         let identifier_key = NSString::from_str("localIdentifier");
@@ -165,7 +189,7 @@ pub(super) fn list_assets_page(
             offset,
             has_more: end < result_count,
         })
-    }
+    })
 }
 
 fn date_to_rfc3339(date: &NSDate) -> Option<String> {
@@ -176,4 +200,21 @@ fn date_to_rfc3339(date: &NSDate) -> Option<String> {
     let seconds = timestamp.floor() as i64;
     let nanos = ((timestamp - seconds as f64) * 1_000_000_000.0).round() as u32;
     chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, nanos).map(|date| date.to_rfc3339())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_exception_becomes_a_recoverable_photos_error() {
+        let error = catch_native(|| {
+            let values = NSArray::<NSString>::new();
+            let _ = values.objectAtIndex(0);
+            Ok(())
+        })
+        .unwrap_err();
+
+        assert!(matches!(error, PhotosError::Native(_)));
+    }
 }

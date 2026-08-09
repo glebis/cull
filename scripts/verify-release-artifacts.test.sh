@@ -22,6 +22,19 @@ make_tools() {
 
   cat >"$bin_dir/codesign" <<'EOF'
 #!/usr/bin/env bash
+if [[ " $* " == *" -dv "* ]]; then
+  printf 'Executable=/test/Cull.app\nCodeDirectory flags=0x10000(runtime)\nTeamIdentifier=%s\n' "${FAKE_TEAM_IDENTIFIER:-TESTTEAM}" >&2
+  [[ "${FAKE_ADHOC_SIGNATURE:-0}" == 0 ]] || printf 'Signature=adhoc (adhoc)\n' >&2
+  exit "${FAKE_CODESIGN_DETAILS_STATUS:-0}"
+fi
+if [[ " $* " == *" --entitlements "* ]]; then
+  if [[ "${FAKE_PHOTOS_ENTITLEMENT:-true}" == true ]]; then
+    printf '<plist><dict><key>com.apple.security.personal-information.photos-library</key><true/></dict></plist>\n'
+  else
+    printf '<plist><dict></dict></plist>\n'
+  fi
+  exit "${FAKE_CODESIGN_ENTITLEMENTS_STATUS:-0}"
+fi
 exit "${FAKE_CODESIGN_STATUS:-0}"
 EOF
   cat >"$bin_dir/spctl" <<'EOF'
@@ -74,6 +87,10 @@ EOF
 case "$2" in
   CFBundleShortVersionString) printf '%s\n' "${FAKE_BUNDLE_VERSION:-0.2.6}" ;;
   CFBundleExecutable) printf '%s\n' 'Cull' ;;
+  NSPhotoLibraryUsageDescription)
+    [[ "${FAKE_PHOTOS_USAGE_DESCRIPTION:-present}" == present ]] || exit 1
+    printf '%s\n' 'Cull reads photos the user chooses to import.'
+    ;;
   *) exit 1 ;;
 esac
 EOF
@@ -132,7 +149,7 @@ fs.writeFileSync(path, JSON.stringify({
   platforms: {
     'darwin-aarch64': {
       signature: fs.readFileSync(path.replace(/latest\.json$/, 'Cull_aarch64.app.tar.gz.sig'), 'utf8').trim(),
-      url: 'https://github.com/glebis/cull/releases/download/v0.2.6/Cull_aarch64.app.tar.gz'
+      url: `https://github.com/glebis/cull/releases/download/v${version}/Cull_aarch64.app.tar.gz`
     }
   }
 }) + '\n');
@@ -168,6 +185,12 @@ run_case() {
   PATH="$case_path" \
     RUNNER_TEMP="$runner_temp" \
     FAKE_CODESIGN_STATUS="${CASE_CODESIGN_STATUS:-0}" \
+    FAKE_CODESIGN_DETAILS_STATUS="${CASE_CODESIGN_DETAILS_STATUS:-0}" \
+    FAKE_CODESIGN_ENTITLEMENTS_STATUS="${CASE_CODESIGN_ENTITLEMENTS_STATUS:-0}" \
+    FAKE_ADHOC_SIGNATURE="${CASE_ADHOC_SIGNATURE:-0}" \
+    FAKE_TEAM_IDENTIFIER="${CASE_TEAM_IDENTIFIER:-TESTTEAM}" \
+    FAKE_PHOTOS_ENTITLEMENT="${CASE_PHOTOS_ENTITLEMENT:-true}" \
+    FAKE_PHOTOS_USAGE_DESCRIPTION="${CASE_PHOTOS_USAGE_DESCRIPTION:-present}" \
     FAKE_SPCTL_STATUS="${CASE_SPCTL_STATUS:-0}" \
     FAKE_MINISIGN_STATUS="${CASE_MINISIGN_STATUS:-0}" \
     FAKE_BUNDLE_VERSION="${CASE_BUNDLE_VERSION:-0.2.6}" \
@@ -286,6 +309,10 @@ CASE_MINISIGN_STATUS=1 run_case failed-updater-signature fail setup_valid
 CASE_BUNDLE_VERSION=0.2.5 run_case wrong-embedded-version fail setup_valid
 CASE_ARCHS=x86_64 run_case wrong-architecture fail setup_valid
 CASE_CODESIGN_STATUS=1 run_case failed-codesign fail setup_valid
+CASE_ADHOC_SIGNATURE=1 run_case adhoc-signature fail setup_valid
+CASE_TEAM_IDENTIFIER=not run_case missing-signing-team fail setup_valid
+CASE_PHOTOS_ENTITLEMENT=false run_case missing-photos-entitlement fail setup_valid
+CASE_PHOTOS_USAGE_DESCRIPTION=missing run_case missing-photos-usage-description fail setup_valid
 CASE_SPCTL_STATUS=1 run_case failed-gatekeeper fail setup_valid
 CASE_STAPLER_STATUS=1 run_case failed-stapler fail setup_valid
 CASE_DETACH_STATUS=1 run_case failed-detach fail setup_valid
@@ -356,13 +383,14 @@ wrapper_source="$wrapper_case/source"
 wrapper_runner_temp="$wrapper_case/runner-temp"
 wrapper_output="$wrapper_case/output"
 wrapper_bin="$wrapper_case/bin"
+wrapper_version="$(node -p "require('$repo_root/package.json').version")"
 mkdir -p "$wrapper_runner_temp"
 make_tools "$wrapper_bin"
-make_artifacts "$wrapper_source" 0.2.5
-PATH="$wrapper_bin" RUNNER_TEMP="$wrapper_runner_temp" FAKE_BUNDLE_VERSION=0.2.5 \
+make_artifacts "$wrapper_source" "$wrapper_version"
+PATH="$wrapper_bin" RUNNER_TEMP="$wrapper_runner_temp" FAKE_BUNDLE_VERSION="$wrapper_version" \
   FAKE_MOUNT_PATH_FILE="$wrapper_case/mount-path" \
   bash "$repo_root/scripts/clean-machine-dmg-gate.sh" \
-    --dmg-path "$wrapper_source/Cull_0.2.5_aarch64.dmg" \
+    --dmg-path "$wrapper_source/Cull_${wrapper_version}_aarch64.dmg" \
     --archive-path "$wrapper_source/Cull_aarch64.app.tar.gz" \
     --signature-path "$wrapper_source/Cull_aarch64.app.tar.gz.sig" \
     --out-dir "$wrapper_output" >/dev/null
