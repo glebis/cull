@@ -3,7 +3,7 @@
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen, exportFolderSmartCollection } from '$lib/stores';
-    import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, renameFolder as apiRenameFolder, listCollections, createCollection, createCollectionWithImages, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, updateSmartCollectionApi, deleteSmartCollectionApi, countByDetectedClass, listDetectedClasses, regenerateThumbnails, rescanSources, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
+    import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, renameFolder as apiRenameFolder, listCollections, createCollection, createCollectionWithImages, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, updateSmartCollectionApi, deleteSmartCollectionApi, countByDetectedClass, listDetectedClasses, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, FilterNode, ImageWithFile, SmartCollection } from '$lib/api';
     import { applyClipboardMonitorCollection } from '$lib/clipboard-monitor';
@@ -22,9 +22,6 @@
         lastResult = text;
         lastResultKind = kind;
     }
-    let regenerating = $state(false);
-    let regenProgress = $state({ current: 0, total: 0 });
-    let rescanning = $state(false);
     let foldersExpanded = $state(true);
     let clipboardStatus = $state<ClipboardMonitorStatus | null>(null);
     let clipboardMoving = $state(false);
@@ -898,41 +895,6 @@
         minSizeFilter.set(value);
     }
 
-    async function handleRescan() {
-        rescanning = true;
-        try {
-            const count = await rescanSources();
-            setLastResult(`Detected sources for ${count} images`);
-            await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
-        } catch (e) {
-            setLastResult(`Rescan error: ${e}`, 'error');
-        } finally {
-            rescanning = false;
-        }
-    }
-
-    async function handleRegenerateThumbnails() {
-        regenerating = true;
-        regenProgress = { current: 0, total: 0 };
-
-        const unlisten: UnlistenFn = await listen<{ current: number; total: number }>(
-            'thumbnail-progress',
-            (event) => {
-                regenProgress = event.payload;
-            }
-        );
-
-        try {
-            const count = await regenerateThumbnails();
-            setLastResult(`Regenerated ${count} thumbnails`);
-        } catch (e) {
-            setLastResult(`Thumbnail error: ${e}`, 'error');
-        } finally {
-            unlisten();
-            regenerating = false;
-        }
-    }
-
     async function handleImportFolder() {
         const selected = await open({ directory: true, multiple: false });
         if (!selected) return;
@@ -1618,7 +1580,7 @@
         {/key}
     {/if}
 
-    <div class="sidebar-footer" aria-live="polite" aria-busy={importing || regenerating || rescanning}>
+    <div class="sidebar-footer" aria-live="polite" aria-busy={importing}>
         {#if lastResult}
             <div class="import-result" class:error={lastResultKind === 'error'}>{lastResult}</div>
         {/if}
@@ -1626,36 +1588,16 @@
             <div class="sr-only">
                 {importTotal > 0 ? `Importing ${importCurrent} of ${importTotal}` : 'Scanning folder'}
             </div>
-        {:else if regenerating}
-            <div class="sr-only">
-                Regenerating thumbnails {regenProgress.current} of {regenProgress.total}
-            </div>
-        {:else if rescanning}
-            <div class="sr-only">Rescanning sources</div>
         {/if}
-        <div class="footer-actions">
-            <button class="import-btn primary" onclick={handleImportFolder} disabled={importing || regenerating || rescanning}>
-                {importing ? (importTotal > 0 ? `Importing ${importCurrent}/${importTotal}...` : 'Scanning...') : '+ Import Folder'}
-            </button>
-            <div class="footer-secondary-actions">
-                <button
-                    class="import-btn secondary"
-                    onclick={handleRegenerateThumbnails}
-                    disabled={importing || regenerating || rescanning}
-                    aria-label={regenerating ? `Regenerating thumbnails ${regenProgress.current} of ${regenProgress.total}` : 'Rebuild thumbnails'}
-                >
-                    {regenerating ? `${regenProgress.current}/${regenProgress.total}` : 'Rebuild thumbnails'}
-                </button>
-                <button
-                    class="import-btn secondary"
-                    onclick={handleRescan}
-                    disabled={importing || regenerating || rescanning}
-                    aria-label={rescanning ? 'Rescanning sources' : 'Rescan sources'}
-                >
-                    {rescanning ? 'Scanning' : 'Rescan sources'}
-                </button>
-            </div>
-        </div>
+        <button
+            class="import-btn"
+            onclick={handleImportFolder}
+            disabled={importing}
+            aria-label={importing ? 'Importing folder' : 'Import folder'}
+            title="Import folder"
+        >
+            <span aria-hidden="true">+</span>
+        </button>
     </div>
 </aside>
 
@@ -2000,6 +1942,9 @@
         font-style: italic;
     }
     .sidebar-footer {
+        align-items: center;
+        display: flex;
+        flex-direction: column;
         margin-top: auto;
         padding: var(--spacing);
         border-top: 1px solid var(--border);
@@ -2015,50 +1960,39 @@
     .import-result.error {
         color: var(--red);
     }
-    .footer-actions {
-        display: grid;
-        gap: 6px;
-    }
-    .footer-secondary-actions {
-        display: grid;
-        gap: 6px;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    }
     .import-btn {
-        width: 100%;
-        background: color-mix(in srgb, var(--blue) 15%, transparent);
-        color: var(--blue);
-        border: 1px solid var(--border);
-        font-family: var(--font);
-        font-size: 12px;
         align-items: center;
-        border-radius: var(--radius);
+        background: color-mix(in srgb, var(--blue) 15%, transparent);
+        border: 1px solid var(--border);
+        border-radius: 50%;
+        color: var(--blue);
         cursor: pointer;
-        display: flex;
+        display: inline-flex;
+        font-family: var(--font);
+        font-size: 20px;
+        font-weight: 400;
+        height: 32px;
         justify-content: center;
-        line-height: 1.2;
-        min-height: 32px;
-        overflow: hidden;
-        padding: 0 10px;
-        text-align: center;
-        text-overflow: ellipsis;
-        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-        white-space: nowrap;
+        line-height: 1;
+        padding: 0 0 2px;
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+        width: 32px;
     }
     .import-btn:hover:not(:disabled) {
         background: color-mix(in srgb, var(--blue) 25%, transparent);
         border-color: var(--blue);
     }
+    .import-btn:active:not(:disabled) {
+        transform: scale(0.96);
+    }
+    .import-btn:focus-visible {
+        border-color: var(--blue);
+        outline: 1px solid var(--blue);
+        outline-offset: 2px;
+    }
     .import-btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
-    }
-    .import-btn.secondary {
-        background: color-mix(in srgb, var(--blue) 8%, transparent);
-        font-size: 10px;
-        min-height: 32px;
-        padding: 2px 6px;
-        white-space: normal;
     }
     .detected-header {
         font-size: 9px;

@@ -71,7 +71,7 @@ describe('Sidebar import progress ownership', () => {
 
         const user = userEvent.setup();
         render(Sidebar);
-        await user.click(await screen.findByRole('button', { name: '+ Import Folder' }));
+        await user.click(await screen.findByRole('button', { name: 'Import folder' }));
         await waitFor(() => expect(mocks.importFolder).toHaveBeenCalledWith(
             '/photos/current',
             null,
@@ -79,10 +79,11 @@ describe('Sidebar import progress ownership', () => {
         ));
 
         progressHandler?.({ payload: { progress_id: 'another-import', current: 9, total: 10 } });
-        expect(screen.getByRole('button', { name: 'Scanning...' })).toBeInTheDocument();
+        expect(screen.getByText('Scanning folder')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Importing folder' })).toBeDisabled();
 
         progressHandler?.({ payload: { progress_id: 'sidebar-import-own', current: 2, total: 10 } });
-        expect(await screen.findByRole('button', { name: 'Importing 2/10...' })).toBeInTheDocument();
+        expect(await screen.findByText('Importing 2 of 10')).toBeInTheDocument();
 
         resolveImport({
             imported: 2,
