@@ -87,8 +87,10 @@ describe('sidebar audit fixes contract', () => {
         expect(sidebar).not.toContain('Analyze uncatalogued images');
     });
 
-    it('footer maintenance buttons state their action (M7)', () => {
-        expect(sidebar).toContain('Rebuild thumbnails');
-        expect(sidebar).toContain('Rescan sources');
+    it('keeps the sidebar footer to one contextual import action (M7)', () => {
+        expect(sidebar).toContain('class="import-btn"');
+        expect(sidebar).toContain('aria-label={importing ? \'Importing folder\' : \'Import folder\'}');
+        expect(sidebar).toContain('<span aria-hidden="true">+</span>');
+        expect(sidebar).not.toContain('footer-secondary-actions');
     });
 });

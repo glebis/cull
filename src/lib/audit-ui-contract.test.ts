@@ -115,16 +115,15 @@ describe('impeccable audit UI contracts', () => {
 
     it('keeps the sidebar footer bounded and exposes sidebar control state', () => {
         expect(sidebar).toContain('class="sidebar-scroll"');
-        expect(sidebar).toContain('class="footer-secondary-actions"');
+        expect(sidebar).toContain('class="import-btn"');
+        expect(sidebar).toContain('<span aria-hidden="true">+</span>');
+        expect(sidebar).toContain('aria-label={importing ? \'Importing folder\' : \'Import folder\'}');
+        expect(sidebar).not.toContain('footer-secondary-actions');
         expect(sidebar).toContain('aria-expanded={foldersExpanded}');
         expect(sidebar).not.toContain('aria-expanded={aiExpanded}');
         expect(sidebar).not.toContain('aria-controls="sidebar-folder-tree"');
         expect(sidebar).not.toContain('aria-controls="sidebar-ai-models"');
         expect(sidebar).toContain('aria-pressed={clipboardStatus?.running ?? false}');
-        expect(sidebar).toContain('aria-label={regenerating ?');
-        expect(sidebar).toContain('Rebuild thumbnails');
-        expect(sidebar).toContain('aria-label={rescanning ?');
-        expect(sidebar).toContain('Rescan sources');
-        expect(sidebar).toContain('Regenerating thumbnails {regenProgress.current} of {regenProgress.total}');
+        expect(sidebar).toContain('aria-busy={importing}');
     });
 });
