@@ -72,6 +72,7 @@
     import { proposalViewContextKey, type AgentProposalViewContext } from '$lib/agent-proposal-context';
     import { estimateAgentBudget } from '$lib/agent-token-estimate';
     import { effectiveAgentVisualLevel } from '$lib/agent-visual-context';
+    import { agentFailureCopy } from '$lib/agent-error-copy';
     import { listen } from '@tauri-apps/api/event';
     import { onMount } from 'svelte';
     import { requestTrashImages, resolveTrashRequestIds, TRASH_IMAGES_REQUESTED_EVENT, type TrashImagesRequestDetail } from '$lib/trash-actions';
@@ -753,7 +754,9 @@
                 lastAgentMessage = 'Request cancelled';
                 return;
             }
-            showToast('Claude agent failed', { detail: String(e), type: 'error', duration: 9000 });
+            const failure = agentFailureCopy(e);
+            lastAgentMessage = failure.detail;
+            showToast(failure.title, { detail: failure.detail, type: 'error', duration: 9000 });
         } finally {
             agentChatBusy = false;
             if (activeAgentRequestId === requestId) activeAgentRequestId = null;
