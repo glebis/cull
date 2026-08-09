@@ -326,8 +326,9 @@ impl Database {
     }
 
     pub fn insert_image(&self, image: &Image) -> Result<()> {
-        let conn = self.conn.lock();
-        conn.execute(
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        tx.execute(
             "INSERT OR IGNORE INTO images (id, sha256_hash, width, height, format, file_size, created_at, imported_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![image.id, image.sha256_hash, image.width, image.height,
@@ -350,7 +351,7 @@ impl Database {
             created_at: image.created_at.clone(),
             imported_at: image.imported_at.clone(),
         };
-        conn.execute(
+        tx.execute(
             "INSERT OR IGNORE INTO media_assets (id, media_type, primary_image_id, sha256_hash, format, file_size, page_count, title, created_at, imported_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
@@ -366,6 +367,7 @@ impl Database {
                 media_asset.imported_at
             ],
         )?;
+        tx.commit()?;
         Ok(())
     }
 

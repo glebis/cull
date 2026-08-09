@@ -79,18 +79,20 @@ impl Database {
     }
 
     pub fn add_to_collection(&self, collection_id: &str, image_ids: &[&str]) -> Result<()> {
-        let conn = self.conn.lock();
-        let max_pos: i64 = conn.query_row(
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let max_pos: i64 = tx.query_row(
             "SELECT COALESCE(MAX(position), -1) FROM collection_items WHERE collection_id = ?1",
             params![collection_id],
             |row| row.get(0),
         )?;
         for (i, id) in image_ids.iter().enumerate() {
-            conn.execute(
+            tx.execute(
                 "INSERT OR IGNORE INTO collection_items (collection_id, image_id, position) VALUES (?1, ?2, ?3)",
                 params![collection_id, id, max_pos + 1 + i as i64],
             )?;
         }
+        tx.commit()?;
         Ok(())
     }
 
