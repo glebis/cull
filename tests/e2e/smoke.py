@@ -153,7 +153,7 @@ def test_sidebar_folder_rename(page: Page) -> None:
     row = page.locator('.folder-row').filter(has_text='folder-rename')
     expect(row).to_be_visible()
     row.click(button='right')
-    rename = page.get_by_role('menuitem', name='Rename...')
+    rename = page.get_by_role('menuitem', name='Rename…')
     expect(rename).to_be_visible()
     rename.click()
     dialog = page.get_by_role('dialog', name='Rename Folder')

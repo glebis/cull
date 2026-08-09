@@ -12,9 +12,9 @@ describe('atomic sidebar folder rename contract', () => {
 
         expect(api).toContain("invoke<RenameFolderResult>('rename_folder', { folder, newName })");
         expect(rust).toContain('commands::files::rename_folder');
-        expect(sidebar).toContain('openFolderContextMenu(e, folder.fullPath, folder.name, folder.isGroup)');
+        expect(sidebar).toContain("onRename: handleRenameFolder");
         expect(sidebar).toContain("title: 'Rename Folder'");
-        expect(sidebar).toContain('handleRenameFolder(folderContextMenu!.path, folderName(folderContextMenu!.path))');
+        expect(sidebar).toContain("name: folderName(target.folder)");
         expect(sidebar).toContain('await apiRenameFolder(folder, name.trim())');
         expect(sidebar).toContain('renamedFolderPath(path, result.oldPath, result.newPath)');
     });
