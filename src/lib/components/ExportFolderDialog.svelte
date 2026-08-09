@@ -6,9 +6,12 @@
         activeFolder,
         selectedIds,
         collections,
+        exportFolderSmartCollection,
+        showRejected,
         showToast,
     } from '$lib/stores';
     import { exportImagesToFolder, listImageIds } from '$lib/api';
+    import { listImageIdsForScope } from '$lib/embedding-scope';
     import { buildExportParams, describeExportScope, type ExportScope } from '$lib/export-helpers';
     import ModalDialog from '$lib/components/ModalDialog.svelte';
 
@@ -22,6 +25,8 @@
     let selected = $derived(Array.from($selectedIds));
     let scopeInfo = $derived(
         describeExportScope({
+            smartCollectionId: $exportFolderSmartCollection?.id ?? null,
+            smartCollectionImageIds: [],
             activeCollection: $activeCollection,
             activeFolder: $activeFolder,
             selectedIds: selected,
@@ -32,6 +37,8 @@
 
     function scopeLabelFor(kind: string): string {
         switch (kind) {
+            case 'smart':
+                return `smart collection “${$exportFolderSmartCollection?.name ?? 'results'}”`;
             case 'selection':
                 return `${selected.length} selected image${selected.length === 1 ? '' : 's'}`;
             case 'collection': {
@@ -52,7 +59,21 @@
 
         exporting = true;
         try {
+            const smartTarget = $exportFolderSmartCollection;
+            if (smartTarget && !smartTarget.filter_json) {
+                throw new Error('Smart collection has no filter to export');
+            }
+            const smartCollectionImageIds = smartTarget
+                ? await listImageIdsForScope({
+                    type: 'smart',
+                    id: smartTarget.id,
+                    filter_json: smartTarget.filter_json!,
+                    include_rejected: $showRejected,
+                })
+                : [];
             const scope: ExportScope = {
+                smartCollectionId: smartTarget?.id ?? null,
+                smartCollectionImageIds,
                 activeCollection: $activeCollection,
                 activeFolder: $activeFolder,
                 selectedIds: selected,
@@ -67,6 +88,7 @@
                 duration: 7000,
             });
             exportFolderOpen.set(false);
+            exportFolderSmartCollection.set(null);
         } catch (e) {
             showToast('Export failed', { detail: String(e), type: 'error', duration: 9000 });
         } finally {
@@ -75,7 +97,10 @@
     }
 
     function close() {
-        if (!exporting) exportFolderOpen.set(false);
+        if (!exporting) {
+            exportFolderOpen.set(false);
+            exportFolderSmartCollection.set(null);
+        }
     }
 
 </script>

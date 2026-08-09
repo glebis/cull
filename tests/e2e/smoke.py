@@ -1082,6 +1082,175 @@ def test_context_menu(page: Page) -> None:
     assert focused_label(page) != before, "Grid did not regain Arrow-key control after closing the context menu"
 
 
+def test_context_menu_keyboard_submenus(page: Page) -> None:
+    """S27d — keyboard focus enters every context submenu and returns to its parent."""
+    press(page, "Meta+1")
+    wait_mode(page, "grid")
+
+    opener = page.locator(".thumb.focused")
+    opener.focus()
+    opener.click(button="right")
+    menu = page.locator(".context-menu")
+    expect(menu).to_be_visible()
+
+    # Initial focus belongs to the root menu. Rate is immediate and exercises
+    # wrapping in a button-only submenu.
+    expect(menu.locator('button[data-submenu-key="rate"]')).to_be_focused()
+    page.keyboard.press("ArrowRight")
+    rate = menu.locator('.submenu[data-submenu-key="rate"]')
+    expect(rate).to_be_visible()
+    expect(rate.get_by_role("menuitem").first).to_be_focused()
+    page.keyboard.press("End")
+    expect(rate.get_by_role("menuitem").last).to_be_focused()
+    page.keyboard.press("ArrowDown")
+    expect(rate.get_by_role("menuitem").first).to_be_focused()
+    page.keyboard.press("ArrowLeft")
+    expect(menu.locator('button[data-submenu-key="rate"]')).to_be_focused()
+
+    # Collections contains a search input and live, asynchronously loaded rows.
+    menu.locator('button[data-submenu-key="collections"]').focus()
+    page.keyboard.press("ArrowRight")
+    collections = menu.locator('.submenu[data-submenu-key="collections"]')
+    expect(collections).to_be_visible()
+    expect(collections.get_by_role("menuitem").first).to_be_focused()
+    page.keyboard.press("ArrowDown")
+    expect(collections.locator(".collection-search")).to_be_focused()
+    page.keyboard.press("ArrowDown")
+    expect(collections.locator(".collection-item").first).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(menu.locator('button[data-submenu-key="collections"]')).to_be_focused()
+
+    # Copy has only actions; it must still receive keyboard focus rather than
+    # leaving focus on the root trigger.
+    menu.locator('button[data-submenu-key="copy"]').focus()
+    page.keyboard.press("ArrowRight")
+    copy = menu.locator('.submenu[data-submenu-key="copy"]')
+    expect(copy.get_by_role("menuitem").first).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(menu.locator('button[data-submenu-key="copy"]')).to_be_focused()
+
+    # Open With loads asynchronously. The focus request must survive the load
+    # only while this submenu remains open; do not activate a native dialog.
+    menu.locator('button[data-submenu-key="openwith"]').focus()
+    page.keyboard.press("ArrowRight")
+    open_with = menu.locator('.submenu[data-submenu-key="openwith"]')
+    expect(open_with).to_be_visible()
+    expect(open_with.get_by_role("menuitem", name="Choose Application...")).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(menu.locator('button[data-submenu-key="openwith"]')).to_be_focused()
+
+    # Move To also combines an action with an input. Escape from the input
+    # returns to the root trigger rather than letting the global handler close
+    # the entire menu.
+    menu.locator('button[data-submenu-key="moveto"]').focus()
+    page.keyboard.press("ArrowRight")
+    move_to = menu.locator('.submenu[data-submenu-key="moveto"]')
+    expect(move_to.get_by_role("menuitem").first).to_be_focused()
+    page.keyboard.press("ArrowDown")
+    expect(move_to.locator(".folder-search")).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(menu.locator('button[data-submenu-key="moveto"]')).to_be_focused()
+
+    # A pointer hover may reveal a submenu but must not steal the keyboard's
+    # current root focus owner.
+    menu.locator('button[data-submenu-key="rate"]').hover()
+    expect(menu.locator('.submenu[data-submenu-key="rate"]')).to_be_visible()
+    expect(menu.locator('button[data-submenu-key="moveto"]')).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(menu.locator('button[data-submenu-key="rate"]')).to_be_focused()
+    expect(menu).to_be_visible()
+
+    # Collection search retains its Enter shortcut: it activates the first
+    # enabled match rather than being swallowed by submenu navigation.
+    menu.locator('button[data-submenu-key="collections"]').focus()
+    page.keyboard.press("ArrowRight")
+    expect(collections.locator(".collection-search")).to_be_visible()
+    page.keyboard.press("ArrowDown")
+    expect(collections.locator(".collection-search")).to_be_focused()
+    page.keyboard.press("Enter")
+    expect(menu).to_be_hidden()
+
+
+def test_sidebar_context_menus(page: Page) -> None:
+    """S27e — sidebar collections and sequences expose pointer and keyboard menus."""
+    # Folder rows are intentionally enabled only by this browser fixture.
+    wait_for_app(page, f"{URL}?folderRename=1")
+
+    folder = page.locator('.folder-row[role="treeitem"]').first
+    expect(folder).to_be_visible()
+    folder.focus()
+    page.keyboard.press("Shift+F10")
+    menu = page.locator(".action-menu")
+    expect(menu).to_be_visible()
+    expect(menu).to_contain_text("Reveal in Finder")
+    expect(menu).to_contain_text("Rescan Folder")
+    expect(menu).to_contain_text("Add Contents to Collection")
+    expect(menu.get_by_role("menuitem", name="Open Folder")).to_be_focused()
+    page.keyboard.press("ArrowDown")
+    expect(menu.get_by_role("menuitem", name="Reveal in Finder")).to_be_focused()
+    page.keyboard.press("ArrowDown")
+    expect(menu.get_by_role("menuitem", name="Rename…")).to_be_focused()
+    page.keyboard.press("ArrowDown")
+    expect(menu.get_by_role("menuitem", name="Rescan Folder")).to_be_focused()
+    page.keyboard.press("ArrowDown")
+    expect(menu.get_by_role("menuitem", name="Add Contents to Collection")).to_be_focused()
+    page.keyboard.press("ArrowRight")
+    expect(menu.get_by_role("menuitem", name="New Collection…")).to_be_focused()
+    page.keyboard.press("Escape")
+    page.keyboard.press("Escape")
+    expect(menu).to_have_count(0)
+    expect(folder).to_be_focused()
+
+    collection = page.locator(".collection-row .section-item").first
+    expect(collection).to_be_visible()
+    collection.focus()
+    collection.click(button="right")
+    expect(menu).to_be_visible()
+    expect(menu).to_contain_text("Open Collection")
+    expect(menu).to_contain_text("Export to Folder")
+    expect(menu).to_contain_text("Delete Collection")
+    page.keyboard.press("Escape")
+    expect(menu).to_have_count(0)
+    expect(collection).to_be_focused()
+
+    smart = page.locator(".section-item", has_text="5 Stars").first
+    expect(smart).to_be_visible()
+    smart.focus()
+    page.keyboard.press("Shift+F10")
+    expect(menu).to_be_visible()
+    expect(menu).to_contain_text("Open Smart Collection")
+    expect(menu).to_contain_text("Export Results")
+    # Presets are protected, so destructive/edit actions are intentionally absent.
+    expect(menu).not_to_contain_text("Delete Smart Collection")
+    page.keyboard.press("Escape")
+    expect(menu).to_have_count(0)
+    expect(smart).to_be_focused()
+
+    page.locator(".session-toggle").click()
+    session = page.locator(".session-row .session-item").first
+    expect(session).to_be_visible()
+    session.focus()
+    page.keyboard.press("Shift+F10")
+    expect(menu).to_be_visible()
+    expect(menu).to_contain_text("Open Session")
+    expect(menu).to_contain_text("Reveal Session Folder in Finder")
+    expect(menu).to_contain_text("Convert to Collection")
+    expect(menu).to_contain_text("Delete Session")
+    page.keyboard.press("Escape")
+    expect(menu).to_have_count(0)
+    expect(session).to_be_focused()
+
+    session.click()
+    canvas = page.locator(".canvas-row .section-item").first
+    expect(canvas).to_be_visible()
+    canvas.click(button="right")
+    expect(menu).to_be_visible()
+    expect(menu).to_contain_text("Open Canvas")
+    expect(menu).to_contain_text("Delete Canvas")
+    page.keyboard.press("Escape")
+    expect(menu).to_have_count(0)
+
+
 def test_context_menu_escape_stays_in_loupe(page: Page) -> None:
     """S27b — Escape dismisses an outside-focused context menu without leaving Loupe."""
     press(page, "Meta+2")
@@ -1391,6 +1560,8 @@ def main() -> int:
         smoke.step("S19e palette does not hijack text input", lambda: test_palette_does_not_hijack_text_input(page))
         smoke.step("S19f AI settings and library commands", lambda: test_ai_settings_and_library_commands(page))
         smoke.step("S27 context menu", lambda: test_context_menu(page))
+        smoke.step("S27d context menu keyboard submenus", lambda: test_context_menu_keyboard_submenus(page))
+        smoke.step("S27e sidebar context menus", lambda: test_sidebar_context_menus(page))
         smoke.step("S27a context submenu right edge", lambda: test_context_submenu_flips_at_right_edge(page))
         smoke.step("S27b context menu Escape stays in Loupe", lambda: test_context_menu_escape_stays_in_loupe(page))
         smoke.step("S27c crop context menu Escape precedence", lambda: test_crop_context_menu_escape_precedence(page))

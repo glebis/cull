@@ -4,7 +4,15 @@ import { buildExportParams, describeExportScope, type ExportScope } from './expo
 const request = { outputDir: '/out', format: 'jpg', naming: '{index}_{name}' };
 
 function scope(partial: Partial<ExportScope>): ExportScope {
-    return { activeCollection: null, activeFolder: null, selectedIds: [], allImageIds: [], ...partial };
+    return {
+        smartCollectionId: null,
+        smartCollectionImageIds: [],
+        activeCollection: null,
+        activeFolder: null,
+        selectedIds: [],
+        allImageIds: [],
+        ...partial,
+    };
 }
 
 describe('export selector resolution', () => {
@@ -33,6 +41,18 @@ describe('export selector resolution', () => {
     it('falls back to the whole library', () => {
         const params = buildExportParams(scope({ allImageIds: ['x', 'y', 'z'] }), request);
         expect(params.image_ids).toEqual(['x', 'y', 'z']);
+    });
+
+    it('exports only the resolved images from an active smart collection', () => {
+        const smartScope = scope({
+            smartCollectionId: 'smart-1',
+            smartCollectionImageIds: ['smart-a', 'smart-b'],
+            allImageIds: ['library-a'],
+        });
+
+        expect(describeExportScope(smartScope)).toEqual({ kind: 'smart', count: 2 });
+        const params = buildExportParams(smartScope, request);
+        expect(params.image_ids).toEqual(['smart-a', 'smart-b']);
     });
 
     it('carries format and naming through unchanged', () => {
