@@ -408,7 +408,7 @@ fn create_image_record(
 fn compute_hash(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 const DOCUMENT_PREVIEW_DIMENSION: u32 = 1200;
@@ -449,7 +449,7 @@ fn hash_file_cancellable(
         }
         hasher.update(&buf[..n]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex::encode(hasher.finalize()))
 }
 
 fn read_file_cancellable(
