@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
 import type { ImageWithFile } from '$lib/api';
 
 const mocks = vi.hoisted(() => ({
@@ -79,6 +79,16 @@ afterEach(() => cleanup());
 beforeEach(() => vi.clearAllMocks());
 
 describe('ContextMenu shortcut hints', () => {
+    it('moves initial keyboard focus to the first root menu item', async () => {
+        const { container } = render(ContextMenu, {
+            props: { image, x: 20, y: 20, onclose: vi.fn() },
+        });
+
+        await waitFor(() => {
+            expect(container.querySelector('button[data-submenu-key="rate"]')).toHaveFocus();
+        });
+    });
+
     it('renders the command registry shortcuts beside matching actions', async () => {
         const { container } = render(ContextMenu, {
             props: { image, x: 20, y: 20, onclose: vi.fn() },
