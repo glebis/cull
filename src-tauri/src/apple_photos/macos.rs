@@ -4,7 +4,7 @@ use super::{
     PhotosAlbum, PhotosAlbumKind, PhotosAsset, PhotosAuthorizationStatus, PhotosError, PhotosPage,
 };
 use block2::RcBlock;
-use objc2::rc::autoreleasepool;
+use objc2::rc::{autoreleasepool, Retained};
 use objc2_foundation::{NSArray, NSDate, NSPredicate, NSSortDescriptor, NSString};
 use objc2_photos::{
     PHAccessLevel, PHAsset, PHAssetCollection, PHAssetCollectionSubtype, PHAssetCollectionType,
@@ -124,19 +124,7 @@ pub(super) fn list_assets_page(
     catch_native(|| unsafe {
         // SAFETY: All PhotoKit objects stay within this serialized autorelease-pool
         // scope. Fetching metadata does not request bytes or permit an iCloud download.
-        let options = PHFetchOptions::new();
-        let creation_key = NSString::from_str("creationDate");
-        let identifier_key = NSString::from_str("localIdentifier");
-        let creation_sort =
-            NSSortDescriptor::sortDescriptorWithKey_ascending(Some(&creation_key), false);
-        let identifier_sort =
-            NSSortDescriptor::sortDescriptorWithKey_ascending(Some(&identifier_key), true);
-        let descriptors = NSArray::from_retained_slice(&[creation_sort, identifier_sort]);
-        options.setSortDescriptors(Some(&descriptors));
-        let image_predicate_format = NSString::from_str("mediaType == 1");
-        let image_predicate =
-            NSPredicate::predicateWithFormat_argumentArray(&image_predicate_format, None);
-        options.setPredicate(Some(&image_predicate));
+        let options = asset_fetch_options();
 
         let result = if let Some(album_id) = album_id {
             let identifier = NSString::from_str(album_id);
@@ -192,6 +180,22 @@ pub(super) fn list_assets_page(
     })
 }
 
+unsafe fn asset_fetch_options() -> Retained<PHFetchOptions> {
+    let options = PHFetchOptions::new();
+    let creation_key = NSString::from_str("creationDate");
+    let creation_sort =
+        NSSortDescriptor::sortDescriptorWithKey_ascending(Some(&creation_key), false);
+    // PhotoKit only accepts a restricted set of PHAsset sort keys. In particular,
+    // localIdentifier raises an Objective-C "Unsupported sort descriptor" exception.
+    let descriptors = NSArray::from_retained_slice(&[creation_sort]);
+    options.setSortDescriptors(Some(&descriptors));
+    let image_predicate_format = NSString::from_str("mediaType == 1");
+    let image_predicate =
+        NSPredicate::predicateWithFormat_argumentArray(&image_predicate_format, None);
+    options.setPredicate(Some(&image_predicate));
+    options
+}
+
 fn date_to_rfc3339(date: &NSDate) -> Option<String> {
     let timestamp = date.timeIntervalSince1970();
     if !timestamp.is_finite() {
@@ -216,5 +220,18 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(error, PhotosError::Native(_)));
+    }
+
+    #[test]
+    fn asset_fetch_options_exclude_unsupported_identifier_sort() {
+        let options = unsafe { asset_fetch_options() };
+        let descriptors = unsafe { options.sortDescriptors() }.unwrap();
+        let keys: Vec<String> = descriptors
+            .iter()
+            .filter_map(|descriptor| descriptor.key())
+            .map(|key| key.to_string())
+            .collect();
+
+        assert_eq!(keys, ["creationDate"]);
     }
 }
