@@ -113,6 +113,11 @@ def thumb_filenames(page: Page) -> list[str]:
     return [thumb_filename(page, index) for index in range(page.locator(".thumb").count())]
 
 
+def expect_thumb_hidden(page: Page, filename: str, previous_count: int) -> None:
+    expect(page.locator(".thumb")).to_have_count(previous_count - 1)
+    assert filename not in thumb_filenames(page)
+
+
 def last_thumb_label(page: Page) -> str:
     count = page.locator(".thumb").count()
     if count == 0:
@@ -442,8 +447,9 @@ def test_rating_decision_and_selection(page: Page) -> None:
     dispatch_key(page, "a")
     expect(page.locator(".thumb.focused .badge.accept")).to_be_visible()
     rejected_filename = focused_filename(page)
+    previous_count = page.locator(".thumb").count()
     dispatch_key(page, "x")
-    assert rejected_filename not in thumb_filenames(page)
+    expect_thumb_hidden(page, rejected_filename, previous_count)
     dispatch_key(page, "a")
     expect(page.locator(".thumb.focused .badge.accept")).to_be_visible()
     dispatch_key(page, "u")
@@ -707,8 +713,9 @@ def test_accept_reject_undecided(page: Page) -> None:
 
     # x -> reject and hide the image from the default library view
     rejected_filename = focused_filename(page)
+    previous_count = page.locator(".thumb").count()
     dispatch_key(page, "x")
-    assert rejected_filename not in thumb_filenames(page)
+    expect_thumb_hidden(page, rejected_filename, previous_count)
 
     # a then u -> undecided (no badge) on the next visible image
     dispatch_key(page, "a")
@@ -1429,12 +1436,13 @@ def test_decisions_in_loupe(page: Page) -> None:
 
     # Go back to loupe and reject
     rejected_filename = focused_filename(page)
+    previous_count = page.locator(".thumb").count()
     press(page, "Enter")
     wait_mode(page, "loupe")
     press(page, "x")
     press(page, "Meta+1")
     wait_mode(page, "grid")
-    assert rejected_filename not in thumb_filenames(page)
+    expect_thumb_hidden(page, rejected_filename, previous_count)
 
     # Accept then clear the next visible image in loupe.
     press(page, "Enter")
