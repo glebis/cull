@@ -76,11 +76,86 @@
     let multiCount = $derived(targetIds.length);
     let inCollection = $derived($activeCollection !== null);
 
-    let flatItems = $derived(
-        menuEl
+    function rootMenuItems(): HTMLButtonElement[] {
+        return menuEl
             ? Array.from(menuEl.querySelectorAll<HTMLButtonElement>('button[data-menu-index]'))
-            : []
-    );
+            : [];
+    }
+
+    function rootMenuButton(key: string): HTMLButtonElement | null {
+        return menuEl?.querySelector<HTMLButtonElement>(`button[data-submenu-key="${key}"]`) ?? null;
+    }
+
+    function submenuElement(key: string): HTMLDivElement | undefined {
+        if (key === 'rate') return rateSubmenuEl;
+        if (key === 'collections') return collectionSubmenuEl;
+        if (key === 'copy') return copySubmenuEl;
+        if (key === 'openwith') return openWithSubmenuEl;
+        if (key === 'moveto') return moveSubmenuEl;
+        return undefined;
+    }
+
+    function submenuFocusables(submenu: HTMLElement): HTMLElement[] {
+        return Array.from(submenu.querySelectorAll<HTMLElement>(
+            'button:not(:disabled), input:not(:disabled)',
+        ));
+    }
+
+    async function closeSubmenuAndFocusTrigger(key: string) {
+        openSubmenu = null;
+        await tick();
+        rootMenuButton(key)?.focus();
+    }
+
+    function handleSubmenuNavigation(e: KeyboardEvent, submenu: HTMLElement): boolean {
+        const key = openSubmenu;
+        if (!key) return false;
+        if (e.key === 'Escape' || e.key === 'ArrowLeft') {
+            e.preventDefault();
+            e.stopPropagation();
+            void closeSubmenuAndFocusTrigger(key);
+            return true;
+        }
+
+        const items = submenuFocusables(submenu);
+        if (items.length === 0) return false;
+        const currentIndex = Math.max(0, items.indexOf(document.activeElement as HTMLElement));
+        let nextIndex: number | null = null;
+        if (e.key === 'ArrowDown') nextIndex = (currentIndex + 1) % items.length;
+        else if (e.key === 'ArrowUp') nextIndex = (currentIndex - 1 + items.length) % items.length;
+        else if (e.key === 'Home') nextIndex = 0;
+        else if (e.key === 'End') nextIndex = items.length - 1;
+        else if (e.key === 'Enter' && document.activeElement instanceof HTMLButtonElement) {
+            e.preventDefault();
+            e.stopPropagation();
+            document.activeElement.click();
+            return true;
+        }
+        if (nextIndex === null) return false;
+        e.preventDefault();
+        e.stopPropagation();
+        items[nextIndex]?.focus();
+        return true;
+    }
+
+    async function openKeyboardSubmenu(key: string) {
+        if (key === 'rate' || key === 'copy') {
+            openSubmenu = key;
+            await placeOpenSubmenu();
+        } else if (key === 'collections') {
+            await loadCollections();
+        } else if (key === 'openwith') {
+            await loadOpenWithApps();
+        } else if (key === 'moveto') {
+            await loadFolders();
+        }
+        await tick();
+        if (openSubmenu !== key) return;
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        if (openSubmenu !== key) return;
+        const submenu = submenuElement(key);
+        if (submenu) submenuFocusables(submenu)[0]?.focus();
+    }
 
     function restoreOpenerFocus() {
         if (!opener?.isConnected) return;
@@ -116,9 +191,17 @@
 
         if (run === placementRun && menuEl) {
             menuReady = true;
-            if (!menuEl.contains(document.activeElement)) {
-                menuEl.focus();
-            }
+            const focusActiveItem = () => {
+                if (run !== placementRun || !menuEl) return;
+                const activeElement = document.activeElement;
+                if (activeElement !== opener && activeElement !== menuEl && activeElement !== document.body) return;
+                const activeItem = menuEl.querySelector<HTMLButtonElement>(
+                    `button[data-menu-index="${activeIndex}"]`,
+                );
+                (activeItem ?? menuEl).focus();
+            };
+            focusActiveItem();
+            requestAnimationFrame(focusActiveItem);
         }
     }
 
@@ -201,18 +284,17 @@
         await revealItemInDir(path);
     }
 
-    $effect(() => {
-        if (menuEl) {
-            flatItems[activeIndex]?.focus();
-        }
-    });
-
     function handleMenuKeydown(e: KeyboardEvent) {
+        const targetSubmenu = e.target instanceof HTMLElement
+            ? e.target.closest<HTMLElement>('.submenu')
+            : null;
+        if (targetSubmenu && handleSubmenuNavigation(e, targetSubmenu)) return;
+
         if (e.key === 'Escape') {
             e.preventDefault();
             e.stopPropagation();
             if (openSubmenu !== null) {
-                openSubmenu = null;
+                void closeSubmenuAndFocusTrigger(openSubmenu);
             } else {
                 onclose();
             }
@@ -240,16 +322,20 @@
             return;
         }
 
-        const items = flatItems;
+        const items = rootMenuItems();
         const count = items.length;
         if (count === 0) return;
+        const focusedRootIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+        if (focusedRootIndex >= 0) activeIndex = focusedRootIndex;
 
         if (e.key === 'ArrowDown') {
             e.preventDefault();
             activeIndex = (activeIndex + 1) % count;
+            items[activeIndex]?.focus();
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
             activeIndex = (activeIndex - 1 + count) % count;
+            items[activeIndex]?.focus();
         } else if (e.key === 'ArrowRight') {
             e.preventDefault();
             // Find which submenu-parent the active button belongs to
@@ -259,17 +345,13 @@
                 if (parentEl) {
                     // Determine submenu key from data attribute or order
                     const key = activeBtn.dataset.submenuKey;
-                    if (key === 'rate') openSubmenu = 'rate';
-                    else if (key === 'collections') { loadCollections(); }
-                    else if (key === 'copy') openSubmenu = 'copy';
-                    else if (key === 'openwith') { loadOpenWithApps(); }
-                    else if (key === 'moveto') { loadFolders(); }
+                    if (key) void openKeyboardSubmenu(key);
                 }
             }
         } else if (e.key === 'ArrowLeft') {
             e.preventDefault();
             if (openSubmenu !== null) {
-                openSubmenu = null;
+                void closeSubmenuAndFocusTrigger(openSubmenu);
             } else {
                 onclose();
             }
@@ -602,21 +684,19 @@
     }
 
     function handleFolderSearchKeydown(e: KeyboardEvent) {
+        if (moveSubmenuEl && handleSubmenuNavigation(e, moveSubmenuEl)) return;
         e.stopPropagation();
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            folderSearch = '';
-        }
     }
 
     function handleCollectionSearchKeydown(e: KeyboardEvent) {
-        e.stopPropagation();
-        if (e.key === 'Escape') {
+        if (e.key === 'Enter' && filteredCollectionList.length > 0) {
             e.preventDefault();
-            collectionSearch = '';
-        } else if (e.key === 'Enter' && filteredCollectionList.length > 0) {
-            e.preventDefault();
+            e.stopPropagation();
             void handleAddToCollection(filteredCollectionList[0][0]);
+        } else if (collectionSubmenuEl && handleSubmenuNavigation(e, collectionSubmenuEl)) {
+            return;
+        } else {
+            e.stopPropagation();
         }
     }
 </script>

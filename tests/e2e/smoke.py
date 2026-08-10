@@ -441,8 +441,11 @@ def test_rating_decision_and_selection(page: Page) -> None:
 
     dispatch_key(page, "a")
     expect(page.locator(".thumb.focused .badge.accept")).to_be_visible()
+    rejected_filename = focused_filename(page)
     dispatch_key(page, "x")
-    expect(page.locator(".thumb.focused .badge.reject")).to_be_visible()
+    assert rejected_filename not in thumb_filenames(page)
+    dispatch_key(page, "a")
+    expect(page.locator(".thumb.focused .badge.accept")).to_be_visible()
     dispatch_key(page, "u")
     expect(page.locator(".thumb.focused .badge")).to_have_count(0)
 
@@ -510,8 +513,13 @@ def test_embeddings_and_empty_states(page: Page) -> None:
     expect(page.locator(".embedding-explorer")).to_be_visible(timeout=10_000)
     expect(page.locator(".embedding-explorer")).to_have_attribute("aria-label", "Visual embeddings")
     expect(page.locator(".embedding-explorer")).to_contain_text("CLIP")
-    expect(page.locator(".embedding-explorer")).to_contain_text("DINOv2")
-    expect(page.locator(".embedding-explorer")).to_contain_text("Gemini")
+    page.get_by_role("button", name="Configure embedding model").click()
+    provider = page.get_by_role("combobox", name="Embedding provider")
+    expect(provider).to_be_visible()
+    expect(provider.locator("option")).to_have_count(6)
+    assert provider.locator("option").all_text_contents()[:3] == [
+        "CLIP ViT-B/32", "DINOv2 ViT-S/14", "Gemini Embedding 2"
+    ]
 
     press(page, "Meta+1")
     expect(page.locator(".grid-container")).to_be_visible()
@@ -685,7 +693,7 @@ def test_star_ratings(page: Page) -> None:
 
 
 def test_accept_reject_undecided(page: Page) -> None:
-    """S10 — a/x/u set accept/reject/undecided badges."""
+    """S10 — a/x/u update decisions and hide rejected images by default."""
     press(page, "Meta+1")
     wait_mode(page, "grid")
     press(page, "Home")
@@ -697,12 +705,14 @@ def test_accept_reject_undecided(page: Page) -> None:
     dispatch_key(page, "a")
     expect(page.locator(".thumb.focused .badge.accept")).to_be_visible()
 
-    # x -> reject (red x badge)
+    # x -> reject and hide the image from the default library view
+    rejected_filename = focused_filename(page)
     dispatch_key(page, "x")
-    expect(page.locator(".thumb.focused .badge.reject")).to_be_visible()
-    expect(page.locator(".thumb.focused .badge.accept")).to_have_count(0)
+    assert rejected_filename not in thumb_filenames(page)
 
-    # u -> undecided (no badge)
+    # a then u -> undecided (no badge) on the next visible image
+    dispatch_key(page, "a")
+    expect(page.locator(".thumb.focused .badge.accept")).to_be_visible()
     dispatch_key(page, "u")
     expect(page.locator(".thumb.focused .badge")).to_have_count(0)
 
@@ -963,8 +973,10 @@ def test_ai_settings_and_library_commands(page: Page) -> None:
     assert tabs.all_inner_texts() == ["General", "Appearance", "AI", "Agent Access", "Privacy", "Plugins"]
 
     page.get_by_role("tab", name="AI", exact=True).click()
-    expect(page.get_by_role("tabpanel")).to_be_visible()
-    assert page.get_by_role("tabpanel").locator("h3").all_text_contents() == [
+    panel = page.get_by_role("tabpanel")
+    expect(panel).to_be_visible()
+    expect(panel.locator("h3")).to_have_count(3)
+    assert panel.locator("h3").all_text_contents() == [
         "Provider Credentials", "Local Models", "Embedding Models"
     ]
     expect(page.get_by_role("tabpanel")).not_to_contain_text("Detect remaining")
@@ -1092,12 +1104,13 @@ def test_context_menu_keyboard_submenus(page: Page) -> None:
     opener.click(button="right")
     menu = page.locator(".context-menu")
     expect(menu).to_be_visible()
+    submenu = lambda key: menu.locator(f'button[data-submenu-key="{key}"] + .submenu')
 
     # Initial focus belongs to the root menu. Rate is immediate and exercises
     # wrapping in a button-only submenu.
     expect(menu.locator('button[data-submenu-key="rate"]')).to_be_focused()
     page.keyboard.press("ArrowRight")
-    rate = menu.locator('.submenu[data-submenu-key="rate"]')
+    rate = submenu("rate")
     expect(rate).to_be_visible()
     expect(rate.get_by_role("menuitem").first).to_be_focused()
     page.keyboard.press("End")
@@ -1110,11 +1123,11 @@ def test_context_menu_keyboard_submenus(page: Page) -> None:
     # Collections contains a search input and live, asynchronously loaded rows.
     menu.locator('button[data-submenu-key="collections"]').focus()
     page.keyboard.press("ArrowRight")
-    collections = menu.locator('.submenu[data-submenu-key="collections"]')
+    collections = submenu("collections")
     expect(collections).to_be_visible()
     expect(collections.get_by_role("menuitem").first).to_be_focused()
     page.keyboard.press("ArrowDown")
-    expect(collections.locator(".collection-search")).to_be_focused()
+    assert collections.locator(".collection-search").evaluate("el => el === document.activeElement"), "collection search did not receive focus"
     page.keyboard.press("ArrowDown")
     expect(collections.locator(".collection-item").first).to_be_focused()
     page.keyboard.press("Escape")
@@ -1124,7 +1137,7 @@ def test_context_menu_keyboard_submenus(page: Page) -> None:
     # leaving focus on the root trigger.
     menu.locator('button[data-submenu-key="copy"]').focus()
     page.keyboard.press("ArrowRight")
-    copy = menu.locator('.submenu[data-submenu-key="copy"]')
+    copy = submenu("copy")
     expect(copy.get_by_role("menuitem").first).to_be_focused()
     page.keyboard.press("Escape")
     expect(menu.locator('button[data-submenu-key="copy"]')).to_be_focused()
@@ -1133,7 +1146,7 @@ def test_context_menu_keyboard_submenus(page: Page) -> None:
     # only while this submenu remains open; do not activate a native dialog.
     menu.locator('button[data-submenu-key="openwith"]').focus()
     page.keyboard.press("ArrowRight")
-    open_with = menu.locator('.submenu[data-submenu-key="openwith"]')
+    open_with = submenu("openwith")
     expect(open_with).to_be_visible()
     expect(open_with.get_by_role("menuitem", name="Choose Application...")).to_be_focused()
     page.keyboard.press("Escape")
@@ -1144,17 +1157,17 @@ def test_context_menu_keyboard_submenus(page: Page) -> None:
     # the entire menu.
     menu.locator('button[data-submenu-key="moveto"]').focus()
     page.keyboard.press("ArrowRight")
-    move_to = menu.locator('.submenu[data-submenu-key="moveto"]')
+    move_to = submenu("moveto")
     expect(move_to.get_by_role("menuitem").first).to_be_focused()
     page.keyboard.press("ArrowDown")
-    expect(move_to.locator(".folder-search")).to_be_focused()
+    assert move_to.locator(".folder-search").evaluate("el => el === document.activeElement"), "folder search did not receive focus"
     page.keyboard.press("Escape")
     expect(menu.locator('button[data-submenu-key="moveto"]')).to_be_focused()
 
     # A pointer hover may reveal a submenu but must not steal the keyboard's
     # current root focus owner.
     menu.locator('button[data-submenu-key="rate"]').hover()
-    expect(menu.locator('.submenu[data-submenu-key="rate"]')).to_be_visible()
+    expect(submenu("rate")).to_be_visible()
     expect(menu.locator('button[data-submenu-key="moveto"]')).to_be_focused()
     page.keyboard.press("Escape")
     expect(menu.locator('button[data-submenu-key="rate"]')).to_be_focused()
@@ -1165,8 +1178,9 @@ def test_context_menu_keyboard_submenus(page: Page) -> None:
     menu.locator('button[data-submenu-key="collections"]').focus()
     page.keyboard.press("ArrowRight")
     expect(collections.locator(".collection-search")).to_be_visible()
+    expect(collections.get_by_role("menuitem").first).to_be_focused()
     page.keyboard.press("ArrowDown")
-    expect(collections.locator(".collection-search")).to_be_focused()
+    assert collections.locator(".collection-search").evaluate("el => el === document.activeElement"), "reopened collection search did not receive focus"
     page.keyboard.press("Enter")
     expect(menu).to_be_hidden()
 
@@ -1408,25 +1422,26 @@ def test_decisions_in_loupe(page: Page) -> None:
 
     # Accept
     press(page, "a")
-    press(page, "Escape")
+    press(page, "Meta+1")
     wait_mode(page, "grid")
     press(page, "Home")
     expect(page.locator(".thumb.focused .badge.accept")).to_be_visible()
 
     # Go back to loupe and reject
+    rejected_filename = focused_filename(page)
     press(page, "Enter")
     wait_mode(page, "loupe")
     press(page, "x")
-    press(page, "Escape")
+    press(page, "Meta+1")
     wait_mode(page, "grid")
-    press(page, "Home")
-    expect(page.locator(".thumb.focused .badge.reject")).to_be_visible()
+    assert rejected_filename not in thumb_filenames(page)
 
-    # Clear
+    # Accept then clear the next visible image in loupe.
     press(page, "Enter")
     wait_mode(page, "loupe")
+    press(page, "a")
     press(page, "u")
-    press(page, "Escape")
+    press(page, "Meta+1")
     wait_mode(page, "grid")
     press(page, "Home")
     expect(page.locator(".thumb.focused .badge")).to_have_count(0)

@@ -29,4 +29,50 @@ describe('E2E mock startup contract', () => {
         expect(payload.bytes.length).toBeGreaterThan(0);
         await expect(invoke('stop_dictation')).resolves.toBeUndefined();
     });
+
+    it('matches the detailed Trash response consumed by the app and supports undo', async () => {
+        const before = await invoke<Array<{ image: { id: string }; path: string }>>('list_images');
+        const image = before[0];
+
+        const result = await invoke<{
+            requested: number;
+            succeeded: number;
+            failed: number;
+            results: Array<{ image_id: string; path: string | null; status: string; error: string | null }>;
+        }>('trash_images_detailed', { imageIds: [image.image.id] });
+
+        expect(result).toEqual({
+            requested: 1,
+            succeeded: 1,
+            failed: 0,
+            results: [{ image_id: image.image.id, path: image.path, status: 'trashed', error: null }],
+        });
+        await expect(invoke<Array<{ image: { id: string } }>>('list_images'))
+            .resolves.not.toContainEqual(expect.objectContaining({ image: { id: image.image.id } }));
+
+        await invoke('undo');
+        await expect(invoke<Array<{ image: { id: string } }>>('list_images'))
+            .resolves.toContainEqual(expect.objectContaining({
+                image: expect.objectContaining({ id: image.image.id }),
+            }));
+    });
+
+    it('returns sessions with the current folder_path contract', async () => {
+        const sessions = await invoke<Array<{ folder_path: string }>>('list_sessions');
+        expect(sessions[0].folder_path).toBe('/mock/session');
+    });
+
+    it('implements scoped embedding pagination used by the explorer', async () => {
+        const ids = await invoke<{ ids: string[]; total: number; has_more: boolean }>('list_scoped_image_ids', {
+            scope: { type: 'all', include_rejected: false }, limit: 2, offset: 0,
+        });
+        expect(ids).toMatchObject({ ids: ['img-0', 'img-1'], total: 20, has_more: true });
+
+        const embeddings = await invoke<{ ids: string[]; dims: number; total: number }>('get_scoped_embedding_page', {
+            scope: { type: 'all', include_rejected: false }, model: 'dinov2-vits14', limit: 2, offset: 2,
+        });
+        expect(embeddings).toMatchObject({
+            ids: ['img-2', 'img-3'], dims: 384, total: 8, offset: 2, limit: 2, has_more: true,
+        });
+    });
 });
