@@ -108,5 +108,20 @@ describe('JobProgressPanel detection jobs', () => {
         });
         expect(screen.getByText('2 imported · 1 reused · 1 failed · 3 skipped · 4 inaccessible · 0 cancelled')).toBeInTheDocument();
         expect(screen.queryByText('generic terminal state')).not.toBeInTheDocument();
+
+        window.dispatchEvent(new CustomEvent('photos-import-started', {
+            detail: { job_id: 'job_photos_fatal', total: 3 },
+        }));
+        handlers.get('photos-import-finished')?.({
+            payload: {
+                job_id: 'job_photos_fatal', imported: 1, reused: 0, failed: 2, skipped: 0,
+                inaccessible: 0, cancelled: 0, error: 'Database finalization failed',
+            },
+        });
+        expect(await screen.findByText(
+            '1 imported · 0 reused · 2 failed · 0 skipped · 0 inaccessible · 0 cancelled · Database finalization failed',
+        )).toBeInTheDocument();
+        await waitFor(() => expect(mocks.loadImagesForCurrentScope).toHaveBeenCalledTimes(2));
+        expect(mocks.refreshImageCount).toHaveBeenCalledTimes(2);
     });
 });

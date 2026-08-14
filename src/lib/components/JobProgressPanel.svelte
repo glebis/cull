@@ -184,7 +184,7 @@
                     : p.error || (p.failed ?? 0) > 0 || (p.inaccessible ?? 0) > 0
                         ? 'failed'
                         : 'completed';
-                const message = p.error ?? [
+                const countsMessage = [
                     `${p.imported ?? 0} imported`,
                     `${p.reused ?? 0} reused`,
                     `${p.failed ?? 0} failed`,
@@ -192,7 +192,8 @@
                     `${p.inaccessible ?? 0} inaccessible`,
                     `${p.cancelled ?? 0} cancelled`,
                 ].join(' · ');
-                upsertJob(p.job_id, 'import', status, total, total, message, p.error ?? null);
+                const message = p.error ? `${countsMessage} · ${p.error}` : countsMessage;
+                upsertJob(p.job_id, 'import', status, total, total, message, null);
                 jobs = jobs.map(job => job.job_id === p.job_id ? { ...job, itemFraction: undefined, photosSummary: true } : job);
                 scheduleFadeOut(p.job_id);
                 if ((p.imported ?? 0) > 0) {
