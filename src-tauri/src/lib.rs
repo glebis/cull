@@ -287,6 +287,7 @@ mod gui_launch_tests {
             "photos_list_albums",
             "photos_list_assets",
             "photos_request_authorization",
+            "photos_start_import_assets",
         ] {
             assert!(registry.contains(&format!("commands::photos::{command},")));
             assert!(photos_permissions.contains(&format!("\"{command}\"")));
@@ -545,6 +546,7 @@ pub fn run() {
             commands::photos::photos_list_albums,
             commands::photos::photos_list_assets,
             commands::photos::photos_load_local_preview,
+            commands::photos::photos_start_import_assets,
             commands::deeplink::drain_pending_open_params,
             commands::deeplink::complete_deep_link_navigation,
             commands::deeplink::open_deep_link_urls,

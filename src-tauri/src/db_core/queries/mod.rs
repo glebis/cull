@@ -6,6 +6,7 @@ pub mod catalog;
 pub mod collections;
 pub mod detection;
 pub mod embeddings;
+pub mod external_assets;
 pub mod images;
 pub mod jobs;
 pub mod media;

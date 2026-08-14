@@ -1,8 +1,10 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
+mod import;
 #[cfg(target_os = "macos")]
 mod macos;
+pub use import::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -83,6 +85,22 @@ pub struct PhotosPage<T> {
     pub has_more: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhotosAssetFilter {
+    #[default]
+    All,
+    Favorites,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhotosAssetSort {
+    #[default]
+    Newest,
+    Oldest,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PhotosError {
     Unsupported,
@@ -113,6 +131,8 @@ pub trait PhotosCatalog {
         album_id: Option<&str>,
         offset: u32,
         limit: u32,
+        filter: PhotosAssetFilter,
+        sort: PhotosAssetSort,
     ) -> Result<PhotosPage<PhotosAsset>, PhotosError>;
     fn load_local_preview(&self, asset_id: &str, size: u32) -> Result<Option<String>, PhotosError>;
 }
@@ -165,8 +185,10 @@ pub fn list_assets(
     album_id: Option<&str>,
     offset: u32,
     limit: u32,
+    filter: PhotosAssetFilter,
+    sort: PhotosAssetSort,
 ) -> Result<PhotosPage<PhotosAsset>, PhotosError> {
-    catalog.list_assets_page(album_id, offset, limit.clamp(1, 100))
+    catalog.list_assets_page(album_id, offset, limit.clamp(1, 100), filter, sort)
 }
 
 pub fn load_local_preview(
@@ -214,12 +236,31 @@ impl PhotosCatalog for SystemPhotosCatalog {
         album_id: Option<&str>,
         offset: u32,
         limit: u32,
+        filter: PhotosAssetFilter,
+        sort: PhotosAssetSort,
     ) -> Result<PhotosPage<PhotosAsset>, PhotosError> {
-        macos::list_assets_page(album_id, offset, limit)
+        macos::list_assets_page(album_id, offset, limit, filter, sort)
     }
 
     fn load_local_preview(&self, asset_id: &str, size: u32) -> Result<Option<String>, PhotosError> {
         macos::load_local_preview(asset_id, size)
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl PhotosCurrentResourceProvider for SystemPhotosCatalog {
+    fn describe_current(&self, asset_id: &str) -> Result<PhotosCurrentResource, PhotosImportError> {
+        macos::describe_current(asset_id)
+    }
+
+    fn materialize_current(
+        &self,
+        resource: &PhotosCurrentResource,
+        output: &mut std::fs::File,
+        cancel: &tokio_util::sync::CancellationToken,
+        progress: &mut dyn FnMut(Option<u64>, Option<u64>, Option<f64>),
+    ) -> Result<PhotosMaterializedMetadata, PhotosImportError> {
+        macos::materialize_current(resource, output, cancel, progress)
     }
 }
 
@@ -242,6 +283,8 @@ impl PhotosCatalog for SystemPhotosCatalog {
         _album_id: Option<&str>,
         _offset: u32,
         _limit: u32,
+        _filter: PhotosAssetFilter,
+        _sort: PhotosAssetSort,
     ) -> Result<PhotosPage<PhotosAsset>, PhotosError> {
         Err(PhotosError::Unsupported)
     }
@@ -252,6 +295,26 @@ impl PhotosCatalog for SystemPhotosCatalog {
         _size: u32,
     ) -> Result<Option<String>, PhotosError> {
         Err(PhotosError::Unsupported)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+impl PhotosCurrentResourceProvider for SystemPhotosCatalog {
+    fn describe_current(
+        &self,
+        _asset_id: &str,
+    ) -> Result<PhotosCurrentResource, PhotosImportError> {
+        Err(PhotosImportError::Unsupported)
+    }
+
+    fn materialize_current(
+        &self,
+        _resource: &PhotosCurrentResource,
+        _output: &mut std::fs::File,
+        _cancel: &tokio_util::sync::CancellationToken,
+        _progress: &mut dyn FnMut(Option<u64>, Option<u64>, Option<f64>),
+    ) -> Result<PhotosMaterializedMetadata, PhotosImportError> {
+        Err(PhotosImportError::Unsupported)
     }
 }
 
@@ -294,6 +357,8 @@ mod tests {
             _album_id: Option<&str>,
             offset: u32,
             limit: u32,
+            _filter: PhotosAssetFilter,
+            _sort: PhotosAssetSort,
         ) -> Result<PhotosPage<PhotosAsset>, PhotosError> {
             Ok(paginate(
                 vec![
@@ -353,7 +418,15 @@ mod tests {
 
     #[test]
     fn asset_adapter_page_preserves_created_desc_null_last_then_id() {
-        let page = list_assets(&FakeCatalog::default(), None, 0, 100).unwrap();
+        let page = list_assets(
+            &FakeCatalog::default(),
+            None,
+            0,
+            100,
+            PhotosAssetFilter::All,
+            PhotosAssetSort::Newest,
+        )
+        .unwrap();
         let ids: Vec<&str> = page.items.iter().map(|item| item.id.as_str()).collect();
         assert_eq!(ids, vec!["new-a", "new-b", "old", "null"]);
     }

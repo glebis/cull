@@ -90,4 +90,4 @@ objc2-vision = { version = "0.3.2", default-features = false, features = ["std",
 objc2-speech = "0.3"
 objc2-avf-audio = "0.3"
 block2 = "0.6"
-objc2-photos = { version = "0.3.2", default-features = false, features = ["std", "block2", "objc2-app-kit", "objc2-core-foundation", "PHAsset", "PHAssetResource", "PHCollection", "PHFetchOptions", "PHFetchResult", "PHImageManager", "PHObject", "PHPhotoLibrary", "PhotosTypes"] }
+objc2-photos = { version = "0.3.2", default-features = false, features = ["std", "block2", "objc2-app-kit", "objc2-core-foundation", "objc2-image-io", "PHAsset", "PHAssetResource", "PHCollection", "PHFetchOptions", "PHFetchResult", "PHImageManager", "PHObject", "PHPhotoLibrary", "PhotosTypes"] }

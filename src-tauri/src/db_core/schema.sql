@@ -360,6 +360,63 @@ CREATE TABLE IF NOT EXISTS import_batches (
                 collection_id TEXT
             );
 
+CREATE TABLE IF NOT EXISTS external_assets (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    provider_asset_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(provider, provider_asset_id)
+);
+
+CREATE TABLE IF NOT EXISTS external_asset_versions (
+    id TEXT PRIMARY KEY,
+    external_asset_id TEXT NOT NULL REFERENCES external_assets(id) ON DELETE CASCADE,
+    representation TEXT NOT NULL CHECK (representation IN ('current', 'original')),
+    version_fingerprint TEXT NOT NULL,
+    provider_modified_at TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(external_asset_id, representation, version_fingerprint)
+);
+
+CREATE TABLE IF NOT EXISTS external_asset_resources (
+    id TEXT PRIMARY KEY,
+    version_id TEXT NOT NULL REFERENCES external_asset_versions(id) ON DELETE CASCADE,
+    resource_key TEXT NOT NULL,
+    original_filename TEXT NOT NULL,
+    content_type TEXT,
+    managed_path TEXT NOT NULL,
+    content_sha256 TEXT,
+    byte_count INTEGER,
+    image_id TEXT REFERENCES images(id) ON DELETE SET NULL,
+    state TEXT NOT NULL CHECK (state IN ('requested', 'materializing', 'materialized', 'imported', 'failed', 'cancelled', 'skipped')),
+    error_code TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(version_id, resource_key),
+    UNIQUE(managed_path)
+);
+
+CREATE TABLE IF NOT EXISTS external_import_items (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    batch_id TEXT NOT NULL REFERENCES import_batches(id) ON DELETE CASCADE,
+    resource_id TEXT NOT NULL REFERENCES external_asset_resources(id) ON DELETE CASCADE,
+    source_album_id TEXT,
+    ordinal INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('requested', 'materializing', 'materialized', 'imported', 'failed', 'cancelled', 'skipped', 'inaccessible')),
+    error_code TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(job_id, resource_id),
+    UNIQUE(job_id, ordinal)
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_resources_image ON external_asset_resources(image_id);
+CREATE INDEX IF NOT EXISTS idx_external_import_items_job ON external_import_items(job_id, ordinal);
+
 CREATE TABLE IF NOT EXISTS iterations (
     id TEXT PRIMARY KEY,
     parent_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,

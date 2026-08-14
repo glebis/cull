@@ -7,7 +7,7 @@ use rusqlite::{ffi, params, Connection, Error as SqlError, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 26;
+const CURRENT_SCHEMA_VERSION: i64 = 27;
 
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, "initial_schema"),
@@ -36,6 +36,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (24, "reserved_schema_history_24"),
     (25, "agent_action_proposals"),
     (26, "image_analysis_status"),
+    (27, "external_asset_imports"),
 ];
 
 #[derive(Clone)]
@@ -383,6 +384,11 @@ impl Database {
             self.seed_preset_collections()?;
             Ok(())
         })?;
+        self.run_migration_step(27, "external_asset_imports", || {
+            let conn = self.conn.lock();
+            conn.execute_batch(external_asset_imports_schema())?;
+            Ok(())
+        })?;
 
         self.verify_schema_invariants()?;
         Ok(())
@@ -419,6 +425,10 @@ impl Database {
             "image_tags",
             "generation_runs",
             "image_analysis_status",
+            "external_assets",
+            "external_asset_versions",
+            "external_asset_resources",
+            "external_import_items",
             "agent_action_proposals",
             "agent_selection_presets",
             "schema_migrations",
@@ -1122,6 +1132,63 @@ fn image_analysis_status_schema() -> &'static str {
     "#
 }
 
+fn external_asset_imports_schema() -> &'static str {
+    r#"
+    CREATE TABLE IF NOT EXISTS external_assets (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        provider_asset_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(provider, provider_asset_id)
+    );
+    CREATE TABLE IF NOT EXISTS external_asset_versions (
+        id TEXT PRIMARY KEY,
+        external_asset_id TEXT NOT NULL REFERENCES external_assets(id) ON DELETE CASCADE,
+        representation TEXT NOT NULL CHECK (representation IN ('current', 'original')),
+        version_fingerprint TEXT NOT NULL,
+        provider_modified_at TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE(external_asset_id, representation, version_fingerprint)
+    );
+    CREATE TABLE IF NOT EXISTS external_asset_resources (
+        id TEXT PRIMARY KEY,
+        version_id TEXT NOT NULL REFERENCES external_asset_versions(id) ON DELETE CASCADE,
+        resource_key TEXT NOT NULL,
+        original_filename TEXT NOT NULL,
+        content_type TEXT,
+        managed_path TEXT NOT NULL,
+        content_sha256 TEXT,
+        byte_count INTEGER,
+        image_id TEXT REFERENCES images(id) ON DELETE SET NULL,
+        state TEXT NOT NULL CHECK (state IN ('requested', 'materializing', 'materialized', 'imported', 'failed', 'cancelled', 'skipped')),
+        error_code TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(version_id, resource_key),
+        UNIQUE(managed_path)
+    );
+    CREATE TABLE IF NOT EXISTS external_import_items (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL REFERENCES import_batches(id) ON DELETE CASCADE,
+        resource_id TEXT NOT NULL REFERENCES external_asset_resources(id) ON DELETE CASCADE,
+        source_album_id TEXT,
+        ordinal INTEGER NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('requested', 'materializing', 'materialized', 'imported', 'failed', 'cancelled', 'skipped', 'inaccessible')),
+        error_code TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(job_id, resource_id),
+        UNIQUE(job_id, ordinal)
+    );
+    CREATE INDEX IF NOT EXISTS idx_external_resources_image ON external_asset_resources(image_id);
+    CREATE INDEX IF NOT EXISTS idx_external_import_items_job ON external_import_items(job_id, ordinal);
+    "#
+}
+
 fn migration_checksum(version: i64, name: &str) -> String {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in version
@@ -1549,8 +1616,9 @@ mod migration_safety_tests {
 
         let db = Database::open(&db_path).unwrap();
         let conn = db.conn.lock();
-        assert_eq!(user_version(&conn).unwrap(), 26);
+        assert_eq!(user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
         assert!(table_exists(&conn, "image_analysis_status").unwrap());
+        assert!(table_exists(&conn, "external_import_items").unwrap());
         let repaired_name: String = conn
             .query_row(
                 "SELECT name FROM projects
@@ -1779,6 +1847,21 @@ mod tests {
     fn verify_schema_invariants_passes_for_fresh_db() {
         let db = test_db();
         assert!(db.verify_schema_invariants().is_ok());
+    }
+
+    #[test]
+    fn fresh_database_contains_apple_photos_import_journal() {
+        let db = test_db();
+        let conn = db.conn.lock();
+
+        for table in [
+            "external_assets",
+            "external_asset_versions",
+            "external_asset_resources",
+            "external_import_items",
+        ] {
+            assert!(table_exists(&conn, table).unwrap(), "missing {table}");
+        }
     }
 
     #[test]

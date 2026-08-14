@@ -1,10 +1,11 @@
 [[permission]]
 identifier = "app-photos"
-description = "Allows explicit Apple Photos authorization, read-only catalog metadata access, and local-only thumbnail previews."
+description = "Allows explicit Apple Photos authorization, read-only catalog access, local previews, and user-selected current-representation imports."
 commands.allow = [
   "photos_authorization_status",
   "photos_load_local_preview",
   "photos_list_albums",
   "photos_list_assets",
   "photos_request_authorization",
+  "photos_start_import_assets",
 ]
