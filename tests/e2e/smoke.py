@@ -1580,6 +1580,38 @@ def test_apple_photos_dialog_geometry(page: Page) -> None:
     page.set_viewport_size({"width": 1440, "height": 960})
 
 
+def test_apple_photos_provider_controls_and_import(page: Page) -> None:
+    """Photos provider criteria and the visible keyboard import path work end to end."""
+    page.evaluate("""async () => {
+        const { applePhotosCatalogOpen } = await import('/src/lib/stores.ts');
+        applePhotosCatalogOpen.set(true);
+    }""")
+
+    dialog = page.locator(".apple-photos-dialog")
+    expect(dialog).to_be_visible()
+    filter_select = page.get_by_role("combobox", name="Filter photos")
+    sort_select = page.get_by_role("combobox", name="Sort photos")
+
+    filter_select.select_option("favorites")
+    expect(page.locator(".asset-tile")).to_have_count(8)
+    sort_select.select_option("oldest")
+    expect(page.locator(".asset-tile").first).to_have_attribute("aria-label", "Select Photo 1.jpg")
+    sort_select.select_option("newest")
+    expect(page.locator(".asset-tile").first).to_have_attribute("aria-label", "Select Photo 22.jpg")
+
+    first_tile = page.locator(".asset-tile").first
+    first_tile.click()
+    import_button = page.get_by_role("button", name="Import 1 photo")
+    expect(import_button).to_be_visible()
+    expect(import_button).to_be_enabled()
+
+    first_tile.focus()
+    page.keyboard.press("Enter")
+    expect(dialog).to_have_count(0)
+    expect(page.get_by_role("button", name="Cancel Import")).to_be_visible()
+    expect(page.locator(".thumb")).to_have_count(21, timeout=5_000)
+
+
 def main() -> int:
     SHOTS.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
@@ -1641,6 +1673,7 @@ def main() -> int:
         smoke.step("S11a selection Space toggle", lambda: test_grid_selection_space(page))
         smoke.step("S11b Shift+click range select", lambda: test_grid_shift_click_range_select(page))
         smoke.step("Apple Photos fullscreen scalable grid", lambda: test_apple_photos_dialog_geometry(page))
+        smoke.step("Apple Photos provider controls and import", lambda: test_apple_photos_provider_controls_and_import(page))
 
         if page_errors:
             print("\nPage errors:")

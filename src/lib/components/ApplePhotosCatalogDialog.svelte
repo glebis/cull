@@ -227,7 +227,10 @@
         importing = true;
         importError = null;
         try {
-            await client.startImport(frozenAssetIds, selectedAlbumId || null);
+            const started = await client.startImport(frozenAssetIds, selectedAlbumId || null);
+            window.dispatchEvent(new CustomEvent('photos-import-started', {
+                detail: { job_id: started.job_id, total: frozenAssetIds.length },
+            }));
             onclose();
         } catch (startError) {
             importError = messageFrom(startError);

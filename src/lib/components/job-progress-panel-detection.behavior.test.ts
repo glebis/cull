@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
     cancelJob: vi.fn().mockResolvedValue(undefined),
     listen: vi.fn(),
     listJobs: vi.fn().mockResolvedValue([]),
+    loadImagesForCurrentScope: vi.fn().mockResolvedValue(undefined),
+    refreshImageCount: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({ listen: mocks.listen }));
@@ -16,6 +18,10 @@ vi.mock('$lib/api', () => ({
     listJobs: mocks.listJobs,
     pauseJob: vi.fn(),
     resumeJob: vi.fn(),
+}));
+vi.mock('$lib/image-loading', () => ({
+    loadImagesForCurrentScope: mocks.loadImagesForCurrentScope,
+    refreshImageCount: mocks.refreshImageCount,
 }));
 
 import JobProgressPanel from './JobProgressPanel.svelte';
@@ -54,5 +60,41 @@ describe('JobProgressPanel detection jobs', () => {
         expect(screen.getByText(/11\/20/)).toBeInTheDocument();
         await user.click(screen.getByRole('button', { name: 'Cancel Detection' }));
         expect(mocks.cancelJob).toHaveBeenCalledWith('job_detection_real');
+    });
+
+    it('shows a started Photos import, keeps it cancellable, and refreshes the library on completion', async () => {
+        const handlers = new Map<string, (event: { payload: Record<string, unknown> }) => void>();
+        mocks.listen.mockImplementation(async (name: string, handler: (event: { payload: Record<string, unknown> }) => void) => {
+            handlers.set(name, handler);
+            return vi.fn();
+        });
+        const user = userEvent.setup();
+        render(JobProgressPanel);
+        await waitFor(() => expect(handlers.has('photos-import-progress')).toBe(true));
+
+        window.dispatchEvent(new CustomEvent('photos-import-started', {
+            detail: { job_id: 'job_photos', total: 3 },
+        }));
+
+        expect(await screen.findByText('Import')).toBeInTheDocument();
+        expect(screen.getByText(/0\/3/)).toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Cancel Import' }));
+        expect(mocks.cancelJob).toHaveBeenCalledWith('job_photos');
+
+        handlers.get('photos-import-progress')?.({
+            payload: { job_id: 'job_photos', phase: 'download', current: 2, total: 3, filename: 'Two.jpg' },
+        });
+        await waitFor(() => expect(screen.getByText(/2\/3/)).toBeInTheDocument());
+
+        handlers.get('photos-import-finished')?.({
+            payload: { job_id: 'job_photos', imported: 2, reused: 0, failed: 1, inaccessible: 0, cancelled: 0 },
+        });
+        await waitFor(() => expect(mocks.loadImagesForCurrentScope).toHaveBeenCalledWith({
+            resetFocus: false,
+            force: true,
+            invalidateCache: true,
+        }));
+        expect(mocks.refreshImageCount).toHaveBeenCalledOnce();
+        expect(screen.getByText('Failed')).toBeInTheDocument();
     });
 });

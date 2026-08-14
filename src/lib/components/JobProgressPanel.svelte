@@ -2,6 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { listen } from '@tauri-apps/api/event';
     import { cancelJob as cancelJobApi, listJobs, pauseJob as pauseJobApi, resumeJob as resumeJobApi, type JobSnapshot } from '$lib/api';
+    import { loadImagesForCurrentScope, refreshImageCount } from '$lib/image-loading';
     import { getProgressPresentation } from '$lib/job-progress';
 
     interface JobInfo {
@@ -22,11 +23,26 @@
     let unlisteners: (() => void)[] = [];
     let fadeTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
+    function handlePhotosImportStarted(event: Event) {
+        const detail = (event as CustomEvent<{ job_id: string; total: number }>).detail;
+        if (!detail?.job_id) return;
+        upsertJob(detail.job_id, 'import', 'running', 0, detail.total, 'Apple Photos');
+    }
+
+    async function refreshAfterPhotosImport() {
+        await Promise.all([
+            loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true }),
+            refreshImageCount(),
+        ]);
+    }
+
     onMount(async () => {
+        window.addEventListener('photos-import-started', handlePhotosImportStarted);
         try {
             const recent = await listJobs();
-            jobs = recent.map(jobFromSnapshot);
-            for (const job of jobs) {
+            for (const snapshot of recent) {
+                const job = jobFromSnapshot(snapshot);
+                upsertJob(job.job_id, job.kind, job.status, job.current, job.total, job.message, job.error ?? null);
                 if (isTerminal(job.status)) scheduleFadeOut(job.job_id);
             }
 
@@ -117,13 +133,36 @@
             const u19 = await listen<any>('ocr-progress', (e) => {
                 upsertJob(e.payload.job_id ?? `evt_ocr`, 'ocr', 'running', e.payload.current, e.payload.total, e.payload.model);
             });
-            unlisteners = [u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11, u12, u13, u14, u15, u16, u17, u18, u19];
+            const u20 = await listen<any>('photos-import-progress', (e) => {
+                const p = e.payload;
+                const current = Math.min(p.current ?? 0, Math.max(0, (p.total ?? 0) - 1));
+                const phase = p.phase === 'download' ? 'Downloading' : p.phase === 'import' ? 'Importing' : 'Preparing';
+                upsertJob(p.job_id, 'import', 'running', current, p.total ?? 0, p.filename ? `${phase} ${p.filename}` : phase);
+            });
+            const u21 = await listen<any>('photos-import-finished', (e) => {
+                const p = e.payload;
+                const counted = (p.imported ?? 0) + (p.reused ?? 0) + (p.failed ?? 0) + (p.inaccessible ?? 0) + (p.cancelled ?? 0);
+                const total = counted || jobs.find(job => job.job_id === p.job_id)?.total || 0;
+                const status = (p.cancelled ?? 0) > 0
+                    ? 'cancelled'
+                    : p.error || (p.failed ?? 0) > 0 || (p.inaccessible ?? 0) > 0
+                        ? 'failed'
+                        : 'completed';
+                const message = p.error ?? `${p.imported ?? 0} imported${(p.reused ?? 0) > 0 ? ` · ${p.reused} already present` : ''}`;
+                upsertJob(p.job_id, 'import', status, total, total, message, p.error ?? null);
+                scheduleFadeOut(p.job_id);
+                if ((p.imported ?? 0) > 0) {
+                    void refreshAfterPhotosImport().catch(error => console.error('Failed to refresh after Apple Photos import:', error));
+                }
+            });
+            unlisteners = [u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11, u12, u13, u14, u15, u16, u17, u18, u19, u20, u21];
         } catch {
             // Not in Tauri environment
         }
     });
 
     onDestroy(() => {
+        window.removeEventListener('photos-import-started', handlePhotosImportStarted);
         unlisteners.forEach(u => u());
         fadeTimers.forEach(t => clearTimeout(t));
     });

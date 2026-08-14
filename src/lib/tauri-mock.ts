@@ -29,6 +29,7 @@ const MOCK_SMART_COLLECTIONS = [
 
 let userCollections: typeof MOCK_SMART_COLLECTIONS = [];
 let nextId = 100;
+let nextPhotosImportId = 1;
 
 const mockApiKeys: Record<string, string> = {};
 
@@ -213,30 +214,64 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   photos_authorization_status: () => 'authorized',
   photos_request_authorization: () => 'authorized',
   photos_list_albums: () => ({ items: [], total: 0, offset: 0, has_more: false }),
-  photos_list_assets: (_: any, args: { offset?: number; limit?: number }) => {
+  photos_list_assets: (_: any, args: { offset?: number; limit?: number; filter?: 'all' | 'favorites'; sort?: 'newest' | 'oldest' }) => {
     const offset = args?.offset ?? 0;
     const limit = args?.limit ?? 100;
-    const total = 24;
-    const items = Array.from(
-      { length: Math.min(limit, Math.max(0, total - offset)) },
-      (_, index) => {
-        const assetIndex = offset + index;
-        return {
+    let matching = Array.from({ length: 24 }, (_, assetIndex) => ({
           id: `photos-asset-${assetIndex}`,
           filename: `Photo ${assetIndex + 1}.jpg`,
-          created_at: '2026-08-14T12:00:00Z',
+          created_at: new Date(Date.UTC(2026, 6, 14, 0, assetIndex * 30)).toISOString(),
           pixel_width: 1600,
           pixel_height: 1200,
           modified_at: null,
-          favorite: assetIndex === 0,
+          favorite: assetIndex % 3 === 0,
           media_subtypes: 0,
-        };
-      },
-    );
+    }));
+    if (args?.filter === 'favorites') matching = matching.filter(asset => asset.favorite);
+    matching.sort((left, right) => left.created_at.localeCompare(right.created_at));
+    if (args?.sort !== 'oldest') matching.reverse();
+    const total = matching.length;
+    const items = matching.slice(offset, offset + limit);
     const page: ApplePhotosAssetPage = { items, total, offset, has_more: offset + items.length < total };
     return page;
   },
   photos_load_local_preview: () => null,
+  photos_start_import_assets: (_: any, args: { assetIds?: string[] }) => {
+    const jobId = `photos-import-${nextPhotosImportId++}`;
+    const total = args?.assetIds?.length ?? 0;
+    setTimeout(() => emitMockEvent('photos-import-progress', {
+      job_id: jobId,
+      phase: 'download',
+      current: 1,
+      total,
+      filename: 'Photo 1.jpg',
+    }), 250);
+    setTimeout(() => {
+      const nextImageIndex = mockImages.length;
+      mockImages = [...mockImages, makeMockImage(nextImageIndex)];
+      const summary = {
+        job_id: jobId,
+        batch_id: `photos-batch-${nextPhotosImportId}`,
+        imported: total,
+        reused: 0,
+        failed: 0,
+        skipped: 0,
+        inaccessible: 0,
+        cancelled: 0,
+        image_ids: [`img-${nextImageIndex}`],
+      };
+      emitMockEvent('photos-import-finished', summary);
+      emitMockEvent('job-status-changed', {
+        job_id: jobId,
+        kind: 'import',
+        status: 'completed',
+        current: total,
+        total,
+        message: 'Apple Photos import complete',
+      });
+    }, 700);
+    return { job_id: jobId, batch_id: `photos-batch-${nextPhotosImportId}` };
+  },
 
   drain_pending_open_params: () => [],
   list_action_proposals: () => [],

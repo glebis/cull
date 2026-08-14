@@ -261,6 +261,23 @@ describe('Apple Photos catalog dialog', () => {
         await waitFor(() => expect(onclose).toHaveBeenCalledOnce());
     });
 
+    it('announces a started import to the shared jobs UI', async () => {
+        const started = vi.fn();
+        window.addEventListener('photos-import-started', started);
+        const catalog = client({
+            listAssets: vi.fn().mockResolvedValue(page([asset('asset-2', 'Two.jpg')])),
+        });
+        const user = userEvent.setup();
+        render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        await user.click(await screen.findByRole('button', { name: 'Select Two.jpg' }));
+        await user.click(screen.getByRole('button', { name: 'Import 1 photo' }));
+
+        expect(started).toHaveBeenCalledOnce();
+        expect((started.mock.calls[0][0] as CustomEvent).detail).toEqual({ job_id: 'job-1', total: 1 });
+        window.removeEventListener('photos-import-started', started);
+    });
+
     it('keeps the selection retryable when starting an import fails', async () => {
         const catalog = client({
             listAssets: vi.fn().mockResolvedValue(page([asset('asset-1', 'One.jpg')])),
