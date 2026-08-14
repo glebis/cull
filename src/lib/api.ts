@@ -37,6 +37,7 @@ export interface ApplePhotosPage<T> {
     items: T[];
     total: number;
     offset: number;
+    next_offset: number;
     has_more: boolean;
 }
 

@@ -30,6 +30,8 @@
     const PREVIEW_SIZE_MAX = 220;
     const PREVIEW_SIZE_DEFAULT = 120;
     const PREVIEW_REQUEST_SIZE = 512;
+    const MAX_SELECTION_HISTORY_IDS = 100_000;
+    type SelectionChange = { added: string[]; removed: string[] };
     let authorization = $state<ApplePhotosAuthorization | null>(null);
     let albums = $state<ApplePhotosAlbum[]>([]);
     let albumsHasMore = $state(false);
@@ -48,11 +50,14 @@
     let albumsError = $state<string | null>(null);
     let assetsError = $state<string | null>(null);
     let importing = $state(false);
+    let selectingAll = $state(false);
     let importError = $state<string | null>(null);
     let authorizationGeneration = 0;
     let albumsGeneration = 0;
     let assetsGeneration = 0;
     let selectedAssetIds = $state<Set<string>>(new Set());
+    let selectionUndoStack: SelectionChange[] = [];
+    let selectionRedoStack: SelectionChange[] = [];
     let previews = $state<Record<string, string | null | undefined>>({});
     let assetGridWidth = $state(0);
     let previewScalePosition = $state(
@@ -113,7 +118,7 @@
             assetsHasMore = page.has_more;
             // The provider cursor advances by consumed rows, not rendered rows: PhotoKit
             // pages can overlap when assets share the same creation timestamp.
-            assetsNextOffset = page.offset + page.items.length;
+            assetsNextOffset = page.next_offset;
         } catch (loadError) {
             if (generation !== assetsGeneration) return;
             assetsError = messageFrom(loadError);
@@ -183,6 +188,9 @@
         previewOrder = [];
         previewGeneration += 1;
         selectedAssetIds = new Set();
+        selectionUndoStack = [];
+        selectionRedoStack = [];
+        selectingAll = false;
         importError = null;
     }
 
@@ -199,7 +207,7 @@
     }
 
     function loadMore() {
-        if (assetsLoading || !assetsHasMore) return;
+        if (assetsLoading || selectingAll || !assetsHasMore) return;
         void loadAssets(selectedAlbumId || null, assetsNextOffset, true);
     }
 
@@ -213,16 +221,98 @@
         void loadAssets(selectedAlbumId || null, assets.length === 0 ? 0 : assetsNextOffset, assets.length > 0);
     }
 
+    function boundedHistory(history: SelectionChange[], change: SelectionChange): SelectionChange[] {
+        const next = [...history, change];
+        let retainedIds = next.reduce((total, item) => total + item.added.length + item.removed.length, 0);
+        while (next.length > 1 && retainedIds > MAX_SELECTION_HISTORY_IDS) {
+            const removed = next.shift();
+            if (removed) retainedIds -= removed.added.length + removed.removed.length;
+        }
+        return next;
+    }
+
+    function commitSelection(next: Set<string>) {
+        const change: SelectionChange = {
+            added: [...next].filter(id => !selectedAssetIds.has(id)),
+            removed: [...selectedAssetIds].filter(id => !next.has(id)),
+        };
+        if (change.added.length === 0 && change.removed.length === 0) return;
+        selectionUndoStack = boundedHistory(selectionUndoStack, change);
+        selectionRedoStack = [];
+        selectedAssetIds = next;
+        importError = null;
+    }
+
     function toggleSelection(assetId: string) {
+        if (selectingAll || importing) return;
         const next = new Set(selectedAssetIds);
         if (next.has(assetId)) next.delete(assetId);
         else next.add(assetId);
+        commitSelection(next);
+    }
+
+    function selectNone() {
+        if (selectingAll || importing) return;
+        commitSelection(new Set());
+    }
+
+    async function selectAll() {
+        if (selectingAll || importing || assets.length === 0) return;
+        const generation = assetsGeneration;
+        const albumId = selectedAlbumId || null;
+        const details = new Map(assets.map(asset => [asset.id, asset]));
+        let offset = assetsNextOffset;
+        let hasMore = assetsHasMore;
+        selectingAll = true;
+        importError = null;
+        try {
+            while (hasMore) {
+                const page = await client.listAssets(albumId, offset, PAGE_SIZE, assetFilter, assetSort);
+                if (generation !== assetsGeneration) return;
+                for (const asset of page.items) details.set(asset.id, asset);
+                const nextOffset = page.next_offset;
+                if (page.has_more && nextOffset <= offset) {
+                    throw new Error('Apple Photos did not advance while selecting all photos.');
+                }
+                offset = nextOffset;
+                hasMore = page.has_more;
+            }
+            commitSelection(new Set(details.keys()));
+        } catch (selectionError) {
+            if (generation === assetsGeneration) importError = messageFrom(selectionError);
+        } finally {
+            if (generation === assetsGeneration) selectingAll = false;
+        }
+    }
+
+    function undoSelection() {
+        if (selectingAll || importing) return;
+        const change = selectionUndoStack.at(-1);
+        if (!change) return;
+        selectionUndoStack = selectionUndoStack.slice(0, -1);
+        selectionRedoStack = boundedHistory(selectionRedoStack, change);
+        const previous = new Set(selectedAssetIds);
+        for (const id of change.added) previous.delete(id);
+        for (const id of change.removed) previous.add(id);
+        selectedAssetIds = previous;
+        importError = null;
+    }
+
+    function redoSelection() {
+        if (selectingAll || importing) return;
+        const change = selectionRedoStack.at(-1);
+        if (!change) return;
+        selectionRedoStack = selectionRedoStack.slice(0, -1);
+        selectionUndoStack = boundedHistory(selectionUndoStack, change);
+        const next = new Set(selectedAssetIds);
+        for (const id of change.removed) next.delete(id);
+        for (const id of change.added) next.add(id);
         selectedAssetIds = next;
         importError = null;
     }
 
     async function startImport() {
-        if (importing || selectedAssetIds.size === 0) return;
+        if (importing || selectingAll || selectedAssetIds.size === 0) return;
         const frozenAssetIds = [...selectedAssetIds];
         importing = true;
         importError = null;
@@ -240,8 +330,26 @@
     }
 
     function handleDialogKeydown(event: KeyboardEvent) {
-        if (event.defaultPrevented || event.key !== 'Enter' || importing || selectedAssetIds.size === 0) return;
+        if (event.defaultPrevented) return;
         const target = event.target;
+        const isTextEditing = target instanceof HTMLTextAreaElement
+            || (target instanceof HTMLInputElement && target.type !== 'range')
+            || (target instanceof HTMLElement && target.isContentEditable);
+        const commandKey = event.metaKey || event.ctrlKey;
+        if (commandKey && !isTextEditing && event.key.toLowerCase() === 'a') {
+            event.preventDefault();
+            event.stopPropagation();
+            void selectAll();
+            return;
+        }
+        if (commandKey && !isTextEditing && event.key.toLowerCase() === 'z') {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.shiftKey) redoSelection();
+            else undoSelection();
+            return;
+        }
+        if (event.key !== 'Enter' || importing || selectingAll || selectedAssetIds.size === 0) return;
         if (target instanceof HTMLSelectElement) return;
         if (target instanceof HTMLInputElement && target.type === 'range') return;
         if (target instanceof HTMLButtonElement && !target.classList.contains('asset-tile')) return;
@@ -517,6 +625,18 @@
                                         <option value="oldest">Oldest</option>
                                     </select>
                                 </label>
+                                <div class="selection-actions" aria-label="Photo selection">
+                                    <button
+                                        type="button"
+                                        onclick={selectAll}
+                                        disabled={assets.length === 0 || selectingAll || importing || selectedAssetIds.size === assetsTotal}
+                                    >{selectingAll ? 'Selecting all…' : 'Select all'}</button>
+                                    <button
+                                        type="button"
+                                        onclick={selectNone}
+                                        disabled={selectedAssetIds.size === 0 || selectingAll || importing}
+                                    >Select none</button>
+                                </div>
                             </div>
                             <span class="catalog-count">{assets.length} of {assetsTotal}</span>
                         </div>
@@ -545,6 +665,7 @@
                                                 class="asset-tile"
                                                 class:selected={selectedAssetIds.has(asset.id)}
                                                 type="button"
+                                                disabled={selectingAll || importing}
                                                 aria-label={asset.filename ? `Select ${asset.filename}` : 'Select photo'}
                                                 aria-pressed={selectedAssetIds.has(asset.id)}
                                                 onclick={() => toggleSelection(asset.id)}
@@ -600,7 +721,7 @@
                             <button
                                 class="import-btn"
                                 type="button"
-                                disabled={selectedAssetIds.size === 0 || importing}
+                                disabled={selectedAssetIds.size === 0 || importing || selectingAll}
                                 aria-label={importing
                                     ? 'Starting import…'
                                     : `Import ${selectedAssetIds.size} ${selectedAssetIds.size === 1 ? 'photo' : 'photos'}`}
@@ -739,8 +860,8 @@
         border-bottom: 1px solid var(--border);
     }
     .catalog-toolbar > h3 { margin-right: auto; color: var(--text); }
-    .toolbar-actions { display: flex; align-items: center; gap: 8px; }
-    .toolbar-actions select, .pagination-state button {
+    .toolbar-actions, .selection-actions { display: flex; align-items: center; gap: 8px; }
+    .toolbar-actions select, .toolbar-actions button, .pagination-state button {
         padding: 6px 10px;
         color: var(--text-secondary);
         background: var(--bg);
@@ -791,6 +912,7 @@
         width: 100%;
     }
     .asset-tile.selected { border-color: var(--blue); }
+    .asset-tile:disabled { cursor: wait; }
     .asset-tile img { width: 100%; height: 100%; display: block; object-fit: cover; }
     .preview-placeholder {
         width: 100%; height: 100%; display: grid; place-items: center;

@@ -82,6 +82,7 @@ pub struct PhotosPage<T> {
     pub items: Vec<T>,
     pub total: u32,
     pub offset: u32,
+    pub next_offset: u32,
     pub has_more: bool,
 }
 
@@ -211,6 +212,7 @@ fn paginate<T>(items: Vec<T>, offset: u32, limit: u32) -> PhotosPage<T> {
         items: items.into_iter().skip(start).take(limit).collect(),
         total,
         offset,
+        next_offset: u32::try_from(end).unwrap_or(u32::MAX),
         has_more,
     }
 }
@@ -437,6 +439,7 @@ mod tests {
         assert_eq!(page.items, vec![2]);
         assert_eq!(page.total, 3);
         assert_eq!(page.offset, 1);
+        assert_eq!(page.next_offset, 2);
         assert!(page.has_more);
     }
 

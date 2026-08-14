@@ -137,15 +137,26 @@ pub async fn photos_start_import_assets(
     if asset_ids.is_empty() {
         return Err("Select at least one Apple Photos asset".into());
     }
-    if asset_ids.len() > 250 {
-        return Err("Apple Photos imports are limited to 250 selected assets per batch".into());
-    }
-
     let db = state.db.clone();
     let jobs = state.jobs.clone();
     let app_data_dir = state.app_data_dir.clone();
-    let (started, cancel) = apple_photos::create_current_import(&db, &jobs, asset_ids.len() as u32)
-        .map_err(|error| error.to_string())?;
+    let preflight_db = db.clone();
+    let preflight_jobs = jobs.clone();
+    let preflight_app_data_dir = app_data_dir.clone();
+    let preflight_asset_ids = asset_ids.clone();
+    let (started, cancel) = tauri::async_runtime::spawn_blocking(move || {
+        apple_photos::create_preflighted_current_import(
+            &preflight_db,
+            &preflight_jobs,
+            &preflight_app_data_dir,
+            &apple_photos::SystemPhotosCatalog,
+            &apple_photos::SystemPhotosDiskSpace,
+            &preflight_asset_ids,
+        )
+    })
+    .await
+    .map_err(|error| format!("Apple Photos preflight worker failed: {error}"))?
+    .map_err(|error| error.to_string())?;
     let pending = match apple_photos::journal_current_import_selection(
         &db,
         &started,

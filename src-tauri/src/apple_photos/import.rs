@@ -12,6 +12,8 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 const MAX_MATERIALIZED_BYTES: u64 = 1024 * 1024 * 1024;
+const MIN_ESTIMATED_ASSET_BYTES: u64 = 32 * 1024 * 1024;
+const IMPORT_DISK_RESERVE_BYTES: u64 = 512 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct PhotosCurrentResource {
@@ -35,6 +37,7 @@ pub enum PhotosImportError {
     PermissionDenied,
     Inaccessible,
     Cancelled,
+    InsufficientSpace { required: u64, available: u64 },
     UnsupportedResource(String),
     Native(String),
     Io(String),
@@ -49,6 +52,7 @@ impl PhotosImportError {
             Self::PermissionDenied => "permission_denied",
             Self::Inaccessible => "asset_inaccessible",
             Self::Cancelled => "cancelled",
+            Self::InsufficientSpace { .. } => "insufficient_disk_space",
             Self::UnsupportedResource(_) => "unsupported_resource",
             Self::Native(_) => "photos_native_error",
             Self::Io(_) => "disk_write_failed",
@@ -65,6 +69,12 @@ impl fmt::Display for PhotosImportError {
             Self::PermissionDenied => write!(f, "Apple Photos permission is not granted"),
             Self::Inaccessible => write!(f, "Apple Photos asset is inaccessible"),
             Self::Cancelled => write!(f, "Apple Photos import cancelled"),
+            Self::InsufficientSpace { required, available } => write!(
+                f,
+                "Not enough free disk space for Apple Photos import. Cull needs about {} MB free, but {} MB is available",
+                required.div_ceil(1024 * 1024),
+                available / (1024 * 1024),
+            ),
             Self::UnsupportedResource(value) => write!(f, "Unsupported Photos resource: {value}"),
             Self::Native(value) | Self::Io(value) | Self::Database(value) | Self::Import(value) => {
                 write!(f, "{value}")
@@ -82,6 +92,78 @@ pub trait PhotosCurrentResourceProvider {
         cancel: &CancellationToken,
         progress: &mut dyn FnMut(Option<u64>, Option<u64>, Option<f64>),
     ) -> Result<PhotosMaterializedMetadata, PhotosImportError>;
+}
+
+pub trait PhotosDiskSpace {
+    fn available_bytes(&self, path: &Path) -> Result<u64, PhotosImportError>;
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SystemPhotosDiskSpace;
+
+impl PhotosDiskSpace for SystemPhotosDiskSpace {
+    fn available_bytes(&self, path: &Path) -> Result<u64, PhotosImportError> {
+        #[cfg(target_os = "macos")]
+        {
+            use std::ffi::CString;
+            use std::os::unix::ffi::OsStrExt;
+
+            let path = CString::new(path.as_os_str().as_bytes()).map_err(|_| {
+                PhotosImportError::Io("Apple Photos storage path contains a null byte".into())
+            })?;
+            let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+            // SAFETY: `path` is a valid, nul-terminated filesystem path and
+            // `stats` points to writable storage for one `statvfs` value.
+            if unsafe { libc::statvfs(path.as_ptr(), stats.as_mut_ptr()) } != 0 {
+                return Err(PhotosImportError::Io(
+                    std::io::Error::last_os_error().to_string(),
+                ));
+            }
+            // SAFETY: a successful `statvfs` call initialized `stats`.
+            let stats = unsafe { stats.assume_init() };
+            return Ok(u64::from(stats.f_bavail).saturating_mul(stats.f_frsize));
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = path;
+            Err(PhotosImportError::Unsupported)
+        }
+    }
+}
+
+pub fn preflight_current_import_space(
+    disk_space: &impl PhotosDiskSpace,
+    app_data_dir: &Path,
+    estimated_bytes: u64,
+) -> Result<(), PhotosImportError> {
+    let required = estimated_bytes.saturating_add(IMPORT_DISK_RESERVE_BYTES);
+    let available = disk_space.available_bytes(app_data_dir)?;
+    if available < required {
+        return Err(PhotosImportError::InsufficientSpace {
+            required,
+            available,
+        });
+    }
+    Ok(())
+}
+
+fn estimate_current_import_bytes(
+    provider: &impl PhotosCurrentResourceProvider,
+    asset_ids: &[String],
+) -> Result<u64, PhotosImportError> {
+    let mut estimated = 0_u64;
+    for asset_id in asset_ids {
+        let asset_estimate = match provider.describe_current(asset_id) {
+            Ok(resource) => u64::from(resource.pixel_width)
+                .saturating_mul(u64::from(resource.pixel_height))
+                .saturating_mul(8)
+                .clamp(MIN_ESTIMATED_ASSET_BYTES, MAX_MATERIALIZED_BYTES),
+            Err(error @ PhotosImportError::PermissionDenied) => return Err(error),
+            Err(_) => MAX_MATERIALIZED_BYTES,
+        };
+        estimated = estimated.saturating_add(asset_estimate);
+    }
+    Ok(estimated)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -282,6 +364,21 @@ pub fn create_current_import(
             .map_err(|error| PhotosImportError::Database(error.to_string()))?;
     }
     Ok((PhotosImportStarted { job_id, batch_id }, cancel))
+}
+
+pub fn create_preflighted_current_import(
+    db: &Database,
+    jobs: &JobRegistry,
+    app_data_dir: &Path,
+    provider: &impl PhotosCurrentResourceProvider,
+    disk_space: &impl PhotosDiskSpace,
+    asset_ids: &[String],
+) -> Result<(PhotosImportStarted, CancellationToken), PhotosImportError> {
+    let estimated_bytes = estimate_current_import_bytes(provider, asset_ids)?;
+    preflight_current_import_space(disk_space, app_data_dir, estimated_bytes)?;
+    let total = u32::try_from(asset_ids.len())
+        .map_err(|_| PhotosImportError::UnsupportedResource("too many selected assets".into()))?;
+    create_current_import(db, jobs, total)
 }
 
 pub fn run_current_import<P, E>(
@@ -1282,6 +1379,55 @@ mod tests {
         assert_eq!(retry.reused, 1);
         assert_eq!(retry.image_ids, first.image_ids);
         assert_eq!(provider.materializations.load(Ordering::SeqCst), 1);
+    }
+
+    struct FixedDiskSpace(u64);
+
+    impl PhotosDiskSpace for FixedDiskSpace {
+        fn available_bytes(&self, _path: &Path) -> Result<u64, PhotosImportError> {
+            Ok(self.0)
+        }
+    }
+
+    #[test]
+    fn insufficient_disk_space_rejects_the_batch_before_job_or_journal_creation() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_data = temp.path().join("app-data");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let db = Database::open(&temp.path().join("test.db")).unwrap();
+        let jobs = JobRegistry::default();
+
+        let error = create_preflighted_current_import(
+            &db,
+            &jobs,
+            &app_data,
+            &FakeProvider {
+                materializations: AtomicUsize::new(0),
+                modified_at: Some("2026-08-15T00:00:00Z".into()),
+            },
+            &FixedDiskSpace(575 * 1024 * 1024),
+            &["asset-one".into(), "asset-two".into()],
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, PhotosImportError::InsufficientSpace { .. }));
+        assert!(error.to_string().contains("Not enough free disk space"));
+        assert!(jobs.list().is_empty());
+        let conn = db.conn.lock();
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM import_batches", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0,
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM external_import_items", [], |row| row
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+            0,
+        );
     }
 
     #[test]

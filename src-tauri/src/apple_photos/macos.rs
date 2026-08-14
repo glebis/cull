@@ -191,9 +191,6 @@ pub(super) fn list_assets_page(
         let mut assets = Vec::new();
         for index in start..end {
             let asset = result.objectAtIndex(index);
-            if asset.mediaType() != PHAssetMediaType::Image {
-                continue;
-            }
             let resources = PHAssetResource::assetResourcesForAsset(&asset);
             let filename = resources
                 .firstObject()
@@ -216,6 +213,7 @@ pub(super) fn list_assets_page(
             items: assets,
             total,
             offset,
+            next_offset: u32::try_from(end).unwrap_or(u32::MAX),
             has_more: end < result_count,
         })
     })

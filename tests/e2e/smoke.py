@@ -1600,6 +1600,17 @@ def test_apple_photos_provider_controls_and_import(page: Page) -> None:
     expect(page.locator(".asset-tile").first).to_have_attribute("aria-label", "Select Photo 22.jpg")
 
     first_tile = page.locator(".asset-tile").first
+    first_tile.focus()
+    page.keyboard.press("Meta+a")
+    expect(page.get_by_role("button", name="Import 8 photos")).to_be_enabled()
+    page.keyboard.press("Meta+z")
+    expect(page.get_by_role("button", name="Import 0 photos")).to_be_disabled()
+
+    page.get_by_role("button", name="Select all").click()
+    expect(page.get_by_role("button", name="Import 8 photos")).to_be_enabled()
+    page.get_by_role("button", name="Select none").click()
+    expect(page.get_by_role("button", name="Import 0 photos")).to_be_disabled()
+
     first_tile.click()
     import_button = page.get_by_role("button", name="Import 1 photo")
     expect(import_button).to_be_visible()

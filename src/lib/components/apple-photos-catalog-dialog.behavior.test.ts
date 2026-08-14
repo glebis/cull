@@ -17,7 +17,13 @@ afterEach(() => {
 });
 
 function page<T>(items: T[], offset = 0, total = items.length): ApplePhotosPage<T> {
-    return { items, offset, total, has_more: offset + items.length < total };
+    return {
+        items,
+        offset,
+        next_offset: offset + items.length,
+        total,
+        has_more: offset + items.length < total,
+    };
 }
 
 function album(id: string, title: string): ApplePhotosAlbum {
@@ -145,6 +151,7 @@ describe('Apple Photos catalog dialog', () => {
                 .mockResolvedValueOnce({
                     items: [asset('asset-1', 'One.jpg'), asset('asset-2', 'Two.jpg')],
                     offset: 0,
+                    next_offset: 2,
                     total: 5,
                     has_more: true,
                 })
@@ -152,6 +159,7 @@ describe('Apple Photos catalog dialog', () => {
                 .mockResolvedValueOnce({
                     items: [asset('asset-4', 'Four.jpg')],
                     offset: 4,
+                    next_offset: 5,
                     total: 5,
                     has_more: false,
                 }),
@@ -169,6 +177,7 @@ describe('Apple Photos catalog dialog', () => {
         resolveSecondPage({
             items: [asset('asset-2', 'Two.jpg'), asset('asset-3', 'Three.jpg')],
             offset: 2,
+            next_offset: 4,
             total: 5,
             has_more: true,
         });
@@ -184,9 +193,9 @@ describe('Apple Photos catalog dialog', () => {
     it('retries a failed incremental page without clearing the visible grid', async () => {
         const catalog = client({
             listAssets: vi.fn()
-                .mockResolvedValueOnce({ items: [asset('asset-1', 'One.jpg')], offset: 0, total: 2, has_more: true })
+                .mockResolvedValueOnce({ items: [asset('asset-1', 'One.jpg')], offset: 0, next_offset: 1, total: 2, has_more: true })
                 .mockRejectedValueOnce(new Error('Photos unavailable'))
-                .mockResolvedValueOnce({ items: [asset('asset-2', 'Two.jpg')], offset: 1, total: 2, has_more: false }),
+                .mockResolvedValueOnce({ items: [asset('asset-2', 'Two.jpg')], offset: 1, next_offset: 2, total: 2, has_more: false }),
         });
         const user = userEvent.setup();
         render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
@@ -206,10 +215,10 @@ describe('Apple Photos catalog dialog', () => {
         const catalog = client({
             listAssets: vi.fn()
                 .mockResolvedValueOnce(page([asset('initial', 'Initial.jpg')]))
-                .mockResolvedValueOnce({ items: [providerReturnedNonFavourite], offset: 0, total: 2, has_more: true })
-                .mockResolvedValueOnce({ items: [providerReturnedNonFavourite], offset: 0, total: 2, has_more: true })
+                .mockResolvedValueOnce({ items: [providerReturnedNonFavourite], offset: 0, next_offset: 1, total: 2, has_more: true })
+                .mockResolvedValueOnce({ items: [providerReturnedNonFavourite], offset: 0, next_offset: 1, total: 2, has_more: true })
                 .mockRejectedValueOnce(new Error('Page unavailable'))
-                .mockResolvedValueOnce({ items: [asset('second', 'Second.jpg')], offset: 1, total: 2, has_more: false }),
+                .mockResolvedValueOnce({ items: [asset('second', 'Second.jpg')], offset: 1, next_offset: 2, total: 2, has_more: false }),
         });
         const user = userEvent.setup();
         render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
@@ -259,6 +268,108 @@ describe('Apple Photos catalog dialog', () => {
 
         resolveImport({ job_id: 'job-1', batch_id: 'batch-1' });
         await waitFor(() => expect(onclose).toHaveBeenCalledOnce());
+    });
+
+    it('selects all photos with Cmd+A and buttons, clears selection, and undoes selection changes', async () => {
+        const catalog = client({
+            listAssets: vi.fn().mockResolvedValue(page([
+                asset('asset-1', 'One.jpg'),
+                asset('asset-2', 'Two.jpg'),
+                asset('asset-3', 'Three.jpg'),
+            ])),
+        });
+        const user = userEvent.setup();
+        render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        const firstTile = await screen.findByRole('button', { name: 'Select One.jpg' });
+        firstTile.focus();
+        await fireEvent.keyDown(firstTile, { key: 'a', metaKey: true });
+
+        expect(screen.getByRole('button', { name: 'Import 3 photos' })).toBeEnabled();
+        expect(screen.getAllByRole('button', { pressed: true })).toHaveLength(3);
+
+        await user.click(screen.getByRole('button', { name: 'Select none' }));
+        expect(screen.getByRole('button', { name: 'Import 0 photos' })).toBeDisabled();
+
+        await fireEvent.keyDown(firstTile, { key: 'z', metaKey: true });
+        expect(screen.getByRole('button', { name: 'Import 3 photos' })).toBeEnabled();
+
+        await user.click(screen.getByRole('button', { name: 'Select all' }));
+        await user.click(screen.getByRole('button', { name: 'Select One.jpg' }));
+        expect(screen.getByRole('button', { name: 'Import 2 photos' })).toBeEnabled();
+
+        await fireEvent.keyDown(screen.getByRole('button', { name: 'Select Two.jpg' }), {
+            key: 'z',
+            metaKey: true,
+        });
+        expect(screen.getByRole('button', { name: 'Import 3 photos' })).toBeEnabled();
+    });
+
+    it('selects the complete provider query even when later photos are not rendered yet', async () => {
+        const catalog = client({
+            listAssets: vi.fn()
+                .mockResolvedValueOnce({
+                    items: [asset('asset-1', 'One.jpg')],
+                    offset: 0,
+                    next_offset: 2,
+                    total: 4,
+                    has_more: true,
+                })
+                .mockResolvedValueOnce({
+                    items: [asset('asset-2', 'Two.jpg'), asset('asset-3', 'Three.jpg')],
+                    offset: 2,
+                    next_offset: 4,
+                    total: 4,
+                    has_more: false,
+                }),
+        });
+        const user = userEvent.setup();
+        render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        expect(await screen.findByRole('button', { name: 'Select One.jpg' })).toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Select all' }));
+
+        expect(catalog.listAssets).toHaveBeenLastCalledWith(null, 2, 100, 'all', 'newest');
+        expect(screen.getByRole('button', { name: 'Import 3 photos' })).toBeEnabled();
+        expect(screen.queryByRole('button', { name: 'Select Two.jpg' })).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Import 3 photos' }));
+        expect(catalog.startImport).toHaveBeenCalledWith(['asset-1', 'asset-2', 'asset-3'], null);
+    });
+
+    it('keeps the pre-operation undo target while Select all is paging', async () => {
+        let resolveRemaining!: (value: ApplePhotosPage<ApplePhotosAsset>) => void;
+        const remaining = new Promise<ApplePhotosPage<ApplePhotosAsset>>(resolve => {
+            resolveRemaining = resolve;
+        });
+        const catalog = client({
+            listAssets: vi.fn()
+                .mockResolvedValueOnce({
+                    items: [asset('asset-1', 'One.jpg')],
+                    offset: 0,
+                    next_offset: 1,
+                    total: 2,
+                    has_more: true,
+                })
+                .mockImplementationOnce(() => remaining),
+        });
+        const user = userEvent.setup();
+        render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        const firstTile = await screen.findByRole('button', { name: 'Select One.jpg' });
+        await user.click(firstTile);
+        await user.click(screen.getByRole('button', { name: 'Select all' }));
+        expect(firstTile).toBeDisabled();
+
+        await fireEvent.keyDown(firstTile, { key: 'z', metaKey: true });
+        resolveRemaining(page([asset('asset-2', 'Two.jpg')], 1, 2));
+        expect(await screen.findByRole('button', { name: 'Import 2 photos' })).toBeEnabled();
+
+        await fireEvent.keyDown(screen.getByRole('button', { name: 'Select none' }), {
+            key: 'z',
+            metaKey: true,
+        });
+        expect(screen.getByRole('button', { name: 'Import 1 photo' })).toBeEnabled();
     });
 
     it('announces a started import to the shared jobs UI', async () => {
@@ -350,9 +461,9 @@ describe('Apple Photos catalog dialog', () => {
         });
         const catalog = client({
             listAssets: vi.fn()
-                .mockResolvedValueOnce({ items: [asset('asset-1', 'One.jpg')], offset: 0, total: 3, has_more: true })
-                .mockResolvedValueOnce({ items: [asset('asset-1', 'One.jpg')], offset: 1, total: 3, has_more: true })
-                .mockResolvedValueOnce({ items: [asset('asset-3', 'Three.jpg')], offset: 2, total: 3, has_more: false }),
+                .mockResolvedValueOnce({ items: [asset('asset-1', 'One.jpg')], offset: 0, next_offset: 1, total: 3, has_more: true })
+                .mockResolvedValueOnce({ items: [asset('asset-1', 'One.jpg')], offset: 1, next_offset: 2, total: 3, has_more: true })
+                .mockResolvedValueOnce({ items: [asset('asset-3', 'Three.jpg')], offset: 2, next_offset: 3, total: 3, has_more: false }),
         });
         render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
 

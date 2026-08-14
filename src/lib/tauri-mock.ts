@@ -277,7 +277,13 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     if (args?.sort !== 'oldest') matching.reverse();
     const total = matching.length;
     const items = matching.slice(offset, offset + limit);
-    const page: ApplePhotosAssetPage = { items, total, offset, has_more: offset + items.length < total };
+    const page: ApplePhotosAssetPage = {
+      items,
+      total,
+      offset,
+      next_offset: offset + items.length,
+      has_more: offset + items.length < total,
+    };
     return page;
   },
   photos_load_local_preview: () => null,
