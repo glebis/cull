@@ -1,5 +1,5 @@
 use crate::db_core::db::Database;
-use rusqlite::{params, Result};
+use rusqlite::{params, OptionalExtension, Result};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -24,7 +24,122 @@ pub struct PendingExternalImport {
     pub item_id: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ExternalContentConsolidation {
+    pub resource_id: String,
+    pub managed_path: String,
+    pub existing_image_id: Option<String>,
+    pub discarded_path: Option<String>,
+    pub discarded_content_type: Option<String>,
+}
+
 impl Database {
+    pub fn consolidate_external_resource_by_content(
+        &self,
+        item_id: &str,
+        resource_id: &str,
+        content_sha256: &str,
+    ) -> Result<ExternalContentConsolidation> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let stable_fingerprint = format!("content-sha256:{content_sha256}");
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let (version_id, asset_id, current_path, current_content_type): (
+            String,
+            String,
+            String,
+            Option<String>,
+        ) = tx.query_row(
+            "SELECT v.id, v.external_asset_id, r.managed_path, r.content_type
+             FROM external_asset_resources r
+             JOIN external_asset_versions v ON v.id = r.version_id
+             WHERE r.id = ?1",
+            [resource_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+        let canonical_version = tx
+            .query_row(
+                "SELECT id FROM external_asset_versions
+                 WHERE external_asset_id = ?1 AND representation = 'current'
+                   AND version_fingerprint = ?2",
+                params![asset_id, stable_fingerprint],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+
+        if let Some(canonical_version) = canonical_version {
+            let (canonical_resource, canonical_path, canonical_image, canonical_hash, state): (
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+                String,
+            ) = tx.query_row(
+                "SELECT id, managed_path, image_id, content_sha256, state
+                 FROM external_asset_resources
+                 WHERE version_id = ?1 AND resource_key = 'current'",
+                [&canonical_version],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )?;
+            if canonical_hash.as_deref() != Some(content_sha256) {
+                return Err(rusqlite::Error::InvalidQuery);
+            }
+            let item_state = if state == "imported" && canonical_image.is_some() {
+                "imported"
+            } else {
+                "materialized"
+            };
+            tx.execute(
+                "UPDATE external_import_items
+                 SET resource_id = ?2, state = ?3, updated_at = ?4 WHERE id = ?1",
+                params![item_id, canonical_resource, item_state, now],
+            )?;
+            tx.execute(
+                "DELETE FROM external_asset_resources WHERE id = ?1",
+                [resource_id],
+            )?;
+            tx.execute(
+                "DELETE FROM external_asset_versions WHERE id = ?1",
+                [&version_id],
+            )?;
+            tx.commit()?;
+            Ok(ExternalContentConsolidation {
+                resource_id: canonical_resource,
+                managed_path: canonical_path.clone(),
+                existing_image_id: canonical_image,
+                discarded_path: (current_path != canonical_path).then_some(current_path),
+                discarded_content_type: current_content_type,
+            })
+        } else {
+            tx.execute(
+                "UPDATE external_asset_versions
+                 SET version_fingerprint = ?2 WHERE id = ?1",
+                params![version_id, stable_fingerprint],
+            )?;
+            let existing_image_id = tx.query_row(
+                "SELECT image_id FROM external_asset_resources WHERE id = ?1",
+                [resource_id],
+                |row| row.get(0),
+            )?;
+            tx.commit()?;
+            Ok(ExternalContentConsolidation {
+                resource_id: resource_id.to_string(),
+                managed_path: current_path,
+                existing_image_id,
+                discarded_path: None,
+                discarded_content_type: None,
+            })
+        }
+    }
+
     pub fn journal_external_import_selection(
         &self,
         job_id: &str,

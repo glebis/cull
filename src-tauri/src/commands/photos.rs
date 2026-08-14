@@ -276,4 +276,27 @@ mod tests {
         assert_eq!(snapshot.status, "failed");
         assert_eq!(snapshot.error.as_deref(), Some("journal failed"));
     }
+
+    #[test]
+    fn finished_event_summary_keeps_partial_counts_ids_and_error() {
+        let payload = serde_json::to_value(apple_photos::PhotosImportSummary {
+            job_id: "job-one".into(),
+            batch_id: "batch-one".into(),
+            imported: 1,
+            reused: 1,
+            failed: 2,
+            skipped: 0,
+            inaccessible: 0,
+            cancelled: 0,
+            image_ids: vec!["image-one".into(), "image-two".into()],
+            error: Some("database unavailable".into()),
+        })
+        .unwrap();
+
+        assert_eq!(payload["imported"], 1);
+        assert_eq!(payload["failed"], 2);
+        assert_eq!(payload["image_ids"].as_array().unwrap().len(), 2);
+        assert_eq!(payload["error"], "database unavailable");
+        assert!(include_str!("photos.rs").contains("emit(\"photos-import-finished\", &summary)"));
+    }
 }

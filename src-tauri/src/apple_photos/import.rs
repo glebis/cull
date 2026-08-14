@@ -113,6 +113,7 @@ pub struct PhotosImportSummary {
     pub inaccessible: u32,
     pub cancelled: u32,
     pub image_ids: Vec<String>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -384,255 +385,375 @@ where
         inaccessible: 0,
         cancelled: 0,
         image_ids: Vec::new(),
+        error: None,
     };
 
-    for index in 0..pending.len() {
-        let current = index as u32 + 1;
-        if cancel.is_cancelled() {
-            summary.cancelled = total.saturating_sub(index as u32);
-            mark_cancelled_items(db, &pending[index..])?;
-            break;
-        }
-        emit(&PhotosImportProgress {
-            job_id: started.job_id.clone(),
-            phase: "discovery".into(),
-            current,
-            total,
-            filename: None,
-            bytes_current: None,
-            bytes_total: None,
-            fraction: None,
-        });
-        if cancel.is_cancelled() {
-            summary.cancelled = total.saturating_sub(index as u32);
-            mark_cancelled_items(db, &pending[index..])?;
-            break;
-        }
-        let asset_id = pending[index].asset_id.clone();
-        let resource = match provider.describe_current(&asset_id) {
-            Ok(resource) => resource,
-            Err(
-                error @ (PhotosImportError::PermissionDenied | PhotosImportError::Inaccessible),
-            ) => {
-                db.mark_external_import_item(
-                    &pending[index].item_id,
-                    &pending[index].resource_id,
-                    "inaccessible",
-                    None,
-                    None,
-                    Some(error.code()),
-                    Some(&error.to_string()),
-                )
-                .map_err(|error| PhotosImportError::Database(error.to_string()))?;
-                summary.inaccessible += 1;
-                jobs.update_progress(&started.job_id, current, Some("Asset inaccessible"));
-                continue;
-            }
-            Err(PhotosImportError::Cancelled) => {
-                summary.cancelled += total.saturating_sub(index as u32);
+    let mut fatal_index = pending.len();
+    let work_result: Result<(), PhotosImportError> = (|| {
+        for index in 0..pending.len() {
+            fatal_index = index;
+            let current = index as u32 + 1;
+            if cancel.is_cancelled() {
+                summary.cancelled = total.saturating_sub(index as u32);
                 mark_cancelled_items(db, &pending[index..])?;
                 break;
             }
-            Err(error) => {
-                db.mark_external_import_item(
-                    &pending[index].item_id,
-                    &pending[index].resource_id,
-                    "failed",
-                    None,
-                    None,
-                    Some(error.code()),
-                    Some(&error.to_string()),
+            emit(&PhotosImportProgress {
+                job_id: started.job_id.clone(),
+                phase: "discovery".into(),
+                current,
+                total,
+                filename: None,
+                bytes_current: None,
+                bytes_total: None,
+                fraction: None,
+            });
+            if cancel.is_cancelled() {
+                summary.cancelled = total.saturating_sub(index as u32);
+                mark_cancelled_items(db, &pending[index..])?;
+                break;
+            }
+            let asset_id = pending[index].asset_id.clone();
+            let resource = match provider.describe_current(&asset_id) {
+                Ok(resource) => resource,
+                Err(
+                    error @ (PhotosImportError::PermissionDenied | PhotosImportError::Inaccessible),
+                ) => {
+                    db.mark_external_import_item(
+                        &pending[index].item_id,
+                        &pending[index].resource_id,
+                        "inaccessible",
+                        None,
+                        None,
+                        Some(error.code()),
+                        Some(&error.to_string()),
+                    )
+                    .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+                    summary.inaccessible += 1;
+                    jobs.update_progress(&started.job_id, current, Some("Asset inaccessible"));
+                    continue;
+                }
+                Err(PhotosImportError::Cancelled) => {
+                    summary.cancelled += total.saturating_sub(index as u32);
+                    mark_cancelled_items(db, &pending[index..])?;
+                    break;
+                }
+                Err(error) => {
+                    db.mark_external_import_item(
+                        &pending[index].item_id,
+                        &pending[index].resource_id,
+                        "failed",
+                        None,
+                        None,
+                        Some(error.code()),
+                        Some(&error.to_string()),
+                    )
+                    .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+                    summary.failed += 1;
+                    jobs.update_progress(&started.job_id, current, Some("Discovery failed"));
+                    continue;
+                }
+            };
+            let fingerprint = version_fingerprint(&resource);
+            let final_path = managed_resource_path(app_data_dir, &resource, &fingerprint)?;
+            let mut prep = db
+                .bind_external_import_descriptor(
+                    &pending[index],
+                    &fingerprint,
+                    resource.modified_at.as_deref(),
+                    &resource.filename,
+                    &final_path.to_string_lossy(),
                 )
                 .map_err(|error| PhotosImportError::Database(error.to_string()))?;
-                summary.failed += 1;
-                jobs.update_progress(&started.job_id, current, Some("Discovery failed"));
+            pending[index].resource_id = prep.resource_id.clone();
+            // The journal may already point at a rendered current-representation path
+            // whose extension differs from the provisional PhotoKit resource name.
+            let journal_path = PathBuf::from(&prep.managed_path);
+
+            if let Some(image_id) = prep.existing_image_id {
+                summary.reused += 1;
+                summary.image_ids.push(image_id);
+                jobs.update_progress(&started.job_id, current, Some("Already imported"));
                 continue;
             }
-        };
-        let fingerprint = version_fingerprint(&resource);
-        let final_path = managed_resource_path(app_data_dir, &resource, &fingerprint)?;
-        let prep = db
-            .bind_external_import_descriptor(
-                &pending[index],
-                &fingerprint,
-                resource.modified_at.as_deref(),
-                &resource.filename,
-                &final_path.to_string_lossy(),
+
+            db.mark_external_import_item(
+                &prep.item_id,
+                &prep.resource_id,
+                "materializing",
+                None,
+                None,
+                None,
+                None,
             )
             .map_err(|error| PhotosImportError::Database(error.to_string()))?;
-        pending[index].resource_id = prep.resource_id.clone();
-        // The journal may already point at a rendered current-representation path
-        // whose extension differs from the provisional PhotoKit resource name.
-        let journal_path = PathBuf::from(&prep.managed_path);
 
-        if let Some(image_id) = prep.existing_image_id {
-            summary.reused += 1;
-            summary.image_ids.push(image_id);
-            jobs.update_progress(&started.job_id, current, Some("Already imported"));
-            continue;
-        }
+            let materialized = materialize_durable(
+                provider,
+                &resource,
+                &journal_path,
+                &cancel,
+                |done, expected, fraction| {
+                    emit(&PhotosImportProgress {
+                        job_id: started.job_id.clone(),
+                        phase: "download".into(),
+                        current,
+                        total,
+                        filename: Some(resource.filename.clone()),
+                        bytes_current: done,
+                        bytes_total: expected,
+                        fraction,
+                    });
+                },
+                |actual_path, content_type| {
+                    db.update_external_resource_location(
+                        &prep.resource_id,
+                        &actual_path.to_string_lossy(),
+                        content_type,
+                    )
+                    .map_err(|error| PhotosImportError::Database(error.to_string()))
+                },
+            );
+            let (mut actual_path, content_hash, bytes) = match materialized {
+                Ok(value) => value,
+                Err(error) => {
+                    let state = if matches!(error, PhotosImportError::Cancelled) {
+                        "cancelled"
+                    } else {
+                        "failed"
+                    };
+                    let _ = db.mark_external_import_item(
+                        &prep.item_id,
+                        &prep.resource_id,
+                        state,
+                        None,
+                        None,
+                        Some(error.code()),
+                        Some(&error.to_string()),
+                    );
+                    if state == "cancelled" {
+                        summary.cancelled += total.saturating_sub(index as u32);
+                        mark_cancelled_items(db, &pending[index + 1..])?;
+                        break;
+                    }
+                    summary.failed += 1;
+                    jobs.update_progress(&started.job_id, current, Some("Download failed"));
+                    continue;
+                }
+            };
+            db.mark_external_import_item(
+                &prep.item_id,
+                &prep.resource_id,
+                "materialized",
+                Some(&content_hash),
+                Some(bytes),
+                None,
+                None,
+            )
+            .map_err(|error| PhotosImportError::Database(error.to_string()))?;
 
-        db.mark_external_import_item(
-            &prep.item_id,
-            &prep.resource_id,
-            "materializing",
-            None,
-            None,
-            None,
-            None,
-        )
-        .map_err(|error| PhotosImportError::Database(error.to_string()))?;
-
-        let materialized = materialize_durable(
-            provider,
-            &resource,
-            &journal_path,
-            &cancel,
-            |done, expected, fraction| {
-                emit(&PhotosImportProgress {
-                    job_id: started.job_id.clone(),
-                    phase: "download".into(),
-                    current,
-                    total,
-                    filename: Some(resource.filename.clone()),
-                    bytes_current: done,
-                    bytes_total: expected,
-                    fraction,
-                });
-            },
-            |actual_path, content_type| {
-                db.update_external_resource_location(
-                    &prep.resource_id,
-                    &actual_path.to_string_lossy(),
-                    content_type,
-                )
-                .map_err(|error| PhotosImportError::Database(error.to_string()))
-            },
-        );
-        let (actual_path, content_hash, bytes) = match materialized {
-            Ok(value) => value,
-            Err(error) => {
-                let state = if matches!(error, PhotosImportError::Cancelled) {
-                    "cancelled"
+            if resource.modified_at.is_none() {
+                let consolidation = db
+                    .consolidate_external_resource_by_content(
+                        &prep.item_id,
+                        &prep.resource_id,
+                        &content_hash,
+                    )
+                    .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+                prep.resource_id = consolidation.resource_id.clone();
+                pending[index].resource_id = prep.resource_id.clone();
+                let canonical_path = PathBuf::from(&consolidation.managed_path);
+                let mut existing_image_id = consolidation.existing_image_id;
+                if let Some(discarded) = consolidation.discarded_path {
+                    let discarded = PathBuf::from(discarded);
+                    let canonical_matches = hash_file(&canonical_path)
+                        .map(|(hash, _)| hash == content_hash)
+                        .unwrap_or(false);
+                    let discarded_matches = hash_file(&discarded)
+                        .map(|(hash, _)| hash == content_hash)
+                        .unwrap_or(false);
+                    let managed_root = app_data_dir.join("imports").join("apple-photos");
+                    let canonical_safe = path_is_safe_managed_file(&managed_root, &canonical_path)
+                        && std::fs::symlink_metadata(&canonical_path)
+                            .map(|metadata| metadata.file_type().is_file())
+                            .unwrap_or(false);
+                    if canonical_matches
+                        && canonical_safe
+                        && discarded_matches
+                        && path_is_safe_managed_file(&managed_root, &discarded)
+                        && std::fs::symlink_metadata(&discarded)
+                            .map(|metadata| metadata.file_type().is_file())
+                            .unwrap_or(false)
+                    {
+                        let recovery_dir = app_data_dir
+                            .join("import-recovery")
+                            .join("apple-photos-duplicates");
+                        std::fs::create_dir_all(&recovery_dir)
+                            .map_err(|error| PhotosImportError::Io(error.to_string()))?;
+                        let recovery_path = recovery_dir.join(format!(
+                            "duplicate-{}.{}",
+                            Uuid::new_v4(),
+                            discarded
+                                .extension()
+                                .and_then(|value| value.to_str())
+                                .unwrap_or("bin")
+                        ));
+                        std::fs::rename(&discarded, &recovery_path)
+                            .map_err(|error| PhotosImportError::Io(error.to_string()))?;
+                        // Prefer recoverable OS trash cleanup. If unavailable, the
+                        // verified duplicate remains quarantined outside managed imports.
+                        let _ = trash::delete(&recovery_path);
+                        actual_path = canonical_path;
+                    } else if discarded_matches
+                        && path_is_safe_managed_file(&managed_root, &discarded)
+                    {
+                        // The journal's canonical file is missing or corrupt. Keep the
+                        // freshly verified bytes and let the importer repair its path.
+                        db.update_external_resource_location(
+                            &prep.resource_id,
+                            &discarded.to_string_lossy(),
+                            consolidation
+                                .discarded_content_type
+                                .as_deref()
+                                .unwrap_or(&resource.content_type),
+                        )
+                        .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+                        actual_path = discarded;
+                        existing_image_id = None;
+                    } else {
+                        return Err(PhotosImportError::Io(
+                            "Refused to trash an unverified Apple Photos duplicate".into(),
+                        ));
+                    }
                 } else {
-                    "failed"
-                };
-                let _ = db.mark_external_import_item(
-                    &prep.item_id,
-                    &prep.resource_id,
-                    state,
-                    None,
-                    None,
-                    Some(error.code()),
-                    Some(&error.to_string()),
-                );
-                if state == "cancelled" {
+                    actual_path = canonical_path;
+                }
+                if let Some(image_id) = existing_image_id {
+                    summary.reused += 1;
+                    summary.image_ids.push(image_id);
+                    jobs.update_progress(&started.job_id, current, Some("Already imported"));
+                    continue;
+                }
+            }
+
+            emit(&PhotosImportProgress {
+                job_id: started.job_id.clone(),
+                phase: "import".into(),
+                current,
+                total,
+                filename: Some(resource.filename.clone()),
+                bytes_current: None,
+                bytes_total: None,
+                fraction: None,
+            });
+            let imported = crate::db_core::import::import_file_cancellable(
+                db,
+                &actual_path,
+                app_data_dir,
+                &|| cancel.is_cancelled(),
+            );
+            let image_id = match imported {
+                Ok(Some(image_id)) => image_id,
+                Ok(None) => {
+                    match db
+                        .get_image_file_by_path(&actual_path.to_string_lossy())
+                        .map_err(|error| PhotosImportError::Database(error.to_string()))?
+                    {
+                        Some(file) => file.image_id,
+                        None => {
+                            db.mark_external_import_item(
+                                &prep.item_id,
+                                &prep.resource_id,
+                                "skipped",
+                                None,
+                                None,
+                                Some("importer_skipped"),
+                                Some("Importer skipped the materialized Photos resource"),
+                            )
+                            .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+                            summary.skipped += 1;
+                            jobs.update_progress(&started.job_id, current, Some("Import skipped"));
+                            continue;
+                        }
+                    }
+                }
+                Err(error) if cancel.is_cancelled() => {
+                    let _ = db.mark_external_import_item(
+                        &prep.item_id,
+                        &prep.resource_id,
+                        "cancelled",
+                        None,
+                        None,
+                        Some("cancelled"),
+                        Some(&error),
+                    );
                     summary.cancelled += total.saturating_sub(index as u32);
                     mark_cancelled_items(db, &pending[index + 1..])?;
                     break;
                 }
-                summary.failed += 1;
-                jobs.update_progress(&started.job_id, current, Some("Download failed"));
-                continue;
-            }
-        };
-        db.mark_external_import_item(
-            &prep.item_id,
-            &prep.resource_id,
-            "materialized",
-            Some(&content_hash),
-            Some(bytes),
-            None,
-            None,
-        )
-        .map_err(|error| PhotosImportError::Database(error.to_string()))?;
-
-        emit(&PhotosImportProgress {
-            job_id: started.job_id.clone(),
-            phase: "import".into(),
-            current,
-            total,
-            filename: Some(resource.filename.clone()),
-            bytes_current: None,
-            bytes_total: None,
-            fraction: None,
-        });
-        let imported = crate::db_core::import::import_file_cancellable(
-            db,
-            &actual_path,
-            app_data_dir,
-            &|| cancel.is_cancelled(),
-        );
-        let image_id = match imported {
-            Ok(Some(image_id)) => image_id,
-            Ok(None) => {
-                match db
-                    .get_image_file_by_path(&actual_path.to_string_lossy())
-                    .map_err(|error| PhotosImportError::Database(error.to_string()))?
-                {
-                    Some(file) => file.image_id,
-                    None => {
-                        db.mark_external_import_item(
-                            &prep.item_id,
-                            &prep.resource_id,
-                            "skipped",
-                            None,
-                            None,
-                            Some("importer_skipped"),
-                            Some("Importer skipped the materialized Photos resource"),
-                        )
-                        .map_err(|error| PhotosImportError::Database(error.to_string()))?;
-                        summary.skipped += 1;
-                        jobs.update_progress(&started.job_id, current, Some("Import skipped"));
-                        continue;
-                    }
+                Err(error) => {
+                    let _ = db.mark_external_import_item(
+                        &prep.item_id,
+                        &prep.resource_id,
+                        "failed",
+                        None,
+                        None,
+                        Some("import_failed"),
+                        Some(&error),
+                    );
+                    summary.failed += 1;
+                    continue;
                 }
-            }
-            Err(error) if cancel.is_cancelled() => {
-                let _ = db.mark_external_import_item(
-                    &prep.item_id,
-                    &prep.resource_id,
-                    "cancelled",
-                    None,
-                    None,
-                    Some("cancelled"),
-                    Some(&error),
-                );
-                summary.cancelled += total.saturating_sub(index as u32);
-                mark_cancelled_items(db, &pending[index + 1..])?;
-                break;
-            }
-            Err(error) => {
-                let _ = db.mark_external_import_item(
-                    &prep.item_id,
-                    &prep.resource_id,
-                    "failed",
-                    None,
-                    None,
-                    Some("import_failed"),
-                    Some(&error),
-                );
-                summary.failed += 1;
-                continue;
-            }
-        };
-        db.finalize_external_import_item(
-            &prep.item_id,
-            &prep.resource_id,
-            &image_id,
-            &started.batch_id,
-        )
-        .map_err(|error| PhotosImportError::Database(error.to_string()))?;
-        summary.imported += 1;
-        summary.image_ids.push(image_id);
-        jobs.update_progress(&started.job_id, current, Some(&resource.filename));
+            };
+            // The importer has committed its image/file records. Publish that fact
+            // even if the following provenance transaction fails, so the UI can
+            // refresh committed images and a retry can finish the materialized row.
+            summary.imported += 1;
+            summary.image_ids.push(image_id.clone());
+            fatal_index = index + 1;
+            db.finalize_external_import_item(
+                &prep.item_id,
+                &prep.resource_id,
+                &image_id,
+                &started.batch_id,
+            )
+            .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+            jobs.update_progress(&started.job_id, current, Some(&resource.filename));
+        }
+        fatal_index = pending.len();
+        Ok(())
+    })();
+
+    if let Err(error) = work_result {
+        summary.error = Some(error.to_string());
+        let remaining = &pending[fatal_index..];
+        for item in remaining {
+            let _ = db.mark_external_import_item(
+                &item.item_id,
+                &item.resource_id,
+                "failed",
+                None,
+                None,
+                Some("batch_aborted"),
+                Some(&error.to_string()),
+            );
+        }
+        if summary.cancelled == 0 {
+            summary.failed = summary.failed.saturating_add(remaining.len() as u32);
+        }
     }
 
     let unique_images: HashSet<&str> = summary.image_ids.iter().map(String::as_str).collect();
-    db.update_import_batch_count(&started.batch_id, unique_images.len() as u32)
-        .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+    if let Err(error) = db.update_import_batch_count(&started.batch_id, unique_images.len() as u32)
+    {
+        summary
+            .error
+            .get_or_insert_with(|| format!("Failed to save partial import count: {error}"));
+    }
     let outcome = if summary.cancelled > 0 || cancel.is_cancelled() {
         WorkerTerminalOutcome::Cancelled
+    } else if let Some(error) = summary.error.as_ref() {
+        WorkerTerminalOutcome::Failed(error.clone())
     } else if summary.failed > 0 || summary.inaccessible > 0 {
         WorkerTerminalOutcome::Failed(format!(
             "{} Apple Photos item(s) failed",
@@ -643,8 +764,11 @@ where
     };
     jobs.finish_from_worker(&started.job_id, outcome);
     if let Some(snapshot) = jobs.get(&started.job_id) {
-        db.save_job(&snapshot)
-            .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+        if let Err(error) = db.save_job(&snapshot) {
+            summary
+                .error
+                .get_or_insert_with(|| format!("Failed to persist terminal job: {error}"));
+        }
     }
     Ok(summary)
 }
@@ -954,6 +1078,96 @@ mod tests {
         }
     }
 
+    struct FatalDescriptorProvider {
+        materializations: AtomicUsize,
+    }
+
+    struct ChangingUnknownProvider {
+        materializations: AtomicUsize,
+    }
+
+    impl PhotosCurrentResourceProvider for ChangingUnknownProvider {
+        fn describe_current(
+            &self,
+            asset_id: &str,
+        ) -> Result<PhotosCurrentResource, PhotosImportError> {
+            Ok(PhotosCurrentResource {
+                asset_id: asset_id.into(),
+                filename: "changing.png".into(),
+                content_type: "public.png".into(),
+                modified_at: None,
+                pixel_width: 1,
+                pixel_height: 1,
+            })
+        }
+
+        fn materialize_current(
+            &self,
+            _resource: &PhotosCurrentResource,
+            output: &mut std::fs::File,
+            _cancel: &CancellationToken,
+            _progress: &mut dyn FnMut(Option<u64>, Option<u64>, Option<f64>),
+        ) -> Result<PhotosMaterializedMetadata, PhotosImportError> {
+            let sequence = self.materializations.fetch_add(1, Ordering::SeqCst);
+            let image = image::RgbaImage::from_pixel(
+                1,
+                1,
+                if sequence == 0 {
+                    image::Rgba([255, 0, 0, 255])
+                } else {
+                    image::Rgba([0, 0, 255, 255])
+                },
+            );
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgba8(image)
+                .write_to(&mut bytes, image::ImageFormat::Png)
+                .unwrap();
+            output.write_all(bytes.get_ref()).unwrap();
+            Ok(PhotosMaterializedMetadata {
+                content_type: "public.png".into(),
+                extension: "png".into(),
+            })
+        }
+    }
+
+    impl PhotosCurrentResourceProvider for FatalDescriptorProvider {
+        fn describe_current(
+            &self,
+            asset_id: &str,
+        ) -> Result<PhotosCurrentResource, PhotosImportError> {
+            Ok(PhotosCurrentResource {
+                asset_id: asset_id.into(),
+                filename: if asset_id == "fatal" {
+                    "unsupported.txt".into()
+                } else {
+                    "photo.png".into()
+                },
+                content_type: "public.png".into(),
+                modified_at: Some("2026-08-14T19:00:00Z".into()),
+                pixel_width: 1,
+                pixel_height: 1,
+            })
+        }
+
+        fn materialize_current(
+            &self,
+            _resource: &PhotosCurrentResource,
+            output: &mut std::fs::File,
+            _cancel: &CancellationToken,
+            _progress: &mut dyn FnMut(Option<u64>, Option<u64>, Option<f64>),
+        ) -> Result<PhotosMaterializedMetadata, PhotosImportError> {
+            self.materializations.fetch_add(1, Ordering::SeqCst);
+            let image = image::DynamicImage::new_rgba8(1, 1);
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            image.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+            output.write_all(bytes.get_ref()).unwrap();
+            Ok(PhotosMaterializedMetadata {
+                content_type: "public.png".into(),
+                extension: "png".into(),
+            })
+        }
+    }
+
     fn journal_rows(db: &Database, job_id: &str) -> Vec<(String, String, Option<String>)> {
         let conn = db.conn.lock();
         let mut statement = conn
@@ -971,6 +1185,24 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap()
+    }
+
+    fn regular_file_count(root: &Path) -> usize {
+        if !root.exists() {
+            return 0;
+        }
+        std::fs::read_dir(root)
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .filter(|entry| !entry.file_type().unwrap().is_symlink())
+            .map(|entry| {
+                if entry.file_type().unwrap().is_dir() {
+                    regular_file_count(&entry.path())
+                } else {
+                    usize::from(entry.file_type().unwrap().is_file())
+                }
+            })
+            .sum()
     }
 
     impl PhotosCurrentResourceProvider for FakeProvider {
@@ -1087,6 +1319,83 @@ mod tests {
 
         assert_eq!(provider.materializations.load(Ordering::SeqCst), 2);
         assert_eq!(second.image_ids, first.image_ids);
+        let (versions, resources): (i64, i64) = db
+            .conn
+            .lock()
+            .query_row(
+                "SELECT
+                   (SELECT COUNT(*) FROM external_asset_versions v
+                    JOIN external_assets a ON a.id = v.external_asset_id
+                    WHERE a.provider_asset_id = 'opaque-id'),
+                   (SELECT COUNT(*) FROM external_asset_resources r
+                    JOIN external_asset_versions v ON v.id = r.version_id
+                    JOIN external_assets a ON a.id = v.external_asset_id
+                    WHERE a.provider_asset_id = 'opaque-id')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((versions, resources), (1, 1));
+        assert_eq!(
+            regular_file_count(&app_data.join("imports/apple-photos")),
+            1
+        );
+    }
+
+    #[test]
+    fn unknown_date_keeps_distinct_content_versions_without_overwrite() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_data = temp.path().join("app-data");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let db = Database::open(&temp.path().join("test.db")).unwrap();
+        let jobs = JobRegistry::default();
+        let provider = ChangingUnknownProvider {
+            materializations: AtomicUsize::new(0),
+        };
+
+        let first = run_current_import(
+            &provider,
+            &db,
+            &app_data,
+            &jobs,
+            vec!["changing-id".into()],
+            None,
+            |_| {},
+        )
+        .unwrap();
+        let second = run_current_import(
+            &provider,
+            &db,
+            &app_data,
+            &jobs,
+            vec!["changing-id".into()],
+            None,
+            |_| {},
+        )
+        .unwrap();
+
+        assert_ne!(first.image_ids, second.image_ids);
+        let (versions, resources): (i64, i64) = db
+            .conn
+            .lock()
+            .query_row(
+                "SELECT
+                   (SELECT COUNT(*) FROM external_asset_versions v
+                    JOIN external_assets a ON a.id = v.external_asset_id
+                    WHERE a.provider_asset_id = 'changing-id'),
+                   (SELECT COUNT(*) FROM external_asset_resources r
+                    JOIN external_asset_versions v ON v.id = r.version_id
+                    JOIN external_assets a ON a.id = v.external_asset_id
+                    WHERE a.provider_asset_id = 'changing-id')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((versions, resources), (2, 2));
+        assert_eq!(
+            regular_file_count(&app_data.join("imports/apple-photos")),
+            2
+        );
     }
 
     #[test]
@@ -1580,5 +1889,103 @@ mod tests {
                 Some("importer_skipped".into())
             )]
         );
+    }
+
+    #[test]
+    fn fatal_mid_batch_returns_partial_summary_and_marks_remaining_items() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_data = temp.path().join("app-data");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let db = Database::open(&temp.path().join("test.db")).unwrap();
+        let jobs = JobRegistry::default();
+        let provider = FatalDescriptorProvider {
+            materializations: AtomicUsize::new(0),
+        };
+
+        let summary = run_current_import(
+            &provider,
+            &db,
+            &app_data,
+            &jobs,
+            vec!["completed".into(), "fatal".into(), "unstarted".into()],
+            None,
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.failed, 2);
+        assert_eq!(summary.image_ids.len(), 1);
+        assert!(summary
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("Unsupported Photos resource")));
+        assert_eq!(provider.materializations.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            journal_rows(&db, &summary.job_id),
+            vec![
+                ("completed".into(), "imported".into(), None),
+                (
+                    "fatal".into(),
+                    "failed".into(),
+                    Some("batch_aborted".into())
+                ),
+                (
+                    "unstarted".into(),
+                    "failed".into(),
+                    Some("batch_aborted".into())
+                ),
+            ]
+        );
+        assert_eq!(jobs.get(&summary.job_id).unwrap().status, "failed");
+    }
+
+    #[test]
+    fn provenance_finalize_failure_still_reports_the_committed_image() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_data = temp.path().join("app-data");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let db = Database::open(&temp.path().join("test.db")).unwrap();
+        db.conn
+            .lock()
+            .execute_batch(
+                "CREATE TRIGGER fail_external_finalize
+                 BEFORE UPDATE ON external_asset_resources
+                 WHEN NEW.state = 'imported'
+                 BEGIN SELECT RAISE(ABORT, 'simulated finalize failure'); END;",
+            )
+            .unwrap();
+        let jobs = JobRegistry::default();
+        let provider = FakeProvider {
+            materializations: AtomicUsize::new(0),
+            modified_at: Some("2026-08-14T20:00:00Z".into()),
+        };
+
+        let summary = run_current_import(
+            &provider,
+            &db,
+            &app_data,
+            &jobs,
+            vec!["committed-before-finalize".into()],
+            None,
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.image_ids.len(), 1);
+        assert!(summary
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("simulated finalize failure")));
+        assert_eq!(
+            db.get_images_by_ids(&[&summary.image_ids[0]])
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(journal_rows(&db, &summary.job_id)[0].1, "materialized");
+        assert_eq!(jobs.get(&summary.job_id).unwrap().status, "failed");
     }
 }
