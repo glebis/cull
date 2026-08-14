@@ -17,7 +17,164 @@ pub struct MaterializingExternalImport {
     pub managed_path: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct PendingExternalImport {
+    pub asset_id: String,
+    pub resource_id: String,
+    pub item_id: String,
+}
+
 impl Database {
+    pub fn journal_external_import_selection(
+        &self,
+        job_id: &str,
+        batch_id: &str,
+        source_album_id: Option<&str>,
+        asset_ids: &[String],
+    ) -> Result<Vec<PendingExternalImport>> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let mut pending = Vec::with_capacity(asset_ids.len());
+        for (ordinal, provider_asset_id) in asset_ids.iter().enumerate() {
+            let proposed_asset_id = Uuid::new_v4().to_string();
+            tx.execute(
+                "INSERT OR IGNORE INTO external_assets
+                 (id, provider, provider_asset_id, created_at, updated_at)
+                 VALUES (?1, 'apple_photos', ?2, ?3, ?3)",
+                params![proposed_asset_id, provider_asset_id, now],
+            )?;
+            let asset_id: String = tx.query_row(
+                "SELECT id FROM external_assets
+                 WHERE provider = 'apple_photos' AND provider_asset_id = ?1",
+                [provider_asset_id],
+                |row| row.get(0),
+            )?;
+            let version_id = Uuid::new_v4().to_string();
+            let fingerprint = format!("pending:{job_id}:{ordinal}");
+            tx.execute(
+                "INSERT INTO external_asset_versions
+                 (id, external_asset_id, representation, version_fingerprint, created_at)
+                 VALUES (?1, ?2, 'current', ?3, ?4)",
+                params![version_id, asset_id, fingerprint, now],
+            )?;
+            let resource_id = Uuid::new_v4().to_string();
+            let pending_path = format!("pending://apple-photos/{job_id}/{ordinal}");
+            tx.execute(
+                "INSERT INTO external_asset_resources
+                 (id, version_id, resource_key, original_filename, managed_path, state, created_at, updated_at)
+                 VALUES (?1, ?2, 'current', 'pending', ?3, 'requested', ?4, ?4)",
+                params![resource_id, version_id, pending_path, now],
+            )?;
+            let item_id = Uuid::new_v4().to_string();
+            tx.execute(
+                "INSERT INTO external_import_items
+                 (id, job_id, batch_id, resource_id, source_album_id, ordinal, state, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'requested', ?7, ?7)",
+                params![
+                    item_id,
+                    job_id,
+                    batch_id,
+                    resource_id,
+                    source_album_id,
+                    ordinal as i64,
+                    now
+                ],
+            )?;
+            pending.push(PendingExternalImport {
+                asset_id: provider_asset_id.clone(),
+                resource_id,
+                item_id,
+            });
+        }
+        tx.commit()?;
+        Ok(pending)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn bind_external_import_descriptor(
+        &self,
+        pending: &PendingExternalImport,
+        version_fingerprint: &str,
+        provider_modified_at: Option<&str>,
+        filename: &str,
+        managed_path: &str,
+    ) -> Result<ExternalImportPreparation> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let (asset_id, pending_version_id): (String, String) = tx.query_row(
+            "SELECT v.external_asset_id, v.id
+             FROM external_asset_resources r
+             JOIN external_asset_versions v ON v.id = r.version_id
+             WHERE r.id = ?1",
+            [&pending.resource_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let proposed_version_id = Uuid::new_v4().to_string();
+        tx.execute(
+            "INSERT OR IGNORE INTO external_asset_versions
+             (id, external_asset_id, representation, version_fingerprint, provider_modified_at, created_at)
+             VALUES (?1, ?2, 'current', ?3, ?4, ?5)",
+            params![
+                proposed_version_id,
+                asset_id,
+                version_fingerprint,
+                provider_modified_at,
+                now
+            ],
+        )?;
+        let version_id: String = tx.query_row(
+            "SELECT id FROM external_asset_versions
+             WHERE external_asset_id = ?1 AND representation = 'current' AND version_fingerprint = ?2",
+            params![asset_id, version_fingerprint],
+            |row| row.get(0),
+        )?;
+        let proposed_resource_id = Uuid::new_v4().to_string();
+        tx.execute(
+            "INSERT OR IGNORE INTO external_asset_resources
+             (id, version_id, resource_key, original_filename, managed_path, state, created_at, updated_at)
+             VALUES (?1, ?2, 'current', ?3, ?4, 'requested', ?5, ?5)",
+            params![proposed_resource_id, version_id, filename, managed_path, now],
+        )?;
+        let (resource_id, stored_path, existing_image_id, resource_state): (
+            String,
+            String,
+            Option<String>,
+            String,
+        ) = tx.query_row(
+            "SELECT id, managed_path, image_id, state FROM external_asset_resources
+             WHERE version_id = ?1 AND resource_key = 'current'",
+            [&version_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+        let item_state = if resource_state == "imported" && existing_image_id.is_some() {
+            "imported"
+        } else {
+            "requested"
+        };
+        tx.execute(
+            "UPDATE external_import_items
+             SET resource_id = ?2, state = ?3, updated_at = ?4 WHERE id = ?1",
+            params![pending.item_id, resource_id, item_state, now],
+        )?;
+        tx.execute(
+            "DELETE FROM external_asset_resources WHERE id = ?1",
+            [&pending.resource_id],
+        )?;
+        tx.execute(
+            "DELETE FROM external_asset_versions WHERE id = ?1",
+            [pending_version_id],
+        )?;
+        tx.commit()?;
+        Ok(ExternalImportPreparation {
+            resource_id,
+            item_id: pending.item_id.clone(),
+            managed_path: stored_path,
+            existing_image_id,
+        })
+    }
+
     pub fn list_materializing_external_imports(&self) -> Result<Vec<MaterializingExternalImport>> {
         let conn = self.conn.lock();
         let mut statement = conn.prepare(
@@ -140,12 +297,21 @@ impl Database {
         let now = chrono::Utc::now().to_rfc3339();
         let mut conn = self.conn.lock();
         let tx = conn.transaction()?;
+        let resource_state = if state == "inaccessible" {
+            "failed"
+        } else {
+            state
+        };
         tx.execute(
             "UPDATE external_asset_resources SET state = ?2, content_sha256 = COALESCE(?3, content_sha256),
              byte_count = COALESCE(?4, byte_count), error_code = ?5, error_message = ?6, updated_at = ?7 WHERE id = ?1",
-            params![resource_id, state, content_sha256, byte_count.and_then(|v| i64::try_from(v).ok()), error_code, error_message, now],
+            params![resource_id, resource_state, content_sha256, byte_count.and_then(|v| i64::try_from(v).ok()), error_code, error_message, now],
         )?;
-        let item_state = if state == "failed" || state == "cancelled" || state == "skipped" {
+        let item_state = if state == "failed"
+            || state == "cancelled"
+            || state == "skipped"
+            || state == "inaccessible"
+        {
             state
         } else if state == "materialized" || state == "materializing" {
             state

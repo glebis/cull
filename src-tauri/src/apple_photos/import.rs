@@ -1,4 +1,5 @@
 use crate::db_core::db::Database;
+use crate::db_core::queries::external_assets::PendingExternalImport;
 use crate::services::jobs::{JobRegistry, WorkerTerminalOutcome};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -297,6 +298,20 @@ where
 {
     let unique = dedupe_ids(asset_ids);
     let (started, cancel) = create_current_import(db, jobs, unique.len() as u32)?;
+    let pending =
+        match journal_current_import_selection(db, &started, &unique, source_album_id.as_deref()) {
+            Ok(pending) => pending,
+            Err(error) => {
+                jobs.finish_from_worker(
+                    &started.job_id,
+                    WorkerTerminalOutcome::Failed(error.to_string()),
+                );
+                if let Some(snapshot) = jobs.get(&started.job_id) {
+                    let _ = db.save_job(&snapshot);
+                }
+                return Err(error);
+            }
+        };
     run_current_import_job(
         provider,
         db,
@@ -304,10 +319,43 @@ where
         jobs,
         started,
         cancel,
-        unique,
-        source_album_id,
+        pending,
         emit,
     )
+}
+
+pub fn journal_current_import_selection(
+    db: &Database,
+    started: &PhotosImportStarted,
+    asset_ids: &[String],
+    source_album_id: Option<&str>,
+) -> Result<Vec<PendingExternalImport>, PhotosImportError> {
+    db.journal_external_import_selection(
+        &started.job_id,
+        &started.batch_id,
+        source_album_id,
+        asset_ids,
+    )
+    .map_err(|error| PhotosImportError::Database(error.to_string()))
+}
+
+fn mark_cancelled_items(
+    db: &Database,
+    pending: &[PendingExternalImport],
+) -> Result<(), PhotosImportError> {
+    for item in pending {
+        db.mark_external_import_item(
+            &item.item_id,
+            &item.resource_id,
+            "cancelled",
+            None,
+            None,
+            Some("cancelled"),
+            Some("Apple Photos import cancelled before this item completed"),
+        )
+        .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -318,15 +366,14 @@ pub fn run_current_import_job<P, E>(
     jobs: &JobRegistry,
     started: PhotosImportStarted,
     cancel: CancellationToken,
-    asset_ids: Vec<String>,
-    source_album_id: Option<String>,
+    mut pending: Vec<PendingExternalImport>,
     mut emit: E,
 ) -> Result<PhotosImportSummary, PhotosImportError>
 where
     P: PhotosCurrentResourceProvider,
     E: FnMut(&PhotosImportProgress),
 {
-    let total = asset_ids.len() as u32;
+    let total = pending.len() as u32;
     let mut summary = PhotosImportSummary {
         job_id: started.job_id.clone(),
         batch_id: started.batch_id.clone(),
@@ -339,10 +386,11 @@ where
         image_ids: Vec::new(),
     };
 
-    for (index, asset_id) in asset_ids.iter().enumerate() {
+    for index in 0..pending.len() {
         let current = index as u32 + 1;
         if cancel.is_cancelled() {
             summary.cancelled = total.saturating_sub(index as u32);
+            mark_cancelled_items(db, &pending[index..])?;
             break;
         }
         emit(&PhotosImportProgress {
@@ -355,18 +403,47 @@ where
             bytes_total: None,
             fraction: None,
         });
-        let resource = match provider.describe_current(asset_id) {
+        if cancel.is_cancelled() {
+            summary.cancelled = total.saturating_sub(index as u32);
+            mark_cancelled_items(db, &pending[index..])?;
+            break;
+        }
+        let asset_id = pending[index].asset_id.clone();
+        let resource = match provider.describe_current(&asset_id) {
             Ok(resource) => resource,
-            Err(PhotosImportError::PermissionDenied | PhotosImportError::Inaccessible) => {
+            Err(
+                error @ (PhotosImportError::PermissionDenied | PhotosImportError::Inaccessible),
+            ) => {
+                db.mark_external_import_item(
+                    &pending[index].item_id,
+                    &pending[index].resource_id,
+                    "inaccessible",
+                    None,
+                    None,
+                    Some(error.code()),
+                    Some(&error.to_string()),
+                )
+                .map_err(|error| PhotosImportError::Database(error.to_string()))?;
                 summary.inaccessible += 1;
                 jobs.update_progress(&started.job_id, current, Some("Asset inaccessible"));
                 continue;
             }
             Err(PhotosImportError::Cancelled) => {
                 summary.cancelled += total.saturating_sub(index as u32);
+                mark_cancelled_items(db, &pending[index..])?;
                 break;
             }
-            Err(_) => {
+            Err(error) => {
+                db.mark_external_import_item(
+                    &pending[index].item_id,
+                    &pending[index].resource_id,
+                    "failed",
+                    None,
+                    None,
+                    Some(error.code()),
+                    Some(&error.to_string()),
+                )
+                .map_err(|error| PhotosImportError::Database(error.to_string()))?;
                 summary.failed += 1;
                 jobs.update_progress(&started.job_id, current, Some("Discovery failed"));
                 continue;
@@ -375,18 +452,15 @@ where
         let fingerprint = version_fingerprint(&resource);
         let final_path = managed_resource_path(app_data_dir, &resource, &fingerprint)?;
         let prep = db
-            .prepare_external_import_item(
-                &started.job_id,
-                &started.batch_id,
-                index as u32,
-                source_album_id.as_deref(),
-                asset_id,
+            .bind_external_import_descriptor(
+                &pending[index],
                 &fingerprint,
                 resource.modified_at.as_deref(),
                 &resource.filename,
                 &final_path.to_string_lossy(),
             )
             .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+        pending[index].resource_id = prep.resource_id.clone();
         // The journal may already point at a rendered current-representation path
         // whose extension differs from the provisional PhotoKit resource name.
         let journal_path = PathBuf::from(&prep.managed_path);
@@ -454,6 +528,7 @@ where
                 );
                 if state == "cancelled" {
                     summary.cancelled += total.saturating_sub(index as u32);
+                    mark_cancelled_items(db, &pending[index + 1..])?;
                     break;
                 }
                 summary.failed += 1;
@@ -490,15 +565,29 @@ where
         );
         let image_id = match imported {
             Ok(Some(image_id)) => image_id,
-            Ok(None) => db
-                .get_image_file_by_path(&actual_path.to_string_lossy())
-                .map_err(|error| PhotosImportError::Database(error.to_string()))?
-                .map(|file| file.image_id)
-                .ok_or_else(|| {
-                    PhotosImportError::Import(
-                        "Importer skipped a materialized Photos resource".into(),
-                    )
-                })?,
+            Ok(None) => {
+                match db
+                    .get_image_file_by_path(&actual_path.to_string_lossy())
+                    .map_err(|error| PhotosImportError::Database(error.to_string()))?
+                {
+                    Some(file) => file.image_id,
+                    None => {
+                        db.mark_external_import_item(
+                            &prep.item_id,
+                            &prep.resource_id,
+                            "skipped",
+                            None,
+                            None,
+                            Some("importer_skipped"),
+                            Some("Importer skipped the materialized Photos resource"),
+                        )
+                        .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+                        summary.skipped += 1;
+                        jobs.update_progress(&started.job_id, current, Some("Import skipped"));
+                        continue;
+                    }
+                }
+            }
             Err(error) if cancel.is_cancelled() => {
                 let _ = db.mark_external_import_item(
                     &prep.item_id,
@@ -510,6 +599,7 @@ where
                     Some(&error),
                 );
                 summary.cancelled += total.saturating_sub(index as u32);
+                mark_cancelled_items(db, &pending[index + 1..])?;
                 break;
             }
             Err(error) => {
@@ -776,6 +866,111 @@ mod tests {
         ) -> Result<PhotosMaterializedMetadata, PhotosImportError> {
             panic!("an existing journaled resource must not be downloaded again")
         }
+    }
+
+    struct SelectiveDescribeProvider;
+
+    impl PhotosCurrentResourceProvider for SelectiveDescribeProvider {
+        fn describe_current(
+            &self,
+            asset_id: &str,
+        ) -> Result<PhotosCurrentResource, PhotosImportError> {
+            match asset_id {
+                "inaccessible" => Err(PhotosImportError::Inaccessible),
+                "failed" => Err(PhotosImportError::Native("metadata unavailable".into())),
+                _ => unreachable!(),
+            }
+        }
+
+        fn materialize_current(
+            &self,
+            _resource: &PhotosCurrentResource,
+            _output: &mut std::fs::File,
+            _cancel: &CancellationToken,
+            _progress: &mut dyn FnMut(Option<u64>, Option<u64>, Option<f64>),
+        ) -> Result<PhotosMaterializedMetadata, PhotosImportError> {
+            unreachable!()
+        }
+    }
+
+    struct CancelDuringMaterializeProvider;
+
+    impl PhotosCurrentResourceProvider for CancelDuringMaterializeProvider {
+        fn describe_current(
+            &self,
+            asset_id: &str,
+        ) -> Result<PhotosCurrentResource, PhotosImportError> {
+            Ok(PhotosCurrentResource {
+                asset_id: asset_id.into(),
+                filename: "photo.png".into(),
+                content_type: "public.png".into(),
+                modified_at: Some("2026-08-14T16:00:00Z".into()),
+                pixel_width: 1,
+                pixel_height: 1,
+            })
+        }
+
+        fn materialize_current(
+            &self,
+            _resource: &PhotosCurrentResource,
+            _output: &mut std::fs::File,
+            cancel: &CancellationToken,
+            _progress: &mut dyn FnMut(Option<u64>, Option<u64>, Option<f64>),
+        ) -> Result<PhotosMaterializedMetadata, PhotosImportError> {
+            cancel.cancel();
+            Err(PhotosImportError::Cancelled)
+        }
+    }
+
+    struct ImporterSkippedProvider;
+
+    impl PhotosCurrentResourceProvider for ImporterSkippedProvider {
+        fn describe_current(
+            &self,
+            asset_id: &str,
+        ) -> Result<PhotosCurrentResource, PhotosImportError> {
+            Ok(PhotosCurrentResource {
+                asset_id: asset_id.into(),
+                filename: "photo.png".into(),
+                content_type: "public.png".into(),
+                modified_at: Some("2026-08-14T18:00:00Z".into()),
+                pixel_width: 1,
+                pixel_height: 1,
+            })
+        }
+
+        fn materialize_current(
+            &self,
+            _resource: &PhotosCurrentResource,
+            output: &mut std::fs::File,
+            _cancel: &CancellationToken,
+            _progress: &mut dyn FnMut(Option<u64>, Option<u64>, Option<f64>),
+        ) -> Result<PhotosMaterializedMetadata, PhotosImportError> {
+            output.write_all(b"unsupported representation").unwrap();
+            Ok(PhotosMaterializedMetadata {
+                content_type: "public.data".into(),
+                extension: "txt".into(),
+            })
+        }
+    }
+
+    fn journal_rows(db: &Database, job_id: &str) -> Vec<(String, String, Option<String>)> {
+        let conn = db.conn.lock();
+        let mut statement = conn
+            .prepare(
+                "SELECT a.provider_asset_id, i.state, i.error_code
+                 FROM external_import_items i
+                 JOIN external_asset_resources r ON r.id = i.resource_id
+                 JOIN external_asset_versions v ON v.id = r.version_id
+                 JOIN external_assets a ON a.id = v.external_asset_id
+                 WHERE i.job_id = ?1 ORDER BY i.ordinal",
+            )
+            .unwrap();
+        statement
+            .query_map([job_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
     }
 
     impl PhotosCurrentResourceProvider for FakeProvider {
@@ -1213,5 +1408,177 @@ mod tests {
             )
             .unwrap();
         assert_eq!(error_code.as_deref(), Some("unsafe_managed_path"));
+    }
+
+    #[test]
+    fn frozen_selection_journals_discovery_failures_with_reason_codes() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_data = temp.path().join("app-data");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let db = Database::open(&temp.path().join("test.db")).unwrap();
+        let jobs = JobRegistry::default();
+
+        let summary = run_current_import(
+            &SelectiveDescribeProvider,
+            &db,
+            &app_data,
+            &jobs,
+            vec!["inaccessible".into(), "failed".into()],
+            Some("album-one".into()),
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!(summary.inaccessible, 1);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(
+            journal_rows(&db, &summary.job_id),
+            vec![
+                (
+                    "inaccessible".into(),
+                    "inaccessible".into(),
+                    Some("asset_inaccessible".into())
+                ),
+                (
+                    "failed".into(),
+                    "failed".into(),
+                    Some("photos_native_error".into())
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn cancellation_before_work_marks_every_frozen_item_cancelled() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_data = temp.path().join("app-data");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let db = Database::open(&temp.path().join("test.db")).unwrap();
+        let jobs = JobRegistry::default();
+        let ids = vec!["one".into(), "two".into(), "three".into()];
+        let (started, cancel) = create_current_import(&db, &jobs, ids.len() as u32).unwrap();
+        let pending = journal_current_import_selection(&db, &started, &ids, None).unwrap();
+        cancel.cancel();
+        let job_id = started.job_id.clone();
+
+        let summary = run_current_import_job(
+            &FakeProvider {
+                materializations: AtomicUsize::new(0),
+                modified_at: Some("2026-08-14T16:00:00Z".into()),
+            },
+            &db,
+            &app_data,
+            &jobs,
+            started,
+            cancel,
+            pending,
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!(summary.cancelled, 3);
+        assert!(journal_rows(&db, &job_id)
+            .iter()
+            .all(|(_, state, code)| state == "cancelled" && code.as_deref() == Some("cancelled")));
+    }
+
+    #[test]
+    fn cancellation_between_items_preserves_completed_item_for_retry() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_data = temp.path().join("app-data");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let db = Database::open(&temp.path().join("test.db")).unwrap();
+        let jobs = JobRegistry::default();
+        let provider = FakeProvider {
+            materializations: AtomicUsize::new(0),
+            modified_at: Some("2026-08-14T17:00:00Z".into()),
+        };
+        let ids = vec!["one".into(), "two".into(), "three".into()];
+        let (started, cancel) = create_current_import(&db, &jobs, ids.len() as u32).unwrap();
+        let pending = journal_current_import_selection(&db, &started, &ids, None).unwrap();
+        let cancel_from_event = cancel.clone();
+        let first_job_id = started.job_id.clone();
+        let first = run_current_import_job(
+            &provider,
+            &db,
+            &app_data,
+            &jobs,
+            started,
+            cancel,
+            pending,
+            |progress| {
+                if progress.phase == "discovery" && progress.current == 2 {
+                    cancel_from_event.cancel();
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(first.imported, 1);
+        assert_eq!(first.cancelled, 2);
+        let first_rows = journal_rows(&db, &first_job_id);
+        assert_eq!(first_rows[0].1, "imported");
+        assert_eq!(first_rows[1].1, "cancelled");
+        assert_eq!(first_rows[2].1, "cancelled");
+
+        let retry =
+            run_current_import(&provider, &db, &app_data, &jobs, ids, None, |_| {}).unwrap();
+        assert_eq!(retry.reused, 1);
+        assert_eq!(retry.imported, 2);
+        assert_eq!(provider.materializations.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn cancellation_during_materialization_marks_current_and_unstarted_items() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_data = temp.path().join("app-data");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let db = Database::open(&temp.path().join("test.db")).unwrap();
+        let jobs = JobRegistry::default();
+
+        let summary = run_current_import(
+            &CancelDuringMaterializeProvider,
+            &db,
+            &app_data,
+            &jobs,
+            vec!["one".into(), "two".into()],
+            None,
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!(summary.cancelled, 2);
+        assert!(journal_rows(&db, &summary.job_id)
+            .iter()
+            .all(|(_, state, code)| state == "cancelled" && code.as_deref() == Some("cancelled")));
+    }
+
+    #[test]
+    fn importer_skip_is_a_durable_item_outcome() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_data = temp.path().join("app-data");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let db = Database::open(&temp.path().join("test.db")).unwrap();
+        let jobs = JobRegistry::default();
+
+        let summary = run_current_import(
+            &ImporterSkippedProvider,
+            &db,
+            &app_data,
+            &jobs,
+            vec!["skipped".into()],
+            None,
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!(summary.skipped, 1);
+        assert_eq!(
+            journal_rows(&db, &summary.job_id),
+            vec![(
+                "skipped".into(),
+                "skipped".into(),
+                Some("importer_skipped".into())
+            )]
+        );
     }
 }

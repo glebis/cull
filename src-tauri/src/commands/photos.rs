@@ -32,6 +32,23 @@ fn update_apple_photos_job(
     jobs.get(&progress.job_id)
 }
 
+fn fail_apple_photos_job_start(
+    db: &crate::db_core::db::Database,
+    jobs: &crate::services::jobs::JobRegistry,
+    job_id: &str,
+    error: &str,
+) -> Option<crate::services::jobs::JobSnapshot> {
+    jobs.finish_from_worker(
+        job_id,
+        crate::services::jobs::WorkerTerminalOutcome::Failed(error.to_string()),
+    );
+    let snapshot = jobs.get(job_id);
+    if let Some(snapshot) = snapshot.as_ref() {
+        let _ = db.save_job(snapshot);
+    }
+    snapshot
+}
+
 async fn blocking<T, F>(operation: F) -> Result<T, String>
 where
     T: Send + 'static,
@@ -129,6 +146,22 @@ pub async fn photos_start_import_assets(
     let app_data_dir = state.app_data_dir.clone();
     let (started, cancel) = apple_photos::create_current_import(&db, &jobs, asset_ids.len() as u32)
         .map_err(|error| error.to_string())?;
+    let pending = match apple_photos::journal_current_import_selection(
+        &db,
+        &started,
+        &asset_ids,
+        source_album_id.as_deref(),
+    ) {
+        Ok(pending) => pending,
+        Err(error) => {
+            if let Some(snapshot) =
+                fail_apple_photos_job_start(&db, &jobs, &started.job_id, &error.to_string())
+            {
+                let _ = app.emit("job-status-changed", snapshot);
+            }
+            return Err(error.to_string());
+        }
+    };
     if let Some(snapshot) = jobs.get(&started.job_id) {
         let _ = app.emit("job-status-changed", snapshot);
     }
@@ -142,8 +175,7 @@ pub async fn photos_start_import_assets(
             &jobs,
             worker_started.clone(),
             cancel,
-            asset_ids,
-            source_album_id,
+            pending,
             |progress| {
                 if let Some(snapshot) = update_apple_photos_job(&jobs, progress) {
                     let _ = db.save_job(&snapshot);
@@ -231,5 +263,17 @@ mod tests {
         assert_eq!(snapshot.message.as_deref(), Some("Downloading photo.jpg"));
         jobs.cancel(&job_id).unwrap();
         assert!(cancel.is_cancelled());
+    }
+
+    #[test]
+    fn journal_start_failure_seals_the_created_job() {
+        let db = crate::db_core::db::Database::open(std::path::Path::new(":memory:")).unwrap();
+        let jobs = crate::services::jobs::JobRegistry::default();
+        let (job_id, _) = jobs.create_job("import", 2);
+
+        let snapshot = fail_apple_photos_job_start(&db, &jobs, &job_id, "journal failed").unwrap();
+
+        assert_eq!(snapshot.status, "failed");
+        assert_eq!(snapshot.error.as_deref(), Some("journal failed"));
     }
 }
