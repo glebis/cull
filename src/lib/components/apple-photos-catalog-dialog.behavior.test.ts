@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import ApplePhotosCatalogDialog from './ApplePhotosCatalogDialog.svelte';
 import type {
@@ -11,14 +11,17 @@ import type {
     ApplePhotosPage,
 } from '$lib/apple-photos';
 
-afterEach(() => cleanup());
+afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+});
 
 function page<T>(items: T[], offset = 0, total = items.length): ApplePhotosPage<T> {
     return { items, offset, total, has_more: offset + items.length < total };
 }
 
 function album(id: string, title: string): ApplePhotosAlbum {
-    return { id, title, kind: 'user' };
+    return { id, title, kind: 'user', role: null };
 }
 
 function asset(id: string, filename: string): ApplePhotosAsset {
@@ -40,6 +43,7 @@ function client(overrides: Partial<ApplePhotosCatalogClient> = {}): ApplePhotosC
         requestAuthorization: vi.fn().mockResolvedValue('authorized'),
         listAlbums: vi.fn().mockResolvedValue(page([])),
         listAssets: vi.fn().mockResolvedValue(page([])),
+        loadPreview: vi.fn().mockResolvedValue(null),
         ...overrides,
     };
 }
@@ -62,11 +66,27 @@ describe('Apple Photos catalog dialog', () => {
 
         expect(await screen.findByText('Showing the photos you allowed Cull to access.')).toBeInTheDocument();
         expect(await screen.findByRole('option', { name: 'Favourites' })).toBeInTheDocument();
-        expect(await screen.findByText('IMG_0001.HEIC')).toBeInTheDocument();
+        expect(await screen.findByRole('button', { name: 'Select IMG_0001.HEIC' })).toBeInTheDocument();
         expect(catalog.listAssets).toHaveBeenCalledWith(null, 0, 100);
     });
 
-    it('switches albums, ignores a stale response, and appends a bounded next page', async () => {
+    it('pins favourites and screenshots by stable PhotoKit role instead of localized title', async () => {
+        const catalog = client({
+            listAlbums: vi.fn().mockResolvedValue(page([
+                { id: 'fav-id', title: 'Favoriten', kind: 'smart', role: 'favorites' },
+                { id: 'shots-id', title: 'Bildschirmfotos', kind: 'smart', role: 'screenshots' },
+            ])),
+        });
+        const user = userEvent.setup();
+        render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        await user.click(await screen.findByRole('button', { name: 'Favourites' }));
+        expect(catalog.listAssets).toHaveBeenLastCalledWith('fav-id', 0, 100);
+        expect(screen.getByRole('button', { name: 'Favourites' })).toHaveAttribute('aria-current', 'page');
+        expect(screen.getByRole('button', { name: 'Screenshots' })).toBeInTheDocument();
+    });
+
+    it('switches albums, ignores a stale response, and loads the next bounded page on scroll', async () => {
         let resolveAll!: (value: ApplePhotosPage<ApplePhotosAsset>) => void;
         const allPending = new Promise<ApplePhotosPage<ApplePhotosAsset>>(resolve => { resolveAll = resolve; });
         const catalog = client({
@@ -82,16 +102,249 @@ describe('Apple Photos catalog dialog', () => {
         const user = userEvent.setup();
         render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
 
-        const selector = await screen.findByRole('combobox', { name: 'Album' });
-        await user.selectOptions(selector, 'album-b');
-        expect(await screen.findByText('B-1.jpg')).toBeInTheDocument();
+        await user.click(await screen.findByRole('button', { name: 'B' }));
+        expect(await screen.findByRole('button', { name: 'Select B-1.jpg' })).toBeInTheDocument();
 
         resolveAll(page([asset('stale', 'STALE.jpg')]));
-        await waitFor(() => expect(screen.queryByText('STALE.jpg')).not.toBeInTheDocument());
+        await waitFor(() => expect(screen.queryByRole('button', { name: 'Select STALE.jpg' })).not.toBeInTheDocument());
 
-        await user.click(screen.getByRole('button', { name: 'Load more' }));
-        expect(await screen.findByText('B-2.jpg')).toBeInTheDocument();
+        await fireEvent.scroll(screen.getByRole('list', { name: 'Apple Photos assets' }));
+        expect(await screen.findByRole('button', { name: 'Select B-2.jpg' })).toBeInTheDocument();
         expect(catalog.listAssets).toHaveBeenLastCalledWith('album-b', 1, 100);
+        expect(screen.getByText('All photos loaded.')).toBeInTheDocument();
+    });
+
+    it('deduplicates overlapping pages, advances by consumed results, and prevents concurrent scroll loads', async () => {
+        let resolveSecondPage!: (value: ApplePhotosPage<ApplePhotosAsset>) => void;
+        const secondPage = new Promise<ApplePhotosPage<ApplePhotosAsset>>(resolve => { resolveSecondPage = resolve; });
+        const catalog = client({
+            listAssets: vi.fn()
+                .mockResolvedValueOnce({
+                    items: [asset('asset-1', 'One.jpg'), asset('asset-2', 'Two.jpg')],
+                    offset: 0,
+                    total: 5,
+                    has_more: true,
+                })
+                .mockImplementationOnce(() => secondPage)
+                .mockResolvedValueOnce({
+                    items: [asset('asset-4', 'Four.jpg')],
+                    offset: 4,
+                    total: 5,
+                    has_more: false,
+                }),
+        });
+        render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        expect(await screen.findByRole('button', { name: 'Select Two.jpg' })).toBeInTheDocument();
+        const list = screen.getByRole('list', { name: 'Apple Photos assets' });
+        await fireEvent.scroll(list);
+        await fireEvent.scroll(list);
+
+        expect(screen.getByText('Loading more photos…')).toBeInTheDocument();
+        expect(catalog.listAssets).toHaveBeenCalledTimes(2);
+
+        resolveSecondPage({
+            items: [asset('asset-2', 'Two.jpg'), asset('asset-3', 'Three.jpg')],
+            offset: 2,
+            total: 5,
+            has_more: true,
+        });
+        expect(await screen.findByRole('button', { name: 'Select Three.jpg' })).toBeInTheDocument();
+        expect(screen.getAllByRole('button', { name: 'Select Two.jpg' })).toHaveLength(1);
+
+        await fireEvent.scroll(list);
+        expect(await screen.findByRole('button', { name: 'Select Four.jpg' })).toBeInTheDocument();
+        expect(catalog.listAssets).toHaveBeenLastCalledWith(null, 4, 100);
+        expect(screen.getByText('End of library reached · 4 unique photos shown.')).toBeInTheDocument();
+    });
+
+    it('retries a failed incremental page without clearing the visible grid', async () => {
+        const catalog = client({
+            listAssets: vi.fn()
+                .mockResolvedValueOnce({ items: [asset('asset-1', 'One.jpg')], offset: 0, total: 2, has_more: true })
+                .mockRejectedValueOnce(new Error('Photos unavailable'))
+                .mockResolvedValueOnce({ items: [asset('asset-2', 'Two.jpg')], offset: 1, total: 2, has_more: false }),
+        });
+        const user = userEvent.setup();
+        render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        expect(await screen.findByRole('button', { name: 'Select One.jpg' })).toBeInTheDocument();
+        await fireEvent.scroll(screen.getByRole('list', { name: 'Apple Photos assets' }));
+        expect(await screen.findByText('More photos could not be loaded.')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Select One.jpg' })).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Retry' }));
+        expect(await screen.findByRole('button', { name: 'Select Two.jpg' })).toBeInTheDocument();
+        expect(catalog.listAssets).toHaveBeenLastCalledWith(null, 1, 100);
+    });
+
+    it('loads a local preview only when its fixed-size tile becomes visible', async () => {
+        const visibilityCallbacks: IntersectionObserverCallback[] = [];
+        vi.stubGlobal('IntersectionObserver', class {
+            root = null;
+            rootMargin = '240px';
+            thresholds = [0];
+
+            constructor(callback: IntersectionObserverCallback) {
+                visibilityCallbacks.push(callback);
+            }
+
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+            takeRecords(): IntersectionObserverEntry[] { return []; }
+        });
+        const preview = 'data:image/png;base64,cHJldmlldw==';
+        const catalog = client({
+            listAssets: vi.fn().mockResolvedValue(page([asset('asset-1', 'One.jpg')])),
+            loadPreview: vi.fn().mockResolvedValue(preview),
+        });
+        const view = render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        expect(await screen.findByLabelText('Preview unavailable locally')).toBeInTheDocument();
+        expect(catalog.loadPreview).not.toHaveBeenCalled();
+        const tile = screen.getByRole('button', { name: 'Select One.jpg' });
+        for (const callback of visibilityCallbacks) {
+            callback(
+                [{ isIntersecting: true, target: tile } as unknown as IntersectionObserverEntry],
+                {} as IntersectionObserver,
+            );
+        }
+
+        await waitFor(() => expect(view.container.querySelector('img')).not.toBeNull());
+        const image = view.container.querySelector('img');
+        expect(image).toHaveAttribute('src', preview);
+        expect(catalog.loadPreview).toHaveBeenCalledWith('asset-1', 320);
+    });
+
+    it('continues from the end sentinel when an overlapping page adds no grid rows', async () => {
+        const visibilityCallbacks: IntersectionObserverCallback[] = [];
+        vi.stubGlobal('IntersectionObserver', class {
+            root = null;
+            rootMargin = '240px';
+            thresholds = [0];
+
+            constructor(callback: IntersectionObserverCallback) {
+                visibilityCallbacks.push(callback);
+            }
+
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+            takeRecords(): IntersectionObserverEntry[] { return []; }
+        });
+        const catalog = client({
+            listAssets: vi.fn()
+                .mockResolvedValueOnce({ items: [asset('asset-1', 'One.jpg')], offset: 0, total: 3, has_more: true })
+                .mockResolvedValueOnce({ items: [asset('asset-1', 'One.jpg')], offset: 1, total: 3, has_more: true })
+                .mockResolvedValueOnce({ items: [asset('asset-3', 'Three.jpg')], offset: 2, total: 3, has_more: false }),
+        });
+        render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        expect(await screen.findByRole('button', { name: 'Select One.jpg' })).toBeInTheDocument();
+        const revealEnd = () => {
+            const tile = screen.getByRole('button', { name: 'Select One.jpg' });
+            for (const callback of visibilityCallbacks) {
+                callback(
+                    [{ isIntersecting: true, target: tile } as unknown as IntersectionObserverEntry],
+                    {} as IntersectionObserver,
+                );
+            }
+        };
+
+        revealEnd();
+        await waitFor(() => expect(catalog.listAssets).toHaveBeenCalledTimes(2));
+        expect(screen.getAllByRole('button', { name: 'Select One.jpg' })).toHaveLength(1);
+
+        revealEnd();
+        expect(await screen.findByRole('button', { name: 'Select Three.jpg' })).toBeInTheDocument();
+        expect(catalog.listAssets).toHaveBeenLastCalledWith(null, 2, 100);
+        expect(screen.getByText('End of library reached · 2 unique photos shown.')).toBeInTheDocument();
+    });
+
+    it('shares an in-flight preview when the same asset appears after an album switch', async () => {
+        const visibilityCallbacks: IntersectionObserverCallback[] = [];
+        vi.stubGlobal('IntersectionObserver', class {
+            root = null;
+            rootMargin = '240px';
+            thresholds = [0];
+
+            constructor(callback: IntersectionObserverCallback) {
+                visibilityCallbacks.push(callback);
+            }
+
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+            takeRecords(): IntersectionObserverEntry[] { return []; }
+        });
+        let resolvePreview!: (value: string) => void;
+        const previewRequest = new Promise<string>(resolve => { resolvePreview = resolve; });
+        const catalog = client({
+            listAlbums: vi.fn().mockResolvedValue(page([album('shared', 'Shared album')])),
+            listAssets: vi.fn().mockResolvedValue(page([asset('same-asset', 'Same.jpg')])),
+            loadPreview: vi.fn().mockReturnValue(previewRequest),
+        });
+        const user = userEvent.setup();
+        const view = render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        const reveal = (target: Element) => {
+            for (const callback of visibilityCallbacks) {
+                callback(
+                    [{ isIntersecting: true, target } as unknown as IntersectionObserverEntry],
+                    {} as IntersectionObserver,
+                );
+            }
+        };
+        reveal(await screen.findByRole('button', { name: 'Select Same.jpg' }));
+        expect(catalog.loadPreview).toHaveBeenCalledOnce();
+
+        await user.click(screen.getByRole('button', { name: 'Shared album' }));
+        await waitFor(() => expect(catalog.listAssets).toHaveBeenCalledTimes(2));
+        reveal(screen.getByRole('button', { name: 'Select Same.jpg' }));
+        expect(catalog.loadPreview).toHaveBeenCalledOnce();
+
+        resolvePreview('data:image/png;base64,c2hhcmVk');
+        await waitFor(() => expect(view.container.querySelector('img')).not.toBeNull());
+    });
+
+    it.each([
+        { mobileViewport: false, expectedHeight: 735 },
+        { mobileViewport: true, expectedHeight: 422 },
+    ])('reserves measured grid height at the real CSS breakpoint ($mobileViewport)', async ({ mobileViewport, expectedHeight }) => {
+        let resize!: (width: number) => void;
+        vi.stubGlobal('ResizeObserver', class {
+            constructor(callback: ResizeObserverCallback) {
+                resize = (width: number) => callback(
+                    [{ contentRect: { width } } as unknown as ResizeObserverEntry],
+                    this as unknown as ResizeObserver,
+                );
+            }
+
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        });
+        vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
+            matches: mobileViewport,
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+        }));
+        const catalog = client({
+            listAssets: vi.fn().mockResolvedValue(page(
+                Array.from({ length: 12 }, (_, index) => asset(`asset-${index}`, `${index}.jpg`)),
+            )),
+        });
+        const view = render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        expect(await screen.findByRole('button', { name: 'Select 11.jpg' })).toBeInTheDocument();
+        resize(528);
+
+        await waitFor(() => {
+            expect(view.container.querySelector('.date-group')).toHaveStyle(
+                `contain-intrinsic-size: auto ${expectedHeight}px`,
+            );
+        });
     });
 
     it('shows recovery guidance for denied access and closes through the shared modal', async () => {

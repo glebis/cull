@@ -20,6 +20,7 @@ pub struct PhotosAlbum {
     pub id: String,
     pub title: Option<String>,
     pub kind: PhotosAlbumKind,
+    pub role: Option<PhotosAlbumRole>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -29,12 +30,20 @@ pub enum PhotosAlbumKind {
     Smart,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhotosAlbumRole {
+    Favorites,
+    Screenshots,
+}
+
 impl PhotosAlbum {
     fn new(id: impl Into<String>, title: impl Into<String>, kind: PhotosAlbumKind) -> Self {
         Self {
             id: id.into(),
             title: Some(title.into()),
             kind,
+            role: None,
         }
     }
 }
@@ -105,6 +114,7 @@ pub trait PhotosCatalog {
         offset: u32,
         limit: u32,
     ) -> Result<PhotosPage<PhotosAsset>, PhotosError>;
+    fn load_local_preview(&self, asset_id: &str, size: u32) -> Result<Option<String>, PhotosError>;
 }
 
 pub fn authorization_status(
@@ -126,8 +136,9 @@ pub fn list_albums(
 ) -> Result<PhotosPage<PhotosAlbum>, PhotosError> {
     let mut albums = catalog.list_albums()?;
     albums.sort_by(|a, b| {
-        a.kind
-            .cmp(&b.kind)
+        album_role_rank(a.role)
+            .cmp(&album_role_rank(b.role))
+            .then_with(|| a.kind.cmp(&b.kind))
             .then_with(|| match (&a.title, &b.title) {
                 (Some(a_title), Some(b_title)) => {
                     a_title.to_lowercase().cmp(&b_title.to_lowercase())
@@ -141,6 +152,14 @@ pub fn list_albums(
     Ok(paginate(albums, offset, limit))
 }
 
+fn album_role_rank(role: Option<PhotosAlbumRole>) -> u8 {
+    match role {
+        Some(PhotosAlbumRole::Favorites) => 0,
+        Some(PhotosAlbumRole::Screenshots) => 1,
+        None => 2,
+    }
+}
+
 pub fn list_assets(
     catalog: &impl PhotosCatalog,
     album_id: Option<&str>,
@@ -148,6 +167,14 @@ pub fn list_assets(
     limit: u32,
 ) -> Result<PhotosPage<PhotosAsset>, PhotosError> {
     catalog.list_assets_page(album_id, offset, limit.clamp(1, 100))
+}
+
+pub fn load_local_preview(
+    catalog: &impl PhotosCatalog,
+    asset_id: &str,
+    size: u32,
+) -> Result<Option<String>, PhotosError> {
+    catalog.load_local_preview(asset_id, size.clamp(96, 512))
 }
 
 fn paginate<T>(items: Vec<T>, offset: u32, limit: u32) -> PhotosPage<T> {
@@ -190,6 +217,10 @@ impl PhotosCatalog for SystemPhotosCatalog {
     ) -> Result<PhotosPage<PhotosAsset>, PhotosError> {
         macos::list_assets_page(album_id, offset, limit)
     }
+
+    fn load_local_preview(&self, asset_id: &str, size: u32) -> Result<Option<String>, PhotosError> {
+        macos::load_local_preview(asset_id, size)
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -214,6 +245,14 @@ impl PhotosCatalog for SystemPhotosCatalog {
     ) -> Result<PhotosPage<PhotosAsset>, PhotosError> {
         Err(PhotosError::Unsupported)
     }
+
+    fn load_local_preview(
+        &self,
+        _asset_id: &str,
+        _size: u32,
+    ) -> Result<Option<String>, PhotosError> {
+        Err(PhotosError::Unsupported)
+    }
 }
 
 #[cfg(test)]
@@ -223,6 +262,7 @@ mod tests {
     #[derive(Default)]
     struct FakeCatalog {
         request_count: std::sync::atomic::AtomicUsize,
+        preview_sizes: std::sync::Mutex<Vec<u32>>,
     }
 
     impl PhotosCatalog for FakeCatalog {
@@ -239,7 +279,12 @@ mod tests {
         fn list_albums(&self) -> Result<Vec<PhotosAlbum>, PhotosError> {
             Ok(vec![
                 PhotosAlbum::new("z", "Trips", PhotosAlbumKind::User),
-                PhotosAlbum::new("b", "Favorites", PhotosAlbumKind::Smart),
+                PhotosAlbum {
+                    id: "b".into(),
+                    title: Some("Favorites".into()),
+                    kind: PhotosAlbumKind::Smart,
+                    role: Some(PhotosAlbumRole::Favorites),
+                },
                 PhotosAlbum::new("a", "favorites", PhotosAlbumKind::Smart),
             ])
         }
@@ -260,6 +305,15 @@ mod tests {
                 offset,
                 limit,
             ))
+        }
+
+        fn load_local_preview(
+            &self,
+            _asset_id: &str,
+            size: u32,
+        ) -> Result<Option<String>, PhotosError> {
+            self.preview_sizes.lock().unwrap().push(size);
+            Ok(Some("data:image/png;base64,cHJldmlldw==".to_string()))
         }
     }
 
@@ -292,7 +346,7 @@ mod tests {
     fn album_page_clamps_and_orders_by_kind_title_then_id() {
         let page = list_albums(&FakeCatalog::default(), 0, 500).unwrap();
         let ids: Vec<&str> = page.items.iter().map(|item| item.id.as_str()).collect();
-        assert_eq!(ids, vec!["z", "a", "b"]);
+        assert_eq!(ids, vec!["b", "z", "a"]);
         assert_eq!(page.offset, 0);
         assert!(!page.has_more);
     }
@@ -311,5 +365,17 @@ mod tests {
         assert_eq!(page.total, 3);
         assert_eq!(page.offset, 1);
         assert!(page.has_more);
+    }
+
+    #[test]
+    fn local_preview_size_is_bounded_before_reaching_the_native_adapter() {
+        let catalog = FakeCatalog::default();
+        assert!(load_local_preview(&catalog, "opaque-id", 8)
+            .unwrap()
+            .is_some());
+        assert!(load_local_preview(&catalog, "opaque-id", 4096)
+            .unwrap()
+            .is_some());
+        assert_eq!(*catalog.preview_sizes.lock().unwrap(), vec![96, 512]);
     }
 }

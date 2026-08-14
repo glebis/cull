@@ -1,14 +1,21 @@
 //! The sole unsafe/native boundary for the read-only PhotoKit catalog.
 
 use super::{
-    PhotosAlbum, PhotosAlbumKind, PhotosAsset, PhotosAuthorizationStatus, PhotosError, PhotosPage,
+    PhotosAlbum, PhotosAlbumKind, PhotosAlbumRole, PhotosAsset, PhotosAuthorizationStatus,
+    PhotosError, PhotosPage,
 };
+use base64::Engine as _;
 use block2::RcBlock;
 use objc2::rc::{autoreleasepool, Retained};
-use objc2_foundation::{NSArray, NSDate, NSPredicate, NSSortDescriptor, NSString};
+use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSImage};
+use objc2_foundation::{
+    NSArray, NSDate, NSDictionary, NSPredicate, NSSize, NSSortDescriptor, NSString,
+};
 use objc2_photos::{
     PHAccessLevel, PHAsset, PHAssetCollection, PHAssetCollectionSubtype, PHAssetCollectionType,
-    PHAssetMediaType, PHAssetResource, PHAuthorizationStatus, PHFetchOptions, PHPhotoLibrary,
+    PHAssetMediaType, PHAssetResource, PHAuthorizationStatus, PHFetchOptions, PHImageContentMode,
+    PHImageManager, PHImageRequestOptions, PHImageRequestOptionsDeliveryMode,
+    PHImageRequestOptionsResizeMode, PHImageRequestOptionsVersion, PHPhotoLibrary,
 };
 
 static PHOTO_KIT_OPERATION: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
@@ -111,7 +118,17 @@ unsafe fn collect_albums(
         let album = result.objectAtIndex(index);
         let id = album.localIdentifier().to_string();
         let title = album.localizedTitle().map(|value| value.to_string());
-        output.push(PhotosAlbum { id, title, kind });
+        let role = match album.assetCollectionSubtype() {
+            PHAssetCollectionSubtype::SmartAlbumFavorites => Some(PhotosAlbumRole::Favorites),
+            PHAssetCollectionSubtype::SmartAlbumScreenshots => Some(PhotosAlbumRole::Screenshots),
+            _ => None,
+        };
+        output.push(PhotosAlbum {
+            id,
+            title,
+            kind,
+            role,
+        });
     }
 }
 
@@ -180,6 +197,65 @@ pub(super) fn list_assets_page(
     })
 }
 
+pub(super) fn load_local_preview(asset_id: &str, size: u32) -> Result<Option<String>, PhotosError> {
+    require_read_access()?;
+    catch_native(|| unsafe {
+        // SAFETY: The request is synchronous, serialized, and scoped to this
+        // autorelease pool. Network access is explicitly disabled so an
+        // iCloud-only asset returns no image instead of starting a download.
+        let identifier = NSString::from_str(asset_id);
+        let identifiers = NSArray::from_retained_slice(&[identifier]);
+        let assets = PHAsset::fetchAssetsWithLocalIdentifiers_options(&identifiers, None);
+        let Some(asset) = assets.firstObject() else {
+            return Ok(None);
+        };
+
+        let options = local_preview_options();
+        let result = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let result_for_handler = result.clone();
+        let handler = RcBlock::new(move |image: *mut NSImage, _info: *mut NSDictionary| {
+            let data_url = image.as_ref().and_then(|image| encode_preview_png(image));
+            if let Ok(mut result) = result_for_handler.lock() {
+                *result = Some(data_url);
+            }
+        });
+        PHImageManager::defaultManager()
+            .requestImageForAsset_targetSize_contentMode_options_resultHandler(
+                &asset,
+                NSSize::new(size as f64, size as f64),
+                PHImageContentMode::AspectFill,
+                Some(&options),
+                &handler,
+            );
+
+        let preview = result
+            .lock()
+            .map_err(|_| PhotosError::Native("local preview callback state was poisoned".into()))?
+            .take()
+            .flatten();
+        Ok(preview)
+    })
+}
+
+unsafe fn local_preview_options() -> Retained<PHImageRequestOptions> {
+    let options = PHImageRequestOptions::new();
+    options.setNetworkAccessAllowed(false);
+    options.setSynchronous(true);
+    options.setVersion(PHImageRequestOptionsVersion::Current);
+    options.setDeliveryMode(PHImageRequestOptionsDeliveryMode::HighQualityFormat);
+    options.setResizeMode(PHImageRequestOptionsResizeMode::Exact);
+    options
+}
+
+unsafe fn encode_preview_png(image: &NSImage) -> Option<String> {
+    let tiff = image.TIFFRepresentation()?;
+    let bitmap = NSBitmapImageRep::imageRepWithData(&tiff)?;
+    let properties = NSDictionary::new();
+    let png = bitmap.representationUsingType_properties(NSBitmapImageFileType::PNG, &properties)?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(png.to_vec());
+    Some(format!("data:image/png;base64,{encoded}"))
+}
+
 unsafe fn asset_fetch_options() -> Retained<PHFetchOptions> {
     let options = PHFetchOptions::new();
     let creation_key = NSString::from_str("creationDate");
@@ -233,5 +309,17 @@ mod tests {
             .collect();
 
         assert_eq!(keys, ["creationDate"]);
+    }
+
+    #[test]
+    fn local_preview_options_are_synchronous_and_never_allow_network_access() {
+        let options = unsafe { local_preview_options() };
+
+        assert!(unsafe { options.isSynchronous() });
+        assert!(!unsafe { options.isNetworkAccessAllowed() });
+        assert_eq!(
+            unsafe { options.resizeMode() },
+            PHImageRequestOptionsResizeMode::Exact
+        );
     }
 }

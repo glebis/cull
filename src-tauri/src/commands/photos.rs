@@ -57,6 +57,17 @@ pub async fn photos_list_assets(
     .await
 }
 
+#[tauri::command]
+pub async fn photos_load_local_preview(
+    asset_id: String,
+    size: Option<u32>,
+) -> Result<Option<String>, String> {
+    blocking(move || {
+        apple_photos::load_local_preview(&SystemPhotosCatalog, &asset_id, size.unwrap_or(320))
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

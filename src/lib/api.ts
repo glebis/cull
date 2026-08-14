@@ -13,11 +13,13 @@ export type ApplePhotosAuthorization =
     | 'authorized';
 
 export type ApplePhotosAlbumKind = 'user' | 'smart';
+export type ApplePhotosAlbumRole = 'favorites' | 'screenshots';
 
 export interface ApplePhotosAlbum {
     id: string;
     title: string | null;
     kind: ApplePhotosAlbumKind;
+    role: ApplePhotosAlbumRole | null;
 }
 
 export interface ApplePhotosAsset {
@@ -59,6 +61,10 @@ export function photosListAssets(
     limit = 100,
 ): Promise<ApplePhotosAssetPage> {
     return invoke<ApplePhotosAssetPage>('photos_list_assets', { albumId, offset, limit });
+}
+
+export function photosLoadLocalPreview(assetId: string, size = 320): Promise<string | null> {
+    return invoke<string | null>('photos_load_local_preview', { assetId, size });
 }
 
 function emitSessionEventsRefresh() {

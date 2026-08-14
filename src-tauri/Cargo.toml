@@ -84,10 +84,10 @@ tauri = { version = "2", features = ["test"] }
 libc = "0.2"
 core-foundation = "0.10"
 objc2 = { version = "0.6", features = ["exception"] }
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage", "NSPasteboard", "NSPasteboardItem", "NSResponder", "NSSharingService", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSBitmapImageRep", "NSImage", "NSImageRep", "NSPasteboard", "NSPasteboardItem", "NSResponder", "NSSharingService", "NSView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSError", "NSFileManager", "NSGeometry", "NSLocale", "NSObject", "NSString", "NSThread", "NSURL", "block2"] }
 objc2-vision = { version = "0.3.2", default-features = false, features = ["std", "VNObservation", "VNRecognizeTextRequest", "VNRequest", "VNRequestHandler", "VNTypes"] }
 objc2-speech = "0.3"
 objc2-avf-audio = "0.3"
 block2 = "0.6"
-objc2-photos = { version = "0.3.2", default-features = false, features = ["std", "block2", "PHAsset", "PHAssetResource", "PHCollection", "PHFetchOptions", "PHFetchResult", "PHObject", "PHPhotoLibrary", "PhotosTypes"] }
+objc2-photos = { version = "0.3.2", default-features = false, features = ["std", "block2", "objc2-app-kit", "objc2-core-foundation", "PHAsset", "PHAssetResource", "PHCollection", "PHFetchOptions", "PHFetchResult", "PHImageManager", "PHObject", "PHPhotoLibrary", "PhotosTypes"] }

@@ -1,5 +1,6 @@
 import {
     photosAuthorizationStatus,
+    photosLoadLocalPreview,
     photosListAlbums,
     photosListAssets,
     photosRequestAuthorization,
@@ -25,6 +26,7 @@ export interface ApplePhotosCatalogClient {
         offset: number,
         limit: number,
     ): Promise<ApplePhotosPage<ApplePhotosAsset>>;
+    loadPreview(assetId: string, size: number): Promise<string | null>;
 }
 
 export const tauriApplePhotosCatalogClient: ApplePhotosCatalogClient = {
@@ -32,4 +34,5 @@ export const tauriApplePhotosCatalogClient: ApplePhotosCatalogClient = {
     requestAuthorization: photosRequestAuthorization,
     listAlbums: photosListAlbums,
     listAssets: photosListAssets,
+    loadPreview: photosLoadLocalPreview,
 };

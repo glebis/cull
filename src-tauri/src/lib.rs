@@ -283,6 +283,7 @@ mod gui_launch_tests {
 
         for command in [
             "photos_authorization_status",
+            "photos_load_local_preview",
             "photos_list_albums",
             "photos_list_assets",
             "photos_request_authorization",
@@ -543,6 +544,7 @@ pub fn run() {
             commands::photos::photos_request_authorization,
             commands::photos::photos_list_albums,
             commands::photos::photos_list_assets,
+            commands::photos::photos_load_local_preview,
             commands::deeplink::drain_pending_open_params,
             commands::deeplink::complete_deep_link_navigation,
             commands::deeplink::open_deep_link_urls,

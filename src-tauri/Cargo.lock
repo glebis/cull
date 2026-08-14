@@ -3323,6 +3323,8 @@ dependencies = [
  "bitflags 2.11.1",
  "block2",
  "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
  "objc2-foundation",
 ]
 
