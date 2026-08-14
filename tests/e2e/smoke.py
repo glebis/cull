@@ -1533,6 +1533,48 @@ def test_grid_shift_click_range_select(page: Page) -> None:
     expect(page.locator(".statusbar")).to_contain_text("5 selected")
 
 
+def test_apple_photos_dialog_geometry(page: Page) -> None:
+    """Apple Photos stays near-fullscreen and preserves three columns at maximum scale."""
+    page.set_viewport_size({"width": 960, "height": 800})
+    page.evaluate("""async () => {
+        const { applePhotosCatalogOpen } = await import('/src/lib/stores.ts');
+        applePhotosCatalogOpen.set(true);
+    }""")
+
+    dialog = page.locator(".apple-photos-dialog")
+    expect(dialog).to_be_visible()
+    expect(page.locator(".asset-tile")).to_have_count(24)
+    dialog_box = dialog.bounding_box()
+    assert dialog_box is not None
+    assert dialog_box["width"] >= 920
+    assert dialog_box["height"] >= 760
+
+    def visible_columns() -> int:
+        positions = page.locator(".asset-tile").evaluate_all(
+            "els => els.map(el => ({ x: Math.round(el.getBoundingClientRect().x), y: Math.round(el.getBoundingClientRect().y) }))"
+        )
+        first_y = positions[0]["y"]
+        return len({position["x"] for position in positions if abs(position["y"] - first_y) <= 1})
+
+    default_columns = visible_columns()
+    assert default_columns >= 4
+
+    slider = page.get_by_role("slider", name="Preview size")
+    slider.evaluate("""element => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(element, '100');
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+    }""")
+    expect(slider).to_have_attribute("aria-valuetext", "220 pixel previews")
+    maximum_columns = visible_columns()
+    assert maximum_columns >= 3
+    assert maximum_columns < default_columns
+
+    page.get_by_role("button", name="Close Apple Photos").click()
+    expect(dialog).to_have_count(0)
+    page.set_viewport_size({"width": 1440, "height": 960})
+
+
 def main() -> int:
     SHOTS.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
@@ -1593,6 +1635,7 @@ def main() -> int:
         smoke.step("S32 detection toggle", lambda: test_detection_toggle(page))
         smoke.step("S11a selection Space toggle", lambda: test_grid_selection_space(page))
         smoke.step("S11b Shift+click range select", lambda: test_grid_shift_click_range_select(page))
+        smoke.step("Apple Photos fullscreen scalable grid", lambda: test_apple_photos_dialog_geometry(page))
 
         if page_errors:
             print("\nPage errors:")

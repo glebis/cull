@@ -1,3 +1,5 @@
+import type { ApplePhotosAssetPage } from './api';
+
 type MockListener<T = any> = (event: { event: string; payload: T }) => void;
 export type UnlistenFn = () => void;
 
@@ -207,6 +209,34 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   'plugin:opener|open_url': () => undefined,
   'plugin:opener|open_path': () => undefined,
   'plugin:opener|reveal_item_in_dir': () => undefined,
+
+  photos_authorization_status: () => 'authorized',
+  photos_request_authorization: () => 'authorized',
+  photos_list_albums: () => ({ items: [], total: 0, offset: 0, has_more: false }),
+  photos_list_assets: (_: any, args: { offset?: number; limit?: number }) => {
+    const offset = args?.offset ?? 0;
+    const limit = args?.limit ?? 100;
+    const total = 24;
+    const items = Array.from(
+      { length: Math.min(limit, Math.max(0, total - offset)) },
+      (_, index) => {
+        const assetIndex = offset + index;
+        return {
+          id: `photos-asset-${assetIndex}`,
+          filename: `Photo ${assetIndex + 1}.jpg`,
+          created_at: '2026-08-14T12:00:00Z',
+          pixel_width: 1600,
+          pixel_height: 1200,
+          modified_at: null,
+          favorite: assetIndex === 0,
+          media_subtypes: 0,
+        };
+      },
+    );
+    const page: ApplePhotosAssetPage = { items, total, offset, has_more: offset + items.length < total };
+    return page;
+  },
+  photos_load_local_preview: () => null,
 
   drain_pending_open_params: () => [],
   list_action_proposals: () => [],

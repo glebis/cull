@@ -32,6 +32,16 @@ describe('thumbnail zoom curve', () => {
         }
     });
 
+    it('supports a bounded zoom curve for embedded photo grids', () => {
+        expect(thumbnailSizeFromZoomPosition(0, 88, 220)).toBe(88);
+        expect(thumbnailSizeFromZoomPosition(100, 88, 220)).toBe(220);
+
+        const position = zoomPositionFromThumbnailSize(120, 88, 220);
+        expect(thumbnailSizeFromZoomPosition(position, 88, 220)).toBeCloseTo(120, 0);
+        expect(nudgeThumbnailSize(220, 1, 88, 220)).toBe(220);
+        expect(nudgeThumbnailSize(88, -1, 88, 220)).toBe(88);
+    });
+
     it('nudges proportionally across the extended range without crossing its bounds', () => {
         expect(nudgeThumbnailSize(4, 1)).toBe(5);
         expect(nudgeThumbnailSize(5, -1)).toBe(4);

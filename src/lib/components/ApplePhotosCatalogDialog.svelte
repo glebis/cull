@@ -8,6 +8,11 @@
         type ApplePhotosAuthorization,
         type ApplePhotosCatalogClient,
     } from '$lib/apple-photos';
+    import {
+        nudgeThumbnailSize,
+        thumbnailSizeFromZoomPosition,
+        zoomPositionFromThumbnailSize,
+    } from '$lib/thumbnail-zoom';
 
     interface Props {
         onclose: () => void;
@@ -18,6 +23,10 @@
 
     const PAGE_SIZE = 100;
     const MAX_CACHED_PREVIEWS = 96;
+    const PREVIEW_SIZE_MIN = 88;
+    const PREVIEW_SIZE_MAX = 220;
+    const PREVIEW_SIZE_DEFAULT = 120;
+    const PREVIEW_REQUEST_SIZE = 512;
     let authorization = $state<ApplePhotosAuthorization | null>(null);
     let albums = $state<ApplePhotosAlbum[]>([]);
     let albumsHasMore = $state(false);
@@ -39,7 +48,9 @@
     let selectedAssetIds = $state<Set<string>>(new Set());
     let previews = $state<Record<string, string | null | undefined>>({});
     let assetGridWidth = $state(0);
-    let compactGrid = $state(false);
+    let previewScalePosition = $state(
+        zoomPositionFromThumbnailSize(PREVIEW_SIZE_DEFAULT, PREVIEW_SIZE_MIN, PREVIEW_SIZE_MAX),
+    );
     const previewRequests = new Map<string, Promise<string | null>>();
     const previewAssets = new WeakMap<Element, ApplePhotosAsset>();
     let previewObserver: IntersectionObserver | null = null;
@@ -207,7 +218,7 @@
         const generation = previewGeneration;
         let request = previewRequests.get(assetId);
         if (!request) {
-            request = client.loadPreview(assetId, 320).catch(() => null);
+            request = client.loadPreview(assetId, PREVIEW_REQUEST_SIZE).catch(() => null);
             previewRequests.set(assetId, request);
             void request.finally(() => {
                 if (previewRequests.get(assetId) === request) previewRequests.delete(assetId);
@@ -252,26 +263,35 @@
             if (entry) updateWidth(entry.contentRect.width);
         });
         sizeObserver?.observe(node);
-        const mediaQuery = typeof window.matchMedia === 'function'
-            ? window.matchMedia('(max-width: 720px)')
-            : null;
-        const updateGridMode = () => { compactGrid = mediaQuery?.matches ?? false; };
-        updateGridMode();
-        mediaQuery?.addEventListener('change', updateGridMode);
         return {
-            destroy: () => {
-                sizeObserver?.disconnect();
-                mediaQuery?.removeEventListener('change', updateGridMode);
-            },
+            destroy: () => sizeObserver?.disconnect(),
         };
     }
 
     function groupIntrinsicHeight(itemCount: number): number {
-        const minimumTileWidth = compactGrid ? 104 : 132;
+        const minimumTileWidth = photoTileSize;
         const columns = Math.max(1, Math.floor((assetGridWidth + 8) / (minimumTileWidth + 8)));
         const tileWidth = (assetGridWidth - (columns - 1) * 8) / columns;
         const rows = Math.ceil(itemCount / columns);
         return Math.ceil(28 + rows * tileWidth + Math.max(0, rows - 1) * 8);
+    }
+
+    function setPreviewScale(event: Event) {
+        previewScalePosition = Number((event.currentTarget as HTMLInputElement).value);
+    }
+
+    function stepPreviewScale(direction: -1 | 1) {
+        const nextSize = nudgeThumbnailSize(
+            photoTileSize,
+            direction,
+            PREVIEW_SIZE_MIN,
+            PREVIEW_SIZE_MAX,
+        );
+        previewScalePosition = zoomPositionFromThumbnailSize(
+            nextSize,
+            PREVIEW_SIZE_MIN,
+            PREVIEW_SIZE_MAX,
+        );
     }
 
     function dateLabel(createdAt: string | null): string {
@@ -318,6 +338,9 @@
             : albums.find(album => album.id === selectedAlbumId)?.title ?? 'Untitled album',
     );
     const assetGroups = $derived(groupedAssets(assets));
+    const photoTileSize = $derived(
+        thumbnailSizeFromZoomPosition(previewScalePosition, PREVIEW_SIZE_MIN, PREVIEW_SIZE_MAX),
+    );
 </script>
 
 <ModalDialog
@@ -415,6 +438,33 @@
                                     {/each}
                                 </select>
                             </label>
+                            <div class="preview-scale-control" role="group" aria-label="Photo preview scale">
+                                <button
+                                    type="button"
+                                    aria-label="Zoom photo previews out"
+                                    title="Smaller photo previews"
+                                    disabled={photoTileSize <= PREVIEW_SIZE_MIN}
+                                    onclick={() => stepPreviewScale(-1)}
+                                >−</button>
+                                <input
+                                    class="preview-scale-track"
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    step="1"
+                                    value={previewScalePosition}
+                                    aria-label="Preview size"
+                                    aria-valuetext={`${photoTileSize} pixel previews`}
+                                    oninput={setPreviewScale}
+                                />
+                                <button
+                                    type="button"
+                                    aria-label="Zoom photo previews in"
+                                    title="Larger photo previews"
+                                    disabled={photoTileSize >= PREVIEW_SIZE_MAX}
+                                    onclick={() => stepPreviewScale(1)}
+                                >+</button>
+                            </div>
                             <div class="toolbar-actions">
                                 <span id="catalog-controls-note" class="sr-only">Additional filtering and sorting are not available in this read-only prototype.</span>
                                 <button type="button" aria-label="Filter photos" aria-describedby="catalog-controls-note" disabled>Filter</button>
@@ -436,11 +486,11 @@
                             <section
                                 class="date-group"
                                 class:contained={assetGridWidth > 0}
-                                style:contain-intrinsic-size={assetGridWidth > 0 ? `auto ${groupIntrinsicHeight(group.items.length)}px` : undefined}
+                                style:contain-intrinsic-size={assetGridWidth > 0 ? `${groupIntrinsicHeight(group.items.length)}px` : undefined}
                                 aria-labelledby={`date-${group.label.replace(/[^a-z0-9]/gi, '-')}`}
                             >
                                 <h3 id={`date-${group.label.replace(/[^a-z0-9]/gi, '-')}`}>{group.label}</h3>
-                                <div class="asset-grid">
+                                <div class="asset-grid" style:--photo-tile-size={`${photoTileSize}px`}>
                                     {#each group.items as asset (asset.id)}
                                         <div role="listitem">
                                             <button
@@ -507,9 +557,11 @@
         background: color-mix(in srgb, var(--bg) 82%, transparent);
     }
 
-    :global(.apple-photos-dialog) {
-        width: min(1160px, calc(100vw - 32px));
-        height: min(90vh, 840px);
+    :global(.dialog.apple-photos-dialog) {
+        width: calc(100vw - 24px);
+        max-width: none;
+        height: calc(100vh - 24px);
+        max-height: none;
         display: grid;
         grid-template-rows: auto minmax(0, 1fr);
         overflow: hidden;
@@ -620,14 +672,28 @@
         border-bottom: 1px solid var(--border);
     }
     .catalog-toolbar > h3 { margin-right: auto; color: var(--text); }
-    .toolbar-actions { display: flex; gap: 8px; }
-    .toolbar-actions button, .toolbar-actions select, .pagination-state button {
+    .toolbar-actions, .preview-scale-control { display: flex; align-items: center; gap: 8px; }
+    .toolbar-actions button, .toolbar-actions select, .preview-scale-control button, .pagination-state button {
         padding: 6px 10px;
         color: var(--text-secondary);
         background: var(--bg);
         border: 1px solid var(--border);
         border-radius: var(--radius);
         font: inherit;
+    }
+    .preview-scale-control { flex: 0 0 auto; }
+    .preview-scale-control button {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        cursor: pointer;
+    }
+    .preview-scale-control button:disabled { cursor: default; opacity: 0.45; }
+    .preview-scale-track {
+        width: 112px;
+        margin: 0;
+        accent-color: var(--blue);
+        cursor: pointer;
     }
     .catalog-count { color: var(--text-secondary); font-size: 11px; }
     .mobile-album-picker { display: none; }
@@ -654,7 +720,7 @@
     .date-group > h3 { margin-bottom: 10px; color: var(--text-secondary); font-size: 11px; font-weight: 500; }
     .asset-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(var(--photo-tile-size), 1fr));
         gap: 8px;
     }
     .asset-grid > [role='listitem'] { min-width: 0; }
@@ -730,6 +796,5 @@
         .catalog-shell { grid-template-columns: 1fr; }
         .catalog-sidebar { display: none; }
         .mobile-album-picker { display: flex; align-items: center; gap: 8px; }
-        .asset-grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
     }
 </style>

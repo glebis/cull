@@ -86,6 +86,26 @@ describe('Apple Photos catalog dialog', () => {
         expect(screen.getByRole('button', { name: 'Screenshots' })).toBeInTheDocument();
     });
 
+    it('offers a bounded grid-style control for changing photo preview scale', async () => {
+        const catalog = client({
+            listAssets: vi.fn().mockResolvedValue(page([
+                asset('asset-1', 'One.jpg'),
+                asset('asset-2', 'Two.jpg'),
+                asset('asset-3', 'Three.jpg'),
+            ])),
+        });
+        render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        const slider = await screen.findByRole('slider', { name: 'Preview size' });
+        expect(screen.getByRole('group', { name: 'Photo preview scale' })).toContainElement(slider);
+        expect(slider).toHaveAttribute('aria-valuetext', '120 pixel previews');
+        expect(screen.getByRole('button', { name: 'Zoom photo previews out' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: 'Zoom photo previews in' })).toBeEnabled();
+
+        await fireEvent.input(slider, { target: { value: '100' } });
+        expect(slider).toHaveAttribute('aria-valuetext', '220 pixel previews');
+    });
+
     it('switches albums, ignores a stale response, and loads the next bounded page on scroll', async () => {
         let resolveAll!: (value: ApplePhotosPage<ApplePhotosAsset>) => void;
         const allPending = new Promise<ApplePhotosPage<ApplePhotosAsset>>(resolve => { resolveAll = resolve; });
@@ -214,7 +234,7 @@ describe('Apple Photos catalog dialog', () => {
         await waitFor(() => expect(view.container.querySelector('img')).not.toBeNull());
         const image = view.container.querySelector('img');
         expect(image).toHaveAttribute('src', preview);
-        expect(catalog.loadPreview).toHaveBeenCalledWith('asset-1', 320);
+        expect(catalog.loadPreview).toHaveBeenCalledWith('asset-1', 512);
     });
 
     it('continues from the end sentinel when an overlapping page adds no grid rows', async () => {
@@ -308,10 +328,7 @@ describe('Apple Photos catalog dialog', () => {
         await waitFor(() => expect(view.container.querySelector('img')).not.toBeNull());
     });
 
-    it.each([
-        { mobileViewport: false, expectedHeight: 735 },
-        { mobileViewport: true, expectedHeight: 422 },
-    ])('reserves measured grid height at the real CSS breakpoint ($mobileViewport)', async ({ mobileViewport, expectedHeight }) => {
+    it('reserves measured grid height from the active preview scale', async () => {
         let resize!: (width: number) => void;
         vi.stubGlobal('ResizeObserver', class {
             constructor(callback: ResizeObserverCallback) {
@@ -325,11 +342,6 @@ describe('Apple Photos catalog dialog', () => {
             unobserve() {}
             disconnect() {}
         });
-        vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
-            matches: mobileViewport,
-            addEventListener: vi.fn(),
-            removeEventListener: vi.fn(),
-        }));
         const catalog = client({
             listAssets: vi.fn().mockResolvedValue(page(
                 Array.from({ length: 12 }, (_, index) => asset(`asset-${index}`, `${index}.jpg`)),
@@ -342,7 +354,14 @@ describe('Apple Photos catalog dialog', () => {
 
         await waitFor(() => {
             expect(view.container.querySelector('.date-group')).toHaveStyle(
-                `contain-intrinsic-size: auto ${expectedHeight}px`,
+                'contain-intrinsic-size: 422px',
+            );
+        });
+
+        await fireEvent.input(screen.getByRole('slider', { name: 'Preview size' }), { target: { value: '100' } });
+        await waitFor(() => {
+            expect(view.container.querySelector('.date-group')).toHaveStyle(
+                'contain-intrinsic-size: 1628px',
             );
         });
     });
