@@ -1547,7 +1547,12 @@ def test_apple_photos_dialog_geometry(page: Page) -> None:
     dialog_box = dialog.bounding_box()
     assert dialog_box is not None
     assert dialog_box["width"] >= 920
-    assert dialog_box["height"] >= 760
+    assert dialog_box["height"] >= 740
+    assert dialog_box["y"] >= 40
+    active_category_shadow = page.get_by_role("button", name="All Photos", exact=True).evaluate(
+        "element => getComputedStyle(element).boxShadow"
+    )
+    assert active_category_shadow == "none"
 
     def visible_columns() -> int:
         positions = page.locator(".asset-tile").evaluate_all(

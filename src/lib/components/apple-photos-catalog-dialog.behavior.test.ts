@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import ApplePhotosCatalogDialog from './ApplePhotosCatalogDialog.svelte';
 import type {
@@ -44,6 +44,7 @@ function client(overrides: Partial<ApplePhotosCatalogClient> = {}): ApplePhotosC
         listAlbums: vi.fn().mockResolvedValue(page([])),
         listAssets: vi.fn().mockResolvedValue(page([])),
         loadPreview: vi.fn().mockResolvedValue(null),
+        startImport: vi.fn().mockResolvedValue({ job_id: 'job-1', batch_id: 'batch-1' }),
         ...overrides,
     };
 }
@@ -65,9 +66,9 @@ describe('Apple Photos catalog dialog', () => {
         await user.click(screen.getByRole('button', { name: 'Allow Photos Access' }));
 
         expect(await screen.findByText('Showing the photos you allowed Cull to access.')).toBeInTheDocument();
-        expect(await screen.findByRole('option', { name: 'Favourites' })).toBeInTheDocument();
+        expect(within(screen.getByRole('combobox', { name: 'Album' })).getByRole('option', { name: 'Favourites' })).toBeInTheDocument();
         expect(await screen.findByRole('button', { name: 'Select IMG_0001.HEIC' })).toBeInTheDocument();
-        expect(catalog.listAssets).toHaveBeenCalledWith(null, 0, 100);
+        expect(catalog.listAssets).toHaveBeenCalledWith(null, 0, 100, 'all', 'newest');
     });
 
     it('pins favourites and screenshots by stable PhotoKit role instead of localized title', async () => {
@@ -81,7 +82,7 @@ describe('Apple Photos catalog dialog', () => {
         render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
 
         await user.click(await screen.findByRole('button', { name: 'Favourites' }));
-        expect(catalog.listAssets).toHaveBeenLastCalledWith('fav-id', 0, 100);
+        expect(catalog.listAssets).toHaveBeenLastCalledWith('fav-id', 0, 100, 'all', 'newest');
         expect(screen.getByRole('button', { name: 'Favourites' })).toHaveAttribute('aria-current', 'page');
         expect(screen.getByRole('button', { name: 'Screenshots' })).toBeInTheDocument();
     });
@@ -101,6 +102,8 @@ describe('Apple Photos catalog dialog', () => {
         expect(slider).toHaveAttribute('aria-valuetext', '120 pixel previews');
         expect(screen.getByRole('button', { name: 'Zoom photo previews out' })).toBeEnabled();
         expect(screen.getByRole('button', { name: 'Zoom photo previews in' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: 'Zoom photo previews out' })).toHaveTextContent('▪▪');
+        expect(screen.getByRole('button', { name: 'Zoom photo previews in' })).toHaveTextContent('▪');
 
         await fireEvent.input(slider, { target: { value: '100' } });
         expect(slider).toHaveAttribute('aria-valuetext', '220 pixel previews');
@@ -130,7 +133,7 @@ describe('Apple Photos catalog dialog', () => {
 
         await fireEvent.scroll(screen.getByRole('list', { name: 'Apple Photos assets' }));
         expect(await screen.findByRole('button', { name: 'Select B-2.jpg' })).toBeInTheDocument();
-        expect(catalog.listAssets).toHaveBeenLastCalledWith('album-b', 1, 100);
+        expect(catalog.listAssets).toHaveBeenLastCalledWith('album-b', 1, 100, 'all', 'newest');
         expect(screen.getByText('All photos loaded.')).toBeInTheDocument();
     });
 
@@ -174,7 +177,7 @@ describe('Apple Photos catalog dialog', () => {
 
         await fireEvent.scroll(list);
         expect(await screen.findByRole('button', { name: 'Select Four.jpg' })).toBeInTheDocument();
-        expect(catalog.listAssets).toHaveBeenLastCalledWith(null, 4, 100);
+        expect(catalog.listAssets).toHaveBeenLastCalledWith(null, 4, 100, 'all', 'newest');
         expect(screen.getByText('End of library reached · 4 unique photos shown.')).toBeInTheDocument();
     });
 
@@ -195,7 +198,82 @@ describe('Apple Photos catalog dialog', () => {
 
         await user.click(screen.getByRole('button', { name: 'Retry' }));
         expect(await screen.findByRole('button', { name: 'Select Two.jpg' })).toBeInTheDocument();
-        expect(catalog.listAssets).toHaveBeenLastCalledWith(null, 1, 100);
+        expect(catalog.listAssets).toHaveBeenLastCalledWith(null, 1, 100, 'all', 'newest');
+    });
+
+    it('resets provider pagination for filter and sort changes and preserves criteria for scroll and retry', async () => {
+        const providerReturnedNonFavourite = asset('provider-result', 'Provider-result.jpg');
+        const catalog = client({
+            listAssets: vi.fn()
+                .mockResolvedValueOnce(page([asset('initial', 'Initial.jpg')]))
+                .mockResolvedValueOnce({ items: [providerReturnedNonFavourite], offset: 0, total: 2, has_more: true })
+                .mockResolvedValueOnce({ items: [providerReturnedNonFavourite], offset: 0, total: 2, has_more: true })
+                .mockRejectedValueOnce(new Error('Page unavailable'))
+                .mockResolvedValueOnce({ items: [asset('second', 'Second.jpg')], offset: 1, total: 2, has_more: false }),
+        });
+        const user = userEvent.setup();
+        render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        expect(await screen.findByRole('button', { name: 'Select Initial.jpg' })).toBeInTheDocument();
+        await user.selectOptions(screen.getByRole('combobox', { name: 'Filter photos' }), 'favorites');
+        expect(await screen.findByRole('button', { name: 'Select Provider-result.jpg' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Select Initial.jpg' })).not.toBeInTheDocument();
+        expect(catalog.listAssets).toHaveBeenLastCalledWith(null, 0, 100, 'favorites', 'newest');
+
+        await user.selectOptions(screen.getByRole('combobox', { name: 'Sort photos' }), 'oldest');
+        await waitFor(() => expect(catalog.listAssets).toHaveBeenLastCalledWith(null, 0, 100, 'favorites', 'oldest'));
+
+        await fireEvent.scroll(screen.getByRole('list', { name: 'Apple Photos assets' }));
+        expect(await screen.findByText('More photos could not be loaded.')).toBeInTheDocument();
+        expect(catalog.listAssets).toHaveBeenLastCalledWith(null, 1, 100, 'favorites', 'oldest');
+
+        await user.click(screen.getByRole('button', { name: 'Retry' }));
+        expect(await screen.findByRole('button', { name: 'Select Second.jpg' })).toBeInTheDocument();
+        expect(catalog.listAssets).toHaveBeenLastCalledWith(null, 1, 100, 'favorites', 'oldest');
+    });
+
+    it('starts one import from a frozen selection on Enter and suppresses duplicate submission', async () => {
+        let resolveImport!: (value: { job_id: string; batch_id: string }) => void;
+        const importStarted = new Promise<{ job_id: string; batch_id: string }>(resolve => { resolveImport = resolve; });
+        const catalog = client({
+            listAssets: vi.fn().mockResolvedValue(page([asset('asset-1', 'One.jpg'), asset('asset-2', 'Two.jpg')])),
+            startImport: vi.fn(() => importStarted),
+        });
+        const onclose = vi.fn();
+        const user = userEvent.setup();
+        render(ApplePhotosCatalogDialog, { onclose, client: catalog });
+
+        const firstTile = await screen.findByRole('button', { name: 'Select One.jpg' });
+        await user.click(firstTile);
+        expect(screen.getByRole('button', { name: 'Import 1 photo' })).toBeEnabled();
+
+        screen.getByRole('button', { name: 'Zoom photo previews out' }).focus();
+        await user.keyboard('{Enter}');
+        expect(catalog.startImport).not.toHaveBeenCalled();
+
+        firstTile.focus();
+        await user.keyboard('{Enter}{Enter}');
+        expect(catalog.startImport).toHaveBeenCalledOnce();
+        expect(catalog.startImport).toHaveBeenCalledWith(['asset-1'], null);
+        expect(screen.getByRole('button', { name: 'Starting import…' })).toBeDisabled();
+
+        resolveImport({ job_id: 'job-1', batch_id: 'batch-1' });
+        await waitFor(() => expect(onclose).toHaveBeenCalledOnce());
+    });
+
+    it('keeps the selection retryable when starting an import fails', async () => {
+        const catalog = client({
+            listAssets: vi.fn().mockResolvedValue(page([asset('asset-1', 'One.jpg')])),
+            startImport: vi.fn().mockRejectedValue(new Error('Import service unavailable')),
+        });
+        const user = userEvent.setup();
+        render(ApplePhotosCatalogDialog, { onclose: vi.fn(), client: catalog });
+
+        await user.click(await screen.findByRole('button', { name: 'Select One.jpg' }));
+        await user.click(screen.getByRole('button', { name: 'Import 1 photo' }));
+
+        expect(await screen.findByRole('alert')).toHaveTextContent('Import service unavailable');
+        expect(screen.getByRole('button', { name: 'Import 1 photo' })).toBeEnabled();
     });
 
     it('loads a local preview only when its fixed-size tile becomes visible', async () => {
@@ -263,10 +341,11 @@ describe('Apple Photos catalog dialog', () => {
 
         expect(await screen.findByRole('button', { name: 'Select One.jpg' })).toBeInTheDocument();
         const revealEnd = () => {
-            const tile = screen.getByRole('button', { name: 'Select One.jpg' });
+            const sentinel = document.querySelector('.pagination-sentinel');
+            if (!sentinel) throw new Error('pagination sentinel missing');
             for (const callback of visibilityCallbacks) {
                 callback(
-                    [{ isIntersecting: true, target: tile } as unknown as IntersectionObserverEntry],
+                    [{ isIntersecting: true, target: sentinel } as unknown as IntersectionObserverEntry],
                     {} as IntersectionObserver,
                 );
             }
@@ -274,11 +353,12 @@ describe('Apple Photos catalog dialog', () => {
 
         revealEnd();
         await waitFor(() => expect(catalog.listAssets).toHaveBeenCalledTimes(2));
+        await waitFor(() => expect(screen.getByRole('list', { name: 'Apple Photos assets' })).toHaveAttribute('aria-busy', 'false'));
         expect(screen.getAllByRole('button', { name: 'Select One.jpg' })).toHaveLength(1);
 
         revealEnd();
         expect(await screen.findByRole('button', { name: 'Select Three.jpg' })).toBeInTheDocument();
-        expect(catalog.listAssets).toHaveBeenLastCalledWith(null, 2, 100);
+        expect(catalog.listAssets).toHaveBeenLastCalledWith(null, 2, 100, 'all', 'newest');
         expect(screen.getByText('End of library reached · 2 unique photos shown.')).toBeInTheDocument();
     });
 

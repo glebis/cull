@@ -40,6 +40,14 @@ export interface ApplePhotosPage<T> {
     has_more: boolean;
 }
 
+export type ApplePhotosAssetFilter = 'all' | 'favorites';
+export type ApplePhotosAssetSort = 'newest' | 'oldest';
+
+export interface ApplePhotosImportStarted {
+    job_id: string;
+    batch_id: string;
+}
+
 export type ApplePhotosAlbumPage = ApplePhotosPage<ApplePhotosAlbum>;
 export type ApplePhotosAssetPage = ApplePhotosPage<ApplePhotosAsset>;
 
@@ -59,12 +67,27 @@ export function photosListAssets(
     albumId: string | null,
     offset = 0,
     limit = 100,
+    filter: ApplePhotosAssetFilter = 'all',
+    sort: ApplePhotosAssetSort = 'newest',
 ): Promise<ApplePhotosAssetPage> {
-    return invoke<ApplePhotosAssetPage>('photos_list_assets', { albumId, offset, limit });
+    return invoke<ApplePhotosAssetPage>('photos_list_assets', { albumId, offset, limit, filter, sort });
 }
 
 export function photosLoadLocalPreview(assetId: string, size = 320): Promise<string | null> {
     return invoke<string | null>('photos_load_local_preview', { assetId, size });
+}
+
+export function photosStartImportAssets(
+    assetIds: string[],
+    sourceAlbumId: string | null = null,
+    progressId: string | null = null,
+): Promise<ApplePhotosImportStarted> {
+    return invoke<ApplePhotosImportStarted>('photos_start_import_assets', {
+        assetIds,
+        representation: 'current',
+        sourceAlbumId,
+        progressId,
+    });
 }
 
 function emitSessionEventsRefresh() {

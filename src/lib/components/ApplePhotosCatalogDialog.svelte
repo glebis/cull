@@ -1,10 +1,13 @@
 <script lang="ts">
     import { onDestroy, onMount } from 'svelte';
     import ModalDialog from '$lib/components/ModalDialog.svelte';
+    import ThumbnailScaleControl from '$lib/components/ThumbnailScaleControl.svelte';
     import {
         tauriApplePhotosCatalogClient,
         type ApplePhotosAlbum,
         type ApplePhotosAsset,
+        type ApplePhotosAssetFilter,
+        type ApplePhotosAssetSort,
         type ApplePhotosAuthorization,
         type ApplePhotosCatalogClient,
     } from '$lib/apple-photos';
@@ -35,6 +38,8 @@
     let assetsTotal = $state(0);
     let assetsHasMore = $state(false);
     let assetsNextOffset = $state(0);
+    let assetFilter = $state<ApplePhotosAssetFilter>('all');
+    let assetSort = $state<ApplePhotosAssetSort>('newest');
     let checking = $state(true);
     let requesting = $state(false);
     let albumsLoading = $state(false);
@@ -42,6 +47,8 @@
     let authorizationError = $state<string | null>(null);
     let albumsError = $state<string | null>(null);
     let assetsError = $state<string | null>(null);
+    let importing = $state(false);
+    let importError = $state<string | null>(null);
     let authorizationGeneration = 0;
     let albumsGeneration = 0;
     let assetsGeneration = 0;
@@ -93,7 +100,7 @@
         assetsLoading = true;
         assetsError = null;
         try {
-            const page = await client.listAssets(albumId, offset, PAGE_SIZE);
+            const page = await client.listAssets(albumId, offset, PAGE_SIZE, assetFilter, assetSort);
             if (generation !== assetsGeneration) return;
             const existingIds = new Set(append ? assets.map(asset => asset.id) : []);
             const uniquePageItems = page.items.filter(asset => {
@@ -175,6 +182,20 @@
         previews = {};
         previewOrder = [];
         previewGeneration += 1;
+        selectedAssetIds = new Set();
+        importError = null;
+    }
+
+    function changeFilter(event: Event) {
+        assetFilter = (event.currentTarget as HTMLSelectElement).value as ApplePhotosAssetFilter;
+        resetAssets();
+        void loadAssets(selectedAlbumId || null);
+    }
+
+    function changeSort(event: Event) {
+        assetSort = (event.currentTarget as HTMLSelectElement).value as ApplePhotosAssetSort;
+        resetAssets();
+        void loadAssets(selectedAlbumId || null);
     }
 
     function loadMore() {
@@ -197,6 +218,33 @@
         if (next.has(assetId)) next.delete(assetId);
         else next.add(assetId);
         selectedAssetIds = next;
+        importError = null;
+    }
+
+    async function startImport() {
+        if (importing || selectedAssetIds.size === 0) return;
+        const frozenAssetIds = [...selectedAssetIds];
+        importing = true;
+        importError = null;
+        try {
+            await client.startImport(frozenAssetIds, selectedAlbumId || null);
+            onclose();
+        } catch (startError) {
+            importError = messageFrom(startError);
+        } finally {
+            importing = false;
+        }
+    }
+
+    function handleDialogKeydown(event: KeyboardEvent) {
+        if (event.defaultPrevented || event.key !== 'Enter' || importing || selectedAssetIds.size === 0) return;
+        const target = event.target;
+        if (target instanceof HTMLSelectElement) return;
+        if (target instanceof HTMLInputElement && target.type === 'range') return;
+        if (target instanceof HTMLButtonElement && !target.classList.contains('asset-tile')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void startImport();
     }
 
     function observePreview(node: HTMLElement, asset: ApplePhotosAsset) {
@@ -276,8 +324,8 @@
         return Math.ceil(28 + rows * tileWidth + Math.max(0, rows - 1) * 8);
     }
 
-    function setPreviewScale(event: Event) {
-        previewScalePosition = Number((event.currentTarget as HTMLInputElement).value);
+    function setPreviewScale(position: number) {
+        previewScalePosition = position;
     }
 
     function stepPreviewScale(direction: -1 | 1) {
@@ -350,6 +398,7 @@
     panelClass="dialog apple-photos-dialog"
     overlayClass="apple-photos-overlay"
     initialFocus=".apple-photos-close"
+    onkeydown={handleDialogKeydown}
 >
     <header class="dialog-header">
         <div>
@@ -438,37 +487,33 @@
                                     {/each}
                                 </select>
                             </label>
-                            <div class="preview-scale-control" role="group" aria-label="Photo preview scale">
-                                <button
-                                    type="button"
-                                    aria-label="Zoom photo previews out"
-                                    title="Smaller photo previews"
-                                    disabled={photoTileSize <= PREVIEW_SIZE_MIN}
-                                    onclick={() => stepPreviewScale(-1)}
-                                >−</button>
-                                <input
-                                    class="preview-scale-track"
-                                    type="range"
-                                    min="0"
-                                    max="100"
-                                    step="1"
-                                    value={previewScalePosition}
-                                    aria-label="Preview size"
-                                    aria-valuetext={`${photoTileSize} pixel previews`}
-                                    oninput={setPreviewScale}
-                                />
-                                <button
-                                    type="button"
-                                    aria-label="Zoom photo previews in"
-                                    title="Larger photo previews"
-                                    disabled={photoTileSize >= PREVIEW_SIZE_MAX}
-                                    onclick={() => stepPreviewScale(1)}
-                                >+</button>
-                            </div>
+                            <ThumbnailScaleControl
+                                position={previewScalePosition}
+                                size={photoTileSize}
+                                minSize={PREVIEW_SIZE_MIN}
+                                maxSize={PREVIEW_SIZE_MAX}
+                                groupLabel="Photo preview scale"
+                                sliderLabel="Preview size"
+                                outLabel="Zoom photo previews out"
+                                inLabel="Zoom photo previews in"
+                                onposition={setPreviewScale}
+                                onstep={stepPreviewScale}
+                            />
                             <div class="toolbar-actions">
-                                <span id="catalog-controls-note" class="sr-only">Additional filtering and sorting are not available in this read-only prototype.</span>
-                                <button type="button" aria-label="Filter photos" aria-describedby="catalog-controls-note" disabled>Filter</button>
-                                <label><span class="sr-only">Sort photos</span><select aria-label="Sort photos" aria-describedby="catalog-controls-note" disabled><option>Newest</option></select></label>
+                                <label>
+                                    <span class="sr-only">Filter photos</span>
+                                    <select aria-label="Filter photos" value={assetFilter} onchange={changeFilter}>
+                                        <option value="all">All</option>
+                                        <option value="favorites">Favourites</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span class="sr-only">Sort photos</span>
+                                    <select aria-label="Sort photos" value={assetSort} onchange={changeSort}>
+                                        <option value="newest">Newest</option>
+                                        <option value="oldest">Oldest</option>
+                                    </select>
+                                </label>
                             </div>
                             <span class="catalog-count">{assets.length} of {assetsTotal}</span>
                         </div>
@@ -545,7 +590,25 @@
                         ></div>
                     </div>
 
-                    <footer>Local previews when available · iCloud downloads disabled</footer>
+                    <footer>
+                        <span>Local previews when available · iCloud downloads enabled for selected imports</span>
+                        <div class="import-actions">
+                            {#if importError}<span class="import-error" role="alert">{importError}</span>{/if}
+                            <button
+                                class="import-btn"
+                                type="button"
+                                disabled={selectedAssetIds.size === 0 || importing}
+                                aria-label={importing
+                                    ? 'Starting import…'
+                                    : `Import ${selectedAssetIds.size} ${selectedAssetIds.size === 1 ? 'photo' : 'photos'}`}
+                                onclick={startImport}
+                            >
+                                {importing
+                                    ? 'Starting import…'
+                                    : `Import ${selectedAssetIds.size} ${selectedAssetIds.size === 1 ? 'photo' : 'photos'}`}
+                            </button>
+                        </div>
+                    </footer>
                 </main>
             </div>
         {/if}
@@ -555,12 +618,14 @@
 <style>
     :global(.apple-photos-overlay) {
         background: color-mix(in srgb, var(--bg) 82%, transparent);
+        --modal-align-items: flex-start;
+        padding: var(--macos-titlebar-safe-area) 12px 12px;
     }
 
     :global(.dialog.apple-photos-dialog) {
-        width: calc(100vw - 24px);
+        width: 100%;
         max-width: none;
-        height: calc(100vh - 24px);
+        height: calc(100vh - var(--macos-titlebar-safe-area) - 12px);
         max-height: none;
         display: grid;
         grid-template-rows: auto minmax(0, 1fr);
@@ -653,7 +718,6 @@
         color: var(--text);
         background: var(--surface);
     }
-    .catalog-sidebar button.active { box-shadow: inset 2px 0 var(--blue); }
     .catalog-sidebar .load-albums { margin-top: 16px; color: var(--blue); }
 
     .catalog-main {
@@ -672,28 +736,14 @@
         border-bottom: 1px solid var(--border);
     }
     .catalog-toolbar > h3 { margin-right: auto; color: var(--text); }
-    .toolbar-actions, .preview-scale-control { display: flex; align-items: center; gap: 8px; }
-    .toolbar-actions button, .toolbar-actions select, .preview-scale-control button, .pagination-state button {
+    .toolbar-actions { display: flex; align-items: center; gap: 8px; }
+    .toolbar-actions select, .pagination-state button {
         padding: 6px 10px;
         color: var(--text-secondary);
         background: var(--bg);
         border: 1px solid var(--border);
         border-radius: var(--radius);
         font: inherit;
-    }
-    .preview-scale-control { flex: 0 0 auto; }
-    .preview-scale-control button {
-        width: 28px;
-        height: 28px;
-        padding: 0;
-        cursor: pointer;
-    }
-    .preview-scale-control button:disabled { cursor: default; opacity: 0.45; }
-    .preview-scale-track {
-        width: 112px;
-        margin: 0;
-        accent-color: var(--blue);
-        cursor: pointer;
     }
     .catalog-count { color: var(--text-secondary); font-size: 11px; }
     .mobile-album-picker { display: none; }
@@ -778,8 +828,25 @@
         border-top: 1px solid var(--border);
         color: var(--text-secondary);
         font-size: 10px;
-        text-align: right;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
     }
+    .import-actions { display: flex; align-items: center; gap: 12px; }
+    .import-error { color: var(--red); }
+    .import-btn {
+        min-width: 132px;
+        padding: 7px 14px;
+        border: 1px solid var(--green);
+        border-radius: var(--radius);
+        background: color-mix(in srgb, var(--green) 16%, var(--surface));
+        color: var(--green);
+        font: inherit;
+        cursor: pointer;
+    }
+    .import-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--green) 24%, var(--surface)); }
+    .import-btn:disabled { cursor: default; opacity: 0.45; }
     .sr-only {
         position: absolute;
         width: 1px;

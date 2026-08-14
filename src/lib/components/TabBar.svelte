@@ -17,6 +17,7 @@
         zoomPositionFromThumbnailSize,
     } from '$lib/thumbnail-zoom';
     import ViewTabIcon from './ViewTabIcon.svelte';
+    import ThumbnailScaleControl from './ThumbnailScaleControl.svelte';
 
     let registeredTabIds = $derived(new Set($tabRegistry.map(t => t.id)));
     let tabs = $derived(visibleViewTabs(registeredTabIds));
@@ -30,8 +31,7 @@
         canvasZoomPosition = canvasZoomPositionFromZoom(v);
     });
 
-    function setSize(e: Event) {
-        const position = parseFloat((e.target as HTMLInputElement).value);
+    function setSize(position: number) {
         const val = thumbnailSizeFromZoomPosition(position);
         zoomPosition = position;
         setGridThumbnailSize(val);
@@ -110,21 +110,18 @@
     </div>
     <div class="tabbar-right">
         {#if $viewMode === 'grid'}
-            <div class="slider-group">
-                <button class="slider-icon" type="button" aria-label="Zoom thumbnails out" title="Zoom out" disabled={$thumbnailSize <= THUMBNAIL_ZOOM_MIN} onclick={() => stepGridZoom(-1)}>▪▪</button>
-                <div class="slider-track">
-                    <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        step="1"
-                        value={zoomPosition}
-                        oninput={setSize}
-                        aria-label="Thumbnail size"
-                    />
-                </div>
-                <button class="slider-icon" type="button" aria-label="Zoom thumbnails in" title="Zoom in" disabled={$thumbnailSize >= THUMBNAIL_ZOOM_MAX} onclick={() => stepGridZoom(1)}>▪</button>
-            </div>
+            <ThumbnailScaleControl
+                position={zoomPosition}
+                size={$thumbnailSize}
+                minSize={THUMBNAIL_ZOOM_MIN}
+                maxSize={THUMBNAIL_ZOOM_MAX}
+                groupLabel="Thumbnail scale"
+                sliderLabel="Thumbnail size"
+                outLabel="Zoom thumbnails out"
+                inLabel="Zoom thumbnails in"
+                onposition={setSize}
+                onstep={stepGridZoom}
+            />
         {:else if $viewMode === 'canvas'}
             <div class="slider-group">
                 <span class="slider-marker">-</span>
@@ -318,29 +315,7 @@
         align-items: center;
         gap: 6px;
     }
-    .slider-icon {
-        display: grid;
-        place-items: center;
-        min-width: 18px;
-        height: 22px;
-        padding: 0 3px;
-        border: 0;
-        border-radius: var(--radius);
-        background: transparent;
-        color: var(--text-secondary);
-        font-family: var(--font);
-        font-size: 8px;
-        opacity: 0.5;
-        letter-spacing: 1px;
-        cursor: pointer;
-        transition: color 120ms, opacity 120ms, background 120ms, transform 80ms;
-    }
     .slider-marker { color: var(--text-secondary); font-size: 8px; opacity: 0.5; }
-    .slider-icon:hover { color: var(--text); background: color-mix(in srgb, var(--blue) 10%, transparent); opacity: 1; }
-    .slider-icon:active { transform: scale(0.88); }
-    .slider-icon:disabled { opacity: 0.18; cursor: default; }
-    .slider-icon:disabled:hover { color: var(--text-secondary); background: transparent; }
-    .slider-icon:focus-visible { outline: 1px solid var(--blue); outline-offset: 1px; }
     .slider-track {
         width: 80px;
         display: flex;
@@ -374,6 +349,5 @@
         .tab-label-popover {
             transition: none;
         }
-        .slider-icon { transition: none; }
     }
 </style>

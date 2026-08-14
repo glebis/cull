@@ -4,16 +4,23 @@ import {
     photosListAlbums,
     photosListAssets,
     photosRequestAuthorization,
+    photosStartImportAssets,
     type ApplePhotosAlbum,
     type ApplePhotosAsset,
+    type ApplePhotosAssetFilter,
+    type ApplePhotosAssetSort,
     type ApplePhotosAuthorization,
+    type ApplePhotosImportStarted,
     type ApplePhotosPage,
 } from './api';
 
 export type {
     ApplePhotosAlbum,
     ApplePhotosAsset,
+    ApplePhotosAssetFilter,
+    ApplePhotosAssetSort,
     ApplePhotosAuthorization,
+    ApplePhotosImportStarted,
     ApplePhotosPage,
 };
 
@@ -25,8 +32,11 @@ export interface ApplePhotosCatalogClient {
         albumId: string | null,
         offset: number,
         limit: number,
+        filter: ApplePhotosAssetFilter,
+        sort: ApplePhotosAssetSort,
     ): Promise<ApplePhotosPage<ApplePhotosAsset>>;
     loadPreview(assetId: string, size: number): Promise<string | null>;
+    startImport(assetIds: string[], sourceAlbumId: string | null): Promise<ApplePhotosImportStarted>;
 }
 
 export const tauriApplePhotosCatalogClient: ApplePhotosCatalogClient = {
@@ -35,4 +45,5 @@ export const tauriApplePhotosCatalogClient: ApplePhotosCatalogClient = {
     listAlbums: photosListAlbums,
     listAssets: photosListAssets,
     loadPreview: photosLoadLocalPreview,
+    startImport: (assetIds, sourceAlbumId) => photosStartImportAssets(assetIds, sourceAlbumId),
 };
