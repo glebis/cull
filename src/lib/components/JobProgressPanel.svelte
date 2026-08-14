@@ -15,6 +15,8 @@
         error?: string | null;
         downloaded?: number;
         totalBytes?: number;
+        itemFraction?: number;
+        photosSummary?: boolean;
         fadeOut?: boolean;
     }
 
@@ -34,6 +36,27 @@
             loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true }),
             refreshImageCount(),
         ]);
+    }
+
+    function formatProgressBytes(bytes: number): string {
+        if (bytes >= 1024 * 1024) return `${Math.round(bytes / (1024 * 1024))} MB`;
+        if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+        return `${bytes} B`;
+    }
+
+    function photosProgressMessage(payload: any, phase: string): string {
+        const parts = [payload.filename ? `${phase} ${payload.filename}` : phase];
+        if (payload.bytes_current != null && payload.bytes_total != null) {
+            parts.push(`${formatProgressBytes(payload.bytes_current)} / ${formatProgressBytes(payload.bytes_total)}`);
+        } else if (payload.bytes_current != null) {
+            parts.push(formatProgressBytes(payload.bytes_current));
+        }
+        if (payload.fraction != null) parts.push(`${Math.round(payload.fraction * 100)}%`);
+        return parts.join(' · ');
+    }
+
+    function displayedProgress(job: JobInfo): number {
+        return Math.min(job.total, job.current + (job.itemFraction ?? 0));
     }
 
     onMount(async () => {
@@ -69,7 +92,17 @@
             });
             const u5 = await listen<any>('job-status-changed', (e) => {
                 const p = e.payload;
-                upsertJob(p.job_id, p.kind ?? 'unknown', p.status, p.current ?? 0, p.total ?? 0, p.message ?? null, p.error ?? null);
+                const existing = jobs.find(job => job.job_id === p.job_id);
+                const preservePhotosSummary = existing?.photosSummary && isTerminal(p.status);
+                upsertJob(
+                    p.job_id,
+                    p.kind ?? 'unknown',
+                    p.status,
+                    p.current ?? 0,
+                    p.total ?? 0,
+                    preservePhotosSummary ? existing.message : p.message ?? null,
+                    preservePhotosSummary ? existing.error ?? null : p.error ?? null,
+                );
                 if (isTerminal(p.status)) {
                     scheduleFadeOut(p.job_id);
                 }
@@ -135,21 +168,32 @@
             });
             const u20 = await listen<any>('photos-import-progress', (e) => {
                 const p = e.payload;
-                const current = Math.min(p.current ?? 0, Math.max(0, (p.total ?? 0) - 1));
+                const total = p.total ?? 0;
+                const current = Math.min(Math.max(0, (p.current ?? 1) - 1), total);
                 const phase = p.phase === 'download' ? 'Downloading' : p.phase === 'import' ? 'Importing' : 'Preparing';
-                upsertJob(p.job_id, 'import', 'running', current, p.total ?? 0, p.filename ? `${phase} ${p.filename}` : phase);
+                upsertJob(p.job_id, 'import', 'running', current, total, photosProgressMessage(p, phase));
+                const itemFraction = p.fraction == null ? 0 : Math.min(1, Math.max(0, p.fraction));
+                jobs = jobs.map(job => job.job_id === p.job_id ? { ...job, itemFraction } : job);
             });
             const u21 = await listen<any>('photos-import-finished', (e) => {
                 const p = e.payload;
-                const counted = (p.imported ?? 0) + (p.reused ?? 0) + (p.failed ?? 0) + (p.inaccessible ?? 0) + (p.cancelled ?? 0);
+                const counted = (p.imported ?? 0) + (p.reused ?? 0) + (p.failed ?? 0) + (p.skipped ?? 0) + (p.inaccessible ?? 0) + (p.cancelled ?? 0);
                 const total = counted || jobs.find(job => job.job_id === p.job_id)?.total || 0;
                 const status = (p.cancelled ?? 0) > 0
                     ? 'cancelled'
                     : p.error || (p.failed ?? 0) > 0 || (p.inaccessible ?? 0) > 0
                         ? 'failed'
                         : 'completed';
-                const message = p.error ?? `${p.imported ?? 0} imported${(p.reused ?? 0) > 0 ? ` · ${p.reused} already present` : ''}`;
+                const message = p.error ?? [
+                    `${p.imported ?? 0} imported`,
+                    `${p.reused ?? 0} reused`,
+                    `${p.failed ?? 0} failed`,
+                    `${p.skipped ?? 0} skipped`,
+                    `${p.inaccessible ?? 0} inaccessible`,
+                    `${p.cancelled ?? 0} cancelled`,
+                ].join(' · ');
                 upsertJob(p.job_id, 'import', status, total, total, message, p.error ?? null);
+                jobs = jobs.map(job => job.job_id === p.job_id ? { ...job, itemFraction: undefined, photosSummary: true } : job);
                 scheduleFadeOut(p.job_id);
                 if ((p.imported ?? 0) > 0) {
                     void refreshAfterPhotosImport().catch(error => console.error('Failed to refresh after Apple Photos import:', error));
@@ -225,7 +269,9 @@
     async function cancelJob(jobId: string) {
         try {
             await cancelJobApi(jobId);
-            upsertJob(jobId, jobs.find(j => j.job_id === jobId)?.kind ?? 'unknown', 'cancelling', jobs.find(j => j.job_id === jobId)?.current ?? 0, jobs.find(j => j.job_id === jobId)?.total ?? 0, 'Cancelling...');
+            const latest = jobs.find(job => job.job_id === jobId);
+            if (!latest || isTerminal(latest.status)) return;
+            upsertJob(jobId, latest.kind, 'cancelling', latest.current, latest.total, 'Cancelling...');
         } catch {
             dismissJob(jobId);
         }
@@ -309,6 +355,7 @@
     <div class="job-panel" role="status" aria-label="Background jobs">
         {#each jobs as job (job.job_id)}
             {@const progress = getProgressPresentation(job)}
+            {@const shownProgress = displayedProgress(job)}
             <div class="job-row {job.status}" class:fade-out={job.fadeOut}>
                 <div class="job-header">
                     <span class="job-icon {job.status}">{statusIcon(job.status)}</span>
@@ -347,13 +394,13 @@
                         role="progressbar"
                         aria-valuemin="0"
                         aria-valuemax={job.total}
-                        aria-valuenow={progress.indeterminate ? undefined : job.current}
-                        aria-valuetext={progress.ariaValueText}
+                        aria-valuenow={progress.indeterminate ? undefined : shownProgress}
+                        aria-valuetext={job.itemFraction != null ? `${progress.text} completed · ${job.message}` : progress.ariaValueText}
                     >
                         <div
                             class="progress-fill {job.status}"
                             class:indeterminate={progress.indeterminate}
-                            style={progress.indeterminate ? '' : `width: ${progress.fraction * 100}%`}
+                            style={progress.indeterminate ? '' : `width: ${job.total > 0 ? (shownProgress / job.total) * 100 : progress.fraction * 100}%`}
                         ></div>
                     </div>
                 {/if}

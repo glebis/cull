@@ -1612,6 +1612,33 @@ def test_apple_photos_provider_controls_and_import(page: Page) -> None:
     expect(page.locator(".thumb")).to_have_count(21, timeout=5_000)
 
 
+def test_apple_photos_partial_cancel(page: Page) -> None:
+    """Cancelling preserves completed Photos items and reports every terminal count."""
+    page.evaluate("""async () => {
+        const { applePhotosCatalogOpen } = await import('/src/lib/stores.ts');
+        applePhotosCatalogOpen.set(true);
+    }""")
+
+    dialog = page.locator(".apple-photos-dialog")
+    expect(dialog).to_be_visible()
+    tiles = page.locator(".asset-tile")
+    tiles.nth(0).click()
+    tiles.nth(1).click()
+    page.get_by_role("button", name="Import 2 photos").click()
+    expect(dialog).to_have_count(0)
+
+    job = page.locator(".job-row").filter(has_text="Import")
+    expect(job).to_contain_text("1/2")
+    expect(job).to_contain_text("512 KB / 1 MB · 50%")
+    job.get_by_role("button", name="Cancel Import").click()
+
+    expect(job).to_contain_text("Cancelled")
+    expect(job).to_contain_text(
+        "1 imported · 0 reused · 0 failed · 0 skipped · 0 inaccessible · 1 cancelled"
+    )
+    expect(page.locator(".thumb")).to_have_count(21, timeout=5_000)
+
+
 def main() -> int:
     SHOTS.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
@@ -1674,6 +1701,7 @@ def main() -> int:
         smoke.step("S11b Shift+click range select", lambda: test_grid_shift_click_range_select(page))
         smoke.step("Apple Photos fullscreen scalable grid", lambda: test_apple_photos_dialog_geometry(page))
         smoke.step("Apple Photos provider controls and import", lambda: test_apple_photos_provider_controls_and_import(page))
+        smoke.step("Apple Photos partial cancellation", lambda: test_apple_photos_partial_cancel(page))
 
         if page_errors:
             print("\nPage errors:")

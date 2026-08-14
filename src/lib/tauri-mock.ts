@@ -30,6 +30,14 @@ const MOCK_SMART_COLLECTIONS = [
 let userCollections: typeof MOCK_SMART_COLLECTIONS = [];
 let nextId = 100;
 let nextPhotosImportId = 1;
+const mockPhotosImportJobs = new Map<string, {
+  batchId: string;
+  total: number;
+  imported: number;
+  imageIds: string[];
+  progressTimer: ReturnType<typeof setTimeout>;
+  finishTimer: ReturnType<typeof setTimeout>;
+}>();
 
 const mockApiKeys: Record<string, string> = {};
 
@@ -76,6 +84,43 @@ function makeMockImage(i: number) {
       decision: i % 5 === 0 ? 'accept' : 'undecided',
     } : null,
   };
+}
+
+function addMockPhotosImages(count: number): string[] {
+  const ids: string[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const imageIndex = mockImages.length;
+    mockImages = [...mockImages, makeMockImage(imageIndex)];
+    ids.push(`img-${imageIndex}`);
+  }
+  return ids;
+}
+
+function emitMockPhotosFinished(
+  jobId: string,
+  job: { batchId: string; total: number; imported: number; imageIds: string[] },
+  cancelled: number,
+) {
+  const summary = {
+    job_id: jobId,
+    batch_id: job.batchId,
+    imported: job.imported,
+    reused: 0,
+    failed: 0,
+    skipped: 0,
+    inaccessible: 0,
+    cancelled,
+    image_ids: job.imageIds,
+  };
+  emitMockEvent('photos-import-finished', summary);
+  emitMockEvent('job-status-changed', {
+    job_id: jobId,
+    kind: 'import',
+    status: cancelled > 0 ? 'cancelled' : 'completed',
+    current: job.total,
+    total: job.total,
+    message: cancelled > 0 ? 'Apple Photos import cancelled' : 'Apple Photos import complete',
+  });
 }
 
 let mockImages = Array.from({ length: 20 }, (_, i) => makeMockImage(i));
@@ -238,39 +283,40 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   photos_load_local_preview: () => null,
   photos_start_import_assets: (_: any, args: { assetIds?: string[] }) => {
     const jobId = `photos-import-${nextPhotosImportId++}`;
+    const batchId = `photos-batch-${nextPhotosImportId}`;
     const total = args?.assetIds?.length ?? 0;
-    setTimeout(() => emitMockEvent('photos-import-progress', {
-      job_id: jobId,
-      phase: 'download',
-      current: 1,
+    const job = {
+      batchId,
       total,
-      filename: 'Photo 1.jpg',
-    }), 250);
-    setTimeout(() => {
-      const nextImageIndex = mockImages.length;
-      mockImages = [...mockImages, makeMockImage(nextImageIndex)];
-      const summary = {
+      imported: 0,
+      imageIds: [] as string[],
+      progressTimer: undefined as unknown as ReturnType<typeof setTimeout>,
+      finishTimer: undefined as unknown as ReturnType<typeof setTimeout>,
+    };
+    job.progressTimer = setTimeout(() => {
+      if (total > 1) {
+        job.imageIds.push(...addMockPhotosImages(1));
+        job.imported = 1;
+      }
+      emitMockEvent('photos-import-progress', {
         job_id: jobId,
-        batch_id: `photos-batch-${nextPhotosImportId}`,
-        imported: total,
-        reused: 0,
-        failed: 0,
-        skipped: 0,
-        inaccessible: 0,
-        cancelled: 0,
-        image_ids: [`img-${nextImageIndex}`],
-      };
-      emitMockEvent('photos-import-finished', summary);
-      emitMockEvent('job-status-changed', {
-        job_id: jobId,
-        kind: 'import',
-        status: 'completed',
-        current: total,
+        phase: 'download',
+        current: job.imported + 1,
         total,
-        message: 'Apple Photos import complete',
+        filename: `Photo ${job.imported + 1}.jpg`,
+        bytes_current: 524_288,
+        bytes_total: 1_048_576,
+        fraction: 0.5,
       });
-    }, 700);
-    return { job_id: jobId, batch_id: `photos-batch-${nextPhotosImportId}` };
+    }, 250);
+    job.finishTimer = setTimeout(() => {
+      job.imageIds.push(...addMockPhotosImages(total - job.imported));
+      job.imported = total;
+      emitMockPhotosFinished(jobId, job, 0);
+      mockPhotosImportJobs.delete(jobId);
+    }, 900);
+    mockPhotosImportJobs.set(jobId, job);
+    return { job_id: jobId, batch_id: batchId };
   },
 
   drain_pending_open_params: () => [],
@@ -638,7 +684,17 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   },
   list_jobs: () => [],
   get_job: () => null,
-  cancel_job: () => undefined,
+  cancel_job: (_: any, args: { jobId?: string }) => {
+    const jobId = args?.jobId;
+    if (!jobId) return undefined;
+    const job = mockPhotosImportJobs.get(jobId);
+    if (!job) return undefined;
+    clearTimeout(job.progressTimer);
+    clearTimeout(job.finishTimer);
+    emitMockPhotosFinished(jobId, job, Math.max(0, job.total - job.imported));
+    mockPhotosImportJobs.delete(jobId);
+    return undefined;
+  },
   pause_job: () => undefined,
   resume_job: () => undefined,
   set_rating: () => undefined,

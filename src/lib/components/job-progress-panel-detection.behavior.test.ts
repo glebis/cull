@@ -82,12 +82,17 @@ describe('JobProgressPanel detection jobs', () => {
         expect(mocks.cancelJob).toHaveBeenCalledWith('job_photos');
 
         handlers.get('photos-import-progress')?.({
-            payload: { job_id: 'job_photos', phase: 'download', current: 2, total: 3, filename: 'Two.jpg' },
+            payload: {
+                job_id: 'job_photos', phase: 'download', current: 2, total: 3, filename: 'Two.jpg',
+                bytes_current: 524_288, bytes_total: 1_048_576, fraction: 0.5,
+            },
         });
-        await waitFor(() => expect(screen.getByText(/2\/3/)).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByText(/1\/3/)).toBeInTheDocument());
+        expect(screen.getByText('Downloading Two.jpg · 512 KB / 1 MB · 50%')).toBeInTheDocument();
+        expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1.5');
 
         handlers.get('photos-import-finished')?.({
-            payload: { job_id: 'job_photos', imported: 2, reused: 0, failed: 1, inaccessible: 0, cancelled: 0 },
+            payload: { job_id: 'job_photos', imported: 2, reused: 1, failed: 1, skipped: 3, inaccessible: 4, cancelled: 0 },
         });
         await waitFor(() => expect(mocks.loadImagesForCurrentScope).toHaveBeenCalledWith({
             resetFocus: false,
@@ -96,5 +101,12 @@ describe('JobProgressPanel detection jobs', () => {
         }));
         expect(mocks.refreshImageCount).toHaveBeenCalledOnce();
         expect(screen.getByText('Failed')).toBeInTheDocument();
+        expect(screen.getByText('2 imported · 1 reused · 1 failed · 3 skipped · 4 inaccessible · 0 cancelled')).toBeInTheDocument();
+
+        handlers.get('job-status-changed')?.({
+            payload: { job_id: 'job_photos', kind: 'import', status: 'failed', current: 10, total: 10, message: 'generic terminal state' },
+        });
+        expect(screen.getByText('2 imported · 1 reused · 1 failed · 3 skipped · 4 inaccessible · 0 cancelled')).toBeInTheDocument();
+        expect(screen.queryByText('generic terminal state')).not.toBeInTheDocument();
     });
 });
