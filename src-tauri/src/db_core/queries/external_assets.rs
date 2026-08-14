@@ -10,7 +10,38 @@ pub struct ExternalImportPreparation {
     pub existing_image_id: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct MaterializingExternalImport {
+    pub item_id: String,
+    pub resource_id: String,
+    pub managed_path: String,
+}
+
 impl Database {
+    pub fn list_materializing_external_imports(&self) -> Result<Vec<MaterializingExternalImport>> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT i.id, r.id, r.managed_path
+             FROM external_import_items i
+             JOIN external_asset_resources r ON r.id = i.resource_id
+             JOIN external_asset_versions v ON v.id = r.version_id
+             JOIN external_assets a ON a.id = v.external_asset_id
+             WHERE a.provider = 'apple_photos'
+               AND i.state = 'materializing'
+             ORDER BY i.created_at, i.id",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(MaterializingExternalImport {
+                    item_id: row.get(0)?,
+                    resource_id: row.get(1)?,
+                    managed_path: row.get(2)?,
+                })
+            })?
+            .collect();
+        rows
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_external_import_item(
         &self,
@@ -149,7 +180,7 @@ impl Database {
             params![item_id, now],
         )?;
         tx.execute(
-            "UPDATE images SET import_batch_id = ?2 WHERE id = ?1",
+            "UPDATE images SET import_batch_id = COALESCE(import_batch_id, ?2) WHERE id = ?1",
             params![image_id, batch_id],
         )?;
         tx.commit()
@@ -233,8 +264,27 @@ mod tests {
             last_seen_mtime: None,
         })
         .unwrap();
+        let original_batch = db.create_import_batch("folder", 1, None).unwrap();
+        db.conn
+            .lock()
+            .execute(
+                "UPDATE images SET import_batch_id = ?2 WHERE id = ?1",
+                rusqlite::params![image_id, original_batch],
+            )
+            .unwrap();
         db.finalize_external_import_item(&first.item_id, &first.resource_id, image_id, &batch)
             .unwrap();
+
+        let preserved_batch: Option<String> = db
+            .conn
+            .lock()
+            .query_row(
+                "SELECT import_batch_id FROM images WHERE id = ?1",
+                [image_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(preserved_batch.as_deref(), Some(original_batch.as_str()));
 
         let retry_batch = db.create_import_batch("apple_photos", 0, None).unwrap();
         let retry = db

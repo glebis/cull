@@ -380,6 +380,28 @@ pub fn run() {
                     .blocking_show();
                 return Err(format!("folder rename recovery failed: {error}").into());
             }
+            match apple_photos::reconcile_current_imports(&db, &app_data_dir) {
+                Ok(report)
+                    if report.removed_part_files > 0
+                        || report.recovered_materialized > 0
+                        || report.reset_requested > 0
+                        || report.rejected_unsafe > 0 =>
+                {
+                    crate::safe_eprintln!(
+                        "[apple-photos] startup reconciliation: removed_parts={}, recovered={}, reset={}, rejected_unsafe={}",
+                        report.removed_part_files,
+                        report.recovered_materialized,
+                        report.reset_requested,
+                        report.rejected_unsafe
+                    );
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    crate::safe_eprintln!(
+                        "[apple-photos] startup reconciliation skipped safely: {error}"
+                    );
+                }
+            }
 
             let model_dir = app_data_dir.join("models");
             let embedding_engine = Mutex::new(EmbeddingEngine::new(&model_dir));

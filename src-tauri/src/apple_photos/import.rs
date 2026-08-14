@@ -114,6 +114,158 @@ pub struct PhotosImportSummary {
     pub image_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PhotosImportReconciliation {
+    pub removed_part_files: u32,
+    pub recovered_materialized: u32,
+    pub reset_requested: u32,
+    pub rejected_unsafe: u32,
+}
+
+pub fn reconcile_current_imports(
+    db: &Database,
+    app_data_dir: &Path,
+) -> Result<PhotosImportReconciliation, PhotosImportError> {
+    let managed_root = app_data_dir.join("imports").join("apple-photos");
+    let mut report = PhotosImportReconciliation::default();
+    report.removed_part_files = remove_stale_parts(&managed_root)?;
+
+    let pending = db
+        .list_materializing_external_imports()
+        .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+    for item in pending {
+        let path = PathBuf::from(&item.managed_path);
+        if !path_is_safe_managed_file(&managed_root, &path) {
+            db.mark_external_import_item(
+                &item.item_id,
+                &item.resource_id,
+                "failed",
+                None,
+                None,
+                Some("unsafe_managed_path"),
+                Some("Managed Apple Photos path escaped its import root"),
+            )
+            .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+            report.rejected_unsafe += 1;
+            continue;
+        }
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_file() => {
+                let (hash, bytes) = hash_file(&path)?;
+                db.mark_external_import_item(
+                    &item.item_id,
+                    &item.resource_id,
+                    "materialized",
+                    Some(&hash),
+                    Some(bytes),
+                    None,
+                    None,
+                )
+                .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+                report.recovered_materialized += 1;
+            }
+            Ok(_) => {
+                db.mark_external_import_item(
+                    &item.item_id,
+                    &item.resource_id,
+                    "failed",
+                    None,
+                    None,
+                    Some("unsafe_managed_path"),
+                    Some("Managed Apple Photos resource was not a regular file"),
+                )
+                .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+                report.rejected_unsafe += 1;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                db.mark_external_import_item(
+                    &item.item_id,
+                    &item.resource_id,
+                    "requested",
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .map_err(|error| PhotosImportError::Database(error.to_string()))?;
+                report.reset_requested += 1;
+            }
+            Err(error) => return Err(PhotosImportError::Io(error.to_string())),
+        }
+    }
+    Ok(report)
+}
+
+fn remove_stale_parts(root: &Path) -> Result<u32, PhotosImportError> {
+    match std::fs::symlink_metadata(root) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(PhotosImportError::Io(error.to_string())),
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(PhotosImportError::Io(
+                "Managed Apple Photos root is not a real directory".into(),
+            ))
+        }
+        Ok(_) => {}
+    }
+    fn visit(directory: &Path, removed: &mut u32) -> Result<(), PhotosImportError> {
+        for entry in std::fs::read_dir(directory)
+            .map_err(|error| PhotosImportError::Io(error.to_string()))?
+        {
+            let entry = entry.map_err(|error| PhotosImportError::Io(error.to_string()))?;
+            let file_type = entry
+                .file_type()
+                .map_err(|error| PhotosImportError::Io(error.to_string()))?;
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                visit(&entry.path(), removed)?;
+            } else if file_type.is_file() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.starts_with("current-") && name.ends_with(".part") {
+                    std::fs::remove_file(entry.path())
+                        .map_err(|error| PhotosImportError::Io(error.to_string()))?;
+                    *removed += 1;
+                }
+            }
+        }
+        Ok(())
+    }
+    let mut removed = 0;
+    visit(root, &mut removed)?;
+    Ok(removed)
+}
+
+fn path_is_safe_managed_file(root: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    if relative.as_os_str().is_empty()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return false;
+    }
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return false,
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(_) => return false,
+        }
+    }
+    true
+}
+
 pub fn create_current_import(
     db: &Database,
     jobs: &JobRegistry,
@@ -836,5 +988,230 @@ mod tests {
             |_, _| Ok(()),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn retry_finalizes_when_import_committed_before_provenance_link() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_data = temp.path().join("app-data");
+        std::fs::create_dir_all(&app_data).unwrap();
+        let db = Database::open(&temp.path().join("test.db")).unwrap();
+        let jobs = JobRegistry::default();
+        let provider = FakeProvider {
+            materializations: AtomicUsize::new(0),
+            modified_at: Some("2026-08-14T14:00:00Z".into()),
+        };
+        let resource = provider.describe_current("crash-gap-id").unwrap();
+        let fingerprint = version_fingerprint(&resource);
+        let path = managed_resource_path(&app_data, &resource, &fingerprint).unwrap();
+        let abandoned_batch = db.create_import_batch("apple_photos", 0, None).unwrap();
+        let abandoned = db
+            .prepare_external_import_item(
+                "abandoned-job",
+                &abandoned_batch,
+                0,
+                None,
+                &resource.asset_id,
+                &fingerprint,
+                resource.modified_at.as_deref(),
+                &resource.filename,
+                &path.to_string_lossy(),
+            )
+            .unwrap();
+        let (path, hash, bytes) = materialize_durable(
+            &provider,
+            &resource,
+            &path,
+            &CancellationToken::new(),
+            |_, _, _| {},
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        db.mark_external_import_item(
+            &abandoned.item_id,
+            &abandoned.resource_id,
+            "materialized",
+            Some(&hash),
+            Some(bytes),
+            None,
+            None,
+        )
+        .unwrap();
+        let committed_image = crate::db_core::import::import_file(&db, &path, &app_data)
+            .unwrap()
+            .unwrap();
+        // Simulate process death before finalize_external_import_item.
+
+        let recovered = run_current_import(
+            &provider,
+            &db,
+            &app_data,
+            &jobs,
+            vec!["crash-gap-id".into()],
+            None,
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!(recovered.image_ids, [committed_image]);
+        assert_eq!(provider.materializations.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn startup_reconciliation_removes_parts_and_resets_missing_materializations() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_data = temp.path().join("app-data");
+        let managed_root = app_data.join("imports/apple-photos");
+        let resource_dir = managed_root.join("asset/version");
+        std::fs::create_dir_all(&resource_dir).unwrap();
+        let part = resource_dir.join("current-stale.part");
+        std::fs::write(&part, b"partial").unwrap();
+        let final_path = resource_dir.join("photo.png");
+        let db = Database::open(&temp.path().join("test.db")).unwrap();
+        let batch = db.create_import_batch("apple_photos", 0, None).unwrap();
+        let pending = db
+            .prepare_external_import_item(
+                "stale-job",
+                &batch,
+                0,
+                None,
+                "stale-id",
+                "stale-version",
+                Some("2026-08-14T12:00:00Z"),
+                "photo.png",
+                &final_path.to_string_lossy(),
+            )
+            .unwrap();
+        db.mark_external_import_item(
+            &pending.item_id,
+            &pending.resource_id,
+            "materializing",
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let recovered_path = resource_dir.join("recovered.png");
+        std::fs::write(&recovered_path, b"complete current representation").unwrap();
+        let recovered = db
+            .prepare_external_import_item(
+                "recoverable-job",
+                &batch,
+                1,
+                None,
+                "recoverable-id",
+                "recoverable-version",
+                Some("2026-08-14T12:01:00Z"),
+                "recovered.png",
+                &recovered_path.to_string_lossy(),
+            )
+            .unwrap();
+        db.mark_external_import_item(
+            &recovered.item_id,
+            &recovered.resource_id,
+            "materializing",
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let report = reconcile_current_imports(&db, &app_data).unwrap();
+
+        assert_eq!(report.removed_part_files, 1);
+        assert_eq!(report.reset_requested, 1);
+        assert_eq!(report.recovered_materialized, 1);
+        assert!(!part.exists());
+        let states: (String, String) = db
+            .conn
+            .lock()
+            .query_row(
+                "SELECT i.state, r.state FROM external_import_items i
+                 JOIN external_asset_resources r ON r.id = i.resource_id
+                 WHERE i.id = ?1",
+                [&pending.item_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(states, ("requested".into(), "requested".into()));
+        let recovered_states: (String, String) = db
+            .conn
+            .lock()
+            .query_row(
+                "SELECT i.state, r.state FROM external_import_items i
+                 JOIN external_asset_resources r ON r.id = i.resource_id
+                 WHERE i.id = ?1",
+                [&recovered.item_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            recovered_states,
+            ("materialized".into(), "materialized".into())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_reconciliation_never_follows_a_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let app_data = temp.path().join("app-data");
+        let managed_root = app_data.join("imports/apple-photos");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&managed_root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let outside_part = outside.join("current-must-survive.part");
+        std::fs::write(&outside_part, b"private outside data").unwrap();
+        std::fs::write(outside.join("photo.png"), b"not an image").unwrap();
+        symlink(&outside, managed_root.join("escape")).unwrap();
+
+        let db = Database::open(&temp.path().join("test.db")).unwrap();
+        let batch = db.create_import_batch("apple_photos", 0, None).unwrap();
+        let pending = db
+            .prepare_external_import_item(
+                "unsafe-job",
+                &batch,
+                0,
+                None,
+                "unsafe-id",
+                "unsafe-version",
+                Some("2026-08-14T12:00:00Z"),
+                "photo.png",
+                &managed_root.join("escape/photo.png").to_string_lossy(),
+            )
+            .unwrap();
+        db.mark_external_import_item(
+            &pending.item_id,
+            &pending.resource_id,
+            "materializing",
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let report = reconcile_current_imports(&db, &app_data).unwrap();
+
+        assert_eq!(report.removed_part_files, 0);
+        assert_eq!(report.rejected_unsafe, 1);
+        assert_eq!(
+            std::fs::read(&outside_part).unwrap(),
+            b"private outside data"
+        );
+        let error_code: Option<String> = db
+            .conn
+            .lock()
+            .query_row(
+                "SELECT error_code FROM external_import_items WHERE id = ?1",
+                [&pending.item_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(error_code.as_deref(), Some("unsafe_managed_path"));
     }
 }
