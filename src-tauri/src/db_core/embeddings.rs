@@ -440,7 +440,7 @@ mod tests {
 
             assert_eq!(size, spec.expected_size_bytes, "{}", spec.model_id);
             assert_eq!(
-                format!("{:x}", hasher.finalize()),
+                hex::encode(hasher.finalize()),
                 spec.expected_sha256,
                 "{}",
                 spec.model_id
