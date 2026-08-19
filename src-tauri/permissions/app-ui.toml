@@ -1,9 +1,10 @@
 [[permission]]
 identifier = "app-ui"
-description = "Allows UI shell commands for window management, menu state, deep-link routing, and dictation controls."
+description = "Allows UI shell commands for window management, menu state, deep-link routing, dictation controls, and the CLI tool install toggle."
 commands.allow = [
   "apply_app_icon_variant",
   "capture_agent_window_snapshot",
+  "cli_tool_status",
   "complete_agent_view_snapshot",
   "complete_deep_link_navigation",
   "create_window",
@@ -28,4 +29,6 @@ commands.allow = [
   "stop_dictation",
   "update_preview_state",
   "update_menu_state",
+  "install_cli_tool",
+  "uninstall_cli_tool",
 ]

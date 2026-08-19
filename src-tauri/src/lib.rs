@@ -787,6 +787,9 @@ pub fn run() {
             commands::preview::stop_preview_display_web_stream,
             commands::preview::get_preview_display_web_stream_status,
             commands::preview::get_image_histogram,
+            commands::cli_tool::cli_tool_status,
+            commands::cli_tool::install_cli_tool,
+            commands::cli_tool::uninstall_cli_tool,
             commands::diagnostics::record_asset_load_event,
             commands::diagnostics::get_asset_load_events,
         ])

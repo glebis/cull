@@ -1,6 +1,7 @@
 pub mod agent_proposals;
 pub mod agent_snapshots;
 pub mod catalog;
+pub mod cli_tool;
 pub mod clipboard_monitor;
 pub mod collections;
 pub mod color;

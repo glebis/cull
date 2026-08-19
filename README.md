@@ -87,7 +87,13 @@ Current high-level shape:
 
 ## Agent CLI
 
-Cull has an MCP-aligned headless CLI slice. Command names and JSON fields mirror the MCP tool model where possible:
+Cull has an MCP-aligned headless CLI slice. Command names and JSON fields mirror the MCP tool model where possible.
+
+The CLI is the same binary as the app, shipped inside the bundle. Getting `cull` onto your PATH:
+
+- **Homebrew** — `brew install --cask glebis/tap/cull` links it for you; nothing else to do.
+- **DMG install** — open Settings → General → Command line tool and switch it on. Cull symlinks itself into the first suitable directory on your PATH and tells you if that directory needs adding to your shell profile.
+- **By hand** — `ln -s /Applications/Cull.app/Contents/MacOS/cull ~/.local/bin/cull`
 
 ```bash
 cull ~/renders
