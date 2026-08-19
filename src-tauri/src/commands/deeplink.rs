@@ -647,6 +647,9 @@ mod tests {
 
     #[test]
     fn builds_loupe_params_for_opened_file() {
+        if writable_home().is_none() {
+            return;
+        }
         let dir = home_tempdir("cull_open_file_");
         let image = dir.path().join("image.png");
         std::fs::write(&image, b"not a real png").unwrap();
@@ -661,6 +664,9 @@ mod tests {
 
     #[test]
     fn launch_folder_builds_grid_import_params() {
+        if writable_home().is_none() {
+            return;
+        }
         let dir = home_tempdir("cull_launch_folder_");
         let folder = dir.path().join("Library");
         std::fs::create_dir(&folder).unwrap();
@@ -684,6 +690,9 @@ mod tests {
 
     #[test]
     fn launch_path_rejects_unsupported_files() {
+        if writable_home().is_none() {
+            return;
+        }
         let dir = home_tempdir("cull_launch_unsupported_");
         let text = dir.path().join("notes.txt");
         std::fs::write(&text, b"notes").unwrap();
@@ -727,6 +736,9 @@ mod tests {
 
     #[test]
     fn drag_drop_single_image_opens_loupe() {
+        if writable_home().is_none() {
+            return;
+        }
         let dir = home_tempdir("cull_drag_single_");
         let image = dir.path().join("image.jpg");
         std::fs::write(&image, b"not a real jpeg").unwrap();
@@ -743,6 +755,9 @@ mod tests {
 
     #[test]
     fn drag_drop_multiple_images_opens_grid_batch() {
+        if writable_home().is_none() {
+            return;
+        }
         let dir = home_tempdir("cull_drag_multi_");
         let first = dir.path().join("first.jpg");
         let second = dir.path().join("second.png");
@@ -766,6 +781,9 @@ mod tests {
 
     #[test]
     fn drag_drop_single_folder_opens_folder_grid() {
+        if writable_home().is_none() {
+            return;
+        }
         let dir = home_tempdir("cull_drag_folder_");
         let folder = dir.path().join("Library");
         std::fs::create_dir(&folder).unwrap();
@@ -785,6 +803,9 @@ mod tests {
 
     #[test]
     fn drag_drop_paths_can_include_drop_position() {
+        if writable_home().is_none() {
+            return;
+        }
         let dir = home_tempdir("cull_drag_position_");
         let folder = dir.path().join("Library");
         std::fs::create_dir(&folder).unwrap();
@@ -799,6 +820,9 @@ mod tests {
 
     #[test]
     fn drag_drop_mixed_files_and_folders_keeps_both_import_actions() {
+        if writable_home().is_none() {
+            return;
+        }
         let dir = home_tempdir("cull_drag_mixed_");
         let image = dir.path().join("image.webp");
         let folder = dir.path().join("Folder");
