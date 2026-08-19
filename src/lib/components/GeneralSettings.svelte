@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { backfillRawPreviews, getAppSetting, setAppSetting } from '$lib/api';
+    import { backfillRawPreviews, cliToolStatus, getAppSetting, installCliTool, setAppSetting, uninstallCliTool } from '$lib/api';
+    import type { CliToolStatus } from '$lib/api';
     import { CLIPBOARD_PASTE_DATE_FORMAT_SETTING, DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT } from '$lib/clipboard-actions';
     import { clientToolsEnabled, navigateTo, showToast, staticPublishingEnabled, viewMode, voiceDictationEnabled } from '$lib/stores';
 
@@ -13,6 +14,8 @@
     let moduleStaticPublishing = $state(false);
     let moduleClientTools = $state(false);
     let moduleVoiceDictation = $state(false);
+    let cliTool = $state<CliToolStatus | null>(null);
+    let cliToolBusy = $state(false);
 
     onMount(async () => {
         const [tray, trash, update, purge, date, raw, publishing, client, voice] = await Promise.all([
@@ -33,6 +36,8 @@
         staticPublishingEnabled.set(moduleStaticPublishing);
         clientToolsEnabled.set(moduleClientTools);
         voiceDictationEnabled.set(moduleVoiceDictation);
+        // Shells out to the login shell for PATH; kept off the blocking load path.
+        void refreshCliTool();
     });
 
     async function toggle(key: string, value: boolean) { await setAppSetting(key, value ? 'true' : 'false'); }
@@ -47,6 +52,45 @@
     }
     async function changeClientTools() { await toggle('module_client_tools', moduleClientTools); clientToolsEnabled.set(moduleClientTools); }
     async function changeVoice() { await toggle('module_voice_dictation', moduleVoiceDictation); voiceDictationEnabled.set(moduleVoiceDictation); }
+    async function refreshCliTool() {
+        try {
+            cliTool = await cliToolStatus();
+        } catch (e) {
+            console.error('Failed to read command line tool status:', e);
+            cliTool = null;
+        }
+    }
+    async function changeCliTool() {
+        if (cliToolBusy) return;
+        cliToolBusy = true;
+        const removing = cliTool?.installed === true && cliTool?.stale !== true;
+        try {
+            cliTool = removing ? await uninstallCliTool() : await installCliTool();
+            if (removing) {
+                showToast('Command line tool removed', { type: 'success', duration: 2500 });
+            } else if (cliTool?.path_hint) {
+                showToast(`Installed to ${cliTool.link_path}`, {
+                    type: 'success',
+                    duration: 10000,
+                    detail: `That directory is not on your PATH yet. Add this to your shell profile:\n${cliTool.path_hint}`,
+                });
+            } else {
+                showToast('Command line tool installed — run \`cull --help\`', {
+                    type: 'success',
+                    duration: 4000,
+                });
+            }
+        } catch (e) {
+            console.error('Failed to change command line tool:', e);
+            showToast(removing ? 'Could not remove command line tool' : 'Could not install command line tool', {
+                detail: String(e),
+                type: 'error',
+                duration: 6000,
+            });
+        } finally {
+            cliToolBusy = false;
+        }
+    }
     async function saveDateFormat() {
         pasteDateFormat = pasteDateFormat.trim() || DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT;
         await setAppSetting(CLIPBOARD_PASTE_DATE_FORMAT_SETTING, pasteDateFormat);
@@ -59,6 +103,26 @@
     <div class="setting-row"><span>Confirm before Trash</span><button class:on={confirmTrash} aria-pressed={confirmTrash} onclick={() => { confirmTrash = !confirmTrash; setAppSetting('skip_trash_confirm', confirmTrash ? 'false' : 'true'); }}>{confirmTrash ? 'ON' : 'OFF'}</button></div>
     <div class="setting-row"><span>Auto update</span><button class:on={autoUpdate} aria-pressed={autoUpdate} onclick={() => { autoUpdate = !autoUpdate; toggle('auto_update_enabled', autoUpdate); window.dispatchEvent(new CustomEvent('auto-update-setting-changed')); }}>{autoUpdate ? 'ON' : 'OFF'}</button></div>
     <div class="setting-row"><span>Auto-purge missing files</span><button class:on={autoPurge} aria-pressed={autoPurge} onclick={() => { autoPurge = !autoPurge; toggle('auto_purge_missing', autoPurge); }}>{autoPurge ? 'ON' : 'OFF'}</button></div>
+        <div class="setting-row">
+            <span>Command line tool</span>
+            <button
+                class:on={cliTool?.installed && !cliTool?.stale}
+                aria-pressed={cliTool?.installed === true && cliTool?.stale !== true}
+                disabled={cliToolBusy}
+                onclick={changeCliTool}
+            >
+                {#if cliToolBusy}…{:else if cliTool?.stale}REPAIR{:else if cliTool?.installed}ON{:else}OFF{/if}
+            </button>
+        </div>
+        {#if cliTool?.stale}
+            <p class="note"><code>{cliTool.link_path}</code> points at a different copy of Cull. Repair it to use this one.</p>
+        {:else if cliTool?.installed}
+            <p class="note"><code>cull</code> is available at <code>{cliTool.link_path}</code>.</p>
+        {:else if cliTool?.path_hint}
+            <p class="note">Installs to <code>{cliTool.candidate_dir}</code>, which is not on your PATH. You will need to add <code>{cliTool.path_hint}</code> to your shell profile.</p>
+        {:else if cliTool}
+            <p class="note">Links <code>cull</code> into <code>{cliTool.candidate_dir}</code> so the CLI and MCP examples in the docs work as written.</p>
+        {/if}
     <label class="setting-row"><span>Paste filename date</span><input bind:value={pasteDateFormat} onblur={saveDateFormat} /></label>
     <p class="note">Used when the destination folder has no numeric filename sequence.</p>
 </section>

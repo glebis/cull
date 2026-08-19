@@ -1949,6 +1949,30 @@ export async function backfillRawPreviews(): Promise<number> {
     return invoke<number>('backfill_raw_previews');
 }
 
+// Command line tool
+export interface CliToolStatus {
+    installed: boolean;
+    link_path: string | null;
+    target_path: string | null;
+    /** Installed, but pointing at a different copy of Cull — offer a re-install. */
+    stale: boolean;
+    candidate_dir: string | null;
+    /** Shell profile line the user must add when the install dir is not on PATH. */
+    path_hint: string | null;
+}
+
+export async function cliToolStatus(): Promise<CliToolStatus> {
+    return invoke<CliToolStatus>('cli_tool_status');
+}
+
+export async function installCliTool(): Promise<CliToolStatus> {
+    return invoke<CliToolStatus>('install_cli_tool');
+}
+
+export async function uninstallCliTool(): Promise<CliToolStatus> {
+    return invoke<CliToolStatus>('uninstall_cli_tool');
+}
+
 // Privacy & audit log
 export interface AuditLogEntry {
     id: string;
