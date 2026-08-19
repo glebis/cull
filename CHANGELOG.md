@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-19
+
+- Ship cli_tool install toggle (PR #184)
+- Fix CI flakes (RUSTSEC-2026-0258 / h2 bump, deeplink tests on read-only HOME)
+
 ## [0.3.3] - 2026-08-08
 
 ### Fixed
