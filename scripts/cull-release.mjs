@@ -539,7 +539,19 @@ function assertPreCommitPlan(plan, source, snapshot) {
   if (actual.size !== expected.size || [...actual].some((path) => !expected.has(path))) {
     throw commandError('PREPARE_RACE', 'Repository changes no longer match the release plan');
   }
-  const newDirectories = [...snapshotDirectories()].filter((path) => !snapshot.directories.has(path));
+  const allNewDirectories = [...snapshotDirectories()].filter((path) => !snapshot.directories.has(path));
+  const newDirectories = allNewDirectories.filter((path) => {
+    try {
+      execFileSync('git', ['check-ignore', '-q', '--', path], {
+        cwd: repoRoot,
+        env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return false;
+    } catch {
+      return true;
+    }
+  });
   if (newDirectories.length > 0) {
     throw commandError('PREPARE_RACE', 'Release gates created unexpected directories', {
       sideEffects: newDirectories.sort(),
