@@ -663,7 +663,13 @@ function runPrepare(args) {
   let record = createReleaseRecord({
     version: plan.version,
     bump: args.bump,
-    source: releaseCommit,
+    // The release record anchors on the merge commit (the value of `source`
+    // before we committed the version bump). The version-bump commit is one
+    // commit behind on merge-commit-style release PRs, and the immutable
+    // release tag gate requires origin/main to be an ancestor of the tagged
+    // SHA — only the merge commit satisfies that constraint. See
+    // scripts/cull-release.mjs#runTag for the matching tag-side anchor.
+    source,
     now: timestamp,
   });
   record = transitionReleaseRecord(record, 'checked', { readiness: 'passed' }, timestamp);
@@ -804,8 +810,14 @@ function tryGh(...args) {
 }
 
 function probeCommit(record) {
-  return tryGit('show', '-s', '--format=%s', '--end-of-options', record.releaseCommit)
-    === `chore(release): v${record.version}`;
+  // The recorded release commit is the merge commit for this version (the
+  // value of `source` before `runPrepare` committed the version bump). We
+  // accept any commit that resolves on disk — the version is anchored by
+  // record.version and the SHA is verified by merge-base ancestry against
+  // origin/main inside `runTag`. The previous "subject === chore(release): vX.Y.Z"
+  // check anchored on the version-bump commit, which sits one commit behind
+  // the merge commit on merge-commit-style release PRs and would never match.
+  return tryGit('cat-file', '-e', record.releaseCommit) === null ? false : true;
 }
 
 function probeTag(record) {
