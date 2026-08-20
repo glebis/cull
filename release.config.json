@@ -10,7 +10,7 @@
     { "id": "cargo-lock", "path": "src-tauri/Cargo.lock", "kind": "cargo-lock-package-version", "package": "cull" }
   ],
   "lockfiles": ["src-tauri/Cargo.lock"],
-  "gate": "npm run preflight -- release",
+  "gate": "bash scripts/cull-release-validate-gate.sh",
   "extraGate": [
     "cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden",
     "cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test export_compat_golden"

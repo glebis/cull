@@ -164,6 +164,7 @@ jobs:
                 publicAsset.digest !== `sha256:${digest}`) process.exit(4);
           }
           const digest = provenance.assets[dmgName]?.sha256;
+          console.error(`DEBUG digest="${digest}" expected="${process.env.EXPECTED_SHA}" equal=${digest === process.env.EXPECTED_SHA}`);
           if (process.env.EXPECTED_SHA && digest !== process.env.EXPECTED_SHA) process.exit(3);
           const publicDmg = release.assets.find(({ name }) => name === dmgName);
           if (!publicDmg || publicDmg.state !== 'uploaded' || publicDmg.size !== provenance.assets[dmgName].size ||
