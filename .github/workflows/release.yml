@@ -604,7 +604,15 @@ jobs:
           if [[ $release_status -eq 3 ]]; then
             gh release create "$TAG" --verify-tag --draft --title "Cull $TAG" \
               --notes-file "$RUNNER_TEMP/release-notes.md" --target "$COMMIT"
-            gh api --paginate --slurp "repos/$REPOSITORY/releases?per_page=100" > "$releases_json"
+            # GitHub's release-list endpoint has eventual consistency after a create.
+            # Poll the list endpoint until the new release appears (or give up after 15s).
+            for _ in 1 2 3 4 5; do
+              sleep 3
+              gh api --paginate --slurp "repos/$REPOSITORY/releases?per_page=100" > "$releases_json"
+              if RELEASES_JSON="$releases_json" TAG="$TAG" node -e 'const p=JSON.parse(process.env.RELEASES_JSON);const m=p.flat().filter(r=>r.tag_name===process.env.TAG);process.exit(m.length===1?0:1)'; then
+                break
+              fi
+            done
             release_details=$(RELEASES_JSON="$releases_json" NOTES="$RUNNER_TEMP/release-notes.md" node <<'NODE'
           const fs = require('node:fs');
           const pages = JSON.parse(fs.readFileSync(process.env.RELEASES_JSON, 'utf8'));
