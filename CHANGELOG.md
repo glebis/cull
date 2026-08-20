@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-20
+
+- Recovered a v0.4.0 publish race: STALE_RELEASE_SOURCE fired because v0.4.0 was tagged on the release commit before its PR landed on main.
+- The repository ruleset `Protect immutable release tags` (id 18866636) forbids tag recreation, so v0.4.0 stays in place and v0.5.0 ships with the same content.
+- Same binaries, same changelog snapshot, deeper version number to keep the immutable-tag invariant.
+
 ## [0.4.0] - 2026-08-19
 
 - Ship cli_tool install toggle (PR #184)
