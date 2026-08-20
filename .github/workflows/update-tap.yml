@@ -88,16 +88,13 @@ jobs:
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             "https://api.github.com/repos/$REPOSITORY/releases/tags/v$VERSION" \
             --output "$RUNNER_TEMP/public-release.json"
-          echo "DEBUG release-api curl exit=$?"
           failure_code=MISSING_PROVENANCE
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             "$PROVENANCE_URL" --output "$RUNNER_TEMP/release-provenance.json"
-          echo "DEBUG provenance curl exit=$?"
           failure_code=MISSING_CHECKSUMS
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             "https://github.com/$REPOSITORY/releases/download/v$VERSION/checksums.txt" \
             --output "$RUNNER_TEMP/checksums.txt"
-          echo "DEBUG checksums curl exit=$?"
           git ls-remote --tags "https://github.com/$REPOSITORY.git" \
             "refs/tags/v$VERSION" "refs/tags/v$VERSION^{}" > "$RUNNER_TEMP/public-tag-refs"
 
@@ -110,12 +107,9 @@ jobs:
             VALIDATED="$RUNNER_TEMP/validated-promotion.json" node <<'NODE'
           const crypto = require('node:crypto');
           const fs = require('node:fs');
-          process.on('exit', (code) => console.error(`DEBUG node exit code=${code}`));
           const release = JSON.parse(fs.readFileSync(process.env.RELEASE_JSON, 'utf8'));
-          console.error(`DEBUG release.tag_name=${release.tag_name} draft=${release.draft} prerelease=${release.prerelease} assets=${JSON.stringify(release.assets.map(a=>a.name).sort())}`);
           const provenanceBytes = fs.readFileSync(process.env.PROVENANCE);
           const provenance = JSON.parse(provenanceBytes);
-          console.error(`DEBUG provenance.commit=${provenance.commit} tagObjectSha=${provenance.tagObjectSha} workflowRunId=${provenance.workflowRunId} keys=${JSON.stringify(Object.keys(provenance.assets).sort())}`);
           const dmgName = `Cull_${process.env.VERSION}_aarch64.dmg`;
           const expectedAssets = [dmgName, 'Cull_aarch64.app.tar.gz', 'Cull_aarch64.app.tar.gz.sig', 'latest.json'].sort();
           const expectedPublic = [...expectedAssets, 'release-provenance.json', 'checksums.txt'].sort();
@@ -123,32 +117,25 @@ jobs:
             'exactInventory', 'updaterMetadata', 'updaterSignature', 'dmgMountedReadOnly',
             'embeddedVersion', 'arm64Only', 'codeSignature', 'gatekeeper', 'stapledNotarization',
           ].sort();
-          console.error(`DEBUG checks: releaseTag=${release.tag_name===`v${process.env.VERSION}`} draft=${release.draft===false} pre=${release.prerelease===false} pubAssets=${JSON.stringify(release.assets.map(({ name }) => name).sort())===JSON.stringify(expectedPublic)} provSchema=${provenance.schema==='cull.release.provenance.v1'} provVer=${provenance.version===process.env.VERSION} provTag=${provenance.tag===`v${process.env.VERSION}`} commitRe=${/^[0-9a-f]{40}$/.test(provenance.commit)} tagShaRe=${/^[0-9a-f]{40}$/.test(provenance.tagObjectSha)} wrType=${typeof provenance.workflowRunId} wrSafe=${Number.isSafeInteger(provenance.workflowRunId)} wrVal=${provenance.workflowRunId} wrLT1=${provenance.workflowRunId<1} hasAssets=${!!provenance.assets} assetKeysMatch=${JSON.stringify(Object.keys(provenance.assets).sort())===JSON.stringify(expectedAssets)} hasChecks=${!!provenance.checks} checkKeysMatch=${JSON.stringify(Object.keys(provenance.checks).sort())===JSON.stringify(expectedChecks)} checkValuesAllTrue=${expectedChecks.every((name) => provenance.checks[name] === true)}`);
-          if (release.tag_name !== `v${process.env.VERSION}`) { console.error('DEBUG exit reason: release.tag_name mismatch'); process.exit(2); }
-          if (release.draft !== false) { console.error('DEBUG exit reason: release.draft is not false'); process.exit(2); }
-          if (release.prerelease !== false) { console.error('DEBUG exit reason: release.prerelease is not false'); process.exit(2); }
-          if (JSON.stringify(release.assets.map(({ name }) => name).sort()) !== JSON.stringify(expectedPublic)) { console.error(`DEBUG exit reason: public assets mismatch, got=${JSON.stringify(release.assets.map(({ name }) => name).sort())} want=${JSON.stringify(expectedPublic)}`); process.exit(2); }
-          if (provenance.schema !== 'cull.release.provenance.v1') { console.error(`DEBUG exit reason: provenance.schema=${provenance.schema}`); process.exit(2); }
-          if (provenance.version !== process.env.VERSION) { console.error(`DEBUG exit reason: provenance.version=${provenance.version} want=${process.env.VERSION}`); process.exit(2); }
-          if (provenance.tag !== `v${process.env.VERSION}`) { console.error(`DEBUG exit reason: provenance.tag=${provenance.tag}`); process.exit(2); }
-          if (!/^[0-9a-f]{40}$/.test(provenance.commit)) { console.error(`DEBUG exit reason: provenance.commit=${provenance.commit} not 40-hex`); process.exit(2); }
-          if (!/^[0-9a-f]{40}$/.test(provenance.tagObjectSha)) { console.error(`DEBUG exit reason: provenance.tagObjectSha=${provenance.tagObjectSha} not 40-hex`); process.exit(2); }
-          if (!Number.isSafeInteger(provenance.workflowRunId)) { console.error(`DEBUG exit reason: workflowRunId not safe integer (typeof=${typeof provenance.workflowRunId}, value=${JSON.stringify(provenance.workflowRunId)})`); process.exit(2); }
-          if (provenance.workflowRunId < 1) { console.error(`DEBUG exit reason: workflowRunId<1`); process.exit(2); }
-          if (!provenance.assets) { console.error(`DEBUG exit reason: provenance.assets missing`); process.exit(2); }
-          if (JSON.stringify(Object.keys(provenance.assets).sort()) !== JSON.stringify(expectedAssets)) { console.error(`DEBUG exit reason: asset keys mismatch got=${JSON.stringify(Object.keys(provenance.assets).sort())} want=${JSON.stringify(expectedAssets)}`); process.exit(2); }
-          if (!provenance.checks) { console.error(`DEBUG exit reason: provenance.checks missing`); process.exit(2); }
-          if (JSON.stringify(Object.keys(provenance.checks).sort()) !== JSON.stringify(expectedChecks)) { console.error(`DEBUG exit reason: checks keys mismatch got=${JSON.stringify(Object.keys(provenance.checks).sort())} want=${JSON.stringify(expectedChecks)}`); process.exit(2); }
-          for (const n of expectedChecks) { if (provenance.checks[n] !== true) { console.error(`DEBUG exit reason: check ${n}=${provenance.checks[n]} not true`); process.exit(2); } }
-          console.error('DEBUG passed provenance gate');
+          if (release.tag_name !== `v${process.env.VERSION}` || release.draft !== false || release.prerelease !== false ||
+              JSON.stringify(release.assets.map(({ name }) => name).sort()) !== JSON.stringify(expectedPublic)) process.exit(2);
+          if (provenance.schema !== 'cull.release.provenance.v1' ||
+              provenance.version !== process.env.VERSION ||
+              provenance.tag !== `v${process.env.VERSION}` ||
+              !/^[0-9a-f]{40}$/.test(provenance.commit) ||
+              !/^[0-9a-f]{40}$/.test(provenance.tagObjectSha) ||
+              !Number.isSafeInteger(Number(provenance.workflowRunId)) || Number(provenance.workflowRunId) < 1 ||
+              !provenance.assets ||
+              JSON.stringify(Object.keys(provenance.assets).sort()) !== JSON.stringify(expectedAssets) ||
+              !provenance.checks ||
+              JSON.stringify(Object.keys(provenance.checks).sort()) !== JSON.stringify(expectedChecks) ||
+              expectedChecks.some((name) => provenance.checks[name] !== true)) process.exit(2);
           const refLines = fs.readFileSync(process.env.TAG_REFS, 'utf8').trim().split('\n').filter(Boolean);
-          console.error(`DEBUG refLines.length=${refLines.length} content=${JSON.stringify(refLines)}`);
           if (refLines.length !== 2) process.exit(2);
           const refs = new Map(refLines.map((line) => {
             const [sha, ref] = line.split('\t');
             return [ref, sha];
           }));
-          console.error(`DEBUG refs=${JSON.stringify(Object.fromEntries(refs))}`);
           if (refs.get(`refs/tags/v${process.env.VERSION}`) !== provenance.tagObjectSha ||
               refs.get(`refs/tags/v${process.env.VERSION}^{}`) !== provenance.commit) process.exit(2);
           for (const name of expectedAssets) {
@@ -161,7 +148,6 @@ jobs:
                 publicAsset.size !== provenanceAsset.size ||
                 publicAsset.digest !== `sha256:${provenanceAsset.sha256}` ||
                 publicAsset.browser_download_url !== expectedUrl;
-            if (fail) console.error(`DEBUG asset fail ${name}: provSha=${provenanceAsset?.sha256} provSize=${provenanceAsset?.size} pubState=${publicAsset?.state} pubSize=${publicAsset?.size} pubDigest=${publicAsset?.digest} expUrl=${expectedUrl} pubUrl=${publicAsset?.browser_download_url}`);
             if (fail) process.exit(2);
           }
           const checksumLines = fs.readFileSync(process.env.CHECKSUMS, 'utf8').trim().split('\n');
@@ -180,11 +166,8 @@ jobs:
             if (!publicAsset || publicAsset.state !== 'uploaded' || publicAsset.size !== bytes.length ||
                 publicAsset.digest !== `sha256:${digest}`) process.exit(4);
           }
-          process.on('exit', (code) => console.error(`DEBUG node exit code=${code}`));
           const digest = provenance.assets[dmgName]?.sha256;
-          console.error(`DEBUG digest="${digest}" expected="${process.env.EXPECTED_SHA}" equal=${digest === process.env.EXPECTED_SHA}`);
           if (process.env.EXPECTED_SHA && digest !== process.env.EXPECTED_SHA) process.exit(3);
-          console.error('DEBUG passed line 167');
           const publicDmg = release.assets.find(({ name }) => name === dmgName);
           if (!publicDmg || publicDmg.state !== 'uploaded' || publicDmg.size !== provenance.assets[dmgName].size ||
               publicDmg.digest !== `sha256:${digest}`) process.exit(2);
