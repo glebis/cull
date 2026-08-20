@@ -41,6 +41,11 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
+      - name: Install cargo-deny and cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny,cargo-audit
+
       - name: Frontend checks
         run: bash scripts/check-ci.sh frontend
 
