@@ -163,9 +163,11 @@ jobs:
             if (!publicAsset || publicAsset.state !== 'uploaded' || publicAsset.size !== bytes.length ||
                 publicAsset.digest !== `sha256:${digest}`) process.exit(4);
           }
+          process.on('exit', (code) => console.error(`DEBUG node exit code=${code}`));
           const digest = provenance.assets[dmgName]?.sha256;
           console.error(`DEBUG digest="${digest}" expected="${process.env.EXPECTED_SHA}" equal=${digest === process.env.EXPECTED_SHA}`);
           if (process.env.EXPECTED_SHA && digest !== process.env.EXPECTED_SHA) process.exit(3);
+          console.error('DEBUG passed line 167');
           const publicDmg = release.assets.find(({ name }) => name === dmgName);
           if (!publicDmg || publicDmg.state !== 'uploaded' || publicDmg.size !== provenance.assets[dmgName].size ||
               publicDmg.digest !== `sha256:${digest}`) process.exit(2);
