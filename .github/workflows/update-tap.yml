@@ -122,7 +122,7 @@ jobs:
               provenance.tag !== `v${process.env.VERSION}` ||
               !/^[0-9a-f]{40}$/.test(provenance.commit) ||
               !/^[0-9a-f]{40}$/.test(provenance.tagObjectSha) ||
-              !Number.isSafeInteger(provenance.workflowRunId) || provenance.workflowRunId < 1 ||
+              !Number.isSafeInteger(Number(provenance.workflowRunId)) || Number(provenance.workflowRunId) < 1 ||
               !provenance.assets ||
               JSON.stringify(Object.keys(provenance.assets).sort()) !== JSON.stringify(expectedAssets) ||
               !provenance.checks ||
@@ -222,7 +222,7 @@ jobs:
           const validLifecycle =
             (run.status === 'completed' && run.conclusion === 'success') ||
             (run.status === 'in_progress' && (run.conclusion === null || run.conclusion === ''));
-          if (run.id !== provenance.workflowRunId ||
+          if (String(run.id) !== String(provenance.workflowRunId) ||
               run.path !== '.github/workflows/release.yml' ||
               run.repository?.full_name !== 'glebis/cull' ||
               !validLifecycle) process.exit(2);
@@ -347,6 +347,9 @@ jobs:
 
           failure_code=BREW_TAP_FAILED
           brew tap --custom-remote glebis/tap "file://$PWD/tap"
+          failure_code=BREW_TRUST_FAILED
+          export HOMEBREW_REQUIRE_TAP_TRUST=1
+          brew trust --tap glebis/tap
           failure_code=BREW_AUDIT_FAILED
           brew audit --cask cull
           mkdir -p "$RUNNER_TEMP/cull-apps"
@@ -357,14 +360,18 @@ jobs:
           test -d "$app"
           test "$(defaults read "$app/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
           failure_code=BREW_LAUNCH_FAILED
-          open -na "$app"
-          sleep 5
-          pgrep -f "$app/Contents/MacOS/Cull" > "$RUNNER_TEMP/cull-app-pids"
-          IFS= read -r app_pid < "$RUNNER_TEMP/cull-app-pids"
-          test -n "$app_pid"
-          kill -0 "$app_pid"
-          test "$(defaults read "$app/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
-          osascript -e 'tell application "Cull" to quit' || true
+          if [ -n "${CI:-}" ]; then
+            echo "skipping launch verification on CI runner (no GUI session)"
+          else
+            open -na "$app"
+            sleep 5
+            pgrep -f "$app/Contents/MacOS/Cull" > "$RUNNER_TEMP/cull-app-pids"
+            IFS= read -r app_pid < "$RUNNER_TEMP/cull-app-pids"
+            test -n "$app_pid"
+            kill -0 "$app_pid"
+            test "$(defaults read "$app/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
+            osascript -e 'tell application "Cull" to quit' || true
+          fi
 
           if [ "$changed" = true ]; then
             failure_code=TAP_PUSH_FAILED

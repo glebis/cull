@@ -288,7 +288,7 @@ node - "$tmp_root/valid/output/release-provenance.json" <<'NODE'
 const fs = require('node:fs');
 const p = JSON.parse(fs.readFileSync(process.argv[2]));
 if (p.schema !== 'cull.release.provenance.v1' || p.version !== '0.2.6' || p.tag !== 'v0.2.6') process.exit(1);
-if (p.commit !== '0123456789abcdef0123456789abcdef01234567' || p.workflowRunId !== '123') process.exit(1);
+if (p.commit !== '0123456789abcdef0123456789abcdef01234567' || p.workflowRunId !== 123) process.exit(1);
 if (p.tagObjectSha !== null) process.exit(1);
 if (Object.keys(p.assets).length !== 4) process.exit(1);
 if (!Object.values(p.checks).every(Boolean)) process.exit(1);
