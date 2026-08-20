@@ -383,7 +383,7 @@ const provenance = {
   tag,
   commit,
   tagObjectSha: tagObjectSha || null,
-  workflowRunId,
+  workflowRunId: Number(workflowRunId),
   assets,
   checks: {
     exactInventory: true,
