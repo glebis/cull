@@ -34,7 +34,8 @@
     "audit:supply-chain": "bash scripts/supply-chain-audit.sh",
     "audit:sbom": "bash scripts/supply-chain-audit.sh sbom",
     "bd": "bash scripts/bd.sh",
-    "lint:issues": "node scripts/check-beads-acceptance.mjs"
+    "lint:issues": "node scripts/check-beads-acceptance.mjs",
+    "test:validate-gate": "bash scripts/cull-release-validate-gate.test.sh"
   },
   "license": "Apache-2.0",
   "repository": {

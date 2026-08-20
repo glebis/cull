@@ -1,0 +1,127 @@
+name: Release-cull validate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-cull-validate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Frontend checks
+        run: bash scripts/check-ci.sh frontend
+
+      - name: Validate-gate shim self-test
+        run: npm run test:validate-gate
+
+      - name: Rust checks
+        run: bash scripts/check-ci.sh rust
+
+      - name: Site checks
+        run: bash scripts/check-ci.sh site
+
+      - name: Compatibility golden tests
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden
+          cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test export_compat_golden
+
+      - name: Release regression gate
+        run: node scripts/release-regression-gate.mjs
+
+      - name: Supply-chain audit
+        run: bash scripts/supply-chain-audit.sh check
+
+      - name: License audit
+        run: npm run audit:licenses
+
+      - name: Production build
+        run: npm run build
+
+  publish-status:
+    name: Publish validate status
+    runs-on: macos-14
+    needs: preflight
+    if: always()
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Build validate manifest
+        env:
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          PREFLIGHT_CONCLUSION: ${{ needs.preflight.conclusion }}
+        run: |
+          set -euo pipefail
+          status="passed"
+          if [[ "${PREFLIGHT_RESULT}" != "success" ]]; then
+            status="failed"
+          fi
+          artifact_name="cull-release-validate-${RUN_ID}-${SHA}.json"
+          manifest="$(mktemp)"
+          {
+            printf '{\n'
+            printf '  "schema": "cull.release.validate.v1",\n'
+            printf '  "sha": "%s",\n' "${SHA}"
+            printf '  "ref": "%s",\n' "${REF}"
+            printf '  "event": "%s",\n' "${EVENT}"
+            printf '  "runId": %s,\n' "${RUN_ID}"
+            printf '  "timestamp": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf '  "status": "%s",\n' "${status}"
+            printf '  "gates": {\n'
+            printf '    "preflight": {\n'
+            printf '      "result": "%s",\n' "${PREFLIGHT_RESULT}"
+            printf '      "conclusion": "%s"\n' "${PREFLIGHT_CONCLUSION}"
+            printf '    }\n'
+            printf '  }\n'
+            printf '}\n'
+          } > "${manifest}"
+          mkdir -p "${RUNNER_TEMP}/cull-release-validate"
+          cp "${manifest}" "${RUNNER_TEMP}/cull-release-validate/${artifact_name}"
+          printf 'VALIDATE_ARTIFACT_PATH=%s\n' "${RUNNER_TEMP}/cull-release-validate/${artifact_name}" >> "${GITHUB_ENV}"
+          printf '%s\n' "${artifact_name}"
+
+      - name: Upload validate artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cull-release-validate-${{ github.run_id }}-${{ github.sha }}
+          path: ${{ env.VALIDATE_ARTIFACT_PATH }}
+          if-no-files-found: error
+          retention-days: 14
