@@ -84,15 +84,20 @@ jobs:
           expected_provenance="https://github.com/$REPOSITORY/releases/download/v$VERSION/release-provenance.json"
           test "$PROVENANCE_URL" = "$expected_provenance"
 
-          failure_code=MISSING_PROVENANCE
+          failure_code=MISSING_RELEASE
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             "https://api.github.com/repos/$REPOSITORY/releases/tags/v$VERSION" \
             --output "$RUNNER_TEMP/public-release.json"
+          echo "DEBUG release-api curl exit=$?"
+          failure_code=MISSING_PROVENANCE
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             "$PROVENANCE_URL" --output "$RUNNER_TEMP/release-provenance.json"
+          echo "DEBUG provenance curl exit=$?"
+          failure_code=MISSING_CHECKSUMS
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             "https://github.com/$REPOSITORY/releases/download/v$VERSION/checksums.txt" \
             --output "$RUNNER_TEMP/checksums.txt"
+          echo "DEBUG checksums curl exit=$?"
           git ls-remote --tags "https://github.com/$REPOSITORY.git" \
             "refs/tags/v$VERSION" "refs/tags/v$VERSION^{}" > "$RUNNER_TEMP/public-tag-refs"
 
