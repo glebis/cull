@@ -110,9 +110,12 @@ jobs:
             VALIDATED="$RUNNER_TEMP/validated-promotion.json" node <<'NODE'
           const crypto = require('node:crypto');
           const fs = require('node:fs');
+          process.on('exit', (code) => console.error(`DEBUG node exit code=${code}`));
           const release = JSON.parse(fs.readFileSync(process.env.RELEASE_JSON, 'utf8'));
+          console.error(`DEBUG release.tag_name=${release.tag_name} draft=${release.draft} prerelease=${release.prerelease} assets=${JSON.stringify(release.assets.map(a=>a.name).sort())}`);
           const provenanceBytes = fs.readFileSync(process.env.PROVENANCE);
           const provenance = JSON.parse(provenanceBytes);
+          console.error(`DEBUG provenance.commit=${provenance.commit} tagObjectSha=${provenance.tagObjectSha} workflowRunId=${provenance.workflowRunId} keys=${JSON.stringify(Object.keys(provenance.assets).sort())}`);
           const dmgName = `Cull_${process.env.VERSION}_aarch64.dmg`;
           const expectedAssets = [dmgName, 'Cull_aarch64.app.tar.gz', 'Cull_aarch64.app.tar.gz.sig', 'latest.json'].sort();
           const expectedPublic = [...expectedAssets, 'release-provenance.json', 'checksums.txt'].sort();
