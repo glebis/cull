@@ -644,11 +644,36 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(readFileSync(join(fixture, 'docs/COMPATIBILITY.md'), 'utf8'))
       .toContain('Last updated: 1.2.4 (2026-07-11)');
     const statePath = join(fixture, '.release-state/1.2.4.json');
+    // The release record anchors on the merge commit (the pre-prepare origin/main
+    // tip), not on the version-bump commit. The version-bump commit is one commit
+    // ahead of oldRemote and is what `head(fixture)` returns after prepare; the
+    // gate requires origin/main to be an ancestor of the tagged SHA, which only
+    // holds when the record anchors on the merge commit.
     expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({
-      version: '1.2.4', state: 'prepared', releaseCommit: head(fixture),
+      version: '1.2.4', state: 'prepared', releaseCommit: oldRemote,
     });
     expect(statSync(statePath).mode & 0o777).toBe(0o600);
     expect(existsSync(`${statePath}.tmp`)).toBe(false);
+  });
+
+  it('records the pre-prepare origin/main tip as releaseCommit, not the version-bump commit', () => {
+    // Regression: on merge-commit-style release PRs the version-bump commit is
+    // one commit behind the merge commit. Tagging the bump commit made the
+    // release gate fail with STALE_RELEASE_SOURCE. The fix records the merge
+    // commit (== pre-prepare origin/main tip) as releaseCommit so the tag and
+    // gate anchor on the same SHA.
+    const fixture = createReleaseFixture();
+    const oldRemote = execFileSync('git', ['rev-parse', 'origin/main'], {
+      cwd: fixture, encoding: 'utf8',
+    }).trim();
+    run(fixture, 'prepare', prepareArgs(fixture), {
+      CULL_RELEASE_NOW: '2026-07-11T12:00:00.000Z',
+    });
+    const bumpCommit = head(fixture);
+    expect(bumpCommit).not.toBe(oldRemote);
+    const state = JSON.parse(readFileSync(join(fixture, '.release-state/1.2.4.json'), 'utf8'));
+    expect(state.releaseCommit).toBe(oldRemote);
+    expect(state.releaseCommit).not.toBe(bumpCommit);
   });
 
   it('rejects an ordinary checkout and accepts only a linked main release worktree', () => {
