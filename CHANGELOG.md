@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-20
+
+### Fixed
+
+- **Release script: anchor releaseCommit on the merge commit.** scripts/cull-release.mjs previously recorded the version-bump commit as releaseCommit, but the immutable release tag gate requires origin/main to be an ancestor of the tagged SHA. On merge-commit-style release PRs the bump commit is one commit behind the merge commit, so the gate fired with STALE_RELEASE_SOURCE for v0.4.0 and v0.5.0. The script now records the pre-prepare source (= origin/main tip = merge commit) so runTag and the gate anchor on the same SHA. PR #190.
+
 ## [0.5.0] - 2026-08-20
 
 - Recovered a v0.4.0 publish race: STALE_RELEASE_SOURCE fired because v0.4.0 was tagged on the release commit before its PR landed on main.
