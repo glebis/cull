@@ -137,23 +137,27 @@ jobs:
               JSON.stringify(Object.keys(provenance.checks).sort()) !== JSON.stringify(expectedChecks) ||
               expectedChecks.some((name) => provenance.checks[name] !== true)) process.exit(2);
           const refLines = fs.readFileSync(process.env.TAG_REFS, 'utf8').trim().split('\n').filter(Boolean);
+          console.error(`DEBUG refLines.length=${refLines.length} content=${JSON.stringify(refLines)}`);
           if (refLines.length !== 2) process.exit(2);
           const refs = new Map(refLines.map((line) => {
             const [sha, ref] = line.split('\t');
             return [ref, sha];
           }));
+          console.error(`DEBUG refs=${JSON.stringify(Object.fromEntries(refs))}`);
           if (refs.get(`refs/tags/v${process.env.VERSION}`) !== provenance.tagObjectSha ||
               refs.get(`refs/tags/v${process.env.VERSION}^{}`) !== provenance.commit) process.exit(2);
           for (const name of expectedAssets) {
             const provenanceAsset = provenance.assets[name];
             const publicAsset = release.assets.find((asset) => asset.name === name);
             const expectedUrl = `https://github.com/${process.env.REPOSITORY}/releases/download/v${process.env.VERSION}/${name}`;
-            if (!provenanceAsset || !/^[0-9a-f]{64}$/.test(provenanceAsset.sha256) ||
+            const fail = !provenanceAsset || !/^[0-9a-f]{64}$/.test(provenanceAsset.sha256) ||
                 !Number.isSafeInteger(provenanceAsset.size) || provenanceAsset.size < 1 ||
                 !publicAsset || publicAsset.state !== 'uploaded' ||
                 publicAsset.size !== provenanceAsset.size ||
                 publicAsset.digest !== `sha256:${provenanceAsset.sha256}` ||
-                publicAsset.browser_download_url !== expectedUrl) process.exit(2);
+                publicAsset.browser_download_url !== expectedUrl;
+            if (fail) console.error(`DEBUG asset fail ${name}: provSha=${provenanceAsset?.sha256} provSize=${provenanceAsset?.size} pubState=${publicAsset?.state} pubSize=${publicAsset?.size} pubDigest=${publicAsset?.digest} expUrl=${expectedUrl} pubUrl=${publicAsset?.browser_download_url}`);
+            if (fail) process.exit(2);
           }
           const checksumLines = fs.readFileSync(process.env.CHECKSUMS, 'utf8').trim().split('\n');
           if (checksumLines.length !== expectedAssets.length) process.exit(2);
