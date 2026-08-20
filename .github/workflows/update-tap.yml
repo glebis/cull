@@ -350,6 +350,8 @@ jobs:
 
           failure_code=BREW_TAP_FAILED
           brew tap --custom-remote glebis/tap "file://$PWD/tap"
+          failure_code=BREW_TRUST_FAILED
+          brew trust --force glebis/tap
           failure_code=BREW_AUDIT_FAILED
           brew audit --cask cull
           mkdir -p "$RUNNER_TEMP/cull-apps"
