@@ -288,6 +288,7 @@ jobs:
           VERSION: ${{ steps.verified.outputs.version }}
           DMG_SHA256: ${{ steps.verified.outputs.dmg_sha256 }}
           CHECKOUT_OUTCOME: ${{ steps.checkout_tap.outcome }}
+          HOMEBREW_DEVELOPER: "1"
         run: |
           set -euo pipefail
           evidence="$RUNNER_TEMP/homebrew-promotion.json"
