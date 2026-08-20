@@ -224,7 +224,7 @@ jobs:
           const validLifecycle =
             (run.status === 'completed' && run.conclusion === 'success') ||
             (run.status === 'in_progress' && (run.conclusion === null || run.conclusion === ''));
-          if (run.id !== provenance.workflowRunId ||
+          if (String(run.id) !== String(provenance.workflowRunId) ||
               run.path !== '.github/workflows/release.yml' ||
               run.repository?.full_name !== 'glebis/cull' ||
               !validLifecycle) process.exit(2);
