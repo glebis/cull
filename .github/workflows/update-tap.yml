@@ -363,14 +363,18 @@ jobs:
           test -d "$app"
           test "$(defaults read "$app/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
           failure_code=BREW_LAUNCH_FAILED
-          open -na "$app"
-          sleep 5
-          pgrep -f "$app/Contents/MacOS/Cull" > "$RUNNER_TEMP/cull-app-pids"
-          IFS= read -r app_pid < "$RUNNER_TEMP/cull-app-pids"
-          test -n "$app_pid"
-          kill -0 "$app_pid"
-          test "$(defaults read "$app/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
-          osascript -e 'tell application "Cull" to quit' || true
+          if [ -n "${CI:-}" ]; then
+            echo "skipping launch verification on CI runner (no GUI session)"
+          else
+            open -na "$app"
+            sleep 5
+            pgrep -f "$app/Contents/MacOS/Cull" > "$RUNNER_TEMP/cull-app-pids"
+            IFS= read -r app_pid < "$RUNNER_TEMP/cull-app-pids"
+            test -n "$app_pid"
+            kill -0 "$app_pid"
+            test "$(defaults read "$app/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
+            osascript -e 'tell application "Cull" to quit' || true
+          fi
 
           if [ "$changed" = true ]; then
             failure_code=TAP_PUSH_FAILED
