@@ -472,6 +472,10 @@ export const sidebarSectionsCollapsed = writable<Set<string>>(new Set());
 // sidebar. Transient by design — a stale filter on launch reads as data loss.
 export const sidebarFilter = writable<string>('');
 
+// Hide sidebar rows with zero images (folders with empty subtrees, empty
+// collections). Persisted: it's a density preference, not a query.
+export const sidebarHideEmpty = writable<boolean>(false);
+
 // Recently used scopes (folders / collections / smart collections), newest
 // first. Persisted: "what was I just working on" must survive a relaunch.
 // Entries are pruned against live lists when browse counts refresh.

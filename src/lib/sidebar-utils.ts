@@ -25,7 +25,11 @@ export interface DisplayFolder {
  * including subfolders".
  */
 export function formatFolderCount(direct: number, subtree: number): string {
-    return direct === subtree ? String(subtree) : `${direct} (${subtree})`;
+    // imageview-1i2k.3: zero counts are noise, not information. An empty
+    // subtree renders nothing; a folder whose images all live deeper shows
+    // the subtree number alone instead of "0 (27)".
+    if (subtree === 0) return '';
+    return direct === subtree || direct === 0 ? String(subtree) : `${direct} (${subtree})`;
 }
 
 export function folderName(path: string): string {
@@ -222,8 +226,10 @@ export function formatImportResult(imported: number, skipped: number, errorCount
     return result;
 }
 
+/** imageview-1i2k.3: a zero count on every row is noise ("too many 0
+ *  values"). Rows render the string as-is, so empty means no badge at all. */
 export function formatSidebarCount(count: number | null | undefined): string {
-    return String(count ?? 0);
+    return count ? String(count) : '';
 }
 
 export type CollectionRow = [string, string, number];

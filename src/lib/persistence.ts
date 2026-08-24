@@ -6,7 +6,7 @@ import {
     lineageLayout, showDetectionBoxes, nsfwMode, embeddingViewState,
     focusedIndex, images,
     pinnedCollection, pinnedCollections,
-    expandedFolders, sidebarSectionsCollapsed, recentScopes,
+    expandedFolders, sidebarSectionsCollapsed, sidebarHideEmpty, recentScopes,
     resetLoupeTransform, setGridThumbnailSize,
     type ViewMode, type LineageLayout, type NsfwMode, type EmbeddingViewState,
 } from './stores';
@@ -45,6 +45,7 @@ export interface PersistedState {
     pinnedCollectionId?: string | null;
     expandedFolders?: string[];
     sidebarSectionsCollapsed?: string[];
+    sidebarHideEmpty?: boolean;
     recentScopes?: RecentScope[];
 }
 
@@ -77,6 +78,7 @@ export function saveAppState(): void {
         pinnedCollectionId: get(pinnedCollection),
         expandedFolders: [...get(expandedFolders)],
         sidebarSectionsCollapsed: [...get(sidebarSectionsCollapsed)],
+        sidebarHideEmpty: get(sidebarHideEmpty),
         recentScopes: get(recentScopes),
     };
     try {
@@ -116,6 +118,7 @@ export function restoreAppStateBeforeImages(): PersistedState | null {
         pinnedCollection.set(state.pinnedCollectionId ?? null);
         expandedFolders.set(new Set(state.expandedFolders ?? []));
         sidebarSectionsCollapsed.set(new Set(state.sidebarSectionsCollapsed ?? []));
+        sidebarHideEmpty.set(state.sidebarHideEmpty ?? false);
         recentScopes.set(state.recentScopes ?? []);
         return state;
     } catch {

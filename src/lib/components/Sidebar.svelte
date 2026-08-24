@@ -2,7 +2,7 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen, exportFolderSmartCollection } from '$lib/stores';
+    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, sidebarHideEmpty, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen, exportFolderSmartCollection } from '$lib/stores';
     import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, renameFolder as apiRenameFolder, listCollections, createCollection, createCollectionWithImages, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, updateSmartCollectionApi, deleteSmartCollectionApi, countByDetectedClass, listDetectedClasses, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, FilterNode, ImageWithFile, SmartCollection } from '$lib/api';
@@ -88,6 +88,8 @@
     let displayCollections = $derived(
         buildPinnedCollectionRows($collections, $pinnedCollections)
             .filter(([, name]) => matchesSidebarFilter(name, $sidebarFilter))
+            // imageview-1i2k.3: hide-empty drops zero-count collections.
+            .filter(([, , count]) => !$sidebarHideEmpty || count > 0)
     );
 
     // Section collapse. The store holds the COLLAPSED ids, so a section added
@@ -113,7 +115,12 @@
 
     // The rows actually on screen. Both the render loop and the keyboard
     // handler read this, so arrow keys can never focus a hidden row.
-    let visibleFolders = $derived(visibleFolderRows(displayFolders, $expandedFolders, $sidebarFilter));
+    // imageview-1i2k.3: hide-empty drops folders whose whole subtree is empty
+    // (subtreeCount covers descendants, so a kept parent never strands one).
+    let visibleFolders = $derived(
+        visibleFolderRows(displayFolders, $expandedFolders, $sidebarFilter)
+            .filter(f => !$sidebarHideEmpty || f.subtreeCount > 0)
+    );
     let treeFocusIndex = $state(0);
     // While filtering, the tree auto-reveals matches and their subtrees, so
     // expansion controls are inert and say so rather than looking broken.
@@ -1528,6 +1535,10 @@
         <label class="show-missing-toggle">
             <input type="checkbox" bind:checked={$showMissing} />
             Show missing files
+        </label>
+        <label class="show-missing-toggle">
+            <input type="checkbox" bind:checked={$sidebarHideEmpty} />
+            Hide empty folders &amp; collections
         </label>
         {#if detectedClasses.length > 0}
             <div class="detected-header">DETECTED OBJECTS</div>

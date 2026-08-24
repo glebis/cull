@@ -109,4 +109,16 @@ describe('sidebar audit fixes contract', () => {
         // The toast action stays — the rail replaces the hunt, not the toast
         expect(sidebar).toContain("label: 'View imported'");
     });
+
+    // imageview-1i2k.3 — zero counts on every row are noise (JTBD o10).
+    it('omits zero counts and offers a hide-empty option', () => {
+        // Unit-level behaviour lives in sidebar-utils.test.ts; here we pin
+        // that rows actually use the omitting formatters.
+        expect(sidebar).toContain('formatSidebarCount(count)');
+        expect(sidebar).toContain('formatFolderCount(folder.count, folder.subtreeCount)');
+        // The option exists, is wired to a persisted store, and filters rows
+        expect(sidebar).toContain('bind:checked={$sidebarHideEmpty}');
+        expect(sidebar).toContain('!$sidebarHideEmpty || f.subtreeCount > 0');
+        expect(stores).toContain('sidebarHideEmpty');
+    });
 });
