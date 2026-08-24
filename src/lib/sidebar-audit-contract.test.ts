@@ -132,4 +132,16 @@ describe('sidebar audit fixes contract', () => {
         const sidebarRule = sidebar.match(/\.sidebar\s*\{[^}]*\}/)?.[0] ?? '';
         expect(sidebarRule).toContain('--text-secondary: var(--text-caption)');
     });
+
+    // imageview-1i2k.8 — sub-24px controls (8px twisty, ~19px preset chips)
+    // expand their tap target with a negative-inset pseudo-element instead
+    // of growing visually.
+    it('gives twisty and preset chips a 24px hit-area floor', () => {
+        const twisty = sidebar.match(/\.twisty::after\s*\{[^}]*\}/)?.[0] ?? '';
+        expect(twisty).toContain("content: ''");
+        expect(twisty).toContain('inset: -8px -5px');
+        const preset = sidebar.match(/\.preset-btn::after\s*\{[^}]*\}/)?.[0] ?? '';
+        expect(preset).toContain("content: ''");
+        expect(preset).toContain('inset: -3px 0');
+    });
 });

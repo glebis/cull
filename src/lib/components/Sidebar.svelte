@@ -1883,7 +1883,16 @@
         font-size: 8px;
         line-height: 1;
         padding: 0;
+        position: relative;
         width: 14px;
+    }
+    /* imageview-1i2k.8: the glyph is ~14×8px; the tap target must not be.
+       A negative-inset pseudo-element grows the hit area to the 24px floor
+       without changing the visual size. */
+    .twisty::after {
+        content: '';
+        position: absolute;
+        inset: -8px -5px;
     }
     .twisty:hover {
         color: var(--text);
@@ -1985,6 +1994,13 @@
         color: var(--text-secondary);
         cursor: pointer;
         font-family: inherit;
+        position: relative;
+    }
+    /* imageview-1i2k.8: ~19px-tall chip, 24px-tall tap target. */
+    .preset-btn::after {
+        content: '';
+        position: absolute;
+        inset: -3px 0;
     }
     .preset-btn:hover {
         background: var(--border);
