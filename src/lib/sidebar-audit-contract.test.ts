@@ -121,4 +121,15 @@ describe('sidebar audit fixes contract', () => {
         expect(sidebar).toContain('!$sidebarHideEmpty || f.subtreeCount > 0');
         expect(stores).toContain('sidebarHideEmpty');
     });
+
+    // imageview-1i2k.7 — #7a7fa0 on #0c0c12 is APCA Lc ~40 at the sidebar's
+    // 9-11px caption sizes. The sidebar overrides the token with a
+    // lightness-only raise (Lc ~62); body-size text elsewhere keeps the
+    // WCAG-AA-passing original.
+    it('raises secondary-text contrast at caption sizes', () => {
+        const appCss = readFileSync(join(process.cwd(), 'src/app.css'), 'utf8');
+        expect(appCss).toContain('--text-caption:');
+        const sidebarRule = sidebar.match(/\.sidebar\s*\{[^}]*\}/)?.[0] ?? '';
+        expect(sidebarRule).toContain('--text-secondary: var(--text-caption)');
+    });
 });

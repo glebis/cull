@@ -1728,6 +1728,10 @@
         grid-area: sidebar;
         min-height: 0;
         overflow: hidden;
+        /* imageview-1i2k.7: the sidebar is all captions (≤11px), where
+           --text-secondary fails APCA (~Lc 40 on --surface). Everywhere in
+           the sidebar, secondary text uses the caption-bright variant. */
+        --text-secondary: var(--text-caption);
     }
     .sidebar-scroll {
         flex: 1 1 auto;
