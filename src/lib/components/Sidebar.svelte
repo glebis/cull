@@ -65,7 +65,7 @@
         }
     }
     import SessionSwitcher from './SessionSwitcher.svelte';
-    import { activeCanvas, activeSession, navigateTo, sessions, sessionCanvases, expandedFolders, sidebarSectionsCollapsed, sidebarFilter, recentScopes } from '$lib/stores';
+    import { activeCanvas, activeSession, navigateTo, sessions, sessionCanvases, expandedFolders, sidebarSectionsCollapsed, sidebarFilter, pendingGridSearch, recentScopes } from '$lib/stores';
     import { createCanvas, deleteCanvas, addToCollection, listImagesByFolder, type Canvas } from '$lib/api';
     import { reconcileRenamedCanvas, reconcileRenamedSession, renamedFolderPath } from '$lib/folder-rename-state';
     import { withCanvasPathMigrationBarrier } from '$lib/canvas-save-coordinator';
@@ -1029,6 +1029,26 @@
 
     let detectedClasses = $state<[string, number][]>([]);
 
+    // imageview-1i2k.2: the filter is the sidebar's one search — it narrows
+    // every scope list, including the ones it used to skip silently.
+    // Canvases: only the active session's are loaded (listCanvases is
+    // per-session), so matches cover that set.
+    let visibleDetectedClasses = $derived(
+        detectedClasses.filter(([cls]) => matchesSidebarFilter(cls, $sidebarFilter))
+    );
+    let matchingCanvases = $derived(
+        filterActive ? $sessionCanvases.filter(c => matchesSidebarFilter(c.name, $sidebarFilter)) : []
+    );
+
+    // Enter promotes the scope filter to a grid search: the same text runs
+    // through the CommandBar NL parser, which applies it to the grid.
+    function promoteFilterToGrid() {
+        const query = get(sidebarFilter).trim();
+        if (!query) return;
+        pendingGridSearch.set(query);
+        navigateTo('grid');
+    }
+
     function handleDetectedClassesChanged() { void loadDetectedClasses(); }
 
     async function loadDetectedClasses(includeRejected = $showRejected) {
@@ -1291,12 +1311,33 @@
         <input
             type="search"
             class="sidebar-filter-input"
-            placeholder="Filter folders &amp; collections"
-            aria-label="Filter folders and collections"
+            placeholder="Filter scopes — Enter searches images"
+            aria-label="Filter sidebar scopes; press Enter to search images"
             bind:value={$sidebarFilter}
-            onkeydown={(e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); sidebarFilter.set(''); } }}
+            onkeydown={(e: KeyboardEvent) => {
+                if (e.key === 'Escape') { e.stopPropagation(); sidebarFilter.set(''); }
+                // imageview-1i2k.2: one adaptive search — Enter hands the
+                // scope query to the grid (CommandBar NL parser).
+                if (e.key === 'Enter') promoteFilterToGrid();
+            }}
         />
     </div>
+
+    {#if matchingCanvases.length > 0}
+    <div class="section">
+        <div class="section-header">CANVASES</div>
+        {#each matchingCanvases as canvas (canvas.id)}
+            <button
+                class="section-item"
+                class:active={$activeCanvas?.id === canvas.id}
+                onclick={() => selectCanvas(canvas)}
+            >
+                <span class="item-label">{canvas.name}</span>
+                <span class="scope-kind">Canvas</span>
+            </button>
+        {/each}
+    </div>
+    {/if}
 
     {#if recentScopeRows.length > 0}
     <div class="section recent-rail">
@@ -1540,9 +1581,9 @@
             <input type="checkbox" bind:checked={$sidebarHideEmpty} />
             Hide empty folders &amp; collections
         </label>
-        {#if detectedClasses.length > 0}
+        {#if visibleDetectedClasses.length > 0}
             <div class="detected-header">DETECTED OBJECTS</div>
-            {#each detectedClasses as [cls, count]}
+            {#each visibleDetectedClasses as [cls, count]}
                 <button
                     class="section-item detected-class"
                     class:active={$activeDetectedClass === cls}
@@ -2060,7 +2101,7 @@
     .recent-rail {
         padding-bottom: 0;
     }
-    .recent-scope .scope-kind {
+    .section-item .scope-kind {
         color: var(--text-secondary);
         font-size: 11px;
         margin-left: auto;

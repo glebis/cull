@@ -7,6 +7,7 @@ const sessionSwitcher = readFileSync(join(process.cwd(), 'src/lib/components/Ses
 const page = readFileSync(join(process.cwd(), 'src/routes/+page.svelte'), 'utf8');
 const stores = readFileSync(join(process.cwd(), 'src/lib/stores.ts'), 'utf8');
 const palette = readFileSync(join(process.cwd(), 'src/lib/command-palette.ts'), 'utf8');
+const commandBar = readFileSync(join(process.cwd(), 'src/lib/components/CommandBar.svelte'), 'utf8');
 
 describe('sidebar audit fixes contract', () => {
     it('renders errors in error styling, not success green (H1)', () => {
@@ -143,5 +144,20 @@ describe('sidebar audit fixes contract', () => {
         const preset = sidebar.match(/\.preset-btn::after\s*\{[^}]*\}/)?.[0] ?? '';
         expect(preset).toContain("content: ''");
         expect(preset).toContain('inset: -3px 0');
+    });
+
+    // imageview-1i2k.2 — one adaptive search: the sidebar filter covers every
+    // scope list (detected classes and canvases were silently excluded), and
+    // Enter promotes the query to a grid search through the CommandBar.
+    it('sidebar filter covers detected classes and canvases; Enter promotes to grid', () => {
+        expect(sidebar).toContain('visibleDetectedClasses');
+        expect(sidebar).toContain('matchingCanvases');
+        expect(sidebar).toContain('promoteFilterToGrid');
+        expect(sidebar).toContain('pendingGridSearch.set(query)');
+        // The store (not an event) carries the query because the CommandBar
+        // only mounts in grid view; it consumes and clears it.
+        expect(commandBar).toContain('$pendingGridSearch');
+        expect(commandBar).toContain('pendingGridSearch.set(null)');
+        expect(stores).toContain('pendingGridSearch');
     });
 });

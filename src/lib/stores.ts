@@ -476,6 +476,12 @@ export const sidebarFilter = writable<string>('');
 // collections). Persisted: it's a density preference, not a query.
 export const sidebarHideEmpty = writable<boolean>(false);
 
+// imageview-1i2k.2: Enter in the sidebar scope filter hands the query to the
+// CommandBar (grid search). A store, not an event, because the CommandBar is
+// only mounted in grid view — the query must survive the view switch.
+// Transient: consumed (set back to null) by the CommandBar on receipt.
+export const pendingGridSearch = writable<string | null>(null);
+
 // Recently used scopes (folders / collections / smart collections), newest
 // first. Persisted: "what was I just working on" must survive a relaunch.
 // Entries are pruned against live lists when browse counts refresh.
