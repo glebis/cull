@@ -93,4 +93,20 @@ describe('sidebar audit fixes contract', () => {
         expect(sidebar).toContain('<span aria-hidden="true">+</span>');
         expect(sidebar).not.toContain('footer-secondary-actions');
     });
+
+    // imageview-1i2k.1 — post-import findability (JTBD o6, opp 11). The toast
+    // expires in 8s; the rail must not.
+    it('keeps the just-imported folder visible after the toast expires (recency rail)', () => {
+        expect(sidebar).toContain('RECENT');
+        expect(sidebar).toContain('recent-scope');
+        expect(sidebar).toContain('just-imported');
+        expect(sidebar).toContain('fresh: true');
+        expect(sidebar).toContain('revealImportedFolderInTree');
+        expect(sidebar).toContain('ancestorFolderPaths');
+        // Recording happens on real selections and imports, persisted via stores
+        expect(sidebar).toContain('recordRecentScope');
+        expect(stores).toContain('recentScopes');
+        // The toast action stays — the rail replaces the hunt, not the toast
+        expect(sidebar).toContain("label: 'View imported'");
+    });
 });

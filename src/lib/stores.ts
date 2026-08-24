@@ -472,6 +472,11 @@ export const sidebarSectionsCollapsed = writable<Set<string>>(new Set());
 // sidebar. Transient by design — a stale filter on launch reads as data loss.
 export const sidebarFilter = writable<string>('');
 
+// Recently used scopes (folders / collections / smart collections), newest
+// first. Persisted: "what was I just working on" must survive a relaunch.
+// Entries are pruned against live lists when browse counts refresh.
+export const recentScopes = writable<import('./sidebar-utils').RecentScope[]>([]);
+
 // Lineage tab layout preference
 export type LineageLayout = 'timeline' | 'comparison';
 export const lineageLayout = writable<LineageLayout>('timeline');

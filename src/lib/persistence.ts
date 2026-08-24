@@ -6,10 +6,11 @@ import {
     lineageLayout, showDetectionBoxes, nsfwMode, embeddingViewState,
     focusedIndex, images,
     pinnedCollection, pinnedCollections,
-    expandedFolders, sidebarSectionsCollapsed,
+    expandedFolders, sidebarSectionsCollapsed, recentScopes,
     resetLoupeTransform, setGridThumbnailSize,
     type ViewMode, type LineageLayout, type NsfwMode, type EmbeddingViewState,
 } from './stores';
+import type { RecentScope } from './sidebar-utils';
 
 const STORAGE_KEY = 'cull-app-state';
 const SCHEMA_VERSION = 1;
@@ -44,6 +45,7 @@ export interface PersistedState {
     pinnedCollectionId?: string | null;
     expandedFolders?: string[];
     sidebarSectionsCollapsed?: string[];
+    recentScopes?: RecentScope[];
 }
 
 export function saveAppState(): void {
@@ -75,6 +77,7 @@ export function saveAppState(): void {
         pinnedCollectionId: get(pinnedCollection),
         expandedFolders: [...get(expandedFolders)],
         sidebarSectionsCollapsed: [...get(sidebarSectionsCollapsed)],
+        recentScopes: get(recentScopes),
     };
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -113,6 +116,7 @@ export function restoreAppStateBeforeImages(): PersistedState | null {
         pinnedCollection.set(state.pinnedCollectionId ?? null);
         expandedFolders.set(new Set(state.expandedFolders ?? []));
         sidebarSectionsCollapsed.set(new Set(state.sidebarSectionsCollapsed ?? []));
+        recentScopes.set(state.recentScopes ?? []);
         return state;
     } catch {
         return null;

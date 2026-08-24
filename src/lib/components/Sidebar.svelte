@@ -53,7 +53,7 @@
         clipboardMonitorStatus.set(status);
     }
 
-    import { buildDisplayFolders, buildPinnedCollectionRows, formatSidebarCount, formatFolderCount, visibleFolderRows, matchesSidebarFilter, prunePinnedIds, type CollectionRow } from '$lib/sidebar-utils';
+    import { buildDisplayFolders, buildPinnedCollectionRows, formatSidebarCount, formatFolderCount, visibleFolderRows, matchesSidebarFilter, prunePinnedIds, recordRecentScope, markRecentScopeVisited, pruneRecentScopes, ancestorFolderPaths, kindLabel, type CollectionRow, type RecentScope } from '$lib/sidebar-utils';
 
     function prunePinsToExistingCollections(rows: CollectionRow[]) {
         const kept = prunePinnedIds(get(pinnedCollections), rows);
@@ -65,7 +65,7 @@
         }
     }
     import SessionSwitcher from './SessionSwitcher.svelte';
-    import { activeCanvas, activeSession, navigateTo, sessions, sessionCanvases, expandedFolders, sidebarSectionsCollapsed, sidebarFilter } from '$lib/stores';
+    import { activeCanvas, activeSession, navigateTo, sessions, sessionCanvases, expandedFolders, sidebarSectionsCollapsed, sidebarFilter, recentScopes } from '$lib/stores';
     import { createCanvas, deleteCanvas, addToCollection, listImagesByFolder, type Canvas } from '$lib/api';
     import { reconcileRenamedCanvas, reconcileRenamedSession, renamedFolderPath } from '$lib/folder-rename-state';
     import { withCanvasPathMigrationBarrier } from '$lib/canvas-save-coordinator';
@@ -231,6 +231,45 @@
     let clipboardCollapsed = $derived(
         isSectionCollapsed($sidebarSectionsCollapsed, 'clipboard') && !clipboardStatus?.running
     );
+
+    // The RECENT rail: rows re-resolve their names from the live lists at
+    // render (renames follow automatically), and dead targets are pruned when
+    // browse counts refresh.
+    let recentScopeRows = $derived(
+        $recentScopes.map(s => {
+            if (s.kind === 'folder') return { ...s, name: folderName(s.id) };
+            if (s.kind === 'collection') {
+                return { ...s, name: $collections.find(([id]) => id === s.id)?.[1] ?? s.name };
+            }
+            return { ...s, name: $smartCollections.find(sc => sc.id === s.id)?.name ?? s.name };
+        })
+    );
+
+    async function openRecentScope(scopeRow: RecentScope) {
+        if (scopeRow.kind === 'folder') { await selectFolder(scopeRow.id); return; }
+        if (scopeRow.kind === 'collection') { await selectCollection(scopeRow.id); return; }
+        const sc = get(smartCollections).find(item => item.id === scopeRow.id);
+        if (sc) await selectSmartCollection(sc);
+    }
+
+    // The tree is alphabetical, so a fresh import lands wherever its name
+    // falls — expand its ancestor rows and scroll it into view instead of
+    // trusting persistence-as-punishment.
+    function revealImportedFolderInTree(path: string) {
+        const rows = buildDisplayFolders(get(folders));
+        const nextExpanded = new Set([...get(expandedFolders), ...ancestorFolderPaths(rows, path)]);
+        expandedFolders.set(nextExpanded);
+        foldersExpanded = true;
+        const idx = visibleFolderRows(rows, nextExpanded, get(sidebarFilter)).findIndex(r => r.fullPath === path);
+        if (idx < 0) return;
+        treeFocusIndex = idx;
+        queueMicrotask(() => {
+            const reduce = typeof window !== 'undefined'
+                && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            const el = document.querySelector<HTMLElement>(`[data-tree-row="${idx}"]`);
+            el?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
+        });
+    }
 
     // Smart collections seed ~22 presets. Hide empty built-ins to keep the list
     // proportional to the library, but retain user collections so their rules
@@ -402,6 +441,12 @@
             collections.set(nextCollections);
             prunePinsToExistingCollections(nextCollections);
             smartCollections.set(nextSmartCollections);
+            recentScopes.set(pruneRecentScopes(
+                get(recentScopes),
+                new Set(nextFolders.map(([p]) => p)),
+                new Set(nextCollections.map(([id]) => id)),
+                new Set(nextSmartCollections.map(sc => sc.id)),
+            ));
             detectedClasses = nextDetectedClasses;
             detectedClassesStore.set(nextDetectedClasses);
         } catch (e) {
@@ -557,6 +602,7 @@
         activeFolder.set(null);
         activeCollection.set(null);
         activeDetectedClass.set(null);
+        recentScopes.update(list => recordRecentScope(list, { kind: 'smart', id: sc.id, name: sc.name, ts: Date.now() }));
         if (sc.filter_json) {
             try {
                 await loadImagesForCurrentScope();
@@ -574,6 +620,9 @@
         activeCollection.set(null);
         activeSmartCollection.set(null);
         activeDetectedClass.set(null);
+        if (folder) {
+            recentScopes.update(list => recordRecentScope(list, { kind: 'folder', id: folder, name: folderName(folder), ts: Date.now() }));
+        }
         try {
             await loadImagesForCurrentScope();
         } catch (e) {
@@ -589,6 +638,8 @@
         activeFolder.set(null);
         activeSmartCollection.set(null);
         activeDetectedClass.set(null);
+        const name = get(collections).find(([id]) => id === collectionId)?.[1] ?? 'Collection';
+        recentScopes.update(list => recordRecentScope(list, { kind: 'collection', id: collectionId, name, ts: Date.now() }));
         try {
             await loadImagesForCurrentScope();
         } catch (e) {
@@ -938,18 +989,28 @@
             }
             setLastResult(summary, result.errors.length > 0 ? 'error' : 'success');
             const importedFolder = selected as string;
+            recentScopes.update(list => recordRecentScope(list, {
+                kind: 'folder',
+                id: importedFolder,
+                // the local const above already holds the basename
+                name: folderName,
+                ts: Date.now(),
+                fresh: true,
+            }));
             showToast(`Imported "${folderName}"`, {
                 detail: summary,
                 type: 'success',
                 duration: 8000,
                 // "Where did what I just imported go?" is the question every
                 // import ends on; answer it in the toast instead of making the
-                // user hunt for the folder in the tree.
+                // user hunt for the folder in the tree. The RECENT rail above
+                // keeps the same answer after the toast expires.
                 actions: result.imported > 0
                     ? [{ label: 'View imported', onclick: () => { selectFolder(importedFolder); } }]
                     : undefined,
             });
             await refreshImages();
+            revealImportedFolderInTree(importedFolder);
         } catch (e) {
             setLastResult(`Error: ${e}`, 'error');
             showToast('Import failed', { detail: String(e), type: 'error', duration: 10000 });
@@ -1229,6 +1290,30 @@
             onkeydown={(e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); sidebarFilter.set(''); } }}
         />
     </div>
+
+    {#if recentScopeRows.length > 0}
+    <div class="section recent-rail">
+        <div class="section-header">RECENT</div>
+        {#each recentScopeRows as scopeRow (scopeRow.kind + ':' + scopeRow.id)}
+            <button
+                class="section-item recent-scope"
+                class:fresh={scopeRow.fresh}
+                onclick={() => openRecentScope(scopeRow)}
+                title={scopeRow.kind === 'folder' ? scopeRow.id : scopeRow.name}
+                aria-label={scopeRow.fresh
+                    ? `${scopeRow.name}, ${kindLabel(scopeRow.kind)}, just imported`
+                    : `${scopeRow.name}, ${kindLabel(scopeRow.kind)}`}
+            >
+                <span class="item-label">{scopeRow.name}</span>
+                {#if scopeRow.fresh}
+                    <span class="just-imported">new</span>
+                {:else}
+                    <span class="scope-kind">{kindLabel(scopeRow.kind)}</span>
+                {/if}
+            </button>
+        {/each}
+    </div>
+    {/if}
 
     <div class="section">
         <div class="section-header">LIBRARY</div>
@@ -1940,6 +2025,28 @@
         color: var(--text-secondary);
         padding: 4px 8px;
         font-style: italic;
+    }
+    .recent-rail {
+        padding-bottom: 0;
+    }
+    .recent-scope .scope-kind {
+        color: var(--text-secondary);
+        font-size: 11px;
+        margin-left: auto;
+        flex: none;
+    }
+    /* Fresh = imported, not visited yet. A hairline + tint, cleared by the     */
+    /* visit itself — never by a timer, so it can't expire unseen. Deliberately */
+    /* distinct from .active (current scope): this row is a pointer, not state. */
+    .recent-scope.fresh {
+        background: color-mix(in srgb, var(--blue) 6%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 45%, var(--border));
+    }
+    .recent-scope .just-imported {
+        color: var(--blue);
+        flex: none;
+        font-size: 11px;
+        margin-left: auto;
     }
     .sidebar-footer {
         align-items: center;
