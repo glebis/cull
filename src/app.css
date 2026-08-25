@@ -67,6 +67,12 @@
     --orange: #e0af68;
     --purple: #bb9af7;
     --red: #f7768e;
+    /* Color semantics (imageview-1i2k.5) — one meaning per color:
+       --blue   interactive: active selection, focus, links, primary actions
+       --green  positive state: success, live/running
+       --orange active mode / attention (e.g. collect mode)
+       --purple detected-class tag
+       --red    error / destructive */
     --spacing: 8px;
     --radius: 4px;
     /* Overlay stacking scale — use these for anything fixed/floating at

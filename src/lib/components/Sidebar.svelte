@@ -2089,7 +2089,9 @@
     }
     .collect-indicator {
         font-size: 10px;
-        color: var(--green);
+        /* imageview-1i2k.5: green means positive state (success, live). An
+           active collect mode is not a success — orange marks modes. */
+        color: var(--orange);
         padding: 2px 8px 4px;
         font-style: italic;
     }

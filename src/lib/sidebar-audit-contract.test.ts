@@ -176,4 +176,23 @@ describe('sidebar audit fixes contract', () => {
         // Functional controls keep their glyphs: twisties and media controls
         expect(sidebar).toContain("'▾' : '▸'");
     });
+
+    // imageview-1i2k.5 — one meaning per color: blue=interactive,
+    // green=positive state, orange=active mode, purple=class tag, red=error.
+    it('keeps one meaning per accent color', () => {
+        // Collect mode is a mode, not a success — not green
+        const collect = sidebar.match(/\.collect-indicator\s*\{[^}]*\}/)?.[0] ?? '';
+        expect(collect).toContain('color: var(--orange)');
+        // Green is positive state only: running dot + import success
+        const runningDot = sidebar.match(/\.running-dot\s*\{[^}]*\}/)?.[0] ?? '';
+        expect(runningDot).toContain('background: var(--green)');
+        const importResult = sidebar.match(/\.import-result\s*\{[^}]*\}/)?.[0] ?? '';
+        expect(importResult).toContain('color: var(--green)');
+        // Purple is the detected-class tag
+        const classTag = sidebar.match(/\.class-tag\s*\{[^}]*\}/)?.[0] ?? '';
+        expect(classTag).toContain('color: var(--purple)');
+        // The semantics are documented at the tokens
+        const appCss = readFileSync(join(process.cwd(), 'src/app.css'), 'utf8');
+        expect(appCss).toContain('one meaning per color');
+    });
 });
