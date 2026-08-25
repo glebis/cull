@@ -26,6 +26,9 @@
     let clipboardStatus = $state<ClipboardMonitorStatus | null>(null);
     let clipboardMoving = $state(false);
     let clipboardPublishing = $state(false);
+    // imageview-1i2k.6: footer chip + popover so the monitor is reachable
+    // without scrolling to the bottom section.
+    let clipboardPopoverOpen = $state(false);
     let clipboardPublishResult = $state<ClipboardPublishResult | null>(null);
     let collectionPreview = $state<{
         collectionId: string;
@@ -888,6 +891,34 @@
         }
     }
 
+    // The footer chip opens quick controls; "Details" reveals the full
+    // section (which stays the place for folder/publish management).
+    function revealClipboardSection() {
+        sidebarSectionsCollapsed.update(set => {
+            const next = new Set(set);
+            next.delete('clipboard');
+            return next;
+        });
+        clipboardPopoverOpen = false;
+        queueMicrotask(() => {
+            const reduce = typeof window !== 'undefined'
+                && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            document.querySelector('.clipboard-monitor')
+                ?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
+        });
+    }
+
+    $effect(() => {
+        if (!clipboardPopoverOpen) return;
+        const onPointerDown = (e: PointerEvent) => {
+            if (!(e.target as HTMLElement).closest('.clipboard-chip, .clipboard-popover')) {
+                clipboardPopoverOpen = false;
+            }
+        };
+        window.addEventListener('pointerdown', onPointerDown);
+        return () => window.removeEventListener('pointerdown', onPointerDown);
+    });
+
     async function handleMoveClipboardCaptureFolder() {
         if (clipboardMoving) return;
         const selected = await open({ directory: true, multiple: false });
@@ -1722,6 +1753,42 @@
                 {importTotal > 0 ? `Importing ${importCurrent} of ${importTotal}` : 'Scanning folder'}
             </div>
         {/if}
+        {#if clipboardPopoverOpen}
+            <div
+                class="clipboard-popover"
+                role="dialog"
+                aria-label="Clipboard monitor"
+                tabindex="-1"
+                onkeydown={(e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); clipboardPopoverOpen = false; } }}
+            >
+                <div class="clipboard-popover-status">
+                    <span class="chip-dot" class:live={clipboardStatus?.running}></span>
+                    {clipboardStatus?.running ? 'Monitor running' : 'Monitor off'}
+                </div>
+                {#if clipboardStatus?.collection_name}
+                    <div class="section-meta">Collection: {clipboardStatus.collection_name} · {clipboardStatus.captured_count}</div>
+                {/if}
+                <button
+                    class="section-item compact"
+                    onclick={handleToggleClipboardMonitor}
+                    disabled={clipboardMoving || clipboardPublishing}
+                    aria-pressed={clipboardStatus?.running ?? false}
+                >
+                    {clipboardStatus?.running ? 'Stop Monitor' : 'Monitor Clipboard'}
+                </button>
+                <button class="section-item compact" onclick={revealClipboardSection}>Details</button>
+            </div>
+        {/if}
+        <button
+            class="clipboard-chip"
+            class:running={clipboardStatus?.running}
+            onclick={() => clipboardPopoverOpen = !clipboardPopoverOpen}
+            aria-expanded={clipboardPopoverOpen}
+            title="Clipboard monitor"
+        >
+            <span class="chip-dot" aria-hidden="true"></span>
+            Clipboard
+        </button>
         <button
             class="import-btn"
             onclick={handleImportFolder}
@@ -2132,6 +2199,62 @@
         border-top: 1px solid var(--border);
         background: var(--surface);
         flex: 0 0 auto;
+        position: relative;
+    }
+    /* imageview-1i2k.6: persistent clipboard chip + popover — the monitor no
+       longer lives only at the bottom of the scroll area. */
+    .clipboard-chip {
+        align-items: center;
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text-secondary);
+        cursor: pointer;
+        display: flex;
+        font-family: inherit;
+        font-size: 11px;
+        gap: 6px;
+        margin-bottom: 6px;
+        padding: 4px 8px;
+        width: 100%;
+    }
+    .clipboard-chip:hover,
+    .clipboard-chip:focus-visible {
+        color: var(--text);
+        border-color: var(--text-secondary);
+    }
+    .chip-dot {
+        background: var(--text-secondary);
+        border-radius: 50%;
+        flex: none;
+        height: 6px;
+        width: 6px;
+    }
+    .clipboard-chip.running .chip-dot,
+    .chip-dot.live {
+        background: var(--green);
+    }
+    .clipboard-popover {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        bottom: calc(100% - 1px);
+        box-shadow: 0 8px 24px color-mix(in srgb, var(--bg) 80%, transparent);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        left: var(--spacing);
+        padding: 8px;
+        position: absolute;
+        right: var(--spacing);
+        z-index: var(--z-panel);
+    }
+    .clipboard-popover-status {
+        align-items: center;
+        color: var(--text);
+        display: flex;
+        font-size: 11px;
+        gap: 6px;
     }
     .import-result {
         font-size: 10px;

@@ -195,4 +195,18 @@ describe('sidebar audit fixes contract', () => {
         const appCss = readFileSync(join(process.cwd(), 'src/app.css'), 'utf8');
         expect(appCss).toContain('one meaning per color');
     });
+
+    // imageview-1i2k.6 — clipboard monitor promotion (guardrail: don't lose
+    // it, make it easier). A persistent footer chip shows live status and
+    // opens quick controls; the bottom section stays for detail.
+    it('promotes the clipboard monitor to a persistent footer chip', () => {
+        expect(sidebar).toContain('class="clipboard-chip"');
+        expect(sidebar).toContain('clipboardPopoverOpen');
+        expect(sidebar).toContain('class="clipboard-popover"');
+        // The chip reflects live status and opens quick controls
+        expect(sidebar).toContain('class:running={clipboardStatus?.running}');
+        expect(sidebar).toContain('revealClipboardSection');
+        // The detail section stays
+        expect(sidebar).toContain('Clipboard Monitor');
+    });
 });
