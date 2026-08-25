@@ -160,4 +160,20 @@ describe('sidebar audit fixes contract', () => {
         expect(commandBar).toContain('pendingGridSearch.set(null)');
         expect(stores).toContain('pendingGridSearch');
     });
+
+    // imageview-1i2k.4 — one geometric language, no emoji dingbats. The five
+    // row-icon dialects (◼ ⏰ ◇ ★ + text-glyph ●) are gone; state markers
+    // (pin, running dot) are CSS-drawn shapes.
+    it('uses one geometric icon language with no emoji row glyphs', () => {
+        for (const entity of ['&#9632;', '&#9200;', '&#9671;', '&#9733;']) {
+            expect(sidebar).not.toContain(entity);
+        }
+        expect(sidebar).not.toContain('>●</span>');
+        expect(sidebar).not.toContain('generated-pin::before');
+        expect(sidebar).not.toContain('generated-pin::after');
+        expect(sidebar).toContain('.pin-btn.active .generated-pin');
+        expect(sidebar).toContain('border-radius: 50%');
+        // Functional controls keep their glyphs: twisties and media controls
+        expect(sidebar).toContain("'▾' : '▸'");
+    });
 });

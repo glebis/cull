@@ -1371,7 +1371,6 @@
             onclick={() => selectFolder(null)}
             aria-current={allImagesActive ? 'true' : undefined}
         >
-            <span class="icon">&#9632;</span>
             <span class="item-label">All Images</span>
             <span class="count">{formatSidebarCount($totalCount)}</span>
         </button>
@@ -1384,7 +1383,6 @@
                 aria-current={$activeSmartCollection?.id === recentImportsCollection.id ? 'true' : undefined}
                 title="Images imported in the last 7 days"
             >
-                <span class="icon">&#9200;</span>
                 <span class="item-label">Recent Imports</span>
                 <span class="count">{formatSidebarCount(recentImportsCollection.image_count)}</span>
             </button>
@@ -1504,7 +1502,6 @@
                         onkeydown={(event) => { if (isContextMenuKey(event)) openCollectionContextMenu(event, id, name, count); }}
                         aria-current={$activeCollection === id ? 'true' : undefined}
                     >
-                        <span class="icon">&#9671;</span>
                         <span class="item-label">{name}</span>
                         <span class="count">{formatSidebarCount(count)}</span>
                     </button>
@@ -1550,7 +1547,6 @@
                     oncontextmenu={(event) => openSmartCollectionContextMenu(event, sc)}
                     onkeydown={(event) => { if (isContextMenuKey(event)) openSmartCollectionContextMenu(event, sc); }}
                     aria-current={$activeSmartCollection?.id === sc.id ? 'true' : undefined}>
-                    <span class="icon">&#9733;</span>
                     <span class="item-label">{sc.name}</span>
                     <span class="count">{formatSidebarCount(sc.image_count)}</span>
                 </button>
@@ -1606,7 +1602,7 @@
             <span class="toggle-arrow">{clipboardCollapsed ? '▸' : '▾'}</span>
             <span class="folders-toggle-label">Clipboard Monitor</span>
             {#if clipboardStatus?.running}
-                <span class="count running-dot" title="Monitor running">●</span>
+                <span class="count running-dot" title="Monitor running" role="img" aria-label="Monitor running"></span>
             {/if}
         </button>
         {#if !clipboardCollapsed}
@@ -1942,9 +1938,14 @@
         flex: none;
         width: 14px;
     }
+    /* imageview-1i2k.4: CSS-drawn dot, same geometric family as the pin —
+       no text-glyph dialects. */
     .running-dot {
-        color: var(--green);
-        font-size: 9px;
+        align-self: center;
+        background: var(--green);
+        border-radius: 50%;
+        height: 6px;
+        width: 6px;
     }
     .folder-row {
         display: flex;
@@ -2222,33 +2223,19 @@
     .pin-btn.active {
         color: var(--text);
     }
+    /* imageview-1i2k.4: one geometric language. The pin was a two-piece
+       pushpin (dialect of its own); now a single rotated square — outline
+       when unpinned, filled when pinned. */
     .generated-pin {
-        display: inline-block;
-        height: 13px;
-        position: relative;
-        transform: rotate(35deg);
-        width: 10px;
-    }
-    .generated-pin::before {
-        background: color-mix(in srgb, currentColor 12%, transparent);
         border: 1px solid currentColor;
         border-radius: 1px;
-        content: '';
-        height: 6px;
-        left: 1px;
-        position: absolute;
-        top: 0;
-        width: 7px;
+        display: inline-block;
+        height: 8px;
+        transform: rotate(45deg);
+        width: 8px;
     }
-    .generated-pin::after {
+    .pin-btn.active .generated-pin {
         background: currentColor;
-        box-shadow: 0 7px 0 -0.5px currentColor;
-        content: '';
-        height: 9px;
-        left: 5px;
-        position: absolute;
-        top: 6px;
-        width: 1px;
     }
     .collection-preview-popover {
         background: var(--surface);
