@@ -209,4 +209,16 @@ describe('sidebar audit fixes contract', () => {
         // The detail section stays
         expect(sidebar).toContain('Clipboard Monitor');
     });
+
+    // imageview-1i2k.9 — empty states teach the next action instead of
+    // showing a bare label or vanishing.
+    it('empty states teach the next action', () => {
+        expect(sidebar).toContain('No collections yet — the + above creates one.');
+        // The Smart section no longer vanishes when every collection is
+        // empty; it renders an actionable empty state.
+        expect(sidebar).toContain('{#if $smartCollections.length > 0}');
+        expect(sidebar).toContain('Save Collection in the search bar');
+        // The .3 hide-empty option gets its own honest empty state
+        expect(sidebar).toContain('hidden while "Hide empty" is on');
+    });
 });

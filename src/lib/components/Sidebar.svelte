@@ -1511,7 +1511,9 @@
             <div class="collect-indicator">Collecting into: {$collections.find(c => c[0] === $collectModeTarget)?.[1] ?? '...'}</div>
         {/if}
         {#if $collections.length === 0}
-            <div class="section-empty">No collections yet</div>
+            <div class="section-empty">No collections yet — the + above creates one.</div>
+        {:else if displayCollections.length === 0}
+            <div class="section-empty">All collections are empty — hidden while "Hide empty" is on.</div>
         {:else}
             {#each displayCollections as [id, name, count]}
                 {@const pinned = $pinnedCollections.includes(id)}
@@ -1558,7 +1560,7 @@
         {/if}
     </div>
 
-    {#if visibleSmartCollections.length > 0}
+    {#if $smartCollections.length > 0}
     {@const smartCollapsed = isSectionCollapsed($sidebarSectionsCollapsed, 'smart')}
     <div class="section">
         <button
@@ -1582,6 +1584,11 @@
                     <span class="count">{formatSidebarCount(sc.image_count)}</span>
                 </button>
             {/each}
+            {#if visibleSmartCollections.length === 0}
+                <!-- imageview-1i2k.9: teach the next action instead of
+                     vanishing — empty built-ins hide, the section stays. -->
+                <div class="section-empty">No smart collections match yet — apply a grid filter, then Save Collection in the search bar.</div>
+            {/if}
         {/if}
     </div>
     {/if}
