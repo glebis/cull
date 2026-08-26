@@ -24,6 +24,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Sidebar: 24px hit-area floor for twisty and preset chips.** Negative-inset pseudo-element on the button, not the input. (`imageview-1i2k.8`)
 - **Sidebar: caption-size secondary text contrast.** `--text-secondary` raised to `#c5cbef` (OKLCH lightness-only) to clear APCA Lc at 9–10px caps. (`imageview-1i2k.7`)
 
+### Added
+
+- **Local install helper (`scripts/install-local-build.sh`).** Refuses to overwrite `/Applications/Cull.app` while any Cull process is holding the executable open (macOS silently preserves the executable pages of a running Mach-O binary on overwrite). Trashes the old copy before installing so a partial install can never leave a hybrid old+new bundle on disk. Verifies the post-install SHA matches the freshly built artifact. Fixes the silent stale-binary bug where a copied-over Cull ran with the previous session's UI.
+- **Release gate: per-version manual-smoke record required.** `release:cull tag` now blocks with `SMOKE_RECORD_MISSING`, `SMOKE_RECORD_STALE`, `SMOKE_BEAD_MISSING`, or `SMOKE_BEAD_OPEN` unless `docs/releases/<version>-smoke.md` exists with today's date and a binary SHA that matches `target/release/bundle/macos/Cull.app/Contents/MacOS/cull`, and a beads issue with `external_ref=cull-release-<version>-smoke` is closed. The smoke record is the human-driven step that prevents an automated session from tagging and shipping without a real install + manual verification.
+
 ## [0.5.1] - 2026-08-20
 
 ### Fixed

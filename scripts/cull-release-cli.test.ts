@@ -130,10 +130,17 @@ function run(
   args: string[] = [],
   env: NodeJS.ProcessEnv = {},
 ) {
+  // Tag and state-transition commands require a per-version manual-smoke
+  // record + closed bead in production. In tests, allow them by default
+  // unless the caller explicitly injects smoke state via env.
+  const requiresSmoke = command === 'tag' || (command === 'state' && args[0] === 'transition');
+  const smokeDefault = requiresSmoke && !Object.keys(env).some((k) => k.startsWith('CULL_RELEASE_TEST_SMOKE_'))
+    ? { CULL_RELEASE_TEST_SMOKE_OK: '1' }
+    : {};
   const execution = spawnSync(process.execPath, [cli, command, ...args, '--json'], {
     cwd: fixture,
     encoding: 'utf8',
-    env: { ...process.env, CULL_RELEASE_TEST_MODE: '1', ...env },
+    env: { ...process.env, CULL_RELEASE_TEST_MODE: '1', ...smokeDefault, ...env },
   });
   return { execution, output: JSON.parse(execution.stdout) };
 }
@@ -1704,5 +1711,46 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(invalidJson.execution.status).toBe(2);
     expect(invalidJson.output.code).toBe('INPUT_INVALID');
     expect(invalidJson.output.message).toContain('Invalid --evidence-json');
+  });
+
+  it('blocks tag when the per-version manual-smoke record is missing', () => {
+    const fixture = createReleaseFixture();
+    run(fixture, 'prepare', prepareArgs(fixture));
+    const releaseCommit = JSON.parse(readFileSync(join(fixture, '.release-state/1.2.4.json'), 'utf8')).releaseCommit;
+    const tagged = run(fixture, 'tag', [
+      '--version', '1.2.4', '--expected-source', releaseCommit,
+    ], { CULL_RELEASE_TEST_SMOKE_MISSING: '1' });
+    expect(tagged.execution.status).toBe(3);
+    expect(tagged.output).toMatchObject({
+      code: 'BLOCKED',
+      details: { blockers: [{ code: 'SMOKE_RECORD_MISSING' }] },
+    });
+  });
+
+  it('blocks tag when the smoke record binary SHA no longer matches the build', () => {
+    const fixture = createReleaseFixture();
+    run(fixture, 'prepare', prepareArgs(fixture));
+    const releaseCommit = JSON.parse(readFileSync(join(fixture, '.release-state/1.2.4.json'), 'utf8')).releaseCommit;
+    const tagged = run(fixture, 'tag', [
+      '--version', '1.2.4', '--expected-source', releaseCommit,
+    ], { CULL_RELEASE_TEST_SMOKE_STALE: '1' });
+    expect(tagged.execution.status).toBe(3);
+    expect(tagged.output).toMatchObject({
+      code: 'BLOCKED',
+      details: { blockers: [{ code: 'SMOKE_RECORD_STALE' }] },
+    });
+  });
+
+  it('accepts tag when the smoke record and bead are present and current', () => {
+    const fixture = createReleaseFixture();
+    run(fixture, 'prepare', prepareArgs(fixture));
+    const releaseCommit = JSON.parse(readFileSync(join(fixture, '.release-state/1.2.4.json'), 'utf8')).releaseCommit;
+    const tagged = run(fixture, 'tag', [
+      '--version', '1.2.4', '--expected-source', releaseCommit,
+    ]);
+    // What matters is that the smoke gate did not block the tag. Other
+    // gates (CONFLICTING_TAG, no-remote-push) may still surface — the
+    // smoke gate is what we are validating here.
+    expect(JSON.stringify(tagged.output)).not.toContain('SMOKE_RECORD');
   });
 });
