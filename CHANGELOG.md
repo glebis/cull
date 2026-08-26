@@ -6,6 +6,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Sidebar: recency rail above the folder tree.** Persistent `Just imported:` chip and last-N scope list above LIBRARY; auto-reveal + highlight until visited. Replaces the 8-second toast. (`imageview-1i2k.1`)
+- **Sidebar: one adaptive search.** The sidebar scope filter now narrows detected classes and the active session's canvases (previously silently excluded). Enter promotes the query to the grid CommandBar. (`imageview-1i2k.2`)
+- **Sidebar: hide zero counts + hide-empty option.** `formatSidebarCount` omits null/zero counts; new persisted option hides folders/collections with empty subtrees. (`imageview-1i2k.3`)
+- **Sidebar: clipboard monitor promotion.** Persistent status chip in the footer strip opens a popover with start/stop, captured count, and a Details link that scrolls to the full clipboard section. (`imageview-1i2k.6`)
+- **Sidebar: empty states teach the next action.** Empty Collections and Smart sections now name the action (`+` creates one; apply a grid filter then Save Collection). Smart section no longer vanishes when empty. (`imageview-1i2k.9`)
+
+### Changed
+
+- **Sidebar: one geometric icon language.** Row-icon glyph dialects (◼/⏰/◇/★) removed in favor of words + counts + right-edge kind labels. Pin is a single rotated CSS square; running indicator is a CSS dot. The ⏰ emoji in Recent Imports is gone. (`imageview-1i2k.4`)
+- **Sidebar: color semantics pinned.** Blue = interactive (active/focus/link/primary); green = positive state (success + live running dot); orange = active mode (collect-indicator moved off green); purple = detected-class tag; red = error. One meaning per accent color. (`imageview-1i2k.5`)
+
+### Fixed
+
+- **Sidebar: 24px hit-area floor for twisty and preset chips.** Negative-inset pseudo-element on the button, not the input. (`imageview-1i2k.8`)
+- **Sidebar: caption-size secondary text contrast.** `--text-secondary` raised to `#c5cbef` (OKLCH lightness-only) to clear APCA Lc at 9–10px caps. (`imageview-1i2k.7`)
+
 ## [0.5.1] - 2026-08-20
 
 ### Fixed
