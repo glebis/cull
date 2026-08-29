@@ -35,6 +35,14 @@ npm run tauri build
 
 ## Import Images
 
+### Browse an SD card or external drive
+
+Connected removable media appears under **Devices** at the top of the sidebar. Select a device, then a folder, to start reviewing directly from that location. Cull creates local thumbnails and remembers ratings, decisions, and collections, but does not copy, move, rename, trash, or delete the originals. Use the toolbar above the grid to switch between **Current folder** and **Including subfolders**; Cull remembers that choice for the device.
+
+When a device is disconnected, Cull keeps the remembered review and cached previews. Reconnect the same volume to resume access to originals. Dropping a folder onto Cull also opens it in browse-in-place mode.
+
+### Add files to the library
+
 Use **File > Open File...** to import one or more images. A single imported image opens in Loupe; multiple imported images stay in the library grid.
 
 Use **File > Open Folder...** to import a folder. Cull scans recursively and switches the active scope to that folder.

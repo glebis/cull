@@ -3,6 +3,7 @@ import {
     activeCollection,
     activeDetectedClass,
     activeFolder,
+    activeReferencedFolder,
     activeSmartCollection,
     importBatchFilter,
     minSizeFilter,
@@ -14,6 +15,7 @@ beforeEach(() => {
     activeCollection.set(null);
     activeDetectedClass.set(null);
     activeFolder.set(null);
+    activeReferencedFolder.set(null);
     activeSmartCollection.set(null);
     importBatchFilter.set(null);
     minSizeFilter.set(0);
@@ -40,6 +42,26 @@ describe('currentLibraryScope', () => {
             include_rejected: true,
         });
         expect(libraryScopeKey(scope)).toBe('folder:/Photos/2026_Trips:1024:with-rejected');
+    });
+
+    it('captures a referenced folder without treating it as an import', () => {
+        activeReferencedFolder.set({
+            source_id: 'source-1',
+            source_name: 'EOS_DIGITAL',
+            relative_path: 'DCIM/100CANON',
+            recursive: false,
+        });
+        const scope = currentLibraryScope();
+        expect(scope).toEqual({
+            type: 'referenced_folder',
+            source_id: 'source-1',
+            relative_path: 'DCIM/100CANON',
+            recursive: false,
+            include_rejected: false,
+        });
+        expect(libraryScopeKey(scope)).toBe(
+            'referenced:source-1:DCIM/100CANON:false:without-rejected',
+        );
     });
 
     it('uses the same precedence as library browsing', () => {

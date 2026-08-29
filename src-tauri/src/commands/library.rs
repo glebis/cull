@@ -181,6 +181,15 @@ fn trash_images_detailed_with(
     let mut results = Vec::new();
 
     for image_id in image_ids {
+        if let Err(error) = state.db.ensure_original_mutation_allowed(image_id) {
+            results.push(TrashImageResult {
+                image_id: image_id.clone(),
+                path: None,
+                status: "protected_original".to_string(),
+                error: Some(error.to_string()),
+            });
+            continue;
+        }
         let id_refs: Vec<&str> = vec![image_id.as_str()];
         let found = state
             .db
@@ -308,6 +317,10 @@ pub async fn delete_images_permanently(
 ) -> Result<u32, String> {
     let mut deleted = 0u32;
     for image_id in &image_ids {
+        state
+            .db
+            .ensure_original_mutation_allowed(image_id)
+            .map_err(|error| error.to_string())?;
         let id_refs: Vec<&str> = vec![image_id.as_str()];
         let found = state
             .db

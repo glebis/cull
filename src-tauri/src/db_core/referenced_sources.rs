@@ -1,5 +1,6 @@
-use super::db::{row_opt_u64, sql_opt_u64, Database};
-use super::models::{ReferencedFile, ReferencedSource, ReferencedSourceKind};
+use super::db::{map_image_with_file_row, row_opt_u64, sql_opt_u64, Database};
+use super::models::{ImageWithFile, ReferencedFile, ReferencedSource, ReferencedSourceKind};
+use super::visibility::RejectedVisibility;
 use rusqlite::{params, types::Type, Error, Result};
 use std::path::{Component, Path, PathBuf};
 
@@ -34,6 +35,58 @@ fn validate_relative_path(relative_path: &str) -> Result<()> {
 }
 
 impl Database {
+    pub fn ensure_original_mutation_allowed(&self, image_id: &str) -> Result<()> {
+        if self.referenced_source_for_image(image_id)?.is_some() {
+            return Err(Error::InvalidParameterName(
+                "This original is on a browsed source. Cull will not move, rename, trash, or delete it."
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn list_images_in_referenced_folder(
+        &self,
+        source_id: &str,
+        relative_path: &str,
+        recursive: bool,
+        limit: u32,
+        offset: u32,
+        include_rejected: bool,
+    ) -> Result<Vec<ImageWithFile>> {
+        let normalized = relative_path.trim_matches('/');
+        let prefix = if normalized.is_empty() {
+            String::new()
+        } else {
+            format!("{normalized}/")
+        };
+        let sql = format!(
+            "SELECT i.id, i.sha256_hash, i.width, i.height, i.format, i.file_size,
+                    i.created_at, i.imported_at, f.path,
+                    s.star_rating, s.color_label, s.decision, i.source_label, i.ai_prompt,
+                    i.raw_metadata, f.missing_at
+             FROM referenced_files rf
+             JOIN image_files f ON f.id = rf.image_file_id
+             JOIN images i ON i.id = f.image_id
+             LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
+             WHERE rf.source_id = ?1
+               AND substr(rf.relative_path, 1, length(?2)) = ?2
+               AND (?3 OR instr(substr(rf.relative_path, length(?2) + 1), '/') = 0)
+               AND {}
+             GROUP BY i.id
+             ORDER BY rf.relative_path COLLATE NOCASE
+             LIMIT ?4 OFFSET ?5",
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+        );
+        let conn = self.read_connection();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            params![source_id, prefix, recursive, limit, offset],
+            map_image_with_file_row,
+        )?;
+        rows.collect()
+    }
+
     pub fn upsert_referenced_source(&self, source: &ReferencedSource) -> Result<()> {
         let conn = self.conn.lock();
         conn.execute(
@@ -382,6 +435,25 @@ mod tests {
         assert!(db
             .attach_referenced_file("source-1", "file-1", "/tmp/image.jpg")
             .is_err());
+    }
+
+    #[test]
+    fn referenced_originals_are_protected_from_file_mutation_commands() {
+        let (_dir, db) = test_db();
+        db.upsert_referenced_source(&sample_source()).unwrap();
+        insert_image_file(
+            &db,
+            "image-1",
+            "file-1",
+            "/Volumes/UNTITLED/DCIM/image.jpg",
+        );
+        db.attach_referenced_file("source-1", "file-1", "DCIM/image.jpg")
+            .unwrap();
+        let error = db
+            .ensure_original_mutation_allowed("image-1")
+            .unwrap_err();
+        assert!(error.to_string().contains("will not move, rename, trash, or delete"));
+        assert!(db.ensure_original_mutation_allowed("not-referenced").is_ok());
     }
 
     #[test]

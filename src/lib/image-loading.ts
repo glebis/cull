@@ -3,6 +3,7 @@ import {
     activeCollection,
     activeDetectedClass,
     activeFolder,
+    activeReferencedFolder,
     activeSmartCollection,
     focusedIndex,
     gridScrollTop,
@@ -24,6 +25,7 @@ import {
     listImages,
     listImagesByFolder,
     listImagesFiltered,
+    listImagesInReferencedFolder,
     type ImageWithFile,
 } from './api';
 import { formatLibraryLoadError } from './library-view-state';
@@ -116,6 +118,17 @@ async function fetchPage(scope: LibraryScope, offset: number, limit: number): Pr
                 : items;
             return { items: applyMissingFilter(filtered), rawCount: items.length };
         }
+        case 'referenced_folder': {
+            const items = await listImagesInReferencedFolder(
+                scope.source_id,
+                scope.relative_path,
+                scope.recursive,
+                limit,
+                offset,
+                includeRejected,
+            );
+            return { items: applyMissingFilter(items), rawCount: items.length };
+        }
         case 'filtered': {
             const items = await listImagesFiltered(scope.min_size, scope.min_size, limit, offset, includeRejected);
             return { items: applyMissingFilter(items), rawCount: items.length };
@@ -183,6 +196,7 @@ export function clearImageScope() {
     activeCollection.set(null);
     activeDetectedClass.set(null);
     activeFolder.set(null);
+    activeReferencedFolder.set(null);
     minSizeFilter.set(0);
 }
 

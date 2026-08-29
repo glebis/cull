@@ -15,6 +15,7 @@ pub mod extensions;
 mod logging;
 mod mcp;
 mod menu;
+mod mounted_sources;
 mod plugins;
 pub mod preview;
 pub mod raw;
@@ -408,6 +409,26 @@ pub fn run() {
                 agent_snapshot_requests: Mutex::new(std::collections::HashMap::new()),
             });
 
+            // Keep mounted-source discovery alive for the app lifetime. The
+            // frontend can miss an early event safely because its list command
+            // always returns the persisted current state.
+            {
+                let state: tauri::State<'_, AppState> = app.state();
+                let db = state.db.clone();
+                let handle = app.handle().clone();
+                let provider = std::sync::Arc::new(
+                    mounted_sources::PlatformMountedSourceProvider,
+                );
+                app.manage(mounted_sources::MountedSourceMonitor::start(
+                    db,
+                    provider,
+                    std::time::Duration::from_secs(2),
+                    move |refresh| {
+                        let _ = handle.emit("sources:changed", refresh);
+                    },
+                ));
+            }
+
             // Load persisted job history from DB
             {
                 let state: tauri::State<'_, AppState> = app.state();
@@ -539,6 +560,14 @@ pub fn run() {
             commands::import::regenerate_thumbnails_by_ids,
             commands::import::regenerate_single_thumbnail,
             commands::import::rescan_sources,
+            commands::referenced_sources::list_referenced_sources,
+            commands::referenced_sources::remember_referenced_folder,
+            commands::referenced_sources::list_source_folders,
+            commands::referenced_sources::list_images_in_referenced_folder,
+            commands::referenced_sources::open_referenced_folder,
+            commands::referenced_sources::set_source_recursive_default,
+            commands::referenced_sources::remove_referenced_source,
+            commands::referenced_sources::cancel_referenced_source_job,
             commands::photos::photos_authorization_status,
             commands::photos::photos_request_authorization,
             commands::photos::photos_list_albums,

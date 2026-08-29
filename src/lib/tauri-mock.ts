@@ -84,6 +84,11 @@ function useFolderRenameFixture(): boolean {
   return new URLSearchParams(window.location.search).get('folderRename') === '1';
 }
 
+function useExternalDriveFixture(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('externalDrive') === '1';
+}
+
 function mockImageFixtureIndex(item: ReturnType<typeof makeMockImage>): number {
   return Number(item.image.id.replace('img-', ''));
 }
@@ -870,6 +875,22 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   ],
   list_similarity_group_images: () => Array.from({ length: 4 }, (_, i) => makeMockImage(i)),
   list_folders: () => useFolderRenameFixture() ? [[mockFolderPath, 2]] : [],
+  list_referenced_sources: () => useExternalDriveFixture() ? [{
+    id: 'source-sd-card', platform_volume_id: 'mock-volume-1', display_name: 'EOS_DIGITAL',
+    last_mount_path: '/Volumes/EOS_DIGITAL', source_kind: 'sd_card', capacity_bytes: 64_000_000_000,
+    recursive_default: false, settings_json: '{"writable":true}', last_seen_at: '2026-08-30T10:00:00Z', offline_at: null,
+  }] : [],
+  list_source_folders: (_: any, args: { relativePath: string }) => args.relativePath ? [] : ['DCIM', 'MISC'],
+  list_images_in_referenced_folder: () => useExternalDriveFixture() ? mockImages.slice(0, 12) : [],
+  open_referenced_folder: (_: any, args: { request: { source_id: string; relative_path: string } }) => {
+    const page = { job_id: `source-job-${nextId++}`, source_id: args.request.source_id, relative_path: args.request.relative_path, requested_paths: [], image_ids: mockImages.slice(0, 12).map(item => item.image.id), discovered_count: 12, next_cursor: null, indexing: true };
+    setTimeout(() => emitMockEvent('referenced-source:page-updated', { job_id: page.job_id, source_id: page.source_id, relative_path: page.relative_path, image_ids: page.image_ids, completed: true, cancelled: false, error: null }), 20);
+    return page;
+  },
+  set_source_recursive_default: () => undefined,
+  remove_referenced_source: () => [],
+  cancel_referenced_source_job: () => true,
+  remember_referenced_folder: (_: any, args: { path: string }) => ({ id: 'source-dropped', platform_volume_id: null, display_name: args.path.split('/').pop() || 'Folder', last_mount_path: args.path, source_kind: 'folder', capacity_bytes: null, recursive_default: false, settings_json: '{}', last_seen_at: '2026-08-30T10:00:00Z', offline_at: null }),
   list_open_with_applications: () => [],
   delete_folder: () => 0,
   rename_folder: (_: any, args: { folder: string; newName: string }) => {

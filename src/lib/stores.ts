@@ -295,6 +295,13 @@ export function requestLoupeZoomOut() {
 
 export const folders = writable<[string, number][]>([]);
 export const activeFolder = writable<string | null>(null);
+export interface ReferencedFolderScope {
+    source_id: string;
+    source_name: string;
+    relative_path: string;
+    recursive: boolean;
+}
+export const activeReferencedFolder = writable<ReferencedFolderScope | null>(null);
 export const minSizeFilter = writable<number>(0);
 export const showMissing = writable<boolean>(false);
 export const activeDetectedClass = writable<string | null>(null);

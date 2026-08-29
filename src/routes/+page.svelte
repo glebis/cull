@@ -4,6 +4,7 @@
     import '../app.css';
     import TabBar from '$lib/components/TabBar.svelte';
     import Sidebar from '$lib/components/Sidebar.svelte';
+    import ReferencedSourceToolbar from '$lib/components/ReferencedSourceToolbar.svelte';
     import StatusBar from '$lib/components/StatusBar.svelte';
     import Grid from '$lib/components/Grid.svelte';
     import Compare from '$lib/components/Compare.svelte';
@@ -1136,6 +1137,7 @@
                 <div class="command-bar-area">
                     <CommandBar />
                 </div>
+                <ReferencedSourceToolbar />
                 <Grid />
             </div>
         {:else if $viewMode === 'compare'}
@@ -1198,7 +1200,7 @@
 
         {#if dragOver}
             <div class="drop-overlay">
-                <div class="drop-label">Drop to import</div>
+                <div class="drop-label">Drop to browse in place</div>
             </div>
         {/if}
     </div>

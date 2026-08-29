@@ -24,7 +24,8 @@ import {
     showRejected,
     type ViewMode,
 } from './stores';
-import { importFolder, importFiles, addToCollection, listCollections, listFolders, listImagesByFolder, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls, completeDeepLinkNavigation, type ImageWithFile, type ImportResponse } from './api';
+import { importFolder, importFiles, addToCollection, listCollections, listFolders, listImagesByFolder, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls, completeDeepLinkNavigation, rememberReferencedFolder, type ImageWithFile, type ImportResponse } from './api';
+import { openReferencedSourceFolder, refreshReferencedSources } from './referenced-sources';
 import { applyClipboardMonitorCollection } from './clipboard-monitor';
 import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { openSettings, type SettingsTab } from './settings-navigation';
@@ -189,6 +190,19 @@ async function handleParamsInner(params: OpenParams, ack: AckFn) {
     // Handle folder import
     if (params.folder) {
         try {
+            if (params.drag_drop) {
+                const source = await rememberReferencedFolder(params.folder);
+                await refreshReferencedSources();
+                await openReferencedSourceFolder(source);
+                await ack(true);
+                focusIndex(0);
+                showToast(`Browsing "${source.display_name}" in place`, {
+                    detail: 'Original files stay where they are',
+                    type: 'success',
+                    duration: 6000,
+                });
+                return;
+            }
             // Switch scope to the target folder FIRST, then ack, then import.
             // The ack must mean "the app is now on this folder", which is only
             // true once activeFolder is set. Acking after importFolder instead

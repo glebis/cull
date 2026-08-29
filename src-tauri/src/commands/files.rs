@@ -949,6 +949,10 @@ pub async fn move_image(
     image_id: String,
     destination_folder: String,
 ) -> Result<String, String> {
+    state
+        .db
+        .ensure_original_mutation_allowed(&image_id)
+        .map_err(|error| error.to_string())?;
     let images = state
         .db
         .get_images_by_ids(&[&image_id])
@@ -1041,6 +1045,10 @@ pub async fn rename_image(
     image_id: String,
     new_name: String,
 ) -> Result<String, String> {
+    state
+        .db
+        .ensure_original_mutation_allowed(&image_id)
+        .map_err(|error| error.to_string())?;
     if new_name.is_empty() || new_name.contains('/') || new_name.contains('\\') {
         return Err("Invalid filename".to_string());
     }
