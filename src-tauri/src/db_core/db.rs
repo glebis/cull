@@ -7,7 +7,7 @@ use rusqlite::{ffi, params, Connection, Error as SqlError, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 26;
+const CURRENT_SCHEMA_VERSION: i64 = 27;
 
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, "initial_schema"),
@@ -36,6 +36,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (24, "reserved_schema_history_24"),
     (25, "agent_action_proposals"),
     (26, "image_analysis_status"),
+    (27, "referenced_sources"),
 ];
 
 #[derive(Clone)]
@@ -383,6 +384,11 @@ impl Database {
             self.seed_preset_collections()?;
             Ok(())
         })?;
+        self.run_migration_step(27, "referenced_sources", || {
+            let conn = self.conn.lock();
+            conn.execute_batch(referenced_sources_schema())?;
+            Ok(())
+        })?;
 
         self.verify_schema_invariants()?;
         Ok(())
@@ -421,6 +427,8 @@ impl Database {
             "image_analysis_status",
             "agent_action_proposals",
             "agent_selection_presets",
+            "referenced_sources",
+            "referenced_files",
             "schema_migrations",
         ];
         let conn = self.conn.lock();
@@ -1122,6 +1130,36 @@ fn image_analysis_status_schema() -> &'static str {
     "#
 }
 
+fn referenced_sources_schema() -> &'static str {
+    r#"
+        CREATE TABLE IF NOT EXISTS referenced_sources (
+            id TEXT PRIMARY KEY,
+            platform_volume_id TEXT UNIQUE,
+            display_name TEXT NOT NULL,
+            last_mount_path TEXT,
+            source_kind TEXT NOT NULL CHECK (source_kind IN ('sd_card', 'external_drive', 'mounted_volume', 'folder')),
+            capacity_bytes INTEGER,
+            recursive_default INTEGER NOT NULL DEFAULT 0 CHECK (recursive_default IN (0, 1)),
+            settings_json TEXT NOT NULL DEFAULT '{}',
+            last_seen_at TEXT NOT NULL,
+            offline_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_referenced_sources_mount_path
+            ON referenced_sources(last_mount_path);
+
+        CREATE TABLE IF NOT EXISTS referenced_files (
+            source_id TEXT NOT NULL REFERENCES referenced_sources(id) ON DELETE CASCADE,
+            image_file_id TEXT NOT NULL UNIQUE REFERENCES image_files(id) ON DELETE CASCADE,
+            relative_path TEXT NOT NULL,
+            PRIMARY KEY (source_id, relative_path)
+        );
+        CREATE INDEX IF NOT EXISTS idx_referenced_files_source
+            ON referenced_files(source_id);
+        CREATE INDEX IF NOT EXISTS idx_referenced_files_image_file
+            ON referenced_files(image_file_id);
+    "#
+}
+
 fn migration_checksum(version: i64, name: &str) -> String {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in version
@@ -1549,7 +1587,7 @@ mod migration_safety_tests {
 
         let db = Database::open(&db_path).unwrap();
         let conn = db.conn.lock();
-        assert_eq!(user_version(&conn).unwrap(), 26);
+        assert_eq!(user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
         assert!(table_exists(&conn, "image_analysis_status").unwrap());
         let repaired_name: String = conn
             .query_row(

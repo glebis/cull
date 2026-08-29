@@ -155,6 +155,57 @@ pub struct ImageFile {
     pub last_seen_mtime: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReferencedSourceKind {
+    SdCard,
+    ExternalDrive,
+    MountedVolume,
+    Folder,
+}
+
+impl ReferencedSourceKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SdCard => "sd_card",
+            Self::ExternalDrive => "external_drive",
+            Self::MountedVolume => "mounted_volume",
+            Self::Folder => "folder",
+        }
+    }
+
+    pub fn from_db(value: &str) -> Option<Self> {
+        match value {
+            "sd_card" => Some(Self::SdCard),
+            "external_drive" => Some(Self::ExternalDrive),
+            "mounted_volume" => Some(Self::MountedVolume),
+            "folder" => Some(Self::Folder),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReferencedSource {
+    pub id: String,
+    pub platform_volume_id: Option<String>,
+    pub display_name: String,
+    pub last_mount_path: Option<String>,
+    pub source_kind: ReferencedSourceKind,
+    pub capacity_bytes: Option<u64>,
+    pub recursive_default: bool,
+    pub settings_json: String,
+    pub last_seen_at: String,
+    pub offline_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReferencedFile {
+    pub source_id: String,
+    pub image_file_id: String,
+    pub relative_path: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Selection {
     pub image_id: String,

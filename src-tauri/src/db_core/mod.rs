@@ -16,6 +16,7 @@ pub mod path_policy;
 pub mod perceptual_hash;
 pub mod quality;
 pub mod queries;
+pub mod referenced_sources;
 pub mod remote_embeddings;
 pub mod secrets;
 pub mod sessions;
