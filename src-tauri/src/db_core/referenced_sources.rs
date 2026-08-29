@@ -441,19 +441,16 @@ mod tests {
     fn referenced_originals_are_protected_from_file_mutation_commands() {
         let (_dir, db) = test_db();
         db.upsert_referenced_source(&sample_source()).unwrap();
-        insert_image_file(
-            &db,
-            "image-1",
-            "file-1",
-            "/Volumes/UNTITLED/DCIM/image.jpg",
-        );
+        insert_image_file(&db, "image-1", "file-1", "/Volumes/UNTITLED/DCIM/image.jpg");
         db.attach_referenced_file("source-1", "file-1", "DCIM/image.jpg")
             .unwrap();
-        let error = db
-            .ensure_original_mutation_allowed("image-1")
-            .unwrap_err();
-        assert!(error.to_string().contains("will not move, rename, trash, or delete"));
-        assert!(db.ensure_original_mutation_allowed("not-referenced").is_ok());
+        let error = db.ensure_original_mutation_allowed("image-1").unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("will not move, rename, trash, or delete"));
+        assert!(db
+            .ensure_original_mutation_allowed("not-referenced")
+            .is_ok());
     }
 
     #[test]
