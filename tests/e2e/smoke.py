@@ -1533,6 +1533,21 @@ def test_grid_shift_click_range_select(page: Page) -> None:
     expect(page.locator(".statusbar")).to_contain_text("5 selected")
 
 
+def test_external_drive_browse_in_place(page: Page) -> None:
+    """S44 — Mounted media is visible and browsable without import."""
+    separator = "&" if "?" in URL else "?"
+    page.goto(f"{URL}{separator}externalDrive=1")
+    expect(page.get_by_test_id("devices-section")).to_contain_text("EOS_DIGITAL")
+    page.get_by_role("button", name=re.compile("EOS_DIGITAL")).click()
+    expect(page.get_by_role("button", name=re.compile("DCIM"))).to_be_visible()
+    expect(page.get_by_test_id("referenced-source-toolbar")).to_contain_text("Current folder")
+    page.get_by_role("button", name=re.compile("DCIM")).click()
+    expect(page.get_by_test_id("referenced-source-toolbar")).to_contain_text("EOS_DIGITAL/DCIM")
+    page.get_by_role("button", name="Current folder").click()
+    expect(page.get_by_test_id("referenced-source-toolbar")).to_contain_text("Including subfolders")
+    expect(page.locator(".thumb")).to_have_count(12)
+
+
 def main() -> int:
     SHOTS.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
@@ -1593,6 +1608,7 @@ def main() -> int:
         smoke.step("S32 detection toggle", lambda: test_detection_toggle(page))
         smoke.step("S11a selection Space toggle", lambda: test_grid_selection_space(page))
         smoke.step("S11b Shift+click range select", lambda: test_grid_shift_click_range_select(page))
+        smoke.step("S44 external drive browse in place", lambda: test_external_drive_browse_in_place(page))
 
         if page_errors:
             print("\nPage errors:")

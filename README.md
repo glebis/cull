@@ -21,7 +21,8 @@ Made by artists for artists, Cull is open, local, and agent-friendly: closer to 
 
 ## What It Does
 
-- Drop in a folder, any size, any structure.
+- Plug in an SD card or external drive and cull directly from it without copying originals.
+- Drop in a folder to browse it in place, or use the explicit import commands when you want it added as a library root.
 - Move quickly through Grid, Loupe, Compare, Canvas, Lineage, Embedding Explorer, Export, and Speed Review views.
 - Rate, accept, reject, compare, collect, and filter without lifting your hands from the keyboard.
 - Search by look and feel rather than filename.

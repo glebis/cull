@@ -103,6 +103,42 @@ export interface ImageWithFile {
     missing_at: string | null;
 }
 
+export type ReferencedSourceKind = 'sd_card' | 'external_drive' | 'mounted_volume' | 'folder';
+
+export interface ReferencedSource {
+    id: string;
+    platform_volume_id: string | null;
+    display_name: string;
+    last_mount_path: string | null;
+    source_kind: ReferencedSourceKind;
+    capacity_bytes: number | null;
+    recursive_default: boolean;
+    settings_json: string;
+    last_seen_at: string;
+    offline_at: string | null;
+}
+
+export interface ReferencedFolderPage {
+    job_id: string;
+    source_id: string;
+    relative_path: string;
+    requested_paths: string[];
+    image_ids: string[];
+    discovered_count: number;
+    next_cursor: string | null;
+    indexing: boolean;
+}
+
+export interface ReferencedFolderUpdate {
+    job_id: string;
+    source_id: string;
+    relative_path: string;
+    image_ids: string[];
+    completed: boolean;
+    cancelled: boolean;
+    error: string | null;
+}
+
 export interface MediaAsset {
     id: string;
     media_type: string;
@@ -803,6 +839,53 @@ export async function listFolders(includeRejected = false): Promise<[string, num
 
 export async function listImagesByFolder(folder: string, limit: number, offset: number, includeRejected = false): Promise<ImageWithFile[]> {
     return invoke('list_images_by_folder', { folder, limit, offset, includeRejected });
+}
+
+export function listReferencedSources(): Promise<ReferencedSource[]> {
+    return invoke<ReferencedSource[]>('list_referenced_sources');
+}
+
+export function rememberReferencedFolder(path: string): Promise<ReferencedSource> {
+    return invoke<ReferencedSource>('remember_referenced_folder', { path });
+}
+
+export function listSourceFolders(sourceId: string, relativePath = ''): Promise<string[]> {
+    return invoke<string[]>('list_source_folders', { sourceId, relativePath });
+}
+
+export function openReferencedFolder(request: {
+    source_id: string;
+    relative_path: string;
+    recursive: boolean;
+    cursor: string | null;
+    limit: number;
+}): Promise<ReferencedFolderPage> {
+    return invoke<ReferencedFolderPage>('open_referenced_folder', { request });
+}
+
+export function listImagesInReferencedFolder(
+    sourceId: string,
+    relativePath: string,
+    recursive: boolean,
+    limit: number,
+    offset: number,
+    includeRejected = false,
+): Promise<ImageWithFile[]> {
+    return invoke<ImageWithFile[]>('list_images_in_referenced_folder', {
+        sourceId, relativePath, recursive, limit, offset, includeRejected,
+    });
+}
+
+export function setSourceRecursiveDefault(sourceId: string, recursive: boolean): Promise<void> {
+    return invoke<void>('set_source_recursive_default', { sourceId, recursive });
+}
+
+export function removeReferencedSource(sourceId: string): Promise<string[]> {
+    return invoke<string[]>('remove_referenced_source', { sourceId });
+}
+
+export function cancelReferencedSourceJob(jobId: string): Promise<boolean> {
+    return invoke<boolean>('cancel_referenced_source_job', { jobId });
 }
 
 export async function deleteFolder(folder: string): Promise<number> {

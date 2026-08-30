@@ -3,6 +3,7 @@ import {
     activeCollection,
     activeDetectedClass,
     activeFolder,
+    activeReferencedFolder,
     activeSmartCollection,
     importBatchFilter,
     minSizeFilter,
@@ -15,6 +16,7 @@ export type LibraryScope =
     | { type: 'collection'; id: string; include_rejected: boolean }
     | { type: 'detected_class'; class_name: string; include_rejected: boolean }
     | { type: 'folder'; path: string; min_size: number; include_rejected: boolean }
+    | { type: 'referenced_folder'; source_id: string; relative_path: string; recursive: boolean; include_rejected: boolean }
     | { type: 'filtered'; min_size: number; include_rejected: boolean }
     | { type: 'all'; include_rejected: boolean };
 
@@ -24,6 +26,7 @@ function buildLibraryScope(
     collection: string | null,
     class_name: string | null,
     path: string | null,
+    referenced: { source_id: string; relative_path: string; recursive: boolean } | null,
     min_size: number,
     include_rejected: boolean,
 ): LibraryScope {
@@ -40,6 +43,13 @@ function buildLibraryScope(
     if (collection) return { type: 'collection', id: collection, include_rejected };
     if (class_name) return { type: 'detected_class', class_name, include_rejected };
     if (path) return { type: 'folder', path, min_size, include_rejected };
+    if (referenced) return {
+        type: 'referenced_folder',
+        source_id: referenced.source_id,
+        relative_path: referenced.relative_path,
+        recursive: referenced.recursive,
+        include_rejected,
+    };
     if (min_size > 0) return { type: 'filtered', min_size, include_rejected };
     return { type: 'all', include_rejected };
 }
@@ -51,16 +61,18 @@ export const libraryScope = derived(
         activeCollection,
         activeDetectedClass,
         activeFolder,
+        activeReferencedFolder,
         minSizeFilter,
         showRejected,
     ],
-    ([$batch, $smart, $collection, $detectedClass, $folder, $minSize, $showRejected]) =>
+    ([$batch, $smart, $collection, $detectedClass, $folder, $referenced, $minSize, $showRejected]) =>
         buildLibraryScope(
             $batch,
             $smart,
             $collection,
             $detectedClass,
             $folder,
+            $referenced,
             $minSize,
             $showRejected,
         ),
@@ -78,6 +90,7 @@ export function libraryScopeKey(scope: LibraryScope): string {
         case 'collection': return `collection:${scope.id}:${visibility}`;
         case 'detected_class': return `detected-class:${scope.class_name}:${visibility}`;
         case 'folder': return `folder:${scope.path}:${scope.min_size}:${visibility}`;
+        case 'referenced_folder': return `referenced:${scope.source_id}:${scope.relative_path}:${scope.recursive}:${visibility}`;
         case 'filtered': return `filtered:${scope.min_size}:${visibility}`;
         case 'all': return `all:${visibility}`;
     }

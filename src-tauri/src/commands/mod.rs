@@ -28,6 +28,7 @@ pub mod preview;
 pub mod privacy;
 pub mod quality;
 pub mod raw;
+pub mod referenced_sources;
 pub mod selection;
 pub mod sessions;
 pub mod smart_collections;

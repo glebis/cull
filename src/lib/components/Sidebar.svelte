@@ -2,7 +2,7 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, folders, activeFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen, exportFolderSmartCollection } from '$lib/stores';
+    import { totalCount, folders, activeFolder, activeReferencedFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen, exportFolderSmartCollection } from '$lib/stores';
     import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, renameFolder as apiRenameFolder, listCollections, createCollection, createCollectionWithImages, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, updateSmartCollectionApi, deleteSmartCollectionApi, countByDetectedClass, listDetectedClasses, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, FilterNode, ImageWithFile, SmartCollection } from '$lib/api';
@@ -65,6 +65,7 @@
         }
     }
     import SessionSwitcher from './SessionSwitcher.svelte';
+    import DevicesSection from './DevicesSection.svelte';
     import { activeCanvas, activeSession, navigateTo, sessions, sessionCanvases, expandedFolders, sidebarSectionsCollapsed, sidebarFilter } from '$lib/stores';
     import { createCanvas, deleteCanvas, addToCollection, listImagesByFolder, type Canvas } from '$lib/api';
     import { reconcileRenamedCanvas, reconcileRenamedSession, renamedFolderPath } from '$lib/folder-rename-state';
@@ -79,6 +80,7 @@
     // and the class row looking unselected/selected at the same time.
     let allImagesActive = $derived(
         $activeFolder === null &&
+        $activeReferencedFolder === null &&
         $activeCollection === null &&
         $activeSmartCollection === null &&
         $activeDetectedClass === null
@@ -550,6 +552,7 @@
     }
 
     async function selectSmartCollection(sc: SmartCollection) {
+        activeReferencedFolder.set(null);
         activeSession.set(null);
         sessionCanvases.set([]);
         activeCanvas.set(null);
@@ -567,6 +570,7 @@
     }
 
     async function selectFolder(folder: string | null) {
+        activeReferencedFolder.set(null);
         activeSession.set(null);
         sessionCanvases.set([]);
         activeCanvas.set(null);
@@ -582,6 +586,7 @@
     }
 
     async function selectCollection(collectionId: string) {
+        activeReferencedFolder.set(null);
         activeSession.set(null);
         sessionCanvases.set([]);
         activeCanvas.set(null);
@@ -981,6 +986,7 @@
             activeCanvas.set(null);
             activeSmartCollection.set(null);
             activeFolder.set(null);
+            activeReferencedFolder.set(null);
             activeCollection.set(null);
             activeDetectedClass.set(className);
             await loadImagesForCurrentScope();
@@ -1177,6 +1183,7 @@
 <aside class="sidebar" aria-label="Library sidebar">
     <div class="sidebar-scroll">
         <SessionSwitcher />
+        <DevicesSection />
 
     {#if $activeSession}
         <div class="section">
