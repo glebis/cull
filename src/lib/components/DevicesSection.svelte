@@ -7,6 +7,7 @@
     let childFolders = $state<string[]>([]);
     let loadingFolders = $state(false);
     let dispose: (() => void) | null = null;
+    let connectedSources = $derived($referencedSources.filter(source => !source.offline_at));
     onMount(async () => {
         try { dispose = await initializeReferencedSources(); }
         catch (error) { console.warn('Referenced sources unavailable', error); }
@@ -29,10 +30,9 @@
     }
 </script>
 
-<div class="section devices-section" data-testid="devices-section">
-    <div class="section-header">DEVICES</div>
-    {#if $referencedSources.length === 0}<div class="empty">Plug in an SD card or drive</div>{/if}
-    {#each $referencedSources as source (source.id)}
+{#if connectedSources.length > 0}
+<div class="devices-section" data-testid="devices-section">
+    {#each connectedSources as source (source.id)}
         <button class="section-item device" class:active={$activeReferencedFolder?.source_id === source.id} class:offline={!!source.offline_at} onclick={() => openSource(source)} title={source.offline_at ? `Reconnect ${source.display_name} to open originals` : source.last_mount_path ?? source.display_name}>
             <span class="device-icon">{sourceIcon(source)}</span><span class="item-label">{source.display_name}</span><span class="status">{source.offline_at ? 'offline' : 'connected'}</span>
         </button>
@@ -45,9 +45,29 @@
         {/if}
     {/each}
 </div>
+{/if}
 
 <style>
-    .devices-section { border-bottom: 1px solid var(--border); padding-bottom: var(--spacing); }
+    .devices-section { border-bottom: 1px solid var(--border); padding: var(--spacing); }
+    .section-item {
+        align-items: center;
+        background: none;
+        border: none;
+        border-radius: var(--radius);
+        color: inherit;
+        cursor: pointer;
+        display: flex;
+        font-family: inherit;
+        font-size: 12px;
+        gap: 6px;
+        min-height: 28px;
+        overflow: hidden;
+        padding: 6px 8px;
+        text-align: left;
+        width: 100%;
+    }
+    .section-item:hover { background: var(--border); }
+    .section-item.active { background: color-mix(in srgb, var(--blue) 10%, transparent); color: var(--blue); }
     .device-icon { width: 16px; color: var(--blue); flex: 0 0 auto; }
     .device.offline { color: var(--text-secondary); }
     .device.offline .device-icon { color: var(--orange); }
