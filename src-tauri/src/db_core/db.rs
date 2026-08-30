@@ -7,7 +7,7 @@ use rusqlite::{ffi, params, Connection, Error as SqlError, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 27;
+const CURRENT_SCHEMA_VERSION: i64 = 28;
 
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, "initial_schema"),
@@ -37,6 +37,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (25, "agent_action_proposals"),
     (26, "image_analysis_status"),
     (27, "referenced_sources"),
+    (28, "referenced_sources_reconcile"),
 ];
 
 #[derive(Clone)]
@@ -385,6 +386,14 @@ impl Database {
             Ok(())
         })?;
         self.run_migration_step(27, "referenced_sources", || {
+            let conn = self.conn.lock();
+            conn.execute_batch(referenced_sources_schema())?;
+            Ok(())
+        })?;
+        // Schema version 27 was also used by an earlier Apple Photos development
+        // build. Reapply this idempotent schema at 28 so those databases migrate
+        // safely instead of treating the colliding version number as completion.
+        self.run_migration_step(28, "referenced_sources_reconcile", || {
             let conn = self.conn.lock();
             conn.execute_batch(referenced_sources_schema())?;
             Ok(())
@@ -1498,6 +1507,45 @@ mod migration_safety_tests {
         let conn = db.conn.lock();
         assert!(table_exists(&conn, "images").unwrap());
         assert!(table_exists(&conn, "catalog_works").unwrap());
+    }
+
+    #[test]
+    fn test_open_repairs_schema_27_name_collision_for_referenced_sources() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("schema-v27-collision.db");
+        {
+            let _ = Database::open(&db_path).unwrap();
+        }
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "
+                DROP TABLE referenced_files;
+                DROP TABLE referenced_sources;
+                DELETE FROM schema_migrations WHERE version = 27;
+                DELETE FROM schema_migration_steps WHERE version = 27;
+                INSERT INTO schema_migrations (version, name, applied_at, checksum)
+                VALUES (27, 'external_asset_imports', '2026-08-14T22:02:30Z', 'legacy-v27');
+                PRAGMA user_version = 27;
+                ",
+            )
+            .unwrap();
+        }
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock();
+        assert!(table_exists(&conn, "referenced_sources").unwrap());
+        assert!(table_exists(&conn, "referenced_files").unwrap());
+        assert_eq!(user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+
+        let legacy_name: String = conn
+            .query_row(
+                "SELECT name FROM schema_migrations WHERE version = 27",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_name, "external_asset_imports");
     }
 
     #[test]
