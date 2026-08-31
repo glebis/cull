@@ -25,6 +25,16 @@ pub trait MountedSourceProvider: Send + Sync {
     fn list_mounted_sources(&self) -> Result<Vec<MountedSource>, String>;
 }
 
+fn include_platform_volume(
+    is_root: bool,
+    is_internal: bool,
+    is_browsable: bool,
+    is_removable: bool,
+    is_ejectable: bool,
+) -> bool {
+    !is_root && is_browsable && (!is_internal || is_removable || is_ejectable)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MountedSourceRefresh {
     pub online: Vec<ReferencedSource>,
@@ -259,14 +269,17 @@ impl MountedSourceProvider for PlatformMountedSourceProvider {
             let Some(path) = url.path().map(|path| PathBuf::from(path.to_string())) else {
                 continue;
             };
-            if path == PathBuf::from("/")
-                || bool_value(&url, unsafe { NSURLVolumeIsInternalKey }).unwrap_or(false)
-                || !bool_value(&url, unsafe { NSURLVolumeIsBrowsableKey }).unwrap_or(true)
-            {
-                continue;
-            }
             let removable = bool_value(&url, unsafe { NSURLVolumeIsRemovableKey }).unwrap_or(false);
             let ejectable = bool_value(&url, unsafe { NSURLVolumeIsEjectableKey }).unwrap_or(false);
+            if !include_platform_volume(
+                path == PathBuf::from("/"),
+                bool_value(&url, unsafe { NSURLVolumeIsInternalKey }).unwrap_or(false),
+                bool_value(&url, unsafe { NSURLVolumeIsBrowsableKey }).unwrap_or(true),
+                removable,
+                ejectable,
+            ) {
+                continue;
+            }
             let kind = if removable {
                 ReferencedSourceKind::SdCard
             } else if ejectable {
@@ -335,6 +348,16 @@ mod tests {
             capacity_bytes: Some(64_000_000_000),
             writable: true,
         }
+    }
+
+    #[test]
+    fn removable_volume_is_included_even_when_macos_reports_it_internal() {
+        assert!(include_platform_volume(false, true, true, true, true));
+    }
+
+    #[test]
+    fn non_removable_internal_volume_stays_excluded() {
+        assert!(!include_platform_volume(false, true, true, false, false));
     }
 
     #[test]

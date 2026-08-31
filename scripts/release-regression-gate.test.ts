@@ -9,6 +9,7 @@ import {
 } from './release-regression-gate.mjs';
 
 const requiredContracts = [
+  'sidebar-feature-retention',
   'sidebar-search-filter',
   'settings-ai-reachable',
   'grid-deep-zoom-presets',
@@ -45,6 +46,7 @@ describe('release regression gate', () => {
         message: expect.stringContaining('grid-hover-preview'),
       }));
     expect(execute.mock.calls.map(([contract]) => contract.id)).toEqual([
+      'sidebar-feature-retention',
       'sidebar-search-filter',
       'settings-ai-reachable',
       'grid-deep-zoom-presets',

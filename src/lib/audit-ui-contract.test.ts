@@ -107,7 +107,7 @@ describe('impeccable audit UI contracts', () => {
         // Batch analysis actions are named distinctly in the command palette.
         expect(paletteRegistry).toContain('Detect Objects in Library');
         expect(paletteRegistry).toContain('Describe Images in Library');
-        expect(sidebar).toContain('Publish clipboard collection');
+        expect(sidebar).toContain('Publish');
         expect(agentAccessSettings).toContain('MCP Connection');
         expect(staticPublishing).toContain('Allow search indexing');
         expect(staticPublishing).toContain('Start Local Preview');

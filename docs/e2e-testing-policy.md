@@ -113,6 +113,7 @@ actionable in terminal and GitHub Actions output:
 
 | Contract | Automated behavior evidence |
 | --- | --- |
+| `sidebar-feature-retention` | Recent Imports renders without a decorative glyph; connected devices render while offline or absent devices occupy no sidebar space. |
 | `sidebar-search-filter` | Sidebar tree search/filter rules and selecting a detected-object filter updates active scope and reloads images. |
 | `settings-ai-reachable` | Settings opens an explicit tab, the AI tab is mounted/reachable, and AI settings render and react to backend readiness. |
 | `grid-deep-zoom-presets` | Minimum-to-maximum grid zoom mapping, presets, gesture anchoring, and zoom bounds. |
