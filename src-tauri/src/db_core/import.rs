@@ -399,7 +399,12 @@ fn create_image_record(
         raw_metadata: None,
     };
     db.insert_image(&image).map_err(|e| e.to_string())?;
-    Ok((image_id, decoded))
+    let canonical_image_id = db
+        .find_by_hash(hash)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Image registration completed without a canonical hash row".to_string())?
+        .id;
+    Ok((canonical_image_id, decoded))
 }
 
 /// Whole-buffer SHA-256, retained as a test reference for `hash_file`'s streaming
@@ -693,6 +698,39 @@ mod tests {
 
         assert_eq!(result.unwrap_err(), "Import cancelled");
         assert_eq!(checks.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn create_image_record_returns_the_canonical_id_after_a_hash_race() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        let existing = Image {
+            id: "canonical-image".to_string(),
+            sha256_hash: "shared-hash".to_string(),
+            width: 16,
+            height: 16,
+            format: "jpg".to_string(),
+            file_size: 4,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            imported_at: "2026-01-01T00:00:00Z".to_string(),
+            ai_prompt: None,
+            raw_metadata: None,
+        };
+        db.insert_image(&existing).unwrap();
+
+        let (image_id, _) = create_image_record(
+            &db,
+            &dir.path().join("duplicate.jpg"),
+            &existing.sha256_hash,
+            "jpg",
+            b"data",
+            false,
+            true,
+            &|| false,
+        )
+        .unwrap();
+
+        assert_eq!(image_id, existing.id);
     }
 
     #[test]

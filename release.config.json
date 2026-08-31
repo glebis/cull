@@ -22,7 +22,8 @@
         "id": "sidebar-feature-retention",
         "tests": [
           "src/lib/components/sidebar-retained-features.behavior.test.ts",
-          "src/lib/components/devices-section.behavior.test.ts"
+          "src/lib/components/devices-section.behavior.test.ts",
+          "src/lib/referenced-sources.test.ts"
         ]
       },
       {

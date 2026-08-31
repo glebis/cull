@@ -22,6 +22,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Concurrent external-device reads.** Opening another folder now cancels and supersedes the previous read, and duplicate-content registration resolves the canonical image identity instead of surfacing a foreign-key error.
 - **External-drive detection on macOS.** Removable or ejectable SD cards remain visible even when macOS also reports the volume as internal.
 - **Release regression coverage for sidebar feature retention.** The release gate now blocks if Recent Imports regains a decorative clock glyph or if connected-device visibility regresses.
 - **Sidebar: 24px hit-area floor for twisty and preset chips.** Negative-inset pseudo-element on the button, not the input. (`imageview-1i2k.8`)

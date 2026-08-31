@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { get, writable } from 'svelte/store';
-import { listReferencedSources, openReferencedFolder as openFolder, type ReferencedFolderPage, type ReferencedFolderUpdate, type ReferencedSource } from './api';
+import { cancelReferencedSourceJob, listReferencedSources, openReferencedFolder as openFolder, type ReferencedFolderPage, type ReferencedFolderUpdate, type ReferencedSource } from './api';
 import { activeCollection, activeDetectedClass, activeFolder, activeReferencedFolder, activeSmartCollection, showToast } from './stores';
 import { loadImagesForCurrentScope } from './image-loading';
 
@@ -8,6 +8,8 @@ export const referencedSources = writable<ReferencedSource[]>([]);
 export const referencedFolderPage = writable<ReferencedFolderPage | null>(null);
 export const referencedSourceIndexing = writable(false);
 let initialized: Promise<UnlistenFn> | null = null;
+let readGeneration = 0;
+let activeJobId: string | null = null;
 
 export async function refreshReferencedSources() {
     referencedSources.set(await listReferencedSources());
@@ -21,7 +23,8 @@ export function initializeReferencedSources(): Promise<UnlistenFn> {
         const stopPage = await listen<ReferencedFolderUpdate>('referenced-source:page-updated', async ({ payload }) => {
             const active = get(activeReferencedFolder);
             const page = get(referencedFolderPage);
-            if (!active || !page || payload.job_id !== page.job_id) return;
+            if (!active || !page || payload.job_id !== page.job_id || payload.job_id !== activeJobId) return;
+            activeJobId = null;
             referencedSourceIndexing.set(false);
             if (payload.error) showToast('Could not finish reading the device', { detail: payload.error, type: 'error' });
             await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
@@ -32,6 +35,11 @@ export function initializeReferencedSources(): Promise<UnlistenFn> {
 }
 
 export async function openReferencedSourceFolder(source: ReferencedSource, relativePath = '', recursive = source.recursive_default, cursor: string | null = null) {
+    const generation = ++readGeneration;
+    const supersededJobId = activeJobId;
+    activeJobId = null;
+    if (supersededJobId) await cancelReferencedSourceJob(supersededJobId);
+    if (generation !== readGeneration) return;
     activeCollection.set(null);
     activeSmartCollection.set(null);
     activeDetectedClass.set(null);
@@ -46,9 +54,15 @@ export async function openReferencedSourceFolder(source: ReferencedSource, relat
     referencedSourceIndexing.set(true);
     try {
         const page = await openFolder({ source_id: source.id, relative_path: relativePath, recursive, cursor, limit: 100 });
+        if (generation !== readGeneration) {
+            await cancelReferencedSourceJob(page.job_id);
+            return;
+        }
+        activeJobId = page.job_id;
         referencedFolderPage.set(page);
         await loadImagesForCurrentScope({ force: true, invalidateCache: true });
     } catch (error) {
+        if (generation !== readGeneration) return;
         referencedSourceIndexing.set(false);
         showToast('Could not browse the device', { detail: error instanceof Error ? error.message : String(error), type: 'error' });
         throw error;
