@@ -25,7 +25,11 @@ export interface DisplayFolder {
  * including subfolders".
  */
 export function formatFolderCount(direct: number, subtree: number): string {
-    return direct === subtree ? String(subtree) : `${direct} (${subtree})`;
+    // imageview-1i2k.3: zero counts are noise, not information. An empty
+    // subtree renders nothing; a folder whose images all live deeper shows
+    // the subtree number alone instead of "0 (27)".
+    if (subtree === 0) return '';
+    return direct === subtree || direct === 0 ? String(subtree) : `${direct} (${subtree})`;
 }
 
 export function folderName(path: string): string {
@@ -222,8 +226,10 @@ export function formatImportResult(imported: number, skipped: number, errorCount
     return result;
 }
 
+/** imageview-1i2k.3: a zero count on every row is noise ("too many 0
+ *  values"). Rows render the string as-is, so empty means no badge at all. */
 export function formatSidebarCount(count: number | null | undefined): string {
-    return String(count ?? 0);
+    return count ? String(count) : '';
 }
 
 export type CollectionRow = [string, string, number];
@@ -264,4 +270,90 @@ export function buildPinnedCollectionRows(
     const unpinned = collections.filter(([id]) => !pinnedSet.has(id));
 
     return [...pinned, ...unpinned];
+}
+
+/* ------------------------------------------------------------------ */
+/* Recent scopes — what the user was looking at most recently, so      */
+/* "where did that just-imported folder go?" has a persistent answer.  */
+/*                                                                     */
+/* A scope is the full identity of a sidebar row: kind matters because */
+/* a folder path and a collection id could look the same as strings.   */
+/* `fresh` marks "imported just now, not visited yet" — the highlight  */
+/* clears on visit, not on a timer, so the marker can't expire while   */
+/* the user is heads-down in another window (the failure mode of the   */
+/* 8-second toast this rail replaces).                                 */
+/* ------------------------------------------------------------------ */
+
+export interface RecentScope {
+    kind: 'folder' | 'collection' | 'smart';
+    /** Real folder path, collection id, or smart-collection id. */
+    id: string;
+    /** Display name snapshot; re-resolved against live lists at render. */
+    name: string;
+    /** Unix ms of last visit or import. */
+    ts: number;
+    /** Just-imported, not yet visited. */
+    fresh?: boolean;
+}
+
+export const RECENT_SCOPES_CAP = 8;
+
+export function recordRecentScope(
+    list: RecentScope[],
+    scopeEntry: RecentScope,
+    cap = RECENT_SCOPES_CAP
+): RecentScope[] {
+    const rest = list.filter(s => !(s.kind === scopeEntry.kind && s.id === scopeEntry.id));
+    return [{ ...scopeEntry, fresh: scopeEntry.fresh ?? false }, ...rest].slice(0, cap);
+}
+
+export function markRecentScopeVisited(
+    list: RecentScope[],
+    kind: RecentScope['kind'],
+    id: string
+): RecentScope[] {
+    if (!list.some(s => s.kind === kind && s.id === id)) return list;
+    return list.map(s => (s.kind === kind && s.id === id ? { ...s, fresh: false } : s));
+}
+
+/** Recents die quietly with their target — a rail row that opens
+ *  nothing is worse than no row. Same rule as prunePinnedIds. */
+export function pruneRecentScopes(
+    list: RecentScope[],
+    liveFolderPaths: Set<string>,
+    liveCollectionIds: Set<string>,
+    liveSmartIds: Set<string>
+): RecentScope[] {
+    return list.filter(s => {
+        if (s.kind === 'folder') return liveFolderPaths.has(s.id);
+        if (s.kind === 'collection') return liveCollectionIds.has(s.id);
+        return liveSmartIds.has(s.id);
+    });
+}
+
+/** fullPaths of every display row that must be expanded for `targetPath`
+ *  to be visible. Walks the pre-order rows tracking the depth chain, the
+ *  same technique as visibleFolderRows, so compression chains ("a/b/c")
+ *  resolve to the rows that actually exist. */
+export function ancestorFolderPaths(rows: DisplayFolder[], targetPath: string): string[] {
+    const chain: DisplayFolder[] = [];
+    for (const row of rows) {
+        while (chain.length && chain[chain.length - 1].depth >= row.depth) {
+            chain.pop();
+        }
+        if (row.fullPath === targetPath) {
+            return chain.filter(r => r.hasChildren).map(r => r.fullPath);
+        }
+        chain.push(row);
+    }
+    return [];
+}
+
+/** Right-edge tag for a recents row: words, not another glyph dialect. */
+export function kindLabel(kind: RecentScope['kind']): string {
+    switch (kind) {
+        case 'folder': return 'Folder';
+        case 'collection': return 'Collection';
+        case 'smart': return 'Smart';
+    }
 }

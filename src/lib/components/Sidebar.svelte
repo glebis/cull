@@ -2,7 +2,7 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, folders, activeFolder, activeReferencedFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen, exportFolderSmartCollection } from '$lib/stores';
+    import { totalCount, folders, activeFolder, activeReferencedFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, sidebarHideEmpty, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen, exportFolderSmartCollection } from '$lib/stores';
     import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, renameFolder as apiRenameFolder, listCollections, createCollection, createCollectionWithImages, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, updateSmartCollectionApi, deleteSmartCollectionApi, countByDetectedClass, listDetectedClasses, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, FilterNode, ImageWithFile, SmartCollection } from '$lib/api';
@@ -26,6 +26,9 @@
     let clipboardStatus = $state<ClipboardMonitorStatus | null>(null);
     let clipboardMoving = $state(false);
     let clipboardPublishing = $state(false);
+    // imageview-1i2k.6: footer chip + popover so the monitor is reachable
+    // without scrolling to the bottom section.
+    let clipboardPopoverOpen = $state(false);
     let clipboardPublishResult = $state<ClipboardPublishResult | null>(null);
     let collectionPreview = $state<{
         collectionId: string;
@@ -36,6 +39,22 @@
         x: number;
         y: number;
     } | null>(null);
+    // Folder preview is gated on the Option (Alt) key being held, per user
+    // request: a normal hover shouldn't spawn a popover, but holding Option
+    // while hovering a folder row opens an interactive thumbnail grid of
+    // that folder's images. Reuses the collection-preview popover styling.
+    let folderPreview = $state<{
+        folder: string;
+        name: string;
+        count: number;
+        images: ImageWithFile[];
+        loading: boolean;
+        x: number;
+        y: number;
+    } | null>(null);
+    let folderPreviewTimer: ReturnType<typeof setTimeout> | null = null;
+    let folderPreviewRequest = 0;
+    let folderPreviewAnchor: HTMLElement | null = null;
     type SidebarContextTarget =
         | { kind: 'folder'; folder: string; name: string; renamable: boolean; removable: boolean; x: number; y: number; opener: HTMLElement | null }
         | { kind: 'collection'; collectionId: string; name: string; count: number; x: number; y: number; opener: HTMLElement | null }
@@ -53,7 +72,7 @@
         clipboardMonitorStatus.set(status);
     }
 
-    import { buildDisplayFolders, buildPinnedCollectionRows, formatSidebarCount, formatFolderCount, visibleFolderRows, matchesSidebarFilter, prunePinnedIds, type CollectionRow } from '$lib/sidebar-utils';
+    import { buildDisplayFolders, buildPinnedCollectionRows, formatSidebarCount, formatFolderCount, visibleFolderRows, matchesSidebarFilter, prunePinnedIds, recordRecentScope, markRecentScopeVisited, pruneRecentScopes, ancestorFolderPaths, kindLabel, type CollectionRow, type RecentScope } from '$lib/sidebar-utils';
 
     function prunePinsToExistingCollections(rows: CollectionRow[]) {
         const kept = prunePinnedIds(get(pinnedCollections), rows);
@@ -66,7 +85,7 @@
     }
     import SessionSwitcher from './SessionSwitcher.svelte';
     import DevicesSection from './DevicesSection.svelte';
-    import { activeCanvas, activeSession, navigateTo, sessions, sessionCanvases, expandedFolders, sidebarSectionsCollapsed, sidebarFilter } from '$lib/stores';
+    import { activeCanvas, activeSession, navigateTo, sessions, sessionCanvases, expandedFolders, sidebarSectionsCollapsed, sidebarFilter, pendingGridSearch, recentScopes } from '$lib/stores';
     import { createCanvas, deleteCanvas, addToCollection, listImagesByFolder, type Canvas } from '$lib/api';
     import { reconcileRenamedCanvas, reconcileRenamedSession, renamedFolderPath } from '$lib/folder-rename-state';
     import { withCanvasPathMigrationBarrier } from '$lib/canvas-save-coordinator';
@@ -90,6 +109,8 @@
     let displayCollections = $derived(
         buildPinnedCollectionRows($collections, $pinnedCollections)
             .filter(([, name]) => matchesSidebarFilter(name, $sidebarFilter))
+            // imageview-1i2k.3: hide-empty drops zero-count collections.
+            .filter(([, , count]) => !$sidebarHideEmpty || count > 0)
     );
 
     // Section collapse. The store holds the COLLAPSED ids, so a section added
@@ -115,7 +136,12 @@
 
     // The rows actually on screen. Both the render loop and the keyboard
     // handler read this, so arrow keys can never focus a hidden row.
-    let visibleFolders = $derived(visibleFolderRows(displayFolders, $expandedFolders, $sidebarFilter));
+    // imageview-1i2k.3: hide-empty drops folders whose whole subtree is empty
+    // (subtreeCount covers descendants, so a kept parent never strands one).
+    let visibleFolders = $derived(
+        visibleFolderRows(displayFolders, $expandedFolders, $sidebarFilter)
+            .filter(f => !$sidebarHideEmpty || f.subtreeCount > 0)
+    );
     let treeFocusIndex = $state(0);
     // While filtering, the tree auto-reveals matches and their subtrees, so
     // expansion controls are inert and say so rather than looking broken.
@@ -234,6 +260,45 @@
         isSectionCollapsed($sidebarSectionsCollapsed, 'clipboard') && !clipboardStatus?.running
     );
 
+    // The RECENT rail: rows re-resolve their names from the live lists at
+    // render (renames follow automatically), and dead targets are pruned when
+    // browse counts refresh.
+    let recentScopeRows = $derived(
+        $recentScopes.map(s => {
+            if (s.kind === 'folder') return { ...s, name: folderName(s.id) };
+            if (s.kind === 'collection') {
+                return { ...s, name: $collections.find(([id]) => id === s.id)?.[1] ?? s.name };
+            }
+            return { ...s, name: $smartCollections.find(sc => sc.id === s.id)?.name ?? s.name };
+        })
+    );
+
+    async function openRecentScope(scopeRow: RecentScope) {
+        if (scopeRow.kind === 'folder') { await selectFolder(scopeRow.id); return; }
+        if (scopeRow.kind === 'collection') { await selectCollection(scopeRow.id); return; }
+        const sc = get(smartCollections).find(item => item.id === scopeRow.id);
+        if (sc) await selectSmartCollection(sc);
+    }
+
+    // The tree is alphabetical, so a fresh import lands wherever its name
+    // falls — expand its ancestor rows and scroll it into view instead of
+    // trusting persistence-as-punishment.
+    function revealImportedFolderInTree(path: string) {
+        const rows = buildDisplayFolders(get(folders));
+        const nextExpanded = new Set([...get(expandedFolders), ...ancestorFolderPaths(rows, path)]);
+        expandedFolders.set(nextExpanded);
+        foldersExpanded = true;
+        const idx = visibleFolderRows(rows, nextExpanded, get(sidebarFilter)).findIndex(r => r.fullPath === path);
+        if (idx < 0) return;
+        treeFocusIndex = idx;
+        queueMicrotask(() => {
+            const reduce = typeof window !== 'undefined'
+                && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            const el = document.querySelector<HTMLElement>(`[data-tree-row="${idx}"]`);
+            el?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
+        });
+    }
+
     // Smart collections seed ~22 presets. Hide empty built-ins to keep the list
     // proportional to the library, but retain user collections so their rules
     // can still be edited when they currently match nothing.
@@ -288,6 +353,76 @@
         collectionPreviewRequest += 1;
         if (!collectionId || collectionPreview?.collectionId === collectionId) {
             collectionPreview = null;
+        }
+    }
+
+    function clearFolderPreviewTimer() {
+        if (!folderPreviewTimer) return;
+        clearTimeout(folderPreviewTimer);
+        folderPreviewTimer = null;
+    }
+
+    function folderPreviewSrc(item: ImageWithFile): string {
+        const path = safeAssetPreviewPath(item, { displayPx: 76, dpr: typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1 });
+        return path ? convertFileSrc(path) : '';
+    }
+
+    // Alt-hover folder preview: the popover is intentionally hidden unless the
+    // Option key is held, so a normal sidebar hover stays calm. We also bail
+    // out if the same folder is already previewing — repeated hovers over the
+    // same row shouldn't restart the load.
+    function scheduleFolderPreview(event: MouseEvent | FocusEvent, folder: string, name: string, count: number) {
+        const native = event as MouseEvent;
+        const altHeld = native.altKey === true;
+        if (!altHeld) {
+            hideFolderPreview(folder);
+            return;
+        }
+        if (count <= 0) {
+            folderPreview = null;
+            return;
+        }
+        if (folderPreview && folderPreview.folder === folder && !folderPreview.loading) {
+            return;
+        }
+
+        clearFolderPreviewTimer();
+        folderPreviewRequest += 1;
+        const anchor = event.currentTarget as HTMLElement;
+        folderPreviewAnchor = anchor;
+        const rect = anchor.getBoundingClientRect();
+        const x = rect.right + 8;
+        const y = Math.max(8, Math.min(rect.top, window.innerHeight - 172));
+        const requestId = folderPreviewRequest;
+
+        folderPreviewTimer = setTimeout(async () => {
+            folderPreview = { folder, name, count, images: [], loading: true, x, y };
+            try {
+                const images = await listImagesByFolder(folder, 4, 0, $showRejected);
+                if (requestId !== folderPreviewRequest) return;
+                folderPreview = { folder, name, count, images, loading: false, x, y };
+            } catch (e) {
+                if (requestId !== folderPreviewRequest) return;
+                folderPreview = null;
+                console.error('Failed to load folder preview:', e);
+            }
+        }, 800);
+    }
+
+    function hideFolderPreview(folder?: string) {
+        clearFolderPreviewTimer();
+        folderPreviewRequest += 1;
+        folderPreviewAnchor = null;
+        if (!folder || folderPreview?.folder === folder) {
+            folderPreview = null;
+        }
+    }
+
+    // Closing the preview when the user lets go of Option keeps the UI calm:
+    // there's no orphan popover lingering after the keystroke ends.
+    function handleFolderPreviewKey(event: KeyboardEvent) {
+        if (event.type === 'keyup' && event.key === 'Alt') {
+            hideFolderPreview();
         }
     }
 
@@ -362,8 +497,12 @@
 
     onDestroy(() => {
         clearCollectionPreviewTimer();
+        clearFolderPreviewTimer();
         window.removeEventListener('detected-classes-changed', handleDetectedClassesChanged);
         window.removeEventListener('cull:decision-changed', handleDecisionChanged);
+        window.removeEventListener('keydown', handleFolderPreviewKey);
+        window.removeEventListener('keyup', handleFolderPreviewKey);
+        window.removeEventListener('blur', () => hideFolderPreview());
     });
 
     onMount(async () => {
@@ -386,6 +525,9 @@
         }
         window.addEventListener('detected-classes-changed', handleDetectedClassesChanged);
         window.addEventListener('cull:decision-changed', handleDecisionChanged);
+        window.addEventListener('keydown', handleFolderPreviewKey);
+        window.addEventListener('keyup', handleFolderPreviewKey);
+        window.addEventListener('blur', () => hideFolderPreview());
     });
 
     async function refreshBrowseCounts(includeRejected: boolean) {
@@ -404,6 +546,12 @@
             collections.set(nextCollections);
             prunePinsToExistingCollections(nextCollections);
             smartCollections.set(nextSmartCollections);
+            recentScopes.set(pruneRecentScopes(
+                get(recentScopes),
+                new Set(nextFolders.map(([p]) => p)),
+                new Set(nextCollections.map(([id]) => id)),
+                new Set(nextSmartCollections.map(sc => sc.id)),
+            ));
             detectedClasses = nextDetectedClasses;
             detectedClassesStore.set(nextDetectedClasses);
         } catch (e) {
@@ -560,6 +708,7 @@
         activeFolder.set(null);
         activeCollection.set(null);
         activeDetectedClass.set(null);
+        recentScopes.update(list => recordRecentScope(list, { kind: 'smart', id: sc.id, name: sc.name, ts: Date.now() }));
         if (sc.filter_json) {
             try {
                 await loadImagesForCurrentScope();
@@ -578,6 +727,9 @@
         activeCollection.set(null);
         activeSmartCollection.set(null);
         activeDetectedClass.set(null);
+        if (folder) {
+            recentScopes.update(list => recordRecentScope(list, { kind: 'folder', id: folder, name: folderName(folder), ts: Date.now() }));
+        }
         try {
             await loadImagesForCurrentScope();
         } catch (e) {
@@ -594,6 +746,8 @@
         activeFolder.set(null);
         activeSmartCollection.set(null);
         activeDetectedClass.set(null);
+        const name = get(collections).find(([id]) => id === collectionId)?.[1] ?? 'Collection';
+        recentScopes.update(list => recordRecentScope(list, { kind: 'collection', id: collectionId, name, ts: Date.now() }));
         try {
             await loadImagesForCurrentScope();
         } catch (e) {
@@ -835,6 +989,34 @@
         }
     }
 
+    // The footer chip opens quick controls; "Details" reveals the full
+    // section (which stays the place for folder/publish management).
+    function revealClipboardSection() {
+        sidebarSectionsCollapsed.update(set => {
+            const next = new Set(set);
+            next.delete('clipboard');
+            return next;
+        });
+        clipboardPopoverOpen = false;
+        queueMicrotask(() => {
+            const reduce = typeof window !== 'undefined'
+                && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            document.querySelector('.clipboard-monitor')
+                ?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
+        });
+    }
+
+    $effect(() => {
+        if (!clipboardPopoverOpen) return;
+        const onPointerDown = (e: PointerEvent) => {
+            if (!(e.target as HTMLElement).closest('.clipboard-chip, .clipboard-popover')) {
+                clipboardPopoverOpen = false;
+            }
+        };
+        window.addEventListener('pointerdown', onPointerDown);
+        return () => window.removeEventListener('pointerdown', onPointerDown);
+    });
+
     async function handleMoveClipboardCaptureFolder() {
         if (clipboardMoving) return;
         const selected = await open({ directory: true, multiple: false });
@@ -885,6 +1067,15 @@
             showToast('Link copied', { detail: clipboardPublishResult.url, type: 'success', duration: 4000 });
         } catch (e) {
             showToast('Copy failed', { detail: String(e), type: 'error', duration: 8000 });
+        }
+    }
+
+    function publishHost(url: string): string {
+        try {
+            const parsed = new URL(url);
+            return parsed.host;
+        } catch {
+            return url;
         }
     }
 
@@ -943,18 +1134,28 @@
             }
             setLastResult(summary, result.errors.length > 0 ? 'error' : 'success');
             const importedFolder = selected as string;
+            recentScopes.update(list => recordRecentScope(list, {
+                kind: 'folder',
+                id: importedFolder,
+                // the local const above already holds the basename
+                name: folderName,
+                ts: Date.now(),
+                fresh: true,
+            }));
             showToast(`Imported "${folderName}"`, {
                 detail: summary,
                 type: 'success',
                 duration: 8000,
                 // "Where did what I just imported go?" is the question every
                 // import ends on; answer it in the toast instead of making the
-                // user hunt for the folder in the tree.
+                // user hunt for the folder in the tree. The RECENT rail above
+                // keeps the same answer after the toast expires.
                 actions: result.imported > 0
                     ? [{ label: 'View imported', onclick: () => { selectFolder(importedFolder); } }]
                     : undefined,
             });
             await refreshImages();
+            revealImportedFolderInTree(importedFolder);
         } catch (e) {
             setLastResult(`Error: ${e}`, 'error');
             showToast('Import failed', { detail: String(e), type: 'error', duration: 10000 });
@@ -965,6 +1166,26 @@
     }
 
     let detectedClasses = $state<[string, number][]>([]);
+
+    // imageview-1i2k.2: the filter is the sidebar's one search — it narrows
+    // every scope list, including the ones it used to skip silently.
+    // Canvases: only the active session's are loaded (listCanvases is
+    // per-session), so matches cover that set.
+    let visibleDetectedClasses = $derived(
+        detectedClasses.filter(([cls]) => matchesSidebarFilter(cls, $sidebarFilter))
+    );
+    let matchingCanvases = $derived(
+        filterActive ? $sessionCanvases.filter(c => matchesSidebarFilter(c.name, $sidebarFilter)) : []
+    );
+
+    // Enter promotes the scope filter to a grid search: the same text runs
+    // through the CommandBar NL parser, which applies it to the grid.
+    function promoteFilterToGrid() {
+        const query = get(sidebarFilter).trim();
+        if (!query) return;
+        pendingGridSearch.set(query);
+        navigateTo('grid');
+    }
 
     function handleDetectedClassesChanged() { void loadDetectedClasses(); }
 
@@ -1230,12 +1451,57 @@
         <input
             type="search"
             class="sidebar-filter-input"
-            placeholder="Filter folders &amp; collections"
-            aria-label="Filter folders and collections"
+            placeholder="Filter scopes — Enter searches images"
+            aria-label="Filter sidebar scopes; press Enter to search images"
             bind:value={$sidebarFilter}
-            onkeydown={(e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); sidebarFilter.set(''); } }}
+            onkeydown={(e: KeyboardEvent) => {
+                if (e.key === 'Escape') { e.stopPropagation(); sidebarFilter.set(''); }
+                // imageview-1i2k.2: one adaptive search — Enter hands the
+                // scope query to the grid (CommandBar NL parser).
+                if (e.key === 'Enter') promoteFilterToGrid();
+            }}
         />
     </div>
+
+    {#if matchingCanvases.length > 0}
+    <div class="section">
+        <div class="section-header">CANVASES</div>
+        {#each matchingCanvases as canvas (canvas.id)}
+            <button
+                class="section-item"
+                class:active={$activeCanvas?.id === canvas.id}
+                onclick={() => selectCanvas(canvas)}
+            >
+                <span class="item-label">{canvas.name}</span>
+                <span class="scope-kind">Canvas</span>
+            </button>
+        {/each}
+    </div>
+    {/if}
+
+    {#if recentScopeRows.length > 0}
+    <div class="section recent-rail">
+        <div class="section-header">RECENT</div>
+        {#each recentScopeRows as scopeRow (scopeRow.kind + ':' + scopeRow.id)}
+            <button
+                class="section-item recent-scope"
+                class:fresh={scopeRow.fresh}
+                onclick={() => openRecentScope(scopeRow)}
+                title={scopeRow.kind === 'folder' ? scopeRow.id : scopeRow.name}
+                aria-label={scopeRow.fresh
+                    ? `${scopeRow.name}, ${kindLabel(scopeRow.kind)}, just imported`
+                    : `${scopeRow.name}, ${kindLabel(scopeRow.kind)}`}
+            >
+                <span class="item-label">{scopeRow.name}</span>
+                {#if scopeRow.fresh}
+                    <span class="just-imported">new</span>
+                {:else}
+                    <span class="scope-kind">{kindLabel(scopeRow.kind)}</span>
+                {/if}
+            </button>
+        {/each}
+    </div>
+    {/if}
 
     <div class="section">
         <div class="section-header">LIBRARY</div>
@@ -1245,7 +1511,6 @@
             onclick={() => selectFolder(null)}
             aria-current={allImagesActive ? 'true' : undefined}
         >
-            <span class="icon">&#9632;</span>
             <span class="item-label">All Images</span>
             <span class="count">{formatSidebarCount($totalCount)}</span>
         </button>
@@ -1258,7 +1523,6 @@
                 aria-current={$activeSmartCollection?.id === recentImportsCollection.id ? 'true' : undefined}
                 title="Images imported in the last 7 days"
             >
-                <span class="icon">&#9200;</span>
                 <span class="item-label">Recent Imports</span>
                 <span class="count">{formatSidebarCount(recentImportsCollection.image_count)}</span>
             </button>
@@ -1289,6 +1553,7 @@
                     <div
                         class="folder-row"
                         class:active={$activeFolder === folder.fullPath}
+                        class:previewing={folderPreview?.folder === folder.fullPath}
                         style="padding-left: {folder.depth * 12}px"
                         role="treeitem"
                         aria-level={folder.depth + 1}
@@ -1299,6 +1564,9 @@
                         data-tree-row={i}
                         tabindex={i === treeTabIndex ? 0 : -1}
                         onfocusin={() => treeFocusIndex = i}
+                        onmouseenter={(e) => scheduleFolderPreview(e, folder.fullPath, folder.name, folder.count)}
+                        onmouseleave={() => hideFolderPreview(folder.fullPath)}
+                        onmousemove={(e) => { if (e.altKey) scheduleFolderPreview(e, folder.fullPath, folder.name, folder.count); }}
                         oncontextmenu={(e) => openFolderContextMenu(e, folder.fullPath, folder.name, folder.fullPath !== '/', !folder.isGroup && folder.fullPath !== '/')}
                     >
                         {#if folder.hasChildren}
@@ -1314,7 +1582,7 @@
                             <span class="twisty-spacer" aria-hidden="true"></span>
                         {/if}
                         <button
-                            class="section-item"
+                            class="section-item folder-item"
                             class:folder-group={folder.isGroup}
                             tabindex="-1"
                             onclick={() => selectFolder(folder.fullPath)}
@@ -1329,14 +1597,11 @@
                                     : `${folder.count} directly in this folder, ${folder.subtreeCount} including subfolders`}
                             >{formatFolderCount(folder.count, folder.subtreeCount)}</span>
                         </button>
-                        <button
-                            class="menu-btn"
-                            tabindex="-1"
-                            onclick={(event) => openFolderContextMenu(event, folder.fullPath, folder.name, folder.fullPath !== '/', !folder.isGroup && folder.fullPath !== '/')}
-                            title="Folder actions"
-                            aria-label={`Folder actions: ${folder.name}`}
-                            aria-haspopup="menu"
-                        >…</button>
+                        <span
+                            class="folder-preview-gesture"
+                            title="Hold Option to preview"
+                            aria-hidden="true"
+                        ></span>
                     </div>
                 {/each}
                 {#if visibleFolders.length === 0}
@@ -1356,7 +1621,9 @@
             <div class="collect-indicator">Collecting into: {$collections.find(c => c[0] === $collectModeTarget)?.[1] ?? '...'}</div>
         {/if}
         {#if $collections.length === 0}
-            <div class="section-empty">No collections yet</div>
+            <div class="section-empty">No collections yet — the + above creates one.</div>
+        {:else if displayCollections.length === 0}
+            <div class="section-empty">All collections are empty — hidden while "Hide empty" is on.</div>
         {:else}
             {#each displayCollections as [id, name, count]}
                 {@const pinned = $pinnedCollections.includes(id)}
@@ -1378,7 +1645,6 @@
                         onkeydown={(event) => { if (isContextMenuKey(event)) openCollectionContextMenu(event, id, name, count); }}
                         aria-current={$activeCollection === id ? 'true' : undefined}
                     >
-                        <span class="icon">&#9671;</span>
                         <span class="item-label">{name}</span>
                         <span class="count">{formatSidebarCount(count)}</span>
                     </button>
@@ -1404,7 +1670,7 @@
         {/if}
     </div>
 
-    {#if visibleSmartCollections.length > 0}
+    {#if $smartCollections.length > 0}
     {@const smartCollapsed = isSectionCollapsed($sidebarSectionsCollapsed, 'smart')}
     <div class="section">
         <button
@@ -1424,11 +1690,15 @@
                     oncontextmenu={(event) => openSmartCollectionContextMenu(event, sc)}
                     onkeydown={(event) => { if (isContextMenuKey(event)) openSmartCollectionContextMenu(event, sc); }}
                     aria-current={$activeSmartCollection?.id === sc.id ? 'true' : undefined}>
-                    <span class="icon">&#9733;</span>
                     <span class="item-label">{sc.name}</span>
                     <span class="count">{formatSidebarCount(sc.image_count)}</span>
                 </button>
             {/each}
+            {#if visibleSmartCollections.length === 0}
+                <!-- imageview-1i2k.9: teach the next action instead of
+                     vanishing — empty built-ins hide, the section stays. -->
+                <div class="section-empty">No smart collections match yet — apply a grid filter, then Save Collection in the search bar.</div>
+            {/if}
         {/if}
     </div>
     {/if}
@@ -1451,9 +1721,13 @@
             <input type="checkbox" bind:checked={$showMissing} />
             Show missing files
         </label>
-        {#if detectedClasses.length > 0}
+        <label class="show-missing-toggle">
+            <input type="checkbox" bind:checked={$sidebarHideEmpty} />
+            Hide empty folders &amp; collections
+        </label>
+        {#if visibleDetectedClasses.length > 0}
             <div class="detected-header">DETECTED OBJECTS</div>
-            {#each detectedClasses as [cls, count]}
+            {#each visibleDetectedClasses as [cls, count]}
                 <button
                     class="section-item detected-class"
                     class:active={$activeDetectedClass === cls}
@@ -1476,12 +1750,41 @@
             <span class="toggle-arrow">{clipboardCollapsed ? '▸' : '▾'}</span>
             <span class="folders-toggle-label">Clipboard Monitor</span>
             {#if clipboardStatus?.running}
-                <span class="count running-dot" title="Monitor running">●</span>
+                <span class="count running-dot" title="Monitor running" role="img" aria-label="Monitor running"></span>
             {/if}
         </button>
         {#if !clipboardCollapsed}
+        {#if clipboardStatus}
+            <div class="clipboard-status" class:running={clipboardStatus.running}>
+                <div class="clipboard-status-row">
+                    <span class="clipboard-status-dot" aria-hidden="true"></span>
+                    <span class="clipboard-status-label">
+                        {clipboardStatus.running ? 'Running' : 'Stopped'}
+                    </span>
+                    <span class="clipboard-status-count">
+                        {clipboardStatus.captured_count} captured
+                    </span>
+                </div>
+                <div class="clipboard-status-row muted">
+                    <span class="clipboard-status-folder" title={clipboardStatus.capture_dir}>
+                        {clipboardStatus.capture_dir.split('/').pop() || clipboardStatus.capture_dir}
+                    </span>
+                    {#if clipboardStatus.collection_name}
+                        <span class="clipboard-status-sep">·</span>
+                        <span class="clipboard-status-collection" title={clipboardStatus.collection_name}>
+                            {clipboardStatus.collection_name}
+                        </span>
+                    {/if}
+                </div>
+                {#if clipboardStatus.access_status !== 'supported'}
+                    <div class="clipboard-status-warning" title={clipboardStatus.access_status}>
+                        Access: {clipboardStatus.access_status}
+                    </div>
+                {/if}
+            </div>
+        {/if}
         <button
-            class="section-item"
+            class="section-item clipboard-primary"
             class:active={clipboardStatus?.running}
             onclick={handleToggleClipboardMonitor}
             disabled={clipboardMoving || clipboardPublishing}
@@ -1490,23 +1793,16 @@
             <span class="icon">{clipboardStatus?.running ? '■' : '▶'}</span>
             {clipboardStatus?.running ? 'Stop Monitor' : 'Monitor Clipboard'}
         </button>
+        <label class="clipboard-option">
+            <input
+                type="checkbox"
+                checked={clipboardStatus?.capture_existing_on_start ?? false}
+                onchange={handleClipboardCaptureExistingChange}
+                disabled={clipboardMoving || clipboardPublishing}
+            />
+            <span>Capture current image on start</span>
+        </label>
         {#if clipboardStatus}
-            <div class="section-meta">Access: {clipboardStatus.access_status}</div>
-            <div class="section-meta" title={clipboardStatus.capture_dir}>
-                Folder: {clipboardStatus.capture_dir.split('/').pop() || clipboardStatus.capture_dir}
-            </div>
-            {#if clipboardStatus.collection_name}
-                <div class="section-meta">Collection: {clipboardStatus.collection_name} · {clipboardStatus.captured_count}</div>
-            {/if}
-            <label class="clipboard-option">
-                <input
-                    type="checkbox"
-                    checked={clipboardStatus.capture_existing_on_start}
-                    onchange={handleClipboardCaptureExistingChange}
-                    disabled={clipboardMoving || clipboardPublishing}
-                />
-                <span>Capture current image on start</span>
-            </label>
             <div class="section-actions">
                 <button
                     class="section-item compact"
@@ -1522,7 +1818,7 @@
                     disabled={!clipboardStatus.collection_id || clipboardPublishing}
                 >
                     <span class="icon">↗</span>
-                    {clipboardPublishing ? 'Publishing...' : 'Publish clipboard collection'}
+                    {clipboardPublishing ? 'Publishing...' : 'Publish'}
                 </button>
             </div>
             {#if clipboardPublishResult}
@@ -1530,7 +1826,12 @@
                     class="publish-url"
                     onclick={copyPublishUrl}
                     title={`Copy link: ${clipboardPublishResult.url}`}
-                >{clipboardPublishResult.url}</button>
+                >
+                    <span class="publish-url-host">
+                        {publishHost(clipboardPublishResult.url)}
+                    </span>
+                    <span class="publish-url-copy" aria-hidden="true">⧉</span>
+                </button>
             {/if}
         {/if}
         {/if}
@@ -1560,6 +1861,35 @@
                         </div>
                     {/each}
                 </div>
+            {/if}
+        </div>
+    {/if}
+
+    {#if folderPreview}
+        <div
+            class="collection-preview-popover folder-preview-popover"
+            style="left: {folderPreview.x}px; top: {folderPreview.y}px;"
+            aria-hidden="true"
+        >
+            <div class="collection-preview-header">
+                <span>{folderPreview.name}</span>
+                <span>{formatSidebarCount(folderPreview.count)}</span>
+            </div>
+            {#if folderPreview.loading}
+                <div class="collection-preview-loading">Loading...</div>
+            {:else if folderPreview.images.length > 0}
+                <div class="collection-preview-grid">
+                    {#each folderPreview.images as item}
+                        {@const src = folderPreviewSrc(item)}
+                        <div class="collection-preview-thumb">
+                            {#if src}
+                                <img src={src} alt="" loading="lazy" />
+                            {/if}
+                        </div>
+                    {/each}
+                </div>
+            {:else}
+                <div class="collection-preview-loading">No images yet</div>
             {/if}
         </div>
     {/if}
@@ -1596,6 +1926,42 @@
                 {importTotal > 0 ? `Importing ${importCurrent} of ${importTotal}` : 'Scanning folder'}
             </div>
         {/if}
+        {#if clipboardPopoverOpen}
+            <div
+                class="clipboard-popover"
+                role="dialog"
+                aria-label="Clipboard monitor"
+                tabindex="-1"
+                onkeydown={(e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); clipboardPopoverOpen = false; } }}
+            >
+                <div class="clipboard-popover-status">
+                    <span class="chip-dot" class:live={clipboardStatus?.running}></span>
+                    {clipboardStatus?.running ? 'Monitor running' : 'Monitor off'}
+                </div>
+                {#if clipboardStatus?.collection_name}
+                    <div class="section-meta">Collection: {clipboardStatus.collection_name} · {clipboardStatus.captured_count}</div>
+                {/if}
+                <button
+                    class="section-item compact"
+                    onclick={handleToggleClipboardMonitor}
+                    disabled={clipboardMoving || clipboardPublishing}
+                    aria-pressed={clipboardStatus?.running ?? false}
+                >
+                    {clipboardStatus?.running ? 'Stop Monitor' : 'Monitor Clipboard'}
+                </button>
+                <button class="section-item compact" onclick={revealClipboardSection}>Details</button>
+            </div>
+        {/if}
+        <button
+            class="clipboard-chip"
+            class:running={clipboardStatus?.running}
+            onclick={() => clipboardPopoverOpen = !clipboardPopoverOpen}
+            aria-expanded={clipboardPopoverOpen}
+            title="Clipboard monitor"
+        >
+            <span class="chip-dot" aria-hidden="true"></span>
+            Clipboard
+        </button>
         <button
             class="import-btn"
             onclick={handleImportFolder}
@@ -1639,6 +2005,10 @@
         grid-area: sidebar;
         min-height: 0;
         overflow: hidden;
+        /* imageview-1i2k.7: the sidebar is all captions (≤11px), where
+           --text-secondary fails APCA (~Lc 40 on --surface). Everywhere in
+           the sidebar, secondary text uses the caption-bright variant. */
+        --text-secondary: var(--text-caption);
     }
     .sidebar-scroll {
         flex: 1 1 auto;
@@ -1697,7 +2067,7 @@
     }
     .section-actions {
         display: grid;
-        grid-template-columns: minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         gap: 4px;
         padding-top: 4px;
     }
@@ -1709,39 +2079,117 @@
         text-overflow: ellipsis;
         white-space: nowrap;
     }
+    .clipboard-status {
+        background: var(--surface);
+        border-radius: 6px;
+        margin: 4px 8px 6px;
+        padding: 6px 8px;
+    }
+    .clipboard-status-row {
+        align-items: baseline;
+        display: flex;
+        gap: 6px;
+        line-height: 1.3;
+        min-width: 0;
+    }
+    .clipboard-status-row.muted {
+        color: var(--text-secondary);
+        font-size: 11px;
+        margin-top: 2px;
+    }
+    .clipboard-status-dot {
+        background: var(--text-secondary);
+        border-radius: 50%;
+        flex: none;
+        height: 7px;
+        margin-top: 3px;
+        width: 7px;
+    }
+    .clipboard-status.running .clipboard-status-dot {
+        background: var(--green);
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 25%, transparent);
+    }
+    .clipboard-status-label {
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 500;
+    }
+    .clipboard-status-count {
+        color: var(--text-secondary);
+        font-size: 11px;
+        margin-left: auto;
+    }
+    .clipboard-status-folder,
+    .clipboard-status-collection {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .clipboard-status-folder {
+        flex: 0 1 auto;
+        max-width: 45%;
+    }
+    .clipboard-status-collection {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+    .clipboard-status-sep {
+        color: var(--text-secondary);
+        flex: none;
+        opacity: 0.6;
+    }
+    .clipboard-status-warning {
+        color: var(--orange);
+        font-size: 11px;
+        margin-top: 4px;
+    }
+    .clipboard-primary {
+        margin: 2px 8px;
+    }
+    .clipboard-option {
+        align-items: center;
+        color: var(--text-secondary);
+        display: flex;
+        font-size: 11px;
+        gap: 8px;
+        padding: 4px 12px;
+    }
+    .clipboard-option input {
+        accent-color: var(--blue);
+        flex: none;
+        margin: 0;
+    }
+    .clipboard-option:hover {
+        color: var(--text);
+    }
     .publish-url {
+        align-items: center;
         background: none;
         border: none;
         color: var(--blue);
         cursor: pointer;
-        display: block;
+        display: flex;
         font-family: inherit;
-        font-size: 10px;
+        font-size: 11px;
+        gap: 6px;
         max-width: 100%;
         overflow: hidden;
-        padding: 2px 8px;
+        padding: 4px 12px;
         text-align: left;
-        text-decoration: underline;
-        text-overflow: ellipsis;
-        white-space: nowrap;
         width: 100%;
     }
     .publish-url:hover {
         color: var(--text);
     }
-    .clipboard-option {
-        align-items: flex-start;
-        color: var(--text-secondary);
-        display: flex;
-        font-size: 11px;
-        gap: 6px;
-        line-height: 1.3;
-        padding: 6px 8px 2px;
+    .publish-url-host {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
-    .clipboard-option input {
-        accent-color: var(--blue);
+    .publish-url-copy {
         flex: none;
-        margin: 1px 0 0;
+        font-size: 12px;
+        opacity: 0.7;
     }
     .icon {
         font-size: 8px;
@@ -1787,21 +2235,35 @@
         cursor: pointer;
         flex: none;
         font-family: inherit;
-        font-size: 8px;
+        font-size: 11px;
         line-height: 1;
         padding: 0;
-        width: 14px;
+        position: relative;
+        width: 16px;
+    }
+    /* imageview-1i2k.8: the glyph is ~14×8px; the tap target must not be.
+       A negative-inset pseudo-element grows the hit area to the 24px floor
+       without changing the visual size. */
+    .twisty::after {
+        content: '';
+        position: absolute;
+        inset: -8px -5px;
     }
     .twisty:hover {
         color: var(--text);
     }
     .twisty-spacer {
         flex: none;
-        width: 14px;
+        width: 16px;
     }
+    /* imageview-1i2k.4: CSS-drawn dot, same geometric family as the pin —
+       no text-glyph dialects. */
     .running-dot {
-        color: var(--green);
-        font-size: 9px;
+        align-self: center;
+        background: var(--green);
+        border-radius: 50%;
+        height: 6px;
+        width: 6px;
     }
     .folder-row {
         display: flex;
@@ -1823,6 +2285,7 @@
     .folder-row .section-item {
         flex: 1;
         min-width: 0;
+        position: relative;
     }
     .folders-toggle {
         font-size: 11px;
@@ -1844,21 +2307,31 @@
         color: var(--text);
     }
     .toggle-arrow {
-        font-size: 8px;
-        width: 10px;
+        font-size: 11px;
+        width: 12px;
         text-align: center;
     }
     .folders-toggle-label {
         font-size: 10px;
         font-weight: 600;
         letter-spacing: 0.05em;
+        text-align: left;
         text-transform: uppercase;
     }
     .folder-label {
         min-width: 0;
         overflow: hidden;
+        padding-right: 56px;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+    /* Numbers align to one column at the right edge of every folder row,
+       regardless of label length. Pad the label so the count never overlaps. */
+    .folder-row .section-item .count {
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
     }
     .folder-group {
         cursor: default;
@@ -1892,6 +2365,13 @@
         color: var(--text-secondary);
         cursor: pointer;
         font-family: inherit;
+        position: relative;
+    }
+    /* imageview-1i2k.8: ~19px-tall chip, 24px-tall tap target. */
+    .preset-btn::after {
+        content: '';
+        position: absolute;
+        inset: -3px 0;
     }
     .preset-btn:hover {
         background: var(--border);
@@ -1938,7 +2418,9 @@
     }
     .collect-indicator {
         font-size: 10px;
-        color: var(--green);
+        /* imageview-1i2k.5: green means positive state (success, live). An
+           active collect mode is not a success — orange marks modes. */
+        color: var(--orange);
         padding: 2px 8px 4px;
         font-style: italic;
     }
@@ -1947,6 +2429,28 @@
         color: var(--text-secondary);
         padding: 4px 8px;
         font-style: italic;
+    }
+    .recent-rail {
+        padding-bottom: 0;
+    }
+    .section-item .scope-kind {
+        color: var(--text-secondary);
+        font-size: 11px;
+        margin-left: auto;
+        flex: none;
+    }
+    /* Fresh = imported, not visited yet. A hairline + tint, cleared by the     */
+    /* visit itself — never by a timer, so it can't expire unseen. Deliberately */
+    /* distinct from .active (current scope): this row is a pointer, not state. */
+    .recent-scope.fresh {
+        background: color-mix(in srgb, var(--blue) 6%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 45%, var(--border));
+    }
+    .recent-scope .just-imported {
+        color: var(--blue);
+        flex: none;
+        font-size: 11px;
+        margin-left: auto;
     }
     .sidebar-footer {
         align-items: center;
@@ -1957,6 +2461,62 @@
         border-top: 1px solid var(--border);
         background: var(--surface);
         flex: 0 0 auto;
+        position: relative;
+    }
+    /* imageview-1i2k.6: persistent clipboard chip + popover — the monitor no
+       longer lives only at the bottom of the scroll area. */
+    .clipboard-chip {
+        align-items: center;
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text-secondary);
+        cursor: pointer;
+        display: flex;
+        font-family: inherit;
+        font-size: 11px;
+        gap: 6px;
+        margin-bottom: 6px;
+        padding: 4px 8px;
+        width: 100%;
+    }
+    .clipboard-chip:hover,
+    .clipboard-chip:focus-visible {
+        color: var(--text);
+        border-color: var(--text-secondary);
+    }
+    .chip-dot {
+        background: var(--text-secondary);
+        border-radius: 50%;
+        flex: none;
+        height: 6px;
+        width: 6px;
+    }
+    .clipboard-chip.running .chip-dot,
+    .chip-dot.live {
+        background: var(--green);
+    }
+    .clipboard-popover {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        bottom: calc(100% - 1px);
+        box-shadow: 0 8px 24px color-mix(in srgb, var(--bg) 80%, transparent);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        left: var(--spacing);
+        padding: 8px;
+        position: absolute;
+        right: var(--spacing);
+        z-index: var(--z-panel);
+    }
+    .clipboard-popover-status {
+        align-items: center;
+        color: var(--text);
+        display: flex;
+        font-size: 11px;
+        gap: 6px;
     }
     .import-result {
         font-size: 10px;
@@ -2050,33 +2610,19 @@
     .pin-btn.active {
         color: var(--text);
     }
+    /* imageview-1i2k.4: one geometric language. The pin was a two-piece
+       pushpin (dialect of its own); now a single rotated square — outline
+       when unpinned, filled when pinned. */
     .generated-pin {
-        display: inline-block;
-        height: 13px;
-        position: relative;
-        transform: rotate(35deg);
-        width: 10px;
-    }
-    .generated-pin::before {
-        background: color-mix(in srgb, currentColor 12%, transparent);
         border: 1px solid currentColor;
         border-radius: 1px;
-        content: '';
-        height: 6px;
-        left: 1px;
-        position: absolute;
-        top: 0;
-        width: 7px;
+        display: inline-block;
+        height: 8px;
+        transform: rotate(45deg);
+        width: 8px;
     }
-    .generated-pin::after {
+    .pin-btn.active .generated-pin {
         background: currentColor;
-        box-shadow: 0 7px 0 -0.5px currentColor;
-        content: '';
-        height: 9px;
-        left: 5px;
-        position: absolute;
-        top: 6px;
-        width: 1px;
     }
     .collection-preview-popover {
         background: var(--surface);
@@ -2087,6 +2633,9 @@
         position: fixed;
         width: 176px;
         z-index: var(--z-context-menu);
+    }
+    .folder-preview-popover {
+        width: 240px;
     }
     .collection-preview-header {
         align-items: center;
@@ -2152,6 +2701,21 @@
     .folder-row:focus-within .menu-btn {
         opacity: 1;
         pointer-events: auto;
+    }
+    /* Folder rows no longer render the per-row "..." button — right-click
+       and the section-item contextmenu still expose folder actions. */
+    .folder-row .menu-btn {
+        display: none;
+    }
+    /* Folder alt-hover preview gesture: an empty placeholder positioned over
+       the count slot. While the user holds Option (Alt) it shows a tiny ⌥
+       hint so the affordance is discoverable; the actual popover is anchored
+       to the right edge of the row. */
+    .folder-preview-gesture {
+        display: none;
+    }
+    .folder-row.previewing .folder-label {
+        color: var(--blue);
     }
     .menu-btn:hover,
     .menu-btn:focus-visible {

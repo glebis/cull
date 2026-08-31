@@ -1,7 +1,7 @@
 <script lang="ts">
     import { parseNlQuery, countSmartCollection, createSmartCollection, listSmartCollections, startDictation, stopDictation } from '$lib/api';
     import { listen } from '@tauri-apps/api/event';
-    import { smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, searchOpen, viewMode, navigateTo, navigateBack, voiceDictationEnabled, showRejected } from '$lib/stores';
+    import { smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, searchOpen, viewMode, navigateTo, navigateBack, voiceDictationEnabled, showRejected, pendingGridSearch } from '$lib/stores';
     import type { FilterNode } from '$lib/api';
     import { buildSearchPresetLists, type SearchPreset, type SearchPresetKind } from '$lib/search-presets';
     import RuleBuilder from './RuleBuilder.svelte';
@@ -102,6 +102,17 @@
         if (saving) {
             tick().then(() => nameInputEl?.focus());
         }
+    });
+
+    // imageview-1i2k.2: Enter in the sidebar scope filter lands here. The
+    // store (not an event) carries the query because this component only
+    // mounts in grid view — the effect consumes and clears it.
+    $effect(() => {
+        const promoted = $pendingGridSearch;
+        if (!promoted) return;
+        pendingGridSearch.set(null);
+        query = promoted;
+        handleParse();
     });
 
     onMount(async () => {
