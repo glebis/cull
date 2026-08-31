@@ -1091,8 +1091,8 @@
         minSizeFilter.set(value);
     }
 
-    async function handleImportFolder() {
-        const selected = await open({ directory: true, multiple: false });
+    async function handleImportFolder(selectedFolder?: string) {
+        const selected = selectedFolder ?? await open({ directory: true, multiple: false });
         if (!selected) return;
 
         importing = true;
@@ -1404,7 +1404,7 @@
 <aside class="sidebar" aria-label="Library sidebar">
     <div class="sidebar-scroll">
         <SessionSwitcher />
-        <DevicesSection />
+        <DevicesSection onimportfolder={handleImportFolder} onrevealfolder={revealFolder} oncopypath={copyFolderPath} />
 
     {#if $activeSession}
         <div class="section">
@@ -1964,7 +1964,7 @@
         </button>
         <button
             class="import-btn"
-            onclick={handleImportFolder}
+            onclick={() => handleImportFolder()}
             disabled={importing}
             aria-label={importing ? 'Importing folder' : 'Import folder'}
             title="Import folder"

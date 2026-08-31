@@ -3,6 +3,7 @@ import {
     buildCollectionContextActions,
     buildCanvasContextActions,
     buildFolderContextActions,
+    buildReferencedFolderContextActions,
     buildSmartCollectionContextActions,
 } from './sidebar-context-actions';
 
@@ -65,6 +66,28 @@ describe('sidebar contextual action policy', () => {
         expect(group.map(item => item.label)).toEqual([
             'Open Folder', 'Reveal in Finder', 'Rename…', 'Add Contents to Collection', 'Copy Path',
         ]);
+    });
+
+    it('keeps referenced folders browse-first while making import an explicit menu action', async () => {
+        const handlers = {
+            onOpen: vi.fn(),
+            onReveal: vi.fn(),
+            onImport: vi.fn(),
+            onCopyPath: vi.fn(),
+        };
+        const items = buildReferencedFolderContextActions({
+            folder: '/Volumes/FUJIFILM SD/653_FUJI',
+            ...handlers,
+        });
+
+        expect(items.map(item => item.label)).toEqual([
+            'Open Folder',
+            'Reveal in Finder',
+            'Import Folder…',
+            'Copy Path',
+        ]);
+        await items[2].action?.();
+        expect(handlers.onImport).toHaveBeenCalledWith('/Volumes/FUJIFILM SD/653_FUJI');
     });
 
     it('preserves collection actions and hides content actions for an empty collection', () => {
