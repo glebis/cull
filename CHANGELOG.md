@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-01
+
+### Changed
+
+- **Recovery release for the burned v0.6.0 tag.** The v0.6.0 annotated tag was pushed minutes before two dependabot commits landed on origin/main, so the immutable release gate correctly refused to build it (STALE_RELEASE_SOURCE) and the tag cannot be moved. Same content as the prepared v0.6.0 — ~26 MB smaller release bundle, pruned Claude Agent SDK resources, compressed bundled art, sidebar work below — plus the release-gate fix for closed-bead lookups and today\u2019s dev-dependency bumps. No behavior changes.
+
 ## [0.6.0] - 2026-09-01
 
 ### Changed
