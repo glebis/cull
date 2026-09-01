@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
     openUrl: vi.fn(),
     openPath: vi.fn(),
     resolveImageOriginalPath: vi.fn(),
+    listOpenWithApplications: vi.fn(),
     updateMenuState: vi.fn(),
     getPreviewDisplayWebStreamStatus: vi.fn(),
     checkForUpdates: vi.fn(),
@@ -40,7 +41,7 @@ vi.mock('./api', () => ({
     undo: vi.fn(),
     moveImage: vi.fn(),
     resolveImageOriginalPath: mocks.resolveImageOriginalPath,
-    listOpenWithApplications: vi.fn(),
+    listOpenWithApplications: mocks.listOpenWithApplications,
     openImagesWithApplication: vi.fn(),
     renameImage: vi.fn(),
     shareImages: vi.fn(),
@@ -254,6 +255,55 @@ describe('native menu bridge', () => {
             'Reconnect UNTITLED to open originals',
             expect.objectContaining({ type: 'warning' }),
         );
+    });
+
+    it('does not open the app chooser when Open With needs a source reconnection', async () => {
+        let menuHandler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, handler) => {
+            menuHandler = handler as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+        mocks.listOpenWithApplications.mockRejectedValue(
+            new Error('Reconnect UNTITLED to open originals'),
+        );
+
+        const [{ initMenu }, stores] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+        stores.images.set([makeImage('img-1')]);
+        stores.focusedIndex.set(0);
+
+        await initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        menuHandler?.({ payload: 'image_open_with' });
+        await flushMicrotasks();
+
+        expect(mocks.dialogOpen).not.toHaveBeenCalled();
+    });
+
+    it('opens the app chooser when Open With has a generic lookup failure', async () => {
+        let menuHandler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, handler) => {
+            menuHandler = handler as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+        mocks.listOpenWithApplications.mockRejectedValue(new Error('Lookup unavailable'));
+        mocks.dialogOpen.mockResolvedValue(null);
+
+        const [{ initMenu }, stores] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+        stores.images.set([makeImage('img-1')]);
+        stores.focusedIndex.set(0);
+
+        await initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        menuHandler?.({ payload: 'image_open_with' });
+        await flushMicrotasks();
+
+        expect(mocks.dialogOpen).toHaveBeenCalledWith(expect.objectContaining({
+            title: 'Open With',
+        }));
     });
 
     it('imports the selected folder from the native Import Folder menu action', async () => {

@@ -300,6 +300,7 @@ async function handleImageOpenWith() {
             type: 'warning',
             duration: 8000,
         });
+        if (formatted.title.startsWith('Reconnect ')) return;
         await chooseOpenWithApplication(img);
     }
 }
