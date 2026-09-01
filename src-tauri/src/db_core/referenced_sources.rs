@@ -4,6 +4,9 @@ use super::visibility::RejectedVisibility;
 use rusqlite::{params, types::Type, Error, Result};
 use std::path::{Component, Path, PathBuf};
 
+pub(crate) const NORMAL_LIBRARY_FILE_PREDICATE: &str =
+    "NOT EXISTS (SELECT 1 FROM referenced_files rf_library WHERE rf_library.image_file_id = f.id)";
+
 fn invalid_source_kind(value: String) -> Error {
     Error::FromSqlConversionFailure(
         4,
@@ -451,6 +454,73 @@ mod tests {
         assert!(db
             .ensure_original_mutation_allowed("not-referenced")
             .is_ok());
+    }
+
+    #[test]
+    fn referenced_only_images_are_not_permanent_library_members() {
+        let (_dir, db) = test_db();
+        db.upsert_referenced_source(&sample_source()).unwrap();
+        insert_image_file(
+            &db,
+            "image-1",
+            "file-1",
+            "/Volumes/UNTITLED/DCIM/100CANON/IMG_0001.JPG",
+        );
+        db.attach_referenced_file("source-1", "file-1", "DCIM/100CANON/IMG_0001.JPG")
+            .unwrap();
+
+        assert!(db
+            .list_images_with_visibility(20, 0, true)
+            .unwrap()
+            .is_empty());
+        assert_eq!(db.image_count_with_visibility(true).unwrap(), 0);
+        assert!(db
+            .evaluate_smart_collection(
+                r#"{"type":"rule","field":"imported_at","op":"last_n_days","value":7.0}"#
+            )
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            db.list_images_in_referenced_folder("source-1", "", true, 20, 0, true)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn normal_file_keeps_a_referenced_image_in_permanent_scopes() {
+        let (_dir, db) = test_db();
+        db.upsert_referenced_source(&sample_source()).unwrap();
+        insert_image_file(
+            &db,
+            "image-1",
+            "file-1",
+            "/Volumes/UNTITLED/DCIM/100CANON/IMG_0001.JPG",
+        );
+        db.attach_referenced_file("source-1", "file-1", "DCIM/100CANON/IMG_0001.JPG")
+            .unwrap();
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "INSERT INTO image_files (id, image_id, path, last_seen_at)
+                 VALUES ('kept-file', 'image-1', '/Pictures/kept.jpg', '2026-08-30')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let all_images = db.list_images_with_visibility(20, 0, true).unwrap();
+        assert_eq!(all_images.len(), 1);
+        assert_eq!(all_images[0].path, "/Pictures/kept.jpg");
+
+        let recent_imports = db
+            .evaluate_smart_collection(
+                r#"{"type":"rule","field":"imported_at","op":"last_n_days","value":7.0}"#,
+            )
+            .unwrap();
+        assert_eq!(recent_imports.len(), 1);
+        assert_eq!(recent_imports[0].path, "/Pictures/kept.jpg");
     }
 
     #[test]
