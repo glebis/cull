@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-09-01
+
+### Changed
+
+- **Publish-path recovery.** v0.6.1 was fully built, signed, notarized, and verified, but publication failed: since c10cf8315 the provenance records workflowRunId as a number while the publish job compared it against a string with strict inequality, so publication could never pass. The tag was also burned by the release-gate\u2019s staleness guard when the publish fix landed on origin/main. v0.6.2 carries the one-line string comparison fix (PR #212) and the same application content as v0.6.0/v0.6.1: ~26 MB smaller release bundle, pruned Claude Agent SDK resources, compressed bundled art, and the sidebar work below. No behavior changes.
+
 ## [0.6.1] - 2026-09-01
 
 ### Changed
