@@ -118,6 +118,14 @@ mod tests {
                     rusqlite::params![id, format!("hash-{id}")],
                 )
                 .unwrap();
+            db.conn
+                .lock()
+                .execute(
+                    "INSERT INTO image_files (id, image_id, path, last_seen_at, missing_at)
+                     VALUES (?1, ?2, ?3, '2026-01-01', NULL)",
+                    rusqlite::params![format!("file-{id}"), id, format!("/Pictures/{id}.png")],
+                )
+                .unwrap();
             db.store_detections(
                 id,
                 "yolo11m",
