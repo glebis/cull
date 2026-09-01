@@ -133,20 +133,24 @@ pub fn refresh_mounted_sources(
                 source.last_seen_at = now.clone();
                 db.upsert_referenced_source(&source)
                     .map_err(|err| err.to_string())?;
-            } else if !available && source.offline_at.is_none() {
-                source.offline_at = Some(now.clone());
-                db.upsert_referenced_source(&source)
-                    .map_err(|err| err.to_string())?;
+            } else if !available {
+                if source.offline_at.is_none() {
+                    source.offline_at = Some(now.clone());
+                    db.upsert_referenced_source(&source)
+                        .map_err(|err| err.to_string())?;
+                }
                 offline_ids.push(source.id);
             }
             continue;
         }
-        if observed_ids.contains(&source.id) || source.offline_at.is_some() {
+        if observed_ids.contains(&source.id) {
             continue;
         }
-        source.offline_at = Some(now.clone());
-        db.upsert_referenced_source(&source)
-            .map_err(|err| err.to_string())?;
+        if source.offline_at.is_none() {
+            source.offline_at = Some(now.clone());
+            db.upsert_referenced_source(&source)
+                .map_err(|err| err.to_string())?;
+        }
         offline_ids.push(source.id);
     }
     online.sort_by(|a, b| {
@@ -373,6 +377,30 @@ mod tests {
         fake.set(Vec::new());
         let refresh = refresh_mounted_sources(&db, &fake).unwrap();
         assert_eq!(refresh.offline_ids, vec![source_id]);
+    }
+
+    #[test]
+    fn refresh_reports_a_source_that_was_already_offline() {
+        let dir = tempdir().unwrap();
+        let db = Database::open(&dir.path().join("cull.db")).unwrap();
+        let fake = FakeProvider::default();
+        db.upsert_referenced_source(&ReferencedSource {
+            id: "already-offline".to_string(),
+            platform_volume_id: Some("volume-offline".to_string()),
+            display_name: "UNTITLED".to_string(),
+            last_mount_path: Some("/Volumes/UNTITLED".to_string()),
+            source_kind: ReferencedSourceKind::SdCard,
+            capacity_bytes: Some(64_000_000_000),
+            recursive_default: false,
+            settings_json: "{}".to_string(),
+            last_seen_at: "2026-08-31T10:00:00Z".to_string(),
+            offline_at: Some("2026-08-31T11:00:00Z".to_string()),
+        })
+        .unwrap();
+
+        let refresh = refresh_mounted_sources(&db, &fake).unwrap();
+
+        assert_eq!(refresh.offline_ids, vec!["already-offline"]);
     }
 
     #[test]
