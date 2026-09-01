@@ -7,6 +7,19 @@ use std::path::{Component, Path, PathBuf};
 pub(crate) const NORMAL_LIBRARY_FILE_PREDICATE: &str =
     "NOT EXISTS (SELECT 1 FROM referenced_files rf_library WHERE rf_library.image_file_id = f.id)";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OriginalFileCandidate {
+    pub path: String,
+    pub referenced_source: Option<ReferencedSourceAvailability>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferencedSourceAvailability {
+    pub id: String,
+    pub display_name: String,
+    pub offline: bool,
+}
+
 fn invalid_source_kind(value: String) -> Error {
     Error::FromSqlConversionFailure(
         4,
@@ -38,17 +51,34 @@ fn validate_relative_path(relative_path: &str) -> Result<()> {
 }
 
 impl Database {
-    pub fn original_file_candidates(&self, image_id: &str) -> Result<Vec<(String, bool)>> {
+    pub fn original_file_candidates(&self, image_id: &str) -> Result<Vec<OriginalFileCandidate>> {
         let conn = self.read_connection();
         let mut stmt = conn.prepare(
-            "SELECT f.path, rf.image_file_id IS NOT NULL
+            "SELECT f.path, rf.source_id, rs.display_name, rs.offline_at
              FROM image_files f
              LEFT JOIN referenced_files rf ON rf.image_file_id = f.id
+             LEFT JOIN referenced_sources rs ON rs.id = rf.source_id
              WHERE f.image_id = ?1
-             ORDER BY (rf.image_file_id IS NOT NULL) ASC, (f.missing_at IS NOT NULL) ASC, f.id ASC",
+             ORDER BY (rf.image_file_id IS NOT NULL) ASC, (rs.offline_at IS NOT NULL) ASC,
+                      (f.missing_at IS NOT NULL) ASC, f.id ASC, rf.source_id ASC",
         )?;
         let candidates = stmt
-            .query_map(params![image_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .query_map(params![image_id], |row| {
+                let source_id: Option<String> = row.get(1)?;
+                let referenced_source = source_id
+                    .map(|id| {
+                        Ok::<ReferencedSourceAvailability, Error>(ReferencedSourceAvailability {
+                            id,
+                            display_name: row.get(2)?,
+                            offline: row.get::<_, Option<String>>(3)?.is_some(),
+                        })
+                    })
+                    .transpose()?;
+                Ok(OriginalFileCandidate {
+                    path: row.get(0)?,
+                    referenced_source,
+                })
+            })?
             .collect();
         candidates
     }
@@ -466,8 +496,18 @@ mod tests {
         assert_eq!(
             db.original_file_candidates("image-1").unwrap(),
             vec![
-                (normal_path.to_string(), false),
-                (referenced_path.to_string(), true),
+                OriginalFileCandidate {
+                    path: normal_path.to_string(),
+                    referenced_source: None,
+                },
+                OriginalFileCandidate {
+                    path: referenced_path.to_string(),
+                    referenced_source: Some(ReferencedSourceAvailability {
+                        id: "source-1".to_string(),
+                        display_name: "UNTITLED".to_string(),
+                        offline: false,
+                    }),
+                },
             ]
         );
     }

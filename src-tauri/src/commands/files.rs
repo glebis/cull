@@ -522,23 +522,21 @@ pub(crate) fn resolve_image_original_path_for_db(
     let candidates = db
         .original_file_candidates(image_id)
         .map_err(|error| error.to_string())?;
-    if let Some((path, _is_referenced)) = candidates
-        .into_iter()
-        .find(|(path, _is_referenced)| Path::new(path).exists())
-    {
-        return Ok(path);
+    let mut offline_source_name = None;
+    for candidate in candidates {
+        if let Some(source) = candidate.referenced_source {
+            if source.offline {
+                offline_source_name.get_or_insert(source.display_name);
+                continue;
+            }
+        }
+        if Path::new(&candidate.path).exists() {
+            return Ok(candidate.path);
+        }
     }
 
-    if let Some(source) = db
-        .referenced_source_for_image(image_id)
-        .map_err(|error| error.to_string())?
-    {
-        if source.offline_at.is_some() {
-            return Err(format!(
-                "Reconnect {} to open originals",
-                source.display_name
-            ));
-        }
+    if let Some(source_name) = offline_source_name {
+        return Err(format!("Reconnect {source_name} to open originals"));
     }
 
     Err(format!("Image '{image_id}' has no available original"))
@@ -1714,6 +1712,25 @@ mod tests {
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
 
         insert_original_candidate(&db, "offline-only", "offline-file", &unavailable_path);
+        db.upsert_referenced_source(&offline_referenced_source())
+            .unwrap();
+        db.attach_referenced_file("source-untitled", "offline-file", "offline.jpg")
+            .unwrap();
+
+        assert_eq!(
+            resolve_image_original_path_for_db(&db, "offline-only").unwrap_err(),
+            "Reconnect UNTITLED to open originals"
+        );
+    }
+
+    #[test]
+    fn offline_referenced_original_rejects_a_stale_mount_path_that_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let stale_path = tmp.path().join("offline.jpg");
+        std::fs::write(&stale_path, b"a different volume now occupies this path").unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+
+        insert_original_candidate(&db, "offline-only", "offline-file", &stale_path);
         db.upsert_referenced_source(&offline_referenced_source())
             .unwrap();
         db.attach_referenced_file("source-untitled", "offline-file", "offline.jpg")
