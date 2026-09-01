@@ -450,7 +450,7 @@ impl Database {
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE {} AND {}
+             WHERE ({}) AND {}
              GROUP BY i.id
              ORDER BY i.imported_at DESC, i.id ASC
              LIMIT ? OFFSET ?",

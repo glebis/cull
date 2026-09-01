@@ -328,7 +328,7 @@ mod tests {
         let conn = db.conn.lock();
         conn.execute(
             "INSERT INTO images (id, sha256_hash, width, height, format, file_size, created_at, imported_at)
-             VALUES (?1, ?2, 100, 100, 'jpg', 10, '2026-08-30', '2026-08-30')",
+             VALUES (?1, ?2, 100, 100, 'jpg', 10, datetime('now'), datetime('now'))",
             params![image_id, format!("hash-{image_id}")],
         )
         .unwrap();
@@ -521,6 +521,34 @@ mod tests {
             .unwrap();
         assert_eq!(recent_imports.len(), 1);
         assert_eq!(recent_imports[0].path, "/Pictures/kept.jpg");
+    }
+
+    #[test]
+    fn scoped_library_browsing_excludes_referenced_files_in_all_or_branches() {
+        let (_dir, db) = test_db();
+        db.upsert_referenced_source(&sample_source()).unwrap();
+        insert_image_file(
+            &db,
+            "referenced-image",
+            "referenced-file",
+            "/Volumes/UNTITLED/DCIM/IMG_0001.JPG",
+        );
+        db.attach_referenced_file("source-1", "referenced-file", "DCIM/IMG_0001.JPG")
+            .unwrap();
+        insert_image_file(&db, "kept-image", "kept-file", "/Pictures/kept.jpg");
+
+        let images = db
+            .list_images_in_scope(
+                &["/Volumes/UNTITLED".to_string(), "/Pictures".to_string()],
+                &[],
+                &[],
+                20,
+                0,
+            )
+            .unwrap();
+
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].path, "/Pictures/kept.jpg");
     }
 
     #[test]
