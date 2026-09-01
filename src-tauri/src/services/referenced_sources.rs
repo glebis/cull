@@ -243,6 +243,11 @@ pub fn register_referenced_paths(
         else {
             continue;
         };
+        let thumbnail = crate::db_core::thumbnails::thumbnail_path(app_data_dir, &file.image_id);
+        if !thumbnail.exists() {
+            crate::db_core::thumbnails::generate_thumbnail(path, app_data_dir, &file.image_id)
+                .map_err(|error| format!("Referenced indexing thumbnail failed: {error}"))?;
+        }
         let relative = relative_string(&root, path)
             .ok_or_else(|| "Indexed file escaped referenced source".to_string())?;
         db.attach_referenced_file(source_id, &file.id, &relative)
@@ -329,5 +334,42 @@ mod tests {
             }
         )
         .is_err());
+    }
+
+    #[test]
+    fn unchanged_referenced_file_regenerates_a_purged_thumbnail() {
+        let (dir, db, source) = setup();
+        let image_path = dir.path().join("image.jpg");
+        let app_data_dir = dir.path().join("app-data");
+        let image = image::RgbImage::from_pixel(8, 8, image::Rgb([90, 120, 150]));
+        image.save(&image_path).unwrap();
+        let image_path = fs::canonicalize(image_path).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+
+        let image_ids = register_referenced_paths(
+            &db,
+            &app_data_dir,
+            &source.id,
+            std::slice::from_ref(&image_path),
+            &cancelled,
+        )
+        .unwrap();
+        let image_id = image_ids.first().unwrap();
+        let thumbnail = crate::db_core::thumbnails::thumbnail_path(&app_data_dir, image_id);
+        assert!(thumbnail.exists());
+
+        crate::db_core::thumbnails::remove_thumbnails_for_image(&app_data_dir, image_id);
+        assert!(!thumbnail.exists());
+
+        register_referenced_paths(
+            &db,
+            &app_data_dir,
+            &source.id,
+            std::slice::from_ref(&image_path),
+            &cancelled,
+        )
+        .unwrap();
+
+        assert!(thumbnail.exists());
     }
 }

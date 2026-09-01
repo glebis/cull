@@ -1,7 +1,7 @@
 use super::db::{map_image_with_file_row, row_opt_u64, sql_opt_u64, Database};
 use super::models::{ImageWithFile, ReferencedFile, ReferencedSource, ReferencedSourceKind};
 use super::visibility::RejectedVisibility;
-use rusqlite::{params, types::Type, Error, Result};
+use rusqlite::{params, params_from_iter, types::Type, Error, Result};
 use std::path::{Component, Path, PathBuf};
 
 pub(crate) const NORMAL_LIBRARY_FILE_PREDICATE: &str =
@@ -150,6 +150,51 @@ impl Database {
             })?
             .collect();
         sources
+    }
+
+    pub fn thumbnail_purge_candidates_for_offline_sources(
+        &self,
+        offline_source_ids: &[String],
+    ) -> Result<Vec<String>> {
+        if offline_source_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let placeholders = std::iter::repeat("?")
+            .take(offline_source_ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT DISTINCT f.image_id
+             FROM referenced_files rf
+             JOIN image_files f ON f.id = rf.image_file_id
+             WHERE rf.source_id IN ({placeholders})
+               AND NOT EXISTS (
+                   SELECT 1 FROM image_files normal
+                   WHERE normal.image_id = f.image_id
+                     AND NOT EXISTS (
+                         SELECT 1 FROM referenced_files normal_rf
+                         WHERE normal_rf.image_file_id = normal.id
+                     )
+               )
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM referenced_files online_rf
+                   JOIN image_files online_file ON online_file.id = online_rf.image_file_id
+                   JOIN referenced_sources online_source ON online_source.id = online_rf.source_id
+                   WHERE online_file.image_id = f.image_id
+                     AND online_source.offline_at IS NULL
+               )
+             ORDER BY f.image_id"
+        );
+        let conn = self.read_connection();
+        let mut stmt = conn.prepare(&sql)?;
+        let image_ids = stmt
+            .query_map(params_from_iter(offline_source_ids.iter()), |row| {
+                row.get(0)
+            })?
+            .collect();
+        image_ids
     }
 
     pub fn attach_referenced_file(
@@ -521,6 +566,78 @@ mod tests {
             .unwrap();
         assert_eq!(recent_imports.len(), 1);
         assert_eq!(recent_imports[0].path, "/Pictures/kept.jpg");
+    }
+
+    #[test]
+    fn offline_thumbnail_purge_keeps_normal_and_online_references() {
+        let (_dir, db) = test_db();
+        let source_1 = sample_source();
+        let source_2 = ReferencedSource {
+            id: "source-2".into(),
+            platform_volume_id: Some("volume-uuid-2".into()),
+            display_name: "SECOND CARD".into(),
+            last_mount_path: Some("/Volumes/SECOND".into()),
+            ..sample_source()
+        };
+        db.upsert_referenced_source(&source_1).unwrap();
+        db.upsert_referenced_source(&source_2).unwrap();
+
+        insert_image_file(
+            &db,
+            "referenced-only",
+            "referenced-only-file",
+            "/Volumes/UNTITLED/referenced-only.jpg",
+        );
+        db.attach_referenced_file("source-1", "referenced-only-file", "referenced-only.jpg")
+            .unwrap();
+
+        insert_image_file(
+            &db,
+            "also-online",
+            "also-online-file",
+            "/Volumes/UNTITLED/also-online.jpg",
+        );
+        db.attach_referenced_file("source-1", "also-online-file", "also-online.jpg")
+            .unwrap();
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "INSERT INTO image_files (id, image_id, path, last_seen_at)
+                 VALUES ('also-online-file-source-2', 'also-online', '/Volumes/SECOND/also-online.jpg', '2026-08-30')",
+                [],
+            )
+            .unwrap();
+        }
+        db.attach_referenced_file("source-2", "also-online-file-source-2", "also-online.jpg")
+            .unwrap();
+
+        insert_image_file(
+            &db,
+            "mixed",
+            "mixed-referenced-file",
+            "/Volumes/UNTITLED/mixed.jpg",
+        );
+        db.attach_referenced_file("source-1", "mixed-referenced-file", "mixed.jpg")
+            .unwrap();
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "INSERT INTO image_files (id, image_id, path, last_seen_at)
+                 VALUES ('mixed-normal-file', 'mixed', '/Pictures/mixed.jpg', '2026-08-30')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let mut offline_source = source_1;
+        offline_source.offline_at = Some("2026-09-01T10:00:00Z".into());
+        db.upsert_referenced_source(&offline_source).unwrap();
+
+        assert_eq!(
+            db.thumbnail_purge_candidates_for_offline_sources(&["source-1".into()])
+                .unwrap(),
+            vec!["referenced-only".to_string()]
+        );
     }
 
     #[test]
