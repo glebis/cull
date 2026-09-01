@@ -532,7 +532,7 @@ jobs:
           if (provenance.schema !== 'cull.release.provenance.v1' || provenance.version !== process.env.VERSION ||
               provenance.tag !== process.env.TAG || provenance.commit !== process.env.COMMIT ||
               provenance.tagObjectSha !== process.env.TAG_OBJECT_SHA ||
-              provenance.workflowRunId !== process.env.EXPECTED_RUN_ID) process.exit(2);
+              String(provenance.workflowRunId) !== String(process.env.EXPECTED_RUN_ID)) process.exit(2);
           if (JSON.stringify(Object.keys(provenance.assets).sort()) !== JSON.stringify([...expectedAssets].sort())) process.exit(2);
           const expectedChecks = [
             'exactInventory', 'updaterMetadata', 'updaterSignature', 'dmgMountedReadOnly',
