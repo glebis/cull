@@ -5,6 +5,7 @@ import { get } from 'svelte/store';
 import {
     importFolder,
     importFiles,
+    resolveImageOriginalPath,
     redo,
     undo,
     moveImage,
@@ -107,6 +108,24 @@ const DEFAULT_LISTEN_TIMEOUT_MS = 5000;
 const DEFAULT_RETRY_DELAY_MS = 1000;
 const DEFAULT_STATE_UPDATE_TIMEOUT_MS = 5000;
 const GITHUB_WIKI_URL = 'https://github.com/glebis/cull/wiki';
+
+export function originalActionError(error: unknown, fallbackTitle: string): { title: string; detail?: string } {
+    const detail = String(error);
+    const reconnectMessage = error instanceof Error ? error.message : detail;
+    if (reconnectMessage.startsWith('Reconnect ')) {
+        return { title: reconnectMessage };
+    }
+    return { title: fallbackTitle, detail };
+}
+
+function showOriginalActionError(error: unknown, fallbackTitle: string) {
+    const formatted = originalActionError(error, fallbackTitle);
+    showToast(formatted.title, {
+        detail: formatted.detail,
+        type: formatted.detail ? 'error' : 'warning',
+        duration: 8000,
+    });
+}
 
 const IMAGE_FILTERS = [
     {
@@ -216,9 +235,9 @@ async function handleImageOpenDefault() {
         return;
     }
     try {
-        await openPath(img.path);
+        await openPath(await resolveImageOriginalPath(img.image.id));
     } catch (e) {
-        showToast('Open failed', { detail: String(e), type: 'error', duration: 8000 });
+        showOriginalActionError(e, 'Open failed');
     }
 }
 
@@ -238,7 +257,7 @@ async function openImageWithApplication(img: ImageWithFile, appPath: string) {
     try {
         await openImagesWithApplication([img.image.id], appPath);
     } catch (e) {
-        showToast('Open With failed', { detail: String(e), type: 'error', duration: 8000 });
+        showOriginalActionError(e, 'Open With failed');
     }
 }
 
@@ -275,7 +294,12 @@ async function handleImageOpenWith() {
             await chooseOpenWithApplication(img);
         }
     } catch (e) {
-        showToast('Open With app list unavailable', { detail: String(e), type: 'warning', duration: 8000 });
+        const formatted = originalActionError(e, 'Open With app list unavailable');
+        showToast(formatted.title, {
+            detail: formatted.detail,
+            type: 'warning',
+            duration: 8000,
+        });
         await chooseOpenWithApplication(img);
     }
 }
