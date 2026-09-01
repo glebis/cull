@@ -731,7 +731,7 @@ fn save_image_bytes(
 
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
-    let hash = format!("{:x}", hasher.finalize());
+    let hash = hex::encode(hasher.finalize());
 
     let img = image::open(&file_path).map_err(|e| format!("Image decode error: {}", e))?;
     let (width, height) = (img.width(), img.height());

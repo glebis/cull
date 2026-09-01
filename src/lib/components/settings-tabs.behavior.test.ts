@@ -26,8 +26,7 @@ describe('Settings tab keyboard navigation', () => {
         const appearance = screen.getByRole('tab', { name: 'Appearance' });
         const plugins = screen.getByRole('tab', { name: 'Plugins' });
 
-        await waitFor(() => expect(screen.getByRole('dialog', { name: 'Settings' })).toHaveFocus());
-        general.focus();
+        await waitFor(() => expect(general).toHaveFocus());
         await user.keyboard('{ArrowRight}');
         expect(appearance).toHaveFocus();
         expect(appearance).toHaveAttribute('aria-selected', 'true');

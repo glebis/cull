@@ -8,6 +8,7 @@
         ImageWithFile,
     } from '$lib/api';
     import { estimateAgentBudget } from '$lib/agent-token-estimate';
+    import { agentActivityMessage, agentActivityPhase } from '$lib/agent-error-copy';
     import {
         parseAgentProposalSourceContext,
         proposalActorLabel,
@@ -111,7 +112,9 @@
         streamEvents.slice().reverse().find(event => ['sdk_assistant', 'sdk_stream'].includes(event.phase) && event.message) ?? null,
     );
     const runStatus = $derived(statusForEvent(latestRunEvent, busy));
-    const assistantMessage = $derived(lastMessage ?? (busy ? latestAssistantEvent?.message ?? null : latestRunEvent?.is_error ? latestRunEvent.message : null));
+    const assistantMessage = $derived(lastMessage ?? (busy
+        ? latestAssistantEvent?.message ?? null
+        : latestRunEvent?.is_error ? agentActivityMessage(latestRunEvent) : null));
     const showChatThread = $derived(Boolean(lastInstruction || assistantMessage || busy));
     const displayInputTokens = $derived(activeProposal?.estimated_input_tokens ?? draftEstimate.inputTokens);
     const displayCostEur = $derived(activeProposal?.estimated_cost_eur ?? draftEstimate.costEur);
@@ -203,7 +206,7 @@
     }
 
     function statusForEvent(event: ClaudeAgentStreamEvent | null, isBusy: boolean) {
-        if (!isBusy && event?.is_error) return 'Could not complete the request';
+        if (event?.is_error) return agentActivityMessage(event);
         if (!isBusy) return 'Ready';
         if (!event) return 'Thinking';
         if (event.message && !['sdk_init', 'sdk_status'].includes(event.phase)) return event.message;
@@ -352,8 +355,8 @@
                             <ol>
                                 {#each streamEvents.slice(-12) as event}
                                     <li class:error={event.is_error}>
-                                        <strong>{event.phase.replace(/^sdk_/, '')}</strong>
-                                        <span>{event.message}</span>
+                                        <strong>{agentActivityPhase(event.phase, event.is_error)}</strong>
+                                        <span>{agentActivityMessage(event)}</span>
                                     </li>
                                 {/each}
                             </ol>

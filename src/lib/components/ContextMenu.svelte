@@ -1,14 +1,20 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
-    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, trashImages, moveImage, renameImage, listFolders, shareImages, openImagesWithApplication, listOpenWithApplications } from '$lib/api';
+    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, moveImage, renameImage, listFolders, shareImages, openImagesWithApplication, listOpenWithApplications, resolveImageOriginalPath } from '$lib/api';
     import { loadSimilarImages } from '$lib/similarity';
     import type { ImageWithFile, OpenWithApplication } from '$lib/api';
-    import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast, requestTextInput } from '$lib/stores';
+    import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast, requestTextInput, showRejected } from '$lib/stores';
     import { invalidateImageCache, loadImagesForCurrentScope } from '$lib/image-loading';
     import { clampFloatingPosition, placeAdjacentSubmenu } from '$lib/floating-position';
     import { filterMoveFolders, folderDisplayName, folderParentPath } from '$lib/move-menu-utils';
     import { withDecision, withRating, type ImageDecision } from '$lib/selection-updates';
+    import { applyDecisionToCurrentView } from '$lib/rejected-visibility';
+    import { requestTrashImages } from '$lib/trash-actions';
+    import { commandShortcutHints, eventMatchesShortcut } from '$lib/command-palette';
+    import { copyImageWithToast } from '$lib/image-copy-action';
+    import { claimContextMenu } from '$lib/context-menu-coordinator';
+    import { originalActionError } from '$lib/menu';
 
     interface Props {
         image: ImageWithFile;
@@ -49,6 +55,14 @@
     let menuReady = $state(false);
     let activeIndex = $state(0);
     let placementRun = 0;
+    const shortcutHints = commandShortcutHints([
+        ...[0, 1, 2, 3, 4, 5].map(rating => `image.rating.${rating}`),
+        'image.decision.accept',
+        'image.decision.reject',
+        'image.decision.undecided',
+        'image.copy',
+        'image.trash',
+    ]);
 
     let currentRating = $derived(image.selection?.star_rating ?? 0);
     let currentDecision = $derived(image.selection?.decision ?? 'undecided');
@@ -63,11 +77,86 @@
     let multiCount = $derived(targetIds.length);
     let inCollection = $derived($activeCollection !== null);
 
-    let flatItems = $derived(
-        menuEl
+    function rootMenuItems(): HTMLButtonElement[] {
+        return menuEl
             ? Array.from(menuEl.querySelectorAll<HTMLButtonElement>('button[data-menu-index]'))
-            : []
-    );
+            : [];
+    }
+
+    function rootMenuButton(key: string): HTMLButtonElement | null {
+        return menuEl?.querySelector<HTMLButtonElement>(`button[data-submenu-key="${key}"]`) ?? null;
+    }
+
+    function submenuElement(key: string): HTMLDivElement | undefined {
+        if (key === 'rate') return rateSubmenuEl;
+        if (key === 'collections') return collectionSubmenuEl;
+        if (key === 'copy') return copySubmenuEl;
+        if (key === 'openwith') return openWithSubmenuEl;
+        if (key === 'moveto') return moveSubmenuEl;
+        return undefined;
+    }
+
+    function submenuFocusables(submenu: HTMLElement): HTMLElement[] {
+        return Array.from(submenu.querySelectorAll<HTMLElement>(
+            'button:not(:disabled), input:not(:disabled)',
+        ));
+    }
+
+    async function closeSubmenuAndFocusTrigger(key: string) {
+        openSubmenu = null;
+        await tick();
+        rootMenuButton(key)?.focus();
+    }
+
+    function handleSubmenuNavigation(e: KeyboardEvent, submenu: HTMLElement): boolean {
+        const key = openSubmenu;
+        if (!key) return false;
+        if (e.key === 'Escape' || e.key === 'ArrowLeft') {
+            e.preventDefault();
+            e.stopPropagation();
+            void closeSubmenuAndFocusTrigger(key);
+            return true;
+        }
+
+        const items = submenuFocusables(submenu);
+        if (items.length === 0) return false;
+        const currentIndex = Math.max(0, items.indexOf(document.activeElement as HTMLElement));
+        let nextIndex: number | null = null;
+        if (e.key === 'ArrowDown') nextIndex = (currentIndex + 1) % items.length;
+        else if (e.key === 'ArrowUp') nextIndex = (currentIndex - 1 + items.length) % items.length;
+        else if (e.key === 'Home') nextIndex = 0;
+        else if (e.key === 'End') nextIndex = items.length - 1;
+        else if (e.key === 'Enter' && document.activeElement instanceof HTMLButtonElement) {
+            e.preventDefault();
+            e.stopPropagation();
+            document.activeElement.click();
+            return true;
+        }
+        if (nextIndex === null) return false;
+        e.preventDefault();
+        e.stopPropagation();
+        items[nextIndex]?.focus();
+        return true;
+    }
+
+    async function openKeyboardSubmenu(key: string) {
+        if (key === 'rate' || key === 'copy') {
+            openSubmenu = key;
+            await placeOpenSubmenu();
+        } else if (key === 'collections') {
+            await loadCollections();
+        } else if (key === 'openwith') {
+            await loadOpenWithApps();
+        } else if (key === 'moveto') {
+            await loadFolders();
+        }
+        await tick();
+        if (openSubmenu !== key) return;
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        if (openSubmenu !== key) return;
+        const submenu = submenuElement(key);
+        if (submenu) submenuFocusables(submenu)[0]?.focus();
+    }
 
     function restoreOpenerFocus() {
         if (!opener?.isConnected) return;
@@ -103,9 +192,17 @@
 
         if (run === placementRun && menuEl) {
             menuReady = true;
-            if (!menuEl.contains(document.activeElement)) {
-                menuEl.focus();
-            }
+            const focusActiveItem = () => {
+                if (run !== placementRun || !menuEl) return;
+                const activeElement = document.activeElement;
+                if (activeElement !== opener && activeElement !== menuEl && activeElement !== document.body) return;
+                const activeItem = menuEl.querySelector<HTMLButtonElement>(
+                    `button[data-menu-index="${activeIndex}"]`,
+                );
+                (activeItem ?? menuEl).focus();
+            };
+            focusActiveItem();
+            requestAnimationFrame(focusActiveItem);
         }
     }
 
@@ -152,6 +249,7 @@
     });
 
     onMount(() => {
+        const releaseMenuClaim = claimContextMenu(onclose);
         function handleClickOutside(e: MouseEvent) {
             if (menuEl && !menuEl.contains(e.target as Node)) onclose();
         }
@@ -173,6 +271,7 @@
             window.addEventListener('resize', handleResize);
         });
         return () => {
+            releaseMenuClaim();
             window.removeEventListener('click', handleClickOutside);
             window.removeEventListener('contextmenu', handleClickOutside);
             window.removeEventListener('keydown', handleWindowKeydown, true);
@@ -186,34 +285,58 @@
         await revealItemInDir(path);
     }
 
-    $effect(() => {
-        if (menuEl) {
-            flatItems[activeIndex]?.focus();
-        }
-    });
-
     function handleMenuKeydown(e: KeyboardEvent) {
+        const targetSubmenu = e.target instanceof HTMLElement
+            ? e.target.closest<HTMLElement>('.submenu')
+            : null;
+        if (targetSubmenu && handleSubmenuNavigation(e, targetSubmenu)) return;
+
         if (e.key === 'Escape') {
             e.preventDefault();
             e.stopPropagation();
             if (openSubmenu !== null) {
-                openSubmenu = null;
+                void closeSubmenuAndFocusTrigger(openSubmenu);
             } else {
                 onclose();
             }
             return;
         }
 
-        const items = flatItems;
+        const shortcutAction = [
+            ...[0, 1, 2, 3, 4, 5].map(rating => ({
+                id: `image.rating.${rating}`,
+                run: () => handleRate(rating),
+            })),
+            { id: 'image.decision.accept', run: () => handleDecision('accept') },
+            { id: 'image.decision.reject', run: () => handleDecision('reject') },
+            { id: 'image.decision.undecided', run: () => handleDecision('undecided') },
+            { id: 'image.copy', run: act(() => copyImageWithToast(image)) },
+            { id: 'image.trash', run: handleTrash },
+        ].find(action => {
+            const shortcut = shortcutHints[action.id];
+            return shortcut ? eventMatchesShortcut(e, shortcut) : false;
+        });
+        if (shortcutAction) {
+            e.preventDefault();
+            e.stopPropagation();
+            void shortcutAction.run();
+            return;
+        }
+
+        const items = rootMenuItems();
         const count = items.length;
         if (count === 0) return;
+        const focusedRootIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+        if (focusedRootIndex >= 0) activeIndex = focusedRootIndex;
 
         if (e.key === 'ArrowDown') {
             e.preventDefault();
             activeIndex = (activeIndex + 1) % count;
+            items[activeIndex]?.focus();
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
             activeIndex = (activeIndex - 1 + count) % count;
+            items[activeIndex]?.focus();
         } else if (e.key === 'ArrowRight') {
             e.preventDefault();
             // Find which submenu-parent the active button belongs to
@@ -223,17 +346,13 @@
                 if (parentEl) {
                     // Determine submenu key from data attribute or order
                     const key = activeBtn.dataset.submenuKey;
-                    if (key === 'rate') openSubmenu = 'rate';
-                    else if (key === 'collections') { loadCollections(); }
-                    else if (key === 'copy') openSubmenu = 'copy';
-                    else if (key === 'openwith') { loadOpenWithApps(); }
-                    else if (key === 'moveto') { loadFolders(); }
+                    if (key) void openKeyboardSubmenu(key);
                 }
             }
         } else if (e.key === 'ArrowLeft') {
             e.preventDefault();
             if (openSubmenu !== null) {
-                openSubmenu = null;
+                void closeSubmenuAndFocusTrigger(openSubmenu);
             } else {
                 onclose();
             }
@@ -328,8 +447,8 @@
         onclose();
         await setDecision(image.image.id, d, $activeSession?.id ?? null);
         invalidateImageCache();
-        image.selection = withDecision(image, d).selection;
-        images.update(all => all.map(item => item.image.id === image.image.id ? withDecision(item, d) : item));
+        const result = applyDecisionToCurrentView(image.image.id, d);
+        if (!result.hidden) image.selection = withDecision(image, d).selection;
     }
 
     async function loadCollections() {
@@ -339,7 +458,7 @@
         collectionLoading = true;
         await placeCollectionSubmenu();
         try {
-            collectionList = await listCollections();
+            collectionList = await listCollections($showRejected);
         } catch (e) {
             collectionList = [];
             showToast('Collection list unavailable', { detail: String(e), type: 'warning', duration: 8000 });
@@ -353,7 +472,7 @@
         onclose();
         await addToCollection(colId, targetIds);
         invalidateImageCache();
-        const c = await listCollections();
+        const c = await listCollections($showRejected);
         collections.set(c);
     }
 
@@ -371,7 +490,7 @@
         const colId = await createCollection(name.trim());
         await addToCollection(colId, targetIds);
         invalidateImageCache();
-        const c = await listCollections();
+        const c = await listCollections($showRejected);
         collections.set(c);
     }
 
@@ -382,7 +501,7 @@
         await removeFromCollection(colId, targetIds);
         await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
         focusedIndex.update(i => Math.max(0, Math.min(i, $images.length - 1)));
-        const c = await listCollections();
+        const c = await listCollections($showRejected);
         collections.set(c);
     }
 
@@ -428,9 +547,19 @@
         }
     }
 
-    async function openInDefaultApp(path: string) {
-        const { openPath } = await import('@tauri-apps/plugin-opener');
-        await openPath(path);
+    async function openInDefaultApp(imageId: string) {
+        try {
+            const path = await resolveImageOriginalPath(imageId);
+            const { openPath } = await import('@tauri-apps/plugin-opener');
+            await openPath(path);
+        } catch (e) {
+            const formatted = originalActionError(e, 'Open failed');
+            showToast(formatted.title, {
+                detail: formatted.detail,
+                type: formatted.detail ? 'error' : 'warning',
+                duration: 8000,
+            });
+        }
     }
 
     async function handleOpenWith() {
@@ -457,7 +586,12 @@
             openWithLoadedFor = image.image.id;
         } catch (e) {
             openWithApps = [];
-            showToast('Open With app list unavailable', { detail: String(e), type: 'warning', duration: 8000 });
+            const formatted = originalActionError(e, 'Open With app list unavailable');
+            showToast(formatted.title, {
+                detail: formatted.detail,
+                type: 'warning',
+                duration: 8000,
+            });
         } finally {
             openWithLoading = false;
         }
@@ -468,24 +602,18 @@
         try {
             await openImagesWithApplication([image.image.id], appPath);
         } catch (e) {
-            showToast('Open With failed', { detail: String(e), type: 'error', duration: 8000 });
+            const formatted = originalActionError(e, 'Open With failed');
+            showToast(formatted.title, {
+                detail: formatted.detail,
+                type: formatted.detail ? 'error' : 'warning',
+                duration: 8000,
+            });
         }
     }
 
-    async function handleTrash() {
+    function handleTrash() {
         onclose();
-        const ids = new Set(targetIds);
-        await trashImages([...ids]);
-        const remainingLoadedCount = $images.filter(img => !ids.has(img.image.id)).length;
-        await loadImagesForCurrentScope({
-            resetFocus: false,
-            force: true,
-            invalidateCache: true,
-            minItems: remainingLoadedCount,
-        });
-        const c = await listCollections();
-        collections.set(c);
-        if ($focusedIndex >= $images.length) focusedIndex.set(Math.max(0, $images.length - 1));
+        requestTrashImages(targetIds);
     }
 
     async function handleRename() {
@@ -509,7 +637,7 @@
 
     async function loadFolders() {
         openSubmenu = 'moveto';
-        folderList = await listFolders();
+        folderList = await listFolders(true);
     }
 
     function currentFolderPath() {
@@ -521,7 +649,7 @@
     async function refreshAfterMove() {
         await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
         try {
-            folders.set(await listFolders());
+            folders.set(await listFolders($showRejected));
         } catch (e) {
             console.error('Failed to refresh folders after move:', e);
         }
@@ -577,21 +705,19 @@
     }
 
     function handleFolderSearchKeydown(e: KeyboardEvent) {
+        if (moveSubmenuEl && handleSubmenuNavigation(e, moveSubmenuEl)) return;
         e.stopPropagation();
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            folderSearch = '';
-        }
     }
 
     function handleCollectionSearchKeydown(e: KeyboardEvent) {
-        e.stopPropagation();
-        if (e.key === 'Escape') {
+        if (e.key === 'Enter' && filteredCollectionList.length > 0) {
             e.preventDefault();
-            collectionSearch = '';
-        } else if (e.key === 'Enter' && filteredCollectionList.length > 0) {
-            e.preventDefault();
+            e.stopPropagation();
             void handleAddToCollection(filteredCollectionList[0][0]);
+        } else if (collectionSubmenuEl && handleSubmenuNavigation(e, collectionSubmenuEl)) {
+            return;
+        } else {
+            e.stopPropagation();
         }
     }
 </script>
@@ -632,9 +758,15 @@
                 bind:this={rateSubmenuEl}
                 style={rateSubmenuPlacement}
             >
-                <button class="context-menu-item" class:active={currentRating === 0} onclick={() => handleRate(0)} role="menuitem" tabindex="-1">☆ Unrated</button>
+                <button class="context-menu-item" class:active={currentRating === 0} onclick={() => handleRate(0)} role="menuitem" tabindex="-1">
+                    <span>☆ Unrated</span>
+                    {#if shortcutHints['image.rating.0']}<kbd class="shortcut-hint" data-shortcut-for="image.rating.0">{shortcutHints['image.rating.0']}</kbd>{/if}
+                </button>
                 {#each [1, 2, 3, 4, 5] as n}
-                    <button class="context-menu-item" class:active={currentRating === n} onclick={() => handleRate(n)} role="menuitem" tabindex="-1">{'★'.repeat(n)} {n} Star{n > 1 ? 's' : ''}</button>
+                    <button class="context-menu-item" class:active={currentRating === n} onclick={() => handleRate(n)} role="menuitem" tabindex="-1">
+                        <span>{'★'.repeat(n)} {n} Star{n > 1 ? 's' : ''}</span>
+                        {#if shortcutHints[`image.rating.${n}`]}<kbd class="shortcut-hint" data-shortcut-for={`image.rating.${n}`}>{shortcutHints[`image.rating.${n}`]}</kbd>{/if}
+                    </button>
                 {/each}
             </div>
         {/if}
@@ -652,7 +784,10 @@
         tabindex={activeIndex === 1 ? 0 : -1}
     >
         <span>Accept</span>
-        {#if currentDecision === 'accept'}<span class="check">✓</span>{/if}
+        <span class="menu-item-meta">
+            {#if currentDecision === 'accept'}<span class="check">✓</span>{/if}
+            {#if shortcutHints['image.decision.accept']}<kbd class="shortcut-hint" data-shortcut-for="image.decision.accept">{shortcutHints['image.decision.accept']}</kbd>{/if}
+        </span>
     </button>
     <button
         class="context-menu-item"
@@ -663,7 +798,10 @@
         tabindex={activeIndex === 2 ? 0 : -1}
     >
         <span>Reject</span>
-        {#if currentDecision === 'reject'}<span class="check">✓</span>{/if}
+        <span class="menu-item-meta">
+            {#if currentDecision === 'reject'}<span class="check">✓</span>{/if}
+            {#if shortcutHints['image.decision.reject']}<kbd class="shortcut-hint" data-shortcut-for="image.decision.reject">{shortcutHints['image.decision.reject']}</kbd>{/if}
+        </span>
     </button>
     <button
         class="context-menu-item"
@@ -671,7 +809,10 @@
         role="menuitem"
         data-menu-index="3"
         tabindex={activeIndex === 3 ? 0 : -1}
-    >Clear Decision</button>
+    >
+        <span>Clear Decision</span>
+        {#if shortcutHints['image.decision.undecided']}<kbd class="shortcut-hint" data-shortcut-for="image.decision.undecided">{shortcutHints['image.decision.undecided']}</kbd>{/if}
+    </button>
 
     <div class="separator"></div>
 
@@ -766,7 +907,9 @@
             tabindex={activeIndex === 7 ? 0 : -1}
         >
             <span>Copy</span>
-            <span class="arrow">►</span>
+            <span class="menu-item-meta">
+                <span class="arrow">►</span>
+            </span>
         </button>
         {#if openSubmenu === 'copy'}
             <div
@@ -775,6 +918,11 @@
                 bind:this={copySubmenuEl}
                 style={copySubmenuPlacement}
             >
+                <button class="context-menu-item" onclick={act(() => copyImageWithToast(image))} role="menuitem" tabindex="-1">
+                    <span>Copy Image</span>
+                    {#if shortcutHints['image.copy']}<kbd class="shortcut-hint" data-shortcut-for="image.copy">{shortcutHints['image.copy']}</kbd>{/if}
+                </button>
+                <div class="separator"></div>
                 <button class="context-menu-item" onclick={handleCopyPath} role="menuitem" tabindex="-1">Copy Path{multiCount > 1 ? 's' : ''}</button>
                 <button class="context-menu-item" onclick={handleCopyFilename} role="menuitem" tabindex="-1">Copy Filename{multiCount > 1 ? 's' : ''}</button>
                 <button class="context-menu-item" onclick={handleCopyFileUrl} role="menuitem" tabindex="-1">Copy File URL{multiCount > 1 ? 's' : ''}</button>
@@ -802,7 +950,7 @@
     {#if multiCount === 1}
         <button
             class="context-menu-item"
-            onclick={act(() => openInDefaultApp(image.path))}
+            onclick={act(() => openInDefaultApp(image.image.id))}
             role="menuitem"
             data-menu-index="10"
             tabindex={activeIndex === 10 ? 0 : -1}
@@ -922,7 +1070,10 @@
         role="menuitem"
         data-menu-index="14"
         tabindex={activeIndex === 14 ? 0 : -1}
-    >Trash{multiCount > 1 ? ` (${multiCount})` : ''}</button>
+    >
+        <span>Trash{multiCount > 1 ? ` (${multiCount})` : ''}</span>
+        {#if shortcutHints['image.trash']}<kbd class="shortcut-hint" data-shortcut-for="image.trash">{shortcutHints['image.trash']}</kbd>{/if}
+    </button>
 </div>
 
 <style>
@@ -957,6 +1108,17 @@
         min-height: 30px;
         white-space: nowrap;
     }
+    .menu-item-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--spacing);
+    }
+    .shortcut-hint {
+        color: var(--text-secondary);
+        font: inherit;
+        font-size: 11px;
+        line-height: 1;
+    }
     .context-menu-item:hover,
     .context-menu-item:focus {
         background: var(--blue);
@@ -978,7 +1140,9 @@
     .context-menu-item:hover .count,
     .context-menu-item:focus .count,
     .context-menu-item:hover .folder-path,
-    .context-menu-item:focus .folder-path {
+    .context-menu-item:focus .folder-path,
+    .context-menu-item:hover .shortcut-hint,
+    .context-menu-item:focus .shortcut-hint {
         color: var(--bg);
     }
     .separator {

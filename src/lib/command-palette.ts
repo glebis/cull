@@ -8,6 +8,7 @@ import {
     activeSmartCollection,
     agentPanelPinned,
     agentPanelVisible,
+    agentSkillsOpen,
     agentVisualLevel,
     collectMode,
     collectModeTarget,
@@ -20,6 +21,8 @@ import {
     groupRankingOpen,
     focusedIndex,
     images,
+    importBatchFilter,
+    importBatchImageIds,
     requestCollectionTarget,
     requestTextInput,
     searchOpen,
@@ -31,6 +34,7 @@ import {
     showDetectionBoxes,
     showDetectionInspector,
     showToast,
+    showRejected,
     sidebarVisible,
     smartCollections,
     folders,
@@ -48,7 +52,9 @@ import {
 } from './stores';
 import { invalidateImageCache, loadAllImages, loadImagesForCurrentScope } from './image-loading';
 import { addToCollection, analyzeImages, checkOllama, createCollection, detectNsfw, detectObjects, getAppSetting, getClientFeedback, getOllamaConfig, isNudenetAvailable, isYoloAvailable, listCanvases, listClientFeedback, listCollections, listImageIdsMissingDetection, listImageIdsMissingVision, redo, saveTextToPath, setClientFeedback, setDecision, setRating, undo, validateSessionFolder, type Canvas, type Session } from './api';
-import { withDecision, withRating, type ImageDecision } from './selection-updates';
+import { activateImportBatch } from './import-batch-navigation';
+import { withRating, type ImageDecision } from './selection-updates';
+import { applyDecisionToCurrentView } from './rejected-visibility';
 import { createWorkflow, readWorkflows, runWorkflow, type CommandWorkflow } from './workflows';
 import { buildDeliveryCsv, type DeliveryRow } from './delivery-csv';
 import { loadSimilarImages } from './similarity';
@@ -57,6 +63,9 @@ import { tabRegistry } from './plugins/tab-registry';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { runAiLibraryJob, type AiLibraryJobKind } from './ai-library-jobs';
 import { openSettings } from './settings-navigation';
+import { requestTrashImages } from './trash-actions';
+import { copyCurrentImageToClipboard } from './image-copy-action';
+import { currentImageIndex } from './current-image-target';
 import {
     previewDisplayAlwaysOnTop,
     previewDisplayBlanked,
@@ -94,6 +103,7 @@ export interface CommandPaletteItem {
     kind: CommandPaletteItemKind;
     keywords?: string[];
     defaultShortcut?: string;
+    handlesDefaultShortcut?: boolean;
     disabled?: boolean;
     when?: () => boolean;
     run: () => void | Promise<void>;
@@ -288,6 +298,25 @@ export function shortcutForItem(item: CommandPaletteItem, hotkeys: Record<string
     return hotkeys[item.id] ?? item.defaultShortcut;
 }
 
+export function commandShortcutHints(commandIds: string[]): Record<string, string> {
+    const wanted = new Set(commandIds);
+    const hotkeys = readCommandHotkeys();
+    const compareMode = get(viewMode) === 'compare';
+    return Object.fromEntries(
+        getCommandPaletteItems('all')
+            .filter(item => wanted.has(item.id) && isCommandPaletteItemVisible(item))
+            .flatMap(item => {
+                const shortcut = shortcutForItem(item, hotkeys);
+                if (
+                    compareMode
+                    && !hotkeys[item.id]
+                    && (item.id === 'image.rating.1' || item.id === 'image.rating.2')
+                ) return [];
+                return shortcut ? [[item.id, shortcut] as const] : [];
+            }),
+    );
+}
+
 // Clear every custom hotkey assignment, reverting all commands to their defaults.
 export function resetCommandHotkeys(): Record<string, string> {
     writeJson(COMMAND_HOTKEYS_STORAGE_KEY, {});
@@ -328,10 +357,25 @@ export function listCommandShortcuts(
     });
 }
 
-function clearNavigationScope() {
+function clearSessionScope() {
     activeSession.set(null);
     sessionCanvases.set([]);
     activeCanvas.set(null);
+}
+
+function clearImportScope() {
+    importBatchFilter.set(null);
+    importBatchImageIds.set([]);
+}
+
+function clearNavigationScope() {
+    clearSessionScope();
+    clearImportScope();
+}
+
+async function openCurrentImportBatch(batchId: string) {
+    clearSessionScope();
+    await activateImportBatch(batchId);
 }
 
 async function openAllImages() {
@@ -390,6 +434,7 @@ async function openSession(session: Session) {
     } catch {
         sessionCanvases.set([]);
     }
+    clearImportScope();
     activeSmartCollection.set(null);
     activeFolder.set(null);
     activeCollection.set(null);
@@ -399,12 +444,13 @@ async function openSession(session: Session) {
 }
 
 function openCanvas(canvas: Canvas) {
+    clearImportScope();
     activeCanvas.set(canvas);
     navigateTo('canvas');
 }
 
 async function setFocusedRating(rating: number) {
-    const idx = get(focusedIndex);
+    const idx = currentImageIndex();
     const image = get(images)[idx];
     if (!image) return;
     await setRating(image.image.id, rating, get(activeSession)?.id ?? null);
@@ -417,16 +463,12 @@ async function setFocusedRating(rating: number) {
 }
 
 async function setFocusedDecision(decision: ImageDecision) {
-    const idx = get(focusedIndex);
+    const idx = currentImageIndex();
     const image = get(images)[idx];
     if (!image) return;
     await setDecision(image.image.id, decision, get(activeSession)?.id ?? null);
     invalidateImageCache();
-    images.update(all => {
-        const next = [...all];
-        next[idx] = withDecision(next[idx], decision);
-        return next;
-    });
+    applyDecisionToCurrentView(image.image.id, decision);
 }
 
 function focusedImageTitle(): string {
@@ -460,7 +502,7 @@ async function createCollectionFromImageSet(inverse = false) {
 
     const collectionId = await createCollection(name.trim());
     await addToCollection(collectionId, imageIds);
-    collections.set(await listCollections());
+    collections.set(await listCollections(get(showRejected)));
     statusHint.set(`Created "${name.trim()}" with ${imageIds.length} images`);
     setTimeout(() => statusHint.set(null), 2000);
 }
@@ -489,7 +531,7 @@ async function toggleCollectMode() {
         targetId = target.collectionId;
     } else {
         targetId = await createCollection(target.name);
-        collections.set(await listCollections());
+        collections.set(await listCollections(get(showRejected)));
     }
 
     collectMode.set(true);
@@ -505,7 +547,7 @@ async function addFocusedImageToCollectTarget() {
 
     await addToCollection(target, [image.image.id]);
     invalidateImageCache();
-    collections.set(await listCollections());
+    collections.set(await listCollections(get(showRejected)));
     if (get(activeCollection) === target) {
         await loadImagesForCurrentScope({ resetFocus: false, force: true });
     }
@@ -738,6 +780,15 @@ function commandItems(): CommandPaletteItem[] {
             kind: 'command',
             keywords: ['fullscreen', 'focus', 'immersive'],
             run: () => zenMode.update(value => !value),
+        },
+        {
+            id: 'agent.install-skills',
+            title: 'Install Agent Skills',
+            subtitle: 'Open the Cull skill and agent setup guide',
+            category: 'Agent',
+            kind: 'command',
+            keywords: ['agent', 'skill', 'install', 'setup', 'onboarding', 'mcp', 'claude', 'codex'],
+            run: () => agentSkillsOpen.set(true),
         },
         {
             id: 'agent.toggle-panel',
@@ -980,6 +1031,18 @@ function commandItems(): CommandPaletteItem[] {
             run: addFocusedImageToCollectTarget,
         },
         {
+            id: 'image.copy',
+            title: 'Copy Focused Image',
+            subtitle: focusedImageTitle(),
+            category: 'Image',
+            kind: 'command',
+            keywords: ['clipboard', 'copy'],
+            defaultShortcut: 'Cmd+C',
+            handlesDefaultShortcut: true,
+            disabled: !hasImage,
+            run: copyCurrentImageToClipboard,
+        },
+        {
             id: 'image.trash',
             title: 'Move Focused Image to Trash',
             subtitle: focusedImageTitle(),
@@ -987,10 +1050,9 @@ function commandItems(): CommandPaletteItem[] {
             kind: 'command',
             keywords: ['delete', 'remove'],
             defaultShortcut: 'Backspace',
+            handlesDefaultShortcut: true,
             disabled: !hasImage,
-            run: () => {
-                window.dispatchEvent(new CustomEvent('trash-focused-image'));
-            },
+            run: () => requestTrashImages(),
         },
         {
             id: 'image.delete-permanently',
@@ -1000,6 +1062,7 @@ function commandItems(): CommandPaletteItem[] {
             kind: 'command',
             keywords: ['remove', 'destroy'],
             defaultShortcut: 'Cmd+Backspace',
+            handlesDefaultShortcut: true,
             disabled: !hasImage,
             run: () => {
                 window.dispatchEvent(new CustomEvent('delete-focused-image'));
@@ -1012,6 +1075,8 @@ function commandItems(): CommandPaletteItem[] {
             category: 'Image',
             kind: 'command',
             keywords: ['star', 'rank', 'score'],
+            defaultShortcut: String(rating),
+            handlesDefaultShortcut: true,
             disabled: !hasImage,
             run: () => setFocusedRating(rating),
         })),
@@ -1022,6 +1087,8 @@ function commandItems(): CommandPaletteItem[] {
             category: 'Image',
             kind: 'command',
             keywords: ['pick', 'cull', 'triage'],
+            defaultShortcut: decision === 'accept' ? 'A' : decision === 'reject' ? 'X' : 'U',
+            handlesDefaultShortcut: true,
             disabled: !hasImage,
             run: () => setFocusedDecision(decision),
         })),
@@ -1298,6 +1365,9 @@ function destinationItems(): CommandPaletteItem[] {
     const activeSessionId = get(activeSession)?.id ?? null;
     const activeCanvasId = get(activeCanvas)?.id ?? null;
     const activeClass = get(activeDetectedClass);
+    const currentImportBatch = get(importBatchFilter);
+    const currentImportImageIds = get(importBatchImageIds);
+    const currentImportCount = currentImportImageIds.length;
 
     return [
         {
@@ -1309,6 +1379,15 @@ function destinationItems(): CommandPaletteItem[] {
             keywords: ['library', 'root'],
             run: openAllImages,
         },
+        ...(currentImportBatch ? [{
+            id: `scope.import.${currentImportBatch}`,
+            title: 'Current Import',
+            subtitle: `${currentImportCount} image${currentImportCount === 1 ? '' : 's'} · ${currentImportBatch}`,
+            category: 'Import',
+            kind: 'destination' as const,
+            keywords: ['import', 'batch', 'recent', currentImportBatch],
+            run: () => openCurrentImportBatch(currentImportBatch),
+        }] : []),
         ...get(sessions).map((session): CommandPaletteItem => ({
             id: `scope.session.${session.id}`,
             title: session.name,
@@ -1557,7 +1636,8 @@ export function commandForKeyboardEvent(event: KeyboardEvent): CommandPaletteIte
     const items = getCommandPaletteItems('all');
     const item = items.find(candidate => {
         if (!isCommandPaletteItemVisible(candidate)) return false;
-        const shortcut = hotkeys[candidate.id];
+        const shortcut = hotkeys[candidate.id]
+            ?? (candidate.handlesDefaultShortcut ? candidate.defaultShortcut : undefined);
         return shortcut ? eventMatchesShortcut(event, shortcut) : false;
     });
     return item && !item.disabled ? item : null;

@@ -143,9 +143,10 @@ describe('formatSidebarCount', () => {
         expect(formatSidebarCount(42)).toBe('42');
     });
 
-    it('uses zero for missing counts', () => {
-        expect(formatSidebarCount(null)).toBe('0');
-        expect(formatSidebarCount(undefined)).toBe('0');
+    it('omits zero and missing counts (imageview-1i2k.3)', () => {
+        expect(formatSidebarCount(0)).toBe('');
+        expect(formatSidebarCount(null)).toBe('');
+        expect(formatSidebarCount(undefined)).toBe('');
     });
 });
 
@@ -180,8 +181,12 @@ describe('formatFolderCount', () => {
         expect(formatFolderCount(4, 27)).toBe('4 (27)');
     });
 
-    it('shows 0 direct for a group folder that only carries descendants', () => {
-        expect(formatFolderCount(0, 27)).toBe('0 (27)');
+    it('shows only the subtree number for a group folder that only carries descendants', () => {
+        expect(formatFolderCount(0, 27)).toBe('27');
+    });
+
+    it('omits the count for a completely empty subtree (imageview-1i2k.3)', () => {
+        expect(formatFolderCount(0, 0)).toBe('');
     });
 });
 

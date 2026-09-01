@@ -25,6 +25,7 @@ pub fn is_module_raw_enabled(db: &Database) -> bool {
 pub enum SyncOutcome {
     Unchanged,
     Restored,
+    Promoted { image_id: String },
     ContentChanged { image_id: String },
     NewImport { image_id: String },
     Registered,
@@ -36,6 +37,46 @@ pub fn sync_file(
     file_path: &Path,
     app_data_dir: &Path,
 ) -> Result<SyncOutcome, String> {
+    sync_file_cancellable(db, file_path, app_data_dir, &|| false)
+}
+
+pub fn sync_file_cancellable<C>(
+    db: &Database,
+    file_path: &Path,
+    app_data_dir: &Path,
+    should_cancel: &C,
+) -> Result<SyncOutcome, String>
+where
+    C: Fn() -> bool + ?Sized,
+{
+    sync_file_cancellable_with_membership(db, file_path, app_data_dir, should_cancel, true)
+}
+
+pub(crate) fn sync_referenced_file_cancellable<C>(
+    db: &Database,
+    file_path: &Path,
+    app_data_dir: &Path,
+    should_cancel: &C,
+) -> Result<SyncOutcome, String>
+where
+    C: Fn() -> bool + ?Sized,
+{
+    sync_file_cancellable_with_membership(db, file_path, app_data_dir, should_cancel, false)
+}
+
+fn sync_file_cancellable_with_membership<C>(
+    db: &Database,
+    file_path: &Path,
+    app_data_dir: &Path,
+    should_cancel: &C,
+    library_member: bool,
+) -> Result<SyncOutcome, String>
+where
+    C: Fn() -> bool + ?Sized,
+{
+    if should_cancel() {
+        return Err("Import cancelled".to_string());
+    }
     let ext = file_path
         .extension()
         .and_then(|e| e.to_str())
@@ -84,85 +125,119 @@ pub fn sync_file(
 
         if size_match && mtime_match && existing_file.missing_at.is_none() {
             let _ = db.touch_image_file(&existing_file.id, file_size, &mtime);
-            return Ok(SyncOutcome::Unchanged);
+            let promoted =
+                promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
+            return Ok(if promoted {
+                SyncOutcome::Promoted {
+                    image_id: existing_file.image_id,
+                }
+            } else {
+                SyncOutcome::Unchanged
+            });
         }
 
         if existing_file.missing_at.is_some() && size_match && mtime_match {
             let _ = db.touch_image_file(&existing_file.id, file_size, &mtime);
-            return Ok(SyncOutcome::Restored);
+            let promoted =
+                promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
+            return Ok(if promoted {
+                SyncOutcome::Promoted {
+                    image_id: existing_file.image_id,
+                }
+            } else {
+                SyncOutcome::Restored
+            });
         }
 
-        let hash = hash_file(file_path).map_err(|e| format!("Read error: {}", e))?;
+        let hash = hash_file_cancellable(file_path, should_cancel)?;
 
         if let Some(img) = db.find_by_hash(&hash).map_err(|e| e.to_string())? {
             if img.id == existing_file.image_id {
                 let _ = db.touch_image_file(&existing_file.id, file_size, &mtime);
+                let promoted =
+                    promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
                 return Ok(if existing_file.missing_at.is_some() {
-                    SyncOutcome::Restored
+                    if promoted {
+                        SyncOutcome::Promoted {
+                            image_id: existing_file.image_id,
+                        }
+                    } else {
+                        SyncOutcome::Restored
+                    }
+                } else if promoted {
+                    SyncOutcome::Promoted {
+                        image_id: existing_file.image_id,
+                    }
                 } else {
                     SyncOutcome::Unchanged
                 });
             }
             if can_decode {
                 let _ = db.repoint_image_file(&existing_file.id, &img.id, file_size, &mtime);
+                if should_cancel() {
+                    promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
+                    return Ok(SyncOutcome::ContentChanged { image_id: img.id });
+                }
                 match crate::db_core::image_decode::decode_image(file_path, module_raw) {
                     Ok(decoded) => {
-                        let _ = thumbnails::generate_thumbnail_from_image(
-                            &decoded.image,
-                            app_data_dir,
-                            &img.id,
-                        );
+                        if !should_cancel() {
+                            let _ = thumbnails::generate_thumbnail_from_image(
+                                &decoded.image,
+                                app_data_dir,
+                                &img.id,
+                            );
+                        }
                     }
                     Err(e) => {
                         crate::safe_eprintln!("Thumbnail decode failed for {}: {}", path_str, e)
                     }
                 }
             } else if is_document {
+                if should_cancel() {
+                    return Ok(SyncOutcome::ContentChanged { image_id: img.id });
+                }
                 validate_pdf_import(file_path)?;
                 let _ = db.repoint_image_file(&existing_file.id, &img.id, file_size, &mtime);
                 let _ = thumbnails::generate_document_thumbnail(file_path, app_data_dir, &img.id);
                 persist_pdf_media_metadata(db, file_path, &img.id)?;
             }
+            promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
             return Ok(SyncOutcome::ContentChanged { image_id: img.id });
         }
 
         // New content: only now read the bytes (source detection / decode need them).
-        let data = fs::read(file_path).map_err(|e| format!("Read error: {}", e))?;
-        let (image_id, decoded) =
-            create_image_record(db, file_path, &hash, &ext, &data, can_decode, module_raw)?;
+        let data = read_file_cancellable(file_path, should_cancel)?;
+        let (image_id, decoded) = create_image_record(
+            db,
+            file_path,
+            &hash,
+            &ext,
+            &data,
+            can_decode,
+            module_raw,
+            should_cancel,
+        )?;
         let _ = db.repoint_image_file(&existing_file.id, &image_id, file_size, &mtime);
         if can_decode {
-            let decoded_dims = decoded
-                .as_ref()
-                .map(|d| (d.image.width(), d.image.height()));
-            if let Some(decoded) = &decoded {
-                let _ = thumbnails::generate_thumbnail_from_image(
-                    &decoded.image,
-                    app_data_dir,
-                    &image_id,
-                );
-                if let Some(metadata) = &decoded.raw_metadata {
-                    if let Ok(meta_json) = serde_json::to_string(metadata) {
-                        let _ = db.update_raw_metadata(&image_id, &meta_json);
-                    }
-                }
-            } else {
-                let _ = thumbnails::generate_thumbnail(file_path, app_data_dir, &image_id);
-            }
-            run_source_detection(db, file_path, &image_id, &ext, decoded_dims);
-            run_sidecar_detection(db, file_path, &image_id);
-            run_perceptual_hash(db, file_path, &image_id, decoded.as_ref().map(|d| &d.image));
-            run_color_metrics(db, file_path, &image_id, decoded.as_ref().map(|d| &d.image));
+            enrich_image(
+                db,
+                file_path,
+                app_data_dir,
+                &image_id,
+                &ext,
+                decoded.as_ref(),
+            );
         } else if is_document {
             validate_pdf_import(file_path)?;
             let _ = thumbnails::generate_document_thumbnail(file_path, app_data_dir, &image_id);
             persist_pdf_media_metadata(db, file_path, &image_id)?;
         }
+        promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
         return Ok(SyncOutcome::ContentChanged { image_id });
     }
 
     // New path
-    let hash = hash_file(file_path).map_err(|e| format!("Read error: {}", e))?;
+    let hash = hash_file_cancellable(file_path, should_cancel)?;
 
     if let Some(existing_img) = db.find_by_hash(&hash).map_err(|e| e.to_string())? {
         let file_record = ImageFile {
@@ -174,7 +249,7 @@ pub fn sync_file(
             last_seen_size: Some(file_size),
             last_seen_mtime: Some(mtime),
         };
-        db.insert_image_file(&file_record)
+        db.insert_image_file_with_library_membership(&file_record, library_member)
             .map_err(|e| e.to_string())?;
         return Ok(SyncOutcome::NewImport {
             image_id: existing_img.id,
@@ -182,13 +257,21 @@ pub fn sync_file(
     }
 
     // New content: only now read the bytes (source detection / decode need them).
-    let data = fs::read(file_path).map_err(|e| format!("Read error: {}", e))?;
+    let data = read_file_cancellable(file_path, should_cancel)?;
     if is_document {
         validate_pdf_import(file_path)?;
     }
 
-    let (image_id, decoded) =
-        create_image_record(db, file_path, &hash, &ext, &data, can_decode, module_raw)?;
+    let (image_id, decoded) = create_image_record(
+        db,
+        file_path,
+        &hash,
+        &ext,
+        &data,
+        can_decode,
+        module_raw,
+        should_cancel,
+    )?;
     let file_record = ImageFile {
         id: Uuid::new_v4().to_string(),
         image_id: image_id.clone(),
@@ -198,28 +281,18 @@ pub fn sync_file(
         last_seen_size: Some(file_size),
         last_seen_mtime: Some(mtime),
     };
-    db.insert_image_file(&file_record)
+    db.insert_image_file_with_library_membership(&file_record, library_member)
         .map_err(|e| e.to_string())?;
 
     if can_decode {
-        let decoded_dims = decoded
-            .as_ref()
-            .map(|d| (d.image.width(), d.image.height()));
-        if let Some(decoded) = &decoded {
-            let _ =
-                thumbnails::generate_thumbnail_from_image(&decoded.image, app_data_dir, &image_id);
-            if let Some(metadata) = &decoded.raw_metadata {
-                if let Ok(meta_json) = serde_json::to_string(metadata) {
-                    let _ = db.update_raw_metadata(&image_id, &meta_json);
-                }
-            }
-        } else {
-            let _ = thumbnails::generate_thumbnail(file_path, app_data_dir, &image_id);
-        }
-        run_source_detection(db, file_path, &image_id, &ext, decoded_dims);
-        run_sidecar_detection(db, file_path, &image_id);
-        run_perceptual_hash(db, file_path, &image_id, decoded.as_ref().map(|d| &d.image));
-        run_color_metrics(db, file_path, &image_id, decoded.as_ref().map(|d| &d.image));
+        enrich_image(
+            db,
+            file_path,
+            app_data_dir,
+            &image_id,
+            &ext,
+            decoded.as_ref(),
+        );
         Ok(SyncOutcome::NewImport { image_id })
     } else if is_document {
         let _ = thumbnails::generate_document_thumbnail(file_path, app_data_dir, &image_id);
@@ -228,6 +301,18 @@ pub fn sync_file(
     } else {
         Ok(SyncOutcome::Registered)
     }
+}
+
+fn promote_existing_file_if_requested(
+    db: &Database,
+    file_id: &str,
+    library_member: bool,
+) -> Result<bool, String> {
+    if !library_member {
+        return Ok(false);
+    }
+    db.promote_image_file_to_library(file_id)
+        .map_err(|error| error.to_string())
 }
 
 fn validate_pdf_import(file_path: &Path) -> Result<(), String> {
@@ -316,10 +401,22 @@ pub fn import_file(
     file_path: &Path,
     app_data_dir: &Path,
 ) -> Result<Option<String>, String> {
-    match sync_file(db, file_path, app_data_dir)? {
-        SyncOutcome::NewImport { image_id } | SyncOutcome::ContentChanged { image_id } => {
-            Ok(Some(image_id))
-        }
+    import_file_cancellable(db, file_path, app_data_dir, &|| false)
+}
+
+pub fn import_file_cancellable<C>(
+    db: &Database,
+    file_path: &Path,
+    app_data_dir: &Path,
+    should_cancel: &C,
+) -> Result<Option<String>, String>
+where
+    C: Fn() -> bool + ?Sized,
+{
+    match sync_file_cancellable(db, file_path, app_data_dir, should_cancel)? {
+        SyncOutcome::NewImport { image_id }
+        | SyncOutcome::ContentChanged { image_id }
+        | SyncOutcome::Promoted { image_id } => Ok(Some(image_id)),
         _ => Ok(None),
     }
 }
@@ -332,7 +429,11 @@ fn create_image_record(
     data: &[u8],
     can_decode: bool,
     module_raw: bool,
+    should_cancel: &(impl Fn() -> bool + ?Sized),
 ) -> Result<(String, Option<crate::db_core::image_decode::DecodedImage>), String> {
+    if should_cancel() {
+        return Err("Import cancelled".to_string());
+    }
     let decoded = if can_decode {
         Some(crate::db_core::image_decode::decode_image(
             file_path, module_raw,
@@ -340,6 +441,9 @@ fn create_image_record(
     } else {
         None
     };
+    if should_cancel() {
+        return Err("Import cancelled".to_string());
+    }
     let (width, height) = if crate::extensions::is_document_extension(ext) {
         (DOCUMENT_PREVIEW_DIMENSION, DOCUMENT_PREVIEW_DIMENSION)
     } else {
@@ -364,7 +468,12 @@ fn create_image_record(
         raw_metadata: None,
     };
     db.insert_image(&image).map_err(|e| e.to_string())?;
-    Ok((image_id, decoded))
+    let canonical_image_id = db
+        .find_by_hash(hash)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Image registration completed without a canonical hash row".to_string())?
+        .id;
+    Ok((canonical_image_id, decoded))
 }
 
 /// Whole-buffer SHA-256, retained as a test reference for `hash_file`'s streaming
@@ -373,7 +482,7 @@ fn create_image_record(
 fn compute_hash(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 const DOCUMENT_PREVIEW_DIMENSION: u32 = 1200;
@@ -389,19 +498,98 @@ fn import_size_within_limit(size: u64) -> bool {
 
 /// Stream a file through SHA-256 in fixed-size chunks so the whole file never
 /// needs to live in a single `Vec<u8>` just to compute its content hash.
+#[cfg(test)]
 fn hash_file(path: &Path) -> std::io::Result<String> {
+    hash_file_cancellable(path, &|| false).map_err(std::io::Error::other)
+}
+
+fn hash_file_cancellable(
+    path: &Path,
+    should_cancel: &(impl Fn() -> bool + ?Sized),
+) -> Result<String, String> {
     use std::io::Read;
-    let mut file = fs::File::open(path)?;
+    let mut file = fs::File::open(path).map_err(|error| format!("Read error: {error}"))?;
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 64 * 1024];
     loop {
-        let n = file.read(&mut buf)?;
+        if should_cancel() {
+            return Err("Import cancelled".to_string());
+        }
+        let n = file
+            .read(&mut buf)
+            .map_err(|error| format!("Read error: {error}"))?;
         if n == 0 {
             break;
         }
         hasher.update(&buf[..n]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex::encode(hasher.finalize()))
+}
+
+fn read_file_cancellable(
+    path: &Path,
+    should_cancel: &(impl Fn() -> bool + ?Sized),
+) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut file = fs::File::open(path).map_err(|error| format!("Read error: {error}"))?;
+    let capacity = file
+        .metadata()
+        .ok()
+        .and_then(|metadata| usize::try_from(metadata.len()).ok())
+        .unwrap_or(0);
+    let mut data = Vec::with_capacity(capacity);
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        if should_cancel() {
+            return Err("Import cancelled".to_string());
+        }
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("Read error: {error}"))?;
+        if read == 0 {
+            return Ok(data);
+        }
+        data.extend_from_slice(&buffer[..read]);
+    }
+}
+
+fn enrich_image(
+    db: &Database,
+    file_path: &Path,
+    app_data_dir: &Path,
+    image_id: &str,
+    ext: &str,
+    decoded: Option<&crate::db_core::image_decode::DecodedImage>,
+) {
+    // Once the image/file rows are committed, finish this image's enrichment as
+    // one logical unit. Cancellation is observed before that commit and again
+    // before the next file, avoiding a permanently half-enriched unchanged row.
+    if let Some(decoded) = decoded {
+        let _ = thumbnails::generate_thumbnail_from_image(&decoded.image, app_data_dir, image_id);
+        if let Some(metadata) = &decoded.raw_metadata {
+            if let Ok(meta_json) = serde_json::to_string(metadata) {
+                let _ = db.update_raw_metadata(image_id, &meta_json);
+            }
+        }
+    } else {
+        let _ = thumbnails::generate_thumbnail(file_path, app_data_dir, image_id);
+    }
+
+    let decoded_dims = decoded.map(|decoded| (decoded.image.width(), decoded.image.height()));
+    run_source_detection(db, file_path, image_id, ext, decoded_dims);
+    run_sidecar_detection(db, file_path, image_id);
+    run_perceptual_hash(
+        db,
+        file_path,
+        image_id,
+        decoded.map(|decoded| &decoded.image),
+    );
+    run_color_metrics(
+        db,
+        file_path,
+        image_id,
+        decoded.map(|decoded| &decoded.image),
+    );
 }
 
 fn run_source_detection(
@@ -517,6 +705,7 @@ mod tests {
     use super::*;
     use rusqlite::params;
     use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn raw_module_default_is_enabled() {
@@ -552,6 +741,65 @@ mod tests {
         let path = dir.path().join("empty.bin");
         std::fs::File::create(&path).unwrap();
         assert_eq!(hash_file(&path).unwrap(), compute_hash(&[]));
+    }
+
+    #[test]
+    fn streaming_hash_stops_between_chunks_when_cancelled() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large.bin");
+        std::fs::write(&path, vec![7_u8; 256 * 1024]).unwrap();
+        let checks = AtomicUsize::new(0);
+
+        let result = hash_file_cancellable(&path, &|| checks.fetch_add(1, Ordering::SeqCst) >= 1);
+
+        assert_eq!(result.unwrap_err(), "Import cancelled");
+        assert_eq!(checks.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn buffered_read_stops_between_chunks_when_cancelled() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large.bin");
+        std::fs::write(&path, vec![9_u8; 256 * 1024]).unwrap();
+        let checks = AtomicUsize::new(0);
+
+        let result = read_file_cancellable(&path, &|| checks.fetch_add(1, Ordering::SeqCst) >= 1);
+
+        assert_eq!(result.unwrap_err(), "Import cancelled");
+        assert_eq!(checks.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn create_image_record_returns_the_canonical_id_after_a_hash_race() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        let existing = Image {
+            id: "canonical-image".to_string(),
+            sha256_hash: "shared-hash".to_string(),
+            width: 16,
+            height: 16,
+            format: "jpg".to_string(),
+            file_size: 4,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            imported_at: "2026-01-01T00:00:00Z".to_string(),
+            ai_prompt: None,
+            raw_metadata: None,
+        };
+        db.insert_image(&existing).unwrap();
+
+        let (image_id, _) = create_image_record(
+            &db,
+            &dir.path().join("duplicate.jpg"),
+            &existing.sha256_hash,
+            "jpg",
+            b"data",
+            false,
+            true,
+            &|| false,
+        )
+        .unwrap();
+
+        assert_eq!(image_id, existing.id);
     }
 
     #[test]

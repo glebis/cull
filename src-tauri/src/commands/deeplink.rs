@@ -93,7 +93,11 @@ pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams>
         return None;
     }
 
-    let params = OpenParams {
+    validate_open_params(build_file_open_params(file_paths)).ok()
+}
+
+fn build_file_open_params(file_paths: Vec<String>) -> OpenParams {
+    OpenParams {
         path: if file_paths.len() == 1 {
             Some(file_paths[0].clone())
         } else {
@@ -118,9 +122,31 @@ pub fn open_params_for_file_paths(file_paths: Vec<String>) -> Option<OpenParams>
         drop_x: None,
         drop_y: None,
         request_id: None,
-    };
+    }
+}
 
-    validate_open_params(params).ok()
+pub fn open_params_for_launch_path(path: &std::path::Path) -> Option<OpenParams> {
+    let canonical = crate::db_core::path_policy::validate_path(
+        path.to_string_lossy().as_ref(),
+        crate::db_core::path_policy::PathMode::UserPicked,
+    )
+    .ok()?;
+
+    if canonical.is_dir() {
+        return Some(OpenParams {
+            folder: Some(canonical.to_string_lossy().into_owned()),
+            view: Some("grid".to_string()),
+            ..OpenParams::default()
+        });
+    }
+
+    if canonical.is_file() && crate::extensions::is_image_path(&canonical, false) {
+        Some(build_file_open_params(vec![canonical
+            .to_string_lossy()
+            .into_owned()]))
+    } else {
+        None
+    }
 }
 
 pub fn open_params_for_urls(urls: &[String]) -> Vec<OpenParams> {
@@ -408,12 +434,35 @@ fn hex_value(byte: u8) -> Option<u8> {
 mod tests {
     use super::*;
 
+    // Create a tempdir for test fixtures. Prefers to nest it under $HOME so the
+    // production path validator sees the fixture as "under home" (matching the
+    // behavior real users get on a developer machine), but falls back to the
+    // system temp location when $HOME is not writable — for example, the macOS
+    // CI runner image now exposes /Users/runner as read-only.
     fn home_tempdir(prefix: &str) -> tempfile::TempDir {
-        let home = dirs::home_dir().unwrap();
+        if let Some(home) = dirs::home_dir() {
+            if let Ok(dir) = tempfile::Builder::new().prefix(prefix).tempdir_in(&home) {
+                return dir;
+            }
+        }
         tempfile::Builder::new()
             .prefix(prefix)
-            .tempdir_in(home)
-            .unwrap()
+            .tempdir()
+            .expect("tempdir creation should not fail on a working CI runner")
+    }
+
+    // Return $HOME when it is writable, otherwise None. Tests that exercise the
+    // validator's "is this path under $HOME?" logic use this to skip themselves
+    // on read-only CI runners instead of failing on `create_dir`.
+    fn writable_home() -> Option<std::path::PathBuf> {
+        let home = dirs::home_dir()?;
+        let probe = home.join(".cull_deeplink_probe");
+        if std::fs::create_dir(&probe).is_ok() {
+            let _ = std::fs::remove_dir(&probe);
+            Some(home)
+        } else {
+            None
+        }
     }
 
     #[test]
@@ -438,7 +487,11 @@ mod tests {
 
     #[test]
     fn valid_home_path_passes_validation() {
-        let home = dirs::home_dir().unwrap();
+        let Some(home) = writable_home() else {
+            // CI runner exposes a read-only $HOME; this assertion is
+            // developer-machine-only and we cannot meaningfully exercise it.
+            return;
+        };
         // Create a non-hidden temp directory under $HOME
         let test_dir = home.join("cull_deeplink_test_tmp");
         std::fs::create_dir_all(&test_dir).unwrap();
@@ -464,7 +517,7 @@ mod tests {
 
     #[test]
     fn ssh_dir_is_rejected() {
-        let home = dirs::home_dir().unwrap();
+        let Some(home) = writable_home() else { return };
         let ssh_path = home.join(".ssh");
         // Only test if the directory actually exists (it does on most dev machines)
         if ssh_path.exists() {
@@ -506,7 +559,7 @@ mod tests {
 
     #[test]
     fn hidden_directory_rejected() {
-        let home = dirs::home_dir().unwrap();
+        let Some(home) = writable_home() else { return };
         let hidden = home.join(".hidden_test_dir_deeplink");
         let _ = std::fs::create_dir(&hidden);
         if hidden.exists() {
@@ -594,6 +647,9 @@ mod tests {
 
     #[test]
     fn builds_loupe_params_for_opened_file() {
+        if writable_home().is_none() {
+            return;
+        }
         let dir = home_tempdir("cull_open_file_");
         let image = dir.path().join("image.png");
         std::fs::write(&image, b"not a real png").unwrap();
@@ -607,7 +663,82 @@ mod tests {
     }
 
     #[test]
+    fn launch_folder_builds_grid_import_params() {
+        if writable_home().is_none() {
+            return;
+        }
+        let dir = home_tempdir("cull_launch_folder_");
+        let folder = dir.path().join("Library");
+        std::fs::create_dir(&folder).unwrap();
+
+        let params = open_params_for_launch_path(&folder).unwrap();
+
+        assert_eq!(
+            params.folder,
+            Some(
+                folder
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+        assert_eq!(params.view.as_deref(), Some("grid"));
+        assert_eq!(params.drag_drop, None);
+        assert!(params.path.is_none());
+    }
+
+    #[test]
+    fn launch_path_rejects_unsupported_files() {
+        if writable_home().is_none() {
+            return;
+        }
+        let dir = home_tempdir("cull_launch_unsupported_");
+        let text = dir.path().join("notes.txt");
+        std::fs::write(&text, b"notes").unwrap();
+
+        assert!(open_params_for_launch_path(&text).is_none());
+    }
+
+    #[test]
+    fn launch_folder_accepts_explicit_path_outside_home() {
+        let folder = tempfile::tempdir().unwrap();
+
+        let params = open_params_for_launch_path(folder.path()).unwrap();
+
+        assert_eq!(
+            params.folder,
+            Some(
+                folder
+                    .path()
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn launch_image_accepts_explicit_path_outside_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let image = dir.path().join("shot.png");
+        std::fs::write(&image, b"image").unwrap();
+
+        let params = open_params_for_launch_path(&image).unwrap();
+
+        assert_eq!(
+            params.path,
+            Some(image.canonicalize().unwrap().to_string_lossy().into_owned())
+        );
+        assert_eq!(params.view.as_deref(), Some("loupe"));
+    }
+
+    #[test]
     fn drag_drop_single_image_opens_loupe() {
+        if writable_home().is_none() {
+            return;
+        }
         let dir = home_tempdir("cull_drag_single_");
         let image = dir.path().join("image.jpg");
         std::fs::write(&image, b"not a real jpeg").unwrap();
@@ -624,6 +755,9 @@ mod tests {
 
     #[test]
     fn drag_drop_multiple_images_opens_grid_batch() {
+        if writable_home().is_none() {
+            return;
+        }
         let dir = home_tempdir("cull_drag_multi_");
         let first = dir.path().join("first.jpg");
         let second = dir.path().join("second.png");
@@ -647,6 +781,9 @@ mod tests {
 
     #[test]
     fn drag_drop_single_folder_opens_folder_grid() {
+        if writable_home().is_none() {
+            return;
+        }
         let dir = home_tempdir("cull_drag_folder_");
         let folder = dir.path().join("Library");
         std::fs::create_dir(&folder).unwrap();
@@ -666,6 +803,9 @@ mod tests {
 
     #[test]
     fn drag_drop_paths_can_include_drop_position() {
+        if writable_home().is_none() {
+            return;
+        }
         let dir = home_tempdir("cull_drag_position_");
         let folder = dir.path().join("Library");
         std::fs::create_dir(&folder).unwrap();
@@ -680,6 +820,9 @@ mod tests {
 
     #[test]
     fn drag_drop_mixed_files_and_folders_keeps_both_import_actions() {
+        if writable_home().is_none() {
+            return;
+        }
         let dir = home_tempdir("cull_drag_mixed_");
         let image = dir.path().join("image.webp");
         let folder = dir.path().join("Folder");

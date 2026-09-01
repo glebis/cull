@@ -1,6 +1,7 @@
 <script lang="ts">
     import { resubmitPrompt, estimateGenerationCost, type CostEstimate } from '$lib/api';
     import { createStaleGuard } from '$lib/stale-guard';
+    import ModalDialog from '$lib/components/ModalDialog.svelte';
 
     interface Props {
         visible: boolean;
@@ -81,19 +82,22 @@
     }
 
     function handleKeydown(e: KeyboardEvent) {
-        if (e.key === 'Escape') onclose();
-        if (e.key === 'Enter' && e.metaKey) submit();
+        if (e.key === 'Enter' && e.metaKey) void submit();
     }
 </script>
 
 {#if visible}
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="dialog-overlay" onclick={onclose} onkeydown={handleKeydown}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="dialog" onclick={(e) => e.stopPropagation()} onkeydown={handleKeydown}>
+<ModalDialog
+    titleId="prompt-resubmit-title"
+    overlayClass="prompt-resubmit-overlay"
+    panelClass="dialog prompt-resubmit-dialog"
+    onclose={onclose}
+    onkeydown={handleKeydown}
+>
+    <div class="dialog-content">
         <div class="dialog-header">
-            <h3>Re-generate</h3>
-            <button class="close-btn" onclick={onclose}>&times;</button>
+            <h3 id="prompt-resubmit-title">Re-generate</h3>
+            <button class="close-btn" onclick={onclose} aria-label="Close">&times;</button>
         </div>
 
         <div class="dialog-body">
@@ -188,11 +192,11 @@
             </button>
         </div>
     </div>
-</div>
+</ModalDialog>
 {/if}
 
 <style>
-    .dialog-overlay {
+    :global(.prompt-resubmit-overlay) {
         position: fixed;
         inset: 0;
         background: color-mix(in srgb, var(--bg) 80%, transparent);
@@ -201,7 +205,7 @@
         justify-content: center;
         z-index: var(--z-modal);
     }
-    .dialog {
+    :global(.prompt-resubmit-dialog) {
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: calc(var(--radius) * 2);
@@ -222,15 +226,6 @@
         font-size: 14px;
         color: var(--text);
     }
-    .close-btn {
-        background: none;
-        border: none;
-        color: var(--text-secondary);
-        font-size: 18px;
-        cursor: pointer;
-        padding: 0 4px;
-    }
-    .close-btn:hover { color: var(--text); }
     .dialog-body {
         padding: calc(var(--spacing) * 2);
         display: flex;
@@ -289,30 +284,6 @@
         gap: var(--spacing);
         padding: calc(var(--spacing) * 2);
         border-top: 1px solid var(--border);
-    }
-    .btn {
-        padding: var(--spacing) calc(var(--spacing) * 2);
-        border-radius: var(--radius);
-        font-size: 13px;
-        font-family: var(--font);
-        cursor: pointer;
-        border: 1px solid var(--border);
-    }
-    .btn.secondary {
-        background: var(--bg);
-        color: var(--text-secondary);
-    }
-    .btn.primary {
-        background: var(--blue);
-        color: var(--bg);
-        border-color: var(--blue);
-    }
-    .btn.primary:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-    .btn:hover:not(:disabled) {
-        filter: brightness(1.1);
     }
     .btn-group {
         display: flex;

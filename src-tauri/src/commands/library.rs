@@ -6,9 +6,13 @@ use crate::AppState;
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
-pub async fn list_folders(state: State<'_, AppState>) -> Result<Vec<(String, u32)>, String> {
+pub async fn list_folders(
+    state: State<'_, AppState>,
+    include_rejected: Option<bool>,
+) -> Result<Vec<(String, u32)>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::list_folders(&ctx).map_err(|e| e.to_string())
+    svc::list_folders_with_visibility(&ctx, include_rejected.unwrap_or(false))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -17,10 +21,16 @@ pub async fn list_images_by_folder(
     folder: String,
     limit: u32,
     offset: u32,
+    include_rejected: Option<bool>,
 ) -> Result<Vec<ImageWithFile>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::list_images_by_folder(&ctx, &folder, Pagination::clamped(offset, limit))
-        .map_err(|e| e.to_string())
+    svc::list_images_by_folder_with_visibility(
+        &ctx,
+        &folder,
+        Pagination::clamped(offset, limit),
+        include_rejected.unwrap_or(false),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -28,9 +38,15 @@ pub async fn list_images(
     state: State<'_, AppState>,
     limit: u32,
     offset: u32,
+    include_rejected: Option<bool>,
 ) -> Result<Vec<ImageWithFile>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::list_images(&ctx, Pagination::clamped(offset, limit)).map_err(|e| e.to_string())
+    svc::list_images_with_visibility(
+        &ctx,
+        Pagination::clamped(offset, limit),
+        include_rejected.unwrap_or(false),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -73,21 +89,27 @@ pub async fn list_images_filtered(
     min_height: Option<u32>,
     limit: u32,
     offset: u32,
+    include_rejected: Option<bool>,
 ) -> Result<Vec<ImageWithFile>, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::list_images_filtered(
+    svc::list_images_filtered_with_visibility(
         &ctx,
         min_width,
         min_height,
         Pagination::clamped(offset, limit),
+        include_rejected.unwrap_or(false),
     )
     .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn get_image_count(state: State<'_, AppState>) -> Result<u32, String> {
+pub async fn get_image_count(
+    state: State<'_, AppState>,
+    include_rejected: Option<bool>,
+) -> Result<u32, String> {
     let ctx = ServiceContext::from_app_state(&state, None);
-    svc::get_image_count(&ctx).map_err(|e| e.to_string())
+    svc::get_image_count_with_visibility(&ctx, include_rejected.unwrap_or(false))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -133,54 +155,7 @@ pub async fn trash_images(
 }
 
 fn trash_images_inner(state: &AppState, image_ids: &[String]) -> Result<u32, String> {
-    let mut trashed = 0u32;
-    for image_id in image_ids {
-        let id_refs: Vec<&str> = vec![image_id.as_str()];
-        let found = state
-            .db
-            .get_images_by_ids(&id_refs)
-            .map_err(|e| e.to_string())?;
-        if let Some(img) = found.first() {
-            let path = std::path::Path::new(&img.path);
-            if path.exists() {
-                match trash::delete(path) {
-                    Ok(()) => {
-                        trashed += 1;
-                        let _ = state.db.mark_file_missing(&img.path);
-                        let filename = path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("file")
-                            .to_string();
-                        log_library_event(
-                            state,
-                            "image_moved_to_trash",
-                            Some("image"),
-                            Some(image_id.clone()),
-                            serde_json::json!({
-                                "image_id": image_id,
-                                "path": &img.path,
-                                "filename": filename.clone(),
-                            }),
-                        );
-                        let _ = state.action_manager.record_action(
-                            &state.db,
-                            "trash_image",
-                            format!("Trash {}", filename),
-                            serde_json::json!({"image_id": image_id, "path": &img.path}).to_string(),
-                            serde_json::json!({"image_id": image_id, "path": &img.path, "trashed": true}).to_string(),
-                            image_id.clone(),
-                            true,
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to trash {}: {}", img.path, e);
-                    }
-                }
-            }
-        }
-    }
-    Ok(trashed)
+    Ok(trash_images_detailed_inner(state, image_ids)?.succeeded)
 }
 
 #[tauri::command]
@@ -195,9 +170,26 @@ pub(crate) fn trash_images_detailed_inner(
     state: &AppState,
     image_ids: &[String],
 ) -> Result<TrashImagesDetailedResult, String> {
+    trash_images_detailed_with(state, image_ids, &crate::services::trash::SystemTrash)
+}
+
+fn trash_images_detailed_with(
+    state: &AppState,
+    image_ids: &[String],
+    platform: &dyn crate::services::trash::TrashPlatform,
+) -> Result<TrashImagesDetailedResult, String> {
     let mut results = Vec::new();
 
     for image_id in image_ids {
+        if let Err(error) = state.db.ensure_original_mutation_allowed(image_id) {
+            results.push(TrashImageResult {
+                image_id: image_id.clone(),
+                path: None,
+                status: "protected_original".to_string(),
+                error: Some(error.to_string()),
+            });
+            continue;
+        }
         let id_refs: Vec<&str> = vec![image_id.as_str()];
         let found = state
             .db
@@ -225,14 +217,57 @@ pub(crate) fn trash_images_detailed_inner(
             continue;
         }
 
-        match trash::delete(path) {
-            Ok(()) => {
-                let _ = state.db.mark_file_missing(&img.path);
+        match crate::services::trash::move_to_trash(platform, path) {
+            Ok(record) => {
                 let filename = path
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("file")
                     .to_string();
+                let record_result = (|| -> Result<_, String> {
+                    let before_json =
+                        serde_json::to_string(&crate::services::trash::TrashActionState {
+                            image_id: image_id.clone(),
+                            original_path: record.original_path.clone(),
+                            trashed_path: record.trashed_path.clone(),
+                            trashed: false,
+                        })
+                        .map_err(|error| error.to_string())?;
+                    let after_json =
+                        serde_json::to_string(&crate::services::trash::TrashActionState {
+                            image_id: image_id.clone(),
+                            original_path: record.original_path.clone(),
+                            trashed_path: record.trashed_path.clone(),
+                            trashed: true,
+                        })
+                        .map_err(|error| error.to_string())?;
+                    state.action_manager.record_action(
+                        &state.db,
+                        "trash_image",
+                        format!("Trash {}", filename),
+                        before_json,
+                        after_json,
+                        image_id.clone(),
+                        true,
+                    )
+                })();
+                if let Err(error) = record_result {
+                    let rollback_error = crate::services::trash::restore_from_trash(&record).err();
+                    let detail = match rollback_error {
+                        Some(rollback) => format!(
+                            "Could not record undo ({error}); restore also failed ({rollback})"
+                        ),
+                        None => format!("Could not record undo: {error}"),
+                    };
+                    results.push(TrashImageResult {
+                        image_id: image_id.clone(),
+                        path: Some(img.path.clone()),
+                        status: "failed".to_string(),
+                        error: Some(detail),
+                    });
+                    continue;
+                }
+                let mark_error = state.db.mark_file_missing(&img.path).err();
                 log_library_event(
                     state,
                     "image_moved_to_trash",
@@ -241,24 +276,17 @@ pub(crate) fn trash_images_detailed_inner(
                     serde_json::json!({
                         "image_id": image_id,
                         "path": &img.path,
-                        "filename": filename.clone(),
+                        "trash_path": record.trashed_path,
+                        "filename": filename,
+                        "library_state_error": mark_error.as_ref().map(ToString::to_string),
                     }),
-                );
-                let _ = state.action_manager.record_action(
-                    &state.db,
-                    "trash_image",
-                    format!("Trash {}", filename),
-                    serde_json::json!({"image_id": image_id, "path": &img.path}).to_string(),
-                    serde_json::json!({"image_id": image_id, "path": &img.path, "trashed": true})
-                        .to_string(),
-                    image_id.clone(),
-                    true,
                 );
                 results.push(TrashImageResult {
                     image_id: image_id.clone(),
                     path: Some(img.path.clone()),
                     status: "trashed".to_string(),
-                    error: None,
+                    error: mark_error
+                        .map(|error| format!("Could not update library state: {error}")),
                 });
             }
             Err(e) => {
@@ -289,6 +317,10 @@ pub async fn delete_images_permanently(
 ) -> Result<u32, String> {
     let mut deleted = 0u32;
     for image_id in &image_ids {
+        state
+            .db
+            .ensure_original_mutation_allowed(image_id)
+            .map_err(|error| error.to_string())?;
         let id_refs: Vec<&str> = vec![image_id.as_str()];
         let found = state
             .db
@@ -606,8 +638,9 @@ mod tests {
         }
     }
 
-    /// Verify that the trash crate can handle filenames with special characters
-    /// that would have caused AppleScript injection with the old implementation.
+    /// Verify that the native Trash API treats special characters as path data,
+    /// never as AppleScript or shell syntax.
+    #[cfg(target_os = "macos")]
     #[test]
     fn trash_special_char_filename() {
         let dir = tempfile::tempdir().unwrap();
@@ -616,13 +649,18 @@ mod tests {
         std::fs::write(&file_path, b"fake image data").unwrap();
         assert!(file_path.exists());
 
-        trash::delete(&file_path).expect("trash::delete should handle special characters");
+        let record =
+            crate::services::trash::move_to_trash(&crate::services::trash::SystemTrash, &file_path)
+                .expect("native Trash should handle special characters");
         assert!(
             !file_path.exists(),
             "file should no longer exist at original path"
         );
+        crate::services::trash::restore_from_trash(&record).unwrap();
+        assert!(file_path.exists());
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn trash_images_moves_file_marks_missing_and_records_audit_and_undo() {
         let dir = tempfile::tempdir().unwrap();
@@ -655,6 +693,13 @@ mod tests {
         assert_eq!(undo_records.len(), 1);
         assert_eq!(undo_records[0].action_type, "trash_image");
         assert!(undo_records[0].has_file_backup);
+        let before: serde_json::Value = serde_json::from_str(&undo_records[0].before_json).unwrap();
+        let trash_path = before["trashed_path"].as_str().unwrap();
+        assert!(std::path::Path::new(trash_path).exists());
+        assert_ne!(trash_path, file_path.to_string_lossy());
+
+        state.action_manager.undo(&state.db).unwrap();
+        assert!(file_path.exists());
     }
 
     #[test]
@@ -693,5 +738,76 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(image_file.missing_at.is_some());
+    }
+
+    #[test]
+    fn trash_undo_restores_exact_duplicate_destinations_and_database_visibility() {
+        let dir = tempfile::tempdir().unwrap();
+        let trash_root = dir.path().join("external-volume-trash");
+        let first_dir = dir.path().join("first");
+        let second_dir = dir.path().join("second");
+        std::fs::create_dir_all(&trash_root).unwrap();
+        std::fs::create_dir_all(&first_dir).unwrap();
+        std::fs::create_dir_all(&second_dir).unwrap();
+        let first_path = first_dir.join("duplicate.png");
+        let second_path = second_dir.join("duplicate.png");
+        std::fs::write(&first_path, b"first").unwrap();
+        std::fs::write(&second_path, b"second").unwrap();
+        let state = test_state(dir.path());
+        insert_test_image(&state.db, "img-trash-first", &first_path);
+        insert_test_image(&state.db, "img-trash-second", &second_path);
+        let platform = crate::services::trash::tests::DirectoryTrash::new(trash_root.clone());
+
+        let result = trash_images_detailed_with(
+            &state,
+            &[
+                "img-trash-first".to_string(),
+                "img-trash-second".to_string(),
+            ],
+            &platform,
+        )
+        .unwrap();
+
+        assert_eq!(result.succeeded, 2);
+        let records = state.db.list_undo_records(10).unwrap();
+        assert_eq!(records.len(), 2);
+        let destinations: Vec<String> = records
+            .iter()
+            .map(|record| {
+                serde_json::from_str::<serde_json::Value>(&record.before_json).unwrap()
+                    ["trashed_path"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        assert_ne!(destinations[0], destinations[1]);
+        assert!(destinations
+            .iter()
+            .all(|path| Path::new(path).starts_with(&trash_root)));
+
+        state.action_manager.undo(&state.db).unwrap();
+        state.action_manager.undo(&state.db).unwrap();
+
+        assert_eq!(std::fs::read(&first_path).unwrap(), b"first");
+        assert_eq!(std::fs::read(&second_path).unwrap(), b"second");
+        for path in [&first_path, &second_path] {
+            let image_file = state
+                .db
+                .get_image_file_by_path(&path.to_string_lossy())
+                .unwrap()
+                .unwrap();
+            assert!(image_file.missing_at.is_none());
+        }
+
+        state.action_manager.redo(&state.db).unwrap();
+        state.action_manager.redo(&state.db).unwrap();
+        assert!(!first_path.exists());
+        assert!(!second_path.exists());
+
+        state.action_manager.undo(&state.db).unwrap();
+        state.action_manager.undo(&state.db).unwrap();
+        assert_eq!(std::fs::read(&first_path).unwrap(), b"first");
+        assert_eq!(std::fs::read(&second_path).unwrap(), b"second");
     }
 }

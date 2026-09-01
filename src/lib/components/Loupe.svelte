@@ -1660,7 +1660,7 @@
         font-weight: 700;
         letter-spacing: 0.06em;
         pointer-events: none;
-        background: var(--blue, #7aa2f7);
+        background: var(--blue);
         color: var(--bg);
         box-shadow: 0 0 0 1px rgba(8, 8, 12, 0.8), 0 8px 22px rgba(0, 0, 0, 0.34);
     }
@@ -1824,11 +1824,11 @@
     }
     .bbox {
         position: absolute;
-        border: 1px solid var(--green, #9ece6a);
+        border: 1px solid var(--green);
         pointer-events: none;
     }
     .bbox-nsfw {
-        border-color: var(--red, #f7768e);
+        border-color: var(--red);
     }
     .bbox-label {
         position: absolute;
@@ -1837,11 +1837,11 @@
         font-size: 9px;
         padding: 1px 4px;
         background: rgba(8, 8, 12, 0.8);
-        color: var(--green, #9ece6a);
+        color: var(--green);
         white-space: nowrap;
     }
     .bbox-nsfw .bbox-label {
-        color: var(--red, #f7768e);
+        color: var(--red);
     }
     /* NSFW overlay */
     .nsfw-overlay {
@@ -1856,19 +1856,19 @@
     .nsfw-label {
         font-size: 14px;
         font-weight: 700;
-        color: var(--red, #f7768e);
+        color: var(--red);
         letter-spacing: 0.1em;
     }
     .nsfw-hint {
         font-size: 10px;
-        color: var(--text-secondary, #565f89);
+        color: var(--text-secondary);
         margin-top: 4px;
     }
     /* Inspector panel */
     .inspector {
         width: 180px;
-        background: var(--surface, #0c0c12);
-        border-left: 1px solid var(--border, #1a1a2e);
+        background: var(--surface);
+        border-left: 1px solid var(--border);
         padding: 8px;
         overflow-y: auto;
         font-size: 11px;
@@ -1876,14 +1876,14 @@
     .inspector-header {
         font-size: 10px;
         font-weight: 700;
-        color: var(--text-secondary, #565f89);
+        color: var(--text-secondary);
         letter-spacing: 0.1em;
         margin-bottom: 8px;
     }
     .inspector-section {
         font-size: 9px;
         font-weight: 700;
-        color: var(--text-secondary, #565f89);
+        color: var(--text-secondary);
         letter-spacing: 0.08em;
         margin-top: 8px;
         margin-bottom: 4px;
@@ -1894,16 +1894,16 @@
         padding: 2px 0;
     }
     .inspector-class {
-        color: var(--purple, #bb9af7);
+        color: var(--purple);
     }
     .inspector-class.nsfw {
-        color: var(--red, #f7768e);
+        color: var(--red);
     }
     .inspector-conf {
-        color: var(--text-secondary, #565f89);
+        color: var(--text-secondary);
     }
     .inspector-empty {
-        color: var(--text-secondary, #565f89);
+        color: var(--text-secondary);
         font-style: italic;
         font-size: 10px;
     }
@@ -1914,11 +1914,11 @@
         font-size: 10px;
     }
     .meta-key {
-        color: var(--text-secondary, #565f89);
+        color: var(--text-secondary);
         font-size: 9px;
     }
     .meta-value {
-        color: var(--text-primary, #e0e0e0);
+        color: var(--text);
         word-break: break-word;
     }
     .prompt-meta {
@@ -1928,12 +1928,12 @@
         flex-wrap: wrap;
     }
     .meta-tag {
-        background: var(--bg-elevated, #2a2a3e);
-        color: var(--text-secondary, #888);
+        background: var(--surface);
+        color: var(--text-secondary);
         padding: 1px 6px;
         border-radius: 3px;
         font-size: 10px;
-        font-family: var(--font-mono);
+        font-family: var(--font);
     }
     /* Crop mode */
     .crop-overlay {

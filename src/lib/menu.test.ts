@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 
@@ -9,7 +10,11 @@ const mocks = vi.hoisted(() => ({
     loadAllImages: vi.fn(),
     loadImagesForCurrentScope: vi.fn(),
     loadImagesUntil: vi.fn(),
+    invalidateImageCache: vi.fn(),
     openUrl: vi.fn(),
+    openPath: vi.fn(),
+    resolveImageOriginalPath: vi.fn(),
+    listOpenWithApplications: vi.fn(),
     updateMenuState: vi.fn(),
     getPreviewDisplayWebStreamStatus: vi.fn(),
     checkForUpdates: vi.fn(),
@@ -25,7 +30,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 
 vi.mock('@tauri-apps/plugin-opener', () => ({
     openUrl: mocks.openUrl,
-    openPath: vi.fn(),
+    openPath: mocks.openPath,
     revealItemInDir: vi.fn(),
 }));
 
@@ -35,7 +40,8 @@ vi.mock('./api', () => ({
     redo: vi.fn(),
     undo: vi.fn(),
     moveImage: vi.fn(),
-    listOpenWithApplications: vi.fn(),
+    resolveImageOriginalPath: mocks.resolveImageOriginalPath,
+    listOpenWithApplications: mocks.listOpenWithApplications,
     openImagesWithApplication: vi.fn(),
     renameImage: vi.fn(),
     shareImages: vi.fn(),
@@ -53,6 +59,7 @@ vi.mock('./api', () => ({
 }));
 
 vi.mock('./image-loading', () => ({
+    invalidateImageCache: mocks.invalidateImageCache,
     loadAllImages: mocks.loadAllImages,
     loadImagesForCurrentScope: mocks.loadImagesForCurrentScope,
     loadImagesUntil: mocks.loadImagesUntil,
@@ -176,6 +183,129 @@ describe('native menu bridge', () => {
         expect(get(commandPaletteMode)).toBe('commands');
     });
 
+    it('routes the native Trash action through the shared confirmation request', async () => {
+        let menuHandler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, handler) => {
+            menuHandler = handler as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+        const requestListener = vi.fn();
+        window.addEventListener('trash-images-requested', requestListener);
+        const [{ initMenu }, stores] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+        stores.images.set([makeImage('img-1'), makeImage('img-2')]);
+        stores.focusedIndex.set(0);
+        stores.selectedIds.set(new Set(['img-1', 'img-2']));
+
+        await initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        menuHandler?.({ payload: 'image_trash' });
+
+        expect(requestListener).toHaveBeenCalledTimes(1);
+        expect((requestListener.mock.calls[0][0] as CustomEvent).detail).toEqual({
+            imageIds: ['img-1', 'img-2'],
+        });
+        window.removeEventListener('trash-images-requested', requestListener);
+    });
+
+    it('opens the resolver-provided original for the native default-open action', async () => {
+        let menuHandler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, handler) => {
+            menuHandler = handler as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+        mocks.resolveImageOriginalPath.mockResolvedValue('/Pictures/kept.jpg');
+
+        const [{ initMenu }, stores] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+        stores.images.set([makeImage('img-1')]);
+        stores.focusedIndex.set(0);
+
+        await initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        menuHandler?.({ payload: 'image_open_default' });
+        await flushMicrotasks();
+
+        expect(mocks.openPath).toHaveBeenCalledWith('/Pictures/kept.jpg');
+    });
+
+    it('shows reconnect guidance when the native default-open action cannot resolve an original', async () => {
+        let menuHandler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, handler) => {
+            menuHandler = handler as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+        mocks.resolveImageOriginalPath.mockRejectedValue(new Error('Reconnect UNTITLED to open originals'));
+
+        const [{ initMenu }, stores] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+        const showToast = vi.spyOn(stores, 'showToast');
+        stores.images.set([makeImage('img-1')]);
+        stores.focusedIndex.set(0);
+
+        await initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        menuHandler?.({ payload: 'image_open_default' });
+        await flushMicrotasks();
+
+        expect(showToast).toHaveBeenCalledWith(
+            'Reconnect UNTITLED to open originals',
+            expect.objectContaining({ type: 'warning' }),
+        );
+    });
+
+    it('does not open the app chooser when Open With needs a source reconnection', async () => {
+        let menuHandler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, handler) => {
+            menuHandler = handler as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+        mocks.listOpenWithApplications.mockRejectedValue(
+            new Error('Reconnect UNTITLED to open originals'),
+        );
+
+        const [{ initMenu }, stores] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+        stores.images.set([makeImage('img-1')]);
+        stores.focusedIndex.set(0);
+
+        await initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        menuHandler?.({ payload: 'image_open_with' });
+        await flushMicrotasks();
+
+        expect(mocks.dialogOpen).not.toHaveBeenCalled();
+    });
+
+    it('opens the app chooser when Open With has a generic lookup failure', async () => {
+        let menuHandler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, handler) => {
+            menuHandler = handler as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+        mocks.listOpenWithApplications.mockRejectedValue(new Error('Lookup unavailable'));
+        mocks.dialogOpen.mockResolvedValue(null);
+
+        const [{ initMenu }, stores] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+        stores.images.set([makeImage('img-1')]);
+        stores.focusedIndex.set(0);
+
+        await initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        menuHandler?.({ payload: 'image_open_with' });
+        await flushMicrotasks();
+
+        expect(mocks.dialogOpen).toHaveBeenCalledWith(expect.objectContaining({
+            title: 'Open With',
+        }));
+    });
+
     it('imports the selected folder from the native Import Folder menu action', async () => {
         let menuHandler: ((event: { payload: string }) => void) | undefined;
         mocks.listen.mockImplementation(async (_eventName, handler) => {
@@ -208,6 +338,27 @@ describe('native menu bridge', () => {
         expect(mocks.importFolder).toHaveBeenCalledWith('/photos/new-import');
         expect(get(stores.activeFolder)).toBe('/photos/new-import');
         expect(get(stores.viewMode)).toBe('grid');
+    });
+
+    it('opens the Apple Photos catalog from the native File menu', async () => {
+        let menuHandler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, handler) => {
+            menuHandler = handler as (event: { payload: string }) => void;
+            return vi.fn();
+        });
+
+        const [{ initMenu }, { applePhotosCatalogOpen }] = await Promise.all([
+            import('./menu'),
+            import('./stores'),
+        ]);
+
+        applePhotosCatalogOpen.set(false);
+        await initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 });
+        await flushMicrotasks();
+
+        menuHandler?.({ payload: 'import_apple_photos' });
+
+        expect(get(applePhotosCatalogOpen)).toBe(true);
     });
 
     it('opens the GitHub wiki when the native Help menu action fires', async () => {
@@ -296,6 +447,20 @@ describe('native menu bridge', () => {
                 showLoupeHistogram: true,
             })
         );
+    });
+
+    it('toggles rejected visibility, reloads the active scope, and syncs checked state', async () => {
+        let handler: ((event: { payload: string }) => void) | undefined;
+        mocks.listen.mockImplementation(async (_eventName, next) => { handler = next as (event: { payload: string }) => void; return vi.fn(); });
+        mocks.loadImagesForCurrentScope.mockResolvedValue(undefined as never);
+        const [{ initMenu }, { showRejected }] = await Promise.all([import('./menu'), import('./stores')]);
+        void initMenu({ listenTimeoutMs: 50, retryDelayMs: 10 }); await flushMicrotasks();
+        expect(mocks.updateMenuState).toHaveBeenCalledWith(expect.objectContaining({ showRejected: false }));
+        handler?.({ payload: 'view_show_rejected' }); await flushMicrotasks();
+        expect(get(showRejected)).toBe(true);
+        expect(mocks.invalidateImageCache).toHaveBeenCalled();
+        expect(mocks.loadImagesForCurrentScope).toHaveBeenCalledWith({ resetFocus: true, force: true, invalidateCache: true });
+        expect(mocks.updateMenuState).toHaveBeenCalledWith(expect.objectContaining({ showRejected: true }));
     });
 
     it('routes native Loupe zoom mode actions', async () => {

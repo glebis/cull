@@ -34,14 +34,14 @@ jobs:
       gate-artifact-name: cull-release-gate-${{ github.run_id }}-${{ steps.release_gate.outputs.sha }}
     steps:
       - name: Checkout requested release tag
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Set up pinned Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -55,6 +55,9 @@ jobs:
 
       - name: Install locked project dependencies
         run: npm ci
+
+      - name: Refresh verified origin/main
+        run: git fetch --no-tags origin main
 
       - name: Record immutable release gate evidence
         id: release_gate
@@ -133,6 +136,9 @@ jobs:
       - name: Verify export compatibility contract
         run: cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test export_compat_golden
 
+      - name: Run named release behavior regression gate
+        run: npm run test:release-regressions
+
       - name: Install pinned browser test client
         if: steps.release_gate.outputs.e2e_required == 'true'
         run: |
@@ -150,7 +156,7 @@ jobs:
         run: npm run build
 
       - name: Upload immutable gate record
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cull-release-gate-${{ github.run_id }}-${{ steps.release_gate.outputs.sha }}
           path: ${{ runner.temp }}/release-gate.json
@@ -176,13 +182,13 @@ jobs:
           test "$PUBLISH_ELIGIBLE" = true
 
       - name: Checkout gate-approved commit
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-gate.outputs.sha }}
           persist-credentials: false
 
       - name: Set up pinned Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -280,7 +286,7 @@ jobs:
 
       - name: Upload exact private signed inventory
         id: upload_signed
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cull-signed-${{ github.run_id }}-${{ needs.release-gate.outputs.sha }}
           path: ${{ runner.temp }}/cull-signed
@@ -301,13 +307,13 @@ jobs:
       artifact-digest: ${{ steps.upload_verified.outputs.artifact-digest }}
     steps:
       - name: Checkout gate-approved verifier
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-gate.outputs.sha }}
           persist-credentials: false
 
       - name: Set up pinned Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -340,14 +346,14 @@ jobs:
           NODE
 
       - name: Download exact private signed inventory
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ needs.signed-build.outputs.artifact-id }}
           path: ${{ runner.temp }}/cull-signed
           merge-multiple: true
 
       - name: Download immutable gate record
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ needs.release-gate.outputs.gate-artifact-name }}
           path: ${{ runner.temp }}/cull-release-gate
@@ -420,7 +426,7 @@ jobs:
 
       - name: Upload exact verified release package
         id: upload_verified
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cull-verified-${{ github.run_id }}-${{ needs.release-gate.outputs.sha }}
           path: ${{ runner.temp }}/cull-verified
@@ -443,7 +449,7 @@ jobs:
       actions: write
     steps:
       - name: Checkout gate-approved release source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-gate.outputs.sha }}
           fetch-depth: 0
@@ -477,7 +483,7 @@ jobs:
           NODE
 
       - name: Download exact verified release package
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ needs.verify-artifact.outputs.artifact-id }}
           path: ${{ runner.temp }}/cull-verified
@@ -562,30 +568,72 @@ jobs:
           NODE
 
       - name: Create or validate idempotent draft
+        id: release_draft
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-gate.outputs.tag }}
           COMMIT: ${{ needs.release-gate.outputs.sha }}
+          VERSION: ${{ needs.release-gate.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
-          release_json="$RUNNER_TEMP/existing-release.json"
-          release_error="$RUNNER_TEMP/existing-release.error"
-          if gh release view "$TAG" --json tagName,isDraft,isPrerelease,assets,body >"$release_json" 2>"$release_error"; then
-            RELEASE_JSON="$release_json" NOTES="$RUNNER_TEMP/release-notes.md" node <<'NODE'
+          releases_json="$RUNNER_TEMP/existing-releases.json"
+          gh api --paginate --slurp "repos/$REPOSITORY/releases?per_page=100" > "$releases_json"
+          release_details=$(RELEASES_JSON="$releases_json" NOTES="$RUNNER_TEMP/release-notes.md" node <<'NODE'
           const fs = require('node:fs');
-          const release = JSON.parse(fs.readFileSync(process.env.RELEASE_JSON, 'utf8'));
+          const pages = JSON.parse(fs.readFileSync(process.env.RELEASES_JSON, 'utf8'));
+          if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) process.exit(2);
+          const matches = pages.flat().filter((release) => release.tag_name === process.env.TAG);
+          if (matches.length > 1) process.exit(2);
+          if (matches.length === 0) process.exit(3);
+          const release = matches[0];
           const notes = fs.readFileSync(process.env.NOTES, 'utf8').trim();
-          if (release.tagName !== process.env.TAG || release.isDraft !== true || release.isPrerelease !== false ||
-              release.body.trim() !== notes || release.assets.length !== 0) process.exit(2);
+          const expectedAssets = [
+            `Cull_${process.env.VERSION}_aarch64.dmg`, 'Cull_aarch64.app.tar.gz',
+            'Cull_aarch64.app.tar.gz.sig', 'latest.json', 'release-provenance.json', 'checksums.txt',
+          ].sort();
+          const actualAssets = release.assets.map(({ name }) => name).sort();
+          if (!Number.isSafeInteger(release.id) || release.id <= 0 || release.draft !== true ||
+              release.prerelease !== false || release.body.trim() !== notes ||
+              (actualAssets.length !== 0 && JSON.stringify(actualAssets) !== JSON.stringify(expectedAssets))) process.exit(2);
+          process.stdout.write(`${release.id} ${actualAssets.length}`);
           NODE
-          else
-            grep -Eiq 'HTTP 404|release not found' "$release_error"
+          ) || release_status=$?
+          release_status=${release_status:-0}
+          if [[ $release_status -eq 3 ]]; then
             gh release create "$TAG" --verify-tag --draft --title "Cull $TAG" \
               --notes-file "$RUNNER_TEMP/release-notes.md" --target "$COMMIT"
+            # GitHub's release-list endpoint has eventual consistency after a create.
+            # Poll the list endpoint until the new release appears (or give up after 15s).
+            for _ in 1 2 3 4 5; do
+              sleep 3
+              gh api --paginate --slurp "repos/$REPOSITORY/releases?per_page=100" > "$releases_json"
+              if RELEASES_JSON="$releases_json" TAG="$TAG" node -e 'const p=JSON.parse(process.env.RELEASES_JSON);const m=p.flat().filter(r=>r.tag_name===process.env.TAG);process.exit(m.length===1?0:1)'; then
+                break
+              fi
+            done
+            release_details=$(RELEASES_JSON="$releases_json" NOTES="$RUNNER_TEMP/release-notes.md" node <<'NODE'
+          const fs = require('node:fs');
+          const pages = JSON.parse(fs.readFileSync(process.env.RELEASES_JSON, 'utf8'));
+          const matches = pages.flat().filter((release) => release.tag_name === process.env.TAG);
+          const notes = fs.readFileSync(process.env.NOTES, 'utf8').trim();
+          if (matches.length !== 1 || !Number.isSafeInteger(matches[0].id) || matches[0].id <= 0 ||
+              matches[0].draft !== true || matches[0].prerelease !== false ||
+              matches[0].body.trim() !== notes || matches[0].assets.length !== 0) process.exit(2);
+          process.stdout.write(`${matches[0].id} 0`);
+          NODE
+            )
+          elif [[ $release_status -ne 0 ]]; then
+            exit "$release_status"
           fi
+          read -r release_id asset_count <<< "$release_details"
+          [[ "$release_id" =~ ^[0-9]+$ && "$asset_count" =~ ^(0|6)$ ]]
+          echo "release-id=${release_id}" >> "$GITHUB_OUTPUT"
+          echo "asset-count=${asset_count}" >> "$GITHUB_OUTPUT"
 
       - name: Upload only verified release assets and evidence
+        if: steps.release_draft.outputs.asset-count == '0'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-gate.outputs.tag }}
@@ -602,13 +650,14 @@ jobs:
       - name: Verify uploaded release asset inventory
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.release-gate.outputs.tag }}
           VERSION: ${{ needs.release-gate.outputs.version }}
           REPOSITORY: ${{ github.repository }}
+          RELEASE_ID: ${{ steps.release_draft.outputs.release-id }}
         shell: bash
         run: |
           set -euo pipefail
-          gh api "repos/$REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/uploaded-release.json"
+          [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$REPOSITORY/releases/$RELEASE_ID" > "$RUNNER_TEMP/uploaded-release.json"
           RELEASE_JSON="$RUNNER_TEMP/uploaded-release.json" PACKAGE="$RUNNER_TEMP/cull-verified" node <<'NODE'
           const crypto = require('node:crypto');
           const fs = require('node:fs');

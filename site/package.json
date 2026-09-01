@@ -12,13 +12,13 @@
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",
-    "@vercel/blob": "^2.0.0",
-    "resend": "^6.6.0"
+    "@vercel/blob": "^2.7.0",
+    "resend": "^6.18.1"
   },
   "devDependencies": {
-    "@types/node": "^24.10.0",
-    "typescript": "~6.0.3",
-    "vite": "^8.0.0",
-    "vitest": "^4.1.8"
+    "@types/node": "^26.1.2",
+    "typescript": "~7.0.2",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10"
   }
 }

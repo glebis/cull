@@ -1,5 +1,6 @@
 <script lang="ts">
     import { tick } from 'svelte';
+    import ModalDialog from '$lib/components/ModalDialog.svelte';
     import { resolveTextInputDialog, textInputDialog } from '$lib/stores';
 
     let value = $state('');
@@ -44,29 +45,22 @@
     }
 
     function handleKeydown(e: KeyboardEvent) {
-        e.stopPropagation();
-        if (e.key === 'Escape') {
+        if (e.key === 'Enter' && e.target === inputEl) {
             e.preventDefault();
-            cancel();
-        }
-        if (e.key === 'Enter') {
-            e.preventDefault();
+            e.stopPropagation();
             submit();
         }
     }
 </script>
 
 {#if $textInputDialog}
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="dialog-overlay" onclick={cancel} onkeydown={handleKeydown}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <dialog
-        open
-        class="dialog"
-        aria-modal="true"
-        aria-labelledby="text-input-dialog-title"
-        aria-describedby={$textInputDialog.description ? 'text-input-dialog-description' : undefined}
-        onclick={(e: MouseEvent) => e.stopPropagation()}
+    <ModalDialog
+        titleId="text-input-dialog-title"
+        descriptionId={$textInputDialog.description ? 'text-input-dialog-description' : undefined}
+        onclose={cancel}
+        overlayClass="text-input-dialog-overlay"
+        panelClass="dialog text-input-dialog"
+        initialFocus={() => inputEl ?? null}
         onkeydown={handleKeydown}
     >
         <div class="dialog-header">
@@ -106,12 +100,11 @@
                 {$textInputDialog.confirmLabel ?? 'Save'}
             </button>
         </div>
-    </dialog>
-</div>
+    </ModalDialog>
 {/if}
 
 <style>
-    .dialog-overlay {
+    :global(.text-input-dialog-overlay) {
         position: fixed;
         inset: 0;
         display: flex;
@@ -122,7 +115,7 @@
         z-index: var(--z-modal);
     }
 
-    .dialog {
+    :global(.dialog.text-input-dialog) {
         position: static;
         display: block;
         width: min(420px, 100%);
@@ -148,21 +141,6 @@
         color: var(--text);
         font-size: 14px;
         font-weight: 700;
-    }
-
-    .close-btn {
-        border: none;
-        background: none;
-        color: var(--text-secondary);
-        cursor: pointer;
-        font-family: var(--font);
-        font-size: 18px;
-        line-height: 1;
-        padding: 0 4px;
-    }
-
-    .close-btn:hover {
-        color: var(--text);
     }
 
     .dialog-body {
@@ -219,37 +197,4 @@
         border-top: 1px solid var(--border);
     }
 
-    .btn {
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        cursor: pointer;
-        font-family: var(--font);
-        font-size: 12px;
-        padding: 6px 14px;
-    }
-
-    .btn:disabled {
-        cursor: not-allowed;
-        opacity: 0.5;
-    }
-
-    .btn.secondary {
-        background: var(--surface);
-        color: var(--text-secondary);
-    }
-
-    .btn.secondary:hover {
-        border-color: var(--text-secondary);
-        color: var(--text);
-    }
-
-    .btn.primary {
-        background: color-mix(in srgb, var(--green) 16%, var(--surface));
-        border-color: var(--green);
-        color: var(--green);
-    }
-
-    .btn.primary:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--green) 24%, var(--surface));
-    }
 </style>

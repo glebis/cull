@@ -6,6 +6,59 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Sidebar: recency rail above the folder tree.** Persistent `Just imported:` chip and last-N scope list above LIBRARY; auto-reveal + highlight until visited. Replaces the 8-second toast. (`imageview-1i2k.1`)
+- **Sidebar: one adaptive search.** The sidebar scope filter now narrows detected classes and the active session's canvases (previously silently excluded). Enter promotes the query to the grid CommandBar. (`imageview-1i2k.2`)
+- **Sidebar: hide zero counts + hide-empty option.** `formatSidebarCount` omits null/zero counts; new persisted option hides folders/collections with empty subtrees. (`imageview-1i2k.3`)
+- **Sidebar: clipboard monitor promotion.** Persistent status chip in the footer strip opens a popover with start/stop, captured count, and a Details link that scrolls to the full clipboard section. (`imageview-1i2k.6`)
+- **Sidebar: empty states teach the next action.** Empty Collections and Smart sections now name the action (`+` creates one; apply a grid filter then Save Collection). Smart section no longer vanishes when empty. (`imageview-1i2k.9`)
+- **Sidebar: alt-hover folder preview (prototype).** Hold Option while hovering a folder row to open a thumbnail grid of that folder's images; the popover closes on Alt release. Plain hovers stay calm. Folder rows no longer show the redundant `…` menu — right-click and the section-item context menu expose folder actions. (`imageview-1i2k.10`)
+
+### Changed
+
+- **Sidebar: one geometric icon language.** Row-icon glyph dialects (◼/⏰/◇/★) removed in favor of words + counts + right-edge kind labels. Pin is a single rotated CSS square; running indicator is a CSS dot. The ⏰ emoji in Recent Imports is gone. (`imageview-1i2k.4`)
+- **Sidebar: color semantics pinned.** Blue = interactive (active/focus/link/primary); green = positive state (success + live running dot); orange = active mode (collect-indicator moved off green); purple = detected-class tag; red = error. One meaning per accent color. (`imageview-1i2k.5`)
+
+### Fixed
+
+- **Grid overview: tiny cells now show real image colors.** At extreme zoom-out the overview canvas painted each cell with a color hashed from the image ID (random-looking, unrelated to content). Cells now paint with the image's stored dominant color (`get_dominant_colors`), falling back to a neutral surface when metrics are missing. (`imageview-lr9q`)
+- **Concurrent external-device reads.** Opening another folder now cancels and supersedes the previous read, and duplicate-content registration resolves the canonical image identity instead of surfacing a foreign-key error.
+- **External-drive detection on macOS.** Removable or ejectable SD cards remain visible even when macOS also reports the volume as internal.
+- **Release regression coverage for sidebar feature retention.** The release gate now blocks if Recent Imports regains a decorative clock glyph or if connected-device visibility regresses.
+- **Sidebar: 24px hit-area floor for twisty and preset chips.** Negative-inset pseudo-element on the button, not the input. (`imageview-1i2k.8`)
+- **Sidebar: caption-size secondary text contrast.** `--text-secondary` raised to `#c5cbef` (OKLCH lightness-only) to clear APCA Lc at 9–10px caps. (`imageview-1i2k.7`)
+- **Sidebar: folder row polish.** Folder counts align to a right-side column; twisties/chevrons bumped to 11px (with the negative-inset hit-area preserved); folder labels left-aligned; per-row `…` menu removed in favor of right-click + section-item context. (`imageview-1i2k.10`)
+
+### Added
+
+- **Local install helper (`scripts/install-local-build.sh`).** Refuses to overwrite `/Applications/Cull.app` while any Cull process is holding the executable open (macOS silently preserves the executable pages of a running Mach-O binary on overwrite). Trashes the old copy before installing so a partial install can never leave a hybrid old+new bundle on disk. Verifies the post-install SHA matches the freshly built artifact. Fixes the silent stale-binary bug where a copied-over Cull ran with the previous session's UI.
+- **Release gate: per-version manual-smoke record required.** `release:cull tag` now blocks with `SMOKE_RECORD_MISSING`, `SMOKE_RECORD_STALE`, `SMOKE_BEAD_MISSING`, or `SMOKE_BEAD_OPEN` unless `docs/releases/<version>-smoke.md` exists with today's date and a binary SHA that matches `target/release/bundle/macos/Cull.app/Contents/MacOS/cull`, and a beads issue with `external_ref=cull-release-<version>-smoke` is closed. The smoke record is the human-driven step that prevents an automated session from tagging and shipping without a real install + manual verification.
+
+## [0.5.1] - 2026-08-20
+
+### Fixed
+
+- **Release script: anchor releaseCommit on the merge commit.** scripts/cull-release.mjs previously recorded the version-bump commit as releaseCommit, but the immutable release tag gate requires origin/main to be an ancestor of the tagged SHA. On merge-commit-style release PRs the bump commit is one commit behind the merge commit, so the gate fired with STALE_RELEASE_SOURCE for v0.4.0 and v0.5.0. The script now records the pre-prepare source (= origin/main tip = merge commit) so runTag and the gate anchor on the same SHA. PR #190.
+
+## [0.5.0] - 2026-08-20
+
+- Recovered a v0.4.0 publish race: STALE_RELEASE_SOURCE fired because v0.4.0 was tagged on the release commit before its PR landed on main.
+- The repository ruleset `Protect immutable release tags` (id 18866636) forbids tag recreation, so v0.4.0 stays in place and v0.5.0 ships with the same content.
+- Same binaries, same changelog snapshot, deeper version number to keep the immutable-tag invariant.
+
+## [0.4.0] - 2026-08-19
+
+- Ship cli_tool install toggle (PR #184)
+- Fix CI flakes (RUSTSEC-2026-0258 / h2 bump, deeplink tests on read-only HOME)
+
+## [0.3.3] - 2026-08-08
+
+### Fixed
+
+- Restored readable PDF first-page previews on macOS; previews no longer render as solid black.
+- Hardened release recovery so an already-verified draft can be published without replacing its assets.
+
 ## [0.3.2] - 2026-08-07
 
 ### Fixed

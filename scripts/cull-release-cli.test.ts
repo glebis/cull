@@ -32,6 +32,7 @@ function createFixture(options: {
   packageLock?: string;
   tauriJson?: string;
   gate?: string | string[];
+  regressionGateCode?: string;
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'cull-release-cli-'));
   const versionFiles = [
@@ -49,6 +50,10 @@ function createFixture(options: {
     worktree: '.',
     stateDir: '.release-state',
     gate: options.gate ?? [process.execPath, '-e', options.gateCode ?? 'process.exit(0)'],
+    regressionGate: {
+      command: [process.execPath, '-e', options.regressionGateCode ?? 'process.exit(0)'],
+      contracts: [{ id: 'fixture-contract', tests: ['fixture.behavior.test.ts'] }],
+    },
     extraGate: [],
     changelog: { path: 'CHANGELOG.md' },
     compatibility: { path: 'docs/COMPATIBILITY.md' },
@@ -125,16 +130,43 @@ function run(
   args: string[] = [],
   env: NodeJS.ProcessEnv = {},
 ) {
+  // Tag and state-transition commands require a per-version manual-smoke
+  // record + closed bead in production. In tests, allow them by default
+  // unless the caller explicitly injects smoke state via env.
+  const requiresSmoke = command === 'tag' || (command === 'state' && args[0] === 'transition');
+  const smokeDefault = requiresSmoke && !Object.keys(env).some((k) => k.startsWith('CULL_RELEASE_TEST_SMOKE_'))
+    ? { CULL_RELEASE_TEST_SMOKE_OK: '1' }
+    : {};
   const execution = spawnSync(process.execPath, [cli, command, ...args, '--json'], {
     cwd: fixture,
     encoding: 'utf8',
-    env: { ...process.env, CULL_RELEASE_TEST_MODE: '1', ...env },
+    env: { ...process.env, CULL_RELEASE_TEST_MODE: '1', ...smokeDefault, ...env },
   });
   return { execution, output: JSON.parse(execution.stdout) };
 }
 
 function head(fixture: string) {
   return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: fixture, encoding: 'utf8' }).trim();
+}
+
+function advanceOriginMainWithoutMovingHead(fixture: string) {
+  const source = head(fixture);
+  const tree = execFileSync('git', ['rev-parse', `${source}^{tree}`], {
+    cwd: fixture, encoding: 'utf8',
+  }).trim();
+  const newerMain = execFileSync('git', ['commit-tree', tree, '-p', source, '-m', 'verified origin main fix'], {
+    cwd: fixture,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'Cull Test',
+      GIT_AUTHOR_EMAIL: 'cull@example.test',
+      GIT_COMMITTER_NAME: 'Cull Test',
+      GIT_COMMITTER_EMAIL: 'cull@example.test',
+    },
+  }).trim();
+  execFileSync('git', ['update-ref', 'refs/remotes/origin/main', newerMain], { cwd: fixture });
+  return { source, newerMain };
 }
 
 function prepareArgs(fixture: string, source = head(fixture)) {
@@ -246,6 +278,40 @@ describe('Cull release readiness CLI', () => {
     });
     expect(result.stderr).not.toContain('TAURI_SIGNING_PRIVATE_KEY');
     expect(readFileSync(join(fixture, 'package.json'), 'utf8')).toBe(before);
+  });
+
+  it('blocks check when a named release regression contract fails', () => {
+    const fixture = createFixture({
+      regressionGateCode: "process.stderr.write('grid-hover-preview failed\\n'); process.exit(17)",
+    });
+
+    const result = runCheck(fixture);
+
+    expect(result.status).toBe(3);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      event: 'error',
+      code: 'BLOCKED',
+      message: expect.stringContaining('release regression gate'),
+      details: expect.objectContaining({
+        status: 17,
+        stderr: expect.stringContaining('grid-hover-preview failed'),
+      }),
+    });
+  });
+
+  it('reports a stale release source that omits verified origin/main commits', () => {
+    const fixture = createFixture();
+    const { source, newerMain } = advanceOriginMainWithoutMovingHead(fixture);
+
+    const result = runCheck(fixture);
+
+    expect(result.status).toBe(3);
+    expect(JSON.parse(result.stdout).result.blockers).toContainEqual({
+      code: 'STALE_RELEASE_SOURCE',
+      message: 'Release source omits commits already on origin/main',
+      releaseSha: source,
+      originMain: newerMain,
+    });
   });
 
   it('blocks readiness when the configured Homebrew cask is not SHA-pinned', () => {
@@ -467,6 +533,45 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(repositorySnapshot(fixture)).toEqual(before);
   });
 
+  it('blocks prepare on a failed named regression contract and restores release-owned files', () => {
+    const fixture = createReleaseFixture({
+      regressionGateCode: "process.stderr.write('thumbnail-prefetch failed\\n'); process.exit(19)",
+    });
+    const before = prepareSafetySnapshot(fixture);
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture));
+
+    expect(result.execution.status).toBe(3);
+    expect(result.output).toMatchObject({
+      code: 'BLOCKED',
+      message: expect.stringContaining('release regression gate'),
+      details: expect.objectContaining({
+        status: 19,
+        stderr: expect.stringContaining('thumbnail-prefetch failed'),
+      }),
+    });
+    expect(prepareSafetySnapshot(fixture)).toEqual(before);
+    expect(head(fixture)).toBe(execFileSync('git', ['rev-parse', 'origin/main'], {
+      cwd: fixture, encoding: 'utf8',
+    }).trim());
+  });
+
+  it('blocks prepare before edits when the source omits verified origin/main commits', () => {
+    const fixture = createReleaseFixture();
+    const before = prepareSafetySnapshot(fixture);
+    const { source, newerMain } = advanceOriginMainWithoutMovingHead(fixture);
+
+    const result = run(fixture, 'prepare', prepareArgs(fixture, source));
+
+    expect(result.execution.status).toBe(3);
+    expect(result.output).toMatchObject({
+      code: 'BLOCKED',
+      message: 'Release source omits commits already on origin/main',
+      details: { releaseSha: source, originMain: newerMain },
+    });
+    expect(prepareSafetySnapshot(fixture)).toEqual(before);
+  });
+
   it('rejects source and version races before writing', () => {
     const fixture = createReleaseFixture();
     const before = repositorySnapshot(fixture);
@@ -546,11 +651,36 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(readFileSync(join(fixture, 'docs/COMPATIBILITY.md'), 'utf8'))
       .toContain('Last updated: 1.2.4 (2026-07-11)');
     const statePath = join(fixture, '.release-state/1.2.4.json');
+    // The release record anchors on the merge commit (the pre-prepare origin/main
+    // tip), not on the version-bump commit. The version-bump commit is one commit
+    // ahead of oldRemote and is what `head(fixture)` returns after prepare; the
+    // gate requires origin/main to be an ancestor of the tagged SHA, which only
+    // holds when the record anchors on the merge commit.
     expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({
-      version: '1.2.4', state: 'prepared', releaseCommit: head(fixture),
+      version: '1.2.4', state: 'prepared', releaseCommit: oldRemote,
     });
     expect(statSync(statePath).mode & 0o777).toBe(0o600);
     expect(existsSync(`${statePath}.tmp`)).toBe(false);
+  });
+
+  it('records the pre-prepare origin/main tip as releaseCommit, not the version-bump commit', () => {
+    // Regression: on merge-commit-style release PRs the version-bump commit is
+    // one commit behind the merge commit. Tagging the bump commit made the
+    // release gate fail with STALE_RELEASE_SOURCE. The fix records the merge
+    // commit (== pre-prepare origin/main tip) as releaseCommit so the tag and
+    // gate anchor on the same SHA.
+    const fixture = createReleaseFixture();
+    const oldRemote = execFileSync('git', ['rev-parse', 'origin/main'], {
+      cwd: fixture, encoding: 'utf8',
+    }).trim();
+    run(fixture, 'prepare', prepareArgs(fixture), {
+      CULL_RELEASE_NOW: '2026-07-11T12:00:00.000Z',
+    });
+    const bumpCommit = head(fixture);
+    expect(bumpCommit).not.toBe(oldRemote);
+    const state = JSON.parse(readFileSync(join(fixture, '.release-state/1.2.4.json'), 'utf8'));
+    expect(state.releaseCommit).toBe(oldRemote);
+    expect(state.releaseCommit).not.toBe(bumpCommit);
   });
 
   it('rejects an ordinary checkout and accepts only a linked main release worktree', () => {
@@ -1581,5 +1711,46 @@ describe('Cull release prepare, resume, and state CLI', () => {
     expect(invalidJson.execution.status).toBe(2);
     expect(invalidJson.output.code).toBe('INPUT_INVALID');
     expect(invalidJson.output.message).toContain('Invalid --evidence-json');
+  });
+
+  it('blocks tag when the per-version manual-smoke record is missing', () => {
+    const fixture = createReleaseFixture();
+    run(fixture, 'prepare', prepareArgs(fixture));
+    const releaseCommit = JSON.parse(readFileSync(join(fixture, '.release-state/1.2.4.json'), 'utf8')).releaseCommit;
+    const tagged = run(fixture, 'tag', [
+      '--version', '1.2.4', '--expected-source', releaseCommit,
+    ], { CULL_RELEASE_TEST_SMOKE_MISSING: '1' });
+    expect(tagged.execution.status).toBe(3);
+    expect(tagged.output).toMatchObject({
+      code: 'BLOCKED',
+      details: { blockers: [{ code: 'SMOKE_RECORD_MISSING' }] },
+    });
+  });
+
+  it('blocks tag when the smoke record binary SHA no longer matches the build', () => {
+    const fixture = createReleaseFixture();
+    run(fixture, 'prepare', prepareArgs(fixture));
+    const releaseCommit = JSON.parse(readFileSync(join(fixture, '.release-state/1.2.4.json'), 'utf8')).releaseCommit;
+    const tagged = run(fixture, 'tag', [
+      '--version', '1.2.4', '--expected-source', releaseCommit,
+    ], { CULL_RELEASE_TEST_SMOKE_STALE: '1' });
+    expect(tagged.execution.status).toBe(3);
+    expect(tagged.output).toMatchObject({
+      code: 'BLOCKED',
+      details: { blockers: [{ code: 'SMOKE_RECORD_STALE' }] },
+    });
+  });
+
+  it('accepts tag when the smoke record and bead are present and current', () => {
+    const fixture = createReleaseFixture();
+    run(fixture, 'prepare', prepareArgs(fixture));
+    const releaseCommit = JSON.parse(readFileSync(join(fixture, '.release-state/1.2.4.json'), 'utf8')).releaseCommit;
+    const tagged = run(fixture, 'tag', [
+      '--version', '1.2.4', '--expected-source', releaseCommit,
+    ]);
+    // What matters is that the smoke gate did not block the tag. Other
+    // gates (CONFLICTING_TAG, no-remote-push) may still surface — the
+    // smoke gate is what we are validating here.
+    expect(JSON.stringify(tagged.output)).not.toContain('SMOKE_RECORD');
   });
 });

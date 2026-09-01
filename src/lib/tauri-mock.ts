@@ -77,6 +77,17 @@ function makeMockImage(i: number) {
 
 let mockImages = Array.from({ length: 20 }, (_, i) => makeMockImage(i));
 let lastTrashedImages: ReturnType<typeof makeMockImage>[] = [];
+let mockFolderPath = '/mock/folder-rename';
+
+function useFolderRenameFixture(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('folderRename') === '1';
+}
+
+function useExternalDriveFixture(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('externalDrive') === '1';
+}
 
 function mockImageFixtureIndex(item: ReturnType<typeof makeMockImage>): number {
   return Number(item.image.id.replace('img-', ''));
@@ -144,11 +155,11 @@ const mockSessions = [
   {
     id: 'session-1',
     name: 'Smoke Session',
-    source_folder: '/mock/session',
-    session_folder: '/mock/session',
+    description: null,
+    folder_path: '/mock/session',
+    settings_json: null,
     image_count: 4,
     created_at: '2026-05-01T12:00:00Z',
-    updated_at: '2026-05-01T12:00:00Z',
   },
 ];
 
@@ -158,11 +169,38 @@ const mockCanvases = [
     session_id: 'session-1',
     name: 'Smoke Canvas',
     canvas_type: 'manual',
-    layout_json: null,
+    layout_json: '{}',
+    filter_json: null,
+    grid_config_json: null,
+    sort_order: 0,
     created_at: '2026-05-01T12:00:00Z',
     updated_at: '2026-05-01T12:00:00Z',
   },
 ];
+
+type MockEmbeddingPageArgs = { model?: string | null; limit?: number; offset?: number };
+
+function mockEmbeddingSpec(model: string): { dims: number; total: number } {
+  if (model === 'dinov2-vits14') return { dims: 384, total: 8 };
+  if (model === 'gemini-embedding-2') return { dims: 3072, total: 0 };
+  if (model.startsWith('cohere:')) return { dims: 1024, total: 7 };
+  if (model.startsWith('openai:')) return { dims: 3072, total: 6 };
+  if (model.startsWith('ollama:')) return { dims: 768, total: 5 };
+  return { dims: 512, total: 12 };
+}
+
+function mockEmbeddingPage(args?: MockEmbeddingPageArgs) {
+  const model = args?.model ?? 'clip-vit-b32';
+  const { dims, total } = mockEmbeddingSpec(model);
+  const offset = args?.offset ?? 0;
+  const limit = args?.limit ?? total;
+  const pageLength = Math.min(limit, Math.max(total - offset, 0));
+  const ids = Array.from({ length: pageLength }, (_, index) => `img-${offset + index}`);
+  const vectors = ids.flatMap((_, imageIndex) =>
+    Array.from({ length: dims }, (_, dimIndex) => Math.sin((imageIndex + 1) * (dimIndex + 1)) * 0.1)
+  );
+  return { ids, vectors, dims, total, offset, limit, has_more: offset + ids.length < total };
+}
 
 const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   'plugin:event|listen': () => nextListenerId++,
@@ -530,15 +568,13 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     if (args?.model?.startsWith('ollama:')) return 5;
     return 12;
   },
-  get_embedding_page: (_: any, args?: { model?: string | null; limit?: number }) => {
-    const model = args?.model ?? 'clip-vit-b32';
-    const dims = model === 'dinov2-vits14' ? 384 : model.startsWith('cohere:') ? 1024 : model.startsWith('openai:') || model === 'gemini-embedding-2' ? 3072 : model.startsWith('ollama:') ? 768 : 512;
-    const total = model === 'dinov2-vits14' ? 8 : model.startsWith('cohere:') ? 7 : model.startsWith('openai:') ? 6 : model.startsWith('ollama:') ? 5 : model === 'gemini-embedding-2' ? 0 : 12;
-    const ids = Array.from({ length: Math.min(args?.limit ?? total, total) }, (_, i) => `img-${i}`);
-    const vectors = ids.flatMap((_, imageIndex) =>
-      Array.from({ length: dims }, (_, dimIndex) => Math.sin((imageIndex + 1) * (dimIndex + 1)) * 0.1)
-    );
-    return { ids, vectors, dims, total, offset: 0, limit: args?.limit ?? total, has_more: false };
+  get_embedding_page: (_: any, args?: MockEmbeddingPageArgs) => mockEmbeddingPage(args),
+  get_scoped_embedding_page: (_: any, args?: MockEmbeddingPageArgs) => mockEmbeddingPage(args),
+  list_scoped_image_ids: (_: any, args?: { limit?: number; offset?: number }) => {
+    const offset = args?.offset ?? 0;
+    const limit = args?.limit ?? 100;
+    const ids = mockImages.slice(offset, offset + limit).map(item => item.image.id);
+    return { ids, total: mockImages.length, offset, limit, has_more: offset + ids.length < mockImages.length };
   },
   list_jobs: () => [],
   get_job: () => null,
@@ -562,6 +598,25 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     lastTrashedImages = mockImages.filter(item => ids.has(item.image.id));
     mockImages = mockImages.filter(item => !ids.has(item.image.id));
     return lastTrashedImages.length;
+  },
+  trash_images_detailed: (_: any, args: { imageIds: string[] }) => {
+    const requestedIds = [...new Set(args.imageIds)];
+    const byId = new Map(mockImages.map(item => [item.image.id, item]));
+    lastTrashedImages = requestedIds.flatMap(id => byId.get(id) ?? []);
+    const removedIds = new Set(lastTrashedImages.map(item => item.image.id));
+    mockImages = mockImages.filter(item => !removedIds.has(item.image.id));
+    const results = requestedIds.map(imageId => {
+      const item = byId.get(imageId);
+      return item
+        ? { image_id: imageId, path: item.path, status: 'trashed', error: null }
+        : { image_id: imageId, path: null, status: 'not_found', error: 'Image not found' };
+    });
+    return {
+      requested: requestedIds.length,
+      succeeded: lastTrashedImages.length,
+      failed: requestedIds.length - lastTrashedImages.length,
+      results,
+    };
   },
   delete_images_permanently: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   rotate_image: (_: any, args: { imageId: string }) => `/mock/library/${args.imageId}_rotated.png`,
@@ -614,6 +669,12 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     analyzed_at: '2026-01-01T00:00:00Z',
   }),
   get_color_metrics_count: () => 18,
+  get_dominant_colors: () => {
+    const palette = ['#7aa2f7', '#9ece6a', '#e0af68', '#bb9af7', '#f7768e', '#414868'];
+    return Object.fromEntries(
+      Array.from({ length: 24 }, (_, i) => [`img-${i + 1}`, palette[i % palette.length]]),
+    );
+  },
   list_images_by_color_bucket: () => [makeMockImage(1), makeMockImage(4), makeMockImage(7)],
   analyze_perceptual_hashes: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   get_image_perceptual_hash: (_: any, args: { imageId: string }) => ({
@@ -819,8 +880,33 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     },
   ],
   list_similarity_group_images: () => Array.from({ length: 4 }, (_, i) => makeMockImage(i)),
-  list_folders: () => [],
+  list_folders: () => useFolderRenameFixture() ? [[mockFolderPath, 2]] : [],
+  list_referenced_sources: () => useExternalDriveFixture() ? [{
+    id: 'source-sd-card', platform_volume_id: 'mock-volume-1', display_name: 'EOS_DIGITAL',
+    last_mount_path: '/Volumes/EOS_DIGITAL', source_kind: 'sd_card', capacity_bytes: 64_000_000_000,
+    recursive_default: false, settings_json: '{"writable":true}', last_seen_at: '2026-08-30T10:00:00Z', offline_at: null,
+  }] : [],
+  list_source_folders: (_: any, args: { relativePath: string }) => args.relativePath ? [] : ['DCIM', 'MISC'],
+  list_images_in_referenced_folder: () => useExternalDriveFixture() ? mockImages.slice(0, 12) : [],
+  open_referenced_folder: (_: any, args: { request: { source_id: string; relative_path: string } }) => {
+    const page = { job_id: `source-job-${nextId++}`, source_id: args.request.source_id, relative_path: args.request.relative_path, requested_paths: [], image_ids: mockImages.slice(0, 12).map(item => item.image.id), discovered_count: 12, next_cursor: null, indexing: true };
+    setTimeout(() => emitMockEvent('referenced-source:page-updated', { job_id: page.job_id, source_id: page.source_id, relative_path: page.relative_path, image_ids: page.image_ids, completed: true, cancelled: false, error: null }), 20);
+    return page;
+  },
+  set_source_recursive_default: () => undefined,
+  remove_referenced_source: () => [],
+  cancel_referenced_source_job: () => true,
+  remember_referenced_folder: (_: any, args: { path: string }) => ({ id: 'source-dropped', platform_volume_id: null, display_name: args.path.split('/').pop() || 'Folder', last_mount_path: args.path, source_kind: 'folder', capacity_bytes: null, recursive_default: false, settings_json: '{}', last_seen_at: '2026-08-30T10:00:00Z', offline_at: null }),
+  list_open_with_applications: () => [],
   delete_folder: () => 0,
+  rename_folder: (_: any, args: { folder: string; newName: string }) => {
+    if (!useFolderRenameFixture() || args.folder !== mockFolderPath) {
+      throw new Error('Folder not found');
+    }
+    const oldPath = mockFolderPath;
+    mockFolderPath = `${oldPath.slice(0, oldPath.lastIndexOf('/'))}/${args.newName}`;
+    return { oldPath, newPath: mockFolderPath, imageCount: 2 };
+  },
   list_collections: () => mockCollections,
   create_collection: (_: any, args: { name: string }) => {
     const id = `col-${nextId++}`;
@@ -833,7 +919,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     const index = mockCollections.findIndex(([id]) => id === args.collectionId);
     if (index >= 0) mockCollections.splice(index, 1);
   },
-  list_images_by_folder: () => [],
+  list_images_by_folder: () => useFolderRenameFixture() ? mockImages.slice(0, 2) : [],
   list_images_filtered: () => [],
   list_collection_images: (_: any, args: { collectionId: string }) =>
     args.collectionId === 'col_clipboard_mock' ? [makeMockImage(0), makeMockImage(1)] : [],

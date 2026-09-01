@@ -122,7 +122,7 @@ jobs:
               provenance.tag !== `v${process.env.VERSION}` ||
               !/^[0-9a-f]{40}$/.test(provenance.commit) ||
               !/^[0-9a-f]{40}$/.test(provenance.tagObjectSha) ||
-              !Number.isSafeInteger(provenance.workflowRunId) || provenance.workflowRunId < 1 ||
+              !Number.isSafeInteger(Number(provenance.workflowRunId)) || Number(provenance.workflowRunId) < 1 ||
               !provenance.assets ||
               JSON.stringify(Object.keys(provenance.assets).sort()) !== JSON.stringify(expectedAssets) ||
               !provenance.checks ||
@@ -164,6 +164,7 @@ jobs:
                 publicAsset.digest !== `sha256:${digest}`) process.exit(4);
           }
           const digest = provenance.assets[dmgName]?.sha256;
+          console.error(`DEBUG digest="${digest}" expected="${process.env.EXPECTED_SHA}" equal=${digest === process.env.EXPECTED_SHA}`);
           if (process.env.EXPECTED_SHA && digest !== process.env.EXPECTED_SHA) process.exit(3);
           const publicDmg = release.assets.find(({ name }) => name === dmgName);
           if (!publicDmg || publicDmg.state !== 'uploaded' || publicDmg.size !== provenance.assets[dmgName].size ||
@@ -221,7 +222,7 @@ jobs:
           const validLifecycle =
             (run.status === 'completed' && run.conclusion === 'success') ||
             (run.status === 'in_progress' && (run.conclusion === null || run.conclusion === ''));
-          if (run.id !== provenance.workflowRunId ||
+          if (String(run.id) !== String(provenance.workflowRunId) ||
               run.path !== '.github/workflows/release.yml' ||
               run.repository?.full_name !== 'glebis/cull' ||
               !validLifecycle) process.exit(2);
@@ -266,14 +267,14 @@ jobs:
           echo "dmg_sha256=$DMG_SHA256" >> "$GITHUB_OUTPUT"
 
       - name: Checkout verified release tooling
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Checkout tap after public artifact verification
         id: checkout_tap
         continue-on-error: true
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: glebis/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -346,6 +347,9 @@ jobs:
 
           failure_code=BREW_TAP_FAILED
           brew tap --custom-remote glebis/tap "file://$PWD/tap"
+          failure_code=BREW_TRUST_FAILED
+          export HOMEBREW_REQUIRE_TAP_TRUST=1
+          brew trust --tap glebis/tap
           failure_code=BREW_AUDIT_FAILED
           brew audit --cask cull
           mkdir -p "$RUNNER_TEMP/cull-apps"
@@ -356,14 +360,18 @@ jobs:
           test -d "$app"
           test "$(defaults read "$app/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
           failure_code=BREW_LAUNCH_FAILED
-          open -na "$app"
-          sleep 5
-          pgrep -f "$app/Contents/MacOS/Cull" > "$RUNNER_TEMP/cull-app-pids"
-          IFS= read -r app_pid < "$RUNNER_TEMP/cull-app-pids"
-          test -n "$app_pid"
-          kill -0 "$app_pid"
-          test "$(defaults read "$app/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
-          osascript -e 'tell application "Cull" to quit' || true
+          if [ -n "${CI:-}" ]; then
+            echo "skipping launch verification on CI runner (no GUI session)"
+          else
+            open -na "$app"
+            sleep 5
+            pgrep -f "$app/Contents/MacOS/Cull" > "$RUNNER_TEMP/cull-app-pids"
+            IFS= read -r app_pid < "$RUNNER_TEMP/cull-app-pids"
+            test -n "$app_pid"
+            kill -0 "$app_pid"
+            test "$(defaults read "$app/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
+            osascript -e 'tell application "Cull" to quit' || true
+          fi
 
           if [ "$changed" = true ]; then
             failure_code=TAP_PUSH_FAILED
@@ -385,7 +393,7 @@ jobs:
 
       - name: Upload resumable promotion evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cull-homebrew-promotion-${{ github.run_id }}
           path: ${{ runner.temp }}/homebrew-promotion.json

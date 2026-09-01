@@ -5,6 +5,7 @@ import { get } from 'svelte/store';
 import {
     importFolder,
     importFiles,
+    resolveImageOriginalPath,
     redo,
     undo,
     moveImage,
@@ -12,7 +13,6 @@ import {
     openImagesWithApplication,
     renameImage,
     shareImages,
-    trashImages,
     listCollections,
     listFolders,
     updateMenuState,
@@ -20,13 +20,16 @@ import {
     type ImageWithFile,
     type OpenWithApplication,
 } from './api';
+import { nudgeThumbnailSize } from './thumbnail-zoom';
 import {
     images,
     viewMode,
     focusedIndex,
     focusedImage,
     sidebarVisible,
+    showRejected,
     thumbnailSize,
+    setGridThumbnailSize,
     showLoupeHistogram,
     activeFolder,
     activeCollection,
@@ -42,6 +45,7 @@ import {
     activePluginIds,
     aboutOpen,
     agentSkillsOpen,
+    applePhotosCatalogOpen,
     navigateTo,
     showToast,
     requestTextInput,
@@ -62,6 +66,7 @@ import {
     setPreviewDisplayWebStreamStatus,
 } from './preview-display-store';
 import { tabRegistry } from './plugins/tab-registry';
+import { requestTrashImages } from './trash-actions';
 
 /** Publish is plugin-only now: it is reachable iff the bundled cull-publish
  * plugin has registered its tab in the tab registry. */
@@ -86,7 +91,7 @@ import {
     handlePreviewDisplayStopWebStream,
     requestPreviewDisplayCapture,
 } from './preview-display-actions';
-import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
+import { invalidateImageCache, loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { folderDisplayName } from './move-menu-utils';
 import { openCommandPalette } from './command-palette';
 import { checkForUpdates } from './update-manager';
@@ -103,6 +108,24 @@ const DEFAULT_LISTEN_TIMEOUT_MS = 5000;
 const DEFAULT_RETRY_DELAY_MS = 1000;
 const DEFAULT_STATE_UPDATE_TIMEOUT_MS = 5000;
 const GITHUB_WIKI_URL = 'https://github.com/glebis/cull/wiki';
+
+export function originalActionError(error: unknown, fallbackTitle: string): { title: string; detail?: string } {
+    const detail = String(error);
+    const reconnectMessage = error instanceof Error ? error.message : detail;
+    if (reconnectMessage.startsWith('Reconnect ')) {
+        return { title: reconnectMessage };
+    }
+    return { title: fallbackTitle, detail };
+}
+
+function showOriginalActionError(error: unknown, fallbackTitle: string) {
+    const formatted = originalActionError(error, fallbackTitle);
+    showToast(formatted.title, {
+        detail: formatted.detail,
+        type: formatted.detail ? 'error' : 'warning',
+        duration: 8000,
+    });
+}
 
 const IMAGE_FILTERS = [
     {
@@ -189,7 +212,7 @@ async function reloadAfterImageRemoval(ids: string[]) {
     if (get(focusedIndex) >= get(images).length) {
         focusedIndex.set(Math.max(0, get(images).length - 1));
     }
-    collections.set(await listCollections());
+    collections.set(await listCollections(get(showRejected)));
 }
 
 async function handleImageShare() {
@@ -212,9 +235,9 @@ async function handleImageOpenDefault() {
         return;
     }
     try {
-        await openPath(img.path);
+        await openPath(await resolveImageOriginalPath(img.image.id));
     } catch (e) {
-        showToast('Open failed', { detail: String(e), type: 'error', duration: 8000 });
+        showOriginalActionError(e, 'Open failed');
     }
 }
 
@@ -234,7 +257,7 @@ async function openImageWithApplication(img: ImageWithFile, appPath: string) {
     try {
         await openImagesWithApplication([img.image.id], appPath);
     } catch (e) {
-        showToast('Open With failed', { detail: String(e), type: 'error', duration: 8000 });
+        showOriginalActionError(e, 'Open With failed');
     }
 }
 
@@ -271,7 +294,13 @@ async function handleImageOpenWith() {
             await chooseOpenWithApplication(img);
         }
     } catch (e) {
-        showToast('Open With app list unavailable', { detail: String(e), type: 'warning', duration: 8000 });
+        const formatted = originalActionError(e, 'Open With app list unavailable');
+        showToast(formatted.title, {
+            detail: formatted.detail,
+            type: 'warning',
+            duration: 8000,
+        });
+        if (formatted.title.startsWith('Reconnect ')) return;
         await chooseOpenWithApplication(img);
     }
 }
@@ -335,7 +364,7 @@ async function moveMenuImagesToFolder(ids: string[], folder: string) {
 
     await loadImagesForCurrentScope({ resetFocus: false, force: true, invalidateCache: true });
     try {
-        folders.set(await listFolders());
+        folders.set(await listFolders(get(showRejected)));
     } catch (e) {
         console.error('Failed to refresh folders after move:', e);
     }
@@ -364,19 +393,13 @@ async function handleImageMoveTo() {
     await moveMenuImagesToFolder(ids, selected);
 }
 
-async function handleImageTrash() {
+function handleImageTrash() {
     const ids = currentMenuTargetIds();
     if (ids.length === 0) {
         showToast('No image selected', { type: 'warning' });
         return;
     }
-
-    try {
-        await trashImages(ids);
-        await reloadAfterImageRemoval(ids);
-    } catch (e) {
-        showToast('Trash failed', { detail: String(e), type: 'error', duration: 8000 });
-    }
+    requestTrashImages(ids);
 }
 
 async function handleGitHubWiki() {
@@ -401,6 +424,9 @@ function handleMenuAction(action: string) {
         case 'import_folder':
         case 'open_folder':
             handleOpenFolder();
+            break;
+        case 'import_apple_photos':
+            applePhotosCatalogOpen.set(true);
             break;
         case 'undo':
             undo().then(label => {
@@ -477,6 +503,13 @@ function handleMenuAction(action: string) {
             break;
         case 'toggle_sidebar':
             sidebarVisible.update((v) => !v);
+            break;
+        case 'view_show_rejected':
+            showRejected.update((visible) => !visible);
+            invalidateImageCache();
+            loadImagesForCurrentScope({ resetFocus: true, force: true, invalidateCache: true }).catch((e) => {
+                showToast('Failed to reload images', { detail: String(e), type: 'error', duration: 8000 });
+            });
             break;
         case 'view_loupe_histogram':
             showLoupeHistogram.update((visible) => !visible);
@@ -590,14 +623,14 @@ function handleMenuAction(action: string) {
             if (get(viewMode) === 'loupe') {
                 requestLoupeZoomIn();
             } else {
-                thumbnailSize.update((s) => Math.min(s + 40, 600));
+                setGridThumbnailSize(nudgeThumbnailSize(get(thumbnailSize), 1));
             }
             break;
         case 'zoom_out':
             if (get(viewMode) === 'loupe') {
                 requestLoupeZoomOut();
             } else {
-                thumbnailSize.update((s) => Math.max(s - 40, 40));
+                setGridThumbnailSize(nudgeThumbnailSize(get(thumbnailSize), -1));
             }
             break;
         case 'actual_size':
@@ -678,6 +711,7 @@ function currentMenuStatePayload() {
     return {
         viewMode: get(viewMode),
         sidebarVisible: get(sidebarVisible),
+        showRejected: get(showRejected),
         hasFocusedImage: get(focusedImage) !== null,
         selectedCount: get(selectedIds).size,
         staticPublishingEnabled: publishTabAvailable(),
@@ -739,6 +773,7 @@ function startMenuStateSubscriptions() {
 
     viewMode.subscribe(queueMenuStateUpdate);
     sidebarVisible.subscribe(queueMenuStateUpdate);
+    showRejected.subscribe(queueMenuStateUpdate);
     focusedImage.subscribe(queueMenuStateUpdate);
     selectedIds.subscribe(queueMenuStateUpdate);
     staticPublishingEnabled.subscribe(queueMenuStateUpdate);

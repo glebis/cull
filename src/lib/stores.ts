@@ -197,16 +197,35 @@ export function cycleAgentVisualLevel() {
 }
 
 export const GRID_PRESETS = [
+    { name: 'pixels', size: 4, gap: 0 },
+    { name: 'overview', size: 12, gap: 0 },
+    { name: 'contact', size: 32, gap: 1 },
     { name: 'compact', size: 80, gap: 2 },
     { name: 'normal', size: 160, gap: 4 },
-    { name: 'large', size: 280, gap: 8 },
-    { name: 'xl', size: 400, gap: 12 },
+    { name: 'large', size: 320, gap: 8 },
+    { name: 'detail', size: 640, gap: 12 },
 ];
 
-export const gridPreset = writable<number>(1);
+export const gridPreset = writable<number>(4);
 export const gridGap = writable<number>(4);
 
+export function setGridThumbnailSize(size: number) {
+    let closest = 0;
+    let distance = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < GRID_PRESETS.length; i += 1) {
+        const nextDistance = Math.abs(GRID_PRESETS[i].size - size);
+        if (nextDistance < distance) {
+            closest = i;
+            distance = nextDistance;
+        }
+    }
+    thumbnailSize.set(size);
+    gridPreset.set(closest);
+    gridGap.set(GRID_PRESETS[closest]?.gap ?? 0);
+}
+
 export const zenMode = writable<boolean>(false);
+export const showRejected = writable<boolean>(false);
 
 export const compareImages = writable<ImageWithFile[]>([]);
 export const compareIndex = writable<number>(0);
@@ -276,6 +295,13 @@ export function requestLoupeZoomOut() {
 
 export const folders = writable<[string, number][]>([]);
 export const activeFolder = writable<string | null>(null);
+export interface ReferencedFolderScope {
+    source_id: string;
+    source_name: string;
+    relative_path: string;
+    recursive: boolean;
+}
+export const activeReferencedFolder = writable<ReferencedFolderScope | null>(null);
 export const minSizeFilter = writable<number>(0);
 export const showMissing = writable<boolean>(false);
 export const activeDetectedClass = writable<string | null>(null);
@@ -453,6 +479,21 @@ export const sidebarSectionsCollapsed = writable<Set<string>>(new Set());
 // sidebar. Transient by design — a stale filter on launch reads as data loss.
 export const sidebarFilter = writable<string>('');
 
+// Hide sidebar rows with zero images (folders with empty subtrees, empty
+// collections). Persisted: it's a density preference, not a query.
+export const sidebarHideEmpty = writable<boolean>(false);
+
+// imageview-1i2k.2: Enter in the sidebar scope filter hands the query to the
+// CommandBar (grid search). A store, not an event, because the CommandBar is
+// only mounted in grid view — the query must survive the view switch.
+// Transient: consumed (set back to null) by the CommandBar on receipt.
+export const pendingGridSearch = writable<string | null>(null);
+
+// Recently used scopes (folders / collections / smart collections), newest
+// first. Persisted: "what was I just working on" must survive a relaunch.
+// Entries are pruned against live lists when browse counts refresh.
+export const recentScopes = writable<import('./sidebar-utils').RecentScope[]>([]);
+
 // Lineage tab layout preference
 export type LineageLayout = 'timeline' | 'comparison';
 export const lineageLayout = writable<LineageLayout>('timeline');
@@ -557,6 +598,8 @@ export const activeCanvas = writable<Canvas | null>(null);
 export const settingsOpen = writable<boolean>(false);
 export const aboutOpen = writable<boolean>(false);
 export const agentSkillsOpen = writable<boolean>(false);
+// Read-only Apple Photos metadata catalog; macOS exposes the native File menu action.
+export const applePhotosCatalogOpen = writable<boolean>(false);
 export const searchOpen = writable<boolean>(false);
 export type CommandPaletteMode = 'all' | 'commands';
 export const commandPaletteOpen = writable<boolean>(false);
@@ -567,6 +610,8 @@ export const shortcutsOpen = writable<boolean>(false);
 export const undoHistoryOpen = writable<boolean>(false);
 // Collection/scope export-to-folder dialog.
 export const exportFolderOpen = writable<boolean>(false);
+// Optional explicit smart-collection target for the sidebar's Export Results action.
+export const exportFolderSmartCollection = writable<SmartCollection | null>(null);
 // Contact sheet export dialog.
 export const contactSheetOpen = writable<boolean>(false);
 // Best-of-group ranking dialog.

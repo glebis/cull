@@ -1,6 +1,7 @@
 // Copyright (c) 2026-present Gleb Kalinin. Architecture and design by author.
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
+mod apple_photos;
 mod cli;
 mod cloud;
 mod commands;
@@ -14,6 +15,7 @@ pub mod extensions;
 mod logging;
 mod mcp;
 mod menu;
+mod mounted_sources;
 mod plugins;
 pub mod preview;
 pub mod raw;
@@ -37,7 +39,7 @@ pub mod test_support {
 
 use crate::commands::deeplink::{
     emit_open_params, open_params_for_drag_drop_paths, open_params_for_drag_drop_paths_at,
-    open_params_for_file_paths, open_params_for_urls, parse_deep_link,
+    open_params_for_file_paths, open_params_for_launch_path, open_params_for_urls, parse_deep_link,
 };
 use crate::db_core::db::Database;
 use crate::db_core::detection::DetectionEngine;
@@ -216,10 +218,88 @@ fn run_stdio_bridge() {
     });
 }
 
+fn legacy_image_paths(args: &[String], parsed_launch_arg: Option<&std::path::Path>) -> Vec<String> {
+    args.iter()
+        .filter(|arg| !arg.starts_with("cull://"))
+        .map(PathBuf::from)
+        .filter(|path| parsed_launch_arg != Some(path.as_path()))
+        .filter(|path| path.is_file() && crate::extensions::is_image_path(path, false))
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect()
+}
+
+#[cfg(test)]
+mod gui_launch_tests {
+    use super::*;
+
+    #[test]
+    fn parsed_positional_image_is_not_forwarded_twice_by_legacy_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let image = dir.path().join("image.png");
+        std::fs::write(&image, b"image").unwrap();
+        let args = vec!["cull".to_string(), image.to_string_lossy().into_owned()];
+
+        assert!(legacy_image_paths(&args, Some(&image)).is_empty());
+        assert_eq!(
+            legacy_image_paths(&args, None),
+            vec![image.to_string_lossy()]
+        );
+    }
+
+    #[test]
+    fn scoped_neighbor_command_is_registered_and_permitted() {
+        let command_registry = include_str!("lib.rs");
+        let ai_permissions = include_str!("../permissions/app-ai-processing.toml");
+        let command_name = concat!("find_similar_images", "_in_scope");
+        let registry_entry = format!("commands::embeddings::{command_name},");
+        let permission_entry = format!("\"{command_name}\",");
+
+        assert!(command_registry.contains(&registry_entry));
+        assert!(ai_permissions
+            .lines()
+            .any(|line| line.trim() == permission_entry));
+    }
+
+    #[test]
+    fn background_embedding_generation_command_is_registered_and_permitted() {
+        let command_registry = include_str!("lib.rs");
+        let ai_permissions = include_str!("../permissions/app-ai-processing.toml");
+        let command_name = "start_model_embedding_generation";
+
+        assert!(command_registry.contains(&format!("commands::embeddings::{command_name},")));
+        assert!(ai_permissions
+            .lines()
+            .any(|line| line.trim() == format!("\"{command_name}\",")));
+    }
+
+    #[test]
+    fn apple_photos_commands_are_registered_and_least_privilege_permitted() {
+        let registry = include_str!("lib.rs");
+        let photos_permissions = include_str!("../permissions/app-photos.toml");
+        let broad_permissions = format!(
+            "{}{}",
+            include_str!("../permissions/app-read.toml"),
+            include_str!("../permissions/app-file-access.toml")
+        );
+
+        for command in [
+            "photos_authorization_status",
+            "photos_list_albums",
+            "photos_list_assets",
+            "photos_request_authorization",
+        ] {
+            assert!(registry.contains(&format!("commands::photos::{command},")));
+            assert!(photos_permissions.contains(&format!("\"{command}\"")));
+            assert!(!broad_permissions.contains(&format!("\"{command}\"")));
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let args = <cli::CliArgs as clap::Parser>::parse();
     let start_hidden = args.tray;
+    let launch_path = args.launch_path.clone();
 
     if let Some(code) = cli::run_headless_if_requested(&args) {
         std::process::exit(code);
@@ -236,10 +316,19 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             crate::safe_eprintln!("[single-instance] Second instance args: {:?}", args);
             reveal_main_window(app);
-            let mut file_paths = Vec::new();
+            let mut parsed_launch_arg = None;
+            if let Ok(parsed) = <cli::CliArgs as clap::Parser>::try_parse_from(args.iter()) {
+                if let Some(path) = parsed.launch_path.as_deref() {
+                    parsed_launch_arg = Some(path.to_path_buf());
+                    let resolved = cli::resolve_launch_path(path, std::path::Path::new(&cwd));
+                    if let Some(params) = open_params_for_launch_path(&resolved) {
+                        let _ = emit_open_params(app, params);
+                    }
+                }
+            }
             for arg in &args {
                 if arg.starts_with("cull://") {
                     crate::safe_eprintln!("[single-instance] Forwarding deep link: {}", arg);
@@ -247,13 +336,9 @@ pub fn run() {
                         Ok(params) => { let _ = emit_open_params(app, params); }
                         Err(e) => crate::safe_eprintln!("[single-instance] Deep link rejected: {}", e),
                     }
-                } else {
-                    let path = PathBuf::from(arg);
-                    if path.is_file() && crate::extensions::is_image_path(&path, false) {
-                        file_paths.push(path.to_string_lossy().into_owned());
-                    }
                 }
             }
+            let file_paths = legacy_image_paths(&args, parsed_launch_arg.as_deref());
             if let Some(params) = open_params_for_file_paths(file_paths) {
                 let _ = emit_open_params(app, params);
             }
@@ -284,6 +369,16 @@ pub fn run() {
                     return Err(format!("database open failed: {}", e).into());
                 }
             };
+            if let Err(error) = commands::files::recover_pending_folder_rename(&db) {
+                let msg = format!(
+                    "Cull found an incomplete folder rename and could not finish recovery safely:\n{error}\n\nStartup has stopped before watchers or background services began. Inspect the source and target folders before reopening Cull."
+                );
+                app.dialog()
+                    .message(msg)
+                    .title("Folder Rename Recovery Required")
+                    .blocking_show();
+                return Err(format!("folder rename recovery failed: {error}").into());
+            }
 
             let model_dir = app_data_dir.join("models");
             let embedding_engine = Mutex::new(EmbeddingEngine::new(&model_dir));
@@ -313,6 +408,38 @@ pub fn run() {
                 agent_snapshots: Mutex::new(services::agent_snapshots::AgentSnapshotRegistry::default()),
                 agent_snapshot_requests: Mutex::new(std::collections::HashMap::new()),
             });
+
+            // Keep mounted-source discovery alive for the app lifetime. The
+            // frontend can miss an early event safely because its list command
+            // always returns the persisted current state.
+            {
+                let state: tauri::State<'_, AppState> = app.state();
+                let db = state.db.clone();
+                let cleanup_db = db.clone();
+                let app_data_dir = state.app_data_dir.clone();
+                let handle = app.handle().clone();
+                let provider = std::sync::Arc::new(
+                    mounted_sources::PlatformMountedSourceProvider,
+                );
+                app.manage(mounted_sources::MountedSourceMonitor::start(
+                    db,
+                    provider,
+                    std::time::Duration::from_secs(2),
+                    move |refresh| {
+                        if let Ok(image_ids) = cleanup_db
+                            .thumbnail_purge_candidates_for_offline_sources(&refresh.offline_ids)
+                        {
+                            for image_id in image_ids {
+                                crate::db_core::thumbnails::remove_thumbnails_for_image(
+                                    &app_data_dir,
+                                    &image_id,
+                                );
+                            }
+                        }
+                        let _ = handle.emit("sources:changed", refresh);
+                    },
+                ));
+            }
 
             // Load persisted job history from DB
             {
@@ -430,6 +557,12 @@ pub fn run() {
                 });
             }
 
+            if let Some(path) = launch_path.as_deref() {
+                if let Some(params) = open_params_for_launch_path(path) {
+                    let _ = emit_open_params(app.handle(), params);
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -439,6 +572,18 @@ pub fn run() {
             commands::import::regenerate_thumbnails_by_ids,
             commands::import::regenerate_single_thumbnail,
             commands::import::rescan_sources,
+            commands::referenced_sources::list_referenced_sources,
+            commands::referenced_sources::remember_referenced_folder,
+            commands::referenced_sources::list_source_folders,
+            commands::referenced_sources::list_images_in_referenced_folder,
+            commands::referenced_sources::open_referenced_folder,
+            commands::referenced_sources::set_source_recursive_default,
+            commands::referenced_sources::remove_referenced_source,
+            commands::referenced_sources::cancel_referenced_source_job,
+            commands::photos::photos_authorization_status,
+            commands::photos::photos_request_authorization,
+            commands::photos::photos_list_albums,
+            commands::photos::photos_list_assets,
             commands::deeplink::drain_pending_open_params,
             commands::deeplink::complete_deep_link_navigation,
             commands::deeplink::open_deep_link_urls,
@@ -508,6 +653,7 @@ pub fn run() {
             commands::agent_proposals::cancel_claude_agent_chat_turn,
             commands::deeplink::open_with_params,
             commands::collections::create_collection,
+            commands::collections::create_collection_with_images,
             commands::collections::list_collections,
             commands::collections::rename_collection,
             commands::collections::add_to_collection,
@@ -516,8 +662,13 @@ pub fn run() {
             commands::collections::delete_collection,
             commands::embeddings::generate_embeddings,
             commands::embeddings::generate_model_embeddings,
+            commands::embeddings::start_model_embedding_generation,
             commands::embeddings::get_embedding_page,
+            commands::embeddings::get_scoped_embedding_page,
+            commands::embeddings::list_scoped_image_ids,
+            commands::embeddings::name_embedding_clusters,
             commands::embeddings::find_similar_images,
+            commands::embeddings::find_similar_images_in_scope,
             commands::embeddings::generate_similarity_groups,
             commands::embeddings::list_similarity_groups,
             commands::embeddings::list_similarity_group_images,
@@ -561,6 +712,7 @@ pub fn run() {
             commands::color::analyze_image_colors,
             commands::color::get_image_color_metrics,
             commands::color::get_color_metrics_count,
+            commands::color::get_dominant_colors,
             commands::color::list_images_by_color_bucket,
             commands::perceptual_hash::analyze_perceptual_hashes,
             commands::perceptual_hash::get_image_perceptual_hash,
@@ -653,9 +805,11 @@ pub fn run() {
             commands::files::paste_image_from_clipboard,
             commands::files::move_image,
             commands::files::rename_image,
+            commands::files::rename_folder,
             commands::files::create_subfolder,
             commands::files::share_images,
             commands::files::open_images_with_application,
+            commands::files::resolve_image_original_path,
             commands::files::list_open_with_applications,
             commands::agent_snapshots::capture_agent_window_snapshot,
             commands::agent_snapshots::complete_agent_view_snapshot,
@@ -677,6 +831,9 @@ pub fn run() {
             commands::preview::stop_preview_display_web_stream,
             commands::preview::get_preview_display_web_stream_status,
             commands::preview::get_image_histogram,
+            commands::cli_tool::cli_tool_status,
+            commands::cli_tool::install_cli_tool,
+            commands::cli_tool::uninstall_cli_tool,
             commands::diagnostics::record_asset_load_event,
             commands::diagnostics::get_asset_load_events,
         ])

@@ -2,7 +2,7 @@
     import { onMount } from 'svelte';
     import { createMcpToken, getAppSetting, listMcpTokens, revokeMcpToken, rotateMcpToken, setAppSetting, type McpToken } from '$lib/api';
     import { MCP_CONFIG_SNIPPET } from '$lib/mcp-config';
-    import { showToast } from '$lib/stores';
+    import { agentSkillsOpen, showToast } from '$lib/stores';
     import { expiryState, relativeExpiry } from '$lib/token-expiry';
 
     const SKILL_SOURCE = 'https://github.com/glebis/claude-skills/blob/main/cull/SKILL.md';
@@ -135,7 +135,10 @@
         {/each}
     </div>
     <div class="copy-box"><code>{selectedMethod.copy}</code><button aria-label={`Copy ${selectedMethod.label} installation instructions`} onclick={() => copy(selectedMethod.copy, 'Installation instructions')}>Copy</button></div>
-    <a href={SKILL_SOURCE} target="_blank" rel="noreferrer">View SKILL.md source ↗</a>
+    <div class="skill-links">
+        <button onclick={() => agentSkillsOpen.set(true)}>Open Agent Skills guide</button>
+        <a href={SKILL_SOURCE} target="_blank" rel="noreferrer">View SKILL.md source ↗</a>
+    </div>
 </section>
 
 <section class="settings-section">
@@ -191,6 +194,7 @@
     button.primary { color: var(--blue); }
     button.danger { color: var(--red); }
     .copy-box { display: flex; align-items: stretch; gap: 8px; margin-bottom: 8px; }
+    .skill-links { display: flex; align-items: center; gap: 8px; }
     code, pre { flex: 1; min-width: 0; margin: 0; padding: 10px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font: 10px/1.5 var(--font); }
     a { color: var(--blue); font-size: 10px; }
     .setting-row, .token-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text); font-size: 12px; }

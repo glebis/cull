@@ -6,10 +6,14 @@
         activeFolder,
         selectedIds,
         collections,
+        exportFolderSmartCollection,
+        showRejected,
         showToast,
     } from '$lib/stores';
     import { exportImagesToFolder, listImageIds } from '$lib/api';
+    import { listImageIdsForScope } from '$lib/embedding-scope';
     import { buildExportParams, describeExportScope, type ExportScope } from '$lib/export-helpers';
+    import ModalDialog from '$lib/components/ModalDialog.svelte';
 
     let format = $state('original');
     let naming = $state('{name}');
@@ -21,6 +25,8 @@
     let selected = $derived(Array.from($selectedIds));
     let scopeInfo = $derived(
         describeExportScope({
+            smartCollectionId: $exportFolderSmartCollection?.id ?? null,
+            smartCollectionImageIds: [],
             activeCollection: $activeCollection,
             activeFolder: $activeFolder,
             selectedIds: selected,
@@ -31,6 +37,8 @@
 
     function scopeLabelFor(kind: string): string {
         switch (kind) {
+            case 'smart':
+                return `smart collection “${$exportFolderSmartCollection?.name ?? 'results'}”`;
             case 'selection':
                 return `${selected.length} selected image${selected.length === 1 ? '' : 's'}`;
             case 'collection': {
@@ -51,7 +59,21 @@
 
         exporting = true;
         try {
+            const smartTarget = $exportFolderSmartCollection;
+            if (smartTarget && !smartTarget.filter_json) {
+                throw new Error('Smart collection has no filter to export');
+            }
+            const smartCollectionImageIds = smartTarget
+                ? await listImageIdsForScope({
+                    type: 'smart',
+                    id: smartTarget.id,
+                    filter_json: smartTarget.filter_json!,
+                    include_rejected: $showRejected,
+                })
+                : [];
             const scope: ExportScope = {
+                smartCollectionId: smartTarget?.id ?? null,
+                smartCollectionImageIds,
                 activeCollection: $activeCollection,
                 activeFolder: $activeFolder,
                 selectedIds: selected,
@@ -66,6 +88,7 @@
                 duration: 7000,
             });
             exportFolderOpen.set(false);
+            exportFolderSmartCollection.set(null);
         } catch (e) {
             showToast('Export failed', { detail: String(e), type: 'error', duration: 9000 });
         } finally {
@@ -74,29 +97,24 @@
     }
 
     function close() {
-        if (!exporting) exportFolderOpen.set(false);
+        if (!exporting) {
+            exportFolderOpen.set(false);
+            exportFolderSmartCollection.set(null);
+        }
     }
 
-    function onBackdropKeydown(event: KeyboardEvent) {
-        if (event.key === 'Escape') close();
-    }
 </script>
 
 {#if $exportFolderOpen}
-    <div
-        class="export-backdrop"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Export images to folder"
-        tabindex="-1"
-        onclick={close}
-        onkeydown={onBackdropKeydown}
+    <ModalDialog
+        titleId="export-folder-title"
+        onclose={close}
+        overlayClass="export-backdrop"
+        panelClass="export-panel"
     >
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <div class="export-panel" role="presentation" onclick={(e) => e.stopPropagation()}>
             <div class="export-head">
-                <span class="export-title">Export to Folder</span>
-                <button class="export-close" type="button" onclick={close} aria-label="Close">×</button>
+                <span id="export-folder-title" class="export-title">Export to Folder</span>
+                <button class="export-close" type="button" data-modal-initial-focus onclick={close} aria-label="Close">×</button>
             </div>
             <p class="export-scope">Exporting <strong>{scopeLabel}</strong>.</p>
 
@@ -131,12 +149,12 @@
                     {exporting ? 'Exporting…' : 'Choose Folder & Export'}
                 </button>
             </div>
-        </div>
-    </div>
+    </ModalDialog>
 {/if}
 
 <style>
-    .export-backdrop {
+    :global(.export-backdrop) {
+        --modal-align-items: flex-start;
         position: fixed;
         inset: 0;
         background: rgba(0, 0, 0, 0.55);
@@ -146,7 +164,7 @@
         padding-top: 12vh;
         z-index: var(--z-modal);
     }
-    .export-panel {
+    :global(.export-panel) {
         width: min(440px, 92vw);
         background: var(--surface);
         border: 1px solid var(--border);

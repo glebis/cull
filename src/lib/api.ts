@@ -2,6 +2,64 @@
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
 import { invoke } from '@tauri-apps/api/core';
+import type { LibraryScope } from './library-scope';
+
+export type ApplePhotosAuthorization =
+    | 'unsupported'
+    | 'not_determined'
+    | 'restricted'
+    | 'denied'
+    | 'limited'
+    | 'authorized';
+
+export type ApplePhotosAlbumKind = 'user' | 'smart';
+
+export interface ApplePhotosAlbum {
+    id: string;
+    title: string | null;
+    kind: ApplePhotosAlbumKind;
+}
+
+export interface ApplePhotosAsset {
+    id: string;
+    filename: string | null;
+    created_at: string | null;
+    modified_at: string | null;
+    pixel_width: number;
+    pixel_height: number;
+    favorite: boolean;
+    media_subtypes: number;
+}
+
+export interface ApplePhotosPage<T> {
+    items: T[];
+    total: number;
+    offset: number;
+    has_more: boolean;
+}
+
+export type ApplePhotosAlbumPage = ApplePhotosPage<ApplePhotosAlbum>;
+export type ApplePhotosAssetPage = ApplePhotosPage<ApplePhotosAsset>;
+
+export function photosAuthorizationStatus(): Promise<ApplePhotosAuthorization> {
+    return invoke<ApplePhotosAuthorization>('photos_authorization_status');
+}
+
+export function photosRequestAuthorization(): Promise<ApplePhotosAuthorization> {
+    return invoke<ApplePhotosAuthorization>('photos_request_authorization');
+}
+
+export function photosListAlbums(offset = 0, limit = 100): Promise<ApplePhotosAlbumPage> {
+    return invoke<ApplePhotosAlbumPage>('photos_list_albums', { offset, limit });
+}
+
+export function photosListAssets(
+    albumId: string | null,
+    offset = 0,
+    limit = 100,
+): Promise<ApplePhotosAssetPage> {
+    return invoke<ApplePhotosAssetPage>('photos_list_assets', { albumId, offset, limit });
+}
 
 function emitSessionEventsRefresh() {
     if (typeof window !== 'undefined') {
@@ -43,6 +101,42 @@ export interface ImageWithFile {
     selection: Selection | null;
     source_label: string | null;
     missing_at: string | null;
+}
+
+export type ReferencedSourceKind = 'sd_card' | 'external_drive' | 'mounted_volume' | 'folder';
+
+export interface ReferencedSource {
+    id: string;
+    platform_volume_id: string | null;
+    display_name: string;
+    last_mount_path: string | null;
+    source_kind: ReferencedSourceKind;
+    capacity_bytes: number | null;
+    recursive_default: boolean;
+    settings_json: string;
+    last_seen_at: string;
+    offline_at: string | null;
+}
+
+export interface ReferencedFolderPage {
+    job_id: string;
+    source_id: string;
+    relative_path: string;
+    requested_paths: string[];
+    image_ids: string[];
+    discovered_count: number;
+    next_cursor: string | null;
+    indexing: boolean;
+}
+
+export interface ReferencedFolderUpdate {
+    job_id: string;
+    source_id: string;
+    relative_path: string;
+    image_ids: string[];
+    completed: boolean;
+    cancelled: boolean;
+    error: string | null;
 }
 
 export interface MediaAsset {
@@ -183,6 +277,7 @@ export interface ImportResponse {
     errors: string[];
     batch_id: string | null;
     image_ids: string[];
+    cancelled: boolean;
 }
 
 export interface GenerationRun {
@@ -238,6 +333,7 @@ export interface CompleteAgentViewSnapshotRequest {
 export interface MenuStatePayload {
     viewMode: string;
     sidebarVisible: boolean;
+    showRejected: boolean;
     hasFocusedImage: boolean;
     selectedCount: number;
     staticPublishingEnabled: boolean;
@@ -575,8 +671,8 @@ export interface ClaudeAgentStreamEvent {
     is_error: boolean;
 }
 
-export async function listImages(limit: number, offset: number): Promise<ImageWithFile[]> {
-    return invoke<ImageWithFile[]>('list_images', { limit, offset });
+export async function listImages(limit: number, offset: number, includeRejected = false): Promise<ImageWithFile[]> {
+    return invoke<ImageWithFile[]>('list_images', { limit, offset, includeRejected });
 }
 
 export async function listMediaAssets(
@@ -607,22 +703,22 @@ export async function listPdfPages(mediaAssetId: string): Promise<PdfPage[]> {
     return invoke<PdfPage[]>('list_pdf_pages', { mediaAssetId });
 }
 
-export async function getImageCount(): Promise<number> {
-    return invoke<number>('get_image_count');
+export async function getImageCount(includeRejected = false): Promise<number> {
+    return invoke<number>('get_image_count', { includeRejected });
 }
 
 export async function listImageIds(): Promise<string[]> {
     return invoke<string[]>('list_image_ids');
 }
 
-export async function importFolder(folderPath: string, sessionId?: string | null): Promise<ImportResponse> {
-    const result = await invoke<ImportResponse>('import_folder', { folderPath, sessionId: sessionId ?? null });
+export async function importFolder(folderPath: string, sessionId?: string | null, progressId?: string | null): Promise<ImportResponse> {
+    const result = await invoke<ImportResponse>('import_folder', { folderPath, sessionId: sessionId ?? null, progressId: progressId ?? null });
     emitSessionEventsRefresh();
     return result;
 }
 
-export async function importFiles(filePaths: string[], sessionId?: string | null): Promise<ImportResponse> {
-    const result = await invoke<ImportResponse>('import_files', { filePaths, sessionId: sessionId ?? null });
+export async function importFiles(filePaths: string[], sessionId?: string | null, progressId?: string | null): Promise<ImportResponse> {
+    const result = await invoke<ImportResponse>('import_files', { filePaths, sessionId: sessionId ?? null, progressId: progressId ?? null });
     emitSessionEventsRefresh();
     return result;
 }
@@ -737,12 +833,59 @@ export async function getIterationSiblings(parentId: string): Promise<ImageWithF
     return invoke<ImageWithFile[]>('get_iteration_siblings', { parentId });
 }
 
-export async function listFolders(): Promise<[string, number][]> {
-    return invoke('list_folders');
+export async function listFolders(includeRejected = false): Promise<[string, number][]> {
+    return invoke('list_folders', { includeRejected });
 }
 
-export async function listImagesByFolder(folder: string, limit: number, offset: number): Promise<ImageWithFile[]> {
-    return invoke('list_images_by_folder', { folder, limit, offset });
+export async function listImagesByFolder(folder: string, limit: number, offset: number, includeRejected = false): Promise<ImageWithFile[]> {
+    return invoke('list_images_by_folder', { folder, limit, offset, includeRejected });
+}
+
+export function listReferencedSources(): Promise<ReferencedSource[]> {
+    return invoke<ReferencedSource[]>('list_referenced_sources');
+}
+
+export function rememberReferencedFolder(path: string): Promise<ReferencedSource> {
+    return invoke<ReferencedSource>('remember_referenced_folder', { path });
+}
+
+export function listSourceFolders(sourceId: string, relativePath = ''): Promise<string[]> {
+    return invoke<string[]>('list_source_folders', { sourceId, relativePath });
+}
+
+export function openReferencedFolder(request: {
+    source_id: string;
+    relative_path: string;
+    recursive: boolean;
+    cursor: string | null;
+    limit: number;
+}): Promise<ReferencedFolderPage> {
+    return invoke<ReferencedFolderPage>('open_referenced_folder', { request });
+}
+
+export function listImagesInReferencedFolder(
+    sourceId: string,
+    relativePath: string,
+    recursive: boolean,
+    limit: number,
+    offset: number,
+    includeRejected = false,
+): Promise<ImageWithFile[]> {
+    return invoke<ImageWithFile[]>('list_images_in_referenced_folder', {
+        sourceId, relativePath, recursive, limit, offset, includeRejected,
+    });
+}
+
+export function setSourceRecursiveDefault(sourceId: string, recursive: boolean): Promise<void> {
+    return invoke<void>('set_source_recursive_default', { sourceId, recursive });
+}
+
+export function removeReferencedSource(sourceId: string): Promise<string[]> {
+    return invoke<string[]>('remove_referenced_source', { sourceId });
+}
+
+export function cancelReferencedSourceJob(jobId: string): Promise<boolean> {
+    return invoke<boolean>('cancel_referenced_source_job', { jobId });
 }
 
 export async function deleteFolder(folder: string): Promise<number> {
@@ -751,8 +894,8 @@ export async function deleteFolder(folder: string): Promise<number> {
     return result;
 }
 
-export async function listImagesFiltered(minWidth: number | null, minHeight: number | null, limit: number, offset: number): Promise<ImageWithFile[]> {
-    return invoke('list_images_filtered', { minWidth, minHeight, limit, offset });
+export async function listImagesFiltered(minWidth: number | null, minHeight: number | null, limit: number, offset: number, includeRejected = false): Promise<ImageWithFile[]> {
+    return invoke('list_images_filtered', { minWidth, minHeight, limit, offset, includeRejected });
 }
 
 export async function createCollection(name: string): Promise<string> {
@@ -761,8 +904,14 @@ export async function createCollection(name: string): Promise<string> {
     return result;
 }
 
-export async function listCollections(): Promise<[string, string, number][]> {
-    return invoke('list_collections');
+export async function createCollectionWithImages(name: string, imageIds: string[]): Promise<string> {
+    const result = await invoke<string>('create_collection_with_images', { name, imageIds });
+    emitSessionEventsRefresh();
+    return result;
+}
+
+export async function listCollections(includeRejected = false): Promise<[string, string, number][]> {
+    return invoke('list_collections', { includeRejected });
 }
 
 export async function renameCollectionApi(collectionId: string, name: string): Promise<void> {
@@ -775,8 +924,8 @@ export async function addToCollection(collectionId: string, imageIds: string[]):
     emitSessionEventsRefresh();
 }
 
-export async function listCollectionImages(collectionId: string, limit?: number, offset?: number): Promise<ImageWithFile[]> {
-    return invoke('list_collection_images', { collectionId, limit: limit ?? null, offset: offset ?? null });
+export async function listCollectionImages(collectionId: string, limit?: number, offset?: number, includeRejected = false): Promise<ImageWithFile[]> {
+    return invoke('list_collection_images', { collectionId, limit: limit ?? null, offset: offset ?? null, includeRejected });
 }
 
 export async function removeFromCollection(collectionId: string, imageIds: string[]): Promise<void> {
@@ -904,8 +1053,8 @@ export async function publishClipboardCollection(collectionId?: string | null): 
 
 // Smart Collection commands
 
-export async function listSmartCollections(): Promise<SmartCollection[]> {
-    return invoke('list_smart_collections');
+export async function listSmartCollections(includeRejected = false): Promise<SmartCollection[]> {
+    return invoke('list_smart_collections', { includeRejected });
 }
 
 export async function createSmartCollection(
@@ -918,12 +1067,12 @@ export async function createSmartCollection(
     return result;
 }
 
-export async function evaluateSmartCollection(filterJson: string, limit?: number, offset?: number): Promise<ImageWithFile[]> {
-    return invoke('evaluate_smart_collection', { filterJson, limit: limit ?? null, offset: offset ?? null });
+export async function evaluateSmartCollection(filterJson: string, limit?: number, offset?: number, includeRejected = false): Promise<ImageWithFile[]> {
+    return invoke('evaluate_smart_collection', { filterJson, limit: limit ?? null, offset: offset ?? null, includeRejected });
 }
 
-export async function countSmartCollection(filterJson: string): Promise<number> {
-    return invoke<number>('count_smart_collection', { filterJson });
+export async function countSmartCollection(filterJson: string, includeRejected = false): Promise<number> {
+    return invoke<number>('count_smart_collection', { filterJson, includeRejected });
 }
 
 export async function deleteSmartCollectionApi(id: string): Promise<void> {
@@ -1034,6 +1183,29 @@ export async function generateModelEmbeddings(model: string, imageIds: string[])
     return invoke('generate_model_embeddings', { model, imageIds });
 }
 
+export type EmbeddingGenerationMode = 'missing' | 'all';
+
+export interface EmbeddingGenerationStart {
+    job_id: string;
+    total: number;
+    model: string;
+    mode: EmbeddingGenerationMode;
+}
+
+export interface EmbeddingGenerationProgress extends EmbeddingGenerationStart {
+    current: number;
+    status: 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed';
+    error?: string | null;
+}
+
+export async function startModelEmbeddingGeneration(
+    model: string,
+    imageIds: string[],
+    mode: EmbeddingGenerationMode,
+): Promise<EmbeddingGenerationStart> {
+    return invoke('start_model_embedding_generation', { model, imageIds, mode });
+}
+
 export interface EmbeddingPage {
     ids: string[];
     vectors: number[];
@@ -1048,8 +1220,64 @@ export async function getEmbeddingPage(model?: string, limit = 5000, offset = 0)
     return invoke('get_embedding_page', { model: model ?? null, limit, offset });
 }
 
+export async function getScopedEmbeddingPage(
+    scope: LibraryScope,
+    model?: string,
+    limit = 5000,
+    offset = 0,
+): Promise<EmbeddingPage> {
+    return invoke('get_scoped_embedding_page', { scope, model: model ?? null, limit, offset });
+}
+
+export interface ImageIdPage {
+    ids: string[];
+    total: number;
+    offset: number;
+    limit: number;
+    has_more: boolean;
+}
+
+export async function listScopedImageIds(
+    scope: LibraryScope,
+    limit = 100,
+    offset = 0,
+): Promise<ImageIdPage> {
+    return invoke('list_scoped_image_ids', { scope, limit, offset });
+}
+
+export interface EmbeddingClusterMembership {
+    cluster_id: number;
+    image_ids: string[];
+}
+
+export interface EmbeddingClusterName {
+    cluster_id: number;
+    label: string;
+    source: 'tag' | 'yolo' | 'filename';
+}
+
+export async function nameEmbeddingClusters(
+    clusters: EmbeddingClusterMembership[],
+): Promise<EmbeddingClusterName[]> {
+    return invoke('name_embedding_clusters', { clusters });
+}
+
 export async function findSimilarImages(imageId: string, topK: number, model?: string): Promise<[string, number][]> {
     return invoke('find_similar_images', { imageId, topK, model: model ?? null });
+}
+
+export async function findSimilarImagesInScope(
+    scope: LibraryScope,
+    imageId: string,
+    topK: number,
+    model?: string,
+): Promise<[string, number][]> {
+    return invoke('find_similar_images_in_scope', {
+        scope,
+        imageId,
+        topK,
+        model: model ?? null,
+    });
 }
 
 export async function generateSimilarityGroups(
@@ -1142,16 +1370,16 @@ export async function searchByDetectedClass(className: string, limit?: number): 
     return invoke('search_by_detected_class', { className, limit: limit ?? 100 });
 }
 
-export async function countByDetectedClass(className: string): Promise<number> {
-    return invoke('count_by_detected_class', { className });
+export async function countByDetectedClass(className: string, includeRejected = false): Promise<number> {
+    return invoke('count_by_detected_class', { className, includeRejected });
 }
 
-export async function listDetectedClasses(): Promise<[string, number][]> {
-    return invoke('list_detected_classes');
+export async function listDetectedClasses(includeRejected = false): Promise<[string, number][]> {
+    return invoke('list_detected_classes', { includeRejected });
 }
 
-export async function listImagesByDetectedClass(className: string, limit: number, offset: number): Promise<ImageWithFile[]> {
-    return invoke('list_images_by_detected_class', { className, limit, offset });
+export async function listImagesByDetectedClass(className: string, limit: number, offset: number, includeRejected = false): Promise<ImageWithFile[]> {
+    return invoke('list_images_by_detected_class', { className, limit, offset, includeRejected });
 }
 
 export async function isYoloAvailable(variant?: string): Promise<boolean> {
@@ -1252,6 +1480,10 @@ export async function getImageColorMetrics(imageId: string): Promise<ImageColorM
 
 export async function getColorMetricsCount(): Promise<number> {
     return invoke('get_color_metrics_count');
+}
+
+export async function getDominantColors(): Promise<Record<string, string>> {
+    return invoke('get_dominant_colors');
 }
 
 export async function listImagesByColorBucket(
@@ -1550,8 +1782,8 @@ export async function removeFromLineageGroup(imageId: string): Promise<void> {
     return invoke('remove_from_lineage_group', { imageId });
 }
 
-export async function getBatchImages(batchId: string): Promise<ImageWithFile[]> {
-    return invoke('get_batch_images', { batchId });
+export async function getBatchImages(batchId: string, includeRejected = false): Promise<ImageWithFile[]> {
+    return invoke('get_batch_images', { batchId, includeRejected });
 }
 
 export async function scanLineage(): Promise<number> {
@@ -1784,12 +2016,28 @@ export async function createSubfolder(parentPath: string, name: string): Promise
     return result;
 }
 
+export interface RenameFolderResult {
+    oldPath: string;
+    newPath: string;
+    imageCount: number;
+}
+
+export async function renameFolder(folder: string, newName: string): Promise<RenameFolderResult> {
+    const result = await invoke<RenameFolderResult>('rename_folder', { folder, newName });
+    emitSessionEventsRefresh();
+    return result;
+}
+
 export async function shareImages(imageIds: string[]): Promise<void> {
     return invoke<void>('share_images', { imageIds });
 }
 
 export async function openImagesWithApplication(imageIds: string[], appPath: string): Promise<void> {
     return invoke<void>('open_images_with_application', { imageIds, appPath });
+}
+
+export async function resolveImageOriginalPath(imageId: string): Promise<string> {
+    return invoke<string>('resolve_image_original_path', { imageId });
 }
 
 export async function listOpenWithApplications(imageId: string): Promise<OpenWithApplication[]> {
@@ -1824,6 +2072,30 @@ export async function updateMenuState(state: MenuStatePayload): Promise<void> {
 
 export async function backfillRawPreviews(): Promise<number> {
     return invoke<number>('backfill_raw_previews');
+}
+
+// Command line tool
+export interface CliToolStatus {
+    installed: boolean;
+    link_path: string | null;
+    target_path: string | null;
+    /** Installed, but pointing at a different copy of Cull — offer a re-install. */
+    stale: boolean;
+    candidate_dir: string | null;
+    /** Shell profile line the user must add when the install dir is not on PATH. */
+    path_hint: string | null;
+}
+
+export async function cliToolStatus(): Promise<CliToolStatus> {
+    return invoke<CliToolStatus>('cli_tool_status');
+}
+
+export async function installCliTool(): Promise<CliToolStatus> {
+    return invoke<CliToolStatus>('install_cli_tool');
+}
+
+export async function uninstallCliTool(): Promise<CliToolStatus> {
+    return invoke<CliToolStatus>('uninstall_cli_tool');
 }
 
 // Privacy & audit log

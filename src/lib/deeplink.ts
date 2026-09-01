@@ -15,20 +15,21 @@ import {
     windowLabel,
     navigateTo,
     showToast,
-    importBatchFilter,
-    importBatchImageIds,
     pinnedCollection,
     activeCollection,
     activeSmartCollection,
     activeDetectedClass,
     activeSession,
     collections,
+    showRejected,
     type ViewMode,
 } from './stores';
-import { importFolder, importFiles, addToCollection, listCollections, getBatchImages, listFolders, listImagesByFolder, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls, completeDeepLinkNavigation, type ImageWithFile, type ImportResponse } from './api';
+import { importFolder, importFiles, addToCollection, listCollections, listFolders, listImagesByFolder, getImagesByIds, getImageByPath, drainPendingOpenParams, openDeepLinkUrls, completeDeepLinkNavigation, rememberReferencedFolder, type ImageWithFile, type ImportResponse } from './api';
+import { openReferencedSourceFolder, refreshReferencedSources } from './referenced-sources';
 import { applyClipboardMonitorCollection } from './clipboard-monitor';
-import { clearImageScope, invalidateImageCache, loadAllImages, loadImagesForCurrentScope, loadImagesUntil, resetImagePaging } from './image-loading';
+import { loadAllImages, loadImagesForCurrentScope, loadImagesUntil } from './image-loading';
 import { openSettings, type SettingsTab } from './settings-navigation';
+import { activateImportBatch } from './import-batch-navigation';
 
 interface OpenParams {
     path?: string | null;
@@ -189,6 +190,19 @@ async function handleParamsInner(params: OpenParams, ack: AckFn) {
     // Handle folder import
     if (params.folder) {
         try {
+            if (params.drag_drop) {
+                const source = await rememberReferencedFolder(params.folder);
+                await refreshReferencedSources();
+                await openReferencedSourceFolder(source);
+                await ack(true);
+                focusIndex(0);
+                showToast(`Browsing "${source.display_name}" in place`, {
+                    detail: 'Original files stay where they are',
+                    type: 'success',
+                    duration: 6000,
+                });
+                return;
+            }
             // Switch scope to the target folder FIRST, then ack, then import.
             // The ack must mean "the app is now on this folder", which is only
             // true once activeFolder is set. Acking after importFolder instead
@@ -205,7 +219,7 @@ async function handleParamsInner(params: OpenParams, ack: AckFn) {
             await loadImagesForCurrentScope({ force: true, invalidateCache: true });
             focusIndex(0);
             // Refresh folder list in sidebar
-            const f = await listFolders();
+            const f = await listFolders(get(showRejected));
             folders.set(f);
             const folderTotal = f.find(([path]) => path === params.folder)?.[1] ?? result.imported;
             if (result.imported > 0) {
@@ -229,7 +243,7 @@ async function handleParamsInner(params: OpenParams, ack: AckFn) {
 
             if (pinned && result.image_ids.length > 0) {
                 await addToCollection(pinned, result.image_ids);
-                const c = await listCollections();
+                const c = await listCollections(get(showRejected));
                 collections.set(c);
                 showToast(`Image added to active collection`, { type: 'success', duration: 5000 });
             }
@@ -265,7 +279,7 @@ async function handleParamsInner(params: OpenParams, ack: AckFn) {
             if (pinned && result.image_ids.length > 0) {
                 // Active collection exists — append silently
                 await addToCollection(pinned, result.image_ids);
-                const c = await listCollections();
+                const c = await listCollections(get(showRejected));
                 collections.set(c);
 
                 activeCollection.set(pinned);
@@ -288,14 +302,7 @@ async function handleParamsInner(params: OpenParams, ack: AckFn) {
                 });
             } else if (result.batch_id) {
                 // No active collection — filter to batch
-                const batchImgs = await getBatchImages(result.batch_id);
-                invalidateImageCache();
-                clearImageScope();
-                resetImagePaging();
-                images.set(batchImgs);
-                importBatchFilter.set(result.batch_id);
-                importBatchImageIds.set(result.image_ids);
-                focusIndex(0);
+                await activateImportBatch(result.batch_id);
             } else {
                 await loadAllImages({ force: true, invalidateCache: true });
                 focusIndex(0);
@@ -358,7 +365,7 @@ async function handleCanvasFolderDrop(params: OpenParams) {
     try {
         const result = await importFolder(params.folder, get(activeSession)?.id ?? null);
         const folderImages = await listAllImagesByFolder(params.folder);
-        const f = await listFolders();
+        const f = await listFolders(get(showRejected));
         folders.set(f);
         emitCanvasImportDrop({
             images: folderImages,
@@ -377,7 +384,7 @@ async function listAllImagesByFolder(folder: string): Promise<ImageWithFile[]> {
     const allImages: ImageWithFile[] = [];
     for (let page = 0; page < FOLDER_IMAGE_PAGE_LIMIT; page++) {
         const offset = page * FOLDER_IMAGE_PAGE_SIZE;
-        const batch = await listImagesByFolder(folder, FOLDER_IMAGE_PAGE_SIZE, offset);
+        const batch = await listImagesByFolder(folder, FOLDER_IMAGE_PAGE_SIZE, offset, get(showRejected));
         allImages.push(...batch);
         if (batch.length < FOLDER_IMAGE_PAGE_SIZE) break;
     }

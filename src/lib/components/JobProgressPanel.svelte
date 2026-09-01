@@ -95,19 +95,15 @@
                 upsertDownload('evt_nudenet_download', 'nudenet-download', e.payload.downloaded, e.payload.total, e.payload.status);
             });
             const u13 = await listen<any>('auto-detection-start', (e) => {
-                const model = e.payload.model ?? 'model';
-                upsertJob(`evt_auto_detection_${model}`, 'auto-detection', 'running', 0, e.payload.count ?? 0, model);
+                upsertJob(e.payload.job_id, 'detection', 'running', e.payload.current ?? 0, e.payload.total ?? 0, e.payload.model ?? 'model');
             });
             const u14 = await listen<any>('auto-detection-progress', (e) => {
-                const model = e.payload.model ?? 'model';
-                upsertJob(`evt_auto_detection_${model}`, 'auto-detection', 'running', e.payload.current, e.payload.total, model);
+                upsertJob(e.payload.job_id, 'detection', 'running', e.payload.current, e.payload.total, e.payload.model ?? 'model');
             });
             const u15 = await listen<any>('auto-detection-complete', (e) => {
-                const count = e.payload.count ?? 0;
-                for (const job of jobs.filter(j => j.kind === 'auto-detection' && j.status === 'running')) {
-                    upsertJob(job.job_id, job.kind, 'completed', job.total || count, job.total || count, job.message);
-                    scheduleFadeOut(job.job_id);
-                }
+                const status = e.payload.cancelled ? 'cancelled' : 'completed';
+                upsertJob(e.payload.job_id, 'detection', status, e.payload.current ?? e.payload.total ?? 0, e.payload.total ?? 0, null);
+                scheduleFadeOut(e.payload.job_id);
             });
             const u16 = await listen<any>('health-check-progress', (e) => {
                 upsertJob(e.payload.job_id ?? `evt_health_check`, 'health-check', 'running', e.payload.current, e.payload.total, null);

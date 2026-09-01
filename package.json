@@ -1,6 +1,6 @@
 {
   "name": "cull",
-  "version": "0.3.2",
+  "version": "0.5.1",
   "description": "Local-first desktop image viewer for AI-generated art workflows.",
   "type": "module",
   "scripts": {
@@ -24,7 +24,8 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "bash scripts/tauri-local.sh",
     "test": "vitest run",
-    "test:release": "vitest run scripts/cull-release-core.test.ts scripts/cull-release-cli.test.ts scripts/release-gate.test.ts scripts/update-homebrew-cask.test.ts",
+    "test:release": "vitest run scripts/cull-release-core.test.ts scripts/cull-release-cli.test.ts scripts/release-gate.test.ts scripts/release-regression-gate.test.ts scripts/update-homebrew-cask.test.ts",
+    "test:release-regressions": "node scripts/release-regression-gate.mjs",
     "release:cull": "node scripts/cull-release.mjs",
     "test:e2e": "bash tests/e2e/run-e2e.sh",
     "test:perf": "vitest run src/lib/view-utils.test.ts -t \"grid rendering performance budget\"",
@@ -33,7 +34,8 @@
     "audit:supply-chain": "bash scripts/supply-chain-audit.sh",
     "audit:sbom": "bash scripts/supply-chain-audit.sh sbom",
     "bd": "bash scripts/bd.sh",
-    "lint:issues": "node scripts/check-beads-acceptance.mjs"
+    "lint:issues": "node scripts/check-beads-acceptance.mjs",
+    "test:validate-gate": "bash scripts/cull-release-validate-gate.test.sh"
   },
   "license": "Apache-2.0",
   "repository": {
@@ -45,11 +47,11 @@
   },
   "homepage": "https://github.com/glebis/cull#readme",
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.200",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.222",
     "@fontsource/eb-garamond": "^5.2.7",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-deep-link": "^2.4.9",
-    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
@@ -58,18 +60,18 @@
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",
-    "@sveltejs/kit": "^2.68.0",
+    "@sveltejs/kit": "^2.70.2",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/svelte": "^5.4.2",
     "@testing-library/user-event": "^14.6.1",
     "jsdom": "^29.1.1",
-    "svelte": "^5.56.3",
-    "svelte-check": "^4.0.0",
+    "svelte": "^5.56.8",
+    "svelte-check": "^4.7.5",
     "typescript": "~6.0.3",
-    "vite": "^8.1.0",
-    "vitest": "^4.1.9"
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10"
   },
   "overrides": {
     "cookie": "0.7.2"

@@ -28,6 +28,12 @@ impl Database {
         Ok(())
     }
 
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
     pub fn set_client_feedback(
         &self,
         image_id: &str,
@@ -221,6 +227,16 @@ impl Database {
             },
         )
         .optional()
+    }
+
+    /// Compact image_id -> dominant_hex map for overview-canvas placeholders.
+    pub fn list_dominant_colors(&self) -> Result<HashMap<String, String>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare("SELECT image_id, dominant_hex FROM image_color_metrics")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect()
     }
 
     pub fn color_metrics_count(&self) -> Result<u32> {

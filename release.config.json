@@ -10,11 +10,62 @@
     { "id": "cargo-lock", "path": "src-tauri/Cargo.lock", "kind": "cargo-lock-package-version", "package": "cull" }
   ],
   "lockfiles": ["src-tauri/Cargo.lock"],
-  "gate": "npm run preflight -- release",
+  "gate": "bash scripts/cull-release-validate-gate.sh",
   "extraGate": [
     "cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test compat_golden",
     "cargo test --manifest-path src-tauri/Cargo.toml --features test-support --test export_compat_golden"
   ],
+  "regressionGate": {
+    "command": ["node", "scripts/release-regression-gate.mjs"],
+    "contracts": [
+      {
+        "id": "sidebar-feature-retention",
+        "tests": [
+          "src/lib/components/sidebar-retained-features.behavior.test.ts",
+          "src/lib/components/devices-section.behavior.test.ts",
+          "src/lib/referenced-sources.test.ts"
+        ]
+      },
+      {
+        "id": "sidebar-search-filter",
+        "tests": [
+          "src/lib/sidebar-utils.test.ts",
+          "src/lib/components/sidebar-detected-filters.behavior.test.ts"
+        ]
+      },
+      {
+        "id": "settings-ai-reachable",
+        "tests": [
+          "src/lib/settings-navigation.test.ts",
+          "src/lib/components/settings-tabs.behavior.test.ts",
+          "src/lib/components/ai-settings.behavior.test.ts"
+        ]
+      },
+      {
+        "id": "grid-deep-zoom-presets",
+        "tests": [
+          "src/lib/thumbnail-zoom.test.ts",
+          "src/lib/grid-gesture-zoom.test.ts"
+        ]
+      },
+      {
+        "id": "grid-hover-preview",
+        "tests": ["src/lib/grid-hover-preview.test.ts"]
+      },
+      {
+        "id": "history-palette-deeplink",
+        "tests": [
+          "src/lib/history-activity.test.ts",
+          "src/lib/components/command-palette-destinations.behavior.test.ts",
+          "src/lib/deeplink-integration.test.ts"
+        ]
+      },
+      {
+        "id": "thumbnail-prefetch",
+        "tests": ["src/lib/prefetch-cache.test.ts"]
+      }
+    ]
+  },
   "changelog": { "path": "CHANGELOG.md", "style": "keep-a-changelog", "from": "conventional-commits" },
   "compatibility": { "path": "docs/COMPATIBILITY.md" },
   "surfaces": [

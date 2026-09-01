@@ -183,6 +183,7 @@ describe('release gate', () => {
         'bash scripts/supply-chain-audit.sh check',
         DB_CONTRACT,
         EXPORT_CONTRACT,
+        'node scripts/release-regression-gate.mjs',
         'bash tests/e2e/run-e2e.sh',
         'npm run build',
       ],
@@ -224,6 +225,20 @@ describe('release gate', () => {
     annotatedTag(root, 'v1.2.4', divergent, true);
 
     expectRejected(run(root, { sha: divergent }), 'NOT_ON_ORIGIN_MAIN');
+  });
+
+  it('rejects a stale release SHA that omits commits already on origin/main', () => {
+    const { root, sha } = fixture();
+    write(root, 'docs/new-main-fix.md', 'verified fix that must ship\n');
+    const newerMain = commit(root, 'verified main fix after stale release candidate');
+    git(root, 'update-ref', 'refs/remotes/origin/main', newerMain);
+
+    const result = run(root, { sha });
+    expectRejected(result, 'STALE_RELEASE_SOURCE');
+    expect(JSON.parse(result.execution.stderr)).toMatchObject({
+      message: expect.stringContaining('omits commits already on origin/main'),
+      details: expect.objectContaining({ releaseSha: sha, originMain: newerMain }),
+    });
   });
 
   it('classifies the covered source of a rename even when Git rename detection is enabled', () => {
@@ -394,6 +409,7 @@ describe('release gate', () => {
       'run bash scripts/supply-chain-audit.sh check',
       `run ${DB_CONTRACT}`,
       `run ${EXPORT_CONTRACT}`,
+      'run node scripts/release-regression-gate.mjs',
       'run npm run build',
     ];
     let cursor = -1;
@@ -641,8 +657,16 @@ describe('release gate', () => {
     expect(publishJob).toContain('Object.keys(provenance.checks).sort()');
     expect(publishJob).toContain('provenance.checks[name] !== true');
     expect(publishJob).toContain("heading === 'Unreleased'");
+    expect(publishJob).toContain('id: release_draft');
+    expect(publishJob).toContain('gh api --paginate --slurp "repos/$REPOSITORY/releases?per_page=100"');
+    expect(publishJob).toContain('release-id=${release_id}');
+    expect(publishJob).toContain('asset-count=${asset_count}');
     expect(publishJob).toContain('gh release create "$TAG" --verify-tag --draft');
     expect(publishJob).toContain('gh release upload "$TAG"');
+    expect(publishJob).toContain("if: steps.release_draft.outputs.asset-count == '0'");
+    expect(publishJob).toContain('RELEASE_ID: ${{ steps.release_draft.outputs.release-id }}');
+    expect(publishJob).toContain('gh api "repos/$REPOSITORY/releases/$RELEASE_ID"');
+    expect(publishJob).not.toContain('releases/tags/$TAG');
     expect(publishJob).not.toContain('--clobber');
     expect(publishJob).not.toContain('tauri-action');
     expect(publishJob).not.toContain('npm run build');

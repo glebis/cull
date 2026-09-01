@@ -21,6 +21,7 @@ const ruleBuilder = source('src/lib/components/RuleBuilder.svelte');
 const tabBar = source('src/lib/components/TabBar.svelte');
 const sidebar = source('src/lib/components/Sidebar.svelte');
 const aiSettings = source('src/lib/components/AiSettings.svelte');
+const importBanner = source('src/lib/components/ImportBanner.svelte');
 const paletteRegistry = source('src/lib/command-palette.ts');
 const tauriConfig = JSON.parse(source('src-tauri/tauri.conf.json'));
 
@@ -41,9 +42,10 @@ describe('impeccable audit UI contracts', () => {
         expect(trashDialog).toContain('data-modal-initial-focus');
         expect(trashDialog).toContain('id="trash-confirm-title"');
 
-        expect(settings).toContain('role="dialog"');
-        expect(settings).toContain('aria-modal="true"');
-        expect(settings).toContain('aria-labelledby="settings-title"');
+        expect(settings).toContain('import ModalDialog');
+        expect(settings).toContain('<ModalDialog');
+        expect(settings).toContain('titleId="settings-title"');
+        expect(settings).toContain('initialFocus=".settings-tab.active"');
         expect(settings).toContain('aria-label="Close settings"');
     });
 
@@ -73,6 +75,10 @@ describe('impeccable audit UI contracts', () => {
         expect(toast).not.toContain('var(--text-primary');
         expect(toast).not.toContain('var(--accent');
         expect(toast).not.toContain('#565f89');
+        expect(importBanner).toContain('background: var(--surface);');
+        expect(importBanner).toContain('color: var(--green);');
+        expect(importBanner).toContain('color: var(--text);');
+        expect(importBanner).not.toMatch(/var\(--[^)]+,/);
     });
 
     it('removes audited visual anti-patterns from product chrome', () => {
@@ -93,7 +99,7 @@ describe('impeccable audit UI contracts', () => {
     });
 
     it('clarifies destructive, privacy-sensitive, and publishing copy', () => {
-        expect(sidebar).toContain('Remove folder from library');
+        expect(sidebar).toContain('Remove Folder from Library');
         // Model setup must not imply an in-app auto-download (bd imageview-dkz.19
         // replaced the 'Install model manually' dead-end with a setup-guide link).
         expect(aiSettings).toContain('setup guide');
@@ -101,7 +107,7 @@ describe('impeccable audit UI contracts', () => {
         // Batch analysis actions are named distinctly in the command palette.
         expect(paletteRegistry).toContain('Detect Objects in Library');
         expect(paletteRegistry).toContain('Describe Images in Library');
-        expect(sidebar).toContain('Publish clipboard collection');
+        expect(sidebar).toContain('Publish');
         expect(agentAccessSettings).toContain('MCP Connection');
         expect(staticPublishing).toContain('Allow search indexing');
         expect(staticPublishing).toContain('Start Local Preview');
@@ -109,16 +115,15 @@ describe('impeccable audit UI contracts', () => {
 
     it('keeps the sidebar footer bounded and exposes sidebar control state', () => {
         expect(sidebar).toContain('class="sidebar-scroll"');
-        expect(sidebar).toContain('class="footer-secondary-actions"');
+        expect(sidebar).toContain('class="import-btn"');
+        expect(sidebar).toContain('<span aria-hidden="true">+</span>');
+        expect(sidebar).toContain('aria-label={importing ? \'Importing folder\' : \'Import folder\'}');
+        expect(sidebar).not.toContain('footer-secondary-actions');
         expect(sidebar).toContain('aria-expanded={foldersExpanded}');
         expect(sidebar).not.toContain('aria-expanded={aiExpanded}');
         expect(sidebar).not.toContain('aria-controls="sidebar-folder-tree"');
         expect(sidebar).not.toContain('aria-controls="sidebar-ai-models"');
         expect(sidebar).toContain('aria-pressed={clipboardStatus?.running ?? false}');
-        expect(sidebar).toContain('aria-label={regenerating ?');
-        expect(sidebar).toContain('Rebuild thumbnails');
-        expect(sidebar).toContain('aria-label={rescanning ?');
-        expect(sidebar).toContain('Rescan sources');
-        expect(sidebar).toContain('Regenerating thumbnails {regenProgress.current} of {regenProgress.total}');
+        expect(sidebar).toContain('aria-busy={importing}');
     });
 });

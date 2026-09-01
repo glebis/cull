@@ -3,7 +3,7 @@
 
 use rmcp::{
     handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
-    model::{CallToolRequestParams, CallToolResult, ServerCapabilities, ServerInfo},
+    model::{CallToolRequestParams, CallToolResponse, ServerCapabilities, ServerInfo},
     schemars,
     service::RequestContext,
     tool, tool_router, ErrorData, RoleServer, ServerHandler,
@@ -13,6 +13,8 @@ use tauri::{Emitter, Manager};
 use super::auth::{require_capability, AuthContext};
 use crate::db_core::canvas_document::CanvasDocument;
 use crate::db_core::models::{Canvas, TokenScope};
+use crate::services::ai::{self as ai_service, FindSimilarParams, SearchByObjectParams};
+use crate::services::curation::{self as curation_service, SetRatingParams};
 use crate::services::tokens;
 use crate::AppState;
 
@@ -176,10 +178,6 @@ fn collection_summaries_for_mcp(
 
 fn clamp_limit(limit: u32) -> u32 {
     limit.min(100).max(1)
-}
-
-fn is_valid_rating(rating: u8) -> bool {
-    rating <= 5
 }
 
 fn normalize_decision(decision: &str) -> Option<&'static str> {
@@ -643,14 +641,6 @@ pub struct ListFolderImagesParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct SetRatingParams {
-    #[schemars(description = "The image ID to rate")]
-    pub image_id: String,
-    #[schemars(description = "Rating from 0 (unrated) to 5")]
-    pub rating: u8,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SetDecisionParams {
     #[schemars(description = "The image ID")]
     pub image_id: String,
@@ -696,24 +686,6 @@ pub struct CreateSmartCollectionParams {
         description = "Natural language query like 'landscape photos rated 4+' or raw filter JSON"
     )]
     pub query: String,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct FindSimilarParams {
-    #[schemars(description = "Image ID to find similar images for")]
-    pub image_id: String,
-    #[schemars(description = "Number of results to return (default 10)")]
-    pub limit: Option<u32>,
-    #[schemars(description = "Embedding model: 'clip-vit-b32' or 'dinov2-vits14'")]
-    pub model: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct SearchByObjectParams {
-    #[schemars(description = "Object class to search for, e.g. 'person', 'car', 'dog'")]
-    pub class_name: String,
-    #[schemars(description = "Max results (default 50)")]
-    pub limit: Option<u32>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -1108,8 +1080,7 @@ impl ServerHandler for CullMcp {
         crate::safe_eprintln!("MCP list_tools: returning {} tools", tools.len());
         Ok(rmcp::model::ListToolsResult {
             tools,
-            next_cursor: None,
-            meta: None,
+            ..Default::default()
         })
     }
 
@@ -1117,7 +1088,7 @@ impl ServerHandler for CullMcp {
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<CallToolResult, ErrorData>> + Send + '_ {
+    ) -> impl std::future::Future<Output = Result<CallToolResponse, ErrorData>> + Send + '_ {
         async move {
             let tool_name = request.name.to_string();
             let params_json = request
@@ -1140,13 +1111,14 @@ impl ServerHandler for CullMcp {
 
             let status = match &result {
                 Err(_) => "error",
-                Ok(r) => {
+                Ok(CallToolResponse::Complete(r)) => {
                     if r.is_error.unwrap_or(false) {
                         "error"
                     } else {
                         "ok"
                     }
                 }
+                Ok(_) => "ok",
             };
             self.log_tool_call(&tool_name, params_json.as_deref(), status);
 
@@ -1545,19 +1517,6 @@ mod tests {
     }
 
     // --- Input validation (tests production helpers) ---
-
-    #[test]
-    fn test_rating_valid_range() {
-        for r in 0..=5u8 {
-            assert!(super::is_valid_rating(r), "Rating {} should be valid", r);
-        }
-    }
-
-    #[test]
-    fn test_rating_invalid() {
-        assert!(!super::is_valid_rating(6));
-        assert!(!super::is_valid_rating(255));
-    }
 
     #[test]
     fn test_decision_valid_values() {

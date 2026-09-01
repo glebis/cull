@@ -260,7 +260,8 @@ CREATE TABLE IF NOT EXISTS image_files (
     path TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     missing_at TEXT
-, last_seen_size INTEGER, last_seen_mtime TEXT);
+, last_seen_size INTEGER, last_seen_mtime TEXT,
+    library_member INTEGER NOT NULL DEFAULT 1 CHECK (library_member IN (0, 1)));
 
 CREATE TABLE IF NOT EXISTS image_metadata (
     image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
@@ -378,6 +379,35 @@ CREATE TABLE IF NOT EXISTS library_roots (
                 path TEXT NOT NULL UNIQUE,
                 added_at TEXT NOT NULL
             );
+
+CREATE TABLE IF NOT EXISTS referenced_sources (
+    id TEXT PRIMARY KEY,
+    platform_volume_id TEXT UNIQUE,
+    display_name TEXT NOT NULL,
+    last_mount_path TEXT,
+    source_kind TEXT NOT NULL CHECK (source_kind IN ('sd_card', 'external_drive', 'mounted_volume', 'folder')),
+    capacity_bytes INTEGER,
+    recursive_default INTEGER NOT NULL DEFAULT 0 CHECK (recursive_default IN (0, 1)),
+    settings_json TEXT NOT NULL DEFAULT '{}',
+    last_seen_at TEXT NOT NULL,
+    offline_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_referenced_sources_mount_path
+    ON referenced_sources(last_mount_path);
+
+CREATE TABLE IF NOT EXISTS referenced_files (
+    source_id TEXT NOT NULL REFERENCES referenced_sources(id) ON DELETE CASCADE,
+    image_file_id TEXT NOT NULL UNIQUE REFERENCES image_files(id) ON DELETE CASCADE,
+    relative_path TEXT NOT NULL,
+    PRIMARY KEY (source_id, relative_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_referenced_files_source
+    ON referenced_files(source_id);
+
+CREATE INDEX IF NOT EXISTS idx_referenced_files_image_file
+    ON referenced_files(image_file_id);
 
 CREATE TABLE IF NOT EXISTS lineage_groups (
                 id TEXT PRIMARY KEY,
