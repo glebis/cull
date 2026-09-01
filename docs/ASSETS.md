@@ -15,7 +15,6 @@ use before release.
 | DMG background | `src-tauri/dmg/cull-dmg-background.png` | Project-owned release packaging artwork | Included with Cull under Apache-2.0 unless replaced by file-specific notice | Allowed |
 | JetBrains Mono | `static/fonts/JetBrainsMono-*.woff2` | JetBrains Mono project | SIL Open Font License 1.1 | Allowed, retain font license attribution |
 | EB Garamond | `static/fonts/EBGaramond-*.woff2` | EB Garamond project | SIL Open Font License 1.1 | Allowed, retain font license attribution |
-| Placeholder framework logos | `static/svelte.svg`, `static/tauri.svg`, `static/vite.svg` | Upstream project logos from the starter/tooling ecosystem | Trademark/logo rights remain with upstream projects; use only for development placeholders or accurate technology references | Replace before marketing-heavy release if not needed |
 
 ## App Icons
 
