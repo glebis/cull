@@ -3172,6 +3172,11 @@ mod tests {
         assert_eq!(stored.palette[0].red, 242);
         assert_eq!(db.color_metrics_count().unwrap(), 2);
 
+        let dominant = db.list_dominant_colors().unwrap();
+        assert_eq!(dominant.get("red").map(String::as_str), Some("#f20c14"));
+        assert_eq!(dominant.get("blue").map(String::as_str), Some("#1848f0"));
+        assert_eq!(dominant.len(), 2);
+
         let images = db.list_images_by_color_bucket("red", 10, 0).unwrap();
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].image.id, "red");

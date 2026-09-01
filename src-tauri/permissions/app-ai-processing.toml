@@ -31,6 +31,7 @@ commands.allow = [
   "get_color_metrics_count",
   "get_detection_count",
   "get_detections",
+  "get_dominant_colors",
   "get_embedding_count",
   "get_embedding_model_download_info",
   "get_embedding_page",

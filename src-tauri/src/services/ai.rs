@@ -10,6 +10,7 @@ use crate::db_core::perceptual_hash::{self, PHASH_ALGORITHM};
 use crate::db_core::quality;
 use crate::services::library::enrich_thumbnails;
 use crate::services::{Pagination, ServiceContext, ServiceError};
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 const MAX_EMBEDDING_PAGE_SIZE: u32 = 5000;
@@ -568,6 +569,10 @@ pub fn get_image_color_metrics(
 
 pub fn get_color_metrics_count(ctx: &ServiceContext) -> Result<u32, ServiceError> {
     Ok(ctx.db.color_metrics_count()?)
+}
+
+pub fn list_dominant_colors(ctx: &ServiceContext) -> Result<HashMap<String, String>, ServiceError> {
+    Ok(ctx.db.list_dominant_colors()?)
 }
 
 pub fn list_images_by_color_bucket(
