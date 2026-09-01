@@ -4,6 +4,7 @@
 use crate::db_core::db::{row_u64, Database};
 use crate::db_core::models::*;
 use crate::db_core::queries::images::image_scope_filter;
+use crate::db_core::referenced_sources::NORMAL_LIBRARY_FILE_PREDICATE;
 use crate::db_core::visibility::RejectedVisibility;
 use rusqlite::types::Value;
 use rusqlite::{params, Result};
@@ -87,11 +88,14 @@ impl Database {
 
     pub fn search_by_class(&self, class_name: &str, limit: u32) -> Result<Vec<(String, f32)>> {
         let conn = self.read_connection();
-        let mut stmt = conn.prepare(
-            "SELECT DISTINCT image_id, MAX(confidence) as max_conf
-             FROM detections WHERE class_name = ?1
-             GROUP BY image_id ORDER BY max_conf DESC, image_id ASC LIMIT ?2",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT d.image_id, MAX(d.confidence) AS max_conf
+                 FROM detections d
+                 JOIN images i ON i.id = d.image_id
+                 JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+                 WHERE d.class_name = ?1 AND {NORMAL_LIBRARY_FILE_PREDICATE}
+                 GROUP BY d.image_id ORDER BY max_conf DESC, d.image_id ASC LIMIT ?2"
+        ))?;
         let rows = stmt.query_map(params![class_name, limit], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, f32>(1)?))
         })?;
@@ -115,7 +119,7 @@ impl Database {
              FROM detections d
              JOIN images i ON i.id = d.image_id
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
-             WHERE d.class_name = ? AND ({scope_filter})
+             WHERE d.class_name = ? AND ({scope_filter}) AND {NORMAL_LIBRARY_FILE_PREDICATE}
              GROUP BY d.image_id
              ORDER BY max_conf DESC, d.image_id ASC
              LIMIT ?"
@@ -148,8 +152,8 @@ impl Database {
              JOIN images i ON i.id = d.image_id
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE d.class_name = ?1 AND {}",
-            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+             WHERE d.class_name = ?1 AND {NORMAL_LIBRARY_FILE_PREDICATE} AND {}",
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate(),
         );
         conn.query_row(&sql, params![class_name], |row| row.get::<_, u32>(0))
     }
@@ -169,7 +173,7 @@ impl Database {
              JOIN images i ON i.id = d.image_id
              JOIN image_files f ON f.image_id = d.image_id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE d.model_name GLOB 'yolo*' AND {}
+             WHERE d.model_name GLOB 'yolo*' AND {NORMAL_LIBRARY_FILE_PREDICATE} AND {}
              GROUP BY d.class_name
              ORDER BY image_count DESC, d.class_name ASC",
             RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
@@ -205,7 +209,7 @@ impl Database {
              JOIN images i ON i.id = d.image_id
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE d.class_name = ?1 AND {}
+             WHERE d.class_name = ?1 AND {NORMAL_LIBRARY_FILE_PREDICATE} AND {}
              GROUP BY i.id
              ORDER BY MAX(d.confidence) DESC, i.imported_at DESC
              LIMIT ?2 OFFSET ?3",
@@ -244,7 +248,13 @@ impl Database {
     pub fn detection_count(&self, model_name: &str) -> Result<u32> {
         let conn = self.conn.lock();
         conn.query_row(
-            "SELECT COUNT(DISTINCT image_id) FROM detections WHERE model_name = ?1",
+            &format!(
+                "SELECT COUNT(DISTINCT d.image_id)
+                 FROM detections d
+                 JOIN images i ON i.id = d.image_id
+                 JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+                 WHERE d.model_name = ?1 AND {NORMAL_LIBRARY_FILE_PREDICATE}"
+            ),
             params![model_name],
             |row| row.get::<_, u32>(0),
         )
@@ -255,6 +265,21 @@ impl Database {
 mod tests {
     use super::*;
     use crate::db_core::detection::Detection;
+
+    fn referenced_source() -> ReferencedSource {
+        ReferencedSource {
+            id: "source-1".into(),
+            platform_volume_id: Some("volume-uuid-1".into()),
+            display_name: "UNTITLED".into(),
+            last_mount_path: Some("/Volumes/UNTITLED".into()),
+            source_kind: ReferencedSourceKind::SdCard,
+            capacity_bytes: Some(64_000_000_000),
+            recursive_default: false,
+            settings_json: "{}".into(),
+            last_seen_at: "2026-09-01T10:00:00Z".into(),
+            offline_at: None,
+        }
+    }
 
     fn insert_image(db: &Database, id: &str) {
         let conn = db.conn.lock();
@@ -275,6 +300,16 @@ mod tests {
             params![id, image_id, format!("/test/{id}.png"), missing_at],
         )
         .unwrap();
+    }
+
+    fn mark_as_browsed_file(db: &Database, file_id: &str) {
+        db.conn
+            .lock()
+            .execute(
+                "UPDATE image_files SET library_member = 0 WHERE id = ?1",
+                params![file_id],
+            )
+            .unwrap();
     }
 
     fn detection(class_name: &str, confidence: f32) -> Detection {
@@ -345,5 +380,48 @@ mod tests {
                 ("dog".to_string(), 1),
             ],
         );
+    }
+
+    #[test]
+    fn detected_class_scopes_exclude_referenced_only_images_but_keep_mixed_images() {
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        db.upsert_referenced_source(&referenced_source()).unwrap();
+
+        insert_image(&db, "referenced-only");
+        insert_file(&db, "referenced-only-file", "referenced-only", None);
+        db.attach_referenced_file("source-1", "referenced-only-file", "DCIM/only.jpg")
+            .unwrap();
+        mark_as_browsed_file(&db, "referenced-only-file");
+        db.store_detections("referenced-only", "yolo11m", &[detection("person", 0.99)])
+            .unwrap();
+
+        insert_image(&db, "mixed");
+        insert_file(&db, "mixed-referenced-file", "mixed", None);
+        db.attach_referenced_file("source-1", "mixed-referenced-file", "DCIM/mixed.jpg")
+            .unwrap();
+        mark_as_browsed_file(&db, "mixed-referenced-file");
+        insert_file(&db, "mixed-normal-file", "mixed", None);
+        db.store_detections("mixed", "yolo11m", &[detection("person", 0.8)])
+            .unwrap();
+
+        assert_eq!(
+            db.list_detected_classes().unwrap(),
+            vec![("person".into(), 1)]
+        );
+        assert_eq!(db.count_by_class("person").unwrap(), 1);
+        assert_eq!(db.detection_count("yolo11m").unwrap(), 1);
+        assert_eq!(
+            db.search_by_class("person", 20).unwrap(),
+            vec![("mixed".into(), 0.8)]
+        );
+        assert_eq!(
+            db.search_by_class_in_scope("person", &["/test".into()], &[], &[], 20)
+                .unwrap(),
+            vec![("mixed".into(), 0.8)]
+        );
+        let images = db.list_images_by_class("person", 20, 0).unwrap();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].image.id, "mixed");
+        assert_eq!(images[0].path, "/test/mixed-normal-file.png");
     }
 }
