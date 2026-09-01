@@ -3,6 +3,7 @@
 
 use crate::db_core::db::{row_u64, Database};
 use crate::db_core::models::*;
+use crate::db_core::referenced_sources::NORMAL_LIBRARY_FILE_PREDICATE;
 use crate::db_core::smart_collections::{FilterNode, SmartCollection};
 use crate::db_core::visibility::RejectedVisibility;
 use rusqlite::Result;
@@ -73,8 +74,10 @@ impl Database {
                              LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
                              LEFT JOIN image_color_metrics cm ON cm.image_id = i.id
                              LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
-                             WHERE ({}) AND {}",
-                            where_clause, visibility.sql_predicate()
+                             WHERE ({}) AND {} AND {}",
+                            where_clause,
+                            visibility.sql_predicate(),
+                            NORMAL_LIBRARY_FILE_PREDICATE
                         );
                         let param_refs: Vec<&dyn rusqlite::types::ToSql> = params
                             .iter()
@@ -149,9 +152,10 @@ impl Database {
              LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
              LEFT JOIN image_color_metrics cm ON cm.image_id = i.id
              LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
-             WHERE ({}) AND {}",
+             WHERE ({}) AND {} AND {}",
             where_clause,
-            visibility.sql_predicate()
+            visibility.sql_predicate(),
+            NORMAL_LIBRARY_FILE_PREDICATE
         );
         let param_refs: Vec<&dyn rusqlite::types::ToSql> = params
             .iter()
@@ -198,11 +202,12 @@ impl Database {
              LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
              LEFT JOIN image_color_metrics cm ON cm.image_id = i.id
              LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
-             WHERE ({}) AND {}
+             WHERE ({}) AND {} AND {}
              GROUP BY i.id
              ORDER BY i.imported_at DESC",
             where_clause,
-            visibility.sql_predicate()
+            visibility.sql_predicate(),
+            NORMAL_LIBRARY_FILE_PREDICATE
         );
 
         if let Some(limit) = limit {

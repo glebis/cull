@@ -2002,6 +2002,10 @@ export async function openImagesWithApplication(imageIds: string[], appPath: str
     return invoke<void>('open_images_with_application', { imageIds, appPath });
 }
 
+export async function resolveImageOriginalPath(imageId: string): Promise<string> {
+    return invoke<string>('resolve_image_original_path', { imageId });
+}
+
 export async function listOpenWithApplications(imageId: string): Promise<OpenWithApplication[]> {
     return invoke<OpenWithApplication[]>('list_open_with_applications', { imageId });
 }

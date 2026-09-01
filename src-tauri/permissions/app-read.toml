@@ -45,6 +45,7 @@ commands.allow = [
   "list_images_filtered",
   "list_lineage_groups",
   "list_open_with_applications",
+  "resolve_image_original_path",
   "list_referenced_sources",
   "list_source_folders",
   "list_session_events",

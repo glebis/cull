@@ -6,6 +6,7 @@ use crate::db_core::db::{cosine_similarity, decode_embedding_bytes};
 
 use crate::db_core::models::*;
 use crate::db_core::queries::images::image_scope_filter;
+use crate::db_core::referenced_sources::NORMAL_LIBRARY_FILE_PREDICATE;
 use crate::db_core::smart_collections::FilterNode;
 use crate::db_core::tags::normalize_tag_name;
 use crate::db_core::visibility::RejectedVisibility;
@@ -132,6 +133,32 @@ fn scoped_where_clause(scope: &EmbeddingScope) -> Result<(String, Vec<Value>, Re
             default_visibility,
         )),
     }
+}
+
+fn membership_predicate_for_embedding_scope(scope: &EmbeddingScope) -> &'static str {
+    // A collection is an explicit user-curated surface, so it may retain an
+    // image whose only available file belongs to a referenced source. Every
+    // other EmbeddingScope is an automatic library view.
+    match scope {
+        EmbeddingScope::Collection { .. } => "1 = 1",
+        _ => NORMAL_LIBRARY_FILE_PREDICATE,
+    }
+}
+
+fn membership_predicate_for_token_scope(collections: &[String]) -> (String, Vec<Value>) {
+    if collections.is_empty() {
+        return (NORMAL_LIBRARY_FILE_PREDICATE.to_string(), Vec::new());
+    }
+
+    let placeholders = vec!["?"; collections.len()].join(",");
+    (
+        format!(
+            "({NORMAL_LIBRARY_FILE_PREDICATE} OR i.id IN (
+                SELECT image_id FROM collection_items WHERE collection_id IN ({placeholders})
+             ))"
+        ),
+        collections.iter().cloned().map(Value::Text).collect(),
+    )
 }
 
 fn to_param_refs(params: &[Value]) -> Vec<&dyn ToSql> {
@@ -364,8 +391,13 @@ impl Database {
         // so the lock isn't held for the whole table scan.
         let raw_rows: Vec<(String, Vec<u8>)> = {
             let conn = self.conn.lock();
-            let mut stmt =
-                conn.prepare("SELECT image_id, vector FROM embeddings WHERE model_name = ?1")?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT DISTINCT e.image_id, e.vector
+                 FROM embeddings e
+                 JOIN images i ON i.id = e.image_id
+                 JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+                 WHERE e.model_name = ?1 AND {NORMAL_LIBRARY_FILE_PREDICATE}"
+            ))?;
             let rows = stmt.query_map(params![model_name], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
             })?;
@@ -386,17 +418,25 @@ impl Database {
     ) -> Result<EmbeddingPage> {
         let conn = self.conn.lock();
         let total: u32 = conn.query_row(
-            "SELECT COUNT(*) FROM embeddings WHERE model_name = ?1",
+            &format!(
+                "SELECT COUNT(DISTINCT e.image_id)
+                 FROM embeddings e
+                 JOIN images i ON i.id = e.image_id
+                 JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+                 WHERE e.model_name = ?1 AND {NORMAL_LIBRARY_FILE_PREDICATE}"
+            ),
             params![model_name],
             |row| row.get(0),
         )?;
-        let mut stmt = conn.prepare(
-            "SELECT image_id, vector, dims
-             FROM embeddings
-             WHERE model_name = ?1
-             ORDER BY image_id
-             LIMIT ?2 OFFSET ?3",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT DISTINCT e.image_id, e.vector, e.dims
+             FROM embeddings e
+             JOIN images i ON i.id = e.image_id
+             JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+             WHERE e.model_name = ?1 AND {NORMAL_LIBRARY_FILE_PREDICATE}
+             ORDER BY e.image_id
+             LIMIT ?2 OFFSET ?3"
+        ))?;
         let rows = stmt.query_map(params![model_name, limit, offset], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -447,8 +487,9 @@ impl Database {
              LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
              LEFT JOIN image_color_metrics cm ON cm.image_id = i.id
              LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
-             WHERE e.model_name = ? AND ({scope_clause}) AND {}",
-            visibility.sql_predicate()
+             WHERE e.model_name = ? AND ({scope_clause}) AND {} AND {}",
+            visibility.sql_predicate(),
+            membership_predicate_for_embedding_scope(scope)
         );
 
         let mut query_params = vec![Value::Text(model_name.to_string())];
@@ -525,8 +566,9 @@ impl Database {
              LEFT JOIN image_quality_metrics qm ON qm.image_id = i.id
              LEFT JOIN image_color_metrics cm ON cm.image_id = i.id
              LEFT JOIN image_similarity_group_items sgi ON sgi.image_id = i.id
-             WHERE ({scope_clause}) AND {}",
-            visibility.sql_predicate()
+             WHERE ({scope_clause}) AND {} AND {}",
+            visibility.sql_predicate(),
+            membership_predicate_for_embedding_scope(scope)
         );
         let (total, ids): (u32, Vec<String>) = {
             let mut conn = self.read_connection();
@@ -597,8 +639,13 @@ impl Database {
         // database access (including UI reads) for the duration.
         let raw_rows: Vec<(String, Vec<u8>)> = {
             let conn = self.conn.lock();
-            let mut stmt =
-                conn.prepare("SELECT image_id, vector FROM embeddings WHERE model_name = ?1")?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT DISTINCT e.image_id, e.vector
+                 FROM embeddings e
+                 JOIN images i ON i.id = e.image_id
+                 JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+                 WHERE e.model_name = ?1 AND {NORMAL_LIBRARY_FILE_PREDICATE}"
+            ))?;
             let rows = stmt.query_map(params![model_name], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
             })?;
@@ -636,6 +683,10 @@ impl Database {
         top_k: usize,
     ) -> Result<Option<Vec<(String, f32)>>> {
         let (scope_clause, scope_params, visibility) = scoped_where_clause(scope)?;
+        let scope_clause = format!(
+            "({scope_clause}) AND {}",
+            membership_predicate_for_embedding_scope(scope)
+        );
         self.find_similar_with_candidate_filter(
             image_id,
             model_name,
@@ -658,7 +709,7 @@ impl Database {
             image_id,
             model_name,
             top_k,
-            "1 = 1",
+            NORMAL_LIBRARY_FILE_PREDICATE,
             Vec::new(),
             "1 = 1",
         )
@@ -675,16 +726,19 @@ impl Database {
         tag_norms: &[String],
         top_k: usize,
     ) -> Result<Option<Vec<(String, f32)>>> {
-        let Some((scope_clause, scope_params)) =
+        let Some((scope_clause, mut scope_params)) =
             image_scope_filter(folders, collections, tag_norms)
         else {
             return Ok(Some(Vec::new()));
         };
+        let (membership_predicate, membership_params) =
+            membership_predicate_for_token_scope(collections);
+        scope_params.extend(membership_params);
         self.find_similar_with_candidate_filter(
             image_id,
             model_name,
             top_k,
-            &scope_clause,
+            &format!("({scope_clause}) AND ({membership_predicate})"),
             scope_params,
             "1 = 1",
         )
@@ -765,7 +819,13 @@ impl Database {
     pub fn embedding_count(&self, model_name: &str) -> Result<u32> {
         let conn = self.conn.lock();
         conn.query_row(
-            "SELECT COUNT(*) FROM embeddings WHERE model_name = ?1",
+            &format!(
+                "SELECT COUNT(DISTINCT e.image_id)
+                 FROM embeddings e
+                 JOIN images i ON i.id = e.image_id
+                 JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
+                 WHERE e.model_name = ?1 AND {NORMAL_LIBRARY_FILE_PREDICATE}"
+            ),
             params![model_name],
             |row| row.get(0),
         )
@@ -787,6 +847,27 @@ mod tests {
             params![id, format!("hash_{}", id)],
         )
         .unwrap();
+        conn.execute(
+            "INSERT INTO image_files (id, image_id, path, last_seen_at, missing_at)
+             VALUES (?1, ?2, ?3, '2026-01-01', NULL)",
+            params![format!("file_{id}"), id, format!("/library/{id}.png")],
+        )
+        .unwrap();
+    }
+
+    fn referenced_source() -> ReferencedSource {
+        ReferencedSource {
+            id: "source-1".into(),
+            platform_volume_id: Some("volume-uuid-1".into()),
+            display_name: "UNTITLED".into(),
+            last_mount_path: Some("/Volumes/UNTITLED".into()),
+            source_kind: ReferencedSourceKind::SdCard,
+            capacity_bytes: Some(64_000_000_000),
+            recursive_default: false,
+            settings_json: "{}".into(),
+            last_seen_at: "2026-09-01T10:00:00Z".into(),
+            offline_at: None,
+        }
     }
 
     fn insert_scoped_image(
@@ -813,6 +894,16 @@ mod tests {
             params![format!("file_{id}"), id, path],
         )
         .unwrap();
+    }
+
+    fn mark_as_browsed_file(db: &Database, file_id: &str) {
+        db.conn
+            .lock()
+            .execute(
+                "UPDATE image_files SET library_member = 0 WHERE id = ?1",
+                params![file_id],
+            )
+            .unwrap();
     }
 
     fn reject_image(db: &Database, id: &str) {
@@ -1148,6 +1239,191 @@ mod tests {
         assert_eq!(ids_for_scope(&db, &detected), vec!["a-keep", "c-other"]);
         assert_eq!(ids_for_scope(&db, &batch), vec!["a-keep"]);
         assert_eq!(ids_for_scope(&db, &all_hidden), vec!["a-keep", "c-other"]);
+    }
+
+    #[test]
+    fn automatic_embedding_scopes_exclude_referenced_only_images_but_collections_keep_them() {
+        let db = open_test_db();
+        db.upsert_referenced_source(&referenced_source()).unwrap();
+
+        insert_scoped_image(
+            &db,
+            "referenced-only",
+            "/Volumes/UNTITLED/DCIM/only.jpg",
+            500,
+            500,
+            Some("batch-1"),
+        );
+        db.attach_referenced_file("source-1", "file_referenced-only", "DCIM/only.jpg")
+            .unwrap();
+        mark_as_browsed_file(&db, "file_referenced-only");
+        db.store_embedding("referenced-only", "model", &[1.0, 0.0])
+            .unwrap();
+
+        insert_scoped_image(
+            &db,
+            "mixed",
+            "/Volumes/UNTITLED/DCIM/mixed.jpg",
+            500,
+            500,
+            Some("batch-1"),
+        );
+        db.attach_referenced_file("source-1", "file_mixed", "DCIM/mixed.jpg")
+            .unwrap();
+        mark_as_browsed_file(&db, "file_mixed");
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "INSERT INTO image_files (id, image_id, path, last_seen_at, missing_at)
+                 VALUES ('mixed-normal-file', 'mixed', '/Pictures/mixed.jpg', '2026-09-01', NULL)",
+                [],
+            )
+            .unwrap();
+        }
+        db.store_embedding("mixed", "model", &[0.8, 0.6]).unwrap();
+
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "INSERT INTO projects (id, name, collection_type, created_at)
+                 VALUES ('collection-1', 'Keep referenced', 'manual', '2026-09-01')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO collection_items (collection_id, image_id, position)
+                 VALUES ('collection-1', 'referenced-only', 0)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let all = EmbeddingScope::All {
+            include_rejected: true,
+        };
+        let collection = EmbeddingScope::Collection {
+            id: "collection-1".into(),
+            include_rejected: true,
+        };
+
+        assert_eq!(ids_for_scope(&db, &all), vec!["mixed"]);
+        assert_eq!(
+            db.get_scoped_embedding_page("model", &all, 20, 0)
+                .unwrap()
+                .ids,
+            vec!["mixed"]
+        );
+        assert_eq!(ids_for_scope(&db, &collection), vec!["referenced-only"]);
+        assert_eq!(
+            db.get_scoped_embedding_page("model", &collection, 20, 0)
+                .unwrap()
+                .ids,
+            vec!["referenced-only"]
+        );
+        assert_eq!(
+            db.get_all_embeddings("model")
+                .unwrap()
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            vec!["mixed"]
+        );
+        assert_eq!(
+            db.get_embedding_page("model", 20, 0).unwrap().ids,
+            vec!["mixed"]
+        );
+        assert_eq!(db.embedding_count("model").unwrap(), 1);
+    }
+
+    #[test]
+    fn automatic_similarity_scopes_exclude_referenced_only_candidates() {
+        let db = open_test_db();
+        db.upsert_referenced_source(&referenced_source()).unwrap();
+
+        insert_scoped_image(&db, "source", "/Pictures/source.jpg", 500, 500, None);
+        db.store_embedding("source", "model", &[1.0, 0.0]).unwrap();
+
+        insert_scoped_image(
+            &db,
+            "referenced-only",
+            "/Volumes/UNTITLED/DCIM/only.jpg",
+            500,
+            500,
+            None,
+        );
+        db.attach_referenced_file("source-1", "file_referenced-only", "DCIM/only.jpg")
+            .unwrap();
+        mark_as_browsed_file(&db, "file_referenced-only");
+        db.store_embedding("referenced-only", "model", &[0.999, 0.001])
+            .unwrap();
+
+        insert_scoped_image(
+            &db,
+            "mixed",
+            "/Volumes/UNTITLED/DCIM/mixed.jpg",
+            500,
+            500,
+            None,
+        );
+        db.attach_referenced_file("source-1", "file_mixed", "DCIM/mixed.jpg")
+            .unwrap();
+        mark_as_browsed_file(&db, "file_mixed");
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "INSERT INTO image_files (id, image_id, path, last_seen_at, missing_at)
+                 VALUES ('mixed-normal-file', 'mixed', '/Pictures/mixed.jpg', '2026-09-01', NULL)",
+                [],
+            )
+            .unwrap();
+        }
+        db.store_embedding("mixed", "model", &[0.8, 0.6]).unwrap();
+
+        let all = EmbeddingScope::All {
+            include_rejected: true,
+        };
+        let similarity = db.find_similar(&[0.6, 0.8], "model", 1).unwrap();
+        assert_eq!(similarity[0].0, "mixed");
+        assert_eq!(
+            db.find_similar_live("source", "model", 20)
+                .unwrap()
+                .unwrap(),
+            vec![("mixed".to_string(), 0.8)]
+        );
+        assert_eq!(
+            db.find_similar_in_scope("source", "model", &all, 20)
+                .unwrap()
+                .unwrap(),
+            vec![("mixed".to_string(), 0.8)]
+        );
+        assert_eq!(
+            db.find_similar_in_token_scope("source", "model", &["/".into()], &[], &[], 20)
+                .unwrap()
+                .unwrap(),
+            vec![("mixed".to_string(), 0.8)]
+        );
+
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "INSERT INTO projects (id, name, collection_type, created_at)
+                 VALUES ('collection-1', 'Keep referenced', 'manual', '2026-09-01')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO collection_items (collection_id, image_id, position)
+                 VALUES ('collection-1', 'referenced-only', 0)",
+                [],
+            )
+            .unwrap();
+        }
+        let collection_neighbors = db
+            .find_similar_in_token_scope("source", "model", &[], &["collection-1".into()], &[], 20)
+            .unwrap()
+            .unwrap();
+        assert_eq!(collection_neighbors.len(), 1);
+        assert_eq!(collection_neighbors[0].0, "referenced-only");
     }
 
     #[test]

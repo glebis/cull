@@ -2,10 +2,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
+import { get } from 'svelte/store';
 import type { ImageWithFile } from '$lib/api';
 
 const mocks = vi.hoisted(() => ({
     setDecision: vi.fn().mockResolvedValue(undefined),
+    resolveImageOriginalPath: vi.fn(),
+    listOpenWithApplications: vi.fn().mockResolvedValue([]),
+    openPath: vi.fn(),
     commandShortcutHints: vi.fn((ids: string[]) => {
         const shortcuts: Record<string, string> = {
             'image.rating.0': '0',
@@ -25,14 +29,16 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
+vi.mock('@tauri-apps/plugin-opener', () => ({ openPath: mocks.openPath }));
 vi.mock('$lib/api', () => ({
     addToCollection: vi.fn(),
     createCollection: vi.fn(),
     listCollections: vi.fn().mockResolvedValue([]),
     listFolders: vi.fn().mockResolvedValue([]),
-    listOpenWithApplications: vi.fn().mockResolvedValue([]),
+    listOpenWithApplications: mocks.listOpenWithApplications,
     moveImage: vi.fn(),
     openImagesWithApplication: vi.fn(),
+    resolveImageOriginalPath: mocks.resolveImageOriginalPath,
     removeFromCollection: vi.fn(),
     renameImage: vi.fn(),
     setDecision: mocks.setDecision,
@@ -54,6 +60,7 @@ vi.mock('$lib/command-palette', () => ({
 vi.mock('$lib/image-copy-action', () => ({ copyImageWithToast: vi.fn() }));
 
 import ContextMenu from './ContextMenu.svelte';
+import { toasts } from '$lib/stores';
 
 const image: ImageWithFile = {
     image: {
@@ -76,7 +83,10 @@ const image: ImageWithFile = {
 };
 
 afterEach(() => cleanup());
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+    vi.clearAllMocks();
+    toasts.set([]);
+});
 
 describe('ContextMenu shortcut hints', () => {
     it('moves initial keyboard focus to the first root menu item', async () => {
@@ -126,5 +136,36 @@ describe('ContextMenu shortcut hints', () => {
 
         await fireEvent.keyDown(container.querySelector('[role="menu"]')!, { key: 'a' });
         expect(mocks.setDecision).toHaveBeenCalledWith('image-one', 'accept', null);
+    });
+
+    it('opens the resolver-provided original from the context menu', async () => {
+        mocks.resolveImageOriginalPath.mockResolvedValue('/Pictures/kept.jpg');
+        const { getByText } = render(ContextMenu, {
+            props: { image, x: 20, y: 20, onclose: vi.fn() },
+        });
+
+        await fireEvent.click(getByText('Open in Default App'));
+
+        await waitFor(() => {
+            expect(mocks.openPath).toHaveBeenCalledWith('/Pictures/kept.jpg');
+        });
+    });
+
+    it('shows reconnect guidance when loading the Open With submenu cannot reach an original', async () => {
+        mocks.listOpenWithApplications.mockRejectedValue(
+            new Error('Reconnect UNTITLED to open originals'),
+        );
+        const { container } = render(ContextMenu, {
+            props: { image, x: 20, y: 20, onclose: vi.fn() },
+        });
+
+        await fireEvent.mouseEnter(container.querySelector('[data-submenu-key="openwith"]')!.parentElement!);
+
+        await waitFor(() => {
+            expect(get(toasts).at(-1)).toMatchObject({
+                message: 'Reconnect UNTITLED to open originals',
+                type: 'warning',
+            });
+        });
     });
 });

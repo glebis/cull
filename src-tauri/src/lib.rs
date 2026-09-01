@@ -415,6 +415,8 @@ pub fn run() {
             {
                 let state: tauri::State<'_, AppState> = app.state();
                 let db = state.db.clone();
+                let cleanup_db = db.clone();
+                let app_data_dir = state.app_data_dir.clone();
                 let handle = app.handle().clone();
                 let provider = std::sync::Arc::new(
                     mounted_sources::PlatformMountedSourceProvider,
@@ -424,6 +426,16 @@ pub fn run() {
                     provider,
                     std::time::Duration::from_secs(2),
                     move |refresh| {
+                        if let Ok(image_ids) = cleanup_db
+                            .thumbnail_purge_candidates_for_offline_sources(&refresh.offline_ids)
+                        {
+                            for image_id in image_ids {
+                                crate::db_core::thumbnails::remove_thumbnails_for_image(
+                                    &app_data_dir,
+                                    &image_id,
+                                );
+                            }
+                        }
                         let _ = handle.emit("sources:changed", refresh);
                     },
                 ));
@@ -796,6 +808,7 @@ pub fn run() {
             commands::files::create_subfolder,
             commands::files::share_images,
             commands::files::open_images_with_application,
+            commands::files::resolve_image_original_path,
             commands::files::list_open_with_applications,
             commands::agent_snapshots::capture_agent_window_snapshot,
             commands::agent_snapshots::complete_agent_view_snapshot,
