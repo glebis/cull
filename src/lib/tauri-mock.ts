@@ -669,6 +669,12 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     analyzed_at: '2026-01-01T00:00:00Z',
   }),
   get_color_metrics_count: () => 18,
+  get_dominant_colors: () => {
+    const palette = ['#7aa2f7', '#9ece6a', '#e0af68', '#bb9af7', '#f7768e', '#414868'];
+    return Object.fromEntries(
+      Array.from({ length: 24 }, (_, i) => [`img-${i + 1}`, palette[i % palette.length]]),
+    );
+  },
   list_images_by_color_bucket: () => [makeMockImage(1), makeMockImage(4), makeMockImage(7)],
   analyze_perceptual_hashes: (_: any, args: { imageIds: string[] }) => args.imageIds.length,
   get_image_perceptual_hash: (_: any, args: { imageId: string }) => ({

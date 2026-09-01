@@ -700,6 +700,7 @@ pub fn run() {
             commands::color::analyze_image_colors,
             commands::color::get_image_color_metrics,
             commands::color::get_color_metrics_count,
+            commands::color::get_dominant_colors,
             commands::color::list_images_by_color_bucket,
             commands::perceptual_hash::analyze_perceptual_hashes,
             commands::perceptual_hash::get_image_perceptual_hash,

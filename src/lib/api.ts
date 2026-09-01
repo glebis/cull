@@ -1482,6 +1482,10 @@ export async function getColorMetricsCount(): Promise<number> {
     return invoke('get_color_metrics_count');
 }
 
+export async function getDominantColors(): Promise<Record<string, string>> {
+    return invoke('get_dominant_colors');
+}
+
 export async function listImagesByColorBucket(
     bucket: string,
     limit = 100,
