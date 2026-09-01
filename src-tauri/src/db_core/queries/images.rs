@@ -1057,10 +1057,20 @@ impl Database {
     }
 
     pub fn insert_image_file(&self, file: &ImageFile) -> Result<()> {
+        self.insert_image_file_with_library_membership(file, true)
+    }
+
+    pub(crate) fn insert_image_file_with_library_membership(
+        &self,
+        file: &ImageFile,
+        library_member: bool,
+    ) -> Result<()> {
         let conn = self.conn.lock();
         conn.execute(
-            "INSERT OR REPLACE INTO image_files (id, image_id, path, last_seen_at, missing_at, last_seen_size, last_seen_mtime)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT OR REPLACE INTO image_files (
+                id, image_id, path, last_seen_at, missing_at, last_seen_size, last_seen_mtime,
+                library_member
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 file.id,
                 file.image_id,
@@ -1068,7 +1078,8 @@ impl Database {
                 file.last_seen_at,
                 file.missing_at,
                 sql_opt_u64(file.last_seen_size)?,
-                file.last_seen_mtime
+                file.last_seen_mtime,
+                library_member,
             ],
         )?;
 
@@ -1098,6 +1109,40 @@ impl Database {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn promote_image_file_to_library(&self, file_id: &str) -> Result<bool> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let (image_id, library_member): (String, bool) = tx.query_row(
+            "SELECT image_id, library_member FROM image_files WHERE id = ?1",
+            params![file_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if library_member {
+            return Ok(false);
+        }
+
+        let already_in_library: bool = tx.query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM image_files
+                 WHERE image_id = ?1 AND library_member = 1
+             )",
+            params![image_id],
+            |row| row.get(0),
+        )?;
+        if !already_in_library {
+            tx.execute(
+                "UPDATE images SET imported_at = datetime('now') WHERE id = ?1",
+                params![image_id],
+            )?;
+        }
+        tx.execute(
+            "UPDATE image_files SET library_member = 1 WHERE id = ?1",
+            params![file_id],
+        )?;
+        tx.commit()?;
+        Ok(true)
     }
 
     pub fn add_library_root(&self, path: &str) -> Result<String> {

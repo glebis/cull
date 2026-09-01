@@ -260,7 +260,8 @@ CREATE TABLE IF NOT EXISTS image_files (
     path TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     missing_at TEXT
-, last_seen_size INTEGER, last_seen_mtime TEXT);
+, last_seen_size INTEGER, last_seen_mtime TEXT,
+    library_member INTEGER NOT NULL DEFAULT 1 CHECK (library_member IN (0, 1)));
 
 CREATE TABLE IF NOT EXISTS image_metadata (
     image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,

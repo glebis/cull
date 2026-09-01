@@ -4,8 +4,7 @@ use super::visibility::RejectedVisibility;
 use rusqlite::{params, params_from_iter, types::Type, Error, Result};
 use std::path::{Component, Path, PathBuf};
 
-pub(crate) const NORMAL_LIBRARY_FILE_PREDICATE: &str =
-    "NOT EXISTS (SELECT 1 FROM referenced_files rf_library WHERE rf_library.image_file_id = f.id)";
+pub(crate) const NORMAL_LIBRARY_FILE_PREDICATE: &str = "f.library_member = 1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OriginalFileCandidate {
@@ -217,10 +216,7 @@ impl Database {
                AND NOT EXISTS (
                    SELECT 1 FROM image_files normal
                    WHERE normal.image_id = f.image_id
-                     AND NOT EXISTS (
-                         SELECT 1 FROM referenced_files normal_rf
-                         WHERE normal_rf.image_file_id = normal.id
-                     )
+                     AND normal.library_member = 1
                )
                AND NOT EXISTS (
                    SELECT 1
@@ -350,14 +346,18 @@ impl Database {
         let tx = conn.transaction()?;
         let linked = {
             let mut stmt = tx.prepare(
-                "SELECT rf.image_file_id, f.image_id
+                "SELECT rf.image_file_id, f.image_id, f.library_member
                  FROM referenced_files rf
                  JOIN image_files f ON f.id = rf.image_file_id
                  WHERE rf.source_id = ?1",
             )?;
             let files = stmt
                 .query_map(params![source_id], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, bool>(2)?,
+                    ))
                 })?
                 .collect::<Result<Vec<_>>>()?;
             files
@@ -366,12 +366,17 @@ impl Database {
             "DELETE FROM referenced_sources WHERE id = ?1",
             params![source_id],
         )?;
-        for (file_id, _) in &linked {
-            tx.execute("DELETE FROM image_files WHERE id = ?1", params![file_id])?;
+        for (file_id, _, library_member) in &linked {
+            if !library_member {
+                tx.execute("DELETE FROM image_files WHERE id = ?1", params![file_id])?;
+            }
         }
 
         let mut orphaned = Vec::new();
-        for (_, image_id) in linked {
+        for (_, image_id, library_member) in linked {
+            if library_member {
+                continue;
+            }
             let remaining: i64 = tx.query_row(
                 "SELECT COUNT(*) FROM image_files WHERE image_id = ?1",
                 params![image_id],
@@ -426,6 +431,15 @@ mod tests {
             "INSERT INTO image_files (id, image_id, path, last_seen_at)
              VALUES (?1, ?2, ?3, '2026-08-30')",
             params![file_id, image_id, path],
+        )
+        .unwrap();
+    }
+
+    fn mark_browse_only(db: &Database, file_id: &str) {
+        let conn = db.conn.lock();
+        conn.execute(
+            "UPDATE image_files SET library_member = 0 WHERE id = ?1",
+            params![file_id],
         )
         .unwrap();
     }
@@ -523,6 +537,7 @@ mod tests {
             "file-1",
             "/Volumes/UNTITLED/DCIM/100CANON/IMG_0001.JPG",
         );
+        mark_browse_only(&db, "file-1");
         db.attach_referenced_file("source-1", "file-1", "DCIM/100CANON/IMG_0001.JPG")
             .unwrap();
         db.set_decision("image-1", "accept").unwrap();
@@ -594,6 +609,7 @@ mod tests {
             "file-1",
             "/Volumes/UNTITLED/DCIM/100CANON/IMG_0001.JPG",
         );
+        mark_browse_only(&db, "file-1");
         db.attach_referenced_file("source-1", "file-1", "DCIM/100CANON/IMG_0001.JPG")
             .unwrap();
 
@@ -626,6 +642,7 @@ mod tests {
             "file-1",
             "/Volumes/UNTITLED/DCIM/100CANON/IMG_0001.JPG",
         );
+        mark_browse_only(&db, "file-1");
         db.attach_referenced_file("source-1", "file-1", "DCIM/100CANON/IMG_0001.JPG")
             .unwrap();
         {
@@ -671,6 +688,7 @@ mod tests {
             "referenced-only-file",
             "/Volumes/UNTITLED/referenced-only.jpg",
         );
+        mark_browse_only(&db, "referenced-only-file");
         db.attach_referenced_file("source-1", "referenced-only-file", "referenced-only.jpg")
             .unwrap();
 
@@ -680,6 +698,7 @@ mod tests {
             "also-online-file",
             "/Volumes/UNTITLED/also-online.jpg",
         );
+        mark_browse_only(&db, "also-online-file");
         db.attach_referenced_file("source-1", "also-online-file", "also-online.jpg")
             .unwrap();
         {
@@ -691,6 +710,7 @@ mod tests {
             )
             .unwrap();
         }
+        mark_browse_only(&db, "also-online-file-source-2");
         db.attach_referenced_file("source-2", "also-online-file-source-2", "also-online.jpg")
             .unwrap();
 
@@ -700,6 +720,7 @@ mod tests {
             "mixed-referenced-file",
             "/Volumes/UNTITLED/mixed.jpg",
         );
+        mark_browse_only(&db, "mixed-referenced-file");
         db.attach_referenced_file("source-1", "mixed-referenced-file", "mixed.jpg")
             .unwrap();
         {
@@ -724,6 +745,27 @@ mod tests {
     }
 
     #[test]
+    fn offline_thumbnail_purge_keeps_a_referenced_file_promoted_to_the_library() {
+        let (_dir, db) = test_db();
+        let mut source = sample_source();
+        source.offline_at = Some("2026-09-01T10:00:00Z".into());
+        db.upsert_referenced_source(&source).unwrap();
+        insert_image_file(
+            &db,
+            "promoted",
+            "same-file",
+            "/Volumes/UNTITLED/promoted.jpg",
+        );
+        db.attach_referenced_file("source-1", "same-file", "promoted.jpg")
+            .unwrap();
+
+        assert!(db
+            .thumbnail_purge_candidates_for_offline_sources(&["source-1".into()])
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
     fn scoped_library_browsing_excludes_referenced_files_in_all_or_branches() {
         let (_dir, db) = test_db();
         db.upsert_referenced_source(&sample_source()).unwrap();
@@ -733,6 +775,7 @@ mod tests {
             "referenced-file",
             "/Volumes/UNTITLED/DCIM/IMG_0001.JPG",
         );
+        mark_browse_only(&db, "referenced-file");
         db.attach_referenced_file("source-1", "referenced-file", "DCIM/IMG_0001.JPG")
             .unwrap();
         insert_image_file(&db, "kept-image", "kept-file", "/Pictures/kept.jpg");
@@ -757,6 +800,8 @@ mod tests {
         db.upsert_referenced_source(&sample_source()).unwrap();
         insert_image_file(&db, "orphan", "external-file", "/Volumes/UNTITLED/a.jpg");
         insert_image_file(&db, "shared", "external-shared", "/Volumes/UNTITLED/b.jpg");
+        mark_browse_only(&db, "external-file");
+        mark_browse_only(&db, "external-shared");
         {
             let conn = db.conn.lock();
             conn.execute(
@@ -781,5 +826,38 @@ mod tests {
             )
             .unwrap();
         assert_eq!(shared_count, 1);
+    }
+
+    #[test]
+    fn removing_source_keeps_a_same_path_file_that_was_promoted_to_library_membership() {
+        let (_dir, db) = test_db();
+        db.upsert_referenced_source(&sample_source()).unwrap();
+        insert_image_file(
+            &db,
+            "promoted",
+            "same-file",
+            "/Volumes/UNTITLED/promoted.jpg",
+        );
+        db.attach_referenced_file("source-1", "same-file", "promoted.jpg")
+            .unwrap();
+
+        assert!(db.remove_referenced_source("source-1").unwrap().is_empty());
+        let conn = db.conn.lock();
+        let image_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM images WHERE id = 'promoted'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let file_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM image_files WHERE id = 'same-file' AND library_member = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(image_count, 1);
+        assert_eq!(file_count, 1);
     }
 }

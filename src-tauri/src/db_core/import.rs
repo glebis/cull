@@ -25,6 +25,7 @@ pub fn is_module_raw_enabled(db: &Database) -> bool {
 pub enum SyncOutcome {
     Unchanged,
     Restored,
+    Promoted { image_id: String },
     ContentChanged { image_id: String },
     NewImport { image_id: String },
     Registered,
@@ -44,6 +45,31 @@ pub fn sync_file_cancellable<C>(
     file_path: &Path,
     app_data_dir: &Path,
     should_cancel: &C,
+) -> Result<SyncOutcome, String>
+where
+    C: Fn() -> bool + ?Sized,
+{
+    sync_file_cancellable_with_membership(db, file_path, app_data_dir, should_cancel, true)
+}
+
+pub(crate) fn sync_referenced_file_cancellable<C>(
+    db: &Database,
+    file_path: &Path,
+    app_data_dir: &Path,
+    should_cancel: &C,
+) -> Result<SyncOutcome, String>
+where
+    C: Fn() -> bool + ?Sized,
+{
+    sync_file_cancellable_with_membership(db, file_path, app_data_dir, should_cancel, false)
+}
+
+fn sync_file_cancellable_with_membership<C>(
+    db: &Database,
+    file_path: &Path,
+    app_data_dir: &Path,
+    should_cancel: &C,
+    library_member: bool,
 ) -> Result<SyncOutcome, String>
 where
     C: Fn() -> bool + ?Sized,
@@ -99,12 +125,28 @@ where
 
         if size_match && mtime_match && existing_file.missing_at.is_none() {
             let _ = db.touch_image_file(&existing_file.id, file_size, &mtime);
-            return Ok(SyncOutcome::Unchanged);
+            let promoted =
+                promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
+            return Ok(if promoted {
+                SyncOutcome::Promoted {
+                    image_id: existing_file.image_id,
+                }
+            } else {
+                SyncOutcome::Unchanged
+            });
         }
 
         if existing_file.missing_at.is_some() && size_match && mtime_match {
             let _ = db.touch_image_file(&existing_file.id, file_size, &mtime);
-            return Ok(SyncOutcome::Restored);
+            let promoted =
+                promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
+            return Ok(if promoted {
+                SyncOutcome::Promoted {
+                    image_id: existing_file.image_id,
+                }
+            } else {
+                SyncOutcome::Restored
+            });
         }
 
         let hash = hash_file_cancellable(file_path, should_cancel)?;
@@ -112,8 +154,20 @@ where
         if let Some(img) = db.find_by_hash(&hash).map_err(|e| e.to_string())? {
             if img.id == existing_file.image_id {
                 let _ = db.touch_image_file(&existing_file.id, file_size, &mtime);
+                let promoted =
+                    promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
                 return Ok(if existing_file.missing_at.is_some() {
-                    SyncOutcome::Restored
+                    if promoted {
+                        SyncOutcome::Promoted {
+                            image_id: existing_file.image_id,
+                        }
+                    } else {
+                        SyncOutcome::Restored
+                    }
+                } else if promoted {
+                    SyncOutcome::Promoted {
+                        image_id: existing_file.image_id,
+                    }
                 } else {
                     SyncOutcome::Unchanged
                 });
@@ -121,6 +175,7 @@ where
             if can_decode {
                 let _ = db.repoint_image_file(&existing_file.id, &img.id, file_size, &mtime);
                 if should_cancel() {
+                    promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
                     return Ok(SyncOutcome::ContentChanged { image_id: img.id });
                 }
                 match crate::db_core::image_decode::decode_image(file_path, module_raw) {
@@ -146,6 +201,7 @@ where
                 let _ = thumbnails::generate_document_thumbnail(file_path, app_data_dir, &img.id);
                 persist_pdf_media_metadata(db, file_path, &img.id)?;
             }
+            promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
             return Ok(SyncOutcome::ContentChanged { image_id: img.id });
         }
 
@@ -176,6 +232,7 @@ where
             let _ = thumbnails::generate_document_thumbnail(file_path, app_data_dir, &image_id);
             persist_pdf_media_metadata(db, file_path, &image_id)?;
         }
+        promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
         return Ok(SyncOutcome::ContentChanged { image_id });
     }
 
@@ -192,7 +249,7 @@ where
             last_seen_size: Some(file_size),
             last_seen_mtime: Some(mtime),
         };
-        db.insert_image_file(&file_record)
+        db.insert_image_file_with_library_membership(&file_record, library_member)
             .map_err(|e| e.to_string())?;
         return Ok(SyncOutcome::NewImport {
             image_id: existing_img.id,
@@ -224,7 +281,7 @@ where
         last_seen_size: Some(file_size),
         last_seen_mtime: Some(mtime),
     };
-    db.insert_image_file(&file_record)
+    db.insert_image_file_with_library_membership(&file_record, library_member)
         .map_err(|e| e.to_string())?;
 
     if can_decode {
@@ -244,6 +301,18 @@ where
     } else {
         Ok(SyncOutcome::Registered)
     }
+}
+
+fn promote_existing_file_if_requested(
+    db: &Database,
+    file_id: &str,
+    library_member: bool,
+) -> Result<bool, String> {
+    if !library_member {
+        return Ok(false);
+    }
+    db.promote_image_file_to_library(file_id)
+        .map_err(|error| error.to_string())
 }
 
 fn validate_pdf_import(file_path: &Path) -> Result<(), String> {
@@ -345,9 +414,9 @@ where
     C: Fn() -> bool + ?Sized,
 {
     match sync_file_cancellable(db, file_path, app_data_dir, should_cancel)? {
-        SyncOutcome::NewImport { image_id } | SyncOutcome::ContentChanged { image_id } => {
-            Ok(Some(image_id))
-        }
+        SyncOutcome::NewImport { image_id }
+        | SyncOutcome::ContentChanged { image_id }
+        | SyncOutcome::Promoted { image_id } => Ok(Some(image_id)),
         _ => Ok(None),
     }
 }
