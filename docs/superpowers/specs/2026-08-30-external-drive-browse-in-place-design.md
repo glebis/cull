@@ -18,13 +18,13 @@ Dragging is not the primary entry point. Mounted devices must be visible without
 
 1. Mounted SD cards and external drives appear automatically in a `Devices` section at the top of the sidebar.
 2. Clicking a device or folder opens it without an import dialog or copy step.
-3. Originals remain on the device. Cull stores only its database records, review decisions, and generated thumbnails locally.
+3. Originals remain on the device. Cull stores database records and review decisions locally. Generated thumbnails for referenced-only images are a disposable cache, not permanent library content.
 4. Folder scope is configurable between `Current folder` and `Include subfolders`. Cull remembers the last choice per referenced source.
 5. A dropped folder opens in browse-in-place mode. Copying files into Cull is a separate explicit action.
 6. Review actions never modify the external source. Rating, colour label, accept, reject, and collection membership are allowed; rename, move, trash, and permanent delete are disabled for referenced external files in the first release.
-7. Ejecting a device does not erase the review or mark every file individually missing. The source becomes offline, cached thumbnails and decisions remain visible, and full-resolution actions explain that the device must be reconnected.
+7. Ejecting a device does not erase the review or mark every file individually missing. The source becomes offline, review decisions remain, referenced-only thumbnails are purged, and original-dependent actions explain that the device must be reconnected. Reconnecting regenerates thumbnails on demand.
 8. Reconnecting the same device restores its source and file paths automatically when a stable platform volume identity is available. Cull never guesses when identity is ambiguous.
-9. Referenced images continue to participate in All Images, collections, filters, search, compare, and existing review shortcuts. Removing a referenced source from Cull removes only Cull's references and cached derivatives, never originals.
+9. Browsing a referenced source does not grant permanent library membership. Referenced-only images remain available in the active referenced-source scope and in explicit user collections, but are excluded from All Images, Library folders, automatic filters, search, and smart collections such as Recent Imports. An image with any non-referenced file record remains a library member. Removing a referenced source from Cull removes only Cull's references and cached derivatives, never originals.
 
 ## Interaction Design
 
@@ -71,9 +71,9 @@ Canvas keeps its explicit add-to-canvas semantics, but registration still refere
 When a source disconnects:
 
 - the device row becomes offline instead of disappearing if it has remembered review state;
-- the current grid remains stable and uses cached thumbnails;
+- the active referenced-source grid keeps its review state, but purged previews show a reconnect state until the source returns;
 - ratings and decisions remain editable because they live in Cull;
-- reveal, full-resolution loupe, export from original, and copy actions show `Reconnect <device>`;
+- reveal, full-resolution loupe, export from original, Open With, and copy actions show `Reconnect <device>`;
 - no watcher event may convert a whole disconnected source into thousands of missing-file records.
 
 If a different device appears at the same mount path, Cull treats it as a different source unless the stable volume identity matches.
@@ -120,8 +120,8 @@ Instead, split the existing eager import pipeline into independently schedulable
 
 1. discover supported paths for the requested page;
 2. reuse an unchanged existing `image_files` record when path, size, and modification time match;
-3. register and decode visible items first;
-4. generate the thumbnail required for the current grid size;
+3. register and decode visible items first without adding them to permanent library scopes;
+4. generate the thumbnail required for the current grid size as a disposable referenced-source cache;
 5. emit a batched `referenced-source:page-updated` event;
 6. run source detection, lineage, and optional analysis at lower priority after the item is usable.
 
@@ -191,7 +191,7 @@ type LibraryScope =
     };
 ```
 
-The new scope owns breadcrumb, recursion preference, paging, cancellation, offline state, and cache key. Existing selection and view stores continue to operate on returned `ImageWithFile` records.
+The new scope owns breadcrumb, recursion preference, paging, cancellation, offline state, and cache key. Existing selection and view stores continue to operate on returned `ImageWithFile` records. Permanent library queries exclude `image_files` rows linked through `referenced_files`; referenced-folder queries continue to read those rows directly.
 
 `Sidebar.svelte` should not absorb volume discovery logic. Add a focused `DevicesSection.svelte` and a small referenced-source store/service, then compose the section at the top of the existing sidebar.
 
