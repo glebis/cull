@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-01
+
+### Changed
+
+- **~26 MB smaller release bundle.** Release binaries are now stripped and link-time optimized; the bundled Claude Agent SDK is pruned to its runtime entry (sdk.mjs + package.json); bundled art is properly sized and quantized (favicon 810 KB → 2.4 KB, clipboard empty-state 550 KB → 35 KB, DMG background 306 KB → 68 KB). Unused framework placeholder SVGs and two unused EB Garamond faces were removed, and OS junk files no longer ship in the frontend build. Cull.app 71 MB → 45 MB, DMG 26.8 MB → 20.4 MB. No behavior changes; runtime import resolution verified in the built app.
+
 ### Added
 
 - **Sidebar: recency rail above the folder tree.** Persistent `Just imported:` chip and last-N scope list above LIBRARY; auto-reveal + highlight until visited. Replaces the 8-second toast. (`imageview-1i2k.1`)
