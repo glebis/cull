@@ -515,6 +515,35 @@ fn image_file_bytes_for_id(db: &Database, image_id: &str) -> Result<ImageFileByt
     })
 }
 
+pub(crate) fn resolve_image_original_path_for_db(
+    db: &Database,
+    image_id: &str,
+) -> Result<String, String> {
+    let candidates = db
+        .original_file_candidates(image_id)
+        .map_err(|error| error.to_string())?;
+    if let Some((path, _is_referenced)) = candidates
+        .into_iter()
+        .find(|(path, _is_referenced)| Path::new(path).exists())
+    {
+        return Ok(path);
+    }
+
+    if let Some(source) = db
+        .referenced_source_for_image(image_id)
+        .map_err(|error| error.to_string())?
+    {
+        if source.offline_at.is_some() {
+            return Err(format!(
+                "Reconnect {} to open originals",
+                source.display_name
+            ));
+        }
+    }
+
+    Err(format!("Image '{image_id}' has no available original"))
+}
+
 fn sanitize_extension(extension: &str) -> String {
     let cleaned: String = extension
         .trim()
@@ -1242,21 +1271,20 @@ pub async fn open_images_with_application(
     let app_bundle = PathBuf::from(&app_path);
     validate_app_bundle(&app_bundle)?;
 
-    let id_refs: Vec<&str> = image_ids.iter().map(|id| id.as_str()).collect();
-    let found = state
-        .db
-        .get_images_by_ids(&id_refs)
-        .map_err(|e| e.to_string())?;
-    let img = found
-        .first()
-        .ok_or_else(|| format!("Image '{}' not found", image_ids[0]))?;
-
-    let path = PathBuf::from(&img.path);
-    if !path.exists() {
-        return Err(format!("Cannot open missing file: {}", img.path));
-    }
+    let path = PathBuf::from(resolve_image_original_path_for_db(
+        &state.db,
+        &image_ids[0],
+    )?);
 
     open_paths_with_application(&app_bundle, vec![path])
+}
+
+#[tauri::command]
+pub async fn resolve_image_original_path(
+    state: State<'_, AppState>,
+    image_id: String,
+) -> Result<String, String> {
+    resolve_image_original_path_for_db(&state.db, &image_id)
 }
 
 #[tauri::command]
@@ -1264,21 +1292,7 @@ pub async fn list_open_with_applications(
     state: State<'_, AppState>,
     image_id: String,
 ) -> Result<Vec<OpenWithApplication>, String> {
-    let images = state
-        .db
-        .get_images_by_ids(&[&image_id])
-        .map_err(|e| e.to_string())?;
-    let img = images
-        .first()
-        .ok_or_else(|| format!("Image '{}' not found", image_id))?;
-
-    let path = PathBuf::from(&img.path);
-    if !path.exists() {
-        return Err(format!(
-            "Cannot list applications for missing file: {}",
-            img.path
-        ));
-    }
+    let path = PathBuf::from(resolve_image_original_path_for_db(&state.db, &image_id)?);
 
     list_applications_for_path(&path)
 }
@@ -1483,8 +1497,55 @@ fn share_paths(_app: AppHandle, _window_label: String, _paths: Vec<PathBuf>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db_core::models::{Image, ImageFile, ReferencedSource, ReferencedSourceKind};
     use image::{ImageBuffer, Rgba};
     use std::io::Write;
+
+    fn insert_original_candidate(
+        db: &Database,
+        image_id: &str,
+        file_id: &str,
+        path: &std::path::Path,
+    ) {
+        db.insert_image(&Image {
+            id: image_id.to_string(),
+            sha256_hash: format!("hash-{image_id}"),
+            width: 1,
+            height: 1,
+            format: "jpg".to_string(),
+            file_size: 1,
+            created_at: "2026-09-01T10:00:00Z".to_string(),
+            imported_at: "2026-09-01T10:00:00Z".to_string(),
+            ai_prompt: None,
+            raw_metadata: None,
+        })
+        .unwrap();
+        db.insert_image_file(&ImageFile {
+            id: file_id.to_string(),
+            image_id: image_id.to_string(),
+            path: path.to_string_lossy().to_string(),
+            last_seen_at: "2026-09-01T10:00:00Z".to_string(),
+            missing_at: None,
+            last_seen_size: None,
+            last_seen_mtime: None,
+        })
+        .unwrap();
+    }
+
+    fn offline_referenced_source() -> ReferencedSource {
+        ReferencedSource {
+            id: "source-untitled".to_string(),
+            platform_volume_id: Some("volume-untitled".to_string()),
+            display_name: "UNTITLED".to_string(),
+            last_mount_path: Some("/Volumes/UNTITLED".to_string()),
+            source_kind: ReferencedSourceKind::SdCard,
+            capacity_bytes: None,
+            recursive_default: false,
+            settings_json: "{}".to_string(),
+            last_seen_at: "2026-09-01T10:00:00Z".to_string(),
+            offline_at: Some("2026-09-01T11:00:00Z".to_string()),
+        }
+    }
 
     #[derive(Default)]
     struct FailingWatchOps {
@@ -1614,6 +1675,54 @@ mod tests {
         let db = Database::open(std::path::Path::new(":memory:")).unwrap();
         let err = image_file_bytes_for_id(&db, "missing").unwrap_err();
         assert!(err.contains("Image 'missing' not found"));
+    }
+
+    #[test]
+    fn original_resolution_prefers_an_available_normal_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let local_path = tmp.path().join("local.jpg");
+        std::fs::write(&local_path, b"local original").unwrap();
+        let referenced_path = tmp.path().join("referenced.jpg");
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+
+        insert_original_candidate(&db, "mixed", "mixed-local", &local_path);
+        db.insert_image_file(&ImageFile {
+            id: "mixed-referenced".to_string(),
+            image_id: "mixed".to_string(),
+            path: referenced_path.to_string_lossy().to_string(),
+            last_seen_at: "2026-09-01T10:00:00Z".to_string(),
+            missing_at: None,
+            last_seen_size: None,
+            last_seen_mtime: None,
+        })
+        .unwrap();
+        db.upsert_referenced_source(&offline_referenced_source())
+            .unwrap();
+        db.attach_referenced_file("source-untitled", "mixed-referenced", "referenced.jpg")
+            .unwrap();
+
+        assert_eq!(
+            resolve_image_original_path_for_db(&db, "mixed").unwrap(),
+            local_path.to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn offline_referenced_original_names_the_source_to_reconnect() {
+        let tmp = tempfile::tempdir().unwrap();
+        let unavailable_path = tmp.path().join("offline.jpg");
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+
+        insert_original_candidate(&db, "offline-only", "offline-file", &unavailable_path);
+        db.upsert_referenced_source(&offline_referenced_source())
+            .unwrap();
+        db.attach_referenced_file("source-untitled", "offline-file", "offline.jpg")
+            .unwrap();
+
+        assert_eq!(
+            resolve_image_original_path_for_db(&db, "offline-only").unwrap_err(),
+            "Reconnect UNTITLED to open originals"
+        );
     }
 
     #[test]

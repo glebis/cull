@@ -38,6 +38,21 @@ fn validate_relative_path(relative_path: &str) -> Result<()> {
 }
 
 impl Database {
+    pub fn original_file_candidates(&self, image_id: &str) -> Result<Vec<(String, bool)>> {
+        let conn = self.read_connection();
+        let mut stmt = conn.prepare(
+            "SELECT f.path, rf.image_file_id IS NOT NULL
+             FROM image_files f
+             LEFT JOIN referenced_files rf ON rf.image_file_id = f.id
+             WHERE f.image_id = ?1
+             ORDER BY (rf.image_file_id IS NOT NULL) ASC, (f.missing_at IS NOT NULL) ASC, f.id ASC",
+        )?;
+        let candidates = stmt
+            .query_map(params![image_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect();
+        candidates
+    }
+
     pub fn ensure_original_mutation_allowed(&self, image_id: &str) -> Result<()> {
         if self.referenced_source_for_image(image_id)?.is_some() {
             return Err(Error::InvalidParameterName(
@@ -427,6 +442,34 @@ mod tests {
         let source = sample_source();
         db.upsert_referenced_source(&source).unwrap();
         assert_eq!(db.list_referenced_sources().unwrap(), vec![source]);
+    }
+
+    #[test]
+    fn original_file_candidates_prefer_normal_rows_before_referenced_rows() {
+        let (_dir, db) = test_db();
+        let normal_path = "/library/normal.jpg";
+        let referenced_path = "/Volumes/UNTITLED/referenced.jpg";
+        insert_image_file(&db, "image-1", "z-normal", normal_path);
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "INSERT INTO image_files (id, image_id, path, last_seen_at)
+                 VALUES ('a-referenced', 'image-1', ?1, '2026-08-30')",
+                params![referenced_path],
+            )
+            .unwrap();
+        }
+        db.upsert_referenced_source(&sample_source()).unwrap();
+        db.attach_referenced_file("source-1", "a-referenced", "referenced.jpg")
+            .unwrap();
+
+        assert_eq!(
+            db.original_file_candidates("image-1").unwrap(),
+            vec![
+                (normal_path.to_string(), false),
+                (referenced_path.to_string(), true),
+            ]
+        );
     }
 
     #[test]

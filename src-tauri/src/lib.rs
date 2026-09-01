@@ -808,6 +808,7 @@ pub fn run() {
             commands::files::create_subfolder,
             commands::files::share_images,
             commands::files::open_images_with_application,
+            commands::files::resolve_image_original_path,
             commands::files::list_open_with_applications,
             commands::agent_snapshots::capture_agent_window_snapshot,
             commands::agent_snapshots::complete_agent_view_snapshot,
