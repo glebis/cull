@@ -1482,6 +1482,10 @@ export async function getColorMetricsCount(): Promise<number> {
     return invoke('get_color_metrics_count');
 }
 
+export async function getDominantColors(): Promise<Record<string, string>> {
+    return invoke('get_dominant_colors');
+}
+
 export async function listImagesByColorBucket(
     bucket: string,
     limit = 100,
@@ -1996,6 +2000,10 @@ export async function shareImages(imageIds: string[]): Promise<void> {
 
 export async function openImagesWithApplication(imageIds: string[], appPath: string): Promise<void> {
     return invoke<void>('open_images_with_application', { imageIds, appPath });
+}
+
+export async function resolveImageOriginalPath(imageId: string): Promise<string> {
+    return invoke<string>('resolve_image_original_path', { imageId });
 }
 
 export async function listOpenWithApplications(imageId: string): Promise<OpenWithApplication[]> {

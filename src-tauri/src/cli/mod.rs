@@ -677,6 +677,14 @@ mod tests {
                 [],
             )
             .unwrap();
+        db.conn
+            .lock()
+            .execute(
+                "INSERT INTO image_files (id, image_id, path, last_seen_at, missing_at)
+                 VALUES ('file-img1', 'img1', '/Pictures/img1.png', '2026-01-01', NULL)",
+                [],
+            )
+            .unwrap();
         db.store_detections(
             "img1",
             "yolo11m",

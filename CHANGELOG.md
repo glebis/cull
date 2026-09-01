@@ -22,6 +22,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Grid overview: tiny cells now show real image colors.** At extreme zoom-out the overview canvas painted each cell with a color hashed from the image ID (random-looking, unrelated to content). Cells now paint with the image's stored dominant color (`get_dominant_colors`), falling back to a neutral surface when metrics are missing. (`imageview-lr9q`)
 - **Concurrent external-device reads.** Opening another folder now cancels and supersedes the previous read, and duplicate-content registration resolves the canonical image identity instead of surfacing a foreign-key error.
 - **External-drive detection on macOS.** Removable or ejectable SD cards remain visible even when macOS also reports the volume as internal.
 - **Release regression coverage for sidebar feature retention.** The release gate now blocks if Recent Imports regains a decorative clock glyph or if connected-device visibility regresses.

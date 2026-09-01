@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
-    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, moveImage, renameImage, listFolders, shareImages, openImagesWithApplication, listOpenWithApplications } from '$lib/api';
+    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, moveImage, renameImage, listFolders, shareImages, openImagesWithApplication, listOpenWithApplications, resolveImageOriginalPath } from '$lib/api';
     import { loadSimilarImages } from '$lib/similarity';
     import type { ImageWithFile, OpenWithApplication } from '$lib/api';
     import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast, requestTextInput, showRejected } from '$lib/stores';
@@ -14,6 +14,7 @@
     import { commandShortcutHints, eventMatchesShortcut } from '$lib/command-palette';
     import { copyImageWithToast } from '$lib/image-copy-action';
     import { claimContextMenu } from '$lib/context-menu-coordinator';
+    import { originalActionError } from '$lib/menu';
 
     interface Props {
         image: ImageWithFile;
@@ -546,9 +547,19 @@
         }
     }
 
-    async function openInDefaultApp(path: string) {
-        const { openPath } = await import('@tauri-apps/plugin-opener');
-        await openPath(path);
+    async function openInDefaultApp(imageId: string) {
+        try {
+            const path = await resolveImageOriginalPath(imageId);
+            const { openPath } = await import('@tauri-apps/plugin-opener');
+            await openPath(path);
+        } catch (e) {
+            const formatted = originalActionError(e, 'Open failed');
+            showToast(formatted.title, {
+                detail: formatted.detail,
+                type: formatted.detail ? 'error' : 'warning',
+                duration: 8000,
+            });
+        }
     }
 
     async function handleOpenWith() {
@@ -575,7 +586,12 @@
             openWithLoadedFor = image.image.id;
         } catch (e) {
             openWithApps = [];
-            showToast('Open With app list unavailable', { detail: String(e), type: 'warning', duration: 8000 });
+            const formatted = originalActionError(e, 'Open With app list unavailable');
+            showToast(formatted.title, {
+                detail: formatted.detail,
+                type: 'warning',
+                duration: 8000,
+            });
         } finally {
             openWithLoading = false;
         }
@@ -586,7 +602,12 @@
         try {
             await openImagesWithApplication([image.image.id], appPath);
         } catch (e) {
-            showToast('Open With failed', { detail: String(e), type: 'error', duration: 8000 });
+            const formatted = originalActionError(e, 'Open With failed');
+            showToast(formatted.title, {
+                detail: formatted.detail,
+                type: formatted.detail ? 'error' : 'warning',
+                duration: 8000,
+            });
         }
     }
 
@@ -929,7 +950,7 @@
     {#if multiCount === 1}
         <button
             class="context-menu-item"
-            onclick={act(() => openInDefaultApp(image.path))}
+            onclick={act(() => openInDefaultApp(image.image.id))}
             role="menuitem"
             data-menu-index="10"
             tabindex={activeIndex === 10 ? 0 : -1}

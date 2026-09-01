@@ -7,7 +7,7 @@ use rusqlite::{ffi, params, Connection, Error as SqlError, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 28;
+const CURRENT_SCHEMA_VERSION: i64 = 29;
 
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, "initial_schema"),
@@ -38,6 +38,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (26, "image_analysis_status"),
     (27, "referenced_sources"),
     (28, "referenced_sources_reconcile"),
+    (29, "image_file_library_membership"),
 ];
 
 #[derive(Clone)]
@@ -398,6 +399,26 @@ impl Database {
             conn.execute_batch(referenced_sources_schema())?;
             Ok(())
         })?;
+        self.run_migration_step(29, "image_file_library_membership", || {
+            let conn = self.conn.lock();
+            if !column_exists(&conn, "image_files", "library_member")? {
+                conn.execute_batch(
+                    "ALTER TABLE image_files
+                         ADD COLUMN library_member INTEGER NOT NULL DEFAULT 1
+                         CHECK (library_member IN (0, 1));
+                     UPDATE image_files
+                     SET library_member = 0
+                     WHERE id IN (SELECT image_file_id FROM referenced_files)
+                       AND NOT EXISTS (
+                           SELECT 1
+                           FROM images i
+                           WHERE i.id = image_files.image_id
+                             AND i.import_batch_id IS NOT NULL
+                       );",
+                )?;
+            }
+            Ok(())
+        })?;
 
         self.verify_schema_invariants()?;
         Ok(())
@@ -453,6 +474,13 @@ impl Database {
                  but required tables are missing: {}. The database may be partially migrated or corrupt.",
                 user_version(&conn)?,
                 missing.join(", ")
+            )));
+        }
+        if !column_exists(&conn, "image_files", "library_member")? {
+            return Err(migration_error(format!(
+                "database failed schema invariant check (user_version={} claims migrations applied) \
+                 but required column image_files.library_member is missing. The database may be partially migrated or corrupt.",
+                user_version(&conn)?,
             )));
         }
         Ok(())
@@ -1017,6 +1045,17 @@ fn table_exists(conn: &Connection, table_name: &str) -> Result<bool> {
     Ok(count > 0)
 }
 
+fn column_exists(conn: &Connection, table_name: &str, column_name: &str) -> Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table_name})"))?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        if row.get::<_, String>(1)? == column_name {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn integrity_check(conn: &Connection) -> Result<()> {
     let mut stmt = conn.prepare("PRAGMA integrity_check")?;
     let results = stmt
@@ -1549,6 +1588,73 @@ mod migration_safety_tests {
     }
 
     #[test]
+    fn test_library_membership_migration_distinguishes_browsed_and_explicit_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("existing-v28.db");
+        {
+            let db = Database::open(&db_path).unwrap();
+            let conn = db.conn.lock();
+            conn.execute_batch(
+                "
+                INSERT INTO import_batches (id, created_at, source, image_count)
+                VALUES ('batch-1', '2026-08-01', 'folder', 1);
+                INSERT INTO images
+                    (id, sha256_hash, width, height, format, file_size, created_at, imported_at, import_batch_id)
+                VALUES
+                    ('browsed', 'hash-browsed', 100, 100, 'jpg', 10, '2026-08-01', '2026-08-01', NULL),
+                    ('explicit', 'hash-explicit', 100, 100, 'jpg', 10, '2026-08-01', '2026-08-01', 'batch-1'),
+                    ('ordinary', 'hash-ordinary', 100, 100, 'jpg', 10, '2026-08-01', '2026-08-01', NULL);
+                INSERT INTO image_files (id, image_id, path, last_seen_at)
+                VALUES
+                    ('file-browsed', 'browsed', '/Volumes/CARD/browsed.jpg', '2026-08-01'),
+                    ('file-explicit', 'explicit', '/Volumes/CARD/explicit.jpg', '2026-08-01'),
+                    ('file-ordinary', 'ordinary', '/Pictures/ordinary.jpg', '2026-08-01');
+                INSERT INTO referenced_sources
+                    (id, platform_volume_id, display_name, last_mount_path, source_kind, last_seen_at)
+                VALUES ('source-1', 'volume-1', 'CARD', '/Volumes/CARD', 'sd_card', '2026-08-01');
+                INSERT INTO referenced_files (source_id, image_file_id, relative_path)
+                VALUES
+                    ('source-1', 'file-browsed', 'browsed.jpg'),
+                    ('source-1', 'file-explicit', 'explicit.jpg');
+                ",
+            )
+            .unwrap();
+
+            let has_membership_column = conn
+                .prepare("PRAGMA table_info(image_files)")
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .any(|name| name.unwrap() == "library_member");
+            if has_membership_column {
+                conn.execute_batch("ALTER TABLE image_files DROP COLUMN library_member;")
+                    .unwrap();
+            }
+            conn.execute_batch(
+                "DELETE FROM schema_migrations WHERE version > 28;
+                 DELETE FROM schema_migration_steps WHERE version > 28;
+                 PRAGMA user_version = 28;",
+            )
+            .unwrap();
+        }
+
+        let db = Database::open(&db_path).unwrap();
+        let conn = db.conn.lock();
+        let membership = |file_id: &str| -> bool {
+            conn.query_row(
+                "SELECT library_member FROM image_files WHERE id = ?1",
+                params![file_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert!(!membership("file-browsed"));
+        assert!(membership("file-explicit"));
+        assert!(membership("file-ordinary"));
+        assert_eq!(user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
     fn test_version_26_backfills_existing_analysis_results() {
         let tmp = tempfile::tempdir().unwrap();
         let db_path = tmp.path().join("existing-v25.db");
@@ -2039,6 +2145,21 @@ mod tests {
         assert!(
             err.to_string().contains("image_tags"),
             "error should name the missing table: {err}"
+        );
+    }
+
+    #[test]
+    fn verify_schema_invariants_detects_missing_library_membership_column() {
+        let db = test_db();
+        db.conn
+            .lock()
+            .execute_batch("ALTER TABLE image_files DROP COLUMN library_member")
+            .unwrap();
+
+        let err = db.verify_schema_invariants().unwrap_err();
+        assert!(
+            err.to_string().contains("image_files.library_member"),
+            "error should name the missing column: {err}"
         );
     }
 
@@ -3171,6 +3292,11 @@ mod tests {
         assert_eq!(stored.dominant_hex, "#f20c14");
         assert_eq!(stored.palette[0].red, 242);
         assert_eq!(db.color_metrics_count().unwrap(), 2);
+
+        let dominant = db.list_dominant_colors().unwrap();
+        assert_eq!(dominant.get("red").map(String::as_str), Some("#f20c14"));
+        assert_eq!(dominant.get("blue").map(String::as_str), Some("#1848f0"));
+        assert_eq!(dominant.len(), 2);
 
         let images = db.list_images_by_color_bucket("red", 10, 0).unwrap();
         assert_eq!(images.len(), 1);
