@@ -9,6 +9,13 @@ homepage = "https://github.com/glebis/cull"
 readme = "../README.md"
 edition = "2021"
 
+[profile.release]
+# Ship a smaller binary: strip symbol tables, link-time optimize, single
+# codegen unit. Release builds only; dev/test profiles are untouched.
+strip = true
+lto = true
+codegen-units = 1
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]

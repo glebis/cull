@@ -70,7 +70,8 @@
     ],
     "resources": {
       "../scripts/claude-agent-sdk-runner.mjs": "claude-agent-sdk-runner.mjs",
-      "../node_modules/@anthropic-ai/claude-agent-sdk": "node_modules/@anthropic-ai/claude-agent-sdk"
+      "../node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs": "node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs",
+      "../node_modules/@anthropic-ai/claude-agent-sdk/package.json": "node_modules/@anthropic-ai/claude-agent-sdk/package.json"
     },
     "macOS": {
       "entitlements": "Entitlements.plist",

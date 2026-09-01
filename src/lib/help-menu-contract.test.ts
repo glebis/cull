@@ -81,8 +81,13 @@ describe('Help menu contract', () => {
         const config = JSON.parse(readProjectFile('src-tauri/tauri.conf.json'));
 
         expect(config.bundle.resources['../scripts/claude-agent-sdk-runner.mjs']).toBe('claude-agent-sdk-runner.mjs');
-        expect(config.bundle.resources['../node_modules/@anthropic-ai/claude-agent-sdk']).toBe(
-            'node_modules/@anthropic-ai/claude-agent-sdk'
+        // Only the runtime entry is bundled: sdk.mjs (self-contained) + package.json
+        // for Node bare-specifier resolution. Types, browser bundle, and bridge are dead weight.
+        expect(config.bundle.resources['../node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs']).toBe(
+            'node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs'
+        );
+        expect(config.bundle.resources['../node_modules/@anthropic-ai/claude-agent-sdk/package.json']).toBe(
+            'node_modules/@anthropic-ai/claude-agent-sdk/package.json'
         );
         expect(projectFileExists('scripts/claude-agent-sdk-runner.mjs')).toBe(true);
         expect(projectFileExists('node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs')).toBe(true);
