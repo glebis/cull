@@ -24,7 +24,7 @@ Dragging is not the primary entry point. Mounted devices must be visible without
 6. Review actions never modify the external source. Rating, colour label, accept, reject, and collection membership are allowed; rename, move, trash, and permanent delete are disabled for referenced external files in the first release.
 7. Ejecting a device does not erase the review or mark every file individually missing. The source becomes offline, review decisions remain, referenced-only thumbnails are purged, and original-dependent actions explain that the device must be reconnected. Reconnecting regenerates thumbnails on demand.
 8. Reconnecting the same device restores its source and file paths automatically when a stable platform volume identity is available. Cull never guesses when identity is ambiguous.
-9. Browsing a referenced source does not grant permanent library membership. Referenced-only images remain available in the active referenced-source scope and in explicit user collections, but are excluded from All Images, Library folders, automatic filters, search, and smart collections such as Recent Imports. An image with any non-referenced file record remains a library member. Removing a referenced source from Cull removes only Cull's references and cached derivatives, never originals.
+9. Browsing a referenced source does not grant permanent library membership. Referenced-only images remain available in the active referenced-source scope and in explicit user collections, but are excluded from All Images, Library folders, automatic filters, search, and smart collections such as Recent Imports. Library membership is durable per file record: explicitly importing a browsed path promotes that same record, and browsing a previously imported path never demotes it. An image with any library-member file record remains a library member. Removing a referenced source from Cull removes only Cull's browse-only references and cached derivatives, never originals or explicitly imported membership.
 
 ## Interaction Design
 
@@ -161,7 +161,7 @@ CREATE TABLE referenced_files (
 
 `image_files.path` remains the currently resolved absolute path so existing image queries continue to work. On verified reconnection, one transaction updates descendant absolute paths from `last_mount_path` to the new mount path, clears source-offline state, and preserves image IDs and selections. `referenced_files` provides the stable source-relative mapping required for safe reconnection.
 
-Removing a referenced source is one explicit transaction: delete its `referenced_files` rows, delete the associated `image_files` rows, delete only images that no longer have any other file record, and then remove source-owned cached thumbnails. Images still referenced from another path remain intact. Originals are never opened for writing or deleted.
+Removing a referenced source is one explicit transaction: delete its `referenced_files` rows, delete associated browse-only `image_files` rows, preserve promoted library-member rows, delete only images that no longer have any file record, and then remove source-owned cached thumbnails. Images still retained through explicit membership or another path remain intact. Originals are never opened for writing or deleted.
 
 The existing `library_roots` watcher contract remains in force. Referenced roots are watched only while online; whole-root disconnects follow the current offline guard and are surfaced as source state rather than destructive missing-file churn.
 
@@ -191,7 +191,7 @@ type LibraryScope =
     };
 ```
 
-The new scope owns breadcrumb, recursion preference, paging, cancellation, offline state, and cache key. Existing selection and view stores continue to operate on returned `ImageWithFile` records. Permanent library queries exclude `image_files` rows linked through `referenced_files`; referenced-folder queries continue to read those rows directly.
+The new scope owns breadcrumb, recursion preference, paging, cancellation, offline state, and cache key. Existing selection and view stores continue to operate on returned `ImageWithFile` records. Permanent automatic library queries require an `image_files.library_member` row; referenced-folder queries continue to read source-linked rows directly, including browse-only records.
 
 `Sidebar.svelte` should not absorb volume discovery logic. Add a focused `DevicesSection.svelte` and a small referenced-source store/service, then compose the section at the top of the existing sidebar.
 
