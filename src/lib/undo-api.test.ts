@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { getUndoStatus, listUndoHistory, redo, undo, type UndoRecord, type UndoStatus } from './api';
+import { getUndoStatus, listUndoHistory, redo, undo, undoMany, type UndoHistoryEntry, type UndoStatus } from './api';
 
 vi.mock('@tauri-apps/api/core', () => ({
     invoke: vi.fn(),
@@ -29,18 +29,11 @@ describe('undo API wrappers', () => {
     });
 
     it('loads undo history with an explicit nullable limit', async () => {
-        const history: UndoRecord[] = [
+        const history: UndoHistoryEntry[] = [
             {
-                seq: 7,
-                id: 'undo-7',
-                action_type: 'set_decision',
-                label: 'Set decision to accepted',
-                before_json: '{"decision":"undecided"}',
-                after_json: '{"decision":"accepted"}',
-                affected_image_ids: 'img-1',
-                group_id: null,
-                has_file_backup: false,
-                created_at: '2026-06-22T20:30:00Z',
+                record: { seq: 7, id: 'undo-7', action_type: 'set_decision', label: 'Set decision to accepted', before_json: '{}', after_json: '{}', affected_image_ids: 'img-1', group_id: null, has_file_backup: false, created_at: '2026-06-22T20:30:00Z' },
+                action_title: 'Set decision', target: { kind: 'image', display_name: 'portrait.png', context: null, unavailable: false },
+                change_summary: 'Decision: undecided → accepted', previews: [], affected_count: 1, can_undo: true,
             },
         ];
         invokeMock.mockResolvedValueOnce(history);
@@ -48,6 +41,13 @@ describe('undo API wrappers', () => {
         await expect(listUndoHistory(12)).resolves.toBe(history);
 
         expect(invokeMock).toHaveBeenCalledWith('list_undo_history', { limit: 12 });
+    });
+
+    it('undoes a contiguous batch through the registered command', async () => {
+        const result = { requested: 2, completed: ['B', 'A'], failure: null };
+        invokeMock.mockResolvedValueOnce(result);
+        await expect(undoMany(2)).resolves.toBe(result);
+        expect(invokeMock).toHaveBeenCalledWith('undo_many', { count: 2 });
     });
 
     it('normalizes omitted undo history limit to null', async () => {
