@@ -8,15 +8,61 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [0.6.2] - 2026-09-01
 
-### Changed
+Cull 0.6.2 is the first update since v0.5.1. It bundles everything prepared for
+the internal v0.6.0/v0.6.1 builds — which never reached the public release page —
+so this list covers all changes since v0.5.1.
 
-- **Publish-path recovery.** v0.6.1 was fully built, signed, notarized, and verified, but publication failed: since c10cf8315 the provenance records workflowRunId as a number while the publish job compared it against a string with strict inequality, so publication could never pass. The tag was also burned by the release-gate’s staleness guard when the publish fix landed on origin/main. v0.6.2 carries the one-line string comparison fix (PR #212) and the same application content as v0.6.0/v0.6.1: ~26 MB smaller release bundle, pruned Claude Agent SDK resources, compressed bundled art, and the sidebar work below. No behavior changes.
+### What's new
 
-## [0.6.1] - 2026-09-01
+- **A "Just imported" rail in the sidebar.** Your latest imports now appear right
+  above your library, so fresh images are one click away — and the rail stays
+  visible until you've checked them.
+- **One smarter sidebar search.** The search box now filters everything the
+  sidebar shows, including detected subjects and the current session's images.
+  Press Enter to run the same search across the full grid.
+- **Clipboard monitor at a glance.** A new chip in the footer shows whether
+  clipboard monitoring is on, how many images it captured, and links straight
+  to the clipboard section where you can start or stop it.
+- **Peek inside folders on hover.** Hold Option (⌥) over a folder in the sidebar
+  to preview its pictures as a thumbnail grid; release the key and it closes.
+- **Empty sections now show the next step.** Empty Collections or Smart sections
+  tell you what to do (press "+" to create one, or save a grid filter as a Smart
+  Collection) instead of quietly disappearing.
+- **Hide what you don't use.** A new setting hides folders and collections whose
+  subtrees contain no visible images.
 
-### Changed
+### Improved
 
-- **Recovery release for the burned v0.6.0 tag.** The v0.6.0 annotated tag was pushed minutes before two dependabot commits landed on origin/main, so the immutable release gate correctly refused to build it (STALE_RELEASE_SOURCE) and the tag cannot be moved. Same content as the prepared v0.6.0 — ~26 MB smaller release bundle, pruned Claude Agent SDK resources, compressed bundled art, sidebar work below — plus the release-gate fix for closed-bead lookups and today’s dev-dependency bumps. No behavior changes.
+- **The app is about 26 MB smaller.** By shipping only what the app actually
+  runs, Cull went from 71 MB to 45 MB installed and the download from 27 MB to
+  about 20 MB — same features, faster download and updates.
+- **One visual language for sidebar icons.** Icons now use words and counts
+  instead of mixed glyphs, and each accent color has one meaning everywhere:
+  blue = clickable, green = success or live activity, orange = active mode,
+  purple = detected subject, red = error.
+- **Tidier folder rows.** Image counts sit in an aligned right-hand column,
+  labels are left-aligned, and folder actions moved to the right-click menu.
+
+### Fixed
+
+- Zoomed far out, tiny grid cells now show each image's real dominant color
+  instead of an unrelated placeholder color.
+- Opening a second folder from an external drive cancels the first read cleanly
+  instead of colliding with it.
+- SD cards and other removable drives stay visible on macOS even when the system
+  reports them as internal.
+- Sidebar arrows and chips now have a comfortable click area (24 px floor).
+- Small sidebar text got a contrast boost for readability.
+- Right-click menus on sidebar sections gained the folder actions that the
+  redundant "…" menu used to hold.
+
+### Under the hood
+
+- The release pipeline now requires a human-verified local install before any
+  version ships, and two release-automation bugs found while shipping this
+  version were fixed. The v0.6.0 and v0.6.1 builds were stopped by our own
+  safety gates before reaching anyone — this v0.6.2 is the build that passed
+  every check. Developer-only dependency updates are included.
 
 ## [0.6.0] - 2026-09-01
 
