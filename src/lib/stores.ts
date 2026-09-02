@@ -497,6 +497,7 @@ export const recentScopes = writable<import('./sidebar-utils').RecentScope[]>([]
 // Lineage tab layout preference
 export type LineageLayout = 'timeline' | 'comparison';
 export const lineageLayout = writable<LineageLayout>('timeline');
+export const lineageImageScale = writable<number>(1);
 
 // Detection overlay state
 export type NsfwMode = 'blur' | 'hide' | 'show';

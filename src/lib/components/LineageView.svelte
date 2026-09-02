@@ -1,7 +1,7 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { onMount } from 'svelte';
-    import { lineageLayout, images, focusedIndex, focusedImageOverride, navigateTo, activeCollection, activeFolder, collections, showToast, requestTextInput, requestConfirm } from '$lib/stores';
+    import { lineageLayout, lineageImageScale, images, focusedIndex, focusedImageOverride, navigateTo, activeCollection, activeFolder, collections, showToast, requestTextInput, requestConfirm } from '$lib/stores';
     import { listLineageGroups, getLineageGroupImages, renameLineageGroup, dissolveLineageGroup, type LineageGroup, type ImageWithFile } from '$lib/api';
     import { resolveLineageImageFocus } from '$lib/lineage-utils';
     import type { LineageLayout } from '$lib/stores';
@@ -190,7 +190,7 @@
     });
 </script>
 
-<div class="lineage-view">
+<div class="lineage-view" style={`--lineage-thumb-size: ${Math.round(100 * $lineageImageScale)}px;`}>
     <div class="lineage-header">
         <h2>Lineage</h2>
         <span class="scope-label" title={$activeFolder ?? $activeCollection ?? 'All images'}>{scopeLabel}</span>
@@ -299,7 +299,7 @@
 
             {#if selectedGroupId}
                 {@const imgs = groupImages.get(selectedGroupId) ?? []}
-                <div class="comparison-grid" style="--cols: {Math.min(imgs.length, Math.ceil(Math.sqrt(imgs.length)))}">
+                <div class="comparison-grid">
                     {#each imgs as img (img.image.id)}
                         {@const previewUrl = thumbnailUrl(img)}
                         <div
@@ -404,6 +404,10 @@
         font-size: 12px;
     }
     .layout-toggle:hover { color: var(--text); }
+    .layout-toggle:focus-visible {
+        outline: 1px solid var(--blue);
+        outline-offset: 1px;
+    }
 
     /* Timeline */
     .timeline-container {
@@ -482,15 +486,15 @@
         position: relative;
         flex-shrink: 0;
         cursor: pointer;
-        border-radius: 6px;
+        border-radius: 0;
         overflow: hidden;
     }
     .strip-thumb img {
         display: block;
-        width: 100px;
-        height: 100px;
+        width: var(--lineage-thumb-size);
+        height: var(--lineage-thumb-size);
         object-fit: cover;
-        border-radius: 6px;
+        border-radius: 0;
     }
     .strip-thumb:hover img {
         opacity: 0.8;
@@ -498,8 +502,8 @@
     .preview-unavailable {
         display: grid;
         place-items: center;
-        width: 100px;
-        height: 100px;
+        width: var(--lineage-thumb-size);
+        height: var(--lineage-thumb-size);
         color: var(--text-secondary);
         background: var(--surface);
         font-size: 10px;
@@ -591,15 +595,18 @@
     }
     .comparison-grid {
         display: grid;
-        grid-template-columns: repeat(var(--cols, 2), 1fr);
+        grid-template-columns: repeat(auto-fill, minmax(var(--lineage-thumb-size), 1fr));
         gap: 8px;
+        align-items: start;
+        justify-items: center;
     }
     .comparison-cell {
         position: relative;
         cursor: pointer;
-        border-radius: 8px;
+        border-radius: 0;
         overflow: hidden;
         background: var(--surface);
+        width: var(--lineage-thumb-size);
     }
     .comparison-cell img {
         display: block;
