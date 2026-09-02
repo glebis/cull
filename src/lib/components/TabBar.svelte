@@ -29,6 +29,24 @@
     canvasZoom.subscribe(v => {
         canvasZoomPosition = canvasZoomPositionFromZoom(v);
     });
+    const LINEAGE_ZOOM_MIN = 0.5;
+    const LINEAGE_ZOOM_MAX = 2.5;
+    const LINEAGE_ZOOM_STEP = 0.1;
+
+    function clampLineageImageScale(scale: number): number {
+        return Math.min(LINEAGE_ZOOM_MAX, Math.max(LINEAGE_ZOOM_MIN, scale));
+    }
+
+    function lineageScaleToPosition(scale: number): number {
+        const normalized = (clampLineageImageScale(scale) - LINEAGE_ZOOM_MIN) / (LINEAGE_ZOOM_MAX - LINEAGE_ZOOM_MIN);
+        return Math.round(normalized * 100);
+    }
+
+    function lineagePositionToScale(position: number): number {
+        const normalized = Math.max(0, Math.min(100, position)) / 100;
+        return clampLineageImageScale(LINEAGE_ZOOM_MIN + normalized * (LINEAGE_ZOOM_MAX - LINEAGE_ZOOM_MIN));
+    }
+
     let lineageZoomPosition = $state(lineageScaleToPosition(1));
     lineageImageScale.subscribe(v => {
         lineageZoomPosition = lineageScaleToPosition(v);
@@ -49,24 +67,6 @@
         const position = parseFloat((e.target as HTMLInputElement).value);
         canvasZoomPosition = position;
         requestCanvasZoom(canvasZoomFromPosition(position));
-    }
-
-    const LINEAGE_ZOOM_MIN = 0.5;
-    const LINEAGE_ZOOM_MAX = 2.5;
-    const LINEAGE_ZOOM_STEP = 0.1;
-
-    function clampLineageImageScale(scale: number): number {
-        return Math.min(LINEAGE_ZOOM_MAX, Math.max(LINEAGE_ZOOM_MIN, scale));
-    }
-
-    function lineageScaleToPosition(scale: number): number {
-        const normalized = (clampLineageImageScale(scale) - LINEAGE_ZOOM_MIN) / (LINEAGE_ZOOM_MAX - LINEAGE_ZOOM_MIN);
-        return Math.round(normalized * 100);
-    }
-
-    function lineagePositionToScale(position: number): number {
-        const normalized = Math.max(0, Math.min(100, position)) / 100;
-        return clampLineageImageScale(LINEAGE_ZOOM_MIN + normalized * (LINEAGE_ZOOM_MAX - LINEAGE_ZOOM_MIN));
     }
 
     function setLineageZoom(e: Event) {
