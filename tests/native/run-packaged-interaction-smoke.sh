@@ -64,7 +64,9 @@ HOME="$smoke_home" "$app_binary" \
 
 echo "[native-smoke] Launching packaged WKWebView"
 set +e
-HOME="$smoke_home" "$app_binary" >"$app_log" 2>&1 &
+# The activity assertion keeps App Nap / WebKit suspension from starving the
+# self-driving smoke when the window is not frontmost (CI runners, busy desktops).
+CULL_NATIVE_SMOKE_ACTIVE=1 HOME="$smoke_home" "$app_binary" >"$app_log" 2>&1 &
 app_pid="$!"
 set -e
 

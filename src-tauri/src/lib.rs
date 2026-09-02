@@ -53,6 +53,29 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Listener, Manager};
 use tauri_plugin_dialog::DialogExt;
 
+/// Keep the packaged app out of App Nap / WebKit WebProcess suspension while
+/// the native interaction smoke self-drives the UI. Without this, WKWebView
+/// can suspend the page (idle/occluded windows) and throttle DOM timers, which
+/// starves the smoke driver until the harness timeout kills it. The harness
+/// sets CULL_NATIVE_SMOKE_ACTIVE when launching the packaged app; see
+/// tests/native/run-packaged-interaction-smoke.sh and the release-lessons
+/// reference in the cull-release skills.
+#[cfg(target_os = "macos")]
+fn begin_smoke_activity_assertion() {
+    if std::env::var_os("CULL_NATIVE_SMOKE_ACTIVE").is_none() {
+        return;
+    }
+    use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
+    let info = NSProcessInfo::processInfo();
+    let activity = info.beginActivityWithOptions_reason(
+        NSActivityOptions::UserInitiatedAllowingIdleSystemSleep,
+        &NSString::from_str("Cull native interaction smoke: keep web content active"),
+    );
+    // The assertion must outlive this call; the process exits soon after the
+    // smoke finishes, so leaking it is intentional and harmless.
+    std::mem::forget(activity);
+}
+
 pub struct AppState {
     pub db: Database,
     pub app_data_dir: PathBuf,
@@ -309,6 +332,9 @@ pub fn run() {
         run_stdio_bridge();
         return;
     }
+
+    #[cfg(target_os = "macos")]
+    begin_smoke_activity_assertion();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

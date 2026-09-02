@@ -97,7 +97,14 @@
             img.decoding = 'async';
             img.onload = () => {
                 if (generation === renderGeneration) {
-                    ctx.drawImage(img, next.x, next.y, size, size);
+                    const naturalWidth = img.naturalWidth || size;
+                    const naturalHeight = img.naturalHeight || size;
+                    const aspect = naturalWidth > 0 && naturalHeight > 0 ? naturalWidth / naturalHeight : 1;
+                    const drawWidth = aspect >= 1 ? size : size * aspect;
+                    const drawHeight = aspect >= 1 ? size / aspect : size;
+                    const drawX = next.x + (size - drawWidth) / 2;
+                    const drawY = next.y + (size - drawHeight) / 2;
+                    ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
                     const item = items[next.index];
                     if (item && selectedIds.has(item.image.id)) {
                         ctx.strokeStyle = selectedColor;
