@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cull external device navigation concepts</title>
+  <style>
+    :root { color-scheme: dark; --bg:#08080c; --surface:#0c0c12; --raised:#11121b; --border:#1a1a2e; --text:#e0e0e0; --muted:#7a7fa0; --blue:#7aa2f7; --green:#9ece6a; --font:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:var(--bg); color:var(--text); font:12px/1.45 var(--font); }
+    button { font:inherit; }
+    .lab { display:grid; grid-template-rows:auto 1fr; min-height:100vh; }
+    .lab-header { align-items:center; border-bottom:1px solid var(--border); display:flex; gap:18px; padding:14px 18px; }
+    .lab-header h1 { font-size:13px; font-weight:500; margin:0; }
+    .switcher { display:flex; gap:4px; margin-left:auto; }
+    .switcher button { background:none; border:1px solid transparent; border-radius:4px; color:var(--muted); cursor:pointer; padding:7px 10px; }
+    .switcher button[aria-selected="true"] { background:var(--raised); border-color:var(--border); color:var(--blue); }
+    .stage { align-items:center; display:grid; grid-template-columns:320px minmax(460px,760px); gap:32px; justify-content:center; padding:32px; }
+    .sidebar { align-self:stretch; background:var(--surface); border:1px solid var(--border); border-radius:8px; min-height:620px; overflow:hidden; width:320px; }
+    .chrome { border-bottom:1px solid var(--border); padding:14px 12px 10px; }
+    .chrome-title { color:var(--muted); font-size:9px; letter-spacing:.12em; text-transform:uppercase; }
+    .concept { display:none; padding:10px 8px 16px; }
+    .concept.active { display:block; }
+    .section-title { color:var(--muted); font-size:9px; letter-spacing:.1em; margin:7px 6px 3px; text-transform:uppercase; }
+    .row { align-items:center; background:none; border:0; border-radius:4px; color:var(--text); cursor:pointer; display:flex; gap:6px; min-height:24px; padding:3px 6px; text-align:left; width:100%; }
+    .row:hover, .row:focus-visible { background:var(--border); outline:none; }
+    .row.active { background:color-mix(in srgb,var(--blue) 12%,transparent); color:var(--blue); }
+    .twisty { color:var(--blue); display:inline-grid; place-items:center; width:14px; }
+    .icon { color:var(--blue); width:16px; }
+    .label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .meta { color:var(--muted); font-size:10px; margin-left:auto; }
+    .tree-children { margin-left:10px; }
+    .location { border-top:1px solid var(--border); color:var(--muted); margin-top:10px; padding:10px 8px 0; }
+    .location strong { color:var(--text); display:block; font-weight:400; margin-top:3px; overflow:hidden; text-overflow:ellipsis; }
+    .crumbs { align-items:center; display:flex; gap:4px; min-height:34px; overflow:hidden; padding:3px 4px 8px; }
+    .crumbs button { background:none; border:0; color:var(--blue); cursor:pointer; padding:3px 4px; }
+    .crumbs .sep { color:var(--muted); }
+    .browser-head { align-items:center; display:flex; gap:7px; margin:2px 4px 5px; }
+    .back { background:none; border:1px solid var(--border); border-radius:4px; color:var(--text); cursor:pointer; height:28px; width:30px; }
+    .back:disabled { color:var(--muted); cursor:default; opacity:.45; }
+    .path-label { min-width:0; }
+    .path-label strong { display:block; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .path-label small { color:var(--muted); }
+    .mount { border:1px solid var(--border); border-radius:999px; color:var(--green); font-size:8px; margin-left:auto; padding:2px 6px; }
+    .device-mark { color:var(--blue); display:inline-block; flex:0 0 13px; height:13px; position:relative; width:13px; }
+    .device-mark.sd { background:currentColor; clip-path:polygon(0 0,70% 0,100% 30%,100% 100%,0 100%); opacity:.9; }
+    .device-mark.sd::after { background:var(--surface); content:""; height:6px; left:3px; position:absolute; top:4px; width:7px; }
+    .device-mark.drive { border:1px solid currentColor; border-radius:3px; height:10px; margin-top:1px; }
+    .device-mark.drive::after { background:currentColor; border-radius:50%; bottom:2px; content:""; height:2px; position:absolute; right:2px; width:2px; }
+    .device-mark.ssd { border:1px solid currentColor; border-radius:2px; height:9px; margin-top:2px; }
+    .device-mark.hdd { border:1px solid currentColor; border-radius:2px; }
+    .device-mark.hdd::after { border:1px solid currentColor; border-radius:50%; content:""; height:6px; left:2px; position:absolute; top:2px; width:6px; }
+    .device-mark.network::before, .device-mark.network::after { border:1px solid currentColor; border-radius:50%; content:""; height:4px; position:absolute; top:1px; width:4px; }
+    .device-mark.network::before { left:0; } .device-mark.network::after { right:0; }
+    .device-mark.network { border-bottom:1px solid currentColor; height:10px; }
+    .device-types { border-top:1px solid var(--border); display:grid; gap:5px; margin:8px 4px 0; padding:8px 2px 0; }
+    .device-type { align-items:center; color:var(--muted); display:flex; gap:7px; font-size:9px; }
+    .device-type strong { color:var(--text); font-weight:400; min-width:76px; }
+    .device-type.placeholder { opacity:.55; }
+    .device-type .evidence { margin-left:auto; }
+    .folder-group { color:var(--muted); cursor:default; font-size:10px; letter-spacing:.05em; text-transform:uppercase; }
+    .folder-group:hover { background:none; }
+    .content { align-self:stretch; display:grid; grid-template-rows:auto 1fr auto; min-height:620px; }
+    .content h2 { font-size:22px; font-weight:400; letter-spacing:-.03em; margin:0 0 8px; }
+    .content p { color:var(--muted); margin:0; max-width:680px; }
+    .proof { align-self:center; display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:28px 0; }
+    .proof div { background:var(--surface); border:1px solid var(--border); border-radius:5px; min-height:112px; padding:13px; }
+    .proof span { color:var(--blue); display:block; font-size:10px; margin-bottom:16px; }
+    .proof strong { display:block; font-size:12px; font-weight:500; margin-bottom:5px; }
+    .proof small { color:var(--muted); }
+    .hint { border-top:1px solid var(--border); color:var(--muted); padding-top:12px; }
+    kbd { background:var(--raised); border:1px solid var(--border); border-radius:3px; color:var(--text); padding:2px 5px; }
+    .hidden-row { display:none; }
+    body.show-hidden .hidden-row { display:flex; }
+    @media (max-width:900px) { .stage { grid-template-columns:320px; } .content { min-height:auto; } }
+  </style>
+</head>
+<body>
+<div class="lab">
+  <header class="lab-header">
+    <h1>External device navigation</h1>
+    <span style="color:var(--muted)">interaction study · no production changes</span>
+    <nav class="switcher" aria-label="Prototype variants">
+      <button data-mode="tree" aria-selected="false">01 Unified tree</button>
+      <button data-mode="focus" aria-selected="false">02 Path browser</button>
+      <button data-mode="library" aria-selected="true">03 Library pattern</button>
+    </nav>
+  </header>
+
+  <main class="stage">
+    <aside class="sidebar" aria-label="Cull sidebar prototype">
+      <div class="chrome"><div class="chrome-title">Cull · Library</div></div>
+
+      <section class="concept" data-concept="tree">
+        <div class="section-title">Devices</div>
+        <button class="row tree-toggle" aria-expanded="true"><span class="twisty">▾</span><span class="icon">▣</span><span class="label">Untitled</span><span class="meta">connected</span></button>
+        <div class="tree-children device-tree">
+          <button class="row tree-toggle" aria-expanded="true"><span class="twisty">▾</span><span class="label">DCIM</span><span class="meta">3</span></button>
+          <div class="tree-children">
+            <button class="row folder" data-path="Untitled / DCIM / 653_FUJI"><span class="twisty">·</span><span class="label">653_FUJI</span><span class="meta">248</span></button>
+            <button class="row folder" data-path="Untitled / DCIM / 654_FUJI"><span class="twisty">·</span><span class="label">654_FUJI</span><span class="meta">219</span></button>
+            <button class="row folder" data-path="Untitled / DCIM / 655_FUJI"><span class="twisty">·</span><span class="label">655_FUJI</span><span class="meta">186</span></button>
+          </div>
+          <button class="row hidden-row folder" data-path="Untitled / .Trashes"><span class="twisty">·</span><span class="label">.Trashes</span></button>
+        </div>
+        <div class="location">Current location<strong class="current-path">Untitled</strong></div>
+      </section>
+
+      <section class="concept" data-concept="focus">
+        <div class="section-title">Device browser</div>
+        <div class="browser-head"><button class="back" aria-label="Back" disabled>←</button><div class="path-label"><strong class="focus-title">Untitled</strong><small class="focus-subtitle">Device root</small></div><span class="mount">connected</span></div>
+        <div class="crumbs" aria-label="Current path"></div>
+        <div class="focus-list"></div>
+        <div class="location">Current location<strong class="focus-path">Untitled</strong></div>
+      </section>
+
+      <section class="concept active" data-concept="library">
+        <div class="section-title">Library</div>
+        <button class="row"><span class="label">All Images</span><span class="meta">12,842</span></button>
+        <button class="row"><span class="label">Recent Imports</span><span class="meta">184</span></button>
+        <button class="row folder-group"><span class="twisty">▾</span><span class="label">Folders</span><span class="meta">14</span></button>
+        <div class="tree-children">
+          <button class="row library-device" aria-expanded="true"><span class="twisty">▾</span><span class="device-mark sd" aria-hidden="true"></span><span class="label">Untitled</span><span class="mount">connected</span></button>
+          <div class="tree-children library-device-children">
+            <button class="row"><span class="twisty">▾</span><span class="label">DCIM</span><span class="meta">653</span></button>
+            <div class="tree-children">
+              <button class="row folder" data-path="Untitled / DCIM / 653_FUJI"><span class="twisty">·</span><span class="label">653_FUJI</span><span class="meta">248</span></button>
+              <button class="row folder" data-path="Untitled / DCIM / 654_FUJI"><span class="twisty">·</span><span class="label">654_FUJI</span><span class="meta">219</span></button>
+            </div>
+          </div>
+          <button class="row"><span class="twisty">▸</span><span class="label">Pictures</span><span class="meta">8,105</span></button>
+        </div>
+        <div class="location">Current location<strong class="current-path">Library</strong></div>
+        <div class="device-types" aria-label="Device type visual language">
+          <div class="device-type"><span class="device-mark sd"></span><strong>SD card</strong><span class="evidence">detected · Secure Digital bus</span></div>
+          <div class="device-type"><span class="device-mark drive"></span><strong>External drive</strong><span class="evidence">generic ejectable volume</span></div>
+          <div class="device-type placeholder"><span class="device-mark ssd"></span><strong>SSD</strong><span class="evidence">future · explicit SolidState only</span></div>
+          <div class="device-type placeholder"><span class="device-mark hdd"></span><strong>HDD</strong><span class="evidence">future · explicit rotational evidence</span></div>
+          <div class="device-type placeholder"><span class="device-mark network"></span><strong>Network</strong><span class="evidence">future · non-local mount evidence</span></div>
+        </div>
+      </section>
+    </aside>
+
+    <section class="content">
+      <div><h2 class="concept-title">The Library tree, extended to mounted devices</h2><p class="concept-copy">The familiar Folders interaction is reused; a connected device sits first under Folders and behaves like a temporary library root.</p></div>
+      <div class="proof">
+        <div><span>WHERE</span><strong>One learned pattern</strong><small>The selected row remains nested under device and DCIM.</small></div>
+        <div><span>SEEN</span><strong>Local and external coexist</strong><small>Mounted media is first, followed by regular library folders.</small></div>
+        <div><span>RETURN</span><strong>Unmount state has a home</strong><small>Collapse or select any visible ancestor.</small></div>
+      </div>
+      <div class="hint">Try folders, disclosure arrows, and <kbd>⌘⇧.</kbd> to show hidden entries. Right-click remains the action-menu gesture.</div>
+    </section>
+  </main>
+</div>
+
+<script>
+  const copy = {
+    tree: ['Devices are roots in one tree','The whole path stays visible. Expand and collapse in place; selection never removes the route home.', ['Persistent ancestry','Counts in context','Collapse or select parent']],
+    focus: ['A focused browser with an explicit path','Each click advances one level. Breadcrumbs and Back make the return route unmistakable.', ['Breadcrumb is location','Folder state is deliberate','Back is always stable']],
+    library: ['The Library tree, extended to mounted devices','The familiar Folders interaction is reused; a connected device behaves like a temporary library root.', ['One learned pattern','Local and external coexist','Unmount state has a home']],
+  };
+  const concepts = [...document.querySelectorAll('.concept')];
+  document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => {
+    const mode = button.dataset.mode;
+    document.querySelectorAll('[data-mode]').forEach(item => item.setAttribute('aria-selected', String(item === button)));
+    concepts.forEach(item => item.classList.toggle('active', item.dataset.concept === mode));
+    const [title, text, proofs] = copy[mode];
+    document.querySelector('.concept-title').textContent = title;
+    document.querySelector('.concept-copy').textContent = text;
+    document.querySelectorAll('.proof strong').forEach((node,index) => node.textContent = proofs[index]);
+  }));
+  document.querySelectorAll('.tree-toggle, .library-device').forEach(button => button.addEventListener('click', () => {
+    const expanded = button.getAttribute('aria-expanded') !== 'false';
+    button.setAttribute('aria-expanded', String(!expanded));
+    button.querySelector('.twisty').textContent = expanded ? '▸' : '▾';
+    const children = button.classList.contains('library-device') ? document.querySelector('.library-device-children') : button.nextElementSibling;
+    if (children) children.hidden = expanded;
+  }));
+  document.querySelectorAll('.folder').forEach(button => button.addEventListener('click', () => {
+    button.closest('.concept').querySelectorAll('.row').forEach(row => row.classList.remove('active'));
+    button.classList.add('active');
+    button.closest('.concept').querySelector('.current-path').textContent = button.dataset.path;
+  }));
+  const focusModel = {
+    'Untitled': ['DCIM','MISC'],
+    'Untitled / DCIM': ['653_FUJI','654_FUJI','655_FUJI'],
+    'Untitled / DCIM / 653_FUJI': [], 'Untitled / DCIM / 654_FUJI': [], 'Untitled / DCIM / 655_FUJI': [],
+    'Untitled / MISC': [],
+  };
+  let focusPath = ['Untitled'];
+  function renderFocus() {
+    const key = focusPath.join(' / '), list = document.querySelector('.focus-list'), crumbs = document.querySelector('.crumbs');
+    document.querySelector('.focus-title').textContent = focusPath.at(-1);
+    document.querySelector('.focus-subtitle').textContent = focusPath.length === 1 ? 'Device root' : `${focusPath.length - 1} levels deep`;
+    document.querySelector('.focus-path').textContent = key;
+    document.querySelector('.back').disabled = focusPath.length === 1;
+    crumbs.replaceChildren();
+    focusPath.forEach((part,index) => {
+      const button = document.createElement('button'); button.textContent = part; button.onclick = () => { focusPath = focusPath.slice(0,index + 1); renderFocus(); }; crumbs.append(button);
+      if (index < focusPath.length - 1) { const sep = document.createElement('span'); sep.className='sep'; sep.textContent='›'; crumbs.append(sep); }
+    });
+    list.replaceChildren();
+    (focusModel[key] || []).forEach(name => {
+      const button=document.createElement('button'); button.className='row'; button.innerHTML=`<span class="twisty">▸</span><span class="label">${name}</span>`;
+      button.onclick=()=>{ focusPath.push(name); renderFocus(); }; list.append(button);
+    });
+    if (!(focusModel[key] || []).length) list.innerHTML='<div class="location">248 images in this folder<br><strong>Folder is selected for review</strong></div>';
+  }
+  document.querySelector('.back').addEventListener('click',()=>{ if(focusPath.length>1){focusPath.pop();renderFocus();} });
+  window.addEventListener('keydown',event=>{ if(event.metaKey&&event.shiftKey&&(event.key==='.'||event.code==='Period')&&!/INPUT|TEXTAREA|SELECT/.test(event.target.tagName)){event.preventDefault();document.body.classList.toggle('show-hidden');} });
+  renderFocus();
+</script>
+</body>
+</html>

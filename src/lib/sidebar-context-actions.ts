@@ -88,6 +88,28 @@ export function buildFolderContextActions(options: FolderContextActionOptions): 
     ].filter(item => !item.hidden);
 }
 
+export interface ReferencedFolderContextActionOptions {
+    folder: string;
+    onOpen: (folder: string) => void | Promise<void>;
+    onReveal: (folder: string) => void | Promise<void>;
+    onImport: (folder: string) => void | Promise<void>;
+    onCopyPath: (folder: string) => void | Promise<void>;
+}
+
+export function buildReferencedFolderContextActions(options: ReferencedFolderContextActionOptions): ActionMenuItem[] {
+    return [
+        { id: 'referenced-folder-open', label: 'Open Folder', action: () => options.onOpen(options.folder) },
+        { id: 'referenced-folder-reveal', label: 'Reveal in Finder', action: () => options.onReveal(options.folder) },
+        {
+            id: 'referenced-folder-import',
+            label: 'Import Folder…',
+            action: () => options.onImport(options.folder),
+            separatorBefore: true,
+        },
+        { id: 'referenced-folder-copy-path', label: 'Copy Path', action: () => options.onCopyPath(options.folder) },
+    ];
+}
+
 export interface CollectionContextActionOptions {
     collectionId: string;
     name: string;

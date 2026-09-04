@@ -44,6 +44,7 @@
         comfyui: 'ComfyUI',
         midjourney: 'MJ',
         nanobanana: 'NB',
+        camera: 'RAW',
     };
     let sourceTag = $derived(item.source_label ? SOURCE_LABELS[item.source_label] ?? item.source_label : null);
     let a11yLabel = $derived(

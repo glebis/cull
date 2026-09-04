@@ -1534,14 +1534,30 @@ def test_grid_shift_click_range_select(page: Page) -> None:
 
 
 def test_external_drive_browse_in_place(page: Page) -> None:
-    """S44 — Mounted media is visible and browsable without import."""
+    """S44 — Mounted media is browse-first, with import kept in folder actions."""
     separator = "&" if "?" in URL else "?"
     page.goto(f"{URL}{separator}externalDrive=1")
     expect(page.get_by_test_id("devices-section")).to_contain_text("EOS_DIGITAL")
-    page.get_by_role("button", name=re.compile("EOS_DIGITAL")).click()
-    expect(page.get_by_role("button", name=re.compile("DCIM"))).to_be_visible()
+    page.get_by_role("button", name=re.compile("^EOS_DIGITAL")).click()
+    folder = page.get_by_role("button", name="DCIM", exact=True)
+    expect(folder).to_be_visible()
+    expect(page.get_by_role("button", name="Actions for DCIM")).to_be_visible()
+    expect(page.get_by_test_id("devices-section").get_by_role("button", name="Import Folder…", exact=True)).to_have_count(0)
+
+    folder.click(button="right")
+    menu = page.get_by_role("menu", name="DCIM actions")
+    expect(menu).to_be_visible()
+    assert menu.get_by_role("menuitem").all_inner_texts() == [
+        "Open Folder",
+        "Reveal in Finder",
+        "Import Folder…",
+        "Copy Path",
+    ]
+    page.keyboard.press("Escape")
+    expect(menu).to_have_count(0)
+
     expect(page.get_by_test_id("referenced-source-toolbar")).to_contain_text("Current folder")
-    page.get_by_role("button", name=re.compile("DCIM")).click()
+    folder.click()
     expect(page.get_by_test_id("referenced-source-toolbar")).to_contain_text("EOS_DIGITAL/DCIM")
     page.get_by_role("button", name="Current folder").click()
     expect(page.get_by_test_id("referenced-source-toolbar")).to_contain_text("Including subfolders")
