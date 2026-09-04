@@ -1,12 +1,57 @@
 use crate::db_core::db::Database;
 use crate::db_core::import::sync_file_cancellable;
 use crate::db_core::models::ReferencedSource;
+use crate::services::asset_events::{log_asset_load_event, NewAssetLoadEvent};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use walkdir::WalkDir;
+
+const SHOW_HIDDEN_FILES_SETTING: &str = "show_hidden_files";
+
+fn show_hidden_files(db: &Database) -> bool {
+    db.get_setting(SHOW_HIDDEN_FILES_SETTING)
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("true")
+}
+
+fn is_hidden_name(name: &std::ffi::OsStr) -> bool {
+    name.to_str()
+        .is_some_and(|name| name.starts_with('.') && name != "." && name != "..")
+}
+
+fn record_unreadable_device_file(db: &Database, path: &Path, error: &str) {
+    let path_string = path.to_string_lossy();
+    let mut hasher = Sha256::new();
+    hasher.update(path_string.as_bytes());
+    let path_hash = format!("sha256-{}", hex::encode(hasher.finalize()));
+    let image_format = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_lowercase());
+    let _ = log_asset_load_event(
+        db,
+        NewAssetLoadEvent {
+            view: "device_scan".to_string(),
+            image_id: None,
+            asset_kind: "source".to_string(),
+            image_format,
+            fallback_used: false,
+            fallback_succeeded: Some(false),
+            path_basename: path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string()),
+            path_hash: Some(path_hash),
+            error_kind: "device_scan_file_unreadable".to_string(),
+            details_json: serde_json::to_string(&serde_json::json!({ "error": error })).ok(),
+        },
+    );
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenReferencedFolder {
@@ -103,10 +148,14 @@ pub fn list_source_folders(
     if !folder.starts_with(&root) {
         return Err("Folder path must remain inside the referenced source".to_string());
     }
+    let include_hidden = show_hidden_files(db);
     let mut folders = std::fs::read_dir(folder)
         .map_err(|error| error.to_string())?
         .filter_map(Result::ok)
         .filter_map(|entry| {
+            if !include_hidden && is_hidden_name(&entry.file_name()) {
+                return None;
+            }
             let file_type = entry.file_type().ok()?;
             if !file_type.is_dir() {
                 return None;
@@ -138,12 +187,16 @@ pub fn discover_folder_page(
     let limit = request.limit.clamp(1, 250) as usize;
     let cursor = request.cursor.as_deref();
     let mut candidates = Vec::with_capacity(limit + 1);
+    let include_hidden = show_hidden_files(db);
 
     if request.recursive {
         for entry in WalkDir::new(&folder)
             .follow_links(false)
             .sort_by_file_name()
             .into_iter()
+            .filter_entry(|entry| {
+                include_hidden || entry.depth() == 0 || !is_hidden_name(entry.file_name())
+            })
             .filter_map(Result::ok)
         {
             if !entry.file_type().is_file()
@@ -173,6 +226,9 @@ pub fn discover_folder_page(
             .map_err(|error| error.to_string())?
             .filter_map(Result::ok)
             .filter_map(|entry| {
+                if !include_hidden && is_hidden_name(&entry.file_name()) {
+                    return None;
+                }
                 let path = entry.path();
                 if !path.is_file() || !crate::extensions::is_image_path(&path, module_raw) {
                     return None;
@@ -233,9 +289,21 @@ pub fn register_referenced_paths(
         if cancelled.load(Ordering::Relaxed) {
             break;
         }
-        sync_file_cancellable(db, path, app_data_dir, &|| {
+        let sync_result = sync_file_cancellable(db, path, app_data_dir, &|| {
             cancelled.load(Ordering::Relaxed)
-        })?;
+        });
+        if let Err(error) = sync_result {
+            if cancelled.load(Ordering::Relaxed) {
+                break;
+            }
+            record_unreadable_device_file(db, path, &error);
+            crate::safe_eprintln!(
+                "[device scan] skipping unreadable file {}: {}",
+                path.display(),
+                error
+            );
+            continue;
+        }
         let path_string = path.to_string_lossy();
         let Some(file) = db
             .get_image_file_by_path(&path_string)
@@ -258,6 +326,7 @@ pub fn register_referenced_paths(
 mod tests {
     use super::*;
     use crate::db_core::models::{ReferencedSource, ReferencedSourceKind};
+    use crate::services::asset_events::get_asset_load_events;
     use std::fs;
     use tempfile::tempdir;
 
@@ -329,5 +398,93 @@ mod tests {
             }
         )
         .is_err());
+    }
+
+    #[test]
+    fn hidden_entries_are_excluded_by_default_and_included_when_enabled() {
+        let (dir, db, source) = setup();
+        fs::create_dir_all(dir.path().join(".Trashes/nested")).unwrap();
+        fs::create_dir_all(dir.path().join("DCIM")).unwrap();
+        fs::write(dir.path().join(".Trashes/nested/hidden.jpg"), []).unwrap();
+        fs::write(dir.path().join("DCIM/.hidden.jpg"), []).unwrap();
+        fs::write(dir.path().join("DCIM/visible.jpg"), []).unwrap();
+
+        assert_eq!(
+            list_source_folders(&db, &source.id, "").unwrap(),
+            vec!["DCIM"]
+        );
+        let request = OpenReferencedFolder {
+            source_id: source.id.clone(),
+            relative_path: "".into(),
+            recursive: true,
+            cursor: None,
+            limit: 50,
+        };
+        let (page, _) = discover_folder_page(&db, &request).unwrap();
+        assert_eq!(page.requested_paths, vec!["DCIM/visible.jpg"]);
+
+        db.set_setting("show_hidden_files", "true").unwrap();
+        assert_eq!(
+            list_source_folders(&db, &source.id, "").unwrap(),
+            vec![".Trashes", "DCIM"]
+        );
+        let (page, _) = discover_folder_page(&db, &request).unwrap();
+        assert_eq!(
+            page.requested_paths,
+            vec![
+                ".Trashes/nested/hidden.jpg",
+                "DCIM/.hidden.jpg",
+                "DCIM/visible.jpg"
+            ]
+        );
+    }
+
+    #[test]
+    fn unreadable_jpeg_does_not_abort_the_remaining_device_scan() {
+        let (dir, db, source) = setup();
+        let app_data_dir = dir.path().join("app-data");
+        fs::create_dir_all(&app_data_dir).unwrap();
+        let invalid = dir.path().join("broken.jpg");
+        let valid = dir.path().join("valid.jpg");
+        let invalid_bytes = b"not a jpeg";
+        fs::write(&invalid, invalid_bytes).unwrap();
+        image::RgbImage::from_pixel(2, 2, image::Rgb([12, 34, 56]))
+            .save(&valid)
+            .unwrap();
+        let invalid = invalid.canonicalize().unwrap();
+        let valid = valid.canonicalize().unwrap();
+
+        let image_ids = register_referenced_paths(
+            &db,
+            &app_data_dir,
+            &source.id,
+            &[invalid.clone(), valid.clone()],
+            &Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert_eq!(image_ids.len(), 1);
+        assert!(db
+            .get_image_file_by_path(&valid.to_string_lossy())
+            .unwrap()
+            .is_some());
+        assert!(db
+            .get_image_file_by_path(&invalid.to_string_lossy())
+            .unwrap()
+            .is_none());
+        assert_eq!(fs::read(&invalid).unwrap(), invalid_bytes);
+
+        let events = get_asset_load_events(&db, 10).unwrap();
+        let failure = events
+            .iter()
+            .find(|event| event.error_kind == "device_scan_file_unreadable")
+            .expect("unreadable device file should be recorded for diagnostics");
+        assert_eq!(failure.view, "device_scan");
+        assert_eq!(failure.path_basename.as_deref(), Some("broken.jpg"));
+        assert!(!failure
+            .details_json
+            .as_deref()
+            .unwrap_or_default()
+            .contains(&dir.path().to_string_lossy().to_string()));
     }
 }

@@ -596,6 +596,9 @@ export const activeCanvas = writable<Canvas | null>(null);
 
 // Settings panel
 export const settingsOpen = writable<boolean>(false);
+// File-browser preference. The backend is authoritative for filtering; this
+// store keeps Settings and the mounted-device browser in sync.
+export const showHiddenFiles = writable<boolean>(false);
 export const aboutOpen = writable<boolean>(false);
 export const agentSkillsOpen = writable<boolean>(false);
 // Read-only Apple Photos metadata catalog; macOS exposes the native File menu action.

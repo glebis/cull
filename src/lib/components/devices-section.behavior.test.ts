@@ -6,10 +6,12 @@ import { get } from 'svelte/store';
 import type { ReferencedSource } from '$lib/api';
 
 const apiMocks = vi.hoisted(() => ({
+    getAppSetting: vi.fn().mockResolvedValue(null),
     listReferencedSources: vi.fn(),
     listSourceFolders: vi.fn().mockResolvedValue([]),
     openReferencedFolder: vi.fn(),
     cancelReferencedSourceJob: vi.fn().mockResolvedValue(true),
+    setAppSetting: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('$lib/api', () => apiMocks);
@@ -38,6 +40,7 @@ beforeEach(() => {
     vi.clearAllMocks();
     referencedSources.set([]);
     apiMocks.listReferencedSources.mockResolvedValue([]);
+    apiMocks.getAppSetting.mockResolvedValue(null);
 });
 
 describe('DevicesSection visibility', () => {
@@ -67,7 +70,7 @@ describe('DevicesSection visibility', () => {
         expect(screen.queryByText('DEVICES')).not.toBeInTheDocument();
     });
 
-    it('opens the folder actions from right-click or the visible affordance without importing on left-click', async () => {
+    it('opens folder actions from right-click or keyboard without visible action buttons', async () => {
         apiMocks.listReferencedSources.mockResolvedValue([connectedSource]);
         apiMocks.listSourceFolders.mockResolvedValue(['653_FUJI']);
         apiMocks.openReferencedFolder.mockImplementation(({ relative_path }: { relative_path: string }) => Promise.resolve({
@@ -87,7 +90,7 @@ describe('DevicesSection visibility', () => {
 
         await fireEvent.click(await screen.findByRole('button', { name: /^FUJIFILM SD/ }));
         const folder = await screen.findByRole('button', { name: '653_FUJI' });
-        expect(screen.getByRole('button', { name: 'Actions for 653_FUJI' })).toBeVisible();
+        expect(screen.queryByRole('button', { name: /Actions for/ })).not.toBeInTheDocument();
         expect(onimportfolder).not.toHaveBeenCalled();
 
         await fireEvent.contextMenu(folder);
@@ -104,5 +107,44 @@ describe('DevicesSection visibility', () => {
         await fireEvent.contextMenu(folder);
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import Folder…' }));
         expect(onimportfolder).toHaveBeenCalledWith('/Volumes/FUJIFILM SD/653_FUJI');
+
+        await fireEvent.keyDown(folder, { key: 'F10', shiftKey: true });
+        expect(await screen.findByRole('menuitem', { name: 'Open Folder' })).toBeInTheDocument();
+    });
+
+    it('hides dotfolders by default and toggles them with Cmd+Shift+Period outside text input', async () => {
+        let showHidden = false;
+        apiMocks.listReferencedSources.mockResolvedValue([connectedSource]);
+        apiMocks.listSourceFolders.mockImplementation(async () => showHidden ? ['.Trashes', '653_FUJI'] : ['653_FUJI']);
+        apiMocks.openReferencedFolder.mockResolvedValue({
+            job_id: 'job-root', source_id: connectedSource.id, relative_path: '', requested_paths: [],
+            image_ids: [], discovered_count: 0, next_cursor: null, indexing: false,
+        });
+        apiMocks.setAppSetting.mockImplementation(async (key: string, value: string) => {
+            if (key === 'show_hidden_files') showHidden = value === 'true';
+        });
+        render(DevicesSection);
+
+        await fireEvent.click(await screen.findByRole('button', { name: /^FUJIFILM SD/ }));
+        expect(await screen.findByRole('button', { name: '653_FUJI' })).toBeVisible();
+        expect(screen.queryByRole('button', { name: '.Trashes' })).not.toBeInTheDocument();
+
+        const input = document.createElement('input');
+        document.body.append(input);
+        await fireEvent.keyDown(input, { key: '.', code: 'Period', metaKey: true, shiftKey: true });
+        expect(apiMocks.setAppSetting).not.toHaveBeenCalledWith('show_hidden_files', 'true');
+
+        await fireEvent.keyDown(window, { key: '.', code: 'Period', metaKey: true, shiftKey: true });
+        await waitFor(() => expect(apiMocks.setAppSetting).toHaveBeenCalledWith('show_hidden_files', 'true'));
+        const hiddenFolder = await screen.findByRole('button', { name: '.Trashes' });
+        expect(hiddenFolder).toBeVisible();
+
+        await fireEvent.click(hiddenFolder);
+        expect(get(activeReferencedFolder)?.relative_path).toBe('.Trashes');
+        await fireEvent.keyDown(window, { key: '.', code: 'Period', metaKey: true, shiftKey: true });
+        await waitFor(() => expect(apiMocks.setAppSetting).toHaveBeenCalledWith('show_hidden_files', 'false'));
+        await waitFor(() => expect(get(activeReferencedFolder)?.relative_path).toBe(''));
+        expect(screen.queryByRole('button', { name: '.Trashes' })).not.toBeInTheDocument();
+        input.remove();
     });
 });

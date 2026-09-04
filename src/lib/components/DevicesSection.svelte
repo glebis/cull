@@ -1,8 +1,8 @@
 <script lang="ts">
     import { onDestroy, onMount } from 'svelte';
     import { get } from 'svelte/store';
-    import { activeReferencedFolder, showToast } from '$lib/stores';
-    import { listSourceFolders, type ReferencedSource } from '$lib/api';
+    import { activeReferencedFolder, showHiddenFiles, showToast } from '$lib/stores';
+    import { getAppSetting, listSourceFolders, setAppSetting, type ReferencedSource } from '$lib/api';
     import { initializeReferencedSources, openReferencedSourceFolder, referencedSources } from '$lib/referenced-sources';
     import ActionMenu from './ActionMenu.svelte';
     import { buildReferencedFolderContextActions } from '$lib/sidebar-context-actions';
@@ -28,10 +28,16 @@
     } | null>(null);
     let connectedSources = $derived($referencedSources.filter(source => !source.offline_at));
     onMount(async () => {
+        try { showHiddenFiles.set((await getAppSetting('show_hidden_files')) === 'true'); }
+        catch (error) { console.warn('Hidden-file preference unavailable', error); }
         try { dispose = await initializeReferencedSources(); }
         catch (error) { console.warn('Referenced sources unavailable', error); }
+        window.addEventListener('cull-hidden-files-changed', refreshActiveFolder);
     });
-    onDestroy(() => dispose?.());
+    onDestroy(() => {
+        dispose?.();
+        window.removeEventListener('cull-hidden-files-changed', refreshActiveFolder);
+    });
     function sourceIcon(source: ReferencedSource) { return source.source_kind === 'sd_card' ? '▣' : '◆'; }
     async function openSource(source: ReferencedSource, relativePath = '') {
         await openReferencedSourceFolder(source, relativePath);
@@ -80,16 +86,37 @@
         folderMenu = { source, relativePath, folder, name, ...menuPoint(event, anchor), opener: anchor };
     }
 
-    function openFolderMenuFromButton(event: MouseEvent, source: ReferencedSource, relativePath: string, name: string) {
-        const anchor = event.currentTarget as HTMLElement;
-        const rect = anchor.getBoundingClientRect();
-        const contextEvent = new MouseEvent('contextmenu', { clientX: rect.right, clientY: rect.bottom });
-        openFolderMenu(contextEvent, source, relativePath, name, anchor);
-    }
-
     function handleFolderMenuKey(event: KeyboardEvent, source: ReferencedSource, relativePath: string, name: string) {
         if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
         openFolderMenu(event, source, relativePath, name, event.currentTarget as HTMLElement);
+    }
+
+    function isEditableTarget(target: EventTarget | null): boolean {
+        return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement ||
+            target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable);
+    }
+
+    async function refreshActiveFolder() {
+        const active = get(activeReferencedFolder);
+        const source = connectedSources.find(item => item.id === active?.source_id);
+        if (!active || !source) return;
+        const parts = active.relative_path.split('/').filter(Boolean);
+        const firstHiddenPart = parts.findIndex(part => part.startsWith('.'));
+        const visiblePath = !get(showHiddenFiles) && firstHiddenPart >= 0
+            ? parts.slice(0, firstHiddenPart).join('/')
+            : active.relative_path;
+        await openSource(source, visiblePath);
+    }
+
+    async function handleHiddenFilesShortcut(event: KeyboardEvent) {
+        const isShortcut = event.metaKey && event.shiftKey && !event.ctrlKey && !event.altKey &&
+            (event.key === '.' || event.code === 'Period');
+        if (!isShortcut || isEditableTarget(event.target)) return;
+        event.preventDefault();
+        const next = !get(showHiddenFiles);
+        showHiddenFiles.set(next);
+        await setAppSetting('show_hidden_files', next ? 'true' : 'false');
+        await refreshActiveFolder();
     }
 
     async function importReferencedFolder(folder: string) {
@@ -127,6 +154,8 @@
     });
 </script>
 
+<svelte:window onkeydown={handleHiddenFilesShortcut} />
+
 {#if connectedSources.length > 0}
 <div class="devices-section" data-testid="devices-section">
     {#each connectedSources as source (source.id)}
@@ -142,21 +171,18 @@
             >
                 <span class="device-icon" aria-hidden="true">{sourceIcon(source)}</span><span class="item-label">{source.display_name}</span><span class="status">{source.offline_at ? 'offline' : 'connected'}</span>
             </button>
-            <button class="folder-actions" aria-label={`Actions for ${source.display_name}`} title={`Actions for ${source.display_name}`} onclick={(event) => openFolderMenuFromButton(event, source, '', source.display_name)}>…</button>
         </div>
         {#if $activeReferencedFolder?.source_id === source.id && !source.offline_at}
             {#if $activeReferencedFolder.relative_path}
                 {@const parentPath = $activeReferencedFolder.relative_path.split('/').filter(Boolean).slice(0, -1).join('/')}
                 <div class="folder-entry child-entry">
                     <button class="section-item folder-open child" onclick={() => openParent(source)} oncontextmenu={(event) => openFolderMenu(event, source, parentPath, 'Parent folder')} onkeydown={(event) => handleFolderMenuKey(event, source, parentPath, 'Parent folder')}><span class="device-icon" aria-hidden="true">↰</span><span class="item-label">Parent folder</span></button>
-                    <button class="folder-actions" aria-label="Actions for Parent folder" title="Actions for Parent folder" onclick={(event) => openFolderMenuFromButton(event, source, parentPath, 'Parent folder')}>…</button>
                 </div>
             {/if}
             {#each childFolders as folder (folder)}
                 {@const childName = folder.split('/').pop() ?? folder}
                 <div class="folder-entry child-entry">
                     <button class="section-item folder-open child" onclick={() => openSource(source, folder)} oncontextmenu={(event) => openFolderMenu(event, source, folder, childName)} onkeydown={(event) => handleFolderMenuKey(event, source, folder, childName)}><span class="device-icon" aria-hidden="true">▸</span><span class="item-label">{childName}</span></button>
-                    <button class="folder-actions" aria-label={`Actions for ${childName}`} title={`Actions for ${childName}`} onclick={(event) => openFolderMenuFromButton(event, source, folder, childName)}>…</button>
                 </div>
             {/each}
             {#if loadingFolders}<div class="empty child">Reading folders…</div>{/if}
@@ -197,20 +223,5 @@
     .child { padding-left: 28px; }
     .folder-entry { align-items: center; display: flex; min-width: 0; }
     .folder-open { flex: 1 1 auto; min-width: 0; width: auto; }
-    .folder-actions {
-        align-items: center;
-        background: none;
-        border: none;
-        border-radius: var(--radius);
-        color: var(--text-secondary);
-        cursor: pointer;
-        display: flex;
-        flex: 0 0 28px;
-        font-family: inherit;
-        height: 28px;
-        justify-content: center;
-        padding: 0;
-    }
-    .folder-actions:hover, .folder-actions:focus-visible { background: var(--border); color: var(--text); }
     .empty { color: var(--text-secondary); font-size: 11px; padding: 6px 12px; }
 </style>

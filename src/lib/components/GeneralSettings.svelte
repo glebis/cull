@@ -3,12 +3,13 @@
     import { backfillRawPreviews, cliToolStatus, getAppSetting, installCliTool, setAppSetting, uninstallCliTool } from '$lib/api';
     import type { CliToolStatus } from '$lib/api';
     import { CLIPBOARD_PASTE_DATE_FORMAT_SETTING, DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT } from '$lib/clipboard-actions';
-    import { clientToolsEnabled, navigateTo, showToast, staticPublishingEnabled, viewMode, voiceDictationEnabled } from '$lib/stores';
+    import { clientToolsEnabled, navigateTo, showHiddenFiles as showHiddenFilesStore, showToast, staticPublishingEnabled, viewMode, voiceDictationEnabled } from '$lib/stores';
 
     let closeToTray = $state(true);
     let confirmTrash = $state(true);
     let autoUpdate = $state(true);
     let autoPurge = $state(false);
+    let showHiddenFiles = $state(false);
     let pasteDateFormat = $state(DEFAULT_CLIPBOARD_PASTE_DATE_FORMAT);
     let moduleRaw = $state(true);
     let moduleStaticPublishing = $state(false);
@@ -18,9 +19,9 @@
     let cliToolBusy = $state(false);
 
     onMount(async () => {
-        const [tray, trash, update, purge, date, raw, publishing, client, voice] = await Promise.all([
+        const [tray, trash, update, purge, hidden, date, raw, publishing, client, voice] = await Promise.all([
             getAppSetting('close_to_tray'), getAppSetting('skip_trash_confirm'), getAppSetting('auto_update_enabled'),
-            getAppSetting('auto_purge_missing'), getAppSetting(CLIPBOARD_PASTE_DATE_FORMAT_SETTING),
+            getAppSetting('auto_purge_missing'), getAppSetting('show_hidden_files'), getAppSetting(CLIPBOARD_PASTE_DATE_FORMAT_SETTING),
             getAppSetting('module_raw'), getAppSetting('module_static_publishing'),
             getAppSetting('module_client_tools'), getAppSetting('module_voice_dictation'),
         ]);
@@ -28,6 +29,7 @@
         confirmTrash = trash !== 'true';
         autoUpdate = update !== 'false';
         autoPurge = purge === 'true';
+        showHiddenFiles = hidden === 'true';
         pasteDateFormat = date || pasteDateFormat;
         moduleRaw = raw !== 'false';
         moduleStaticPublishing = publishing === 'true';
@@ -36,6 +38,7 @@
         staticPublishingEnabled.set(moduleStaticPublishing);
         clientToolsEnabled.set(moduleClientTools);
         voiceDictationEnabled.set(moduleVoiceDictation);
+        showHiddenFilesStore.set(showHiddenFiles);
         // Shells out to the login shell for PATH; kept off the blocking load path.
         void refreshCliTool();
     });
@@ -52,6 +55,12 @@
     }
     async function changeClientTools() { await toggle('module_client_tools', moduleClientTools); clientToolsEnabled.set(moduleClientTools); }
     async function changeVoice() { await toggle('module_voice_dictation', moduleVoiceDictation); voiceDictationEnabled.set(moduleVoiceDictation); }
+    async function changeHiddenFiles() {
+        showHiddenFiles = !showHiddenFiles;
+        showHiddenFilesStore.set(showHiddenFiles);
+        await setAppSetting('show_hidden_files', showHiddenFiles ? 'true' : 'false');
+        window.dispatchEvent(new CustomEvent('cull-hidden-files-changed'));
+    }
     async function refreshCliTool() {
         try {
             cliTool = await cliToolStatus();
@@ -103,6 +112,7 @@
     <div class="setting-row"><span>Confirm before Trash</span><button class:on={confirmTrash} aria-pressed={confirmTrash} onclick={() => { confirmTrash = !confirmTrash; setAppSetting('skip_trash_confirm', confirmTrash ? 'false' : 'true'); }}>{confirmTrash ? 'ON' : 'OFF'}</button></div>
     <div class="setting-row"><span>Auto update</span><button class:on={autoUpdate} aria-pressed={autoUpdate} onclick={() => { autoUpdate = !autoUpdate; toggle('auto_update_enabled', autoUpdate); window.dispatchEvent(new CustomEvent('auto-update-setting-changed')); }}>{autoUpdate ? 'ON' : 'OFF'}</button></div>
     <div class="setting-row"><span>Auto-purge missing files</span><button class:on={autoPurge} aria-pressed={autoPurge} onclick={() => { autoPurge = !autoPurge; toggle('auto_purge_missing', autoPurge); }}>{autoPurge ? 'ON' : 'OFF'}</button></div>
+    <div class="setting-row"><span>Show hidden files</span><button aria-label="Show hidden files" class:on={showHiddenFiles} aria-pressed={showHiddenFiles} onclick={changeHiddenFiles}>{showHiddenFiles ? 'ON' : 'OFF'}</button></div>
         <div class="setting-row">
             <span>Command line tool</span>
             <button
