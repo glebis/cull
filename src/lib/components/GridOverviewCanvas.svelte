@@ -1,6 +1,6 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
-    import type { ImageWithFile } from '$lib/api';
+    import { getDominantColors, type ImageWithFile } from '$lib/api';
     import { shouldDecodeGridOverviewThumbnails } from '$lib/grid-overview';
     import { safeAssetPreviewPath } from '$lib/view-utils';
 
@@ -22,15 +22,28 @@
     let canvas: HTMLCanvasElement;
     let renderGeneration = 0;
 
+    let dominantColors = $state<Record<string, string>>({});
+    let dominantColorsFetchCount = -1;
+
+    // Fetch real per-image dominant colors so tiny overview cells reflect actual
+    // image content instead of arbitrary placeholder hues. Re-fetch only when the
+    // library size changes (scroll/repaints must not trigger IPC).
+    $effect(() => {
+        const count = items.length;
+        if (count === 0 || count === dominantColorsFetchCount) return;
+        dominantColorsFetchCount = count;
+        getDominantColors()
+            .then((map) => { dominantColors = map; })
+            .catch(() => { /* placeholders stay neutral when metrics are unavailable */ });
+    });
+
     function token(styles: CSSStyleDeclaration, name: string): string {
         return styles.getPropertyValue(name).trim();
     }
 
-    function imageColor(index: number, palette: string[]): string {
-        const id = items[index]?.image.id ?? String(index);
-        let hash = 0;
-        for (let i = 0; i < id.length; i += 1) hash = ((hash << 5) - hash + id.charCodeAt(i)) | 0;
-        return palette[Math.abs(hash) % palette.length];
+    function imageColor(index: number, fallback: string): string {
+        const id = items[index]?.image.id;
+        return (id && dominantColors[id]) || fallback;
     }
 
     $effect(() => {
@@ -46,7 +59,7 @@
 
         const styles = getComputedStyle(canvas);
         const background = token(styles, '--bg');
-        const palette = [token(styles, '--surface'), token(styles, '--border'), token(styles, '--text-secondary'), token(styles, '--blue'), token(styles, '--purple')];
+        const fallbackColor = token(styles, '--surface');
         const selectedColor = token(styles, '--green');
         const focusedColor = token(styles, '--blue');
         ctx.fillStyle = background;
@@ -65,7 +78,7 @@
                 if (!item) break;
                 const x = col * cellSize;
                 const y = row * cellSize - scrollTop;
-                ctx.fillStyle = selectedIds.has(item.image.id) ? selectedColor : index === focusedIndex ? focusedColor : imageColor(index, palette);
+                ctx.fillStyle = selectedIds.has(item.image.id) ? selectedColor : index === focusedIndex ? focusedColor : imageColor(index, fallbackColor);
                 ctx.fillRect(x, y, size, size);
                 if (decodeThumbnails) {
                     const path = safeAssetPreviewPath(item, { displayPx: size, dpr: 1 });
@@ -84,7 +97,14 @@
             img.decoding = 'async';
             img.onload = () => {
                 if (generation === renderGeneration) {
-                    ctx.drawImage(img, next.x, next.y, size, size);
+                    const naturalWidth = img.naturalWidth || size;
+                    const naturalHeight = img.naturalHeight || size;
+                    const aspect = naturalWidth > 0 && naturalHeight > 0 ? naturalWidth / naturalHeight : 1;
+                    const drawWidth = aspect >= 1 ? size : size * aspect;
+                    const drawHeight = aspect >= 1 ? size / aspect : size;
+                    const drawX = next.x + (size - drawWidth) / 2;
+                    const drawY = next.y + (size - drawHeight) / 2;
+                    ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
                     const item = items[next.index];
                     if (item && selectedIds.has(item.image.id)) {
                         ctx.strokeStyle = selectedColor;

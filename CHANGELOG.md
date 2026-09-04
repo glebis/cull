@@ -6,6 +6,70 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-09-01
+
+Cull 0.6.2 is the first update since v0.5.1. It bundles everything prepared for
+the internal v0.6.0/v0.6.1 builds — which never reached the public release page —
+so this list covers all changes since v0.5.1.
+
+### What's new
+
+- **A "Just imported" rail in the sidebar.** Your latest imports now appear right
+  above your library, so fresh images are one click away — and the rail stays
+  visible until you've checked them.
+- **One smarter sidebar search.** The search box now filters everything the
+  sidebar shows, including detected subjects and the current session's images.
+  Press Enter to run the same search across the full grid.
+- **Clipboard monitor at a glance.** A new chip in the footer shows whether
+  clipboard monitoring is on, how many images it captured, and links straight
+  to the clipboard section where you can start or stop it.
+- **Peek inside folders on hover.** Hold Option (⌥) over a folder in the sidebar
+  to preview its pictures as a thumbnail grid; release the key and it closes.
+- **Empty sections now show the next step.** Empty Collections or Smart sections
+  tell you what to do (press "+" to create one, or save a grid filter as a Smart
+  Collection) instead of quietly disappearing.
+- **Hide what you don't use.** A new setting hides folders and collections whose
+  subtrees contain no visible images.
+
+### Improved
+
+- **The app is about 26 MB smaller.** By shipping only what the app actually
+  runs, Cull went from 71 MB to 45 MB installed and the download from 27 MB to
+  about 20 MB — same features, faster download and updates.
+- **One visual language for sidebar icons.** Icons now use words and counts
+  instead of mixed glyphs, and each accent color has one meaning everywhere:
+  blue = clickable, green = success or live activity, orange = active mode,
+  purple = detected subject, red = error.
+- **Tidier folder rows.** Image counts sit in an aligned right-hand column,
+  labels are left-aligned, and folder actions moved to the right-click menu.
+
+### Fixed
+
+- Zoomed far out, tiny grid cells now show each image's real dominant color
+  instead of an unrelated placeholder color.
+- Opening a second folder from an external drive cancels the first read cleanly
+  instead of colliding with it.
+- SD cards and other removable drives stay visible on macOS even when the system
+  reports them as internal.
+- Sidebar arrows and chips now have a comfortable click area (24 px floor).
+- Small sidebar text got a contrast boost for readability.
+- Right-click menus on sidebar sections gained the folder actions that the
+  redundant "…" menu used to hold.
+
+### Under the hood
+
+- The release pipeline now requires a human-verified local install before any
+  version ships, and two release-automation bugs found while shipping this
+  version were fixed. The v0.6.0 and v0.6.1 builds were stopped by our own
+  safety gates before reaching anyone — this v0.6.2 is the build that passed
+  every check. Developer-only dependency updates are included.
+
+## [0.6.0] - 2026-09-01
+
+### Changed
+
+- **~26 MB smaller release bundle.** Release binaries are now stripped and link-time optimized; the bundled Claude Agent SDK is pruned to its runtime entry (sdk.mjs + package.json); bundled art is properly sized and quantized (favicon 810 KB → 2.4 KB, clipboard empty-state 550 KB → 35 KB, DMG background 306 KB → 68 KB). Unused framework placeholder SVGs and two unused EB Garamond faces were removed, and OS junk files no longer ship in the frontend build. Cull.app 71 MB → 45 MB, DMG 26.8 MB → 20.4 MB. No behavior changes; runtime import resolution verified in the built app.
+
 ### Added
 
 - **Sidebar: recency rail above the folder tree.** Persistent `Just imported:` chip and last-N scope list above LIBRARY; auto-reveal + highlight until visited. Replaces the 8-second toast. (`imageview-1i2k.1`)
@@ -22,6 +86,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Grid overview: tiny cells now show real image colors.** At extreme zoom-out the overview canvas painted each cell with a color hashed from the image ID (random-looking, unrelated to content). Cells now paint with the image's stored dominant color (`get_dominant_colors`), falling back to a neutral surface when metrics are missing. (`imageview-lr9q`)
 - **Concurrent external-device reads.** Opening another folder now cancels and supersedes the previous read, and duplicate-content registration resolves the canonical image identity instead of surfacing a foreign-key error.
 - **External-drive detection on macOS.** Removable or ejectable SD cards remain visible even when macOS also reports the volume as internal.
 - **Release regression coverage for sidebar feature retention.** The release gate now blocks if Recent Imports regains a decorative clock glyph or if connected-device visibility regresses.

@@ -48,6 +48,14 @@ pub async fn get_color_metrics_count(state: State<'_, AppState>) -> Result<u32, 
 }
 
 #[tauri::command]
+pub async fn get_dominant_colors(
+    state: State<'_, AppState>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let ctx = ServiceContext::from_app_state(&state, None);
+    crate::services::ai::list_dominant_colors(&ctx).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn list_images_by_color_bucket(
     state: State<'_, AppState>,
     bucket: String,

@@ -53,6 +53,29 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Listener, Manager};
 use tauri_plugin_dialog::DialogExt;
 
+/// Keep the packaged app out of App Nap / WebKit WebProcess suspension while
+/// the native interaction smoke self-drives the UI. Without this, WKWebView
+/// can suspend the page (idle/occluded windows) and throttle DOM timers, which
+/// starves the smoke driver until the harness timeout kills it. The harness
+/// sets CULL_NATIVE_SMOKE_ACTIVE when launching the packaged app; see
+/// tests/native/run-packaged-interaction-smoke.sh and the release-lessons
+/// reference in the cull-release skills.
+#[cfg(target_os = "macos")]
+fn begin_smoke_activity_assertion() {
+    if std::env::var_os("CULL_NATIVE_SMOKE_ACTIVE").is_none() {
+        return;
+    }
+    use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
+    let info = NSProcessInfo::processInfo();
+    let activity = info.beginActivityWithOptions_reason(
+        NSActivityOptions::UserInitiatedAllowingIdleSystemSleep,
+        &NSString::from_str("Cull native interaction smoke: keep web content active"),
+    );
+    // The assertion must outlive this call; the process exits soon after the
+    // smoke finishes, so leaking it is intentional and harmless.
+    std::mem::forget(activity);
+}
+
 pub struct AppState {
     pub db: Database,
     pub app_data_dir: PathBuf,
@@ -310,6 +333,9 @@ pub fn run() {
         return;
     }
 
+    #[cfg(target_os = "macos")]
+    begin_smoke_activity_assertion();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -415,6 +441,8 @@ pub fn run() {
             {
                 let state: tauri::State<'_, AppState> = app.state();
                 let db = state.db.clone();
+                let cleanup_db = db.clone();
+                let app_data_dir = state.app_data_dir.clone();
                 let handle = app.handle().clone();
                 let provider = std::sync::Arc::new(
                     mounted_sources::PlatformMountedSourceProvider,
@@ -424,6 +452,16 @@ pub fn run() {
                     provider,
                     std::time::Duration::from_secs(2),
                     move |refresh| {
+                        if let Ok(image_ids) = cleanup_db
+                            .thumbnail_purge_candidates_for_offline_sources(&refresh.offline_ids)
+                        {
+                            for image_id in image_ids {
+                                crate::db_core::thumbnails::remove_thumbnails_for_image(
+                                    &app_data_dir,
+                                    &image_id,
+                                );
+                            }
+                        }
                         let _ = handle.emit("sources:changed", refresh);
                     },
                 ));
@@ -700,6 +738,7 @@ pub fn run() {
             commands::color::analyze_image_colors,
             commands::color::get_image_color_metrics,
             commands::color::get_color_metrics_count,
+            commands::color::get_dominant_colors,
             commands::color::list_images_by_color_bucket,
             commands::perceptual_hash::analyze_perceptual_hashes,
             commands::perceptual_hash::get_image_perceptual_hash,
@@ -769,6 +808,7 @@ pub fn run() {
             commands::dictation::start_dictation,
             commands::dictation::stop_dictation,
             commands::undo::undo,
+            commands::undo::undo_many,
             commands::undo::redo,
             commands::undo::get_undo_status,
             commands::undo::list_undo_history,
@@ -795,6 +835,7 @@ pub fn run() {
             commands::files::create_subfolder,
             commands::files::share_images,
             commands::files::open_images_with_application,
+            commands::files::resolve_image_original_path,
             commands::files::list_open_with_applications,
             commands::agent_snapshots::capture_agent_window_snapshot,
             commands::agent_snapshots::complete_agent_view_snapshot,

@@ -3,7 +3,7 @@ import {
     viewMode, thumbnailSize, gridPreset, gridGap, gridScrollTop,
     sidebarVisible, zenMode, showRejected, activeFolder, activeCollection,
     activeSmartCollection, activeDetectedClass, minSizeFilter, loupeScale, loupePanX, loupePanY,
-    lineageLayout, showDetectionBoxes, nsfwMode, embeddingViewState,
+    lineageLayout, lineageImageScale, showDetectionBoxes, nsfwMode, embeddingViewState,
     focusedIndex, images,
     pinnedCollection, pinnedCollections,
     expandedFolders, sidebarSectionsCollapsed, sidebarHideEmpty, recentScopes,
@@ -14,6 +14,13 @@ import type { RecentScope } from './sidebar-utils';
 
 const STORAGE_KEY = 'cull-app-state';
 const SCHEMA_VERSION = 1;
+const LINEAGE_ZOOM_MIN = 0.5;
+const LINEAGE_ZOOM_MAX = 2.5;
+
+function clampLineageImageScale(scale: number): number {
+    if (!Number.isFinite(scale)) return 1;
+    return Math.min(LINEAGE_ZOOM_MAX, Math.max(LINEAGE_ZOOM_MIN, scale));
+}
 
 export interface PersistedState {
     _version: number;
@@ -36,6 +43,7 @@ export interface PersistedState {
     loupePanX: number;
     loupePanY: number;
     lineageLayout: LineageLayout;
+    lineageImageScale: number;
     showDetectionBoxes: boolean;
     nsfwMode: NsfwMode;
     embeddingViewState: EmbeddingViewState;
@@ -71,6 +79,7 @@ export function saveAppState(): void {
         loupePanX: get(loupePanX),
         loupePanY: get(loupePanY),
         lineageLayout: get(lineageLayout),
+        lineageImageScale: get(lineageImageScale),
         showDetectionBoxes: get(showDetectionBoxes),
         nsfwMode: get(nsfwMode),
         embeddingViewState: get(embeddingViewState),
@@ -109,6 +118,7 @@ export function restoreAppStateBeforeImages(): PersistedState | null {
         loupePanX.set(state.loupePanX);
         loupePanY.set(state.loupePanY);
         lineageLayout.set(state.lineageLayout);
+        lineageImageScale.set(clampLineageImageScale(typeof state.lineageImageScale === 'number' ? state.lineageImageScale : 1));
         showDetectionBoxes.set(state.showDetectionBoxes);
         nsfwMode.set(state.nsfwMode);
         embeddingViewState.set(state.embeddingViewState);

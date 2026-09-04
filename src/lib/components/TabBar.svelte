@@ -1,6 +1,6 @@
 <script lang="ts">
     import { openPreviewDisplay } from '$lib/api';
-    import { viewMode, thumbnailSize, canvasZoom, navigateTo, requestCanvasZoom, setGridThumbnailSize, showToast } from '$lib/stores';
+    import { viewMode, thumbnailSize, canvasZoom, lineageImageScale, navigateTo, requestCanvasZoom, setGridThumbnailSize, showToast } from '$lib/stores';
     import type { ViewMode } from '$lib/stores';
     import {
         canvasZoomFromPosition,
@@ -29,6 +29,28 @@
     canvasZoom.subscribe(v => {
         canvasZoomPosition = canvasZoomPositionFromZoom(v);
     });
+    const LINEAGE_ZOOM_MIN = 0.5;
+    const LINEAGE_ZOOM_MAX = 2.5;
+    const LINEAGE_ZOOM_STEP = 0.1;
+
+    function clampLineageImageScale(scale: number): number {
+        return Math.min(LINEAGE_ZOOM_MAX, Math.max(LINEAGE_ZOOM_MIN, scale));
+    }
+
+    function lineageScaleToPosition(scale: number): number {
+        const normalized = (clampLineageImageScale(scale) - LINEAGE_ZOOM_MIN) / (LINEAGE_ZOOM_MAX - LINEAGE_ZOOM_MIN);
+        return Math.round(normalized * 100);
+    }
+
+    function lineagePositionToScale(position: number): number {
+        const normalized = Math.max(0, Math.min(100, position)) / 100;
+        return clampLineageImageScale(LINEAGE_ZOOM_MIN + normalized * (LINEAGE_ZOOM_MAX - LINEAGE_ZOOM_MIN));
+    }
+
+    let lineageZoomPosition = $state(lineageScaleToPosition(1));
+    lineageImageScale.subscribe(v => {
+        lineageZoomPosition = lineageScaleToPosition(v);
+    });
 
     function setSize(e: Event) {
         const position = parseFloat((e.target as HTMLInputElement).value);
@@ -45,6 +67,20 @@
         const position = parseFloat((e.target as HTMLInputElement).value);
         canvasZoomPosition = position;
         requestCanvasZoom(canvasZoomFromPosition(position));
+    }
+
+    function setLineageZoom(e: Event) {
+        const position = parseFloat((e.target as HTMLInputElement).value);
+        lineageZoomPosition = position;
+        lineageImageScale.set(lineagePositionToScale(position));
+    }
+
+    function stepLineageZoom(direction: -1 | 1) {
+        const factor = 1 + (LINEAGE_ZOOM_STEP * direction);
+        const nextScale = clampLineageImageScale($lineageImageScale * factor);
+        if (nextScale !== $lineageImageScale) {
+            lineageImageScale.set(nextScale);
+        }
     }
 
     function selectTab(mode: ViewMode) {
@@ -140,6 +176,22 @@
                     />
                 </div>
                 <span class="slider-marker">+</span>
+            </div>
+        {:else if $viewMode === 'lineage'}
+            <div class="slider-group">
+                <button class="slider-icon" type="button" aria-label="Zoom lineage images out" title="Zoom out lineage images" disabled={$lineageImageScale <= LINEAGE_ZOOM_MIN} onclick={() => stepLineageZoom(-1)}>▪▪</button>
+                <div class="slider-track">
+                    <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={lineageZoomPosition}
+                        oninput={setLineageZoom}
+                        aria-label="Lineage image scale"
+                    />
+                </div>
+                <button class="slider-icon" type="button" aria-label="Zoom lineage images in" title="Zoom in lineage images" disabled={$lineageImageScale >= LINEAGE_ZOOM_MAX} onclick={() => stepLineageZoom(1)}>▪</button>
             </div>
         {/if}
     </div>

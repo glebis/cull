@@ -1,5 +1,5 @@
 use crate::db_core::db::Database;
-use crate::db_core::import::sync_file_cancellable;
+use crate::db_core::import::sync_referenced_file_cancellable;
 use crate::db_core::models::ReferencedSource;
 use crate::services::asset_events::{log_asset_load_event, NewAssetLoadEvent};
 use serde::{Deserialize, Serialize};
@@ -289,7 +289,7 @@ pub fn register_referenced_paths(
         if cancelled.load(Ordering::Relaxed) {
             break;
         }
-        let sync_result = sync_file_cancellable(db, path, app_data_dir, &|| {
+        let sync_result = sync_referenced_file_cancellable(db, path, app_data_dir, &|| {
             cancelled.load(Ordering::Relaxed)
         });
         if let Err(error) = sync_result {
@@ -311,6 +311,11 @@ pub fn register_referenced_paths(
         else {
             continue;
         };
+        let thumbnail = crate::db_core::thumbnails::thumbnail_path(app_data_dir, &file.image_id);
+        if !thumbnail.exists() {
+            crate::db_core::thumbnails::generate_thumbnail(path, app_data_dir, &file.image_id)
+                .map_err(|error| format!("Referenced indexing thumbnail failed: {error}"))?;
+        }
         let relative = relative_string(&root, path)
             .ok_or_else(|| "Indexed file escaped referenced source".to_string())?;
         db.attach_referenced_file(source_id, &file.id, &relative)
@@ -486,5 +491,131 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains(&dir.path().to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn unchanged_referenced_file_regenerates_a_purged_thumbnail() {
+        let (dir, db, source) = setup();
+        let image_path = dir.path().join("image.jpg");
+        let app_data_dir = dir.path().join("app-data");
+        let image = image::RgbImage::from_pixel(8, 8, image::Rgb([90, 120, 150]));
+        image.save(&image_path).unwrap();
+        let image_path = fs::canonicalize(image_path).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+
+        let image_ids = register_referenced_paths(
+            &db,
+            &app_data_dir,
+            &source.id,
+            std::slice::from_ref(&image_path),
+            &cancelled,
+        )
+        .unwrap();
+        let image_id = image_ids.first().unwrap();
+        let thumbnail = crate::db_core::thumbnails::thumbnail_path(&app_data_dir, image_id);
+        assert!(thumbnail.exists());
+
+        crate::db_core::thumbnails::remove_thumbnails_for_image(&app_data_dir, image_id);
+        assert!(!thumbnail.exists());
+
+        register_referenced_paths(
+            &db,
+            &app_data_dir,
+            &source.id,
+            std::slice::from_ref(&image_path),
+            &cancelled,
+        )
+        .unwrap();
+
+        assert!(thumbnail.exists());
+    }
+
+    #[test]
+    fn browsing_then_importing_the_same_path_promotes_it_without_changing_image_identity() {
+        let (dir, db, source) = setup();
+        let image_path = dir.path().join("promote.jpg");
+        let app_data_dir = dir.path().join("app-data");
+        let image = image::RgbImage::from_pixel(8, 8, image::Rgb([90, 120, 150]));
+        image.save(&image_path).unwrap();
+        let image_path = fs::canonicalize(image_path).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+
+        let browsed_ids = register_referenced_paths(
+            &db,
+            &app_data_dir,
+            &source.id,
+            std::slice::from_ref(&image_path),
+            &cancelled,
+        )
+        .unwrap();
+        assert_eq!(browsed_ids.len(), 1);
+        assert!(db.list_images(20, 0).unwrap().is_empty());
+
+        let imported_id = crate::db_core::import::import_file(&db, &image_path, &app_data_dir)
+            .unwrap()
+            .expect("promoting a browsed path must count as an import");
+
+        assert_eq!(imported_id, browsed_ids[0]);
+        let library = db.list_images(20, 0).unwrap();
+        assert_eq!(library.len(), 1);
+        assert_eq!(library[0].image.id, browsed_ids[0]);
+        let referenced = db
+            .list_images_in_referenced_folder(&source.id, "", true, 20, 0, true)
+            .unwrap();
+        assert_eq!(referenced.len(), 1);
+        assert_eq!(referenced[0].image.id, browsed_ids[0]);
+    }
+
+    #[test]
+    fn importing_then_browsing_the_same_path_keeps_it_in_the_library() {
+        let (dir, db, source) = setup();
+        let image_path = dir.path().join("keep.jpg");
+        let app_data_dir = dir.path().join("app-data");
+        let image = image::RgbImage::from_pixel(8, 8, image::Rgb([60, 80, 100]));
+        image.save(&image_path).unwrap();
+        let image_path = fs::canonicalize(image_path).unwrap();
+
+        let imported_id = crate::db_core::import::import_file(&db, &image_path, &app_data_dir)
+            .unwrap()
+            .unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let browsed_ids = register_referenced_paths(
+            &db,
+            &app_data_dir,
+            &source.id,
+            std::slice::from_ref(&image_path),
+            &cancelled,
+        )
+        .unwrap();
+
+        assert_eq!(browsed_ids, vec![imported_id.clone()]);
+        let library = db.list_images(20, 0).unwrap();
+        assert_eq!(library.len(), 1);
+        assert_eq!(library[0].image.id, imported_id);
+    }
+
+    #[test]
+    fn a_failed_explicit_import_does_not_promote_a_browsed_path() {
+        let (dir, db, source) = setup();
+        let image_path = dir.path().join("broken-on-import.jpg");
+        let app_data_dir = dir.path().join("app-data");
+        let image = image::RgbImage::from_pixel(8, 8, image::Rgb([40, 50, 60]));
+        image.save(&image_path).unwrap();
+        let image_path = fs::canonicalize(image_path).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        register_referenced_paths(
+            &db,
+            &app_data_dir,
+            &source.id,
+            std::slice::from_ref(&image_path),
+            &cancelled,
+        )
+        .unwrap();
+        assert!(db.list_images(20, 0).unwrap().is_empty());
+
+        fs::write(&image_path, b"not a decodable jpeg anymore").unwrap();
+        assert!(crate::db_core::import::import_file(&db, &image_path, &app_data_dir).is_err());
+
+        assert!(db.list_images(20, 0).unwrap().is_empty());
     }
 }

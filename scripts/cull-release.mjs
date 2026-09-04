@@ -362,7 +362,7 @@ function queryReleaseIncidents() {
     return issues;
   }
   const output = execFileSync('npm', [
-    'run', '--silent', 'bd', '--', 'list', '--json', '--limit', '0',
+    'run', '--silent', 'bd', '--', 'list', '--json', '--limit', '0', '--all',
   ], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const issues = JSON.parse(output);
   if (!Array.isArray(issues)) throw new Error('bd list did not return an array');

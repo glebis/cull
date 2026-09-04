@@ -29,23 +29,9 @@
 @font-face {
     font-family: 'EB Garamond';
     font-style: normal;
-    font-weight: 500;
-    font-display: swap;
-    src: url('/fonts/EBGaramond-Medium.woff2') format('woff2');
-}
-@font-face {
-    font-family: 'EB Garamond';
-    font-style: normal;
     font-weight: 700;
     font-display: swap;
     src: url('/fonts/EBGaramond-Bold.woff2') format('woff2');
-}
-@font-face {
-    font-family: 'EB Garamond';
-    font-style: italic;
-    font-weight: 400;
-    font-display: swap;
-    src: url('/fonts/EBGaramond-Italic.woff2') format('woff2');
 }
 
 :root {

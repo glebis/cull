@@ -3,6 +3,33 @@
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
+    <script>
+      // Smoke diagnostics: render fatal frontend errors as a visible on-page
+      // banner so the packaged interaction smoke's timeout screenshot captures
+      // the actual error (the app log cannot see WKWebView console output in
+      // release builds, and the window title is hidden).
+      (function () {
+        function show(label, text) {
+          try {
+            var banner = document.createElement('div');
+            banner.id = 'smoke-error-banner';
+            banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;' +
+              'background:#ff3366;color:#ffffff;font:14px/1.4 monospace;padding:12px;white-space:pre-wrap;';
+            banner.textContent = label + ': ' + String(text).slice(0, 300);
+            (document.body || document.documentElement).appendChild(banner);
+            document.title = 'SMOKE-ERR ' + label;
+          } catch (displayError) { /* nothing else we can do */ }
+        }
+        window.addEventListener('error', function (e) {
+          show('ERR', (e.message || 'unknown') +
+            (e.filename ? ' @' + String(e.filename).split('/').pop() + ':' + e.lineno : ''));
+        });
+        window.addEventListener('unhandledrejection', function (e) {
+          var reason = e.reason && e.reason.message ? e.reason.message : String(e.reason);
+          show('REJECT', reason);
+        });
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tauri + SvelteKit + Typescript App</title>
     %sveltekit.head%

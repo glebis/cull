@@ -8,6 +8,7 @@ use crate::db_core::db::{
 
 use crate::db_core::db::Database;
 use crate::db_core::models::*;
+use crate::db_core::referenced_sources::NORMAL_LIBRARY_FILE_PREDICATE;
 use crate::db_core::visibility::RejectedVisibility;
 use rusqlite::types::Value;
 use rusqlite::{params, OptionalExtension, Result, Transaction};
@@ -416,11 +417,12 @@ impl Database {
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE {}
+             WHERE {} AND {}
              GROUP BY i.id
              ORDER BY i.imported_at DESC, i.id ASC
              LIMIT ?1 OFFSET ?2",
-            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate(),
+            NORMAL_LIBRARY_FILE_PREDICATE
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![limit, offset], map_image_with_file_row)?;
@@ -448,11 +450,11 @@ impl Database {
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE {}
+             WHERE ({}) AND {}
              GROUP BY i.id
              ORDER BY i.imported_at DESC, i.id ASC
              LIMIT ? OFFSET ?",
-            scope_filter
+            scope_filter, NORMAL_LIBRARY_FILE_PREDICATE
         );
         args.push(Value::Integer(limit as i64));
         args.push(Value::Integer(offset as i64));
@@ -494,6 +496,8 @@ impl Database {
         );
         sql.push_str(" AND ");
         sql.push_str(RejectedVisibility::from_include_rejected(include_rejected).sql_predicate());
+        sql.push_str(" AND ");
+        sql.push_str(NORMAL_LIBRARY_FILE_PREDICATE);
         if let Some(w) = min_width {
             sql.push_str(&format!(" AND i.width >= {}", w));
         }
@@ -561,12 +565,13 @@ impl Database {
                  FROM image_files f
                  JOIN images i ON i.id = f.image_id
                  LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-                 WHERE f.missing_at IS NULL AND {}
+                 WHERE f.missing_at IS NULL AND {} AND {}
              )
              WHERE folder IS NOT NULL
              GROUP BY folder
              ORDER BY folder",
-            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate(),
+            NORMAL_LIBRARY_FILE_PREDICATE
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([], |row| {
@@ -606,11 +611,12 @@ impl Database {
              FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE substr(f.path, 1, ?4) COLLATE BINARY = ?1 COLLATE BINARY AND {}
+             WHERE substr(f.path, 1, ?4) COLLATE BINARY = ?1 COLLATE BINARY AND {} AND {}
              GROUP BY i.id
              ORDER BY i.imported_at DESC
              LIMIT ?2 OFFSET ?3",
-            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate(),
+            NORMAL_LIBRARY_FILE_PREDICATE
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![prefix, limit, offset, prefix_len], |row| {
@@ -652,8 +658,9 @@ impl Database {
             "SELECT COUNT(DISTINCT i.id) FROM images i
              JOIN image_files f ON f.image_id = i.id AND f.missing_at IS NULL
              LEFT JOIN selections s ON s.image_id = i.id AND s.project_id = '__global__'
-             WHERE {}",
-            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate()
+             WHERE {} AND {}",
+            RejectedVisibility::from_include_rejected(include_rejected).sql_predicate(),
+            NORMAL_LIBRARY_FILE_PREDICATE
         );
         conn.query_row(&sql, [], |row| row.get(0))
     }
@@ -1050,10 +1057,20 @@ impl Database {
     }
 
     pub fn insert_image_file(&self, file: &ImageFile) -> Result<()> {
+        self.insert_image_file_with_library_membership(file, true)
+    }
+
+    pub(crate) fn insert_image_file_with_library_membership(
+        &self,
+        file: &ImageFile,
+        library_member: bool,
+    ) -> Result<()> {
         let conn = self.conn.lock();
         conn.execute(
-            "INSERT OR REPLACE INTO image_files (id, image_id, path, last_seen_at, missing_at, last_seen_size, last_seen_mtime)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT OR REPLACE INTO image_files (
+                id, image_id, path, last_seen_at, missing_at, last_seen_size, last_seen_mtime,
+                library_member
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 file.id,
                 file.image_id,
@@ -1061,7 +1078,8 @@ impl Database {
                 file.last_seen_at,
                 file.missing_at,
                 sql_opt_u64(file.last_seen_size)?,
-                file.last_seen_mtime
+                file.last_seen_mtime,
+                library_member,
             ],
         )?;
 
@@ -1091,6 +1109,40 @@ impl Database {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn promote_image_file_to_library(&self, file_id: &str) -> Result<bool> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let (image_id, library_member): (String, bool) = tx.query_row(
+            "SELECT image_id, library_member FROM image_files WHERE id = ?1",
+            params![file_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if library_member {
+            return Ok(false);
+        }
+
+        let already_in_library: bool = tx.query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM image_files
+                 WHERE image_id = ?1 AND library_member = 1
+             )",
+            params![image_id],
+            |row| row.get(0),
+        )?;
+        if !already_in_library {
+            tx.execute(
+                "UPDATE images SET imported_at = datetime('now') WHERE id = ?1",
+                params![image_id],
+            )?;
+        }
+        tx.execute(
+            "UPDATE image_files SET library_member = 1 WHERE id = ?1",
+            params![file_id],
+        )?;
+        tx.commit()?;
+        Ok(true)
     }
 
     pub fn add_library_root(&self, path: &str) -> Result<String> {

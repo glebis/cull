@@ -1,6 +1,6 @@
 [package]
 name = "cull"
-version = "0.5.1"
+version = "0.6.2"
 description = "Local-first desktop image viewer for AI-generated art workflows."
 authors = ["Gleb Kalinin <glebis@gmail.com>"]
 license = "Apache-2.0"
@@ -8,6 +8,13 @@ repository = "https://github.com/glebis/cull"
 homepage = "https://github.com/glebis/cull"
 readme = "../README.md"
 edition = "2021"
+
+[profile.release]
+# Ship a smaller binary: strip symbol tables, link-time optimize, single
+# codegen unit. Release builds only; dev/test profiles are untouched.
+strip = true
+lto = true
+codegen-units = 1
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -85,7 +92,7 @@ libc = "0.2"
 core-foundation = "0.10"
 objc2 = { version = "0.6", features = ["exception"] }
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage", "NSPasteboard", "NSPasteboardItem", "NSResponder", "NSSharingService", "NSView", "NSWindow", "NSWorkspace"] }
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSError", "NSFileManager", "NSGeometry", "NSLocale", "NSObject", "NSString", "NSThread", "NSURL", "NSValue", "block2"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSError", "NSFileManager", "NSGeometry", "NSLocale", "NSObject", "NSString", "NSProcessInfo", "NSThread", "NSURL", "NSValue", "block2"] }
 objc2-vision = { version = "0.3.2", default-features = false, features = ["std", "VNObservation", "VNRecognizeTextRequest", "VNRequest", "VNRequestHandler", "VNTypes"] }
 objc2-speech = "0.3"
 objc2-avf-audio = "0.3"
