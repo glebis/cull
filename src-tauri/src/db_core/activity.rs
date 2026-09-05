@@ -19,34 +19,9 @@ fn row_to_session_event(row: &rusqlite::Row<'_>) -> Result<SessionEvent> {
 
 impl Database {
     pub fn log_session_event(&self, event: &NewSessionEvent) -> Result<String> {
-        let id = uuid::Uuid::new_v4().to_string();
-        let now = chrono::Utc::now().to_rfc3339();
-        let payload_json = if event.payload_json.trim().is_empty() {
-            "{}"
-        } else {
-            event.payload_json.as_str()
-        };
         let conn = self.conn.lock();
-        conn.execute(
-            "INSERT INTO session_events (
-                id, session_id, event_type, actor_type, actor_id,
-                subject_type, subject_id, payload_json, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![
-                id,
-                event.session_id.as_deref(),
-                event.event_type.as_str(),
-                event.actor_type.as_str(),
-                event.actor_id.as_deref(),
-                event.subject_type.as_deref(),
-                event.subject_id.as_deref(),
-                payload_json,
-                now,
-            ],
-        )?;
-        Ok(id)
+        log_session_event_conn(&conn, event)
     }
-
     pub fn list_session_events(
         &self,
         session_id: Option<&str>,
@@ -186,6 +161,40 @@ impl Database {
             recent_events,
         })
     }
+}
+
+/// Connection-scoped variant so code already inside an open transaction
+/// (e.g. atomic proposal application) can log provenance without taking the
+/// database lock again.
+pub(crate) fn log_session_event_conn(
+    conn: &rusqlite::Connection,
+    event: &NewSessionEvent,
+) -> Result<String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let payload_json = if event.payload_json.trim().is_empty() {
+        "{}"
+    } else {
+        event.payload_json.as_str()
+    };
+    conn.execute(
+        "INSERT INTO session_events (
+            id, session_id, event_type, actor_type, actor_id,
+            subject_type, subject_id, payload_json, created_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            id,
+            event.session_id.as_deref(),
+            event.event_type.as_str(),
+            event.actor_type.as_str(),
+            event.actor_id.as_deref(),
+            event.subject_type.as_deref(),
+            event.subject_id.as_deref(),
+            payload_json,
+            now,
+        ],
+    )?;
+    Ok(id)
 }
 
 #[cfg(test)]

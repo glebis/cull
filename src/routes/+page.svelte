@@ -36,10 +36,14 @@
     import TextInputDialog from '$lib/components/TextInputDialog.svelte';
     import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
     import CollectionTargetDialog from '$lib/components/CollectionTargetDialog.svelte';
+    import SelectionModeBar from '$lib/components/SelectionModeBar.svelte';
+    import SelectionStartDialog from '$lib/components/SelectionStartDialog.svelte';
+    import SelectionFinishDialog from '$lib/components/SelectionFinishDialog.svelte';
+    import SelectionResumeDialog from '$lib/components/SelectionResumeDialog.svelte';
     import GenerationResultsStrip from '$lib/components/GenerationResultsStrip.svelte';
     import PreviewDisplay from '$lib/components/PreviewDisplay.svelte';
     import { handleKeydown } from '$lib/keys';
-    import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, applePhotosCatalogOpen, searchOpen, showMissing, showRejected, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel, agentPanelPinned, agentPanelVisible, agentVisualLevel, activeAgentProposalId, activeAgentSelectionPresetId, undoHistoryOpen, cycleAgentVisualLevel } from '$lib/stores';
+    import { images, focusedIndex, focusedImage, viewMode, sidebarVisible, zenMode, minSizeFilter, showToast, settingsOpen, aboutOpen, agentSkillsOpen, applePhotosCatalogOpen, searchOpen, showMissing, showRejected, smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, staticPublishingEnabled, clientToolsEnabled, voiceDictationEnabled, pluginsEnabled, selectedIds, activeCanvas, activeSession, collections, windowLabel, agentPanelPinned, agentPanelVisible, agentVisualLevel, activeAgentProposalId, activeAgentSelectionPresetId, undoHistoryOpen, cycleAgentVisualLevel, selectionRun } from '$lib/stores';
     import { trashImagesDetailed, deleteImagesPermanently, getAppSetting, setAppSetting, checkLibraryHealth, regenerateThumbnailsByIds, listCollections, listSmartCollections, updatePreviewState, captureAgentWindowSnapshot, completeAgentViewSnapshot, failAgentViewSnapshot, createActionProposal, listActionProposals, applyActionProposal, dismissActionProposal, listAgentSelectionPresets, upsertAgentSelectionPreset, runClaudeAgentChatTurn, cancelClaudeAgentChatTurn, undo, type AgentActionProposal, type AgentChatImageContext, type AgentSelectionPreset, type AgentVisualLevel, type ClaudeAgentStreamEvent, type ImageWithFile, type PreviewState } from '$lib/api';
     import { initDeepLink } from '$lib/deeplink';
     import { initMenu } from '$lib/menu';
@@ -67,10 +71,12 @@
         setPreviewDisplayOverlay,
     } from '$lib/preview-display-store';
     import { saveAppState, restoreAppStateBeforeImages, applyRestoredViewState, type PersistedState } from '$lib/persistence';
+    import { restoreMostRecentActiveRun, initSelectionModeEvents } from '$lib/selection-mode';
     import { invalidateImageCache, loadImagesForCurrentScope, refreshImageCount, type ImageLoadOptions } from '$lib/image-loading';
     import { clampFocusIndexToList, nextFocusIndexAfterFocusedRemoval } from '$lib/image-removal';
     import { buildAgentSnapshotManifest, collectVisibleImageTargets, drawAnnotatedSnapshot, type AgentSnapshotScope } from '$lib/agent-view-snapshot';
     import { proposalViewContextKey, type AgentProposalViewContext } from '$lib/agent-proposal-context';
+    import { isShortlistProposalKind, applyShortlistProposal } from '$lib/agent-proposal-shortlist';
     import { estimateAgentBudget } from '$lib/agent-token-estimate';
     import { effectiveAgentVisualLevel } from '$lib/agent-visual-context';
     import { agentFailureCopy } from '$lib/agent-error-copy';
@@ -486,6 +492,7 @@
 
     function currentAgentProposalViewContext(): AgentProposalViewContext {
         const scope = currentAgentSnapshotScope();
+        const activeRun = $selectionRun;
         return {
             kind: scope.kind,
             id: scope.id,
@@ -494,6 +501,10 @@
             view_mode: $viewMode,
             selected_count: $selectedIds.size,
             visible_count: $images.length,
+            // Captured at request time so shortlist proposals made through
+            // Claude chat target this exact run, never whichever run is open
+            // when the proposal is later approved.
+            ...(activeRun && activeRun.status === 'active' ? { selection_id: activeRun.id } : {}),
         };
     }
 
@@ -730,12 +741,17 @@
             lastAgentMessage = result.message;
 
             if (result.proposal) {
-                agentProposals = [result.proposal, ...agentProposals.filter(item => item.id !== result.proposal?.id)];
-                activeAgentProposalId.set(result.proposal.id);
+                const createdProposal = result.proposal;
+                agentProposals = [createdProposal, ...agentProposals.filter(item => item.id !== createdProposal.id)];
+                activeAgentProposalId.set(createdProposal.id);
                 agentPanelVisible.set(true);
                 agentPanelPinned.set(true);
                 showToast('Claude proposal created', {
-                    detail: result.proposal.kind === 'trash_images' ? 'Review before moving files to Trash' : 'Review before changing selection',
+                    detail: createdProposal.kind === 'trash_images'
+                        ? 'Review before moving files to Trash'
+                        : isShortlistProposalKind(createdProposal.kind)
+                            ? 'Review before changing the shortlist'
+                            : 'Review before changing selection',
                     type: 'info',
                     duration: 5000,
                 });
@@ -874,7 +890,22 @@
             reviewProposalId = null;
             requestTrashImages(approvedImageIds);
             return;
-        } else {
+        }
+        if (isShortlistProposalKind(proposal.kind)) {
+            // Shortlist proposals mutate the captured run's membership through
+            // the apply endpoint alone. Approved IDs are used exactly as
+            // reviewed — no visibility filtering and no transient highlight
+            // writes. A failed apply keeps the proposal pending for Retry.
+            await applyShortlistProposal(proposal, approvedImageIds, {
+                onApplied: async () => {
+                    reviewProposalId = null;
+                    activeAgentProposalId.set(null);
+                    await refreshAgentPanelData();
+                },
+            });
+            return;
+        }
+        {
             const visibleIds = new Set($images.map(item => item.image.id));
             const visibleApprovedIds = approvedImageIds.filter(id => visibleIds.has(id));
             if (visibleApprovedIds.length === 0) {
@@ -956,6 +987,16 @@
                 minItems: Math.max(restoredLoadedCount, restoredFocusCount),
             });
             applyRestoredViewState(restored);
+            // Selection Mode: re-open the most recent active run after the
+            // library view is ready. A run stays active across restarts, so
+            // its chrome and Source/Shortlist views return coherently. If the
+            // backend has no active run (or the command is unavailable) the
+            // ordinary library view simply continues.
+            try {
+                await restoreMostRecentActiveRun();
+            } catch (selectionError) {
+                console.warn('Selection Mode restore skipped:', selectionError);
+            }
             await initDeepLink();
             staticPublishingEnabled.set((await getAppSetting('module_static_publishing')) === 'true');
             clientToolsEnabled.set((await getAppSetting('module_client_tools')) === 'true');
@@ -1006,6 +1047,11 @@
 
         const dragUnlisten = listen<boolean>('drag-hover', (event) => {
             dragOver = event.payload;
+        });
+
+        const selectionEventsUnlisten = initSelectionModeEvents().catch((e) => {
+            console.warn('Selection Mode events unavailable:', e);
+            return () => {};
         });
 
         window.addEventListener(TRASH_IMAGES_REQUESTED_EVENT, handleTrashRequest);
@@ -1098,6 +1144,7 @@
             unsub();
             unsubMissing();
             dragUnlisten.then(fn => fn());
+            selectionEventsUnlisten.then(fn => fn());
             watcherUnlisten.then(fn => fn());
             agentSnapshotRequestUnlisten.then(fn => fn());
             agentSnapshotSelectionUnlisten.then(fn => fn());
@@ -1124,7 +1171,7 @@
     <PreviewDisplay />
 {:else}
     <UpdateBanner />
-    <div class="app-shell" class:no-sidebar={noSidebar} class:zen={$zenMode} class:agent-pinned={$agentPanelPinned && !$zenMode}>
+    <div class="app-shell" class:no-sidebar={noSidebar} class:selection-active={!!$selectionRun} class:zen={$zenMode} class:agent-pinned={$agentPanelPinned && !$zenMode}>
         {#if !$zenMode}
             <TabBar />
         {/if}
@@ -1132,6 +1179,9 @@
             <Sidebar />
         {/if}
         <ImportBanner />
+        {#if $selectionRun}
+            <SelectionModeBar />
+        {/if}
         {#if $viewMode === 'grid'}
             <div class="main-with-commandbar">
                 <div class="command-bar-area">
@@ -1249,6 +1299,9 @@
     <TextInputDialog />
     <ConfirmDialog />
     <CollectionTargetDialog />
+    <SelectionStartDialog />
+    <SelectionFinishDialog />
+    <SelectionResumeDialog />
 {/if}
 
 <style>
@@ -1290,6 +1343,35 @@
         grid-template-rows: 1fr;
         grid-template-columns: 1fr;
         padding-top: var(--macos-titlebar-safe-area);
+    }
+    .app-shell.selection-active {
+        grid-template-areas:
+            "tabbar tabbar"
+            "selection selection"
+            "sidebar main"
+            "statusbar statusbar";
+        grid-template-rows: var(--macos-titlebar-safe-area) auto minmax(0, 1fr) 32px;
+    }
+    .app-shell.selection-active.no-sidebar {
+        grid-template-areas: "tabbar" "selection" "main" "statusbar";
+    }
+    .app-shell.selection-active.agent-pinned {
+        grid-template-areas:
+            "tabbar tabbar tabbar"
+            "selection selection selection"
+            "sidebar main agent"
+            "statusbar statusbar statusbar";
+    }
+    .app-shell.selection-active.no-sidebar.agent-pinned {
+        grid-template-areas:
+            "tabbar tabbar"
+            "selection selection"
+            "main agent"
+            "statusbar statusbar";
+    }
+    .app-shell.selection-active.zen {
+        grid-template-areas: "selection" "main";
+        grid-template-rows: auto minmax(0, 1fr);
     }
     .placeholder {
         grid-area: main;

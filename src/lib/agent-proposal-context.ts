@@ -8,6 +8,11 @@ export type AgentProposalViewContext = {
     view_mode?: string | null;
     selected_count?: number;
     visible_count?: number;
+    /** Captured Selection Mode run target. Written at the top level of
+     *  view_context_json while a run is active so the backend bridge can pin
+     *  shortlist proposals to that exact run instead of whichever run happens
+     *  to be active at approval time. */
+    selection_id?: string | null;
 };
 
 export type AgentProposalActorContext = {
@@ -77,6 +82,41 @@ export function sourceContextIsStale(
     const sourceKey = sourceContextScopeKey(context);
     const currentKey = proposalViewContextKey(currentViewContext);
     return Boolean(sourceKey && currentKey && sourceKey !== currentKey);
+}
+
+// ---------------------------------------------------------------------------
+// Shortlist proposals (Selection Mode)
+// ---------------------------------------------------------------------------
+
+/** Proposal kinds that mutate Selection Mode shortlist membership. They are
+ *  applied only through the proposal apply endpoint against the run captured
+ *  in source_context_json.selection_id. */
+export const SHORTLIST_PROPOSAL_KINDS = ['shortlist_add', 'shortlist_remove'] as const;
+
+export function isShortlistProposalKind(kind: string): boolean {
+    return (SHORTLIST_PROPOSAL_KINDS as readonly string[]).includes(kind);
+}
+
+/** The Selection Mode run a shortlist proposal targets, captured when the
+ *  proposal was created — never inferred from the currently open run. */
+export function sourceContextSelectionId(context: AgentProposalSourceContext): string | null {
+    const value = context.selection_id;
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+/** Button label for applying an approved subset, distinct from highlight
+ *  ("Select approved") and trash ("Move approved to Trash") actions. */
+export function shortlistProposalActionLabel(kind: string): string {
+    return kind === 'shortlist_remove'
+        ? 'Remove approved from shortlist'
+        : 'Add approved to shortlist';
+}
+
+/** Short human kind label used in the dock switcher and dialog titles. */
+export function proposalKindLabel(kind: string): string {
+    if (kind === 'trash_images') return 'Trash';
+    if (isShortlistProposalKind(kind)) return 'Shortlist';
+    return 'Selection';
 }
 
 export function proposalActorLabel(context: AgentProposalSourceContext, fallbackPersona: AgentPersona): string {

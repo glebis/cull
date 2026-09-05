@@ -81,6 +81,10 @@ instead of silently treating the audit as passed.
 
 ## AI-Generated Code And Provenance
 
+The September 2026 Selection Mode implementation includes GLM-assisted work
+through Pi, reviewed and integrated with Codex. This is development tooling;
+no GLM weights or runtime dependency are bundled in Cull.
+
 The release relies on the authorship record in `AUTHORSHIP.md`:
 
 - human architecture, product decisions, data models, component boundaries, and

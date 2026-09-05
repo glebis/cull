@@ -10,5 +10,6 @@ pub mod images;
 pub mod jobs;
 pub mod media;
 pub mod misc;
+pub mod selection_runs;
 pub mod selections;
 pub mod smart_collections;

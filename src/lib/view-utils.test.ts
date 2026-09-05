@@ -62,6 +62,38 @@ describe('buildThumbnailAriaLabel', () => {
         })).toBe('image-1.png, rating 4, decision accept, source MJ, selected, present');
     });
 
+    it('omits the shortlist state outside Selection Mode', () => {
+        expect(buildThumbnailAriaLabel({
+            filename: 'image-1.png',
+            rating: 0,
+            decision: 'undecided',
+            sourceTag: null,
+            selected: false,
+            missing: false,
+        })).not.toContain('shortlisted');
+    });
+
+    it('announces shortlist membership separately from transient selection while the mode is active', () => {
+        expect(buildThumbnailAriaLabel({
+            filename: 'image-1.png',
+            rating: 0,
+            decision: 'undecided',
+            sourceTag: null,
+            selected: false,
+            missing: false,
+            shortlisted: true,
+        })).toContain('Shortlisted');
+        expect(buildThumbnailAriaLabel({
+            filename: 'image-1.png',
+            rating: 0,
+            decision: 'undecided',
+            sourceTag: null,
+            selected: false,
+            missing: false,
+            shortlisted: false,
+        })).toContain('not shortlisted');
+    });
+
     it('includes default states when fields are absent or falsey', () => {
         expect(buildThumbnailAriaLabel({
             filename: '',

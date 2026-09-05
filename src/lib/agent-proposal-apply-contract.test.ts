@@ -57,4 +57,15 @@ describe('agent proposal apply flow contract', () => {
         expect(pageSource).toContain("source_context_json: JSON.stringify(agentProposalSourceContext('agent_chat_manual_seed'");
         expect(pageSource).toContain('view_context_json: JSON.stringify(currentAgentProposalViewContext())');
     });
+
+    it('routes shortlist proposals through the apply endpoint without transient writes', () => {
+        // The shortlist branch must precede the select_images branch and must
+        // never touch selectedIds or filter approved IDs by visibility.
+        const shortlistBranch = pageSource.indexOf("isShortlistProposalKind(proposal.kind)");
+        const visibleFilter = pageSource.indexOf('const visibleIds = new Set($images.map(item => item.image.id))');
+        expect(shortlistBranch).toBeGreaterThan(-1);
+        expect(visibleFilter).toBeGreaterThan(shortlistBranch);
+        expect(pageSource).toContain('await applyShortlistProposal(proposal, approvedImageIds, {');
+        expect(pageSource).toContain('selection_id: activeRun.id }');
+    });
 });

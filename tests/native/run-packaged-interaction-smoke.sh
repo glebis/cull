@@ -8,10 +8,13 @@ fi
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 shots_dir="${CULL_NATIVE_SMOKE_SHOTS:-${RUNNER_TEMP:-/tmp}/cull-native-interaction-smoke}"
-work_dir="${CULL_NATIVE_SMOKE_WORK:-$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/cull-native-smoke.XXXXXX")}"
-smoke_home="$work_dir/home"
+# Keep the runtime socket below macOS SUN_LEN, including the app identifier.
+work_dir="${CULL_NATIVE_SMOKE_WORK:-$(mktemp -d /tmp/cs.XXXXXX)}"
+smoke_home="$work_dir/h"
 fixture_root="$work_dir/fixtures"
-app_data="${CULL_NATIVE_SMOKE_APP_DATA:-$HOME/Library/Application Support/com.glebkalinin.cull.interaction-smoke}"
+# Tauri resolves its macOS data directory from the HOME used at launch.
+# Seed that exact directory so both processes see the same isolated database.
+app_data="$smoke_home/Library/Application Support/com.glebkalinin.cull.interaction-smoke"
 app_bundle="${CULL_NATIVE_SMOKE_APP:-$repo_root/src-tauri/target/release/bundle/macos/Cull.app}"
 app_binary="$app_bundle/Contents/MacOS/cull"
 app_log="$shots_dir/cull-native-interaction-smoke.log"
@@ -62,54 +65,60 @@ HOME="$smoke_home" "$app_binary" \
   --app-data-dir "$app_data" \
   import_folder --folder-path "$fixture_root" >/dev/null
 
-echo "[native-smoke] Launching packaged WKWebView"
-set +e
-# The activity assertion keeps App Nap / WebKit suspension from starving the
-# self-driving smoke when the window is not frontmost (CI runners, busy desktops).
-CULL_NATIVE_SMOKE_ACTIVE=1 HOME="$smoke_home" "$app_binary" >"$app_log" 2>&1 &
-app_pid="$!"
-set -e
+# The second process uses the same isolated database and must report a fresh
+# restart assertion. A stale first-run success manifest cannot satisfy it.
+for smoke_phase in initial restart; do
+  echo "[native-smoke] Launching packaged WKWebView ($smoke_phase)"
+  app_log="$shots_dir/cull-native-interaction-smoke-$smoke_phase.log"
+  CULL_NATIVE_SMOKE_ACTIVE=1 HOME="$smoke_home" "$app_binary" >"$app_log" 2>&1 &
+  app_pid="$!"
+  deadline=$((SECONDS + timeout_seconds))
+  timed_out=0
+  while kill -0 "$app_pid" 2>/dev/null; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      timed_out=1
+      /usr/sbin/screencapture -x "$shots_dir/native-interaction-smoke-$smoke_phase-timeout.png" >/dev/null 2>&1 || true
+      kill -TERM "$app_pid" >/dev/null 2>&1 || true
+      break
+    fi
+    sleep 1
+  done
+  set +e
+  wait "$app_pid"
+  status="$?"
+  set -e
+  if [ "$timed_out" = "1" ]; then status=124; fi
 
-deadline=$((SECONDS + timeout_seconds))
-timed_out=0
-while kill -0 "$app_pid" 2>/dev/null; do
-  if [ "$SECONDS" -ge "$deadline" ]; then
-    timed_out=1
-    /usr/sbin/screencapture -x "$shots_dir/native-interaction-smoke-timeout.png" >/dev/null 2>&1 || true
-    kill -TERM "$app_pid" 2>/dev/null || true
-    break
+  snapshot_root="$app_data/Agent Snapshots"
+  result_manifest="$snapshot_root/native_interaction_smoke_result/manifest.json"
+  if [ -d "$snapshot_root" ]; then
+    while IFS= read -r artifact; do
+      cp "$artifact" "$shots_dir/$smoke_phase-$(basename "$(dirname "$artifact")")-$(basename "$artifact")"
+    done < <(find "$snapshot_root" -type f \( -name '*.png' -o -name 'manifest.json' \) -print)
   fi
-  sleep 1
-done
 
-set +e
-wait "$app_pid"
-status="$?"
-set -e
-
-if [ "$timed_out" = "1" ]; then
-  status=124
-fi
-
-snapshot_root="$app_data/Agent Snapshots"
-result_manifest="$snapshot_root/native_interaction_smoke_result/manifest.json"
-if [ -d "$snapshot_root" ]; then
-  while IFS= read -r artifact; do
-    cp "$artifact" "$shots_dir/$(basename "$(dirname "$artifact")")-$(basename "$artifact")"
-  done < <(find "$snapshot_root" -type f \( -name '*.png' -o -name 'manifest.json' \) -print)
-fi
-
-if [ -f "$result_manifest" ]; then
-  if grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' "$result_manifest"; then
-    status=0
+  # Require both a clean process exit and this phase's persisted success.
+  # A stale manifest or a crash after writing it cannot turn a failure into a pass.
+  if [ "$timed_out" != "1" ] && [ -f "$result_manifest" ]; then
+    if python3 - "$result_manifest" "$smoke_phase" <<'PYVERIFY'
+import json, sys
+with open(sys.argv[1]) as stream:
+    manifest = json.load(stream)
+result = manifest.get('smoke_result', {})
+expected = 'selection-shortlist-save' if sys.argv[2] == 'initial' else 'selection-restart-persistence'
+completed = result.get('completed')
+if not (result.get('ok') is True and isinstance(completed, list)
+        and all(isinstance(item, str) for item in completed) and expected in completed):
+    raise SystemExit(1)
+PYVERIFY
+    then :; else status=1; fi
   else
     status=1
   fi
-fi
+  if [ "$status" -ne 0 ]; then
+    echo "[native-smoke] FAIL $smoke_phase (exit $status); artifacts: $shots_dir" >&2
+    exit "$status"
+  fi
+done
 
-if [ "$status" -ne 0 ]; then
-  echo "[native-smoke] FAIL (exit $status); artifacts: $shots_dir" >&2
-  exit "$status"
-fi
-
-echo "[native-smoke] PASS"
+echo "[native-smoke] PASS including process restart"

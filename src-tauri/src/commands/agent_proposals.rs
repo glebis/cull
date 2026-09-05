@@ -2,7 +2,7 @@ use crate::db_core::models::{AgentActionProposal, AgentSelectionPreset, NewSessi
 use crate::services::agent_proposals as svc;
 use crate::services::claude_agent as claude_svc;
 use crate::AppState;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
 pub async fn create_action_proposal(
@@ -42,6 +42,7 @@ pub async fn dismiss_action_proposal(
 
 #[tauri::command]
 pub async fn apply_action_proposal(
+    app: AppHandle,
     state: State<'_, AppState>,
     proposal_id: String,
     approved_image_ids: Vec<String>,
@@ -51,9 +52,14 @@ pub async fn apply_action_proposal(
         .db
         .get_action_proposal(&proposal_id)
         .map_err(|e| e.to_string())?;
-    let result =
-        svc::apply_action_proposal_db(&state.db, &proposal_id, &approved_image_ids, &result_json)
-            .map_err(|e| e.to_string())?;
+    let result = svc::apply_action_proposal_db(
+        &state.db,
+        &state.action_manager,
+        &proposal_id,
+        &approved_image_ids,
+        &result_json,
+    )
+    .map_err(|e| e.to_string())?;
     if let Some(proposal) = proposal {
         log_agent_proposal_event(
             &state,
@@ -65,6 +71,20 @@ pub async fn apply_action_proposal(
                 "approved_image_ids": approved_image_ids,
             })),
         );
+        // Shortlist proposals changed selection-run membership outside the
+        // mode's own commands; surfaces re-fetch canonical state on this event.
+        if matches!(proposal.kind.as_str(), "shortlist_add" | "shortlist_remove") {
+            if let Ok(context) =
+                serde_json::from_str::<serde_json::Value>(&proposal.source_context_json)
+            {
+                if let Some(selection_id) = context.get("selection_id").and_then(|id| id.as_str()) {
+                    let _ = app.emit(
+                        "selection-run:updated",
+                        serde_json::json!({ "selection_id": selection_id }),
+                    );
+                }
+            }
+        }
     }
     Ok(result)
 }

@@ -58,6 +58,8 @@ fn action_title(action_type: &str) -> String {
         "set_rating" => "Set rating".to_string(),
         "set_decision" => "Set decision".to_string(),
         "trash_image" => "Move to Trash".to_string(),
+        "shortlist_add" => "Add to shortlist".to_string(),
+        "shortlist_remove" => "Remove from shortlist".to_string(),
         other => other.replace('_', " "),
     }
 }
@@ -106,6 +108,13 @@ fn change_summary(record: &UndoRecord) -> Option<String> {
             _ => Some("Decision: Unknown previous value".to_string()),
         },
         "trash_image" => Some("Moved to Trash".to_string()),
+        "shortlist_add" | "shortlist_remove" => {
+            let count = affected_ids(record).len();
+            Some(format!(
+                "{count} image{}",
+                if count == 1 { "" } else { "s" }
+            ))
+        }
         _ => None,
     }
 }

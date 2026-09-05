@@ -34,8 +34,6 @@ import {
     agentPanelVisible,
     agentSkillsOpen,
     agentVisualLevel,
-    collectMode,
-    collectModeTarget,
     collections,
     detectedClasses,
     focusedIndex,
@@ -44,6 +42,7 @@ import {
     importBatchFilter,
     importBatchImageIds,
     selectedIds,
+    selectionRun,
     sessions,
     sessionCanvases,
     smartCollections,
@@ -108,8 +107,7 @@ describe('command palette helpers', () => {
         focusedIndex.set(0);
         selectedIds.set(new Set());
         collections.set([]);
-        collectMode.set(false);
-        collectModeTarget.set(null);
+        selectionRun.set(null);
         agentPanelPinned.set(false);
         agentPanelVisible.set(false);
         agentVisualLevel.set('tiny');
@@ -404,40 +402,52 @@ describe('command palette helpers', () => {
 
         expect(ids).toContain('collection.create-from-selection');
         expect(ids).toContain('collection.create-from-unselected');
-        expect(ids).toContain('collection.toggle-collect-mode');
-        expect(ids).toContain('collection.add-focused-to-collect-target');
+        // Collect Mode was retired and must not appear in the user-facing palette.
+        expect(ids).not.toContain('collection.toggle-collect-mode');
+        expect(ids).not.toContain('collection.add-focused-to-collect-target');
     });
 
-    it('disables collect-focused outside collect mode', () => {
+    it('exposes Selection Mode commands and disables start while a run is active', () => {
         resetCommandContext();
-        images.set([{
-            image: { id: 'img-1' },
-            path: '/tmp/img-1.png',
-            thumbnail_path: null,
-            selection: null,
-        } as never]);
+        const ids = getCommandPaletteItems('commands').map(i => i.id);
 
+        expect(ids).toContain('selection.start');
+        expect(ids).toContain('selection.resume');
+        expect(ids).toContain('selection.finish');
+        expect(ids).toContain('selection.archive');
+        expect(ids).toContain('selection.leave');
+        expect(ids).toContain('selection.add-highlighted');
+        expect(ids).toContain('selection.remove-highlighted');
+
+        selectionRun.set({
+            id: 'run-1',
+            name: 'Client final',
+            status: 'active',
+            source_count: 300,
+            shortlist_count: 2,
+            target_count: 5,
+            source_scope: { type: 'all', include_rejected: false },
+            created_at: '2026-09-05T00:00:00Z',
+            updated_at: '2026-09-05T00:00:00Z',
+            finished_at: null,
+            rejected_shortlist_count: 0,
+        });
+        const items = getCommandPaletteItems('commands');
+        expect(items.find(i => i.id === 'selection.start')?.disabled).toBe(true);
+        expect(items.find(i => i.id === 'selection.start')?.subtitle).toContain('already active');
+        // Group commands name the highlighted count in their titles.
+        selectedIds.set(new Set(['a', 'b']));
+        const next = getCommandPaletteItems('commands');
+        expect(next.find(i => i.id === 'selection.add-highlighted')?.title).toContain('2 Highlighted');
+    });
+
+    it('disables shortlist group commands without an active run', () => {
+        resetCommandContext();
+        selectedIds.set(new Set(['img-1']));
         const command = getCommandPaletteItems('commands')
-            .find(i => i.id === 'collection.add-focused-to-collect-target');
+            .find(i => i.id === 'selection.add-highlighted');
 
         expect(command?.disabled).toBe(true);
-    });
-
-    it('enables collect-focused with a target and focused image', () => {
-        resetCommandContext();
-        collectMode.set(true);
-        collectModeTarget.set('col-1');
-        images.set([{
-            image: { id: 'img-1' },
-            path: '/tmp/img-1.png',
-            thumbnail_path: null,
-            selection: null,
-        } as never]);
-
-        const command = getCommandPaletteItems('commands')
-            .find(i => i.id === 'collection.add-focused-to-collect-target');
-
-        expect(command?.disabled).toBe(false);
     });
 });
 

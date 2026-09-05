@@ -1638,6 +1638,356 @@ def test_external_drive_browse_in_place(page: Page) -> None:
     expect(page.locator(".thumb")).to_have_count(12)
 
 
+# --- Selection Mode (browser mock; imageview-60yo) helpers ---
+
+
+def fill_bound_input(page: Page, locator, value: str) -> None:
+    """Set a Svelte bind:value input through the native value setter."""
+    locator.evaluate(
+        """(el, value) => {
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+            setter.call(el, value);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        }""",
+        value,
+    )
+
+
+def open_palette_and_click(page: Page, title_fragment: str) -> None:
+    """Open the command palette and click the first row matching the fragment."""
+    press(page, "Meta+K")
+    expect(page.locator(".palette-panel")).to_be_visible()
+    page.locator(".palette-input").fill(title_fragment)
+    page.wait_for_timeout(250)
+    row = page.locator(".palette-row").filter(has_text=title_fragment).first
+    expect(row).to_be_visible()
+    row.click()
+    page.wait_for_timeout(250)
+
+
+def start_selection_via_dialog(page: Page, name: str, target: str | None = None) -> None:
+    """Start a run through the real Start Selection dialog."""
+    open_palette_and_click(page, "Start Selection")
+    dialog = page.get_by_role("dialog", name=re.compile("Start Selection"))
+    expect(dialog).to_be_visible()
+    fill_bound_input(page, dialog.locator("input").first, name)
+    if target is not None:
+        fill_bound_input(page, dialog.locator("input[type='number']"), target)
+    dialog.get_by_role("button", name=re.compile("^Start Selection")).click()
+    expect(page.locator(".selection-bar")).to_be_visible()
+
+
+def expect_shortlist_count(page: Page, count: int) -> None:
+    expect(page.locator("[data-selection-counts]")).to_contain_text(f"Shortlist {count}")
+
+
+def expect_focused_state(page: Page, fragment: str) -> None:
+    expect(page.locator(".thumb.focused")).to_have_attribute("aria-label", re.compile(fragment))
+
+
+def highlight_range(page: Page, count: int) -> None:
+    """Highlight `count` tiles from the focused one with shift-click."""
+    page.locator(".thumb").first.click()
+    page.locator(".thumb").nth(count - 1).click(modifiers=["Shift"])
+    expect(page.locator(".statusbar")).to_contain_text(f"{count} selected")
+
+
+def test_selection_start_captures_complete_source(page: Page) -> None:
+    """SM1 — Start captures the backend-resolved >200-image source and starts
+    empty even with highlighted images."""
+    wait_for_app(page, f"{URL}?selectionFixture=reset&selectionImages=250")
+    press(page, "Home")
+
+    # Highlight two images first; Selection Mode must not carry them over.
+    press(page, "Space")
+    press(page, "ArrowRight")
+    press(page, "Space")
+    expect(page.locator(".statusbar")).to_contain_text("2 selected")
+
+    open_palette_and_click(page, "Start Selection")
+    dialog = page.get_by_role("dialog", name=re.compile("Start Selection"))
+    expect(dialog).to_be_visible()
+    # The source is resolved by the backend and is larger than the loaded page.
+    expect(dialog).to_contain_text("250 images")
+    visible_thumbs = page.locator(".thumb").count()
+    assert 0 < visible_thumbs < 250, f"expected a paged grid, saw {visible_thumbs} thumbnails"
+    expect(dialog).to_contain_text("Starts with an empty shortlist")
+
+    fill_bound_input(page, dialog.locator("input").first, "Big shoot")
+    dialog.get_by_role("button", name=re.compile("^Start Selection")).click()
+
+    expect(page.locator(".selection-bar")).to_contain_text("Selection: Big shoot")
+    expect(page.locator("[data-selection-counts]")).to_contain_text("Source 250")
+    expect(page.locator("[data-selection-counts]")).to_contain_text("Shortlist 0")
+    expect(page.locator("[data-shortlisted='true']")).to_have_count(0)
+
+
+def test_selection_toolbar_layout(page: Page) -> None:
+    """SM9 — Selection controls remain clickable and above content at narrow width."""
+    original = page.viewport_size
+    try:
+        page.set_viewport_size({"width": 900, "height": 720})
+        wait_for_app(page, f"{URL}?selectionFixture=reset")
+        start_selection_via_dialog(page, "Narrow client selection", "4")
+        press(page, "Home")
+        press(page, "Space")
+        bar = page.get_by_role("toolbar", name="Selection Mode", exact=True)
+        for label in ["Shortlist", "Source"]:
+            bar.get_by_role("radio", name=label, exact=True).click()
+            expect(bar.get_by_role("radio", name=label, exact=True)).to_have_attribute("aria-checked", "true")
+            expect(page.locator(".thumb")).to_have_count(1 if label == "Shortlist" else 20)
+        bounds = bar.bounding_box()
+        thumb = page.locator(".thumb").first.bounding_box()
+        assert bounds and thumb and thumb["y"] >= bounds["y"] + bounds["height"] - 1
+        assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= 900
+        page.screenshot(path=str(SHOTS / "selection-narrow-toolbar.png"), full_page=True)
+        bar.get_by_role("button", name=re.compile("^Finish")).click()
+        expect(page.get_by_role("dialog", name=re.compile("Finish Selection"))).to_be_visible()
+    finally:
+        if original:
+            page.set_viewport_size(original)
+
+
+def test_selection_space_independence(page: Page) -> None:
+    """SM2 — Space toggles the focused image's shortlist membership only; it
+    never highlights, and accept/reject decisions never change membership."""
+    wait_for_app(page, f"{URL}?selectionFixture=reset")
+    press(page, "Home")
+    start_selection_via_dialog(page, "Space proof")
+
+    expect_focused_state(page, ", not shortlisted,")
+    press(page, "Space")
+    expect_focused_state(page, ", Shortlisted,")
+    # Space did not highlight the focused image.
+    expect_focused_state(page, ", not selected,")
+    expect_shortlist_count(page, 1)
+
+    press(page, "Space")
+    expect_focused_state(page, ", not shortlisted,")
+    expect_shortlist_count(page, 0)
+
+    # Review decisions stay independent of membership. Rejecting hides the
+    # image from the Source view (normal rejected filter) but never changes
+    # membership: the Shortlist keeps it visible with both states.
+    press(page, "Space")
+    expect_shortlist_count(page, 1)
+    press(page, "x")
+    expect_shortlist_count(page, 1)
+    page.get_by_role("radio", name="Shortlist").click()
+    expect(page.locator(".thumb")).to_have_count(1)
+    expect_focused_state(page, "decision reject")
+    expect_focused_state(page, ", Shortlisted,")
+
+
+def test_selection_group_membership_undo(page: Page) -> None:
+    """SM3 — Group commands move the highlighted set as one undoable operation."""
+    wait_for_app(page, f"{URL}?selectionFixture=reset")
+    press(page, "Home")
+    start_selection_via_dialog(page, "Group proof")
+
+    highlight_range(page, 3)
+    open_palette_and_click(page, "Highlighted to Shortlist")
+    expect_shortlist_count(page, 3)
+    expect(page.locator("[data-shortlisted='true']")).to_have_count(3)
+
+    highlight_range(page, 3)
+    open_palette_and_click(page, "Highlighted from Shortlist")
+    expect_shortlist_count(page, 0)
+    expect(page.locator("[data-shortlisted='true']")).to_have_count(0)
+
+    # Undo from Loupe bypasses the transient-highlight history, so each press
+    # reverts exactly one membership group — never a partial group.
+    press(page, "Enter")
+    press(page, "Meta+z")
+    expect_shortlist_count(page, 3)  # the remove group, reverted in one press
+    press(page, "Meta+z")
+    expect_shortlist_count(page, 0)  # the add group, reverted in one press
+    press(page, "Meta+Shift+z")
+    expect_shortlist_count(page, 3)  # redo re-applies the add group
+    press(page, "Escape")
+    expect(page.locator("[data-shortlisted='true']")).to_have_count(3)
+
+
+def test_selection_scope_navigation_and_filtering(page: Page) -> None:
+    """SM4 — Source and Shortlist scopes keep their own focus and content, and
+    search filters within the captured source without touching membership."""
+    wait_for_app(page, f"{URL}?selectionFixture=reset&selectionImages=250")
+    press(page, "Home")
+    start_selection_via_dialog(page, "Scope proof")
+
+    # Shortlist two members in addition order, then park the source focus.
+    press(page, "Space")
+    press(page, "ArrowRight")
+    press(page, "ArrowRight")
+    press(page, "Space")
+    expect_shortlist_count(page, 2)
+    for _ in range(3):
+        press(page, "ArrowRight")
+    assert_thumb_focus_has_filename(page, "image-5.png")
+
+    # Shortlist scope shows exactly the members in addition order.
+    page.get_by_role("radio", name="Shortlist").click()
+    expect(page.locator(".thumb")).to_have_count(2)
+    assert thumb_filenames(page) == ["image-0.png", "image-2.png"]
+    assert_thumb_focus_has_filename(page, "image-0.png")
+
+    # Switching back restores the source's own focus position.
+    page.get_by_role("radio", name="Source").click()
+    assert_thumb_focus_has_filename(page, "image-5.png")
+    page.get_by_role("radio", name="Shortlist").click()
+    assert_thumb_focus_has_filename(page, "image-0.png")
+
+    # Space in the Shortlist view removes the focused member.
+    press(page, "Space")
+    expect_shortlist_count(page, 1)
+    expect(page.locator(".thumb")).to_have_count(1)
+    assert_thumb_focus_has_filename(page, "image-2.png")
+
+    # Search layers within the stable source; the snapshot count is unchanged
+    # and off-screen members survive the filter.
+    page.get_by_role("radio", name="Source").click()
+    press(page, "/")
+    expect(page.locator(".command-input")).to_be_visible()
+    set_search_value(page, "image-24")
+    press(page, "Enter")
+    expect(page.locator(".selection-bar")).to_contain_text("within the source")
+    expect(page.locator(".selection-bar")).to_contain_text("image-24")
+    expect(page.locator("[data-selection-counts]")).to_contain_text("Source 250")
+    expect(page.locator(".thumb")).to_have_count(11)
+    page.get_by_role("radio", name="Shortlist").click()
+    expect(page.locator(".thumb")).to_have_count(1)
+    assert_thumb_focus_has_filename(page, "image-2.png")
+
+    # Clearing the search restores the full source view.
+    page.get_by_role("radio", name="Source").click()
+    press(page, "/")
+    page.locator(".command-input").focus()
+    set_search_value(page, "")
+    press(page, "Enter")
+    expect(page.locator(".selection-bar")).not_to_contain_text("within the source")
+
+
+def test_selection_persistence_failure_retry(page: Page) -> None:
+    """SM5 — An injected save failure rolls the markers back and Retry applies
+    the same captured images."""
+    wait_for_app(page, f"{URL}?selectionFixture=reset")
+    press(page, "Home")
+    start_selection_via_dialog(page, "Retry proof")
+
+    press(page, "Space")
+    expect_shortlist_count(page, 1)
+
+    page.evaluate("window.__CULL_E2E_SHORTLIST_FAILURES__ = 1")
+    press(page, "ArrowRight")
+    press(page, "Space")
+    toast = page.locator(".toast").filter(has_text="Could not update the shortlist")
+    expect(toast).to_be_visible()
+    # Rollback: the optimistic marker is gone and the persisted count stands.
+    expect_shortlist_count(page, 1)
+    expect_focused_state(page, ", not shortlisted,")
+
+    toast.get_by_role("button", name="Retry").click()
+    expect_shortlist_count(page, 2)
+    expect_focused_state(page, ", Shortlisted,")
+
+
+def test_selection_reload_resume(page: Page) -> None:
+    """SM6 — The run survives a real page reload and auto-resumes from the
+    persisted fixture (the harness keeps sessionStorage across this reload)."""
+    wait_for_app(page, f"{URL}?selectionFixture=reset")
+    press(page, "Home")
+    start_selection_via_dialog(page, "Resume proof")
+    press(page, "Space")
+    for _ in range(3):
+        press(page, "ArrowRight")
+    press(page, "Space")
+    expect_shortlist_count(page, 2)
+
+    # Plain reload (no fixture reset): the mock hydrates the sessionStorage
+    # fixture written by the mutations above, then the app auto-resumes.
+    wait_for_app(page, URL)
+    expect(page.locator(".selection-bar")).to_contain_text("Selection: Resume proof")
+    expect(page.locator("[data-selection-counts]")).to_contain_text("Source 20")
+    expect_shortlist_count(page, 2)
+    expect_focused_state(page, ", Shortlisted,")
+
+
+def test_selection_finish_summary(page: Page) -> None:
+    """SM7 — Finish reports the rejected-shortlist conflict, then the result
+    becomes a normal collection with files and decisions untouched."""
+    wait_for_app(page, f"{URL}?selectionFixture=reset")
+    press(page, "Home")
+    start_selection_via_dialog(page, "Client final", "4")
+
+    # Four members, then reject the focused one, then a fifth member. The
+    # mutation after the decision refreshes the run state with the conflict.
+    for _ in range(3):
+        press(page, "Space")
+        press(page, "ArrowRight")
+    press(page, "Space")
+    expect_shortlist_count(page, 4)
+    press(page, "x")
+    # Rejected images leave the default source view and focus advances.
+    assert_thumb_focus_has_filename(page, "image-4.png")
+    press(page, "Space")
+    expect_shortlist_count(page, 5)
+
+    expect(page.locator(".selection-bar")).to_contain_text("1 shortlisted image is also rejected")
+
+    page.locator(".selection-bar").get_by_role("button", name=re.compile("^Finish")).click()
+    dialog = page.get_by_role("dialog", name=re.compile("Finish Selection"))
+    expect(dialog).to_be_visible()
+    expect(dialog).to_contain_text("Client final")
+    expect(dialog).to_contain_text("Source: 20 images")
+    expect(dialog.locator("[data-finish-shortlist-count]")).to_contain_text("Shortlist: 5 image")
+    expect(dialog.locator("[data-finish-shortlist-count]")).to_contain_text("1 more than the target of 4")
+    expect(dialog).to_contain_text("1 shortlisted image is also marked rejected")
+    expect(dialog).to_contain_text("No files are copied, moved, or deleted")
+    dialog.get_by_role("button", name=re.compile("^Finish Selection")).click()
+
+    # The mode exits and the resulting collection opens in the grid. The
+    # rejected member stays in the run (finish dialog above) while the normal
+    # collection view keeps the default rejected filter, so 5 members show 4
+    # tiles, in shortlist order, with decisions and files untouched.
+    expect(page.locator(".selection-bar")).to_have_count(0)
+    expect(page.locator(".toast")).to_contain_text("Selection finished")
+    expect(page.locator(".thumb")).to_have_count(4)
+    assert thumb_filenames(page) == ["image-0.png", "image-1.png", "image-2.png", "image-4.png"]
+
+
+def test_selection_archive_restore(page: Page) -> None:
+    """SM8 — Archive keeps the run resumable and Restore brings it back with
+    membership intact."""
+    wait_for_app(page, f"{URL}?selectionFixture=reset")
+    press(page, "Home")
+    start_selection_via_dialog(page, "Archive proof")
+    press(page, "Space")
+    expect_shortlist_count(page, 1)
+
+    page.locator(".selection-bar").get_by_role("button", name=re.compile("^Archive")).click()
+    confirm = page.get_by_role("dialog", name=re.compile("Archive Selection"))
+    expect(confirm).to_be_visible()
+    expect(confirm).to_contain_text("keeps its shortlist (1)")
+    confirm.get_by_role("button", name="Keep Active").click()
+    expect(confirm).to_have_count(0)
+    expect(page.locator(".selection-bar")).to_be_visible()
+
+    page.locator(".selection-bar").get_by_role("button", name=re.compile("^Archive")).click()
+    confirm = page.get_by_role("dialog", name=re.compile("Archive Selection"))
+    confirm.get_by_role("button", name="Archive", exact=True).click()
+    expect(page.locator(".selection-bar")).to_have_count(0)
+
+    open_palette_and_click(page, "Resume Selection")
+    resume_dialog = page.get_by_role("dialog", name=re.compile("Resume Selection"))
+    expect(resume_dialog).to_be_visible()
+    expect(resume_dialog).to_contain_text("Archive proof")
+    resume_dialog.get_by_role("button", name="Restore and Resume").click()
+
+    expect(page.locator(".selection-bar")).to_contain_text("Selection: Archive proof")
+    expect_shortlist_count(page, 1)
+    expect_focused_state(page, ", Shortlisted,")
+
+
 def main() -> int:
     SHOTS.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
@@ -1646,7 +1996,19 @@ def main() -> int:
             launch_options["executable_path"] = BROWSER_EXECUTABLE
         browser = p.chromium.launch(**launch_options)
         page = browser.new_page(viewport={"width": 1440, "height": 960})
-        page.add_init_script("window.localStorage.clear(); window.sessionStorage.clear();")
+        page.add_init_script(
+            # Storage hygiene, narrowed for the Selection Mode persistence E2E:
+            # localStorage is still cleared on every navigation (unchanged
+            # behavior), but sessionStorage is cleared only once per smoke run.
+            # That lets the browser mock's Selection fixture (tauri-mock.ts,
+            # sessionStorage-backed) prove real reload persistence in exactly
+            # one intentional scenario without leaking state across runs.
+            "window.localStorage.clear();"
+            "if (!window.sessionStorage.getItem('__CULL_E2E_SESSION_READY__')) {"
+            "  window.sessionStorage.clear();"
+            "  window.sessionStorage.setItem('__CULL_E2E_SESSION_READY__', '1');"
+            "}"
+        )
         page_errors: list[str] = []
         page.on("pageerror", lambda error: page_errors.append(getattr(error, "stack", None) or str(error)))
 
@@ -1700,6 +2062,19 @@ def main() -> int:
         smoke.step("S11a selection Space toggle", lambda: test_grid_selection_space(page))
         smoke.step("S11b Shift+click range select", lambda: test_grid_shift_click_range_select(page))
         smoke.step("S44 external drive browse in place", lambda: test_external_drive_browse_in_place(page))
+
+        # --- Selection Mode (browser mock; imageview-60yo). Runs last: each
+        # scenario resets its own fixture state via ?selectionFixture=reset so
+        # leftover runs can never leak into other steps. ---
+        smoke.step("SM1 >200 source capture and empty start", lambda: test_selection_start_captures_complete_source(page))
+        smoke.step("SM2 focused Space independent of highlights and decisions", lambda: test_selection_space_independence(page))
+        smoke.step("SM3 grouped add/remove and undo/redo", lambda: test_selection_group_membership_undo(page))
+        smoke.step("SM4 scope navigation, filtering and position", lambda: test_selection_scope_navigation_and_filtering(page))
+        smoke.step("SM5 persistence failure rollback and retry", lambda: test_selection_persistence_failure_retry(page))
+        smoke.step("SM6 reload resumes active run", lambda: test_selection_reload_resume(page))
+        smoke.step("SM7 finish target and conflict summary to collection", lambda: test_selection_finish_summary(page))
+        smoke.step("SM8 archive and restore", lambda: test_selection_archive_restore(page))
+        smoke.step("SM9 narrow toolbar layout", lambda: test_selection_toolbar_layout(page))
 
         # Focused runs: CULL_E2E_ONLY=<substring> skips every step whose name
         # does not contain it (e.g. CULL_E2E_ONLY="settings cli tool").

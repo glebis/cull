@@ -120,7 +120,8 @@ export interface CollectionContextActionOptions {
     onDuplicate: (collectionId: string, name: string) => void | Promise<void>;
     onExport: (collectionId: string) => void | Promise<void>;
     onPublish: (collectionId: string) => void | Promise<void>;
-    onCollect: (collectionId: string, name: string) => void | Promise<void>;
+    /** Reopens the Selection Mode run that finished into this collection. */
+    onContinueSelection: (collectionId: string) => void | Promise<void>;
     onTogglePin: (collectionId: string) => void | Promise<void>;
     onCopyId: (collectionId: string) => void | Promise<void>;
     onDelete: (collectionId: string, name: string) => void | Promise<void>;
@@ -143,7 +144,7 @@ export function buildCollectionContextActions(options: CollectionContextActionOp
             action: () => options.onPublish(options.collectionId),
             hidden: options.count === 0,
         },
-        { id: 'collection-collect', label: 'Use for Collect Mode', action: () => options.onCollect(options.collectionId, options.name) },
+        { id: 'collection-continue-selection', label: 'Continue as Selection…', action: () => options.onContinueSelection(options.collectionId) },
         {
             id: 'collection-pin',
             label: options.pinned ? 'Unpin Collection' : 'Pin Collection',

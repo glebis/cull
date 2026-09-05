@@ -2,7 +2,7 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { open } from '@tauri-apps/plugin-dialog';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { totalCount, folders, activeFolder, activeReferencedFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, collectMode, collectModeTarget, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, sidebarHideEmpty, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen, exportFolderSmartCollection } from '$lib/stores';
+    import { totalCount, folders, activeFolder, activeReferencedFolder, minSizeFilter, collections, activeCollection, activeDetectedClass, detectedClasses as detectedClassesStore, smartCollections, activeSmartCollection, showToast, pinnedCollection, pinnedCollections, showMissing, showRejected, sidebarHideEmpty, requestTextInput, requestConfirm, clipboardMonitorStatus, exportFolderOpen, exportFolderSmartCollection } from '$lib/stores';
     import { importFolder as apiImportFolder, getImageCount, listFolders, deleteFolder as apiDeleteFolder, renameFolder as apiRenameFolder, listCollections, createCollection, createCollectionWithImages, renameCollectionApi, deleteCollectionApi, listCollectionImages, listSmartCollections, updateSmartCollectionApi, deleteSmartCollectionApi, countByDetectedClass, listDetectedClasses, getClipboardMonitorStatus, startClipboardMonitor, stopClipboardMonitor, setClipboardMonitorCaptureExistingOnStart, moveClipboardCaptureFolder, publishClipboardCollection } from '$lib/api';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
     import type { ClipboardMonitorStatus, ClipboardPublishResult, FilterNode, ImageWithFile, SmartCollection } from '$lib/api';
@@ -93,6 +93,7 @@
     import ModalDialog from './ModalDialog.svelte';
     import RuleBuilder from './RuleBuilder.svelte';
     import { buildCanvasContextActions, buildCollectionContextActions, buildFolderContextActions, buildSmartCollectionContextActions } from '$lib/sidebar-context-actions';
+    import { continueSelectionFromCollection } from '$lib/selection-mode';
 
     // "All Images" is only the active scope when nothing else narrows it —
     // including a detected-class filter, which used to leave both All Images
@@ -690,13 +691,6 @@
         } catch (e) {
             showToast('Copy failed', { detail: String(e), type: 'error', duration: 8000 });
         }
-    }
-
-    function setCollectTarget(collectionId: string, name: string) {
-        closeSidebarContextMenu();
-        collectMode.set(true);
-        collectModeTarget.set(collectionId);
-        showToast('Collect mode enabled', { detail: name, type: 'info', duration: 5000 });
     }
 
     async function selectSmartCollection(sc: SmartCollection) {
@@ -1378,7 +1372,7 @@
                 onDuplicate: duplicateCollection,
                 onExport: handleExportCollection,
                 onPublish: publishCollection,
-                onCollect: setCollectTarget,
+                onContinueSelection: (id: string) => void continueSelectionFromCollection(id),
                 onTogglePin: togglePinnedCollection,
                 onCopyId: copyCollectionId,
                 onDelete: handleDeleteCollection,
@@ -1617,9 +1611,6 @@
             COLLECTIONS
             <button class="new-collection-btn" onclick={handleNewCollection} title="New Collection" aria-label="New collection">+</button>
         </div>
-        {#if $collectMode && $collectModeTarget}
-            <div class="collect-indicator">Collecting into: {$collections.find(c => c[0] === $collectModeTarget)?.[1] ?? '...'}</div>
-        {/if}
         {#if $collections.length === 0}
             <div class="section-empty">No collections yet — the + above creates one.</div>
         {:else if displayCollections.length === 0}
@@ -2415,14 +2406,6 @@
     }
     .new-collection-btn:hover {
         color: var(--blue);
-    }
-    .collect-indicator {
-        font-size: 10px;
-        /* imageview-1i2k.5: green means positive state (success, live). An
-           active collect mode is not a success — orange marks modes. */
-        color: var(--orange);
-        padding: 2px 8px 4px;
-        font-style: italic;
     }
     .section-empty {
         font-size: 11px;

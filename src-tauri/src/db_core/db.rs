@@ -7,7 +7,7 @@ use rusqlite::{ffi, params, Connection, Error as SqlError, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CURRENT_SCHEMA_VERSION: i64 = 29;
+const CURRENT_SCHEMA_VERSION: i64 = 30;
 
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, "initial_schema"),
@@ -39,6 +39,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (27, "referenced_sources"),
     (28, "referenced_sources_reconcile"),
     (29, "image_file_library_membership"),
+    (30, "selection_runs"),
 ];
 
 #[derive(Clone)]
@@ -419,6 +420,12 @@ impl Database {
             }
             Ok(())
         })?;
+        self.run_migration_step(30, "selection_runs", || {
+            let conn = self.conn.lock();
+            conn.execute_batch(selection_runs_schema())?;
+            rebuild_agent_action_proposal_kinds(&conn)?;
+            Ok(())
+        })?;
 
         self.verify_schema_invariants()?;
         Ok(())
@@ -459,6 +466,8 @@ impl Database {
             "agent_selection_presets",
             "referenced_sources",
             "referenced_files",
+            "selection_runs",
+            "selection_run_source_items",
             "schema_migrations",
         ];
         let conn = self.conn.lock();
@@ -1208,6 +1217,108 @@ fn referenced_sources_schema() -> &'static str {
     "#
 }
 
+fn selection_runs_schema() -> &'static str {
+    r#"
+        CREATE TABLE IF NOT EXISTS selection_runs (
+            id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+            status TEXT NOT NULL CHECK (status IN ('active', 'finished', 'archived')),
+            archived_from TEXT CHECK (archived_from IN ('active', 'finished')),
+            source_scope_json TEXT NOT NULL,
+            source_count INTEGER NOT NULL,
+            target_count INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            finished_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS selection_run_source_items (
+            selection_id TEXT NOT NULL REFERENCES selection_runs(id) ON DELETE CASCADE,
+            image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            PRIMARY KEY (selection_id, image_id),
+            UNIQUE (selection_id, position)
+        );
+
+        CREATE INDEX IF NOT EXISTS selection_run_source_items_image_idx
+            ON selection_run_source_items(image_id);
+    "#
+}
+
+/// Rebuilds `agent_action_proposals` so its `kind` CHECK constraint also
+/// accepts the Selection Mode proposal kinds (`shortlist_add`,
+/// `shortlist_remove`). SQLite cannot alter a CHECK constraint, so the table
+/// is rebuilt in place: every existing row, default and index is preserved.
+/// Safe under active foreign keys because nothing references this table and
+/// preserved `selection_preset_id` values already satisfy their FK.
+fn rebuild_agent_action_proposal_kinds(conn: &Connection) -> Result<()> {
+    let needs_rebuild = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'agent_action_proposals'
+               AND sql NOT LIKE '%shortlist_add%'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? == 1;
+    if !needs_rebuild {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        r#"
+        CREATE TABLE agent_action_proposals_rebuilt (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL CHECK (
+                kind IN (
+                    'select_images',
+                    'set_decisions',
+                    'create_collection',
+                    'add_to_collection',
+                    'remove_from_collection',
+                    'reorder_canvas',
+                    'remove_from_canvas',
+                    'trash_images',
+                    'shortlist_add',
+                    'shortlist_remove'
+                )
+            ),
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'applied', 'dismissed')),
+            persona TEXT NOT NULL
+                CHECK (persona IN ('curator', 'copilot', 'operator')),
+            lens TEXT,
+            criteria TEXT NOT NULL,
+            visual_level TEXT NOT NULL
+                CHECK (visual_level IN ('text', 'tiny', 'preview', 'full')),
+            selection_preset_id TEXT REFERENCES agent_selection_presets(id) ON DELETE SET NULL,
+            estimated_input_tokens INTEGER,
+            estimated_output_tokens INTEGER,
+            estimated_cost_eur REAL,
+            source_context_json TEXT NOT NULL DEFAULT '{}',
+            items_json TEXT NOT NULL DEFAULT '[]',
+            guard_results_json TEXT NOT NULL DEFAULT '{}',
+            apply_result_json TEXT,
+            undo_journal_json TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            applied_at TEXT
+        );
+        INSERT INTO agent_action_proposals_rebuilt
+        SELECT id, kind, status, persona, lens, criteria, visual_level,
+               selection_preset_id, estimated_input_tokens, estimated_output_tokens,
+               estimated_cost_eur, source_context_json, items_json,
+               guard_results_json, apply_result_json, undo_journal_json,
+               created_at, updated_at, applied_at
+        FROM agent_action_proposals;
+        DROP TABLE agent_action_proposals;
+        ALTER TABLE agent_action_proposals_rebuilt RENAME TO agent_action_proposals;
+        CREATE INDEX IF NOT EXISTS idx_agent_action_proposals_preset
+            ON agent_action_proposals(selection_preset_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_action_proposals_status_created
+            ON agent_action_proposals(status, created_at DESC);
+        "#,
+    )?;
+    Ok(())
+}
+
 fn migration_checksum(version: i64, name: &str) -> String {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in version
@@ -1871,6 +1982,152 @@ mod client_feedback_tests {
         };
         assert_eq!(stored_rating, Some(4));
         assert!(db.get_client_feedback("img-1").unwrap().unwrap().favorite);
+    }
+}
+
+#[cfg(test)]
+mod selection_migration_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn migration_v30_creates_selection_tables_and_extends_proposal_kinds() {
+        let dir = tempdir().unwrap();
+        let db = Database::open(&dir.path().join("cull.db")).unwrap();
+        {
+            let conn = db.conn.lock();
+            for table in ["selection_runs", "selection_run_source_items"] {
+                let exists: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                        params![table],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(exists, 1, "{table} must exist after v30");
+            }
+            // The rebuilt CHECK accepts the shortlist proposal kinds.
+            conn.execute(
+                "INSERT INTO agent_action_proposals (id, kind, persona, criteria, visual_level)
+                 VALUES ('p1', 'shortlist_add', 'curator', '{}', 'text')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO agent_action_proposals (id, kind, persona, criteria, visual_level)
+                 VALUES ('p2', 'shortlist_remove', 'copilot', '{}', 'text')",
+                [],
+            )
+            .unwrap();
+        }
+        db.verify_schema_invariants().unwrap();
+    }
+
+    #[test]
+    fn migration_v30_rebuild_preserves_proposal_rows_and_indexes() {
+        let dir = tempdir().unwrap();
+        let db = Database::open(&dir.path().join("cull.db")).unwrap();
+        drop(db);
+
+        // Simulate a v29 database: recreate the proposals table with the old
+        // eight-kind CHECK, put a row in it, and rewind the migration chain.
+        {
+            let conn = Connection::open(&dir.path().join("cull.db")).unwrap();
+            conn.execute_batch(
+                "PRAGMA foreign_keys=OFF;
+                 DROP TABLE agent_action_proposals;
+                 CREATE TABLE agent_action_proposals (
+                     id TEXT PRIMARY KEY,
+                     kind TEXT NOT NULL CHECK (
+                         kind IN (
+                             'select_images', 'set_decisions', 'create_collection',
+                             'add_to_collection', 'remove_from_collection',
+                             'reorder_canvas', 'remove_from_canvas', 'trash_images'
+                         )
+                     ),
+                     status TEXT NOT NULL DEFAULT 'pending'
+                         CHECK (status IN ('pending', 'applied', 'dismissed')),
+                     persona TEXT NOT NULL
+                         CHECK (persona IN ('curator', 'copilot', 'operator')),
+                     lens TEXT,
+                     criteria TEXT NOT NULL,
+                     visual_level TEXT NOT NULL
+                         CHECK (visual_level IN ('text', 'tiny', 'preview', 'full')),
+                     selection_preset_id TEXT REFERENCES agent_selection_presets(id) ON DELETE SET NULL,
+                     estimated_input_tokens INTEGER,
+                     estimated_output_tokens INTEGER,
+                     estimated_cost_eur REAL,
+                     source_context_json TEXT NOT NULL DEFAULT '{}',
+                     items_json TEXT NOT NULL DEFAULT '[]',
+                     guard_results_json TEXT NOT NULL DEFAULT '{}',
+                     apply_result_json TEXT,
+                     undo_journal_json TEXT,
+                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                     applied_at TEXT
+                 );
+                 INSERT INTO agent_action_proposals
+                     (id, kind, status, persona, criteria, visual_level, source_context_json)
+                 VALUES
+                     ('old-1', 'select_images', 'pending', 'curator', '{}', 'text', '{}'),
+                     ('old-2', 'trash_images', 'applied', 'operator', '{}', 'tiny', '{}');
+                 CREATE INDEX idx_agent_action_proposals_preset
+                     ON agent_action_proposals(selection_preset_id);
+                 CREATE INDEX idx_agent_action_proposals_status_created
+                     ON agent_action_proposals(status, created_at DESC);
+                 DELETE FROM selection_runs;
+                 DELETE FROM selection_run_source_items;
+                 DROP TABLE selection_run_source_items;
+                 DROP TABLE selection_runs;
+                 DELETE FROM schema_migrations WHERE version = 30;
+                 DELETE FROM schema_migration_steps WHERE version = 30;
+                 PRAGMA user_version = 29;",
+            )
+            .unwrap();
+        }
+
+        let db = Database::open(&dir.path().join("cull.db")).unwrap();
+        {
+            let conn = db.conn.lock();
+            let rows: i64 = conn
+                .query_row("SELECT COUNT(*) FROM agent_action_proposals", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(rows, 2, "existing proposal rows must be preserved");
+            let preserved: String = conn
+                .query_row(
+                    "SELECT kind FROM agent_action_proposals WHERE id = 'old-2'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(preserved, "trash_images");
+            // The rebuilt table accepts the new kinds.
+            conn.execute(
+                "INSERT INTO agent_action_proposals (id, kind, persona, criteria, visual_level)
+                 VALUES ('new-1', 'shortlist_add', 'curator', '{}', 'text')",
+                [],
+            )
+            .unwrap();
+            // Indexes were recreated.
+            for index in [
+                "idx_agent_action_proposals_preset",
+                "idx_agent_action_proposals_status_created",
+            ] {
+                let exists: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1
+                         AND tbl_name = 'agent_action_proposals'
+                         AND sql IS NOT NULL",
+                        params![index],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(exists, 1, "index {index} must exist after rebuild");
+            }
+        }
+        db.verify_schema_invariants().unwrap();
     }
 }
 

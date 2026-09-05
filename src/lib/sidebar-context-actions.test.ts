@@ -93,14 +93,14 @@ describe('sidebar contextual action policy', () => {
     it('preserves collection actions and hides content actions for an empty collection', () => {
         const handlers = {
             onOpen: vi.fn(), onRename: vi.fn(), onDuplicate: vi.fn(), onExport: vi.fn(),
-            onPublish: vi.fn(), onCollect: vi.fn(), onTogglePin: vi.fn(), onCopyId: vi.fn(), onDelete: vi.fn(),
+            onPublish: vi.fn(), onContinueSelection: vi.fn(), onTogglePin: vi.fn(), onCopyId: vi.fn(), onDelete: vi.fn(),
         };
         const full = buildCollectionContextActions({
             collectionId: 'c1', name: 'Portfolio', count: 4, pinned: false, ...handlers,
         });
         expect(full.map(item => item.label)).toEqual([
             'Open Collection', 'Rename…', 'Duplicate…', 'Export to Folder…', 'Publish Collection',
-            'Use for Collect Mode', 'Pin Collection', 'Copy Collection ID', 'Delete Collection…',
+            'Continue as Selection…', 'Pin Collection', 'Copy Collection ID', 'Delete Collection…',
         ]);
 
         const empty = buildCollectionContextActions({

@@ -21,7 +21,7 @@ All architectural decisions, data models, API interfaces, component hierarchies,
 
 ## AI Implementation
 
-Code implementation was assisted by **Claude** (Anthropic) and **Codex** (OpenAI). The AI generated syntax, function bodies, and boilerplate under human architectural direction and iterative review.
+Code implementation was assisted by **Claude** (Anthropic), **Codex** (OpenAI), and **GLM** (Z.ai, through Pi). The AI generated syntax, function bodies, and boilerplate under human architectural direction and iterative review.
 
 The human author provided:
 - Architectural specifications before code generation (design docs in `docs/`, `AGENTS.md`)
@@ -35,7 +35,7 @@ Development session logs (Claude Code and Codex transcripts) are retained locall
 ## Copyright Notice
 
 Architecture and design copyright (c) 2026-present Gleb Kalinin.
-Implementation was assisted by Claude (Anthropic) and Codex (OpenAI) under human direction, review, and integration. Provider output terms are not treated as a substitute for source provenance, license compatibility review, or human authorship documentation.
+Implementation was assisted by Claude (Anthropic), Codex (OpenAI), and GLM (Z.ai, through Pi) under human direction, review, and integration. Provider output terms are not treated as a substitute for source provenance, license compatibility review, or human authorship documentation.
 
 ## AI Provider Output Terms
 

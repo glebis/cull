@@ -3,14 +3,20 @@ import {
     images, selectedIds, focusedIndex, thumbnailSize, statusHint, viewMode,
     compareActiveSide, compareImages,
     sidebarVisible, gridPreset, gridGap, GRID_PRESETS, zenMode, compareImageOnly, exportImageOnly,
-    collections, collectMode, collectModeTarget, activeCollection,
+    collections, activeCollection,
     showDetectionBoxes, showDetectionInspector, nsfwMode,
     navigateTo, navigateBack, searchOpen, shortcutsOpen, undoHistoryOpen, focusedImage, activeSession,
-    requestTextInput, requestCollectionTarget, selectionAnchorIndex, requestLoupeActualSize, requestLoupeFitIn,
+    requestTextInput, selectionAnchorIndex, requestLoupeActualSize, requestLoupeFitIn,
     requestLoupeZoomIn, requestLoupeZoomOut,
     activeFolder, setGridThumbnailSize,
     showRejected,
 } from './stores';
+import {
+    isSelectionModeActive,
+    refreshSelectionViewAfterLibraryUndo,
+    toggleShortlistFocused,
+    toggleShortlistMembership,
+} from './selection-mode';
 import { tabCycleOrder } from './plugins/tab-registry';
 import { computeCompareSwap, nextComparePresentationState } from './compare-utils';
 import { nextExportPresentationState } from './presentation-utils';
@@ -435,6 +441,7 @@ export function handleKeydown(e: KeyboardEvent) {
             if (label) {
                 showToast(`Undone: ${label}`, { type: 'info', duration: 4000 });
                 window.dispatchEvent(new CustomEvent('reload-images'));
+                void refreshSelectionViewAfterLibraryUndo();
             }
         });
         return;
@@ -451,6 +458,7 @@ export function handleKeydown(e: KeyboardEvent) {
             if (label) {
                 showToast(`Redone: ${label}`, { type: 'info', duration: 4000 });
                 window.dispatchEvent(new CustomEvent('reload-images'));
+                void refreshSelectionViewAfterLibraryUndo();
             }
         });
         return;
@@ -505,8 +513,10 @@ function handleGridKeys(e: KeyboardEvent) {
             break;
         case ' ':
             e.preventDefault();
-            if (get(collectMode)) {
-                handleCollectModeAdd();
+            if (isSelectionModeActive()) {
+                // Selection Mode: Space toggles the focused image's shortlist
+                // membership — never the transient highlight.
+                toggleShortlistFocused();
             } else {
                 toggleSelect();
             }
@@ -569,10 +579,6 @@ function handleGridKeys(e: KeyboardEvent) {
             e.preventDefault();
             handleCreateCollectionFromSelected(true);
             break;
-        case 'b':
-            e.preventDefault();
-            handleToggleCollectMode();
-            break;
         case 'f':
             e.preventDefault();
             toggleFullscreen();
@@ -618,73 +624,6 @@ async function handleCreateCollectionFromSelected(inverse: boolean) {
     }
 }
 
-async function handleToggleCollectMode() {
-    const current = get(collectMode);
-    if (current) {
-        // Exit collect mode
-        collectMode.set(false);
-        collectModeTarget.set(null);
-        statusHint.set(null);
-        return;
-    }
-
-    // Enter collect mode: pick or create a collection
-    const cols = get(collections);
-    let targetId: string | null = null;
-
-    const target = await requestCollectionTarget({
-        title: 'Collect Mode',
-        description: cols.length > 0
-            ? 'Choose the collection that Space will add images to, or create a new one.'
-            : 'Create a collection that Space will add images to.',
-        collections: cols,
-        confirmLabel: 'Start',
-    });
-    if (!target) return;
-
-    if (target.type === 'existing') {
-        targetId = target.collectionId;
-    } else {
-        try {
-            targetId = await createCollection(target.name);
-            const c = await listCollections(get(showRejected));
-            collections.set(c);
-        } catch (err) {
-            console.error('Failed to create collection:', err);
-            return;
-        }
-    }
-
-    collectMode.set(true);
-    collectModeTarget.set(targetId);
-    const colName = get(collections).find(c => c[0] === targetId)?.[1] ?? '';
-    statusHint.set(`Collect mode: Space to add, B to exit [${colName}]`);
-}
-
-async function handleCollectModeAdd() {
-    const target = get(collectModeTarget);
-    if (!target) return;
-
-    const imgs = get(images);
-    const idx = get(focusedIndex);
-    const img = imgs[idx];
-    if (!img) return;
-
-    try {
-        await addToCollection(target, [img.image.id]);
-        invalidateImageCache();
-        const c = await listCollections(get(showRejected));
-        collections.set(c);
-        // If we're viewing this collection, refresh
-        if (get(activeCollection) === target) {
-            await loadImagesForCurrentScope({ resetFocus: false, force: true });
-        }
-        statusHint.set(`Added to collection. Space for next, B to exit`);
-    } catch (err) {
-        console.error('Failed to add to collection:', err);
-    }
-}
-
 function compareSwapFocusedImage(direction: 1 | -1) {
     const imgs = get(images);
     const imageIds = imgs.map(i => i.image.id);
@@ -724,8 +663,8 @@ function handleCanvasKeys(e: KeyboardEvent) {
             break;
         case ' ':
             e.preventDefault();
-            if (get(collectMode)) {
-                handleCollectModeAdd();
+            if (isSelectionModeActive()) {
+                toggleShortlistFocused();
             } else {
                 toggleSelect();
             }
@@ -793,6 +732,14 @@ function handleCompareKeys(e: KeyboardEvent) {
             waitingForStar = true;
             statusHint.set('Rate: press 1-5');
             break;
+        case ' ':
+            e.preventDefault();
+            if (isSelectionModeActive()) {
+                // Compare's focused image is the active side's image.
+                const img = get(images)[getCompareActiveIndex()];
+                if (img) toggleShortlistMembership(img.image.id);
+            }
+            break;
         case 'Escape':
             e.preventDefault();
             navigateBack() || navigateTo('grid');
@@ -857,7 +804,11 @@ function handleLoupeKeys(e: KeyboardEvent) {
             break;
         case ' ':
             e.preventDefault();
-            toggleSelect();
+            if (isSelectionModeActive()) {
+                toggleShortlistFocused();
+            } else {
+                toggleSelect();
+            }
             break;
         case '+':
         case '=':

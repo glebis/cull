@@ -1,6 +1,7 @@
 import type { ImageWithFile } from './api';
 import { loadImagesForCurrentScope } from './image-loading';
 import { withDecision, type ImageDecision } from './selection-updates';
+import { markSelectionCachesStale } from './selection-view';
 import { get } from 'svelte/store';
 import { activeSmartCollection, focusedIndex, images, importBatchImageIds, selectedIds, showRejected, showToast, totalCount } from './stores';
 
@@ -24,6 +25,10 @@ export function applyDecisionToCurrentView(imageId: string, decision: ImageDecis
     const includeRejected = get(showRejected) || activeSmart !== null;
     const result = applyVisibleDecision(get(images), imageId, decision, includeRejected, get(focusedIndex));
     images.set(result.items); focusedIndex.set(result.focusedIndex);
+    // Selection Mode pages derive their rows from backend queries that depend
+    // on decisions (rejected filtering, the shortlist conflict summary). Flag
+    // those caches for refetch while keeping each scope's focus/scroll memory.
+    markSelectionCachesStale();
     if (result.hidden) {
         selectedIds.update(ids => { if (!ids.has(imageId)) return ids; const next = new Set(ids); next.delete(imageId); return next; });
         importBatchImageIds.update(ids => ids.filter(id => id !== imageId));

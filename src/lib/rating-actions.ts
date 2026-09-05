@@ -1,6 +1,7 @@
 import { images, showToast } from './stores';
 import { setRating } from './api';
 import { invalidateImageCache } from './image-loading';
+import { updateSelectionCacheItem } from './selection-view';
 import { withRating } from './selection-updates';
 
 // Rating writes are serialized per image id: concurrent saves for the same
@@ -47,6 +48,11 @@ export async function saveRating(imageId: string, rating: number, sessionId: str
                 copy[target] = withRating(copy[target], rating);
                 return copy;
             });
+            // Selection Mode pages cache full ImageWithFile records: repaint
+            // the rating there too so a Source/Shortlist switch cannot
+            // restore a stale star count. The remembered focus and scroll of
+            // those caches stay intact.
+            updateSelectionCacheItem(imageId, item => withRating(item, rating));
         });
     } catch (e) {
         console.error('Failed to set rating:', e);

@@ -9,6 +9,11 @@ export interface ThumbnailAriaLabelInput {
     sourceTag: string | null;
     selected: boolean;
     missing: boolean;
+    /** Shortlist membership state. Tri-state: `true`/`false` announce the
+     *  shortlist state while Selection Mode is active; `undefined` (or
+     *  omitted) leaves the state out entirely — outside the mode it would
+     *  just be noise on every tile. */
+    shortlisted?: boolean;
 }
 
 export function buildThumbnailAriaLabel(input: ThumbnailAriaLabelInput): string {
@@ -17,8 +22,15 @@ export function buildThumbnailAriaLabel(input: ThumbnailAriaLabelInput): string 
     const decision = input.decision || 'undecided';
     const sourceTag = input.sourceTag || 'unknown';
     const selected = input.selected ? 'selected' : 'not selected';
+    const shortlisted = input.shortlisted === undefined
+        ? null
+        : input.shortlisted ? 'Shortlisted' : 'not shortlisted';
     const fileStatus = input.missing ? 'missing' : 'present';
-    return `${filename}, rating ${safeRating}, decision ${decision}, source ${sourceTag}, ${selected}, ${fileStatus}`;
+    return [
+        `${filename}, rating ${safeRating}, decision ${decision}, source ${sourceTag}, ${selected}`,
+        shortlisted,
+        fileStatus,
+    ].filter(Boolean).join(', ');
 }
 
 export function getThumbnailBorderClass(focused: boolean, selected: boolean): string {

@@ -1,9 +1,20 @@
 use crate::db_core::db::Database;
 use crate::db_core::models::UndoRecord;
+use crate::db_core::queries;
 use chrono::Utc;
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use uuid::Uuid;
+
+/// Marks an idempotent no-op: nothing changed, so no undo record exists.
+fn no_op_result() -> ActionResult {
+    ActionResult {
+        undo_record_id: String::new(),
+        label: "No shortlist change".to_string(),
+        can_undo: false,
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UndoStatus {
@@ -149,8 +160,47 @@ pub struct ActionResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Action {
-    SetRating { image_id: String, rating: u8 },
-    SetDecision { image_id: String, decision: String },
+    SetRating {
+        image_id: String,
+        rating: u8,
+    },
+    SetDecision {
+        image_id: String,
+        decision: String,
+    },
+    /// Grouped Selection Mode shortlist membership change. Validation,
+    /// mutation and the undo record happen in one transaction; a no-op
+    /// (nothing effectively added/removed) writes no undo record. Actor
+    /// provenance is logged by the service layer through session_events.
+    ShortlistAdd {
+        selection_id: String,
+        image_ids: Vec<String>,
+    },
+    ShortlistRemove {
+        selection_id: String,
+        image_ids: Vec<String>,
+    },
+}
+
+/// Undo/redo replay semantics stored inside the before/after JSON of
+/// shortlist undo records: each state captures the full ordered membership.
+/// Replay derives the membership delta from both states, preserving intervening
+/// edits to other members and dropping deleted images from the delta.
+fn shortlist_state_json(selection_id: &str, membership: &[String]) -> String {
+    serde_json::json!({
+        "selection_id": selection_id,
+        "membership": membership,
+    })
+    .to_string()
+}
+
+fn dedupe_preserving_order(image_ids: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    image_ids
+        .iter()
+        .filter(|id| seen.insert((*id).clone()))
+        .cloned()
+        .collect()
 }
 
 pub struct ActionManager {
@@ -170,6 +220,12 @@ impl ActionManager {
     }
 
     pub fn execute(&self, db: &Database, action: Action) -> Result<ActionResult, String> {
+        match &action {
+            Action::ShortlistAdd { .. } | Action::ShortlistRemove { .. } => {
+                return self.execute_shortlist_transactional(db, action, |_, _| Ok(()));
+            }
+            Action::SetRating { .. } | Action::SetDecision { .. } => {}
+        }
         // 1. Read before state — must happen BEFORE locking conn for the transaction
         let (action_type, label, before_json, after_json, affected_ids) = match &action {
             Action::SetRating { image_id, rating } => {
@@ -200,6 +256,10 @@ impl ActionManager {
                     serde_json::json!({"image_id": image_id, "decision": decision}).to_string(),
                     image_id.clone(),
                 )
+            }
+            // Dispatched by execute_shortlist before this match runs.
+            Action::ShortlistAdd { .. } | Action::ShortlistRemove { .. } => {
+                unreachable!("shortlist actions are handled by execute_shortlist")
             }
         };
 
@@ -240,6 +300,10 @@ impl ActionManager {
                 )
                 .map_err(|e| e.to_string())?;
             }
+            // Dispatched by execute_shortlist before this match runs.
+            Action::ShortlistAdd { .. } | Action::ShortlistRemove { .. } => {
+                unreachable!("shortlist actions are handled by execute_shortlist")
+            }
         }
 
         // Insert undo record
@@ -269,7 +333,189 @@ impl ActionManager {
         })
     }
 
+    /// Grouped shortlist mutation: validation, membership change and undo
+    /// record all happen inside one savepoint so a failed group leaves zero
+    /// writes and zero history, and a committed change always has history.
+    /// Idempotent no-ops change nothing and write no record (and preserve the
+    /// redo branch).
+    /// Transaction-aware grouped shortlist mutation. Validation, membership
+    /// change, the undo record insert and the `extra` callback all run inside
+    /// one transaction: if `extra` fails (e.g. the caller cannot record the
+    /// proposal consumption), the membership change and undo record roll back
+    /// with it, so a committed change always has history and vice versa.
+    /// Cursor bookkeeping happens only after a successful commit. Idempotent
+    /// no-ops still run `extra` (a reviewed proposal may be consumed with no
+    /// membership change) but write no undo record.
+    /// Only shortlist actions are supported here; other actions error.
+    pub fn execute_shortlist_transactional(
+        &self,
+        db: &Database,
+        action: Action,
+        extra: impl FnOnce(&Connection, usize) -> Result<(), String>,
+    ) -> Result<ActionResult, String> {
+        let (selection_id, requested, add) = match &action {
+            Action::ShortlistAdd {
+                selection_id,
+                image_ids,
+            } => (selection_id.clone(), image_ids.clone(), true),
+            Action::ShortlistRemove {
+                selection_id,
+                image_ids,
+            } => (selection_id.clone(), image_ids.clone(), false),
+            _ => return Err("Only shortlist actions support transactional execution".to_string()),
+        };
+        if requested.is_empty() {
+            return Err("No images provided for the shortlist change".to_string());
+        }
+        let requested = dedupe_preserving_order(&requested);
+
+        let mut cursor = self.cursor_seq.lock().unwrap();
+        let mut conn = db.conn.lock();
+        let tx = conn.savepoint().map_err(|e| e.to_string())?;
+
+        // Lifecycle guard: membership may only change while active.
+        let status: Option<String> = tx
+            .query_row(
+                "SELECT status FROM selection_runs WHERE id = ?1",
+                rusqlite::params![selection_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        match status.as_deref() {
+            None => return Err(format!("Selection run '{selection_id}' was not found",)),
+            Some("active") => {}
+            Some(other) => {
+                return Err(format!(
+                    "Selection run is {other}; reopen or restore it before changing its shortlist"
+                ))
+            }
+        }
+
+        let (action_type, label, before_json, after_json, affected, changed_count) = if add {
+            // Validate the whole group against the captured source before
+            // writing anything.
+            let in_source =
+                queries::selection_runs::filter_ids_in_source_conn(&tx, &selection_id, &requested)
+                    .map_err(|e| e.to_string())?;
+            let outside: Vec<String> = requested
+                .iter()
+                .filter(|id| !in_source.contains(id))
+                .cloned()
+                .collect();
+            if !outside.is_empty() {
+                return Err(format!(
+                    "Cannot add images outside the captured selection source: {}",
+                    outside.join(", ")
+                ));
+            }
+            let before_order =
+                queries::selection_runs::shortlist_ordered_ids_conn(&tx, &selection_id)
+                    .map_err(|e| e.to_string())?;
+            let current = queries::selection_runs::filter_ids_in_membership_conn(
+                &tx,
+                &selection_id,
+                &requested,
+            )
+            .map_err(|e| e.to_string())?;
+            let new_ids: Vec<String> = requested
+                .iter()
+                .filter(|id| !current.contains(id))
+                .cloned()
+                .collect();
+            if new_ids.is_empty() {
+                // Idempotent no-op: still give the caller its transactional
+                // hook (a reviewed proposal may be consumed) with no undo
+                // record and no redo-branch disturbance.
+                extra(&tx, 0)?;
+                tx.commit().map_err(|e| e.to_string())?;
+                return Ok(no_op_result());
+            }
+            queries::selection_runs::shortlist_append_conn(&tx, &selection_id, &new_ids)
+                .map_err(|e| e.to_string())?;
+            let after_order =
+                queries::selection_runs::shortlist_ordered_ids_conn(&tx, &selection_id)
+                    .map_err(|e| e.to_string())?;
+            (
+                "shortlist_add",
+                format!("Add {} to shortlist", new_ids.len()),
+                shortlist_state_json(&selection_id, &before_order),
+                shortlist_state_json(&selection_id, &after_order),
+                new_ids.join(","),
+                new_ids.len(),
+            )
+        } else {
+            let before_order =
+                queries::selection_runs::shortlist_ordered_ids_conn(&tx, &selection_id)
+                    .map_err(|e| e.to_string())?;
+            let removable = queries::selection_runs::filter_ids_in_membership_conn(
+                &tx,
+                &selection_id,
+                &requested,
+            )
+            .map_err(|e| e.to_string())?;
+            if removable.is_empty() {
+                extra(&tx, 0)?;
+                tx.commit().map_err(|e| e.to_string())?;
+                return Ok(no_op_result());
+            }
+            queries::selection_runs::shortlist_delete_conn(&tx, &selection_id, &removable)
+                .map_err(|e| e.to_string())?;
+            let after_order =
+                queries::selection_runs::shortlist_ordered_ids_conn(&tx, &selection_id)
+                    .map_err(|e| e.to_string())?;
+            (
+                "shortlist_remove",
+                format!("Remove {} from shortlist", removable.len()),
+                shortlist_state_json(&selection_id, &before_order),
+                shortlist_state_json(&selection_id, &after_order),
+                removable.join(","),
+                removable.len(),
+            )
+        };
+
+        // Clear redo branch only now that we know the group is effective.
+        if let Some(cur_seq) = *cursor {
+            tx.execute(
+                "DELETE FROM undo_records WHERE seq >= ?1",
+                rusqlite::params![cur_seq],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
+        let record_id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO undo_records (id, action_type, label, before_json, after_json, affected_image_ids, has_file_backup, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)",
+            rusqlite::params![record_id, action_type, label, before_json, after_json, affected, now],
+        )
+        .map_err(|e| e.to_string())?;
+
+        // Caller-completion hook (e.g. consuming a reviewed proposal) runs
+        // inside the same transaction: a failure here rolls back the
+        // membership change and the undo record together.
+        extra(&tx, changed_count)?;
+
+        tx.commit().map_err(|e| e.to_string())?;
+        *cursor = None;
+        drop(conn);
+        let _ = db.prune_oldest_undo_records(self.max_depth);
+
+        Ok(ActionResult {
+            undo_record_id: record_id,
+            label,
+            can_undo: true,
+        })
+    }
+
     pub fn undo(&self, db: &Database) -> Result<Option<String>, String> {
+        Ok(self.undo_record(db)?.map(|record| record.label))
+    }
+
+    /// Like `undo`, but returns the full undone record so callers can react
+    /// (for example emitting `selection-run:updated` for shortlist actions).
+    pub fn undo_record(&self, db: &Database) -> Result<Option<UndoRecord>, String> {
         let mut cursor = self.cursor_seq.lock().unwrap();
 
         // Find the record to undo
@@ -307,12 +553,17 @@ impl ActionManager {
         };
 
         // Apply the before state
-        self.apply_state(db, &record.action_type, &record.before_json)?;
+        self.apply_state(
+            db,
+            &record.action_type,
+            &record.before_json,
+            &record.after_json,
+        )?;
 
         // Move cursor to target (the record we just undid)
         *cursor = Some(target_seq);
 
-        Ok(Some(record.label))
+        Ok(Some(record))
     }
 
     pub fn undoable_count(&self, db: &Database) -> Result<u32, String> {
@@ -365,6 +616,11 @@ impl ActionManager {
     }
 
     pub fn redo(&self, db: &Database) -> Result<Option<String>, String> {
+        Ok(self.redo_record(db)?.map(|record| record.label))
+    }
+
+    /// Like `redo`, but returns the full redone record for event emission.
+    pub fn redo_record(&self, db: &Database) -> Result<Option<UndoRecord>, String> {
         let mut cursor = self.cursor_seq.lock().unwrap();
 
         let cur_seq = match *cursor {
@@ -382,7 +638,12 @@ impl ActionManager {
         };
 
         // Apply the after state
-        self.apply_state(db, &record.action_type, &record.after_json)?;
+        self.apply_state(
+            db,
+            &record.action_type,
+            &record.after_json,
+            &record.before_json,
+        )?;
 
         // Move cursor up — find next record above current, or go to None (top)
         let conn = db.conn.lock();
@@ -400,7 +661,7 @@ impl ActionManager {
             None => *cursor = None,
         }
 
-        Ok(Some(record.label))
+        Ok(Some(record))
     }
 
     pub fn status(&self, db: &Database) -> UndoStatus {
@@ -521,6 +782,7 @@ impl ActionManager {
         db: &Database,
         action_type: &str,
         state_json: &str,
+        expected_json: &str,
     ) -> Result<(), String> {
         if action_type == "trash_image" {
             if let Ok(state) =
@@ -602,6 +864,22 @@ impl ActionManager {
                     }
                     Ok(())
                 }
+            }
+            "shortlist_add" | "shortlist_remove" => {
+                let selection_id = val["selection_id"].as_str().ok_or("Missing selection_id")?;
+                let membership: Vec<String> = val["membership"]
+                    .as_array()
+                    .ok_or("Missing membership")?
+                    .iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect();
+                let expected: serde_json::Value =
+                    serde_json::from_str(expected_json).map_err(|e| e.to_string())?;
+                let expected_membership: Vec<String> =
+                    serde_json::from_value(expected["membership"].clone())
+                        .map_err(|e| e.to_string())?;
+                db.shortlist_restore(selection_id, &expected_membership, &membership)
+                    .map_err(|e| e.to_string())
             }
             _ => Err(format!("Unknown action type for undo: {}", action_type)),
         }
