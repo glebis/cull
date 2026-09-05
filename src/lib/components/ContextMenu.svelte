@@ -1,14 +1,15 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
-    import { setRating, setDecision, listCollections, addToCollection, removeFromCollection, createCollection, moveImage, renameImage, listFolders, shareImages, openImagesWithApplication, listOpenWithApplications, resolveImageOriginalPath } from '$lib/api';
+    import { setDecision, listCollections, addToCollection, removeFromCollection, createCollection, moveImage, renameImage, listFolders, shareImages, openImagesWithApplication, listOpenWithApplications, resolveImageOriginalPath } from '$lib/api';
     import { loadSimilarImages } from '$lib/similarity';
     import type { ImageWithFile, OpenWithApplication } from '$lib/api';
     import { images, focusedIndex, selectedIds, activeCollection, activeSession, collections, folders, showToast, requestTextInput, showRejected } from '$lib/stores';
     import { invalidateImageCache, loadImagesForCurrentScope } from '$lib/image-loading';
     import { clampFloatingPosition, placeAdjacentSubmenu } from '$lib/floating-position';
     import { filterMoveFolders, folderDisplayName, folderParentPath } from '$lib/move-menu-utils';
-    import { withDecision, withRating, type ImageDecision } from '$lib/selection-updates';
+    import { withDecision, type ImageDecision } from '$lib/selection-updates';
+    import { saveRating } from '$lib/rating-actions';
     import { applyDecisionToCurrentView } from '$lib/rejected-visibility';
     import { requestTrashImages } from '$lib/trash-actions';
     import { commandShortcutHints, eventMatchesShortcut } from '$lib/command-palette';
@@ -436,11 +437,13 @@
     }
 
     async function handleRate(n: number) {
+        const imageId = image.image.id;
+        const sessionId = $activeSession?.id ?? null;
         onclose();
-        await setRating(image.image.id, n, $activeSession?.id ?? null);
-        invalidateImageCache();
-        image.selection = withRating(image, n).selection;
-        images.update(all => all.map(item => item.image.id === image.image.id ? withRating(item, n) : item));
+        // The shared action serializes same-image writes and repaints by id;
+        // it only touches stores, so the save stays safe if this component
+        // unmounts while the queued write is in flight.
+        await saveRating(imageId, n, sessionId);
     }
 
     async function handleDecision(d: ImageDecision) {

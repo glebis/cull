@@ -1,5 +1,13 @@
 # Detailed Action History Design
 
+**Delivery status (2026-09-05):** Core implemented on main. The rendered
+`UndoHistoryPanel.svelte` shows enriched undo entries and activity, supports
+contiguous-prefix batch undo through `services/undo.rs::undo_many`, and is
+mounted by the main page. This document retains the original design contract;
+its future-tense wording does not mean the feature still needs implementing.
+Remaining changes should be filed against observed behavior, with rendered
+coverage in `undo-history-panel.test.ts` as the starting point.
+
 ## Summary
 
 Cull's Action History will become an understandable, actionable timeline rather than a compact diagnostic list. Every row will explain what changed and which image, collection, or item it affected. Image-related rows will include safe local previews. Users will be able to select and undo several recent actions in one operation without violating the undo stack.
@@ -214,4 +222,3 @@ These boundaries keep formatting and selection behavior independently testable a
 7. All row cells are top-aligned, including wrapped text and responsive layouts.
 8. No raw JSON, unexplained UUID, or full internal path is the primary presentation.
 9. Automated backend/frontend tests and installed-app visual verification cover the behavior.
-

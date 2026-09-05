@@ -16,13 +16,14 @@ import { computeCompareSwap, nextComparePresentationState } from './compare-util
 import { nextExportPresentationState } from './presentation-utils';
 import type { NsfwMode } from './stores';
 import type { ViewMode } from './stores';
-import { setRating, setDecision, createCollection, addToCollection, listCollections, rotateImage, undo, redo, pasteImageFromClipboard } from './api';
+import { setDecision, createCollection, addToCollection, listCollections, rotateImage, undo, redo, pasteImageFromClipboard } from './api';
 import { showToast } from './stores';
+import { saveRating } from './rating-actions';
 import { invalidateImageCache, loadImagesForCurrentScope } from './image-loading';
 import { focusImagePath } from './transform-results';
 import { commandForKeyboardEvent, openCommandPalette, runCommandPaletteItem } from './command-palette';
 import { recordShortcutUse, VIEW_CYCLE_SHORTCUT_REMINDER_ID } from './shortcut-reminders';
-import { withRating, type ImageDecision } from './selection-updates';
+import { type ImageDecision } from './selection-updates';
 import { applyDecisionToCurrentView } from './rejected-visibility';
 import { filenameForPath, pasteDestinationForContext } from './clipboard-actions';
 import { nudgeThumbnailSize } from './thumbnail-zoom';
@@ -140,17 +141,10 @@ export async function handleStarRating(n: number, imageIndex?: number) {
     const idx = imageIndex ?? get(focusedIndex);
     const img = imgs[idx];
     if (!img) return;
-    try {
-        await setRating(img.image.id, n, get(activeSession)?.id ?? null);
-        invalidateImageCache();
-        images.update(all => {
-            const copy = [...all];
-            copy[idx] = withRating(copy[idx], n);
-            return copy;
-        });
-    } catch (e) {
-        console.error('Failed to set rating:', e);
-    }
+    // The shared action serializes same-image writes and repaints by id; the
+    // images array and session can change while the save is queued or in
+    // flight, so a captured index would go stale.
+    await saveRating(img.image.id, n, get(activeSession)?.id ?? null);
 }
 
 export async function handleDecision(decision: ImageDecision, imageIndex?: number) {

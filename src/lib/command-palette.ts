@@ -51,9 +51,10 @@ import {
     type ViewMode,
 } from './stores';
 import { invalidateImageCache, loadAllImages, loadImagesForCurrentScope } from './image-loading';
-import { addToCollection, analyzeImages, checkOllama, createCollection, detectNsfw, detectObjects, getAppSetting, getClientFeedback, getOllamaConfig, isNudenetAvailable, isYoloAvailable, listCanvases, listClientFeedback, listCollections, listImageIdsMissingDetection, listImageIdsMissingVision, redo, saveTextToPath, setClientFeedback, setDecision, setRating, undo, validateSessionFolder, type Canvas, type Session } from './api';
+import { addToCollection, analyzeImages, checkOllama, createCollection, detectNsfw, detectObjects, getAppSetting, getClientFeedback, getOllamaConfig, isNudenetAvailable, isYoloAvailable, listCanvases, listClientFeedback, listCollections, listImageIdsMissingDetection, listImageIdsMissingVision, redo, saveTextToPath, setClientFeedback, setDecision, undo, validateSessionFolder, type Canvas, type Session } from './api';
 import { activateImportBatch } from './import-batch-navigation';
-import { withRating, type ImageDecision } from './selection-updates';
+import { saveRating } from './rating-actions';
+import { type ImageDecision } from './selection-updates';
 import { applyDecisionToCurrentView } from './rejected-visibility';
 import { createWorkflow, readWorkflows, runWorkflow, type CommandWorkflow } from './workflows';
 import { buildDeliveryCsv, type DeliveryRow } from './delivery-csv';
@@ -450,16 +451,12 @@ function openCanvas(canvas: Canvas) {
 }
 
 async function setFocusedRating(rating: number) {
-    const idx = currentImageIndex();
-    const image = get(images)[idx];
+    const image = get(images)[currentImageIndex()];
     if (!image) return;
-    await setRating(image.image.id, rating, get(activeSession)?.id ?? null);
-    invalidateImageCache();
-    images.update(all => {
-        const next = [...all];
-        next[idx] = withRating(next[idx], rating);
-        return next;
-    });
+    // The shared action serializes same-image writes and repaints by id, so a
+    // navigation that reorders the array while the save is in flight cannot
+    // land the rating on the wrong image.
+    await saveRating(image.image.id, rating, get(activeSession)?.id ?? null);
 }
 
 async function setFocusedDecision(decision: ImageDecision) {

@@ -1,5 +1,16 @@
 # Referenced Media Library Boundary Implementation Plan
 
+> **Historical plan — implementation supersedes the SQL approach below.**
+> Verified on 2026-09-05: the delivered boundary uses explicit
+> `image_files.library_member` state, including a migration, and
+> `NORMAL_LIBRARY_FILE_PREDICATE = "f.library_member = 1"` in
+> `src-tauri/src/db_core/referenced_sources.rs`. Do not implement the anti-join
+> or the no-migration assumption below. An explicitly imported file may retain
+> its referenced-source association and still belong to the library. Core
+> boundary work is recorded in closed issue `imageview-n0cn`; original-read
+> hardening is implemented under `imageview-t6g5`. Unchecked boxes below
+> are historical planning text, not current issue status.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Keep SD-card and external-source browsing out of permanent library scopes, discard referenced-only previews when the source goes offline, restore previews on reconnect, and replace generic missing-file failures with source-aware reconnect guidance.

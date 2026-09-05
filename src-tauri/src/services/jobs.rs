@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::db_core::db::Database;
 use crate::services::model_download::{DownloadControl, PauseController};
 
 #[derive(Debug, Clone, Serialize)]
@@ -37,17 +38,58 @@ pub enum WorkerTerminalOutcome {
 #[derive(Clone)]
 pub struct JobRegistry {
     jobs: Arc<Mutex<HashMap<String, JobState>>>,
+    persistence: Arc<Mutex<()>>,
+    /// When present, job lifecycle rows are durably persisted so interrupted
+    /// jobs can be recognised as failed after a restart.
+    db: Option<Database>,
 }
 
 impl Default for JobRegistry {
     fn default() -> Self {
         Self {
             jobs: Arc::new(Mutex::new(HashMap::new())),
+            persistence: Arc::new(Mutex::new(())),
+            db: None,
         }
     }
 }
 
 impl JobRegistry {
+    /// Registry that durably records job creation and status transitions in
+    /// `db`. A job that is still running when the app stops is marked failed
+    /// on the next start by `mark_stale_running_jobs_failed`.
+    pub fn with_db(db: Database) -> Self {
+        Self {
+            jobs: Arc::new(Mutex::new(HashMap::new())),
+            persistence: Arc::new(Mutex::new(())),
+            db: Some(db),
+        }
+    }
+
+    /// Persist one snapshot. Must be called with the registry lock released so
+    /// database latency can never stall concurrent job queries or updates.
+    /// Persistence failures are surfaced loudly instead of being dropped.
+    fn persist_snapshot(&self, snapshot: &JobSnapshot) {
+        let Some(db) = self.db.as_ref() else {
+            return;
+        };
+        // Serialize disk writes, then reread current state. A delayed caller may
+        // hold an older terminal snapshot, not just an older running snapshot.
+        // The registry lock is still released before database IO.
+        let _persist = self.persistence.lock().unwrap();
+        let Some(snapshot) = self.get(&snapshot.job_id) else {
+            return;
+        };
+        if let Err(error) = db.save_job(&snapshot) {
+            crate::safe_eprintln!(
+                "[jobs] failed to persist job '{}' (status {}): {}",
+                snapshot.job_id,
+                snapshot.status,
+                error
+            );
+        }
+    }
+
     pub fn create_job(&self, kind: &str, total: u32) -> (String, CancellationToken) {
         let raw = Uuid::new_v4().to_string().replace('-', "");
         let job_id = format!("job_{}", &raw[..12]);
@@ -66,13 +108,18 @@ impl JobRegistry {
             updated_at: now,
         };
         let state = JobState {
-            snapshot,
+            snapshot: snapshot.clone(),
             cancel: cancel.clone(),
             pause,
         };
-        let mut jobs = self.jobs.lock().unwrap();
-        self.prune_locked(&mut jobs);
-        jobs.insert(job_id.clone(), state);
+        {
+            let mut jobs = self.jobs.lock().unwrap();
+            self.prune_locked(&mut jobs);
+            jobs.insert(job_id.clone(), state);
+        }
+        // The running row is what makes an interrupted job visible as failed
+        // after a restart.
+        self.persist_snapshot(&snapshot);
         (job_id, cancel)
     }
 
@@ -96,110 +143,152 @@ impl JobRegistry {
     }
 
     pub fn complete(&self, job_id: &str) {
-        let mut jobs = self.jobs.lock().unwrap();
-        if let Some(state) = jobs.get_mut(job_id) {
-            if state.cancel.is_cancelled() {
-                state.snapshot.status = "cancelled".to_string();
-            } else {
-                state.snapshot.status = "completed".to_string();
-                state.snapshot.current = state.snapshot.total;
-            }
-            state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+        let snapshot = {
+            let mut jobs = self.jobs.lock().unwrap();
+            jobs.get_mut(job_id).map(|state| {
+                if state.cancel.is_cancelled() {
+                    state.snapshot.status = "cancelled".to_string();
+                } else {
+                    state.snapshot.status = "completed".to_string();
+                    state.snapshot.current = state.snapshot.total;
+                }
+                state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+                state.snapshot.clone()
+            })
+        };
+        if let Some(snapshot) = snapshot {
+            self.persist_snapshot(&snapshot);
         }
     }
 
     pub fn fail(&self, job_id: &str, error: &str) {
-        let mut jobs = self.jobs.lock().unwrap();
-        if let Some(state) = jobs.get_mut(job_id) {
-            if state.cancel.is_cancelled() {
-                state.snapshot.status = "cancelled".to_string();
-            } else {
-                state.snapshot.status = "failed".to_string();
-                state.snapshot.error = Some(error.to_string());
-            }
-            state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+        let snapshot = {
+            let mut jobs = self.jobs.lock().unwrap();
+            jobs.get_mut(job_id).map(|state| {
+                if state.cancel.is_cancelled() {
+                    state.snapshot.status = "cancelled".to_string();
+                } else {
+                    state.snapshot.status = "failed".to_string();
+                    state.snapshot.error = Some(error.to_string());
+                }
+                state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+                state.snapshot.clone()
+            })
+        };
+        if let Some(snapshot) = snapshot {
+            self.persist_snapshot(&snapshot);
         }
     }
 
     pub fn cancel(&self, job_id: &str) -> Result<(), String> {
-        let mut jobs = self.jobs.lock().unwrap();
-        let state = jobs
-            .get_mut(job_id)
-            .ok_or_else(|| format!("Job '{}' not found", job_id))?;
-        if !matches!(state.snapshot.status.as_str(), "running" | "paused") {
-            return Err(format!(
-                "Job '{}' is not running (status: {})",
-                job_id, state.snapshot.status
-            ));
+        let snapshot = {
+            let mut jobs = self.jobs.lock().unwrap();
+            let state = jobs
+                .get_mut(job_id)
+                .ok_or_else(|| format!("Job '{}' not found", job_id))?;
+            if !matches!(state.snapshot.status.as_str(), "running" | "paused") {
+                return Err(format!(
+                    "Job '{}' is not running (status: {})",
+                    job_id, state.snapshot.status
+                ));
+            }
+            state.pause.resume();
+            state.snapshot.status = "cancelling".to_string();
+            state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+            state.cancel.cancel();
+            Some(state.snapshot.clone())
+        };
+        if let Some(snapshot) = snapshot {
+            self.persist_snapshot(&snapshot);
         }
-        state.pause.resume();
-        state.snapshot.status = "cancelling".to_string();
-        state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
-        state.cancel.cancel();
         Ok(())
     }
 
     pub fn pause(&self, job_id: &str) -> Result<PauseController, String> {
-        let mut jobs = self.jobs.lock().unwrap();
-        let state = jobs
-            .get_mut(job_id)
-            .ok_or_else(|| format!("Job '{}' not found", job_id))?;
-        if state.snapshot.status != "running" {
-            return Err(format!(
-                "Job '{}' is not running (status: {})",
-                job_id, state.snapshot.status
-            ));
+        let (snapshot, pause) = {
+            let mut jobs = self.jobs.lock().unwrap();
+            let state = jobs
+                .get_mut(job_id)
+                .ok_or_else(|| format!("Job '{}' not found", job_id))?;
+            if state.snapshot.status != "running" {
+                return Err(format!(
+                    "Job '{}' is not running (status: {})",
+                    job_id, state.snapshot.status
+                ));
+            }
+            state.pause.pause();
+            state.snapshot.status = "paused".to_string();
+            state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+            (Some(state.snapshot.clone()), state.pause.clone())
+        };
+        if let Some(snapshot) = snapshot {
+            self.persist_snapshot(&snapshot);
         }
-        state.pause.pause();
-        state.snapshot.status = "paused".to_string();
-        state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
-        Ok(state.pause.clone())
+        Ok(pause)
     }
 
     pub fn resume(&self, job_id: &str) -> Result<(), String> {
-        let mut jobs = self.jobs.lock().unwrap();
-        let state = jobs
-            .get_mut(job_id)
-            .ok_or_else(|| format!("Job '{}' not found", job_id))?;
-        if state.snapshot.status != "paused" {
-            return Err(format!(
-                "Job '{}' is not paused (status: {})",
-                job_id, state.snapshot.status
-            ));
+        let snapshot = {
+            let mut jobs = self.jobs.lock().unwrap();
+            let state = jobs
+                .get_mut(job_id)
+                .ok_or_else(|| format!("Job '{}' not found", job_id))?;
+            if state.snapshot.status != "paused" {
+                return Err(format!(
+                    "Job '{}' is not paused (status: {})",
+                    job_id, state.snapshot.status
+                ));
+            }
+            state.pause.resume();
+            state.snapshot.status = "running".to_string();
+            state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+            Some(state.snapshot.clone())
+        };
+        if let Some(snapshot) = snapshot {
+            self.persist_snapshot(&snapshot);
         }
-        state.pause.resume();
-        state.snapshot.status = "running".to_string();
-        state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
         Ok(())
     }
 
     pub fn mark_cancelled(&self, job_id: &str) {
-        let mut jobs = self.jobs.lock().unwrap();
-        if let Some(state) = jobs.get_mut(job_id) {
-            state.snapshot.status = "cancelled".to_string();
-            state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+        let snapshot = {
+            let mut jobs = self.jobs.lock().unwrap();
+            jobs.get_mut(job_id).map(|state| {
+                state.snapshot.status = "cancelled".to_string();
+                state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+                state.snapshot.clone()
+            })
+        };
+        if let Some(snapshot) = snapshot {
+            self.persist_snapshot(&snapshot);
         }
     }
 
     pub fn finish_from_worker(&self, job_id: &str, outcome: WorkerTerminalOutcome) {
-        let mut jobs = self.jobs.lock().unwrap();
-        if let Some(state) = jobs.get_mut(job_id) {
-            match outcome {
-                WorkerTerminalOutcome::Completed => {
-                    state.snapshot.status = "completed".to_string();
-                    state.snapshot.current = state.snapshot.total;
-                    state.snapshot.error = None;
+        let snapshot = {
+            let mut jobs = self.jobs.lock().unwrap();
+            jobs.get_mut(job_id).map(|state| {
+                match outcome {
+                    WorkerTerminalOutcome::Completed => {
+                        state.snapshot.status = "completed".to_string();
+                        state.snapshot.current = state.snapshot.total;
+                        state.snapshot.error = None;
+                    }
+                    WorkerTerminalOutcome::Cancelled => {
+                        state.snapshot.status = "cancelled".to_string();
+                        state.snapshot.error = None;
+                    }
+                    WorkerTerminalOutcome::Failed(error) => {
+                        state.snapshot.status = "failed".to_string();
+                        state.snapshot.error = Some(error);
+                    }
                 }
-                WorkerTerminalOutcome::Cancelled => {
-                    state.snapshot.status = "cancelled".to_string();
-                    state.snapshot.error = None;
-                }
-                WorkerTerminalOutcome::Failed(error) => {
-                    state.snapshot.status = "failed".to_string();
-                    state.snapshot.error = Some(error);
-                }
-            }
-            state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+                state.snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+                state.snapshot.clone()
+            })
+        };
+        if let Some(snapshot) = snapshot {
+            self.persist_snapshot(&snapshot);
         }
     }
 
@@ -228,6 +317,7 @@ impl JobRegistry {
     }
 
     pub fn persist_terminal(&self, job_id: &str, db: &crate::db_core::db::Database) {
+        let _persist = self.persistence.lock().unwrap();
         let snapshot = {
             let jobs = self.jobs.lock().unwrap();
             jobs.get(job_id).and_then(|state| {
@@ -239,7 +329,13 @@ impl JobRegistry {
             })
         };
         if let Some(snapshot) = snapshot {
-            let _ = db.save_job(&snapshot);
+            if let Err(error) = db.save_job(&snapshot) {
+                crate::safe_eprintln!(
+                    "[jobs] failed to persist terminal job '{}': {}",
+                    snapshot.job_id,
+                    error
+                );
+            }
         }
     }
 
@@ -718,5 +814,189 @@ mod tests {
 
         let loaded = db.load_terminal_jobs().unwrap();
         assert_eq!(loaded.len(), 1);
+    }
+
+    // --- Durable lifecycle tests (file-backed DB simulating restarts) ---
+
+    fn open_db(dir: &std::path::Path) -> crate::db_core::db::Database {
+        crate::db_core::db::Database::open(&dir.join("jobs-test.db")).unwrap()
+    }
+
+    #[test]
+    fn running_job_persisted_at_creation_fails_after_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::with_db(open_db(dir.path()));
+        let (job_id, _) = registry.create_job("import", 10);
+        assert_eq!(registry.get(&job_id).unwrap().status, "running");
+
+        // Simulate a restart: fresh connection and registry over the same file.
+        let restarted_db = open_db(dir.path());
+        let restarted = JobRegistry::with_db(restarted_db.clone());
+        restarted.load_from_db(&restarted_db);
+
+        let snapshot = restarted.get(&job_id).unwrap();
+        assert_eq!(snapshot.status, "failed");
+        assert_eq!(
+            snapshot.error.as_deref(),
+            Some("App stopped before job completed")
+        );
+        assert_eq!(snapshot.kind, "import");
+        assert_eq!(snapshot.total, 10);
+    }
+
+    #[test]
+    fn cancelling_job_interrupted_by_restart_fails_after_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::with_db(open_db(dir.path()));
+        let (job_id, token) = registry.create_job("import", 10);
+        registry.cancel(&job_id).unwrap();
+        assert!(token.is_cancelled());
+        assert_eq!(registry.get(&job_id).unwrap().status, "cancelling");
+
+        let restarted_db = open_db(dir.path());
+        let restarted = JobRegistry::with_db(restarted_db.clone());
+        restarted.load_from_db(&restarted_db);
+
+        let snapshot = restarted.get(&job_id).unwrap();
+        assert_eq!(snapshot.status, "failed");
+    }
+
+    #[test]
+    fn paused_job_interrupted_by_restart_fails_after_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::with_db(open_db(dir.path()));
+        let (job_id, _) = registry.create_job("embeddings", 8);
+        registry.pause(&job_id).unwrap();
+        assert_eq!(registry.get(&job_id).unwrap().status, "paused");
+
+        let restarted_db = open_db(dir.path());
+        let restarted = JobRegistry::with_db(restarted_db.clone());
+        restarted.load_from_db(&restarted_db);
+
+        let snapshot = restarted.get(&job_id).unwrap();
+        assert_eq!(snapshot.status, "failed");
+    }
+
+    #[test]
+    fn terminal_outcomes_are_persisted_without_call_site_help() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::with_db(open_db(dir.path()));
+        let (completed_id, _) = registry.create_job("import", 4);
+        registry.complete(&completed_id);
+        let (failed_id, _) = registry.create_job("embeddings", 2);
+        registry.fail(&failed_id, "model missing");
+        let (cancelled_id, _) = registry.create_job("detection", 3);
+        registry.cancel(&cancelled_id).unwrap();
+        registry.mark_cancelled(&cancelled_id);
+
+        let restarted_db = open_db(dir.path());
+        let restarted = JobRegistry::with_db(restarted_db.clone());
+        restarted.load_from_db(&restarted_db);
+
+        assert_eq!(restarted.get(&completed_id).unwrap().status, "completed");
+        let failed = restarted.get(&failed_id).unwrap();
+        assert_eq!(failed.status, "failed");
+        assert_eq!(failed.error.as_deref(), Some("model missing"));
+        assert_eq!(restarted.get(&cancelled_id).unwrap().status, "cancelled");
+    }
+
+    #[test]
+    fn fail_after_cancel_persists_cancelled_not_failed() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::with_db(open_db(dir.path()));
+        let (job_id, _) = registry.create_job("import", 10);
+        registry.cancel(&job_id).unwrap();
+        registry.fail(&job_id, "late error");
+
+        assert_eq!(registry.get(&job_id).unwrap().status, "cancelled");
+
+        let restarted_db = open_db(dir.path());
+        let restarted = JobRegistry::with_db(restarted_db.clone());
+        restarted.load_from_db(&restarted_db);
+
+        let snapshot = restarted.get(&job_id).unwrap();
+        assert_eq!(snapshot.status, "cancelled");
+        assert!(snapshot.error.is_none());
+    }
+
+    #[test]
+    fn persistence_failure_is_surfaced_without_blocking_job_operation() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open_db(dir.path());
+        {
+            let conn = db.conn.lock();
+            conn.execute_batch(
+                "CREATE TRIGGER fail_job_persistence
+                 BEFORE INSERT ON mcp_jobs
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced job persistence failure');
+                 END;",
+            )
+            .unwrap();
+        }
+
+        let registry = JobRegistry::with_db(db.clone());
+        // Creation, progress, and cancellation still work in memory even
+        // though the durable rows cannot be written (the failure is logged).
+        let (job_id, token) = registry.create_job("import", 10);
+        assert_eq!(registry.get(&job_id).unwrap().status, "running");
+        registry.update_progress(&job_id, 3, None);
+        registry.cancel(&job_id).unwrap();
+        assert!(token.is_cancelled());
+        assert_eq!(registry.get(&job_id).unwrap().status, "cancelling");
+    }
+
+    #[test]
+    fn delayed_persistence_uses_current_state_instead_of_an_old_terminal_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open_db(dir.path());
+        let registry = JobRegistry::with_db(db.clone());
+        let (job_id, _) = registry.create_job("import", 1);
+        registry.fail(&job_id, "earlier outcome");
+        let stale = registry.get(&job_id).unwrap();
+        registry.finish_from_worker(&job_id, WorkerTerminalOutcome::Completed);
+
+        registry.persist_snapshot(&stale);
+
+        let saved = db.load_terminal_jobs().unwrap();
+        assert_eq!(saved[0].status, "completed");
+        assert_eq!(saved[0].error, None);
+        assert_eq!(saved[0].current, 1);
+    }
+
+    #[test]
+    fn automatic_terminal_persistence_does_not_hold_the_registry_lock_during_database_io() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = open_db(dir.path());
+        let registry = JobRegistry::with_db(db.clone());
+        let (job_id, _) = registry.create_job("import", 1);
+
+        let writer = db.conn.lock();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+        let complete_registry = registry.clone();
+        let complete_job_id = job_id.clone();
+        let (started_tx, started_rx) = mpsc::channel();
+        let completer = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            complete_registry.complete(&complete_job_id);
+        });
+        started_rx.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+
+        let list_registry = registry.clone();
+        let (list_tx, list_rx) = mpsc::channel();
+        std::thread::spawn(move || list_tx.send(list_registry.list()).unwrap());
+        let snapshots = list_rx
+            .recv_timeout(Duration::from_millis(250))
+            .expect("list_jobs must not wait for automatic terminal persistence");
+        assert_eq!(snapshots[0].status, "completed");
+
+        writer.execute_batch("ROLLBACK").unwrap();
+        drop(writer);
+        completer.join().unwrap();
     }
 }

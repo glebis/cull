@@ -1,7 +1,13 @@
 # AI Settings and Agent Access Design
 
 **Date:** 2026-07-10  
-**Status:** Approved for implementation planning
+**Status:** Core Settings reorganization implemented; remaining audit fixes are separate
+
+**Delivery note (2026-09-05):** `McpSettings.svelte` mounts the explicit AI tab,
+`AiSettings.svelte` configures providers/models, and `AgentAccessSettings.svelte`
+provides transport and token controls. The Claude proposal workflow remains a
+separate in-progress feature (`imageview-64mk`). General Settings CLI recovery
+is implemented under `imageview-6kdb`; do not treat the entire reorganization as pending.
 
 ## Goal
 
@@ -388,4 +394,3 @@ panel primarily as “MCP, publishing, and app settings.”
 4. Add the three command-palette jobs and progress integration.
 5. Remove the sidebar model block and relocate detected-object filters.
 6. Update contracts, browser smoke coverage, and user documentation.
-

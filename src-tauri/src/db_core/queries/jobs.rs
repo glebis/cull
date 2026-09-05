@@ -6,11 +6,33 @@ use crate::db_core::models::*;
 use rusqlite::{params, OptionalExtension, Result};
 
 impl Database {
+    /// Persist a job snapshot. On conflict, a stored terminal row
+    /// ('completed'/'failed'/'cancelled') is never overwritten by a
+    /// non-terminal snapshot: lifecycle writes are cloned outside the registry
+    /// lock, so concurrent transitions can reach the database out of order and
+    /// a stale 'running' write must not resurrect a finished job. Terminal
+    /// snapshots may overwrite other terminal snapshots. The JobRegistry
+    /// serializes writes and rereads its current state to preserve ordering;
+    /// this guard additionally prevents resurrecting terminal rows.
+    /// Timestamps are deliberately not compared: RFC3339 strings vary in
+    /// fractional-digit precision and are not reliably ordered, while the
+    /// state-based guard is deterministic and treats equal timestamps safely.
+    /// A rejected stale write is a no-op, not an error.
     pub fn save_job(&self, snapshot: &crate::services::jobs::JobSnapshot) -> Result<()> {
         let conn = self.conn.lock();
         conn.execute(
-            "INSERT OR REPLACE INTO mcp_jobs (job_id, kind, status, current, total, message, error, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO mcp_jobs (job_id, kind, status, current, total, message, error, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(job_id) DO UPDATE SET
+                kind = excluded.kind,
+                status = excluded.status,
+                current = excluded.current,
+                total = excluded.total,
+                message = excluded.message,
+                error = excluded.error,
+                updated_at = excluded.updated_at
+             WHERE mcp_jobs.status NOT IN ('completed', 'failed', 'cancelled')
+                OR excluded.status IN ('completed', 'failed', 'cancelled')",
             params![
                 snapshot.job_id, snapshot.kind, snapshot.status,
                 snapshot.current, snapshot.total, snapshot.message, snapshot.error,
@@ -58,9 +80,12 @@ impl Database {
     pub fn mark_stale_running_jobs_failed(&self) -> Result<u32> {
         let now = chrono::Utc::now().to_rfc3339();
         let conn = self.conn.lock();
+        // A paused or cancelling job cannot outlive the app either: it is
+        // interrupted just like a running job and must be reported as failed
+        // on the next start rather than lingering in a non-terminal state.
         let updated = conn.execute(
             "UPDATE mcp_jobs SET status = 'failed', error = 'App stopped before job completed', updated_at = ?1
-             WHERE status IN ('running', 'cancelling')",
+             WHERE status IN ('running', 'cancelling', 'paused')",
             params![now],
         )?;
         Ok(updated as u32)
@@ -253,5 +278,111 @@ mod tests {
             completed.completed_at.as_deref(),
             Some("2026-08-08T00:00:00Z")
         );
+    }
+
+    #[test]
+    fn mark_stale_running_jobs_failed_covers_paused_jobs() {
+        let db = Database::open(Path::new(":memory:")).unwrap();
+        {
+            let conn = db.conn.lock();
+            conn.execute(
+                "INSERT INTO mcp_jobs (job_id, kind, status, current, total, created_at, updated_at)
+                 VALUES ('job_paused_stale', 'import', 'paused', 2, 10, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let updated = db.mark_stale_running_jobs_failed().unwrap();
+
+        assert_eq!(updated, 1);
+        let snapshot = db.load_terminal_jobs().unwrap();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].job_id, "job_paused_stale");
+        assert_eq!(snapshot[0].status, "failed");
+        assert_eq!(
+            snapshot[0].error.as_deref(),
+            Some("App stopped before job completed")
+        );
+    }
+
+    fn job_snapshot(status: &str, updated_at: &str) -> crate::services::jobs::JobSnapshot {
+        crate::services::jobs::JobSnapshot {
+            job_id: "job_ordering".to_string(),
+            kind: "import".to_string(),
+            status: status.to_string(),
+            current: 3,
+            total: 10,
+            message: None,
+            error: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: updated_at.to_string(),
+        }
+    }
+
+    #[test]
+    fn save_job_keeps_terminal_row_when_a_stale_running_snapshot_arrives() {
+        let db = Database::open(Path::new(":memory:")).unwrap();
+
+        // The terminal snapshot is written first (the worker finished), then a
+        // stale 'running' transition from a racing cancel/pause write arrives
+        // late — with the exact same timestamp, so the guard cannot depend on
+        // timestamp ordering.
+        db.save_job(&job_snapshot("completed", "2026-01-01T00:00:05Z"))
+            .unwrap();
+        db.save_job(&job_snapshot("running", "2026-01-01T00:00:05Z"))
+            .unwrap();
+
+        let loaded = db.load_terminal_jobs().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].job_id, "job_ordering");
+        assert_eq!(loaded[0].status, "completed");
+
+        // A newer terminal snapshot still lands (the registry's final state).
+        db.save_job(&job_snapshot("failed", "2026-01-01T00:00:06Z"))
+            .unwrap();
+        let loaded = db.load_terminal_jobs().unwrap();
+        assert_eq!(loaded[0].status, "failed");
+    }
+
+    #[test]
+    fn save_job_keeps_terminal_row_over_a_stale_cancelling_snapshot() {
+        let db = Database::open(Path::new(":memory:")).unwrap();
+
+        // mark_cancelled persisted 'cancelled', then the racing cancel
+        // transition's 'cancelling' write arrives late.
+        db.save_job(&job_snapshot("cancelled", "2026-01-01T00:00:05Z"))
+            .unwrap();
+        db.save_job(&job_snapshot("cancelling", "2026-01-01T00:00:05Z"))
+            .unwrap();
+
+        let loaded = db.load_terminal_jobs().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].status, "cancelled");
+    }
+
+    #[test]
+    fn save_job_lets_non_terminal_lifecycle_transitions_land_in_order() {
+        let db = Database::open(Path::new(":memory:")).unwrap();
+
+        let statuses = [
+            ("running", "2026-01-01T00:00:01Z"),
+            ("paused", "2026-01-01T00:00:02Z"),
+            ("running", "2026-01-01T00:00:03Z"),
+            ("cancelling", "2026-01-01T00:00:04Z"),
+        ];
+        for (status, updated_at) in statuses {
+            db.save_job(&job_snapshot(status, updated_at)).unwrap();
+            let stored: String = {
+                let conn = db.conn.lock();
+                conn.query_row(
+                    "SELECT status FROM mcp_jobs WHERE job_id = 'job_ordering'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+            };
+            assert_eq!(stored, status);
+        }
     }
 }

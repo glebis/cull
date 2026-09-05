@@ -412,7 +412,9 @@ pub fn run() {
             let safety_engine = Mutex::new(DetectionEngine::new_nudenet(&model_dir));
 
             let secrets = Box::new(KeychainStore::new("cull"));
-            let jobs = crate::services::jobs::JobRegistry::default();
+            // Persist job lifecycle rows so interrupted jobs are reported as
+            // failed on the next start.
+            let jobs = crate::services::jobs::JobRegistry::with_db(db.clone());
             app.manage(AppState {
                 db,
                 app_data_dir,
