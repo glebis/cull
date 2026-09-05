@@ -135,21 +135,51 @@ function showSelectionHistoryStatus(label: string) {
     }, 2000);
 }
 
+// Rating writes are serialized per image id: concurrent saves for the same
+// image must reach the database in intent order, or a reload could restore an
+// older rating. Different images keep saving concurrently. Slots are removed
+// once settled, so the map never grows with the library.
+const ratingWriteQueues = new Map<string, Promise<void>>();
+
+function enqueueRatingWrite(imageId: string, run: () => Promise<void>): Promise<void> {
+    const previous = ratingWriteQueues.get(imageId);
+    // Idle images write immediately; queued ones run after the pending write,
+    // which may have failed — an earlier failure must not block later writes.
+    const write = previous ? previous.then(run, run) : run();
+    ratingWriteQueues.set(imageId, write);
+    return write.finally(() => {
+        // Clean bookkeeping: drop the slot once settled if we are still the tail.
+        if (ratingWriteQueues.get(imageId) === write) ratingWriteQueues.delete(imageId);
+    });
+}
+
 export async function handleStarRating(n: number, imageIndex?: number) {
     const imgs = get(images);
     const idx = imageIndex ?? get(focusedIndex);
     const img = imgs[idx];
     if (!img) return;
+    // Capture the target and session by value: the images array and session can
+    // change while the save is queued or in flight, so the index goes stale.
+    const imageId = img.image.id;
+    const sessionId = get(activeSession)?.id ?? null;
     try {
-        await setRating(img.image.id, n, get(activeSession)?.id ?? null);
-        invalidateImageCache();
-        images.update(all => {
-            const copy = [...all];
-            copy[idx] = withRating(copy[idx], n);
-            return copy;
+        await enqueueRatingWrite(imageId, async () => {
+            await setRating(imageId, n, sessionId);
+            invalidateImageCache();
+            // Repainting inside the serialized slot keeps UI updates in the
+            // exact order the writes reach the database.
+            images.update(all => {
+                const target = all.findIndex(item => item.image.id === imageId);
+                // The image left the current view (folder replaced or removed).
+                if (target < 0) return all;
+                const copy = [...all];
+                copy[target] = withRating(copy[target], n);
+                return copy;
+            });
         });
     } catch (e) {
         console.error('Failed to set rating:', e);
+        showToast('Could not save rating', { detail: String(e), type: 'error', duration: 5000 });
     }
 }
 

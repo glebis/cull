@@ -19,14 +19,27 @@ SHOTS = Path(os.environ.get("CULL_E2E_SHOTS", "/tmp/cull-e2e"))
 DEFAULT_CHROME_BETA = "/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta"
 BROWSER_EXECUTABLE = os.environ.get("CULL_E2E_BROWSER", DEFAULT_CHROME_BETA)
 
+# Fictional locations reported by the browser mock's CLI tool handlers (see
+# src/lib/tauri-mock.ts). These never exist on the real filesystem.
+MOCK_CLI_CANDIDATE_DIR = '/mock/bin'
+MOCK_CLI_LINK_PATH = '/mock/bin/cull'
+
 
 class Smoke:
-    def __init__(self, page: Page, page_errors: list[str]) -> None:
+    def __init__(self, page: Page, page_errors: list[str], only: str = "") -> None:
         self.page = page
         self.page_errors = page_errors
         self.failures: list[str] = []
+        # Focused-run filter (CULL_E2E_ONLY): skip steps whose name does not
+        # contain the given substring. Empty string runs everything.
+        self.only = only.strip().lower()
+        self.ran = 0
 
     def step(self, name: str, fn: Callable[[], None]) -> None:
+        if self.only and self.only not in name.lower():
+            print(f"  SKIP {name}")
+            return
+        self.ran += 1
         error_count = len(self.page_errors)
         try:
             wait_for_app(self.page)
@@ -1009,6 +1022,64 @@ def test_ai_settings_and_library_commands(page: Page) -> None:
     expect(page.locator(".palette-panel")).to_have_count(0)
 
 
+def test_settings_cli_tool_lifecycle(page: Page) -> None:
+    """imageview-6kdb — CLI tool row: failed status names Retry, then Install/Remove lifecycle.
+
+    One integrated journey over the browser mock's stateful CLI handlers:
+    faulted status check -> Retry -> Install -> Remove, each state named by an
+    accessible control instead of an ambiguous OFF toggle.
+    """
+    # Fault exactly one cli_tool_status call BEFORE opening Settings; the
+    # status check fires when the General tab mounts.
+    page.evaluate("window.__CULL_E2E_CLI_STATUS_FAILURES__ = 1")
+
+    press(page, "Meta+Shift+P")
+    set_input_value(page, ".palette-input", "open settings")
+    page.locator(".palette-input").press("Enter")
+    settings = page.get_by_role("dialog", name="Settings")
+    expect(settings).to_be_visible()
+
+    # A failed status check is a named Retry control with an alert — never an
+    # OFF toggle or an Install affordance that would lie about the state.
+    retry = page.get_by_role("button", name="Retry command line tool status check")
+    expect(retry).to_be_visible()
+    assert retry.inner_text().strip() == "RETRY"
+    expect(page.get_by_role("button", name="Install command line tool")).to_have_count(0)
+    expect(page.get_by_role("alert")).to_contain_text("could not check the command line tool")
+    page.screenshot(path=str(SHOTS / "cli-tool-1-status-failed.png"), full_page=True)
+
+    # Retry recovers to the named Install action.
+    retry.click()
+    install = page.get_by_role("button", name="Install command line tool")
+    expect(install).to_be_visible()
+    assert install.inner_text().strip() == "INSTALL"
+    expect(page.get_by_role("alert")).to_have_count(0)
+    expect(settings).to_contain_text(MOCK_CLI_CANDIDATE_DIR)
+    page.screenshot(path=str(SHOTS / "cli-tool-2-install-ready.png"), full_page=True)
+
+    # Install succeeds: named Remove action, destination note, success toast.
+    install.click()
+    remove = page.get_by_role("button", name="Remove command line tool")
+    expect(remove).to_be_visible()
+    assert remove.inner_text().strip() == "REMOVE"
+    expect(settings).to_contain_text("is available at")
+    expect(settings).to_contain_text(MOCK_CLI_LINK_PATH)
+    installed_toast = page.locator(".toast-success").filter(has_text="Installed to")
+    expect(installed_toast).to_contain_text(MOCK_CLI_LINK_PATH)
+    page.screenshot(path=str(SHOTS / "cli-tool-3-installed.png"), full_page=True)
+
+    # Remove returns to the named Install action with its own success toast.
+    remove.click()
+    install_again = page.get_by_role("button", name="Install command line tool")
+    expect(install_again).to_be_visible()
+    assert install_again.inner_text().strip() == "INSTALL"
+    expect(page.locator(".toast-success").filter(has_text="Command line tool removed")).to_be_visible()
+    page.screenshot(path=str(SHOTS / "cli-tool-4-removed.png"), full_page=True)
+
+    page.get_by_role("button", name="Close settings").click()
+    expect(page.get_by_role("dialog", name="Settings")).to_have_count(0)
+
+
 def test_keyboard_shortcuts_panel(page: Page) -> None:
     """zu0.7/zu0.8 — palette and status bar open the searchable keyboard-shortcuts panel."""
     press(page, "Meta+1")
@@ -1541,7 +1612,10 @@ def test_external_drive_browse_in_place(page: Page) -> None:
     page.get_by_role("button", name=re.compile("^EOS_DIGITAL")).click()
     folder = page.get_by_role("button", name="DCIM", exact=True)
     expect(folder).to_be_visible()
-    expect(page.get_by_role("button", name="Actions for DCIM")).to_be_visible()
+    folder.focus()
+    folder.press("Shift+F10")
+    expect(page.get_by_role("menu", name="DCIM actions")).to_be_visible()
+    page.keyboard.press("Escape")
     expect(page.get_by_test_id("devices-section").get_by_role("button", name="Import Folder…", exact=True)).to_have_count(0)
 
     folder.click(button="right")
@@ -1576,7 +1650,7 @@ def main() -> int:
         page_errors: list[str] = []
         page.on("pageerror", lambda error: page_errors.append(getattr(error, "stack", None) or str(error)))
 
-        smoke = Smoke(page, page_errors)
+        smoke = Smoke(page, page_errors, only=os.environ.get("CULL_E2E_ONLY", ""))
         smoke.step("S01 view switching", lambda: test_view_switching(page))
         smoke.step("S01c compare layout bounded by status bar", lambda: test_compare_statusbar_does_not_resize_layout(page))
         smoke.step("S01d compare Shift+. image-only mode", lambda: test_compare_shift_period_cycles_to_image_only(page))
@@ -1613,6 +1687,7 @@ def main() -> int:
         smoke.step("S19d keyboard shortcuts panel", lambda: test_keyboard_shortcuts_panel(page))
         smoke.step("S19e palette does not hijack text input", lambda: test_palette_does_not_hijack_text_input(page))
         smoke.step("S19f AI settings and library commands", lambda: test_ai_settings_and_library_commands(page))
+        smoke.step("imageview-6kdb settings CLI tool lifecycle", lambda: test_settings_cli_tool_lifecycle(page))
         smoke.step("S27 context menu", lambda: test_context_menu(page))
         smoke.step("S27d context menu keyboard submenus", lambda: test_context_menu_keyboard_submenus(page))
         smoke.step("S27e sidebar context menus", lambda: test_sidebar_context_menus(page))
@@ -1625,6 +1700,13 @@ def main() -> int:
         smoke.step("S11a selection Space toggle", lambda: test_grid_selection_space(page))
         smoke.step("S11b Shift+click range select", lambda: test_grid_shift_click_range_select(page))
         smoke.step("S44 external drive browse in place", lambda: test_external_drive_browse_in_place(page))
+
+        # Focused runs: CULL_E2E_ONLY=<substring> skips every step whose name
+        # does not contain it (e.g. CULL_E2E_ONLY="settings cli tool").
+        if os.environ.get("CULL_E2E_ONLY", "").strip() and smoke.ran == 0:
+            raise SystemExit(
+                f"CULL_E2E_ONLY={os.environ['CULL_E2E_ONLY']!r} matched no steps"
+            )
 
         if page_errors:
             print("\nPage errors:")

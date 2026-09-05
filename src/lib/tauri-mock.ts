@@ -30,6 +30,50 @@ let nextId = 100;
 
 const mockApiKeys: Record<string, string> = {};
 
+// --- Command line tool (install `cull` onto PATH) mock state ---
+// Browser-only stand-in for src-tauri/src/commands/cli_tool.rs. All paths are
+// fictional /mock locations; nothing here touches the real filesystem or shell.
+const MOCK_CLI_CANDIDATE_DIR = '/mock/bin';
+const MOCK_CLI_LINK_PATH = '/mock/bin/cull';
+const MOCK_CLI_TARGET_PATH = '/mock/Cull.app/Contents/MacOS/cull';
+const MOCK_CLI_PATH_HINT = "export PATH='/mock/bin':$PATH";
+
+let cliToolInstalled = false;
+
+function mockCliToolStatus() {
+  if (cliToolInstalled) {
+    return {
+      installed: true,
+      link_path: MOCK_CLI_LINK_PATH as string | null,
+      target_path: MOCK_CLI_TARGET_PATH as string | null,
+      stale: false,
+      candidate_dir: null as string | null,
+      path_hint: null as string | null,
+    };
+  }
+  return {
+    installed: false,
+    link_path: null as string | null,
+    target_path: null as string | null,
+    stale: false,
+    candidate_dir: MOCK_CLI_CANDIDATE_DIR as string | null,
+    path_hint: MOCK_CLI_PATH_HINT as string | null,
+  };
+}
+
+// E2E fault injection (imageview-6kdb): when
+// window.__CULL_E2E_CLI_STATUS_FAILURES__ is a number > 0, each cli_tool_status
+// call consumes one failure and rejects, so the browser smoke can exercise the
+// Settings load-failure and Retry states. Install/remove are unaffected, and
+// the flag is only ever read here — production api.ts knows nothing about it.
+function consumeCliStatusFault(): boolean {
+  if (typeof window === 'undefined') return false;
+  const remaining = (window as any).__CULL_E2E_CLI_STATUS_FAILURES__;
+  if (typeof remaining !== 'number' || remaining <= 0) return false;
+  (window as any).__CULL_E2E_CLI_STATUS_FAILURES__ = remaining - 1;
+  return true;
+}
+
 const LONG_COMPARE_FILENAMES = [
   'ig_0b99ac4db97448df0169ee70444b788191bda40ea3858ee372.png',
   'ig_0b99ac4db97448df0169ee6fbd671081918388e8c8989ab0b4.png',
@@ -501,6 +545,23 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   validate_api_key: () => true,
   get_app_setting: () => null,
   set_app_setting: () => undefined,
+  cli_tool_status: () => {
+    if (consumeCliStatusFault()) {
+      throw new Error('mock: cli_tool_status is unavailable (injected E2E fault)');
+    }
+    return mockCliToolStatus();
+  },
+  install_cli_tool: () => {
+    cliToolInstalled = true;
+    // The real command keeps the PATH hint on the install response so the UI
+    // can surface the shell-profile line; status checks of an installed link
+    // report no hint.
+    return { ...mockCliToolStatus(), path_hint: MOCK_CLI_PATH_HINT as string | null };
+  },
+  uninstall_cli_tool: () => {
+    cliToolInstalled = false;
+    return mockCliToolStatus();
+  },
   apply_app_icon_variant: () => undefined,
   update_menu_state: () => undefined,
   backfill_image_metadata: () => 0,

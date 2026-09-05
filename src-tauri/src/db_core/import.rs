@@ -8,6 +8,7 @@ use super::color;
 use super::db::Database;
 use super::models::*;
 use super::perceptual_hash;
+use super::queries::images::ImageFileLink;
 use super::sidecar;
 use super::source_detection::{detect_source, read_png_text_chunks};
 use super::thumbnails;
@@ -124,7 +125,8 @@ where
             .map_or(false, |m| m == mtime);
 
         if size_match && mtime_match && existing_file.missing_at.is_none() {
-            let _ = db.touch_image_file(&existing_file.id, file_size, &mtime);
+            db.touch_image_file(&existing_file.id, file_size, &mtime)
+                .map_err(|e| e.to_string())?;
             let promoted =
                 promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
             return Ok(if promoted {
@@ -137,7 +139,8 @@ where
         }
 
         if existing_file.missing_at.is_some() && size_match && mtime_match {
-            let _ = db.touch_image_file(&existing_file.id, file_size, &mtime);
+            db.touch_image_file(&existing_file.id, file_size, &mtime)
+                .map_err(|e| e.to_string())?;
             let promoted =
                 promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
             return Ok(if promoted {
@@ -153,7 +156,8 @@ where
 
         if let Some(img) = db.find_by_hash(&hash).map_err(|e| e.to_string())? {
             if img.id == existing_file.image_id {
-                let _ = db.touch_image_file(&existing_file.id, file_size, &mtime);
+                db.touch_image_file(&existing_file.id, file_size, &mtime)
+                    .map_err(|e| e.to_string())?;
                 let promoted =
                     promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
                 return Ok(if existing_file.missing_at.is_some() {
@@ -173,7 +177,8 @@ where
                 });
             }
             if can_decode {
-                let _ = db.repoint_image_file(&existing_file.id, &img.id, file_size, &mtime);
+                db.repoint_image_file(&existing_file.id, &img.id, file_size, &mtime)
+                    .map_err(|e| e.to_string())?;
                 if should_cancel() {
                     promote_existing_file_if_requested(db, &existing_file.id, library_member)?;
                     return Ok(SyncOutcome::ContentChanged { image_id: img.id });
@@ -197,7 +202,8 @@ where
                     return Ok(SyncOutcome::ContentChanged { image_id: img.id });
                 }
                 validate_pdf_import(file_path)?;
-                let _ = db.repoint_image_file(&existing_file.id, &img.id, file_size, &mtime);
+                db.repoint_image_file(&existing_file.id, &img.id, file_size, &mtime)
+                    .map_err(|e| e.to_string())?;
                 let _ = thumbnails::generate_document_thumbnail(file_path, app_data_dir, &img.id);
                 persist_pdf_media_metadata(db, file_path, &img.id)?;
             }
@@ -207,8 +213,10 @@ where
 
         // New content: only now read the bytes (source detection / decode need them).
         let data = read_file_cancellable(file_path, should_cancel)?;
-        let (image_id, decoded) = create_image_record(
-            db,
+        if is_document {
+            validate_pdf_import(file_path)?;
+        }
+        let (image, decoded) = stage_image_record(
             file_path,
             &hash,
             &ext,
@@ -217,7 +225,18 @@ where
             module_raw,
             should_cancel,
         )?;
-        let _ = db.repoint_image_file(&existing_file.id, &image_id, file_size, &mtime);
+        // The new image + media asset and the repoint of this file row commit
+        // together; a failure leaves the previous image linkage untouched.
+        let image_id = db
+            .register_image_with_file_link(
+                &image,
+                ImageFileLink::RepointFile {
+                    file_id: existing_file.id.clone(),
+                    size: file_size,
+                    mtime: mtime.clone(),
+                },
+            )
+            .map_err(|e| e.to_string())?;
         if can_decode {
             enrich_image(
                 db,
@@ -228,7 +247,6 @@ where
                 decoded.as_ref(),
             );
         } else if is_document {
-            validate_pdf_import(file_path)?;
             let _ = thumbnails::generate_document_thumbnail(file_path, app_data_dir, &image_id);
             persist_pdf_media_metadata(db, file_path, &image_id)?;
         }
@@ -262,8 +280,7 @@ where
         validate_pdf_import(file_path)?;
     }
 
-    let (image_id, decoded) = create_image_record(
-        db,
+    let (image, decoded) = stage_image_record(
         file_path,
         &hash,
         &ext,
@@ -274,14 +291,24 @@ where
     )?;
     let file_record = ImageFile {
         id: Uuid::new_v4().to_string(),
-        image_id: image_id.clone(),
+        // Replaced with the canonical image id inside the registration
+        // transaction (SHA-256 dedup may resolve to an existing image).
+        image_id: String::new(),
         path: path_str,
         last_seen_at: Utc::now().to_rfc3339(),
         missing_at: None,
         last_seen_size: Some(file_size),
         last_seen_mtime: Some(mtime),
     };
-    db.insert_image_file_with_library_membership(&file_record, library_member)
+    // The new image + media asset and its first file row commit together.
+    let image_id = db
+        .register_image_with_file_link(
+            &image,
+            ImageFileLink::InsertFile {
+                file: file_record,
+                library_member,
+            },
+        )
         .map_err(|e| e.to_string())?;
 
     if can_decode {
@@ -421,8 +448,11 @@ where
     }
 }
 
-fn create_image_record(
-    db: &Database,
+/// Decode and measure a new file into an `Image` row without touching the
+/// database. The DB write happens later in `register_image_with_file_link`, so
+/// hashing, decoding, and cancellation checks never hold the database mutex and
+/// the image + file rows always commit together.
+fn stage_image_record(
     file_path: &Path,
     hash: &str,
     ext: &str,
@@ -430,7 +460,7 @@ fn create_image_record(
     can_decode: bool,
     module_raw: bool,
     should_cancel: &(impl Fn() -> bool + ?Sized),
-) -> Result<(String, Option<crate::db_core::image_decode::DecodedImage>), String> {
+) -> Result<(Image, Option<crate::db_core::image_decode::DecodedImage>), String> {
     if should_cancel() {
         return Err("Import cancelled".to_string());
     }
@@ -456,7 +486,7 @@ fn create_image_record(
     let image_id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     let image = Image {
-        id: image_id.clone(),
+        id: image_id,
         sha256_hash: hash.to_string(),
         width,
         height,
@@ -467,13 +497,7 @@ fn create_image_record(
         ai_prompt: None,
         raw_metadata: None,
     };
-    db.insert_image(&image).map_err(|e| e.to_string())?;
-    let canonical_image_id = db
-        .find_by_hash(hash)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Image registration completed without a canonical hash row".to_string())?
-        .id;
-    Ok((canonical_image_id, decoded))
+    Ok((image, decoded))
 }
 
 /// Whole-buffer SHA-256, retained as a test reference for `hash_file`'s streaming
@@ -770,7 +794,7 @@ mod tests {
     }
 
     #[test]
-    fn create_image_record_returns_the_canonical_id_after_a_hash_race() {
+    fn staged_image_registers_to_the_canonical_id_after_a_hash_race() {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::open(&dir.path().join("test.db")).unwrap();
         let existing = Image {
@@ -787,8 +811,7 @@ mod tests {
         };
         db.insert_image(&existing).unwrap();
 
-        let (image_id, _) = create_image_record(
-            &db,
+        let (staged, _) = stage_image_record(
             &dir.path().join("duplicate.jpg"),
             &existing.sha256_hash,
             "jpg",
@@ -798,8 +821,171 @@ mod tests {
             &|| false,
         )
         .unwrap();
+        assert_ne!(staged.id, existing.id);
+
+        let file_record = ImageFile {
+            id: "race-file".to_string(),
+            image_id: staged.id.clone(),
+            path: "/library/duplicate.jpg".to_string(),
+            last_seen_at: "2026-01-01T00:00:00Z".to_string(),
+            missing_at: None,
+            last_seen_size: Some(4),
+            last_seen_mtime: None,
+        };
+        let image_id = db
+            .register_image_with_file_link(
+                &staged,
+                ImageFileLink::InsertFile {
+                    file: file_record,
+                    library_member: true,
+                },
+            )
+            .unwrap();
 
         assert_eq!(image_id, existing.id);
+        // The deduped insert must not leave a second image or media asset row.
+        let conn = db.conn.lock();
+        let images: i64 = conn
+            .query_row("SELECT COUNT(*) FROM images", [], |row| row.get(0))
+            .unwrap();
+        let media_assets: i64 = conn
+            .query_row("SELECT COUNT(*) FROM media_assets", [], |row| row.get(0))
+            .unwrap();
+        let file_image_id: String = conn
+            .query_row(
+                "SELECT image_id FROM image_files WHERE id = 'race-file'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        drop(conn);
+        assert_eq!(images, 1);
+        assert_eq!(media_assets, 1);
+        assert_eq!(file_image_id, existing.id);
+    }
+
+    /// Realistic full-migration DB with a RAISE(ABORT) trigger on
+    /// `image_files` inserts to inject a mid-transaction constraint failure.
+    fn db_with_failing_image_file_insert() -> (tempfile::TempDir, Database) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        {
+            let conn = db.conn.lock();
+            conn.execute_batch(
+                "CREATE TRIGGER fail_image_file_insert
+                 BEFORE INSERT ON image_files
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced image file failure');
+                 END;",
+            )
+            .unwrap();
+        }
+        (dir, db)
+    }
+
+    fn write_png(path: &Path, seed: u8) {
+        let img = image::RgbImage::from_fn(8, 8, |x, y| {
+            image::Rgb([seed.wrapping_add(x as u8), seed.wrapping_add(y as u8), 255])
+        });
+        image::DynamicImage::ImageRgb8(img)
+            .save_with_format(path, image::ImageFormat::Png)
+            .unwrap();
+    }
+
+    fn count_rows(db: &Database, sql: &str) -> i64 {
+        db.conn.lock().query_row(sql, [], |row| row.get(0)).unwrap()
+    }
+
+    #[test]
+    fn failed_file_link_leaves_no_orphaned_image_rows() {
+        let (dir, db) = db_with_failing_image_file_insert();
+        let app_data_dir = dir.path().join("app-data");
+        let png_path = dir.path().join("orphan-check.png");
+        write_png(&png_path, 1);
+
+        let result = import_file(&db, &png_path, &app_data_dir);
+
+        assert!(result.is_err());
+        // The image, its media asset, and the file row must commit together
+        // or not at all: no orphaned image row without a file link.
+        assert_eq!(count_rows(&db, "SELECT COUNT(*) FROM images"), 0);
+        assert_eq!(count_rows(&db, "SELECT COUNT(*) FROM media_assets"), 0);
+        assert_eq!(count_rows(&db, "SELECT COUNT(*) FROM image_files"), 0);
+        assert_eq!(count_rows(&db, "SELECT COUNT(*) FROM media_files"), 0);
+    }
+
+    #[test]
+    fn failed_repoint_leaves_the_previous_image_linkage_intact() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        let app_data_dir = dir.path().join("app-data");
+        let png_path = dir.path().join("changing.png");
+        write_png(&png_path, 2);
+
+        let original_id = import_file(&db, &png_path, &app_data_dir).unwrap().unwrap();
+
+        // New content at the same path: a repoint to a replacement image.
+        write_png(&png_path, 3);
+        {
+            let conn = db.conn.lock();
+            conn.execute_batch(
+                "CREATE TRIGGER fail_image_file_update
+                 BEFORE UPDATE ON image_files
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced repoint failure');
+                 END;",
+            )
+            .unwrap();
+        }
+
+        let result = sync_file(&db, &png_path, &app_data_dir);
+
+        assert!(result.is_err());
+        // The replacement image must not survive the failed repoint, and the
+        // file row must still reference the original image.
+        assert_eq!(count_rows(&db, "SELECT COUNT(*) FROM images"), 1);
+        assert_eq!(count_rows(&db, "SELECT COUNT(*) FROM media_assets"), 1);
+        let path_string = png_path.to_string_lossy().to_string();
+        let linked_image_id: String = db
+            .conn
+            .lock()
+            .query_row(
+                "SELECT image_id FROM image_files WHERE path = ?1",
+                params![path_string],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(linked_image_id, original_id);
+    }
+
+    #[test]
+    fn failed_touch_is_surfaced_instead_of_reporting_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        let app_data_dir = dir.path().join("app-data");
+        let png_path = dir.path().join("touchy.png");
+        write_png(&png_path, 4);
+
+        import_file(&db, &png_path, &app_data_dir).unwrap().unwrap();
+
+        {
+            let conn = db.conn.lock();
+            conn.execute_batch(
+                "CREATE TRIGGER fail_image_file_touch
+                 BEFORE UPDATE ON image_files
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced touch failure');
+                 END;",
+            )
+            .unwrap();
+        }
+
+        // The file is unchanged, so the sync would normally report Ok(Changed
+        // -> Unchanged) after touching the row; the failed write must be
+        // surfaced instead of silently claiming success.
+        let result = sync_file(&db, &png_path, &app_data_dir);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("forced touch failure"));
     }
 
     #[test]

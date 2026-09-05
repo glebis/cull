@@ -499,20 +499,39 @@ fn mime_type_for_path(path: &Path) -> &'static str {
     }
 }
 
-fn image_file_bytes_for_id(db: &Database, image_id: &str) -> Result<ImageFileBytes, String> {
+fn ensure_image_exists_for_db(db: &Database, image_id: &str) -> Result<(), String> {
     let images = db
         .get_images_by_ids(&[image_id])
         .map_err(|e| e.to_string())?;
-    let img = images
-        .first()
-        .ok_or_else(|| format!("Image '{}' not found", image_id))?;
-    let path = PathBuf::from(&img.path);
+    if images.is_empty() {
+        return Err(format!("Image '{}' not found", image_id));
+    }
+    Ok(())
+}
+
+fn image_file_bytes_for_id(db: &Database, image_id: &str) -> Result<ImageFileBytes, String> {
+    ensure_image_exists_for_db(db, image_id)?;
+    // Resolve through the shared original-path policy so offline referenced
+    // sources never read unrelated content that now occupies their stale mount
+    // path, and available normal library files are preferred.
+    let path = PathBuf::from(resolve_image_original_path_for_db(db, image_id)?);
     let bytes = std::fs::read(&path)
         .map_err(|e| format!("Failed to read original image '{}': {}", image_id, e))?;
     Ok(ImageFileBytes {
         bytes,
         mime_type: mime_type_for_path(&path).to_string(),
     })
+}
+
+fn resolve_clipboard_copy_path_for_db(db: &Database, image_id: &str) -> Result<PathBuf, String> {
+    ensure_image_exists_for_db(db, image_id)?;
+    // Same shared policy as byte loading: never copy bytes from a stale
+    // offline-source mount path, and prefer available normal library files.
+    let path = PathBuf::from(resolve_image_original_path_for_db(db, image_id)?);
+    if !path.exists() {
+        return Err(format!("Cannot copy missing file: {}", path.display()));
+    }
+    Ok(path)
 }
 
 pub(crate) fn resolve_image_original_path_for_db(
@@ -864,17 +883,7 @@ pub async fn copy_image_to_clipboard(
     state: State<'_, AppState>,
     image_id: String,
 ) -> Result<(), String> {
-    let images = state
-        .db
-        .get_images_by_ids(&[&image_id])
-        .map_err(|e| e.to_string())?;
-    let img = images
-        .first()
-        .ok_or_else(|| format!("Image '{}' not found", image_id))?;
-    let path = PathBuf::from(&img.path);
-    if !path.exists() {
-        return Err(format!("Cannot copy missing file: {}", img.path));
-    }
+    let path = resolve_clipboard_copy_path_for_db(&state.db, &image_id)?;
 
     copy_path_to_clipboard(&path)
 }
@@ -1739,6 +1748,112 @@ mod tests {
         assert_eq!(
             resolve_image_original_path_for_db(&db, "offline-only").unwrap_err(),
             "Reconnect UNTITLED to open originals"
+        );
+    }
+
+    #[test]
+    fn image_file_bytes_for_id_never_reads_stale_offline_mount_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let stale_path = tmp.path().join("offline.jpg");
+        std::fs::write(
+            &stale_path,
+            b"unrelated content from whatever now occupies the mount",
+        )
+        .unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+
+        insert_original_candidate(&db, "offline-only", "offline-file", &stale_path);
+        db.upsert_referenced_source(&offline_referenced_source())
+            .unwrap();
+        db.attach_referenced_file("source-untitled", "offline-file", "offline.jpg")
+            .unwrap();
+
+        // The stale mount path exists on disk, but loading bytes for the
+        // original must fail closed instead of returning that content.
+        assert_eq!(
+            image_file_bytes_for_id(&db, "offline-only").unwrap_err(),
+            "Reconnect UNTITLED to open originals"
+        );
+    }
+
+    #[test]
+    fn image_file_bytes_for_id_uses_available_normal_alternate_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let local_path = tmp.path().join("local.jpg");
+        std::fs::write(&local_path, b"local original bytes").unwrap();
+        let stale_path = tmp.path().join("stale-mount.jpg");
+        std::fs::write(&stale_path, b"stale mount content").unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+
+        insert_original_candidate(&db, "mixed", "mixed-local", &local_path);
+        db.insert_image_file(&ImageFile {
+            id: "mixed-referenced".to_string(),
+            image_id: "mixed".to_string(),
+            path: stale_path.to_string_lossy().to_string(),
+            last_seen_at: "2026-09-01T10:00:00Z".to_string(),
+            missing_at: None,
+            last_seen_size: None,
+            last_seen_mtime: None,
+        })
+        .unwrap();
+        db.upsert_referenced_source(&offline_referenced_source())
+            .unwrap();
+        db.attach_referenced_file("source-untitled", "mixed-referenced", "referenced.jpg")
+            .unwrap();
+
+        let payload = image_file_bytes_for_id(&db, "mixed").unwrap();
+
+        assert_eq!(payload.bytes, b"local original bytes");
+        assert_eq!(payload.mime_type, "image/jpeg");
+    }
+
+    #[test]
+    fn clipboard_copy_path_never_resolves_stale_offline_mount_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let stale_path = tmp.path().join("offline.png");
+        std::fs::write(&stale_path, b"unrelated stale mount content").unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+
+        insert_original_candidate(&db, "offline-only", "offline-file", &stale_path);
+        db.upsert_referenced_source(&offline_referenced_source())
+            .unwrap();
+        db.attach_referenced_file("source-untitled", "offline-file", "offline.png")
+            .unwrap();
+
+        assert_eq!(
+            resolve_clipboard_copy_path_for_db(&db, "offline-only").unwrap_err(),
+            "Reconnect UNTITLED to open originals"
+        );
+    }
+
+    #[test]
+    fn clipboard_copy_path_uses_available_normal_alternate_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let local_path = tmp.path().join("local.png");
+        std::fs::write(&local_path, b"local original bytes").unwrap();
+        let stale_path = tmp.path().join("stale-mount.png");
+        std::fs::write(&stale_path, b"stale mount content").unwrap();
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+
+        insert_original_candidate(&db, "mixed", "mixed-local", &local_path);
+        db.insert_image_file(&ImageFile {
+            id: "mixed-referenced".to_string(),
+            image_id: "mixed".to_string(),
+            path: stale_path.to_string_lossy().to_string(),
+            last_seen_at: "2026-09-01T10:00:00Z".to_string(),
+            missing_at: None,
+            last_seen_size: None,
+            last_seen_mtime: None,
+        })
+        .unwrap();
+        db.upsert_referenced_source(&offline_referenced_source())
+            .unwrap();
+        db.attach_referenced_file("source-untitled", "mixed-referenced", "referenced.png")
+            .unwrap();
+
+        assert_eq!(
+            resolve_clipboard_copy_path_for_db(&db, "mixed").unwrap(),
+            local_path
         );
     }
 

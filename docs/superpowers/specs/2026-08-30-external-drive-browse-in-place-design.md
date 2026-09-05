@@ -1,8 +1,22 @@
 # External Drive Browse-in-Place Design
 
 **Date:** 2026-08-30  
-**Status:** Approved interaction model; implementation pending  
+**Status:** Core browsing delivered; source-action hardening implemented
 **Owner:** Cull
+
+## Delivery note — 2026-09-05
+
+Mounted-device browsing and external-folder context actions are implemented on
+main through PR #217. `DevicesSection.svelte` provides the entry point;
+referenced-source records preserve identity and review state. Permanent library
+membership is explicit (`image_files.library_member`), not inferred from whether
+a file has a referenced-source link. The original problem and decisions below
+describe the design baseline, not a list of unimplemented features.
+
+Remaining validation includes real-device disconnect/reconnect and RAW failure
+recovery. Original-byte and clipboard actions now use the same source-aware
+resolution as other original-file actions (`imageview-t6g5`), with offline-source
+and available-alternate regression coverage.
 
 ## Problem
 

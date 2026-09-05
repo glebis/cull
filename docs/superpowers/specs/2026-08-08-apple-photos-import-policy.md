@@ -3,6 +3,17 @@
 Status: Accepted implementation policy for `imageview-uz3` follow-on slices  
 Date: 2026-08-08
 
+## Delivery boundary — 2026-09-05
+
+Main currently exposes read-only authorization and catalog listing through
+`src-tauri/src/commands/photos.rs`. The richer browser and durable import work
+exists on `codex/apple-photos-infinite-scroll` and is not part of main at this
+checkpoint. This accepted policy describes intended import behavior, not proof
+that main ships it. Before continuing or duplicating that implementation,
+review the branch's scoped commits against current main and validate the
+real-library signed-app matrix in `imageview-uz3.3`. The browser/orchestration
+follow-up is `imageview-uz3.4`.
+
 ## Problem Statement
 
 Cull can now browse the macOS System Photo Library without downloading assets, but importing from Apple Photos crosses several user-data boundaries that the catalog slice intentionally avoided. A Photos asset may be edited, iCloud-only, compound (RAW+JPEG or Live Photo), or no longer visible under Limited Photos access. Cull's existing importer treats a durable filesystem path as canonical, so a temporary PhotoKit export cannot safely be handed to it and then deleted.

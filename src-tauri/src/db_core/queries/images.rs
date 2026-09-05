@@ -278,7 +278,211 @@ fn migrate_folder_paths_in_transaction(
     })
 }
 
+/// Insert the `images` row (deduped by SHA-256 via INSERT OR IGNORE) and, when
+/// the row is new, its mirrored `media_assets` row. Returns whether the image
+/// row was actually inserted; a `false` result means an image with the same
+/// hash already exists and is canonical.
+fn insert_image_and_media_asset_tx(tx: &Transaction<'_>, image: &Image) -> Result<bool> {
+    let inserted = tx.execute(
+        "INSERT OR IGNORE INTO images (id, sha256_hash, width, height, format, file_size, created_at, imported_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![image.id, image.sha256_hash, image.width, image.height,
+                image.format, sql_u64(image.file_size)?, image.created_at, image.imported_at],
+    )?;
+    if inserted != 1 {
+        // Deduped: the canonical image (and its media asset mirror) already
+        // exist. Do not fabricate a second media asset pointing at an image id
+        // that was never inserted.
+        return Ok(false);
+    }
+    let media_type = if image.format.eq_ignore_ascii_case("pdf") {
+        "pdf"
+    } else {
+        "image"
+    };
+    let media_asset = MediaAsset {
+        id: format!("ma_{}", image.id),
+        media_type: media_type.to_string(),
+        primary_image_id: image.id.clone(),
+        sha256_hash: image.sha256_hash.clone(),
+        format: image.format.clone(),
+        file_size: image.file_size,
+        page_count: None,
+        title: None,
+        created_at: image.created_at.clone(),
+        imported_at: image.imported_at.clone(),
+    };
+    tx.execute(
+        "INSERT OR IGNORE INTO media_assets (id, media_type, primary_image_id, sha256_hash, format, file_size, page_count, title, created_at, imported_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            media_asset.id,
+            media_asset.media_type,
+            media_asset.primary_image_id,
+            media_asset.sha256_hash,
+            media_asset.format,
+            sql_u64(media_asset.file_size)?,
+            media_asset.page_count,
+            media_asset.title,
+            media_asset.created_at,
+            media_asset.imported_at
+        ],
+    )?;
+    Ok(true)
+}
+
+/// Insert one `image_files` row plus, when a media asset exists for the image,
+/// its mirrored `media_files` row.
+fn insert_image_file_tx(
+    tx: &Transaction<'_>,
+    file: &ImageFile,
+    library_member: bool,
+) -> Result<()> {
+    tx.execute(
+        "INSERT OR REPLACE INTO image_files (
+            id, image_id, path, last_seen_at, missing_at, last_seen_size, last_seen_mtime,
+            library_member
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            file.id,
+            file.image_id,
+            file.path,
+            file.last_seen_at,
+            file.missing_at,
+            sql_opt_u64(file.last_seen_size)?,
+            file.last_seen_mtime,
+            library_member,
+        ],
+    )?;
+
+    let media_asset_id = tx
+        .query_row(
+            "SELECT id FROM media_assets WHERE primary_image_id = ?1",
+            params![&file.image_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+
+    if let Some(media_asset_id) = media_asset_id {
+        tx.execute(
+            "INSERT OR REPLACE INTO media_files (
+                id, media_asset_id, path, last_seen_at, missing_at, last_seen_size, last_seen_mtime
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                format!("mf_{}", file.id),
+                media_asset_id,
+                file.path,
+                file.last_seen_at,
+                file.missing_at,
+                sql_opt_u64(file.last_seen_size)?,
+                file.last_seen_mtime,
+            ],
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Repoint one `image_files` row to `new_image_id` and, when a media asset
+/// exists for that image, its mirrored `media_files` row.
+fn repoint_image_file_tx(
+    tx: &Transaction<'_>,
+    file_id: &str,
+    new_image_id: &str,
+    size: u64,
+    mtime: &str,
+) -> Result<()> {
+    let updated = tx.execute(
+        "UPDATE image_files SET image_id = ?2, last_seen_at = datetime('now'), missing_at = NULL,
+         last_seen_size = ?3, last_seen_mtime = ?4 WHERE id = ?1",
+        params![file_id, new_image_id, size as i64, mtime],
+    )?;
+    if updated != 1 {
+        // The file row vanished between discovery and this transaction. Fail so
+        // callers (e.g. register_image_with_file_link) roll the new image rows
+        // back instead of committing an image with no file link.
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "image file row '{file_id}' not found for repoint"
+        )));
+    }
+    let media_asset_id: Option<String> = tx
+        .query_row(
+            "SELECT id FROM media_assets WHERE primary_image_id = ?1",
+            params![new_image_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(media_asset_id) = media_asset_id {
+        let media_file_id = format!("mf_{}", file_id);
+        tx.execute(
+            "UPDATE media_files
+             SET media_asset_id = ?2, last_seen_at = datetime('now'), missing_at = NULL,
+                 last_seen_size = ?3, last_seen_mtime = ?4
+             WHERE id = ?1",
+            params![media_file_id, media_asset_id, size as i64, mtime,],
+        )?;
+    }
+    Ok(())
+}
+
+/// How an imported file row should be attached to the canonical image inside
+/// the same transaction that creates the image rows.
+pub enum ImageFileLink {
+    /// Insert a new `image_files` row. The record's `image_id` is replaced
+    /// with the canonical image id resolved inside the transaction, because
+    /// SHA-256 dedup may resolve the insert to an existing image.
+    InsertFile {
+        file: ImageFile,
+        library_member: bool,
+    },
+    /// Repoint an existing `image_files` row (and its `media_files` mirror)
+    /// to the canonical image.
+    RepointFile {
+        file_id: String,
+        size: u64,
+        mtime: String,
+    },
+}
+
 impl Database {
+    /// Create the `images` + `media_assets` rows for `image` and attach the
+    /// described file row in one transaction: either every row commits
+    /// together, or the import fails without leaving an orphaned image row.
+    /// Dedup by SHA-256 mirrors `insert_image`: an existing image with the
+    /// same hash wins, and its id is returned so callers enrich the right row.
+    pub fn register_image_with_file_link(
+        &self,
+        image: &Image,
+        link: ImageFileLink,
+    ) -> Result<String> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        insert_image_and_media_asset_tx(&tx, image)?;
+        let canonical_image_id: String = tx.query_row(
+            "SELECT id FROM images WHERE sha256_hash = ?1",
+            params![image.sha256_hash],
+            |row| row.get(0),
+        )?;
+        match link {
+            ImageFileLink::InsertFile {
+                mut file,
+                library_member,
+            } => {
+                file.image_id = canonical_image_id.clone();
+                insert_image_file_tx(&tx, &file, library_member)?;
+            }
+            ImageFileLink::RepointFile {
+                file_id,
+                size,
+                mtime,
+            } => {
+                repoint_image_file_tx(&tx, &file_id, &canonical_image_id, size, &mtime)?;
+            }
+        }
+        tx.commit()?;
+        Ok(canonical_image_id)
+    }
+
     pub fn migrate_folder_paths(&self, source: &str, target: &str) -> Result<FolderPathMigration> {
         validate_folder_migration_path(source, "source")?;
         validate_folder_migration_path(target, "target")?;
@@ -329,45 +533,7 @@ impl Database {
     pub fn insert_image(&self, image: &Image) -> Result<()> {
         let mut conn = self.conn.lock();
         let tx = conn.transaction()?;
-        tx.execute(
-            "INSERT OR IGNORE INTO images (id, sha256_hash, width, height, format, file_size, created_at, imported_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![image.id, image.sha256_hash, image.width, image.height,
-                    image.format, sql_u64(image.file_size)?, image.created_at, image.imported_at],
-        )?;
-        let media_type = if image.format.eq_ignore_ascii_case("pdf") {
-            "pdf"
-        } else {
-            "image"
-        };
-        let media_asset = MediaAsset {
-            id: format!("ma_{}", image.id),
-            media_type: media_type.to_string(),
-            primary_image_id: image.id.clone(),
-            sha256_hash: image.sha256_hash.clone(),
-            format: image.format.clone(),
-            file_size: image.file_size,
-            page_count: None,
-            title: None,
-            created_at: image.created_at.clone(),
-            imported_at: image.imported_at.clone(),
-        };
-        tx.execute(
-            "INSERT OR IGNORE INTO media_assets (id, media_type, primary_image_id, sha256_hash, format, file_size, page_count, title, created_at, imported_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![
-                media_asset.id,
-                media_asset.media_type,
-                media_asset.primary_image_id,
-                media_asset.sha256_hash,
-                media_asset.format,
-                sql_u64(media_asset.file_size)?,
-                media_asset.page_count,
-                media_asset.title,
-                media_asset.created_at,
-                media_asset.imported_at
-            ],
-        )?;
+        insert_image_and_media_asset_tx(&tx, image)?;
         tx.commit()?;
         Ok(())
     }
@@ -1030,29 +1196,10 @@ impl Database {
         size: u64,
         mtime: &str,
     ) -> Result<()> {
-        let conn = self.conn.lock();
-        conn.execute(
-            "UPDATE image_files SET image_id = ?2, last_seen_at = datetime('now'), missing_at = NULL,
-             last_seen_size = ?3, last_seen_mtime = ?4 WHERE id = ?1",
-            params![file_id, new_image_id, size as i64, mtime],
-        )?;
-        let media_asset_id: Option<String> = conn
-            .query_row(
-                "SELECT id FROM media_assets WHERE primary_image_id = ?1",
-                params![new_image_id],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if let Some(media_asset_id) = media_asset_id {
-            let media_file_id = format!("mf_{}", file_id);
-            conn.execute(
-                "UPDATE media_files
-                 SET media_asset_id = ?2, last_seen_at = datetime('now'), missing_at = NULL,
-                     last_seen_size = ?3, last_seen_mtime = ?4
-                 WHERE id = ?1",
-                params![media_file_id, media_asset_id, size as i64, mtime,],
-            )?;
-        }
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        repoint_image_file_tx(&tx, file_id, new_image_id, size, mtime)?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -1065,49 +1212,10 @@ impl Database {
         file: &ImageFile,
         library_member: bool,
     ) -> Result<()> {
-        let conn = self.conn.lock();
-        conn.execute(
-            "INSERT OR REPLACE INTO image_files (
-                id, image_id, path, last_seen_at, missing_at, last_seen_size, last_seen_mtime,
-                library_member
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                file.id,
-                file.image_id,
-                file.path,
-                file.last_seen_at,
-                file.missing_at,
-                sql_opt_u64(file.last_seen_size)?,
-                file.last_seen_mtime,
-                library_member,
-            ],
-        )?;
-
-        let media_asset_id = conn
-            .query_row(
-                "SELECT id FROM media_assets WHERE primary_image_id = ?1",
-                params![&file.image_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-
-        if let Some(media_asset_id) = media_asset_id {
-            conn.execute(
-                "INSERT OR REPLACE INTO media_files (
-                    id, media_asset_id, path, last_seen_at, missing_at, last_seen_size, last_seen_mtime
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    format!("mf_{}", file.id),
-                    media_asset_id,
-                    file.path,
-                    file.last_seen_at,
-                    file.missing_at,
-                    sql_opt_u64(file.last_seen_size)?,
-                    file.last_seen_mtime,
-                ],
-            )?;
-        }
-
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        insert_image_file_tx(&tx, file, library_member)?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -1166,5 +1274,283 @@ impl Database {
         let conn = self.conn.lock();
         let deleted = conn.execute("DELETE FROM library_roots WHERE path = ?1", params![path])?;
         Ok(deleted > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn test_db() -> Database {
+        Database::open(Path::new(":memory:")).unwrap()
+    }
+
+    fn image(id: &str, hash: &str) -> Image {
+        Image {
+            id: id.to_string(),
+            sha256_hash: hash.to_string(),
+            width: 16,
+            height: 16,
+            format: "png".to_string(),
+            file_size: 128,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            imported_at: "2026-01-01T00:00:00Z".to_string(),
+            ai_prompt: None,
+            raw_metadata: None,
+        }
+    }
+
+    fn file_record(image_id: &str, id: &str, path: &str) -> ImageFile {
+        ImageFile {
+            id: id.to_string(),
+            image_id: image_id.to_string(),
+            path: path.to_string(),
+            last_seen_at: "2026-01-01T00:00:00Z".to_string(),
+            missing_at: None,
+            last_seen_size: Some(128),
+            last_seen_mtime: Some("2026-01-01T00:00:00Z".to_string()),
+        }
+    }
+
+    fn count(db: &Database, sql: &str) -> i64 {
+        db.conn.lock().query_row(sql, [], |row| row.get(0)).unwrap()
+    }
+
+    fn file_image_id(db: &Database, file_id: &str) -> String {
+        db.conn
+            .lock()
+            .query_row(
+                "SELECT image_id FROM image_files WHERE id = ?1",
+                params![file_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn register_insert_commits_image_media_asset_and_file_together() {
+        let db = test_db();
+        let img = image("image-1", "hash-1");
+        let canonical = db
+            .register_image_with_file_link(
+                &img,
+                ImageFileLink::InsertFile {
+                    file: file_record("unused", "file-1", "/library/a.png"),
+                    library_member: true,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(canonical, "image-1");
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM images"), 1);
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM media_assets"), 1);
+        assert_eq!(
+            count(
+                &db,
+                "SELECT COUNT(*) FROM image_files WHERE image_id = 'image-1'"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                &db,
+                "SELECT COUNT(*) FROM media_files WHERE path = '/library/a.png'"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn register_dedupes_to_the_canonical_image_and_links_the_file_to_it() {
+        let db = test_db();
+        let canonical_img = image("image-canonical", "shared-hash");
+        db.insert_image(&canonical_img).unwrap();
+
+        let duplicate = image("image-duplicate", "shared-hash");
+        let canonical = db
+            .register_image_with_file_link(
+                &duplicate,
+                ImageFileLink::InsertFile {
+                    file: file_record("ignored", "file-2", "/library/b.png"),
+                    library_member: true,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(canonical, "image-canonical");
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM images"), 1);
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM media_assets"), 1);
+        assert_eq!(file_image_id(&db, "file-2"), "image-canonical");
+    }
+
+    #[test]
+    fn register_rolls_back_the_image_when_the_file_insert_fails() {
+        let db = test_db();
+        {
+            let conn = db.conn.lock();
+            conn.execute_batch(
+                "CREATE TRIGGER fail_image_file_insert
+                 BEFORE INSERT ON image_files
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced image file failure');
+                 END;",
+            )
+            .unwrap();
+        }
+
+        let img = image("image-orphan", "hash-orphan");
+        let error = db
+            .register_image_with_file_link(
+                &img,
+                ImageFileLink::InsertFile {
+                    file: file_record("unused", "file-3", "/library/c.png"),
+                    library_member: true,
+                },
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("forced image file failure"));
+        // The image and its media asset must not survive a failed file link.
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM images"), 0);
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM media_assets"), 0);
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM image_files"), 0);
+    }
+
+    #[test]
+    fn register_rolls_back_the_image_when_the_repoint_fails() {
+        let db = test_db();
+        let original = image("image-original", "hash-original");
+        db.insert_image(&original).unwrap();
+        db.insert_image_file_with_library_membership(
+            &file_record("image-original", "file-keep", "/library/keep.png"),
+            true,
+        )
+        .unwrap();
+        {
+            let conn = db.conn.lock();
+            conn.execute_batch(
+                "CREATE TRIGGER fail_image_file_update
+                 BEFORE UPDATE ON image_files
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced repoint failure');
+                 END;",
+            )
+            .unwrap();
+        }
+
+        let replacement = image("image-replacement", "hash-replacement");
+        let error = db
+            .register_image_with_file_link(
+                &replacement,
+                ImageFileLink::RepointFile {
+                    file_id: "file-keep".to_string(),
+                    size: 128,
+                    mtime: "2026-01-02T00:00:00Z".to_string(),
+                },
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("forced repoint failure"));
+        // The replacement image must not survive a failed repoint.
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM images"), 1);
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM media_assets"), 1);
+        assert_eq!(file_image_id(&db, "file-keep"), "image-original");
+    }
+
+    #[test]
+    fn register_repoint_errors_when_the_file_row_is_missing_and_rolls_back() {
+        let db = test_db();
+        // An unrelated, healthy image + file row that must be preserved.
+        let unrelated = image("image-unrelated", "hash-unrelated");
+        db.insert_image(&unrelated).unwrap();
+        db.insert_image_file_with_library_membership(
+            &file_record(
+                "image-unrelated",
+                "file-unrelated",
+                "/library/unrelated.png",
+            ),
+            true,
+        )
+        .unwrap();
+
+        // Repoint target deleted between discovery and the registration
+        // transaction: the update must match zero rows and abort the whole
+        // registration.
+        let replacement = image("image-replacement", "hash-replacement");
+        let error = db
+            .register_image_with_file_link(
+                &replacement,
+                ImageFileLink::RepointFile {
+                    file_id: "file-gone".to_string(),
+                    size: 128,
+                    mtime: "2026-01-02T00:00:00Z".to_string(),
+                },
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("not found for repoint"));
+        // No unlinked replacement image or media asset may survive.
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM images"), 1);
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM media_assets"), 1);
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM image_files"), 1);
+        assert_eq!(
+            count(
+                &db,
+                "SELECT COUNT(*) FROM image_files WHERE image_id = 'image-unrelated'"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn repoint_image_file_errors_when_the_target_row_is_missing() {
+        let db = test_db();
+        let img = image("image-1", "hash-1");
+        db.insert_image(&img).unwrap();
+
+        let error = db
+            .repoint_image_file("file-gone", "image-1", 128, "2026-01-02T00:00:00Z")
+            .unwrap_err();
+
+        assert!(error.to_string().contains("not found for repoint"));
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM image_files"), 0);
+    }
+
+    #[test]
+    fn register_repoint_commits_image_media_asset_and_repoint_together() {
+        let db = test_db();
+        let original = image("image-original", "hash-original");
+        db.insert_image(&original).unwrap();
+        db.insert_image_file_with_library_membership(
+            &file_record("image-original", "file-move", "/library/moved.png"),
+            true,
+        )
+        .unwrap();
+
+        let replacement = image("image-replacement", "hash-replacement");
+        let canonical = db
+            .register_image_with_file_link(
+                &replacement,
+                ImageFileLink::RepointFile {
+                    file_id: "file-move".to_string(),
+                    size: 128,
+                    mtime: "2026-01-02T00:00:00Z".to_string(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(canonical, "image-replacement");
+        assert_eq!(file_image_id(&db, "file-move"), "image-replacement");
+        let media_asset_id: String = db
+            .conn
+            .lock()
+            .query_row(
+                "SELECT media_asset_id FROM media_files WHERE path = '/library/moved.png'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(media_asset_id, "ma_image-replacement");
     }
 }

@@ -269,8 +269,9 @@ impl Database {
     }
 
     pub fn create_catalog_work(&self, primary_image_id: &str) -> Result<String> {
-        let conn = self.conn.lock();
-        let image_exists: i64 = conn.query_row(
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let image_exists: i64 = tx.query_row(
             "SELECT COUNT(*) FROM images WHERE id = ?1",
             params![primary_image_id],
             |row| row.get(0),
@@ -283,21 +284,21 @@ impl Database {
             .into());
         }
 
-        let conn = self.conn.lock();
         let id = format!("cw_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
         let now = chrono::Utc::now().to_rfc3339();
-        conn.execute(
+        tx.execute(
             "INSERT INTO catalog_works (id, primary_image_id, created_at, updated_at, deleted_at)
              VALUES (?1, ?2, ?3, ?4, NULL)",
             params![id, primary_image_id, now.clone(), now.clone()],
         )?;
         let image_link_id = catalog_work_image_id(&id, primary_image_id, "primary");
-        conn.execute(
+        tx.execute(
             "INSERT INTO catalog_work_images (
                 id, work_id, image_id, role, ordinal, edition_label, created_at
              ) VALUES (?1, ?2, ?3, 'primary', 0, NULL, ?4)",
             params![image_link_id, id, primary_image_id, now],
         )?;
+        tx.commit()?;
         Ok(id)
     }
 
