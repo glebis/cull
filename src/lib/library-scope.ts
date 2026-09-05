@@ -20,6 +20,23 @@ export type LibraryScope =
     | { type: 'filtered'; min_size: number; include_rejected: boolean }
     | { type: 'all'; include_rejected: boolean };
 
+/** Source scopes a Selection Mode run can capture. Everything the grid can
+ *  resolve through the backend plus a plain text search intersected with a
+ *  base scope. Transient views (similarity results, canvas boards) must never
+ *  be captured — callers disable Start for those instead. */
+export type SelectionSourceScope =
+    | LibraryScope
+    | { type: 'search'; base: LibraryScope; query: string };
+
+export function isSelectionSourceScope(value: unknown): value is SelectionSourceScope {
+    if (!value || typeof value !== 'object') return false;
+    const scope = value as { type?: unknown; base?: unknown; query?: unknown };
+    if (scope.type === 'search') {
+        return typeof scope.query === 'string' && isSelectionSourceScope(scope.base);
+    }
+    return typeof scope.type === 'string' && scope.type !== 'search';
+}
+
 function buildLibraryScope(
     batch_id: string | null,
     smart: { id: string; filter_json: string | null } | null,

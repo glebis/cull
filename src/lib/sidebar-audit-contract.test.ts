@@ -186,19 +186,23 @@ describe('sidebar audit fixes contract', () => {
     });
 
     // imageview-1i2k.5 — one meaning per color: blue=interactive,
-    // green=positive state, orange=active mode, purple=class tag, red=error.
+    // green=positive state, orange=active mode, purple=class tag + shortlist
+    // membership (Selection Mode), red=error.
     it('keeps one meaning per accent color', () => {
-        // Collect mode is a mode, not a success — not green
-        const collect = sidebar.match(/\.collect-indicator\s*\{[^}]*\}/)?.[0] ?? '';
-        expect(collect).toContain('color: var(--orange)');
+        // Collect Mode was retired; Selection Mode carries membership in --purple.
+        const selectionBar = readFileSync(join(process.cwd(), 'src/lib/components/SelectionModeBar.svelte'), 'utf8');
+        expect(selectionBar).not.toContain('collect-indicator');
         // Green is positive state only: running dot + import success
         const runningDot = sidebar.match(/\.running-dot\s*\{[^}]*\}/)?.[0] ?? '';
         expect(runningDot).toContain('background: var(--green)');
         const importResult = sidebar.match(/\.import-result\s*\{[^}]*\}/)?.[0] ?? '';
         expect(importResult).toContain('color: var(--green)');
-        // Purple is the detected-class tag
+        // Purple is the detected-class tag and the shortlist marker token
         const classTag = sidebar.match(/\.class-tag\s*\{[^}]*\}/)?.[0] ?? '';
         expect(classTag).toContain('color: var(--purple)');
+        const thumbnail = readFileSync(join(process.cwd(), 'src/lib/components/Thumbnail.svelte'), 'utf8');
+        expect(thumbnail).toContain('badge.shortlisted');
+        expect(thumbnail).toContain('var(--purple)');
         // The semantics are documented at the tokens
         const appCss = readFileSync(join(process.cwd(), 'src/app.css'), 'utf8');
         expect(appCss).toContain('one meaning per color');

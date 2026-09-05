@@ -410,6 +410,127 @@ pub struct ImageIdPage {
     pub has_more: bool,
 }
 
+/// The explicit, durable scope captured when a Selection Mode run starts.
+/// Mirrors the frontend `LibraryScope` tagged union (including
+/// `referenced_folder`) plus a backend-resolved `search` intersection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SelectionSourceScope {
+    All {
+        include_rejected: bool,
+    },
+    Folder {
+        path: String,
+        min_size: u32,
+        include_rejected: bool,
+    },
+    Filtered {
+        min_size: u32,
+        include_rejected: bool,
+    },
+    Collection {
+        id: String,
+        include_rejected: bool,
+    },
+    Smart {
+        id: String,
+        filter_json: String,
+        include_rejected: bool,
+    },
+    DetectedClass {
+        class_name: String,
+        include_rejected: bool,
+    },
+    ImportBatch {
+        batch_id: String,
+        include_rejected: bool,
+    },
+    ReferencedFolder {
+        source_id: String,
+        relative_path: String,
+        recursive: bool,
+        include_rejected: bool,
+    },
+    /// Backend-resolved text search intersected with its base scope. Matches
+    /// case-insensitively against file paths, source labels and AI prompts.
+    Search {
+        base: Box<SelectionSourceScope>,
+        query: String,
+    },
+}
+
+impl SelectionSourceScope {
+    pub fn include_rejected(&self) -> bool {
+        match self {
+            Self::All { include_rejected }
+            | Self::Folder {
+                include_rejected, ..
+            }
+            | Self::Filtered {
+                include_rejected, ..
+            }
+            | Self::Collection {
+                include_rejected, ..
+            }
+            | Self::Smart {
+                include_rejected, ..
+            }
+            | Self::DetectedClass {
+                include_rejected, ..
+            }
+            | Self::ImportBatch {
+                include_rejected, ..
+            }
+            | Self::ReferencedFolder {
+                include_rejected, ..
+            } => *include_rejected,
+            Self::Search { base, .. } => base.include_rejected(),
+        }
+    }
+}
+
+/// A Selection Mode run: lifecycle plus live membership counts. Counts are
+/// read from surviving foreign-key references at read time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelectionRun {
+    pub id: String,
+    pub name: String,
+    pub status: String,
+    pub source_count: u32,
+    pub shortlist_count: u32,
+    pub target_count: Option<u32>,
+    pub source_scope: SelectionSourceScope,
+    pub created_at: String,
+    pub updated_at: String,
+    pub finished_at: Option<String>,
+    pub rejected_shortlist_count: u32,
+}
+
+/// Canonical state returned by every mutating Selection Mode command.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelectionState {
+    pub run: SelectionRun,
+    pub shortlist_ids: Vec<String>,
+}
+
+/// One paged page of Source or Shortlist members.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelectionPage {
+    pub items: Vec<ImageWithFile>,
+    pub total: u32,
+}
+
+/// Result of one grouped shortlist mutation.
+/// `undo_record_id` is empty exactly when the mutation was an idempotent
+/// no-op (nothing changed, so no undo record was written).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShortlistMutationResult {
+    pub state: SelectionState,
+    pub changed: bool,
+    pub undo_record_id: String,
+    pub label: String,
+}
+
 /// A stable, serializable description of the visible library slice used by
 /// the grid and Embedding Explorer. Scope filtering is applied in SQLite
 /// before paging so callers never receive a globally-paged approximation.

@@ -1,12 +1,13 @@
 <script lang="ts">
     import { parseNlQuery, countSmartCollection, createSmartCollection, listSmartCollections, startDictation, stopDictation } from '$lib/api';
     import { listen } from '@tauri-apps/api/event';
-    import { smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, searchOpen, viewMode, navigateTo, navigateBack, voiceDictationEnabled, showRejected, pendingGridSearch } from '$lib/stores';
+    import { smartCollections, activeSmartCollection, activeFolder, activeCollection, activeDetectedClass, searchOpen, viewMode, navigateTo, navigateBack, voiceDictationEnabled, showRejected, pendingGridSearch, selectionRun, selectionScopeTotal } from '$lib/stores';
     import type { FilterNode } from '$lib/api';
     import { buildSearchPresetLists, type SearchPreset, type SearchPresetKind } from '$lib/search-presets';
     import RuleBuilder from './RuleBuilder.svelte';
     import { onMount, onDestroy, tick } from 'svelte';
     import { loadImagesForCurrentScope } from '$lib/image-loading';
+    import { setSelectionSourceSearch } from '$lib/selection-mode';
 
     let query = $state('');
     let parsedFilter: FilterNode | null = $state(null);
@@ -61,6 +62,13 @@
     }
 
     function activateAdHocFilter(filterJson: string, count: number | null) {
+        // While a Selection Mode run owns the view, applyFilter routes the
+        // query to the scoped source search instead of re-scoping the library.
+        if ($selectionRun && $selectionRun.status === 'active') {
+            void setSelectionSourceSearch(query);
+            matchCount = $selectionScopeTotal ?? 0;
+            return;
+        }
         $activeSmartCollection = {
             id: '__adhoc__',
             name: query.trim() || 'Search',
@@ -79,6 +87,17 @@
     }
 
     async function applyFilter(filterJson: string, reqId: number) {
+        // While a Selection Mode run owns the view, the query is a plain text
+        // search constrained to the stable captured source; the total comes
+        // from the selection page loader, never the visible page.
+        if ($selectionRun && $selectionRun.status === 'active') {
+            await setSelectionSourceSearch(query);
+            if (reqId === applyRequestId) {
+                matchCount = $selectionScopeTotal ?? 0;
+                applied = true;
+            }
+            return;
+        }
         activateAdHocFilter(filterJson, null);
         const [count] = await Promise.all([
             countSmartCollection(filterJson, $showRejected),
@@ -201,6 +220,23 @@
             applied = false;
             saving = false;
             activeAppliedPresetKind = null;
+            // Clearing the query also clears the scoped Selection source search.
+            if ($selectionRun && $selectionRun.status === 'active') {
+                await setSelectionSourceSearch(null);
+                matchCount = 0;
+            }
+            return;
+        }
+        // Selection Mode search is a plain text query over the stable source;
+        // NL rule parsing does not apply inside the mode.
+        if ($selectionRun && $selectionRun.status === 'active') {
+            const reqId = ++applyRequestId;
+            isApplying = true;
+            try {
+                await applyFilter('', reqId);
+            } finally {
+                if (reqId === applyRequestId) isApplying = false;
+            }
             return;
         }
         const filterJson = await parseNlQuery(query);
@@ -276,6 +312,9 @@
         isDirtyFromManualEdit = false;
         activeAppliedPresetKind = null;
         isCollapsed = false;
+        if ($selectionRun && $selectionRun.status === 'active') {
+            void setSelectionSourceSearch(null);
+        }
         $searchOpen = false;
         navigateBack();
     }
@@ -296,6 +335,9 @@
         isDirtyFromManualEdit = false;
         activeAppliedPresetKind = null;
         isCollapsed = false;
+        if ($selectionRun && $selectionRun.status === 'active') {
+            void setSelectionSourceSearch(null);
+        }
         $searchOpen = false;
     }
 

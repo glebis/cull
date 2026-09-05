@@ -2,7 +2,7 @@
 // Implementation assisted by Claude (Anthropic). See AUTHORSHIP.md.
 
 import { invoke } from '@tauri-apps/api/core';
-import type { LibraryScope } from './library-scope';
+import type { LibraryScope, SelectionSourceScope } from './library-scope';
 
 export type ApplePhotosAuthorization =
     | 'unsupported'
@@ -931,6 +931,120 @@ export async function listCollectionImages(collectionId: string, limit?: number,
 export async function removeFromCollection(collectionId: string, imageIds: string[]): Promise<void> {
     await invoke('remove_from_collection', { collectionId, imageIds });
     emitSessionEventsRefresh();
+}
+
+// ------------------------------------------------------------------------
+// Selection Mode (shortlist runs). Membership is collection-backed in the
+// database; these commands are the only mutation path and always return the
+// canonical SelectionState after one undoable operation.
+// ------------------------------------------------------------------------
+
+export type SelectionRunStatus = 'active' | 'finished' | 'archived';
+
+export interface SelectionRun {
+    id: string;
+    name: string;
+    status: SelectionRunStatus;
+    source_count: number;
+    shortlist_count: number;
+    target_count: number | null;
+    source_scope: SelectionSourceScope;
+    created_at: string;
+    updated_at: string;
+    finished_at: string | null;
+    rejected_shortlist_count: number;
+}
+
+export interface SelectionState {
+    run: SelectionRun;
+    shortlist_ids: string[];
+}
+
+export interface SelectionPage {
+    items: ImageWithFile[];
+    total: number;
+}
+
+export interface SelectionPageFilters {
+    query?: string | null;
+    minSize?: number | null;
+    includeRejected?: boolean | null;
+}
+
+export async function previewSelectionSource(sourceScope: SelectionSourceScope): Promise<{ count: number }> {
+    return invoke('preview_selection_source', { sourceScope });
+}
+
+export async function createSelectionRun(
+    name: string,
+    sourceScope: SelectionSourceScope,
+    targetCount: number | null,
+): Promise<SelectionState> {
+    return invoke('create_selection_run', { name, sourceScope, targetCount });
+}
+
+export async function listSelectionRuns(status?: SelectionRunStatus | null): Promise<SelectionRun[]> {
+    return invoke('list_selection_runs', { status: status ?? null });
+}
+
+export async function getSelectionRun(selectionId: string): Promise<SelectionState> {
+    return invoke('get_selection_run', { selectionId });
+}
+
+export async function listSelectionSource(
+    selectionId: string,
+    offset: number,
+    limit: number,
+    filters: SelectionPageFilters = {},
+): Promise<SelectionPage> {
+    return invoke('list_selection_source', {
+        selectionId,
+        offset,
+        limit,
+        query: filters.query ?? null,
+        minSize: filters.minSize ?? null,
+        includeRejected: filters.includeRejected ?? null,
+    });
+}
+
+export async function listSelectionShortlist(
+    selectionId: string,
+    offset: number,
+    limit: number,
+    filters: SelectionPageFilters = {},
+): Promise<SelectionPage> {
+    return invoke('list_selection_shortlist', {
+        selectionId,
+        offset,
+        limit,
+        query: filters.query ?? null,
+        minSize: filters.minSize ?? null,
+        includeRejected: filters.includeRejected ?? null,
+    });
+}
+
+export async function addToShortlist(selectionId: string, imageIds: string[]): Promise<SelectionState> {
+    return invoke('add_to_shortlist', { selectionId, imageIds });
+}
+
+export async function removeFromShortlist(selectionId: string, imageIds: string[]): Promise<SelectionState> {
+    return invoke('remove_from_shortlist', { selectionId, imageIds });
+}
+
+export async function finishSelectionRun(selectionId: string): Promise<SelectionState> {
+    return invoke('finish_selection_run', { selectionId });
+}
+
+export async function reopenSelectionRun(selectionId: string): Promise<SelectionState> {
+    return invoke('reopen_selection_run', { selectionId });
+}
+
+export async function archiveSelectionRun(selectionId: string): Promise<SelectionState> {
+    return invoke('archive_selection_run', { selectionId });
+}
+
+export async function restoreSelectionRun(selectionId: string): Promise<SelectionState> {
+    return invoke('restore_selection_run', { selectionId });
 }
 
 export async function deleteCollectionApi(collectionId: string): Promise<void> {

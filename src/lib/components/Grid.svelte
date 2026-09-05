@@ -2,10 +2,11 @@
     import { onDestroy } from 'svelte';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { open } from '@tauri-apps/plugin-dialog';
-    import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState, showToast, totalCount, folders, gridPreset, GRID_PRESETS, activeSmartCollection, activeCollection, activeDetectedClass, activeFolder, minSizeFilter, clipboardMonitorStatus, showRejected } from '$lib/stores';
+    import { images, selectedIds, selectionAnchorIndex, focusedIndex, thumbnailSize, viewMode, gridGap, gridScrollTop, navigateTo, imageLoadState, showToast, totalCount, folders, gridPreset, GRID_PRESETS, activeSmartCollection, activeCollection, activeDetectedClass, activeFolder, minSizeFilter, clipboardMonitorStatus, showRejected, shortlistIds } from '$lib/stores';
+    import { loadMoreImagesForCurrentView } from '$lib/selection-view';
     import { importFolder as apiImportFolder, getImageCount, listFolders } from '$lib/api';
     import type { ImageWithFile } from '$lib/api';
-    import { IMAGE_OVERVIEW_PAGE_SIZE, IMAGE_PAGE_SIZE, loadImagesForCurrentScope, loadMoreImagesForCurrentScope } from '$lib/image-loading';
+    import { IMAGE_OVERVIEW_PAGE_SIZE, IMAGE_PAGE_SIZE, loadImagesForCurrentScope } from '$lib/image-loading';
     import { wheelGestureIntent } from '$lib/gesture-interactions';
     import { gridGestureZoom } from '$lib/grid-gesture-zoom';
     import { resolveLibraryViewState, scopeEmptyCopy, type LibraryScopeKind } from '$lib/library-view-state';
@@ -144,7 +145,7 @@
         if (cellSize <= 0) return;
         const remainingPx = totalHeight - (scrollTop + containerHeight);
         if (remainingPx < cellSize * pageLoadAheadRows) {
-            void loadMoreImagesForCurrentScope();
+            void loadMoreImagesForCurrentView();
         }
     }
 
@@ -322,7 +323,7 @@
         if (size > GRID_FULL_SCOPE_OVERVIEW_MAX_SIZE) return;
         if (!$imageLoadState.hasMore || $imageLoadState.loading || $imageLoadState.loadingMore) return;
         $images.length;
-        const timer = window.setTimeout(() => void loadMoreImagesForCurrentScope(IMAGE_OVERVIEW_PAGE_SIZE), 16);
+        const timer = window.setTimeout(() => void loadMoreImagesForCurrentView(IMAGE_OVERVIEW_PAGE_SIZE), 16);
         return () => window.clearTimeout(timer);
     });
 
@@ -554,7 +555,7 @@
                         data-agent-focused={$focusedIndex === vi.index}
                         data-agent-view-role="grid-cell"
                     >
-                        <Thumbnail item={vi.item} {size} focused={$focusedIndex === vi.index} selected={$selectedIds.has(vi.item.image.id)} onclick={(event) => handleClick(vi.index, event)} ondblclick={() => handleDblClick(vi.index)} loading="eager" />
+                        <Thumbnail item={vi.item} {size} focused={$focusedIndex === vi.index} selected={$selectedIds.has(vi.item.image.id)} shortlisted={$shortlistIds.has(vi.item.image.id)} onclick={(event) => handleClick(vi.index, event)} ondblclick={() => handleDblClick(vi.index)} loading="eager" />
                     </div>
                 {/each}
             {/if}

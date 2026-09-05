@@ -10,8 +10,6 @@ import {
     agentPanelVisible,
     agentSkillsOpen,
     agentVisualLevel,
-    collectMode,
-    collectModeTarget,
     collections,
     commandPaletteMode,
     commandPaletteOpen,
@@ -23,10 +21,13 @@ import {
     images,
     importBatchFilter,
     importBatchImageIds,
-    requestCollectionTarget,
     requestTextInput,
     searchOpen,
     selectedIds,
+    selectionRun,
+    selectionStartOpen,
+    selectionResumeOpen,
+    selectionFinishOpen,
     sessions,
     undoHistoryOpen,
     shortcutsOpen,
@@ -51,6 +52,13 @@ import {
     type ViewMode,
 } from './stores';
 import { invalidateImageCache, loadAllImages, loadImagesForCurrentScope } from './image-loading';
+import {
+    addHighlightedToShortlist,
+    archiveSelection,
+    leaveSelectionMode,
+    removeHighlightedFromShortlist,
+    selectionStartAvailability,
+} from './selection-mode';
 import { addToCollection, analyzeImages, checkOllama, createCollection, detectNsfw, detectObjects, getAppSetting, getClientFeedback, getOllamaConfig, isNudenetAvailable, isYoloAvailable, listCanvases, listClientFeedback, listCollections, listImageIdsMissingDetection, listImageIdsMissingVision, redo, saveTextToPath, setClientFeedback, setDecision, undo, validateSessionFolder, type Canvas, type Session } from './api';
 import { activateImportBatch } from './import-batch-navigation';
 import { saveRating } from './rating-actions';
@@ -504,57 +512,18 @@ async function createCollectionFromImageSet(inverse = false) {
     setTimeout(() => statusHint.set(null), 2000);
 }
 
-async function toggleCollectMode() {
-    if (get(collectMode)) {
-        collectMode.set(false);
-        collectModeTarget.set(null);
-        statusHint.set(null);
-        return;
-    }
-
-    const availableCollections = get(collections);
-    const target = await requestCollectionTarget({
-        title: 'Collect Mode',
-        description: availableCollections.length > 0
-            ? 'Choose the collection that Space will add images to, or create a new one.'
-            : 'Create a collection that Space will add images to.',
-        collections: availableCollections,
-        confirmLabel: 'Start',
-    });
-    if (!target) return;
-
-    let targetId: string;
-    if (target.type === 'existing') {
-        targetId = target.collectionId;
-    } else {
-        targetId = await createCollection(target.name);
-        collections.set(await listCollections(get(showRejected)));
-    }
-
-    collectMode.set(true);
-    collectModeTarget.set(targetId);
-    const collectionName = get(collections).find(item => item[0] === targetId)?.[1] ?? '';
-    statusHint.set(`Collect mode: Space to add, B to exit [${collectionName}]`);
-}
-
-async function addFocusedImageToCollectTarget() {
-    const target = get(collectModeTarget);
-    const image = get(images)[get(focusedIndex)];
-    if (!target || !image) return;
-
-    await addToCollection(target, [image.image.id]);
-    invalidateImageCache();
-    collections.set(await listCollections(get(showRejected)));
-    if (get(activeCollection) === target) {
-        await loadImagesForCurrentScope({ resetFocus: false, force: true });
-    }
-    statusHint.set('Added to collection. Space for next, B to exit');
-}
-
 function toggleAgentPanel() {
     const open = get(agentPanelVisible) || get(agentPanelPinned);
     agentPanelVisible.set(!open);
     agentPanelPinned.set(!open);
+}
+
+function selectionStartSubtitle(): string {
+    const availability = selectionStartAvailability();
+    if (availability.available) {
+        return `Shortlist from “${availability.label}” — starts empty, originals and decisions unchanged`;
+    }
+    return availability.reason ?? 'Not available here';
 }
 
 async function runLibraryAiJob(kind: AiLibraryJobKind) {
@@ -707,8 +676,9 @@ function commandItems(): CommandPaletteItem[] {
     const hasImage = Boolean(get(images)[get(focusedIndex)]);
     const selectedCount = get(selectedIds).size;
     const unselectedCount = Math.max(0, get(images).length - selectedCount);
-    const collectTarget = get(collectModeTarget);
-    const collectTargetName = get(collections).find(item => item[0] === collectTarget)?.[1] ?? 'collection';
+    const activeRun = get(selectionRun);
+    const selectionActive = activeRun !== null && activeRun.status === 'active';
+    const shortlistCount = activeRun?.shortlist_count ?? 0;
 
     return [
         {
@@ -1009,23 +979,87 @@ function commandItems(): CommandPaletteItem[] {
             run: () => createCollectionFromImageSet(true),
         },
         {
-            id: 'collection.toggle-collect-mode',
-            title: get(collectMode) ? 'Exit Collect Mode' : 'Start Collect Mode',
-            subtitle: get(collectMode) ? `Collecting into ${collectTargetName}` : 'Choose a collection target for Space',
-            category: 'Collections',
+            id: 'selection.start',
+            title: 'Start Selection…',
+            subtitle: selectionStartSubtitle(),
+            category: 'Selection',
             kind: 'command',
-            keywords: ['collect', 'collection', 'space'],
-            run: toggleCollectMode,
+            keywords: ['shortlist', 'pick', 'collect', 'final set', 'mode'],
+            disabled: !selectionStartAvailability().available,
+            run: () => selectionStartOpen.set(true),
         },
         {
-            id: 'collection.add-focused-to-collect-target',
-            title: 'Add Focused Image to Collect Target',
-            subtitle: collectTarget ? collectTargetName : 'Start collect mode first',
-            category: 'Collections',
+            id: 'selection.resume',
+            title: 'Resume Selection…',
+            subtitle: 'Continue an active, finished, or archived selection run',
+            category: 'Selection',
             kind: 'command',
-            keywords: ['collect', 'append', 'collection'],
-            disabled: !hasImage || !collectTarget,
-            run: addFocusedImageToCollectTarget,
+            keywords: ['shortlist', 'restore', 'reopen', 'archive'],
+            run: () => selectionResumeOpen.set(true),
+        },
+        {
+            id: 'selection.finish',
+            title: 'Finish Selection…',
+            subtitle: selectionActive
+                ? `Shortlist ${shortlistCount} becomes a normal collection`
+                : 'No active selection',
+            category: 'Selection',
+            kind: 'command',
+            keywords: ['complete', 'collection', 'shortlist'],
+            disabled: !selectionActive || shortlistCount === 0,
+            run: () => selectionFinishOpen.set(true),
+        },
+        {
+            id: 'selection.archive',
+            title: 'Archive Selection…',
+            subtitle: selectionActive
+                ? `Keeps “${activeRun?.name}” and its shortlist, restorable later`
+                : 'No active selection',
+            category: 'Selection',
+            kind: 'command',
+            keywords: ['archive', 'hide', 'shortlist'],
+            disabled: !selectionActive,
+            run: () => void archiveSelection(),
+        },
+        {
+            id: 'selection.leave',
+            title: 'Leave Selection Mode',
+            subtitle: selectionActive
+                ? `“${activeRun?.name}” stays active and resumable`
+                : 'No active selection',
+            category: 'Selection',
+            kind: 'command',
+            keywords: ['exit', 'pause', 'shortlist'],
+            disabled: !selectionActive,
+            run: () => void leaveSelectionMode(),
+        },
+        {
+            id: 'selection.add-highlighted',
+            title: selectionActive ? `Add ${selectedCount} Highlighted to Shortlist` : 'Add Highlighted to Shortlist',
+            subtitle: !selectionActive
+                ? 'Start or resume a selection first'
+                : selectedCount === 0
+                    ? 'Highlight images first'
+                    : `Adds ${selectedCount} highlighted image${selectedCount === 1 ? '' : 's'} to the shortlist`,
+            category: 'Selection',
+            kind: 'command',
+            keywords: ['shortlist', 'group', 'bookmark', 'pick'],
+            disabled: !selectionActive || selectedCount === 0,
+            run: () => addHighlightedToShortlist(),
+        },
+        {
+            id: 'selection.remove-highlighted',
+            title: selectionActive ? `Remove ${selectedCount} Highlighted from Shortlist` : 'Remove Highlighted from Shortlist',
+            subtitle: !selectionActive
+                ? 'Start or resume a selection first'
+                : selectedCount === 0
+                    ? 'Highlight images first'
+                    : `Removes highlighted images that are shortlisted`,
+            category: 'Selection',
+            kind: 'command',
+            keywords: ['shortlist', 'group', 'unbookmark'],
+            disabled: !selectionActive || selectedCount === 0,
+            run: () => removeHighlightedFromShortlist(),
         },
         {
             id: 'image.copy',

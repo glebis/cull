@@ -12,6 +12,7 @@ export interface NativeInteractionSmokeOptions {
     recordResult?: (result: NativeInteractionSmokeResult) => Promise<void>;
     log?: (message: string) => void;
     hitTest?: (target: Element, x: number, y: number) => Element | null;
+    selectionPersistence?: () => Promise<{ resumed: boolean; completed: string[] }>;
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -184,6 +185,21 @@ export async function runNativeInteractionSmoke(
     const completed: string[] = [];
 
     try {
+        {
+            const checkSelection = options.selectionPersistence ?? (async () => {
+                const { runNativeSelectionPersistenceSmoke } = await import('./native-selection-smoke');
+                return runNativeSelectionPersistenceSmoke();
+            });
+            const selection = await checkSelection();
+            completed.push(...selection.completed);
+            if (selection.resumed) {
+                const result = { ok: true, completed } satisfies NativeInteractionSmokeResult;
+                log(`[native-interaction-smoke] PASS ${completed.join(', ')}`);
+                await recordResult(result);
+                await finish(0);
+                return result;
+            }
+        }
         await waitFor(
             () => visibleFolderRows(root).length >= 1 && root.querySelectorAll('.thumb').length >= 2,
             'seeded folder and images did not render',

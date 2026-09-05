@@ -12,11 +12,13 @@
     import {
         parseAgentProposalSourceContext,
         proposalActorLabel,
+        proposalKindLabel,
         sourceContextIsStale,
         sourceContextScopeLabel,
         type AgentProposalViewContext,
     } from '$lib/agent-proposal-context';
     import { safeAssetPreviewPath } from '$lib/view-utils';
+    import { selectionRun } from '$lib/stores';
 
     type Candidate = {
         image_id: string;
@@ -237,7 +239,7 @@
         {#if activeProposal}
             <section class="proposal-card" class:stale={proposalIsStale} aria-label="Pending agent proposal">
                 <div class="proposal-topline">
-                    <span>{activeProposal.kind === 'trash_images' ? 'Trash proposal' : 'Selection proposal'}</span>
+                    <span>{proposalKindLabel(activeProposal.kind)} proposal</span>
                     <strong>Needs approval</strong>
                 </div>
                 {#if pendingProposals.length > 1}
@@ -246,7 +248,7 @@
                         <select id="agent-proposal-select" value={activeProposal.id} onchange={(event) => onselectproposal((event.currentTarget as HTMLSelectElement).value)}>
                             {#each pendingProposals as proposal}
                                 <option value={proposal.id}>
-                                    {proposal.kind === 'trash_images' ? 'Trash' : 'Selection'} · {proposal.lens ?? 'proposal'}
+                                    {proposalKindLabel(proposal.kind)} · {proposal.lens ?? 'proposal'}
                                 </option>
                             {/each}
                         </select>
@@ -366,7 +368,9 @@
             {/if}
             <textarea
                 bind:value={instruction}
-                placeholder="Ask Claude to propose a selection"
+                placeholder={$selectionRun && $selectionRun.status === 'active'
+                    ? `Ask Claude to propose images for “${$selectionRun.name}”, or to remove them`
+                    : 'Ask Claude to propose a selection'}
                 rows="3"
                 onkeydown={handleInstructionKeydown}
             ></textarea>

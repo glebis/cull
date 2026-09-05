@@ -42,7 +42,9 @@ CREATE TABLE IF NOT EXISTS agent_action_proposals (
                 'remove_from_collection',
                 'reorder_canvas',
                 'remove_from_canvas',
-                'trash_images'
+                'trash_images',
+                'shortlist_add',
+                'shortlist_remove'
             )
         ),
         status TEXT NOT NULL DEFAULT 'pending'
@@ -580,6 +582,29 @@ CREATE TABLE IF NOT EXISTS selections (
     decision TEXT CHECK (decision IN ('accept', 'reject', 'undecided')) DEFAULT 'undecided',
     PRIMARY KEY (image_id, project_id)
 );
+
+CREATE TABLE IF NOT EXISTS selection_runs (
+    id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK (status IN ('active', 'finished', 'archived')),
+    archived_from TEXT CHECK (archived_from IN ('active', 'finished')),
+    source_scope_json TEXT NOT NULL,
+    source_count INTEGER NOT NULL,
+    target_count INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS selection_run_source_items (
+    selection_id TEXT NOT NULL REFERENCES selection_runs(id) ON DELETE CASCADE,
+    image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (selection_id, image_id),
+    UNIQUE (selection_id, position)
+);
+
+CREATE INDEX IF NOT EXISTS selection_run_source_items_image_idx
+ON selection_run_source_items(image_id);
 
 CREATE TABLE IF NOT EXISTS session_events (
     id TEXT PRIMARY KEY,

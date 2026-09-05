@@ -476,6 +476,53 @@ fn parse_optional_view_context_json(value: Option<&str>) -> Result<Option<Value>
     Ok(Some(parsed))
 }
 
+/// Shortlist proposals may only target an existing, active Selection Mode run.
+fn validate_active_selection_run(db: &Database, selection_id: &str) -> Result<(), ServiceError> {
+    let conn = db.conn.lock();
+    let status =
+        crate::db_core::queries::selection_runs::selection_run_status_conn(&conn, selection_id)
+            .map_err(ServiceError::Database)?;
+    drop(conn);
+    match status.as_deref() {
+        Some("active") => Ok(()),
+        Some(other) => Err(ServiceError::InvalidInput(format!(
+            "Selection run '{selection_id}' is {other}; shortlist proposals require an active run"
+        ))),
+        None => Err(ServiceError::NotFound(format!(
+            "Selection run '{selection_id}' was not found"
+        ))),
+    }
+}
+
+/// Every proposed image ID must already be a member of the run's captured
+/// source snapshot, so agents can never grow a run beyond its source.
+fn validate_ids_in_selection_source(
+    db: &Database,
+    selection_id: &str,
+    image_ids: &[String],
+) -> Result<(), ServiceError> {
+    let conn = db.conn.lock();
+    let in_source = crate::db_core::queries::selection_runs::filter_ids_in_source_conn(
+        &conn,
+        selection_id,
+        image_ids,
+    )
+    .map_err(ServiceError::Database)?;
+    drop(conn);
+    let outside: Vec<&str> = image_ids
+        .iter()
+        .map(String::as_str)
+        .filter(|id| !in_source.contains(&id.to_string()))
+        .collect();
+    if !outside.is_empty() {
+        return Err(ServiceError::InvalidInput(format!(
+            "Claude proposed image(s) outside the captured selection source: {}",
+            outside.join(", ")
+        )));
+    }
+    Ok(())
+}
+
 fn validate_model_alias(model: &str) -> Result<(), ServiceError> {
     if model.is_empty()
         || !model
@@ -527,13 +574,16 @@ JSON schema:
 Hard rules:
 - Do not execute, apply, delete, trash, move, or mutate anything.
 - You may only return intent: answer, update_preset, or create_proposal.
-- Proposal kinds allowed in this bridge: select_images or trash_images.
+- Proposal kinds allowed in this bridge: select_images, trash_images, shortlist_add, or shortlist_remove.
+- shortlist_add and shortlist_remove are only valid while a Selection Mode run is active in the current view context; the run target is captured automatically and you cannot change it.
+- shortlist_add proposes images that deserve a place in the selection shortlist; shortlist_remove proposes removing already shortlisted images. Every proposed image_id must be inside the captured selection source.
 - Proposal item image_id values must come from candidate_images.
 - For trash_images, be conservative and explain uncertainty in guard_results.
 - If the user asks to change the active preset, return operation update_preset.
 - If the task is curation, return operation create_proposal.
 - If there is not enough evidence, return answer and ask for a Preview escalation.
 - The default visual level is tiny. Use thumbnail_path only as small visual context. Never ask for original files unless the user explicitly chooses Full in Cull.
+- There is no finish, archive, or delete operation for selection runs; never propose one.
 
 Cull context:
 {context_json}
@@ -864,7 +914,10 @@ fn create_proposal_from_draft(
     total_cost_usd: Option<f64>,
     runtime_source: ClaudeRuntimeSource,
 ) -> Result<AgentActionProposal, ServiceError> {
-    if !matches!(draft.kind.as_str(), "select_images" | "trash_images") {
+    if !matches!(
+        draft.kind.as_str(),
+        "select_images" | "trash_images" | "shortlist_add" | "shortlist_remove"
+    ) {
         return Err(ServiceError::InvalidInput(format!(
             "Claude returned unsupported proposal kind '{}'",
             draft.kind
@@ -888,6 +941,36 @@ fn create_proposal_from_draft(
             )));
         }
     }
+    let view_context = parse_optional_view_context_json(request.view_context_json.as_deref())?;
+    // Shortlist proposals require an explicit, active Selection Mode run in
+    // the view context; there is no silent conversion of other kinds and no
+    // agent finish action. The canonical run target is copied from the
+    // captured view context — model output cannot choose a different run.
+    let shortlist_selection_id =
+        if matches!(draft.kind.as_str(), "shortlist_add" | "shortlist_remove") {
+            let selection_id = view_context
+                .as_ref()
+                .and_then(|context| context.get("selection_id"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| {
+                    ServiceError::InvalidInput(
+                    "Shortlist proposals require an active Selection Mode run in view_context_json"
+                        .to_string(),
+                )
+                })?;
+            validate_active_selection_run(db, selection_id)?;
+            let candidate_ids: Vec<String> = draft
+                .items
+                .iter()
+                .map(|item| item.image_id.clone())
+                .collect();
+            validate_ids_in_selection_source(db, selection_id, &candidate_ids)?;
+            Some(selection_id.to_string())
+        } else {
+            None
+        };
     let usage_value: Value = serde_json::from_str(usage_json)
         .map_err(|e| ServiceError::Engine(format!("Invalid usage JSON: {}", e)))?;
     let mut source_context = serde_json::Map::from_iter([
@@ -908,13 +991,14 @@ fn create_proposal_from_draft(
         ),
         ("runtime".to_string(), usage_value.clone()),
     ]);
-    if let Some(view_context) =
-        parse_optional_view_context_json(request.view_context_json.as_deref())?
-    {
+    if let Some(view_context) = view_context {
         if let Some(label) = view_context.get("label").and_then(Value::as_str) {
             source_context.insert("scope_label".to_string(), json!(label));
         }
         source_context.insert("view_context".to_string(), view_context);
+    }
+    if let Some(selection_id) = shortlist_selection_id {
+        source_context.insert("selection_id".to_string(), json!(selection_id));
     }
     let source_context_json = Value::Object(source_context).to_string();
     let estimated_input_tokens = estimated_input_tokens_from_usage(&usage_value);
@@ -1053,7 +1137,7 @@ fn sum_model_cost_usd(model_usage: &Value) -> Option<f64> {
 }
 
 fn claude_decision_schema() -> &'static str {
-    r#"{"type":"object","properties":{"operation":{"type":"string","enum":["answer","create_proposal","update_preset"]},"message":{"type":"string"},"proposal":{"type":"object","properties":{"kind":{"type":"string","enum":["select_images","trash_images"]},"lens":{"type":["string","null"]},"criteria":{"type":"string"},"items":{"type":"array","items":{"type":"object","properties":{"image_id":{"type":"string"},"reason":{"type":"string"},"confidence":{}},"required":["image_id","reason"],"additionalProperties":false},"minItems":1},"guard_results":{"type":"object"}},"required":["kind","criteria","items"],"additionalProperties":false},"preset_update":{"type":"object","properties":{"name":{"type":"string"},"purpose":{"type":"string"},"prompt":{"type":"string"},"criteria_json":{"type":"object"}},"required":["prompt"],"additionalProperties":false}},"required":["operation","message"],"additionalProperties":false}"#
+    r#"{"type":"object","properties":{"operation":{"type":"string","enum":["answer","create_proposal","update_preset"]},"message":{"type":"string"},"proposal":{"type":"object","properties":{"kind":{"type":"string","enum":["select_images","trash_images","shortlist_add","shortlist_remove"]},"lens":{"type":["string","null"]},"criteria":{"type":"string"},"items":{"type":"array","items":{"type":"object","properties":{"image_id":{"type":"string"},"reason":{"type":"string"},"confidence":{}},"required":["image_id","reason"],"additionalProperties":false},"minItems":1},"guard_results":{"type":"object"}},"required":["kind","criteria","items"],"additionalProperties":false},"preset_update":{"type":"object","properties":{"name":{"type":"string"},"purpose":{"type":"string"},"prompt":{"type":"string"},"criteria_json":{"type":"object"}},"required":["prompt"],"additionalProperties":false}},"required":["operation","message"],"additionalProperties":false}"#
 }
 
 fn claude_decision_schema_value() -> Result<Value, ServiceError> {
@@ -1064,6 +1148,7 @@ fn claude_decision_schema_value() -> Result<Value, ServiceError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db_core::models::{Image, ImageFile};
     use std::fs;
     use tokio::sync::Mutex as AsyncMutex;
 
@@ -1275,6 +1360,162 @@ if (process.env.CULL_FAKE_AGENT_ERROR_RESULT) {
         let usage: Value = serde_json::from_str(&result.usage_json).unwrap();
         assert_eq!(usage["source"], "claude_agent_sdk");
         assert_eq!(usage["anthropic_api_key_removed"], true);
+    }
+
+    fn seed_active_selection_run(db: &Database) -> String {
+        let now = "2026-09-01T00:00:00Z".to_string();
+        db.insert_image(&Image {
+            id: "img_a".to_string(),
+            sha256_hash: "hash-img_a".to_string(),
+            width: 800,
+            height: 600,
+            format: "png".to_string(),
+            file_size: 1024,
+            created_at: now.clone(),
+            imported_at: now.clone(),
+            ai_prompt: None,
+            raw_metadata: None,
+        })
+        .unwrap();
+        db.insert_image_file(&ImageFile {
+            id: "file-img_a".to_string(),
+            image_id: "img_a".to_string(),
+            path: "/library/shoot/img_a.png".to_string(),
+            last_seen_at: now.clone(),
+            missing_at: None,
+            last_seen_size: None,
+            last_seen_mtime: None,
+        })
+        .unwrap();
+        let scope = crate::db_core::models::SelectionSourceScope::Folder {
+            path: "/library/shoot".to_string(),
+            min_size: 0,
+            include_rejected: false,
+        };
+        db.create_selection_run("Client final", &scope, None)
+            .unwrap()
+    }
+
+    fn request_with_view_context(
+        mut request: ClaudeAgentChatTurnRequest,
+        extra: Value,
+    ) -> ClaudeAgentChatTurnRequest {
+        let mut context: Value =
+            serde_json::from_str(request.view_context_json.as_deref().unwrap_or("{}")).unwrap();
+        if let (Some(object), Some(extra)) = (context.as_object_mut(), extra.as_object()) {
+            object.extend(extra.clone());
+        }
+        request.view_context_json = Some(context.to_string());
+        request
+    }
+
+    #[tokio::test]
+    async fn sdk_shortlist_proposal_binds_canonical_active_run() {
+        let db = test_db();
+        let selection_id = seed_active_selection_run(&db);
+        let request = request_with_view_context(
+            sample_request(),
+            json!({ "selection_id": selection_id.clone() }),
+        );
+        let result = run_with_fake_sdk(
+            &db,
+            request,
+            json!({
+                "operation": "create_proposal",
+                "message": "Adding a strong candidate to the shortlist.",
+                "proposal": {
+                    "kind": "shortlist_add",
+                    "lens": "portfolio",
+                    "criteria": "final pick",
+                    "items": [{"image_id": "img_a", "reason": "strongest", "confidence": 0.9}],
+                    "guard_results": {"blocked": []}
+                }
+            }),
+        )
+        .await
+        .unwrap();
+
+        let proposal = result.proposal.expect("shortlist proposal should persist");
+        assert_eq!(proposal.kind, "shortlist_add");
+        assert_eq!(proposal.status, "pending");
+        let source_context: Value = serde_json::from_str(&proposal.source_context_json).unwrap();
+        // The canonical run target is copied at creation; model output cannot
+        // choose a different run.
+        assert_eq!(source_context["selection_id"], selection_id);
+    }
+
+    #[tokio::test]
+    async fn sdk_shortlist_proposal_requires_active_run_context() {
+        let db = test_db();
+        let selection_id = seed_active_selection_run(&db);
+
+        // No selection_id in the view context: shortlist chat must fail
+        // instead of silently falling back to another run or kind.
+        let error = run_with_fake_sdk(
+            &db,
+            sample_request(),
+            json!({
+                "operation": "create_proposal",
+                "message": "add to shortlist",
+                "proposal": {
+                    "kind": "shortlist_add",
+                    "criteria": "final pick",
+                    "items": [{"image_id": "img_a", "reason": "strongest"}]
+                }
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("require an active Selection Mode run"),
+            "unexpected error: {error}"
+        );
+
+        // An outside-source candidate is rejected even with a valid run.
+        let outside_image = AgentChatImageContext {
+            image_id: "img_outside".to_string(),
+            filename: None,
+            width: None,
+            height: None,
+            format: None,
+            star_rating: None,
+            color_label: None,
+            decision: None,
+            source_label: None,
+            thumbnail_path: Some("/tmp/cull/thumbs/outside.png".to_string()),
+        };
+        let mut request =
+            request_with_view_context(sample_request(), json!({ "selection_id": selection_id }));
+        request.candidate_images.push(outside_image);
+        let error = run_with_fake_sdk(
+            &db,
+            request,
+            json!({
+                "operation": "create_proposal",
+                "message": "add to shortlist",
+                "proposal": {
+                    "kind": "shortlist_add",
+                    "criteria": "final pick",
+                    "items": [{"image_id": "img_outside", "reason": "strongest"}]
+                }
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("outside the captured selection source"),
+            "unexpected error: {error}"
+        );
+        // And the run's shortlist was never touched by chat turns.
+        assert!(db
+            .selection_shortlist_ids(&selection_id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(db.list_action_proposals(None, 20).unwrap().len(), 0);
     }
 
     #[tokio::test]

@@ -4,7 +4,36 @@
 use crate::db_core::db::{row_u64, Database};
 use crate::db_core::models::*;
 use crate::db_core::visibility::RejectedVisibility;
-use rusqlite::{params, Result};
+use rusqlite::{params, Connection, OptionalExtension, Result};
+
+/// Generic collection mutations must never bypass Selection Mode source and
+/// lifecycle invariants, so they are restricted to manual (or legacy NULL)
+/// collections. Smart, session and selection projects are managed by their
+/// own specialized flows.
+/// Generic collection mutations must never bypass Selection Mode source and
+/// lifecycle invariants, so they are restricted to collection types without
+/// membership rules of their own: manual (or legacy NULL) collections and
+/// filesystem-backed sessions, whose membership flow predates Selection Mode.
+/// Smart collections derive membership from filters and selection runs
+/// validate against their captured source, so both are refused here.
+fn ensure_collection_accepts_membership(conn: &Connection, collection_id: &str) -> Result<()> {
+    let accepted: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM projects
+             WHERE id = ?1
+               AND (collection_type IS NULL OR collection_type = 'manual'
+                    OR collection_type = 'session')",
+            params![collection_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if accepted.is_none() {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "Collection does not accept manual membership changes".to_string(),
+        ));
+    }
+    Ok(())
+}
 
 impl Database {
     pub fn create_collection(&self, name: &str) -> Result<String> {
@@ -81,6 +110,7 @@ impl Database {
     pub fn add_to_collection(&self, collection_id: &str, image_ids: &[&str]) -> Result<()> {
         let mut conn = self.conn.lock();
         let tx = conn.transaction()?;
+        ensure_collection_accepts_membership(&tx, collection_id)?;
         let max_pos: i64 = tx.query_row(
             "SELECT COALESCE(MAX(position), -1) FROM collection_items WHERE collection_id = ?1",
             params![collection_id],
@@ -98,6 +128,7 @@ impl Database {
 
     pub fn remove_from_collection(&self, collection_id: &str, image_id: &str) -> Result<()> {
         let conn = self.conn.lock();
+        ensure_collection_accepts_membership(&conn, collection_id)?;
         conn.execute(
             "DELETE FROM collection_items WHERE collection_id = ?1 AND image_id = ?2",
             params![collection_id, image_id],
@@ -231,6 +262,7 @@ impl Database {
 
     pub fn delete_collection(&self, collection_id: &str) -> Result<()> {
         let conn = self.conn.lock();
+        ensure_collection_accepts_membership(&conn, collection_id)?;
         conn.execute(
             "DELETE FROM collection_items WHERE collection_id = ?1",
             params![collection_id],

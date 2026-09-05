@@ -56,8 +56,10 @@
     /* Color semantics (imageview-1i2k.5) — one meaning per color:
        --blue   interactive: active selection, focus, links, primary actions
        --green  positive state: success, live/running
-       --orange active mode / attention (e.g. collect mode)
-       --purple detected-class tag
+       --orange active mode / attention
+       --purple detected-class tag and Selection Mode shortlist membership
+                (bookmark marker; never the only carrier of the state — the
+                accessible name announces "Shortlisted")
        --red    error / destructive */
     --spacing: 8px;
     --radius: 4px;

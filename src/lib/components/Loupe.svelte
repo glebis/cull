@@ -3,7 +3,7 @@
     import { onMount, tick } from 'svelte';
     import ContextMenu from './ContextMenu.svelte';
     import PromptResubmitDialog from './PromptResubmitDialog.svelte';
-    import { images, focusedIndex, focusedImage, showLoupeHistogram, loupeScale, loupePanX, loupePanY, loupeZoomRequest, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds } from '$lib/stores';
+    import { images, focusedIndex, focusedImage, showLoupeHistogram, loupeScale, loupePanX, loupePanY, loupeZoomRequest, navigateBack, showDetectionBoxes, showDetectionInspector, nsfwMode, showToast, selectedIds, shortlistIds } from '$lib/stores';
     import {
         getDetections,
         getVisionMetadata,
@@ -982,6 +982,7 @@
     });
 
     let isSelected = $derived(image ? $selectedIds.has(image.image.id) : false);
+    let isShortlisted = $derived(image ? $shortlistIds.has(image.image.id) : false);
 
     async function copyPrompt() {
         if (!prompt) return;
@@ -1026,6 +1027,7 @@
             data-agent-rating={rating || ''}
             data-agent-decision={decision}
             data-agent-selected={isSelected}
+            data-shortlisted={isShortlisted}
             data-agent-focused="true"
             data-agent-view-role="loupe-image"
         >
@@ -1156,6 +1158,16 @@
         <div class="mini-selected">SEL</div>
     {/if}
 
+    {#if !hideOverlays && isShortlisted}
+        <!-- Bookmark marker with labelled state: shape + title, not colour alone. -->
+        <div class="mini-shortlisted" title="Shortlisted">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M6 3h12v18l-6-4.5L6 21z" />
+            </svg>
+            <span>Shortlisted</span>
+        </div>
+    {/if}
+
     {#if !hideOverlays && $showLoupeHistogram && histogram}
         <div class="loupe-histogram" aria-label="Histogram: luma and RGB tonal distribution">
             <div class="histogram-heading">
@@ -1232,6 +1244,10 @@
             <span class="decision" class:accept={decision === 'accept'} class:reject={decision === 'reject'}>
                 {decision}
             </span>
+        {/if}
+        {#if isShortlisted}
+            <span class="sep">|</span>
+            <span class="shortlist-flag">Shortlisted</span>
         {/if}
         {:else}
             <span class="empty-status">No image selected</span>
@@ -1518,6 +1534,11 @@
     .decision.reject {
         color: var(--red);
     }
+    .shortlist-flag {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--purple);
+    }
     .zoom {
         border: none;
         background: transparent;
@@ -1663,6 +1684,28 @@
         background: var(--blue);
         color: var(--bg);
         box-shadow: 0 0 0 1px rgba(8, 8, 12, 0.8), 0 8px 22px rgba(0, 0, 0, 0.34);
+    }
+    .mini-shortlisted {
+        position: absolute;
+        top: 18px;
+        left: 64px;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        pointer-events: none;
+        background: var(--purple);
+        color: var(--bg);
+        box-shadow: 0 0 0 1px rgba(8, 8, 12, 0.8), 0 8px 22px rgba(0, 0, 0, 0.34);
+    }
+    .mini-shortlisted svg {
+        width: 11px;
+        height: 11px;
     }
     /* Decision badge (persistent) */
     .mini-status {

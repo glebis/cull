@@ -68,6 +68,7 @@ describe('packaged native interaction smoke', () => {
 
         expect(smokeModule.runNativeInteractionSmoke).toBeTypeOf('function');
         const result = await smokeModule.runNativeInteractionSmoke!({
+            selectionPersistence: async () => ({ resumed: false, completed: [] }),
             root: document,
             timeoutMs: 500,
             finish: async (code) => { finishCodes.push(code); },
@@ -109,6 +110,7 @@ describe('packaged native interaction smoke', () => {
 
         expect(smokeModule.runNativeInteractionSmoke).toBeTypeOf('function');
         const result = await smokeModule.runNativeInteractionSmoke!({
+            selectionPersistence: async () => ({ resumed: false, completed: [] }),
             root: document,
             timeoutMs: 25,
             finish: async (code) => { finishCodes.push(code); },
@@ -141,6 +143,7 @@ describe('packaged native interaction smoke', () => {
 
         expect(smokeModule.runNativeInteractionSmoke).toBeTypeOf('function');
         const result = await smokeModule.runNativeInteractionSmoke!({
+            selectionPersistence: async () => ({ resumed: false, completed: [] }),
             root: document,
             timeoutMs: 25,
             finish: async (code) => { finishCodes.push(code); },
@@ -156,4 +159,39 @@ describe('packaged native interaction smoke', () => {
         expect(screenshots).toEqual([expect.stringContaining('blocked by div.blocking-overlay')]);
         expect(recordedResults).toEqual([expect.objectContaining({ ok: false })]);
     });
+});
+
+it('records the resumed selection check without replaying first-launch UI setup', async () => {
+    const { runNativeInteractionSmoke } = await loadSmokeModule();
+    const results: unknown[] = [];
+    const exits: number[] = [];
+    document.body.innerHTML = '';
+    const result = await runNativeInteractionSmoke!({
+        root: document,
+        selectionPersistence: async () => ({ resumed: true, completed: ['selection-restart-persistence'] }),
+        recordResult: async value => { results.push(value); },
+        finish: async code => { exits.push(code); },
+        captureFailure: async () => {},
+        log: () => {},
+    });
+    expect(result).toEqual({ ok: true, completed: ['selection-restart-persistence'] });
+    expect(results).toEqual([result]);
+    expect(exits).toEqual([0]);
+});
+
+it('fails the packaged run when persisted shortlist validation fails', async () => {
+    const { runNativeInteractionSmoke } = await loadSmokeModule();
+    const exits: number[] = [];
+    const failures: string[] = [];
+    const result = await runNativeInteractionSmoke!({
+        root: document,
+        selectionPersistence: async () => { throw new Error('shortlist did not survive restart'); },
+        recordResult: async () => {},
+        finish: async code => { exits.push(code); },
+        captureFailure: async message => { failures.push(message); },
+        log: () => {},
+    });
+    expect(result.ok).toBe(false);
+    expect(failures).toEqual(['shortlist did not survive restart']);
+    expect(exits).toEqual([1]);
 });

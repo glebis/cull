@@ -3,10 +3,14 @@
     import ModalDialog from '$lib/components/ModalDialog.svelte';
     import type { AgentActionProposal, ImageWithFile } from '$lib/api';
     import {
+        isShortlistProposalKind,
         parseAgentProposalSourceContext,
         proposalActorLabel,
+        proposalKindLabel,
+        shortlistProposalActionLabel,
         sourceContextIsStale,
         sourceContextScopeLabel,
+        sourceContextSelectionId,
         type AgentProposalViewContext,
     } from '$lib/agent-proposal-context';
     import { safeAssetPreviewPath } from '$lib/view-utils';
@@ -31,12 +35,18 @@
 
     let approvedIds = $state<Set<string>>(new Set());
     const candidates = $derived(parseCandidates(proposal?.items_json));
-    const actionLabel = $derived(proposal?.kind === 'trash_images' ? 'Move approved to Trash' : 'Select approved');
+    const actionLabel = $derived.by(() => {
+        if (!proposal) return 'Select approved';
+        if (proposal.kind === 'trash_images') return 'Move approved to Trash';
+        if (isShortlistProposalKind(proposal.kind)) return shortlistProposalActionLabel(proposal.kind);
+        return 'Select approved';
+    });
     const sourceContext = $derived(parseAgentProposalSourceContext(proposal?.source_context_json));
     const proposalSourceLabel = $derived(proposal ? proposalActorLabel(sourceContext, proposal.persona) : '');
     const proposalCreatedLabel = $derived(proposal ? formatProposalTimestamp(proposal.created_at) : '');
     const proposalScopeLabel = $derived(sourceContextScopeLabel(sourceContext) ?? currentViewContext?.label ?? 'Unknown view');
     const proposalIsStale = $derived(sourceContextIsStale(sourceContext, currentViewContext));
+    const shortlistTarget = $derived(sourceContextSelectionId(sourceContext));
 
     $effect(() => {
         approvedIds = new Set(candidates.map(candidate => candidate.image_id));
@@ -95,9 +105,9 @@
         <header class="dialog-header">
             <div>
                 <h2 id="agent-proposal-review-title">
-                    {proposal.kind === 'trash_images' ? 'Review Trash proposal' : 'Review selection proposal'}
+                    {proposal ? `Review ${proposalKindLabel(proposal.kind).toLowerCase()} proposal` : 'Review proposal'}
                 </h2>
-                <p id="agent-proposal-review-description">{proposal.criteria}</p>
+                <p id="agent-proposal-review-description">{proposal?.criteria}</p>
             </div>
             <button type="button" onclick={oncancelreview}>Cancel</button>
         </header>
@@ -106,6 +116,9 @@
             <span>By {proposalSourceLabel}</span>
             <span>{proposalCreatedLabel}</span>
             <span>View: {proposalScopeLabel}</span>
+            {#if shortlistTarget}
+                <span>Target selection: {shortlistTarget}</span>
+            {/if}
             {#if proposalIsStale}
                 <strong>Stale view</strong>
             {/if}

@@ -30,6 +30,7 @@ pub mod quality;
 pub mod raw;
 pub mod referenced_sources;
 pub mod selection;
+pub mod selection_run;
 pub mod sessions;
 pub mod smart_collections;
 pub mod static_publishing;

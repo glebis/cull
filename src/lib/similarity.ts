@@ -4,7 +4,7 @@
 
 import { findSimilarImages, getImagesByIds, type ImageWithFile } from './api';
 import { clearImageScope, resetImagePaging } from './image-loading';
-import { focusedIndex, images } from './stores';
+import { focusedIndex, images, similarityViewActive } from './stores';
 
 // Reorder fetched images to match the ranked similarity order. Images missing
 // from the ranking sort to the end (Infinity), preserving determinism.
@@ -29,6 +29,7 @@ export async function loadSimilarImages(imageId: string, topK = 20): Promise<num
         resetImagePaging();
         images.set(similar);
         focusedIndex.set(0);
+        similarityViewActive.set(true);
     }
     return similar.length;
 }

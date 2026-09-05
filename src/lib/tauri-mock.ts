@@ -1,3 +1,4 @@
+import type { AgentActionProposal } from "./api";
 type MockListener<T = any> = (event: { event: string; payload: T }) => void;
 export type UnlistenFn = () => void;
 
@@ -96,6 +97,13 @@ function mockThumbnailPath(i: number): string {
 }
 
 function makeMockImage(i: number) {
+  const selection: MockSelectionState | null = i > 0 && i % 3 === 0 ? {
+    image_id: `img-${i}`,
+    project_id: null,
+    star_rating: Math.min(5, Math.floor(i / 2) + 1),
+    color_label: null,
+    decision: i % 5 === 0 ? 'accept' : 'undecided',
+  } : null;
   return {
     image: {
       id: `img-${i}`,
@@ -109,18 +117,28 @@ function makeMockImage(i: number) {
     },
     path: mockImagePath(i),
     thumbnail_path: mockThumbnailPath(i),
-    selection: i > 0 && i % 3 === 0 ? {
-      image_id: `img-${i}`,
-      project_id: null,
-      star_rating: Math.min(5, Math.floor(i / 2) + 1),
-      color_label: null,
-      decision: i % 5 === 0 ? 'accept' : 'undecided',
-    } : null,
+    selection,
+    source_label: null as string | null,
+    missing_at: null as string | null,
   };
 }
 
-let mockImages = Array.from({ length: 20 }, (_, i) => makeMockImage(i));
+// Browser fixtures default to 20 images; ?selectionImages=N raises the library
+// size (capped at 500) so Selection Mode E2E can prove a >200-image source
+// snapshot covers the whole resolved scope instead of the visible page.
+function selectionFixtureImageCount(): number {
+  if (typeof window === 'undefined') return 20;
+  const requested = Number(new URLSearchParams(window.location.search).get('selectionImages'));
+  if (!Number.isFinite(requested) || requested < 1) return 20;
+  return Math.min(Math.floor(requested), 500);
+}
+
+let mockImages = Array.from({ length: selectionFixtureImageCount() }, (_, i) => makeMockImage(i));
 let lastTrashedImages: ReturnType<typeof makeMockImage>[] = [];
+// Monotonic operation counter so the shared undo command can tell whether the
+// latest trash or the latest shortlist group happened more recently.
+let mockOperationSeq = 0;
+let lastTrashSeq = 0;
 let mockFolderPath = '/mock/folder-rename';
 
 function useFolderRenameFixture(): boolean {
@@ -246,6 +264,535 @@ function mockEmbeddingPage(args?: MockEmbeddingPageArgs) {
   return { ids, vectors, dims, total, offset, limit, has_more: offset + ids.length < total };
 }
 
+// --- Selection Mode ---
+// Browser-only stand-in for the native selection commands from
+// docs/superpowers/plans/2026-09-05-selection-mode-implementation.md.
+// Ordered membership, lifecycle and the membership undo journal live in
+// sessionStorage so runs survive page reloads for resume E2E; nothing here
+// touches production code, the real database, or the filesystem. The failure
+// switch (__CULL_E2E_SHORTLIST_FAILURES__), the reset hook
+// (__CULL_E2E_SELECTION_RESET__()), and the ?selectionFixture=reset and
+// ?selectionImages=N URL params are read only in this file.
+
+type MockSelectionStatus = 'active' | 'finished' | 'archived';
+type MockImageWithFile = ReturnType<typeof makeMockImage>;
+
+interface MockSelectionState {
+  image_id: string;
+  project_id: string | null;
+  star_rating: number | null;
+  color_label: string | null;
+  decision: string;
+}
+
+interface MockSelectionRunRecord {
+  id: string;
+  name: string;
+  status: MockSelectionStatus;
+  source_scope: unknown;
+  source_ids: string[];
+  shortlist_ids: string[];
+  target_count: number | null;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  pre_archive_status: MockSelectionStatus | null;
+}
+
+interface MockMembershipUndoRecord {
+  selection_id: string;
+  before: string[];
+  after: string[];
+  seq: number;
+}
+
+interface MockSelectionFixtureSnapshot {
+  version: 1;
+  runs: MockSelectionRunRecord[];
+  undo: MockMembershipUndoRecord[];
+  redo: MockMembershipUndoRecord[];
+}
+
+interface MockSelectionRunView {
+  id: string;
+  name: string;
+  status: MockSelectionStatus;
+  source_count: number;
+  shortlist_count: number;
+  target_count: number | null;
+  source_scope: unknown;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  rejected_shortlist_count: number;
+}
+
+interface MockSelectionStateView {
+  run: MockSelectionRunView;
+  shortlist_ids: string[];
+}
+
+const SELECTION_FIXTURE_STORAGE_KEY = 'cull-e2e-selection-fixture-v1';
+// Undo action type reported by the shared undo/redo commands after reverting a
+// shortlist membership group. The backend peer owns the canonical native string.
+const SELECTION_MEMBERSHIP_UNDO_ACTION = 'selection_membership';
+
+let selectionFixture: MockSelectionFixtureSnapshot | null = null;
+
+function emptySelectionFixture(): MockSelectionFixtureSnapshot {
+  return { version: 1, runs: [], undo: [], redo: [] };
+}
+
+function selectionStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
+  try {
+    const storage = (globalThis as any).sessionStorage;
+    return storage && typeof storage.getItem === 'function' ? storage : null;
+  } catch {
+    return null;
+  }
+}
+
+function selectionResetRequested(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return new URLSearchParams(window.location.search).get('selectionFixture') === 'reset';
+  } catch {
+    return false;
+  }
+}
+
+function loadSelectionFixture(): MockSelectionFixtureSnapshot {
+  const storage = selectionStorage();
+  if (!storage) return emptySelectionFixture();
+  try {
+    if (selectionResetRequested()) {
+      storage.removeItem(SELECTION_FIXTURE_STORAGE_KEY);
+      return emptySelectionFixture();
+    }
+    const raw = storage.getItem(SELECTION_FIXTURE_STORAGE_KEY);
+    if (!raw) return emptySelectionFixture();
+    const parsed = JSON.parse(raw) as Partial<MockSelectionFixtureSnapshot> | null;
+    if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.runs)) return emptySelectionFixture();
+    return {
+      version: 1,
+      runs: parsed.runs,
+      undo: Array.isArray(parsed.undo) ? parsed.undo : [],
+      redo: Array.isArray(parsed.redo) ? parsed.redo : [],
+    };
+  } catch {
+    return emptySelectionFixture();
+  }
+}
+
+function persistSelectionFixture(): void {
+  const storage = selectionStorage();
+  if (!storage || !selectionFixture) return;
+  try {
+    storage.setItem(SELECTION_FIXTURE_STORAGE_KEY, JSON.stringify(selectionFixture));
+  } catch {
+    // Quota or privacy mode: the in-memory fixture keeps working for the page.
+  }
+}
+
+function selectionFixtureState(): MockSelectionFixtureSnapshot {
+  if (!selectionFixture) selectionFixture = loadSelectionFixture();
+  return selectionFixture;
+}
+
+let mockActionProposals: AgentActionProposal[] = [];
+
+function resetSelectionFixture(): void {
+  mockActionProposals = [];
+  selectionFixture = emptySelectionFixture();
+  try {
+    selectionStorage()?.removeItem(SELECTION_FIXTURE_STORAGE_KEY);
+  } catch {
+    // Storage failures do not matter for the in-memory fixture.
+  }
+}
+
+// Test-only seam: browser E2E calls window.__CULL_E2E_SELECTION_RESET__() to
+// start a scenario from an empty fixture; vitest uses the same hook in Node.
+(globalThis as any).__CULL_E2E_SELECTION_RESET__ = resetSelectionFixture;
+
+// Test-only failure injection for membership saves: when
+// __CULL_E2E_SHORTLIST_FAILURES__ is a number > 0, each add/remove consumes one
+// failure and rejects before touching any state, so browser E2E can exercise
+// optimistic rollback and retry. Modeled on consumeCliStatusFault below; only
+// read here — production api.ts knows nothing about it.
+function consumeShortlistSaveFault(): boolean {
+  const remaining = (globalThis as any).__CULL_E2E_SHORTLIST_FAILURES__;
+  if (typeof remaining !== 'number' || remaining <= 0) return false;
+  (globalThis as any).__CULL_E2E_SHORTLIST_FAILURES__ = remaining - 1;
+  return true;
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function mockImageDecision(item: MockImageWithFile): string {
+  return item.selection?.decision ?? 'undecided';
+}
+
+function survivingImageIds(): Set<string> {
+  return new Set(mockImages.map(item => item.image.id));
+}
+
+// Decisions and ratings mutate the live fixture so review state is observable
+// everywhere (aria labels, selection conflict counts) without a reload.
+function applyMockSelection(imageId: string, patch: { star_rating?: number | null; decision?: string }): void {
+  const item = mockImages.find(candidate => candidate.image.id === imageId);
+  if (!item) return;
+  item.selection = {
+    image_id: imageId,
+    project_id: item.selection?.project_id ?? null,
+    star_rating: patch.star_rating !== undefined ? patch.star_rating : item.selection?.star_rating ?? null,
+    color_label: item.selection?.color_label ?? null,
+    decision: patch.decision !== undefined ? patch.decision : item.selection?.decision ?? 'undecided',
+  };
+}
+
+function mockImageIndexById(imageId: string): number {
+  const index = Number(String(imageId).replace('img-', ''));
+  return Number.isFinite(index) ? index : 0;
+}
+
+function evaluateSmartRule(rule: any, item: MockImageWithFile): boolean {
+  const value = rule.value;
+  switch (rule.field) {
+    case 'rating': {
+      const rating = item.selection?.star_rating;
+      if (typeof rating !== 'number') return false;
+      return rule.op === 'gte' ? rating >= value : rating === value;
+    }
+    case 'decision':
+      return rule.op === 'eq' && mockImageDecision(item) === value;
+    case 'orientation': {
+      const orientation = item.image.width >= item.image.height ? 'landscape' : 'portrait';
+      return rule.op === 'eq' && orientation === value;
+    }
+    case 'format':
+      return rule.op === 'eq' && item.image.format === value;
+    case 'source_label':
+      return rule.op === 'eq' && item.source_label === value;
+    case 'imported_at': {
+      if (rule.op !== 'last_n_days') return false;
+      const imported = Date.parse(item.image.imported_at);
+      const days = Number(value);
+      if (Number.isNaN(imported) || !Number.isFinite(days)) return false;
+      return (Date.now() - imported) / 86_400_000 <= days;
+    }
+    default:
+      return false;
+  }
+}
+
+function evaluateSmartNode(node: any, item: MockImageWithFile): boolean {
+  if (!node || typeof node !== 'object') return false;
+  if (node.type === 'group') {
+    const children = Array.isArray(node.children) ? node.children : [];
+    return node.op === 'or'
+      ? children.some((child: any) => evaluateSmartNode(child, item))
+      : children.every((child: any) => evaluateSmartNode(child, item));
+  }
+  if (node.type !== 'rule') return false;
+  return evaluateSmartRule(node, item);
+}
+
+function evaluateSmartFilter(filterJson: unknown, item: MockImageWithFile): boolean {
+  let filter: unknown = filterJson;
+  if (typeof filterJson === 'string') {
+    try {
+      filter = JSON.parse(filterJson);
+    } catch {
+      return false;
+    }
+  }
+  return evaluateSmartNode(filter, item);
+}
+
+function visibleMockImage(item: MockImageWithFile, includeRejected: boolean): boolean {
+  return includeRejected || mockImageDecision(item) !== 'reject';
+}
+
+function selectionCollectionItems(collectionId: string): MockImageWithFile[] {
+  const byId = new Map(mockImages.map(item => [item.image.id, item]));
+  const liveOrRebuilt = (imageId: string) => byId.get(imageId) ?? makeMockImage(mockImageIndexById(imageId));
+  if (collectionId === 'col_clipboard_mock') return [liveOrRebuilt('img-0'), liveOrRebuilt('img-1')];
+  if (collectionId === 'col-picks') return mockImages.slice(0, 6);
+  const run = selectionRunById(collectionId);
+  return run ? survivingShortlistIds(run).map(liveOrRebuilt) : [];
+}
+
+function resolveSelectionScopeItems(scope: any): MockImageWithFile[] {
+  if (!scope || typeof scope !== 'object') {
+    throw new Error("Selection source scope is required (for example { type: 'all', include_rejected: false }).");
+  }
+  const includeRejected = scope.include_rejected === true;
+  switch (scope.type) {
+    case 'all':
+      return mockImages.filter(item => visibleMockImage(item, includeRejected));
+    case 'import_batch':
+      // The browser fixture has no import batches; an unresolved scope previews as empty.
+      return [];
+    case 'smart':
+      return mockImages.filter(item =>
+        visibleMockImage(item, includeRejected) && evaluateSmartFilter(scope.filter_json, item));
+    case 'collection':
+      return selectionCollectionItems(String(scope.id ?? ''))
+        .filter(item => visibleMockImage(item, includeRejected));
+    case 'detected_class':
+      // Mirrors the list_images_by_detected_class fixture (img-0, img-1).
+      return mockImages.slice(0, 2).filter(item => visibleMockImage(item, includeRejected));
+    case 'folder': {
+      const folderPath = String(scope.path ?? '');
+      const images = useFolderRenameFixture() && folderPath === mockFolderPath
+        ? mockImages.slice(0, 2)
+        : mockImages.filter(item => item.path.startsWith(`${folderPath}/`));
+      const minSize = Number(scope.min_size ?? 0);
+      return images.filter(item =>
+        visibleMockImage(item, includeRejected)
+        && (!Number.isFinite(minSize) || minSize <= 0 || item.image.file_size >= minSize));
+    }
+    case 'referenced_folder':
+      // Mirrors the externalDrive fixture page of list_images_in_referenced_folder.
+      return useExternalDriveFixture()
+        ? mockImages.slice(0, 12).filter(item => visibleMockImage(item, includeRejected))
+        : [];
+    case 'filtered': {
+      const minSize = Number(scope.min_size ?? 0);
+      return mockImages.filter(item =>
+        visibleMockImage(item, includeRejected)
+        && (!Number.isFinite(minSize) || minSize <= 0 || item.image.file_size >= minSize));
+    }
+    case 'search': {
+      // Backend-resolved text search intersected with its base scope.
+      const base = resolveSelectionScopeItems(scope.base);
+      const query = String(scope.query ?? '').trim().toLowerCase();
+      if (!query) return base;
+      return base.filter(item =>
+        item.path.toLowerCase().includes(query) || item.image.format.toLowerCase() === query);
+    }
+    default:
+      throw new Error(`Unsupported selection source scope type '${String(scope.type)}'.`);
+  }
+}
+
+function selectionRunById(runId: unknown): MockSelectionRunRecord | null {
+  if (typeof runId !== 'string' || runId.length === 0) return null;
+  return selectionFixtureState().runs.find(run => run.id === runId) ?? null;
+}
+
+function requireSelectionRun(args: any): MockSelectionRunRecord {
+  const runId = args?.selectionId ?? args?.selection_id;
+  const run = selectionRunById(runId);
+  if (!run) {
+    throw new Error(`Selection run was not found: '${String(runId)}'. Use list_selection_runs to see the resumable, finished and archived runs.`);
+  }
+  return run;
+}
+
+function nextSelectionRunId(): string {
+  let id = '';
+  do {
+    id = `sel-${nextId++}`;
+  } while (selectionRunById(id));
+  return id;
+}
+
+function survivingSourceIds(record: MockSelectionRunRecord): string[] {
+  const surviving = survivingImageIds();
+  return record.source_ids.filter(imageId => surviving.has(imageId));
+}
+
+function survivingShortlistIds(record: MockSelectionRunRecord): string[] {
+  const surviving = survivingImageIds();
+  return record.shortlist_ids.filter(imageId => surviving.has(imageId));
+}
+
+function selectionRunView(record: MockSelectionRunRecord): MockSelectionStateView {
+  const shortlistIds = survivingShortlistIds(record);
+  const byId = new Map(mockImages.map(item => [item.image.id, item]));
+  const rejectedShortlistCount = shortlistIds.filter(imageId => {
+    const item = byId.get(imageId);
+    return item ? mockImageDecision(item) === 'reject' : false;
+  }).length;
+  return {
+    run: {
+      id: record.id,
+      name: record.name,
+      status: record.status,
+      source_count: survivingSourceIds(record).length,
+      shortlist_count: shortlistIds.length,
+      target_count: record.target_count,
+      source_scope: record.source_scope,
+      created_at: record.created_at,
+      updated_at: record.updated_at,
+      finished_at: record.finished_at,
+      rejected_shortlist_count: rejectedShortlistCount,
+    },
+    shortlist_ids: shortlistIds,
+  };
+}
+
+function membershipImageIds(args: any): string[] {
+  const raw = args?.imageIds ?? args?.image_ids;
+  return Array.isArray(raw) ? raw.map(id => String(id)) : [];
+}
+
+function recordMembershipUndo(record: MockSelectionRunRecord, before: string[], after: string[]): void {
+  const snapshot = selectionFixtureState();
+  snapshot.undo.push({ selection_id: record.id, before, after, seq: ++mockOperationSeq });
+  snapshot.redo = []; // new forward work clears the redo branch
+  if (snapshot.undo.length > 100) snapshot.undo.splice(0, snapshot.undo.length - 100);
+}
+
+function applyShortlistMembership(record: MockSelectionRunRecord, ids: string[]): void {
+  record.shortlist_ids = ids;
+  record.updated_at = nowIso();
+}
+
+function mutateShortlist(
+  record: MockSelectionRunRecord,
+  operation: 'add' | 'remove',
+  imageIds: string[],
+): MockSelectionStateView {
+  if (consumeShortlistSaveFault()) {
+    throw new Error('mock: shortlist save failed (injected E2E fault)');
+  }
+  if (record.status !== 'active') {
+    throw new Error(`Selection run "${record.name}" is ${record.status} and can no longer change membership. Reopen it first.`);
+  }
+  // Groups are atomic: validate every id before writing anything.
+  const requested = [...new Set(imageIds)];
+  if (requested.length === 0) return selectionRunView(record);
+  const surviving = survivingImageIds();
+  const missing = requested.filter(imageId => !surviving.has(imageId));
+  if (missing.length > 0) {
+    throw new Error(`Cannot change the shortlist: these images are no longer in the library: ${missing.join(', ')}.`);
+  }
+  const sourceSet = new Set(survivingSourceIds(record));
+  const outside = requested.filter(imageId => !sourceSet.has(imageId));
+  if (outside.length > 0) {
+    throw new Error(`Cannot ${operation === 'add' ? 'add' : 'remove'} image(s) outside the captured Selection source: ${outside.join(', ')}.`);
+  }
+  const before = survivingShortlistIds(record);
+  const beforeSet = new Set(before);
+  let after: string[];
+  if (operation === 'add') {
+    const additions = requested.filter(imageId => !beforeSet.has(imageId));
+    if (additions.length === 0) return selectionRunView(record); // idempotent no-op: no undo record
+    after = [...before, ...additions]; // membership preserves addition order
+  } else {
+    const removals = requested.filter(imageId => beforeSet.has(imageId));
+    if (removals.length === 0) return selectionRunView(record); // idempotent no-op: no undo record
+    const removalSet = new Set(removals);
+    after = before.filter(imageId => !removalSet.has(imageId));
+  }
+  applyShortlistMembership(record, after);
+  recordMembershipUndo(record, before, after);
+  persistSelectionFixture();
+  const view = selectionRunView(record);
+  emitMockEvent('selection-run:updated', view);
+  return view;
+}
+
+// A finished selection run exposes its shortlist as a normal named collection;
+// every other lifecycle state keeps it out of the sidebar lists.
+function syncSelectionCollection(record: MockSelectionRunRecord): void {
+  const collectionId = record.id; // Native finish preserves the run/project identity.
+  const index = mockCollections.findIndex(([id]) => id === collectionId);
+  if (record.status === 'finished') {
+    const count = survivingShortlistIds(record).length;
+    if (index >= 0) mockCollections[index][2] = count;
+    else mockCollections.push([collectionId, record.name, count]);
+    return;
+  }
+  if (index >= 0) mockCollections.splice(index, 1);
+}
+
+function completeLifecycleChange(record: MockSelectionRunRecord): MockSelectionStateView {
+  persistSelectionFixture();
+  const view = selectionRunView(record);
+  emitMockEvent('selection-run:updated', view);
+  return view;
+}
+
+function finishSelectionRun(record: MockSelectionRunRecord): MockSelectionStateView {
+  if (record.status !== 'active') {
+    throw new Error(`Selection run "${record.name}" is ${record.status}; only active runs can be finished.`);
+  }
+  if (survivingShortlistIds(record).length === 0) {
+    throw new Error(`Cannot finish Selection Mode with an empty shortlist. Archive "${record.name}" instead.`);
+  }
+  record.status = 'finished';
+  record.finished_at = nowIso();
+  record.updated_at = record.finished_at;
+  syncSelectionCollection(record);
+  return completeLifecycleChange(record);
+}
+
+function reopenSelectionRun(record: MockSelectionRunRecord): MockSelectionStateView {
+  if (record.status !== 'finished') {
+    throw new Error(`Selection run "${record.name}" is ${record.status} and cannot be reopened. Only finished runs can be reopened.`);
+  }
+  record.status = 'active';
+  record.finished_at = null;
+  record.updated_at = nowIso();
+  syncSelectionCollection(record);
+  return completeLifecycleChange(record);
+}
+
+function archiveSelectionRun(record: MockSelectionRunRecord): MockSelectionStateView {
+  if (record.status === 'archived') {
+    throw new Error(`Selection run "${record.name}" is already archived.`);
+  }
+  record.pre_archive_status = record.status;
+  record.status = 'archived';
+  record.updated_at = nowIso();
+  syncSelectionCollection(record);
+  return completeLifecycleChange(record);
+}
+
+function restoreSelectionRun(record: MockSelectionRunRecord): MockSelectionStateView {
+  if (record.status !== 'archived') {
+    throw new Error(`Selection run "${record.name}" is ${record.status} and cannot be restored. Only archived runs can be restored.`);
+  }
+  record.status = record.pre_archive_status ?? 'active';
+  record.pre_archive_status = null;
+  record.updated_at = nowIso();
+  syncSelectionCollection(record);
+  return completeLifecycleChange(record);
+}
+
+function selectionPage(record: MockSelectionRunRecord, scope: 'source' | 'shortlist', args?: any) {
+  const ids = scope === 'source' ? survivingSourceIds(record) : survivingShortlistIds(record);
+  const byId = new Map(mockImages.map(item => [item.image.id, item]));
+  const includeRejected = args?.includeRejected === true || args?.include_rejected === true;
+  const minSize = Number(args?.minSize ?? args?.min_size ?? 0);
+  const query = String(args?.query ?? '').trim().toLowerCase();
+
+  const filtered = ids
+    .map(imageId => byId.get(imageId))
+    .filter((item): item is MockImageWithFile => Boolean(item))
+    .filter(item => visibleMockImage(item, includeRejected))
+    .filter(item => !Number.isFinite(minSize) || minSize <= 0 || item.image.file_size >= minSize)
+    .filter(item => !query
+      || item.path.toLowerCase().includes(query)
+      || item.image.format.toLowerCase() === query);
+
+  const offset = Math.max(0, Math.floor(Number(args?.offset ?? 0)) || 0);
+  const limitRaw = args?.limit;
+  const limit = limitRaw === undefined || limitRaw === null
+    ? filtered.length
+    : Math.max(0, Math.floor(Number(limitRaw)) || 0);
+  return {
+    items: filtered.slice(offset, offset + limit),
+    total: filtered.length,
+  };
+}
+
 const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   'plugin:event|listen': () => nextListenerId++,
   'plugin:event|unlisten': () => undefined,
@@ -258,13 +805,112 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   'plugin:opener|reveal_item_in_dir': () => undefined,
 
   drain_pending_open_params: () => [],
-  list_action_proposals: () => [],
+  create_action_proposal: (_: any, args: any) => {
+    const proposal: AgentActionProposal = {
+      ...args.request, id: `proposal-${mockActionProposals.length + 1}`,
+      status: 'pending', apply_result_json: null, undo_journal_json: null,
+      created_at: nowIso(), updated_at: nowIso(), applied_at: null,
+    };
+    mockActionProposals.push(proposal);
+    return { ...proposal };
+  },
+  list_action_proposals: (_: any, args?: any) => mockActionProposals
+    .filter(p => !args?.status || p.status === args.status)
+    .slice(0, args?.limit ?? 20).map(p => ({ ...p })),
+  dismiss_action_proposal: (_: any, args: any) => {
+    const proposal = mockActionProposals.find(p => p.id === args.proposalId);
+    if (!proposal || proposal.status !== 'pending') throw new Error('Proposal is not pending');
+    proposal.status = 'dismissed';
+  },
+  apply_action_proposal: (_: any, args: any) => {
+    const proposal = mockActionProposals.find(p => p.id === args.proposalId);
+    if (!proposal || proposal.status !== 'pending') throw new Error('Proposal is not pending');
+    if (!['shortlist_add', 'shortlist_remove'].includes(proposal.kind)) {
+      throw new Error('Mock supports applying shortlist proposals only');
+    }
+    const approved = [...new Set<string>(args.approvedImageIds)];
+    if (!approved.length) throw new Error('Approve at least one image');
+    const items = JSON.parse(proposal.items_json) as Array<{ image_id: string }>;
+    if (approved.some(id => !items.some(item => item.image_id === id))) {
+      throw new Error('Approved image is not part of the reviewed proposal');
+    }
+    const context = JSON.parse(proposal.source_context_json);
+    const record = requireSelectionRun({ selectionId: context.selection_id });
+    // Validate and mutate the captured run before consuming approval; a fault
+    // leaves both membership and proposal pending, so the same review retries.
+    mutateShortlist(record, proposal.kind === 'shortlist_add' ? 'add' : 'remove', approved);
+    proposal.status = 'applied';
+    proposal.apply_result_json = args.resultJson;
+    proposal.undo_journal_json = JSON.stringify({ approved_image_ids: approved });
+    proposal.applied_at = proposal.updated_at = nowIso();
+    return { proposal_id: proposal.id, status: 'applied', applied_count: approved.length,
+      failed_count: 0, result_json: args.resultJson };
+  },
   list_agent_selection_presets: () => [],
   get_image_file_bytes: (_: any, args: { imageId: string }) => {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#0c0c12"/><text x="320" y="180" text-anchor="middle" fill="#e0e0e0">${args.imageId}</text></svg>`;
     return { bytes: Array.from(new TextEncoder().encode(svg)), mime_type: 'image/svg+xml' };
   },
   stop_dictation: () => undefined,
+
+  // Selection Mode (browser-only stand-in for the native selection commands;
+  // see the Selection Mode section above for fixture semantics).
+  preview_selection_source: (_: any, args?: any) => ({
+    count: resolveSelectionScopeItems(args?.sourceScope ?? args?.source_scope).length,
+  }),
+  create_selection_run: (_: any, args?: any) => {
+    const name = String(args?.name ?? '').trim();
+    if (!name) throw new Error('Selection Mode needs a name before it can start.');
+    const scope = args?.sourceScope ?? args?.source_scope;
+    const sourceItems = resolveSelectionScopeItems(scope);
+    if (sourceItems.length === 0) {
+      throw new Error('Cannot start Selection Mode: the resolved source is empty. Pick a scope with images and try again.');
+    }
+    const targetRaw = args?.targetCount ?? args?.target_count;
+    const targetCount = targetRaw === undefined || targetRaw === null || targetRaw === ''
+      ? null
+      : Number(targetRaw);
+    if (targetCount !== null && (!Number.isFinite(targetCount) || targetCount <= 0)) {
+      throw new Error('Selection target count must be a positive number.');
+    }
+    const record: MockSelectionRunRecord = {
+      id: nextSelectionRunId(),
+      name,
+      status: 'active',
+      source_scope: scope,
+      // Captures every resolved source id in stable order, not just the visible page.
+      source_ids: sourceItems.map(item => item.image.id),
+      shortlist_ids: [], // always starts empty, even when images are highlighted
+      target_count: targetCount,
+      created_at: nowIso(),
+      updated_at: nowIso(),
+      finished_at: null,
+      pre_archive_status: null,
+    };
+    selectionFixtureState().runs.push(record);
+    persistSelectionFixture();
+    const view = selectionRunView(record);
+    emitMockEvent('selection-run:updated', view);
+    return view;
+  },
+  list_selection_runs: (_: any, args?: any) => {
+    const status = typeof args?.status === 'string' && args.status.length > 0 ? args.status : null;
+    return selectionFixtureState().runs
+      .filter(run => !status || run.status === status)
+      .sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at))
+      .map(run => selectionRunView(run).run);
+  },
+  get_selection_run: (_: any, args?: any) => selectionRunView(requireSelectionRun(args)),
+  list_selection_source: (_: any, args?: any) => selectionPage(requireSelectionRun(args), 'source', args),
+  list_selection_shortlist: (_: any, args?: any) => selectionPage(requireSelectionRun(args), 'shortlist', args),
+  add_to_shortlist: (_: any, args?: any) =>
+    mutateShortlist(requireSelectionRun(args), 'add', membershipImageIds(args)),
+  remove_from_shortlist: (_: any, args?: any) =>
+    mutateShortlist(requireSelectionRun(args), 'remove', membershipImageIds(args)),
+  finish_selection_run: (_: any, args?: any) => finishSelectionRun(requireSelectionRun(args)),
+  reopen_selection_run: (_: any, args?: any) => reopenSelectionRun(requireSelectionRun(args)),
+  archive_selection_run: (_: any, args?: any) => archiveSelectionRun(requireSelectionRun(args)),
+  restore_selection_run: (_: any, args?: any) => restoreSelectionRun(requireSelectionRun(args)),
 
   list_smart_collections: () => [...MOCK_SMART_COLLECTIONS, ...userCollections],
 
@@ -610,7 +1256,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   ],
   list_images: () => mockImages,
   get_image_count: () => mockImages.length,
-  list_image_ids: () => Array.from({ length: 20 }, (_, i) => `img-${i}`),
+  list_image_ids: () => Array.from({ length: mockImages.length }, (_, i) => `img-${i}`),
   get_images_by_ids: (_: any, args: { imageIds: string[] }) =>
     args.imageIds.map(id => makeMockImage(Number(id.replace('img-', '')) || 0)),
   get_image_by_path: (_: any, args: { path: string }) => ({
@@ -642,22 +1288,60 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   cancel_job: () => undefined,
   pause_job: () => undefined,
   resume_job: () => undefined,
-  set_rating: () => undefined,
-  set_decision: () => undefined,
+  set_rating: (_: any, args: { imageId: string; rating: number }) => {
+    applyMockSelection(args.imageId, { star_rating: args.rating });
+    return undefined;
+  },
+  set_decision: (_: any, args: { imageId: string; decision: string }) => {
+    applyMockSelection(args.imageId, { decision: args.decision });
+    return undefined;
+  },
   undo: () => {
-    if (lastTrashedImages.length > 0) {
+    // Selection membership groups participate in the same undo command as the
+    // trash fixture. Whichever operation happened more recently is reverted
+    // first; trash undo has no redo half, so redo only covers membership.
+    const snapshot = selectionFixtureState();
+    const topMembership = snapshot.undo[snapshot.undo.length - 1];
+    const membershipIsNewest = Boolean(topMembership && topMembership.seq >= lastTrashSeq);
+    if (lastTrashedImages.length > 0 && !membershipIsNewest) {
       mockImages = [...mockImages, ...lastTrashedImages]
         .sort((left, right) => mockImageFixtureIndex(left) - mockImageFixtureIndex(right));
       lastTrashedImages = [];
+      return 'rating';
+    }
+    const membership = snapshot.undo.pop();
+    if (membership) {
+      const run = selectionRunById(membership.selection_id);
+      if (run) {
+        applyShortlistMembership(run, membership.before);
+        snapshot.redo.push(membership);
+        persistSelectionFixture();
+        emitMockEvent('selection-run:updated', selectionRunView(run));
+      }
+      return SELECTION_MEMBERSHIP_UNDO_ACTION;
     }
     return 'rating';
   },
-  redo: () => 'rating',
+  redo: () => {
+    const membership = selectionFixtureState().redo.pop();
+    if (membership) {
+      const run = selectionRunById(membership.selection_id);
+      if (run) {
+        applyShortlistMembership(run, membership.after);
+        selectionFixtureState().undo.push(membership);
+        persistSelectionFixture();
+        emitMockEvent('selection-run:updated', selectionRunView(run));
+      }
+      return SELECTION_MEMBERSHIP_UNDO_ACTION;
+    }
+    return 'rating';
+  },
   cancel_claude_agent_chat_turn: () => true,
   trash_images: (_: any, args: { imageIds: string[] }) => {
     const ids = new Set(args.imageIds);
     lastTrashedImages = mockImages.filter(item => ids.has(item.image.id));
     mockImages = mockImages.filter(item => !ids.has(item.image.id));
+    lastTrashSeq = ++mockOperationSeq;
     return lastTrashedImages.length;
   },
   trash_images_detailed: (_: any, args: { imageIds: string[] }) => {
@@ -666,6 +1350,7 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
     lastTrashedImages = requestedIds.flatMap(id => byId.get(id) ?? []);
     const removedIds = new Set(lastTrashedImages.map(item => item.image.id));
     mockImages = mockImages.filter(item => !removedIds.has(item.image.id));
+    lastTrashSeq = ++mockOperationSeq;
     const results = requestedIds.map(imageId => {
       const item = byId.get(imageId);
       return item
@@ -982,8 +1667,13 @@ const MOCK_HANDLERS: Record<string, (...args: any[]) => any> = {
   },
   list_images_by_folder: () => useFolderRenameFixture() ? mockImages.slice(0, 2) : [],
   list_images_filtered: () => [],
-  list_collection_images: (_: any, args: { collectionId: string }) =>
-    args.collectionId === 'col_clipboard_mock' ? [makeMockImage(0), makeMockImage(1)] : [],
+  list_collection_images: (_: any, args: { collectionId: string; includeRejected?: boolean; offset?: number | null; limit?: number | null }) => {
+    const items = selectionCollectionItems(args.collectionId);
+    // Match the native command's rejected-visibility contract.
+    const visible = args.includeRejected === true ? items : items.filter(item => mockImageDecision(item) !== 'reject');
+    const offset = args.offset ?? 0;
+    return visible.slice(offset, args.limit == null ? undefined : offset + args.limit);
+  },
   is_yolo_available: () => true,
   is_nudenet_available: () => true,
   download_yolo_model: () => {

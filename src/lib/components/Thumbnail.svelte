@@ -4,6 +4,7 @@
     import { getMediaAssetForImage, regenerateSingleThumbnail } from '$lib/api';
     import { recordImageLoadFailure } from '$lib/diagnostics';
     import { buildThumbnailAriaLabel, safeAssetPreviewPath } from '$lib/view-utils';
+    import { selectionRun, shortlistIds } from '$lib/stores';
     import ContextMenu from './ContextMenu.svelte';
 
     interface Props {
@@ -11,12 +12,14 @@
         size: number;
         focused: boolean;
         selected: boolean;
+        /** Selection Mode shortlist membership — independent of `selected`. */
+        shortlisted?: boolean;
         onclick: (event: MouseEvent | KeyboardEvent) => void;
         ondblclick: () => void;
         loading?: 'lazy' | 'eager';
     }
 
-    let { item, size, focused, selected, onclick, ondblclick, loading = 'lazy' }: Props = $props();
+    let { item, size, focused, selected, shortlisted = false, onclick, ondblclick, loading = 'lazy' }: Props = $props();
 
     const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
     // Base thumbnail (largest variant) and the size-appropriate variant for this tile.
@@ -47,6 +50,13 @@
         camera: 'RAW',
     };
     let sourceTag = $derived(item.source_label ? SOURCE_LABELS[item.source_label] ?? item.source_label : null);
+    // The shortlist state is announced only while Selection Mode is active;
+    // outside the mode it would be meaningless noise on every tile.
+    let shortlistState = $derived(
+        $selectionRun !== null && $selectionRun.status === 'active'
+            ? shortlisted
+            : undefined
+    );
     let a11yLabel = $derived(
         buildThumbnailAriaLabel({
             filename,
@@ -55,6 +65,7 @@
             sourceTag,
             selected,
             missing: !!item.missing_at,
+            shortlisted: shortlistState,
         })
     );
     let imgError = $state(false);
@@ -206,6 +217,16 @@
             </svg>
         </div>
     {/if}
+
+    {#if shortlisted}
+        <!-- Bookmark/pick marker: shape + accessible name carry the state, not
+             colour alone (the tile's aria label announces "Shortlisted"). -->
+        <div class="badge shortlisted" data-shortlisted="true" title="Shortlisted">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M6 3h12v18l-6-4.5L6 21z" />
+            </svg>
+        </div>
+    {/if}
 </div>
 
 {#if ctxMenu.visible}
@@ -345,6 +366,18 @@
         border-left-color: var(--red);
         border-bottom-color: var(--red);
         color: var(--red);
+    }
+    /* Shortlist membership: distinct bookmark shape and --purple token. The
+       state is carried by the accessible name, never colour alone. */
+    .badge.shortlisted {
+        top: auto;
+        bottom: 0;
+        border-left-color: var(--purple);
+        border-top-color: var(--purple);
+        border-right: 0;
+        border-bottom: 0;
+        border-radius: 0 var(--radius) 0 0;
+        color: var(--purple);
     }
     .missing-overlay {
         position: absolute;

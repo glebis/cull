@@ -65,7 +65,7 @@ describe('ActionProposalReviewDialog rendered behavior', () => {
             oncancelreview,
         });
 
-        expect(screen.getByRole('dialog', { name: 'Review Trash proposal' })).toBeVisible();
+        expect(screen.getByRole('dialog', { name: 'Review trash proposal' })).toBeVisible();
         expect(screen.getByRole('checkbox', { name: 'Include image-1' })).toBeChecked();
         await user.click(screen.getByRole('checkbox', { name: 'Include image-2' }));
         await user.click(screen.getByRole('button', { name: 'Move approved to Trash' }));

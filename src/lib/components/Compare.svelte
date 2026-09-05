@@ -1,6 +1,6 @@
 <script lang="ts">
     import { convertFileSrc } from '@tauri-apps/api/core';
-    import { images, selectedIds, focusedIndex, compareActiveSide, compareImageOnly, zenMode } from '$lib/stores';
+    import { images, selectedIds, focusedIndex, compareActiveSide, compareImageOnly, zenMode, shortlistIds } from '$lib/stores';
     import type { ImageWithFile } from '$lib/api';
     import { nextCompareFocusedIndex } from '$lib/compare-gestures';
     import { classifySwipe, wheelGestureIntent } from '$lib/gesture-interactions';
@@ -160,6 +160,7 @@
         data-agent-rating={leftImage?.selection?.star_rating ?? ''}
         data-agent-decision={leftImage?.selection?.decision ?? 'undecided'}
         data-agent-selected={leftImage ? $selectedIds.has(leftImage.image.id) : false}
+        data-shortlisted={leftImage ? $shortlistIds.has(leftImage.image.id) : false}
         data-agent-focused={leftImage?.image.id === focusedImageId}
         data-agent-view-role="compare-left"
     >
@@ -186,6 +187,9 @@
                     <span class="decision" class:accept={decisionLabel(leftImage) === 'accept'} class:reject={decisionLabel(leftImage) === 'reject'}>
                         {decisionLabel(leftImage)}
                     </span>
+                    {#if leftImage && $shortlistIds.has(leftImage.image.id)}
+                        <span class="shortlist-flag" title="Shortlisted">⚑ Shortlisted</span>
+                    {/if}
                 </div>
             {/if}
         {:else}
@@ -214,6 +218,7 @@
         data-agent-rating={rightImage?.selection?.star_rating ?? ''}
         data-agent-decision={rightImage?.selection?.decision ?? 'undecided'}
         data-agent-selected={rightImage ? $selectedIds.has(rightImage.image.id) : false}
+        data-shortlisted={rightImage ? $shortlistIds.has(rightImage.image.id) : false}
         data-agent-focused={rightImage?.image.id === focusedImageId}
         data-agent-view-role="compare-right"
     >
@@ -240,6 +245,9 @@
                     <span class="decision" class:accept={decisionLabel(rightImage) === 'accept'} class:reject={decisionLabel(rightImage) === 'reject'}>
                         {decisionLabel(rightImage)}
                     </span>
+                    {#if rightImage && $shortlistIds.has(rightImage.image.id)}
+                        <span class="shortlist-flag" title="Shortlisted">⚑ Shortlisted</span>
+                    {/if}
                 </div>
             {/if}
         {:else}
@@ -360,6 +368,11 @@
     }
     .decision.reject {
         color: var(--red);
+    }
+    .shortlist-flag {
+        color: var(--purple);
+        font-size: 10px;
+        font-weight: 600;
     }
     .empty-panel {
         flex: 1;

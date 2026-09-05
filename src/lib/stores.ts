@@ -1,5 +1,5 @@
 import { writable, derived, get, type Writable } from 'svelte/store';
-import type { ClipboardMonitorStatus, ImageWithFile, SmartCollection, Session, Canvas } from './api';
+import type { ClipboardMonitorStatus, ImageWithFile, SelectionRun, SmartCollection, Session, Canvas } from './api';
 
 export type ViewMode = 'grid' | 'compare' | 'loupe' | 'canvas' | 'lineage' | 'embeddings' | 'publish' | 'export' | 'tinder';
 
@@ -452,8 +452,28 @@ export function resolveConfirmDialog(value: boolean) {
 // Collections
 export const collections = writable<[string, string, number][]>([]); // [id, name, count]
 export const activeCollection = writable<string | null>(null);
+/** Legacy Collect Mode state. User-facing Collect Mode was replaced by
+ *  Selection Mode; the stores remain exported only for compatibility with
+ *  older imports and are never set by current UI. */
 export const collectMode = writable<boolean>(false);
 export const collectModeTarget = writable<string | null>(null); // collection id being collected into
+
+// Selection Mode — building a shortlist from an explicit source. The database
+// is canonical; `shortlistIds` is the immediate marker cache so tiles update
+// before a persistence round-trip completes.
+export const selectionRun = writable<SelectionRun | null>(null);
+export const selectionScope = writable<'source' | 'shortlist'>('source');
+export const shortlistIds = writable<Set<string>>(new Set());
+/** Plain text search constrained to the stable captured source. Null when the
+ *  Source view is unfiltered. */
+export const selectionSourceSearch = writable<string | null>(null);
+/** Total backend-resolved items for the current Selection Mode scope page
+ *  query (not inferred from the visible page). */
+export const selectionScopeTotal = writable<number | null>(null);
+/** True while the grid shows a transient similarity result list. That view
+ *  cannot be captured as a Selection source, so Start Selection is disabled
+ *  with an explanation while it is active. */
+export const similarityViewActive = writable<boolean>(false);
 export const clipboardMonitorStatus = writable<ClipboardMonitorStatus | null>(null);
 
 // Smart Collections
@@ -620,6 +640,10 @@ export const exportFolderSmartCollection = writable<SmartCollection | null>(null
 export const contactSheetOpen = writable<boolean>(false);
 // Best-of-group ranking dialog.
 export const groupRankingOpen = writable<boolean>(false);
+// Selection Mode dialogs.
+export const selectionStartOpen = writable<boolean>(false);
+export const selectionFinishOpen = writable<boolean>(false);
+export const selectionResumeOpen = writable<boolean>(false);
 
 export const focusedImage = derived(
     [images, focusedIndex, focusedImageOverride],

@@ -24,6 +24,7 @@ pub mod model_download;
 pub mod model_pipeline;
 pub mod ocr;
 pub mod referenced_sources;
+pub mod selection_run;
 pub mod sessions;
 pub mod tokens;
 pub mod trash;

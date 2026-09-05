@@ -1,7 +1,19 @@
 [[permission]]
 identifier = "app-curation"
-description = "Allows curation commands for ratings, collections, lineage, sessions, canvases, and undo."
+description = "Allows curation commands for ratings, collections, shortlist runs, lineage, sessions, canvases, and undo."
 commands.allow = [
+  "preview_selection_source",
+  "create_selection_run",
+  "list_selection_runs",
+  "get_selection_run",
+  "list_selection_source",
+  "list_selection_shortlist",
+  "add_to_shortlist",
+  "remove_from_shortlist",
+  "finish_selection_run",
+  "reopen_selection_run",
+  "archive_selection_run",
+  "restore_selection_run",
   "add_to_collection",
   "add_to_lineage_group",
   "apply_action_proposal",

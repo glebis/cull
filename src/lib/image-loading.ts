@@ -12,8 +12,10 @@ import {
     importBatchFilter,
     importBatchImageIds,
     minSizeFilter,
+    selectionRun,
     showMissing,
     showRejected,
+    similarityViewActive,
     totalCount,
 } from './stores';
 import {
@@ -185,6 +187,13 @@ export function resetImagePaging() {
     setLoadState();
 }
 
+/** While a Selection Mode run owns the view, library scope loads are paused;
+ *  the run's own loaders fill the shared image stores instead. Leaving the
+ *  mode clears the run before reloading the library scope. */
+function selectionModeOwnsView(): boolean {
+    return get(selectionRun) !== null;
+}
+
 export function invalidateImageCache() {
     scopeCache.clear();
 }
@@ -210,6 +219,7 @@ export async function loadAllImages(options: ImageLoadOptions = {}) {
 }
 
 export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) {
+    if (selectionModeOwnsView()) return;
     const resetFocus = options.resetFocus ?? true;
     const force = options.force ?? false;
     const minItems = Math.max(0, options.minItems ?? 0);
@@ -241,6 +251,7 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
         gridScrollTop.set(cached.scrollTop);
         loading = false;
         loadedOnce = true;
+        similarityViewActive.set(false);
         setLoadState();
         return;
     }
@@ -269,6 +280,7 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
         nextOffset = offset;
         hasMore = lastRawCount === IMAGE_PAGE_SIZE;
         loadedOnce = true;
+        similarityViewActive.set(false);
         if (resetFocus) {
             focusedIndex.set(0);
             gridScrollTop.set(0);
@@ -290,6 +302,7 @@ export async function loadImagesForCurrentScope(options: ImageLoadOptions = {}) 
 }
 
 export async function loadMoreImagesForCurrentScope(pageSize = IMAGE_PAGE_SIZE) {
+    if (selectionModeOwnsView()) return;
     const scope = currentLibraryScope();
     const key = scopeKey(scope);
     if (key !== activeScopeKey) {
@@ -330,6 +343,7 @@ export async function loadImagesUntil(
     predicate: (image: ImageWithFile) => boolean,
     maxPages = 20,
 ): Promise<number> {
+    if (selectionModeOwnsView()) return -1;
     for (let page = 0; page <= maxPages; page++) {
         const foundIndex = get(images).findIndex(predicate);
         if (foundIndex >= 0) return foundIndex;
