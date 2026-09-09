@@ -32,7 +32,7 @@ jobs:
           cache: npm
 
       - name: Install pinned Rust
-        uses: dtolnay/rust-toolchain@1.120.0
+        uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: rustfmt, clippy
 

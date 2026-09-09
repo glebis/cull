@@ -40,7 +40,7 @@ jobs:
           cache: npm
 
       - name: Install pinned Rust
-        uses: dtolnay/rust-toolchain@1.120.0
+        uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: rustfmt, clippy
 
@@ -65,7 +65,7 @@ jobs:
           cache: npm
 
       - name: Install pinned Rust
-        uses: dtolnay/rust-toolchain@1.120.0
+        uses: dtolnay/rust-toolchain@1.95.0
 
       - name: Cache packaged app build
         uses: Swatinem/rust-cache@v2
@@ -123,7 +123,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
 
       - name: Install pinned Rust
-        uses: dtolnay/rust-toolchain@1.120.0
+        uses: dtolnay/rust-toolchain@1.95.0
 
       - name: Cache Rust audit tools
         uses: Swatinem/rust-cache@v2
