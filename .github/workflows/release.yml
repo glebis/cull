@@ -50,7 +50,7 @@ jobs:
         run: |
           rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy --target aarch64-apple-darwin
           rustup default 1.95.0
-          cargo install cargo-deny --version 0.19.8 --locked
+          cargo install cargo-deny --version 0.20.2 --locked
           cargo install cargo-audit --version 0.22.2 --locked
 
       - name: Install locked project dependencies
