@@ -50,3 +50,6 @@ docs/internal/
 
 # Local release resumability cache; authoritative evidence lives in Git/GitHub.
 .release-state/
+
+# Vendored agent skill packs (local tooling, not product code)
+.agents/

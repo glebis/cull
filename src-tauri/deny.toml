@@ -16,6 +16,11 @@ targets = [
 [advisories]
 version = 2
 yanked = "deny"
+# Several accepted IDs (the Linux-only GTK stack below) are never encountered
+# inside cargo-deny's macOS-scoped graph; they exist so the shared audit script
+# can forward them to cargo-audit, which scans the full Cargo.lock. Keep
+# cargo-deny warning-only about such unmatched ignores.
+unused-ignored-advisory = "warn"
 # Note: the Linux-only gtk3/glib advisories are excluded from cargo-deny scope
 # by the [graph] targets restriction above; cargo-audit still scans the full
 # Cargo.lock, so the shared audit script forwards this same ignore list to
