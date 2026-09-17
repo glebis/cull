@@ -97,8 +97,10 @@ no benefit); a hybrid split (two contracts to document and test).
 Validation:
 
 - Exactly one of `image_ids` / `folder_path`. Both or neither is an error.
-- `image_ids` is deduplicated in request order. An empty list, or more than 20
-  entries, is an error — the tool never silently truncates an explicit request.
+- `image_ids` is deduplicated in request order and blank entries are skipped.
+  An empty list (after dedupe), or more than 20 **distinct** entries, is an
+  error — the tool never silently truncates an explicit request. The 20-item
+  limit is applied after dedupe.
 - `size` must be one of `64`, `128`, `256`, `800`.
 - Folder pages are capped at 20 items regardless of `limit`; `limit` is clamped
   to `1..=20` (a `limit` of 0 becomes 1) and `offset` is treated as 0 when
@@ -167,7 +169,7 @@ are not part of the preview contract under any transport.
 | `missing` | The image is authorized and present, but no generated thumbnail file exists. |
 | `not_found` | The requested ID is not in the library. Local transport only. |
 | `unavailable` | The ID is unknown **or** outside the token scope. Authenticated transport only. |
-| `skipped_too_large` | The thumbnail file exceeds the 2 MB per-image cap. |
+| `skipped_too_large` | The generated thumbnail file exceeds the 2 MB per-image cap (raw file bytes). |
 | `skipped_budget` | The 8 MB authenticated payload budget was already exhausted. |
 
 `unavailable` deliberately does not distinguish unknown from out-of-scope, so a
@@ -208,11 +210,14 @@ the manifest or the blocks.
 
 - Maximum 20 items per call (both modes). An explicit over-limit `image_ids`
   request is an error rather than a silent truncation.
-- Per-image cap 2 MB. A larger generated file becomes `skipped_too_large`.
-- Authenticated total payload budget 8 MB of base64 data. Once an item would
-  exceed the budget, that item and every remaining item become
-  `skipped_budget`. This is deterministic: no partial backfill of later,
-  smaller images, so the manifest always mirrors the returned blocks.
+- Per-image cap 2 MB of **raw file bytes**. A larger generated file becomes
+  `skipped_too_large`.
+- Authenticated total budget 8 MB of **base64-encoded** payload. Once an `ok`
+  item would exceed the budget, that item and every remaining item that would
+  otherwise be `ok` become `skipped_budget`. Items already resolved to
+  `missing`, `not_found`, or `unavailable` keep those statuses. This is
+  deterministic: no partial backfill of later, smaller images, so the manifest
+  always mirrors the returned blocks.
 - At the default 256 px, a full 20-image page is roughly 400 KB of base64, so
   the budget binds only for large (800 px) requests on heavy images.
 
@@ -221,8 +226,12 @@ the manifest or the blocks.
 - IDs mode: every ID passes `check_image_id_scope` before resolution. Out of
   scope → `unavailable` (authenticated).
 - Folder mode: `tokens::folder_in_scope` first; a folder outside scope is an
-  explicit error. Each returned row additionally passes
-  `tokens::image_in_scope`, matching `list_folder_images`.
+  explicit error. Every item is then authorized individually inside resolution
+  via `tokens::image_id_in_scope`, which loads folder and collection membership;
+  this is a single source of truth for both request modes and lets a
+  collection-scoped token authorize a row reached through a folder page. A
+  folder page may therefore yield fewer `ok` items than `limit` when the scope
+  is sparse.
 - `get_image_previews` is added to `ALL_TOOLS` and `READ_TOOLS` in
   `mcp/auth.rs` and mapped to `library:read` in `tokens::tool_capability`, so
   capability checks and the completeness test stay correct.
