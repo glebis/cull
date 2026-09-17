@@ -33,6 +33,141 @@ pub(crate) fn preview_size_chain(size: u32) -> Vec<u32> {
         .collect()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PreviewStatus {
+    Ok,
+    Missing,
+    NotFound,
+    Unavailable,
+    SkippedTooLarge,
+    SkippedBudget,
+}
+
+impl PreviewStatus {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            PreviewStatus::Ok => "ok",
+            PreviewStatus::Missing => "missing",
+            PreviewStatus::NotFound => "not_found",
+            PreviewStatus::Unavailable => "unavailable",
+            PreviewStatus::SkippedTooLarge => "skipped_too_large",
+            PreviewStatus::SkippedBudget => "skipped_budget",
+        }
+    }
+}
+
+/// One requested preview after authorization and thumbnail lookup, before
+/// payload budgeting. `thumbnail_path` is populated for local transport only;
+/// `inline_bytes` for authenticated transport only.
+#[derive(Debug, Clone)]
+pub(crate) struct PreviewItem {
+    pub image_id: String,
+    pub status: PreviewStatus,
+    pub thumbnail_size: Option<u32>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub bytes: Option<u64>,
+    pub thumbnail_path: Option<String>,
+    pub inline_bytes: Option<Vec<u8>>,
+}
+
+impl PreviewItem {
+    pub(crate) fn unresolved(image_id: &str, status: PreviewStatus) -> Self {
+        PreviewItem {
+            image_id: image_id.to_string(),
+            status,
+            thumbnail_size: None,
+            width: None,
+            height: None,
+            bytes: None,
+            thumbnail_path: None,
+            inline_bytes: None,
+        }
+    }
+}
+
+/// Resolve each requested image ID to a generated thumbnail.
+///
+/// Authorization runs per item via `tokens::image_id_in_scope`, so an
+/// out-of-scope ID is indistinguishable from an unknown one for authenticated
+/// callers. Source paths (`ImageWithFile::path`) are intentionally never read
+/// here: the preview contract covers generated thumbnails only.
+pub(crate) fn resolve_preview_items(
+    db: &Database,
+    app_data_dir: &Path,
+    scope: &Option<TokenScope>,
+    local: bool,
+    image_ids: &[String],
+    size: u32,
+) -> Result<Vec<PreviewItem>, String> {
+    if image_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let refs: Vec<&str> = image_ids.iter().map(String::as_str).collect();
+    let images = db.get_images_by_ids(&refs).map_err(|e| e.to_string())?;
+    let known: std::collections::HashSet<&str> =
+        images.iter().map(|image| image.image.id.as_str()).collect();
+
+    let chain = preview_size_chain(size);
+    let mut items = Vec::with_capacity(image_ids.len());
+
+    for image_id in image_ids {
+        if !tokens::image_id_in_scope(db, scope, image_id).map_err(|e| e.to_string())? {
+            items.push(PreviewItem::unresolved(
+                image_id,
+                PreviewStatus::Unavailable,
+            ));
+            continue;
+        }
+        if !known.contains(image_id.as_str()) {
+            let status = if local {
+                PreviewStatus::NotFound
+            } else {
+                PreviewStatus::Unavailable
+            };
+            items.push(PreviewItem::unresolved(image_id, status));
+            continue;
+        }
+
+        let served = chain.iter().find_map(|&candidate| {
+            let path = thumbnails::sized_thumbnail_path(app_data_dir, image_id, candidate);
+            path.exists().then_some((candidate, path))
+        });
+        let Some((served_size, thumbnail_file)) = served else {
+            items.push(PreviewItem::unresolved(image_id, PreviewStatus::Missing));
+            continue;
+        };
+
+        let bytes = std::fs::metadata(&thumbnail_file)
+            .ok()
+            .map(|metadata| metadata.len());
+        let dimensions = image::image_dimensions(&thumbnail_file).ok();
+        let inline_bytes = if local {
+            None
+        } else {
+            std::fs::read(&thumbnail_file).ok()
+        };
+        if !local && inline_bytes.is_none() {
+            items.push(PreviewItem::unresolved(image_id, PreviewStatus::Missing));
+            continue;
+        }
+
+        items.push(PreviewItem {
+            image_id: image_id.clone(),
+            status: PreviewStatus::Ok,
+            thumbnail_size: Some(served_size),
+            width: dimensions.map(|(width, _)| width),
+            height: dimensions.map(|(_, height)| height),
+            bytes,
+            thumbnail_path: local.then(|| thumbnail_file.to_string_lossy().to_string()),
+            inline_bytes,
+        });
+    }
+
+    Ok(items)
+}
+
 /// Normalize and validate `get_image_previews` params into a selector and a
 /// thumbnail size. `offset`/`limit` are ignored in IDs mode.
 pub(crate) fn validate_preview_request(
@@ -254,6 +389,54 @@ pub(super) fn router() -> super::ToolRouter<super::CullMcp> {
 mod tests {
     use super::*;
 
+    use crate::db_core::models::{Image, ImageFile};
+    use crate::db_core::thumbnails as thumbnails_mod;
+    use std::path::PathBuf;
+
+    fn test_db() -> Database {
+        Database::open(std::path::Path::new(":memory:")).unwrap()
+    }
+
+    fn insert_test_image(db: &Database, id: &str, source_path: &str) {
+        db.insert_image(&Image {
+            id: id.to_string(),
+            sha256_hash: format!("hash-{id}"),
+            width: 8,
+            height: 8,
+            format: "jpeg".to_string(),
+            file_size: 1,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            imported_at: "2026-01-01T00:00:00Z".to_string(),
+            ai_prompt: None,
+            raw_metadata: None,
+        })
+        .unwrap();
+        db.insert_image_file(&ImageFile {
+            id: format!("file-{id}"),
+            image_id: id.to_string(),
+            path: source_path.to_string(),
+            last_seen_at: "2026-01-01T00:00:00Z".to_string(),
+            missing_at: None,
+            last_seen_size: None,
+            last_seen_mtime: None,
+        })
+        .unwrap();
+    }
+
+    fn write_thumbnail(app_data_dir: &Path, image_id: &str, size: u32) -> PathBuf {
+        let path = thumbnails_mod::sized_thumbnail_path(app_data_dir, image_id, size);
+        image::DynamicImage::new_rgb8(8, 8).save(&path).unwrap();
+        path
+    }
+
+    fn folder_scope(folder: &str) -> Option<TokenScope> {
+        Some(TokenScope {
+            collections: None,
+            folders: Some(vec![folder.to_string()]),
+            tags: None,
+        })
+    }
+
     fn ids_params(ids: &[&str]) -> GetImagePreviewsParams {
         GetImagePreviewsParams {
             image_ids: Some(ids.iter().map(|id| id.to_string()).collect()),
@@ -389,5 +572,115 @@ mod tests {
     fn validate_rejects_blank_folder_path() {
         let err = validate_preview_request(&folder_params("   ", None, None)).unwrap_err();
         assert!(err.contains("folder_path"), "got: {err}");
+    }
+
+    #[test]
+    fn resolve_reports_not_found_locally_and_unavailable_for_tokens() {
+        let db = test_db();
+        let tmp = tempfile::tempdir().unwrap();
+        let ids = vec!["ghost".to_string()];
+
+        let local = resolve_preview_items(&db, tmp.path(), &None, true, &ids, 256).unwrap();
+        assert_eq!(local[0].status, PreviewStatus::NotFound);
+
+        let scoped =
+            resolve_preview_items(&db, tmp.path(), &folder_scope("/lib"), false, &ids, 256)
+                .unwrap();
+        assert_eq!(scoped[0].status, PreviewStatus::Unavailable);
+    }
+
+    #[test]
+    fn resolve_hides_out_of_scope_images_behind_unavailable() {
+        let db = test_db();
+        let tmp = tempfile::tempdir().unwrap();
+        insert_test_image(&db, "inside", "/lib/a.jpg");
+        insert_test_image(&db, "outside", "/other/b.jpg");
+        write_thumbnail(tmp.path(), "inside", 256);
+        write_thumbnail(tmp.path(), "outside", 256);
+
+        let ids = vec!["inside".to_string(), "outside".to_string()];
+        let items = resolve_preview_items(&db, tmp.path(), &folder_scope("/lib"), false, &ids, 256)
+            .unwrap();
+
+        assert_eq!(items[0].status, PreviewStatus::Ok);
+        assert_eq!(items[1].status, PreviewStatus::Unavailable);
+        assert!(items[1].thumbnail_path.is_none());
+        assert!(items[1].inline_bytes.is_none());
+    }
+
+    #[test]
+    fn resolve_reports_missing_thumbnails_without_failing_other_items() {
+        let db = test_db();
+        let tmp = tempfile::tempdir().unwrap();
+        insert_test_image(&db, "has_thumb", "/lib/a.jpg");
+        insert_test_image(&db, "no_thumb", "/lib/b.jpg");
+        write_thumbnail(tmp.path(), "has_thumb", 256);
+
+        let ids = vec!["no_thumb".to_string(), "has_thumb".to_string()];
+        let items = resolve_preview_items(&db, tmp.path(), &None, true, &ids, 256).unwrap();
+
+        assert_eq!(items[0].status, PreviewStatus::Missing);
+        assert_eq!(items[1].status, PreviewStatus::Ok);
+    }
+
+    #[test]
+    fn resolve_falls_back_to_a_larger_generated_size() {
+        let db = test_db();
+        let tmp = tempfile::tempdir().unwrap();
+        insert_test_image(&db, "big_only", "/lib/a.jpg");
+        write_thumbnail(tmp.path(), "big_only", 800);
+
+        let ids = vec!["big_only".to_string()];
+        let items = resolve_preview_items(&db, tmp.path(), &None, true, &ids, 256).unwrap();
+
+        assert_eq!(items[0].status, PreviewStatus::Ok);
+        assert_eq!(items[0].thumbnail_size, Some(800));
+        let path = items[0].thumbnail_path.clone().unwrap();
+        assert!(path.ends_with("big_only.jpg"), "got: {path}");
+    }
+
+    #[test]
+    fn resolve_local_returns_thumbnail_paths_and_never_source_paths() {
+        let db = test_db();
+        let tmp = tempfile::tempdir().unwrap();
+        insert_test_image(&db, "raf", "/lib/frame.RAF");
+        let thumb = write_thumbnail(tmp.path(), "raf", 256);
+
+        let ids = vec!["raf".to_string()];
+        let items = resolve_preview_items(&db, tmp.path(), &None, true, &ids, 256).unwrap();
+
+        assert_eq!(items[0].status, PreviewStatus::Ok);
+        let served = items[0].thumbnail_path.clone().unwrap();
+        assert_eq!(PathBuf::from(&served), thumb);
+        assert!(served.ends_with("raf_256.jpg"), "got: {served}");
+        assert!(!served.ends_with(".RAF"));
+        assert!(items[0].inline_bytes.is_none());
+        assert_eq!(items[0].width, Some(8));
+        assert_eq!(items[0].height, Some(8));
+        assert!(items[0].bytes.unwrap() > 0);
+    }
+
+    #[test]
+    fn resolve_authenticated_inlines_jpeg_bytes_and_no_paths() {
+        let db = test_db();
+        let tmp = tempfile::tempdir().unwrap();
+        insert_test_image(&db, "a", "/lib/a.jpeg");
+        let thumb = write_thumbnail(tmp.path(), "a", 256);
+
+        let ids = vec!["a".to_string()];
+        let items = resolve_preview_items(&db, tmp.path(), &None, false, &ids, 256).unwrap();
+
+        assert_eq!(items[0].status, PreviewStatus::Ok);
+        assert!(items[0].thumbnail_path.is_none());
+        let inlined = items[0].inline_bytes.clone().unwrap();
+        assert_eq!(inlined, std::fs::read(&thumb).unwrap());
+    }
+
+    #[test]
+    fn resolve_empty_id_list_is_empty() {
+        let db = test_db();
+        let tmp = tempfile::tempdir().unwrap();
+        let items = resolve_preview_items(&db, tmp.path(), &None, true, &[], 256).unwrap();
+        assert!(items.is_empty());
     }
 }
