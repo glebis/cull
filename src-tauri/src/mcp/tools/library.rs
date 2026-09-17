@@ -192,6 +192,7 @@ pub(crate) fn build_preview_response(
     size_requested: u32,
 ) -> PreviewResponse {
     let mut running_budget: u64 = 0;
+    let mut budget_exhausted = false;
     let mut image_blocks: Vec<Vec<u8>> = Vec::new();
     let mut manifest_items: Vec<serde_json::Value> = Vec::with_capacity(items.len());
 
@@ -211,7 +212,12 @@ pub(crate) fn build_preview_response(
                             status = PreviewStatus::SkippedTooLarge;
                         } else {
                             let encoded = base64_encoded_len(bytes.len());
-                            if running_budget + encoded > PREVIEW_TOTAL_MAX_BYTES {
+                            if budget_exhausted
+                                || running_budget + encoded > PREVIEW_TOTAL_MAX_BYTES
+                            {
+                                // Latch: the first overflow ends payload backfill, so
+                                // later smaller images are never admitted either.
+                                budget_exhausted = true;
                                 status = PreviewStatus::SkippedBudget;
                             } else {
                                 running_budget += encoded;
@@ -939,5 +945,128 @@ mod tests {
         let response = build_preview_response(vec![broken], false, 256);
         assert_eq!(response.manifest["items"][0]["status"], "missing");
         assert!(response.image_blocks.is_empty());
+    }
+
+    #[test]
+    fn response_admits_an_image_at_exactly_the_per_image_cap() {
+        // The per-image cap is a strict `>`: raw == 2 MiB is still admitted.
+        let response = build_preview_response(
+            vec![ok_inline_item(
+                "exact",
+                PREVIEW_PER_IMAGE_MAX_BYTES as usize,
+            )],
+            false,
+            256,
+        );
+
+        assert_eq!(response.image_blocks.len(), 1);
+        assert_eq!(response.manifest["items"][0]["status"], "ok");
+        assert_eq!(response.manifest["items"][0]["content_index"], 0);
+    }
+
+    #[test]
+    fn response_admits_items_that_exactly_fill_the_total_budget() {
+        // base64 lengths: 2_796_204 + 2_796_204 + 2_796_200 = 8_388_608 = 8 MiB.
+        // Every raw length is <= 2 MiB, so the per-image cap never interferes.
+        // The fourth item is tiny but no longer fits: the budget is exact.
+        let items = vec![
+            ok_inline_item("a", 2_097_152),
+            ok_inline_item("b", 2_097_152),
+            ok_inline_item("c", 2_097_150),
+            ok_inline_item("d", 1_000),
+        ];
+        let response = build_preview_response(items, false, 256);
+
+        assert_eq!(response.image_blocks.len(), 3);
+        assert_eq!(response.manifest["items"][0]["status"], "ok");
+        assert_eq!(response.manifest["items"][1]["status"], "ok");
+        assert_eq!(response.manifest["items"][2]["status"], "ok");
+        assert_eq!(response.manifest["items"][2]["content_index"], 2);
+        assert_eq!(response.manifest["items"][3]["status"], "skipped_budget");
+        assert!(response.manifest["items"][3].get("content_index").is_none());
+    }
+
+    #[test]
+    fn response_latches_the_budget_after_the_first_overflow() {
+        // Three 1_800_000-byte raws -> 2_400_000 base64 each = 7_200_000 accepted.
+        // The fourth overflows and must latch the budget; a later tiny item that
+        // would individually fit (7_200_000 + 1_336 <= 8_388_608) must therefore
+        // still be skipped_budget rather than `ok`.
+        let raw = 1_800_000usize;
+        let items = vec![
+            ok_inline_item("a", raw),
+            ok_inline_item("b", raw),
+            ok_inline_item("c", raw),
+            ok_inline_item("overflow", raw),
+            ok_inline_item("tiny_after_overflow", 1_000),
+        ];
+        let response = build_preview_response(items, false, 256);
+
+        assert_eq!(response.image_blocks.len(), 3);
+        assert_eq!(response.manifest["items"][3]["status"], "skipped_budget");
+        assert_eq!(response.manifest["items"][4]["status"], "skipped_budget");
+        assert!(response.manifest["items"][4].get("content_index").is_none());
+    }
+
+    #[test]
+    fn response_keeps_oversized_items_skipped_too_large_after_the_latch() {
+        // The per-image check takes precedence over the budget latch, so an
+        // oversized item after exhaustion is skipped_too_large, not skipped_budget.
+        let raw = 1_800_000usize;
+        let huge = PREVIEW_PER_IMAGE_MAX_BYTES as usize + 1;
+        let items = vec![
+            ok_inline_item("a", raw),
+            ok_inline_item("b", raw),
+            ok_inline_item("c", raw),
+            ok_inline_item("overflow", raw),
+            ok_inline_item("huge_after_latch", huge),
+            ok_inline_item("tiny_after_latch", 1_000),
+        ];
+        let response = build_preview_response(items, false, 256);
+
+        assert_eq!(response.image_blocks.len(), 3);
+        assert_eq!(response.manifest["items"][4]["status"], "skipped_too_large");
+        assert_eq!(response.manifest["items"][5]["status"], "skipped_budget");
+    }
+
+    #[test]
+    fn response_links_blocks_to_items_by_content_index_across_a_non_ok_item() {
+        // Distinct payloads + a non-ok item between two ok items pin
+        // `content_index` to the block index rather than the manifest position.
+        let first = PreviewItem {
+            image_id: "a".to_string(),
+            status: PreviewStatus::Ok,
+            thumbnail_size: Some(256),
+            width: Some(8),
+            height: Some(8),
+            bytes: Some(32),
+            thumbnail_path: None,
+            inline_bytes: Some(vec![1u8; 32]),
+        };
+        let second = PreviewItem {
+            image_id: "c".to_string(),
+            status: PreviewStatus::Ok,
+            thumbnail_size: Some(256),
+            width: Some(8),
+            height: Some(8),
+            bytes: Some(48),
+            thumbnail_path: None,
+            inline_bytes: Some(vec![2u8; 48]),
+        };
+        let items = vec![
+            first,
+            PreviewItem::unresolved("gap", PreviewStatus::NotFound),
+            second,
+        ];
+        let response = build_preview_response(items, false, 256);
+
+        assert_eq!(response.image_blocks.len(), 2);
+        assert_eq!(response.manifest["items"][0]["content_index"], 0);
+        assert_eq!(response.manifest["items"][1]["status"], "not_found");
+        assert!(response.manifest["items"][1].get("content_index").is_none());
+        // Manifest position 2 maps to block index 1.
+        assert_eq!(response.manifest["items"][2]["content_index"], 1);
+        assert_eq!(response.image_blocks[0], vec![1u8; 32]);
+        assert_eq!(response.image_blocks[1], vec![2u8; 48]);
     }
 }
