@@ -11,6 +11,10 @@ use crate::db_core::thumbnails;
 pub(crate) const PREVIEW_MAX_ITEMS: usize = 20;
 /// Documented default thumbnail size for previews.
 pub(crate) const PREVIEW_DEFAULT_SIZE: u32 = 256;
+/// Per-image cap on the raw generated thumbnail file size.
+pub(crate) const PREVIEW_PER_IMAGE_MAX_BYTES: u64 = 2 * 1024 * 1024;
+/// Total base64 payload budget for one authenticated preview response.
+pub(crate) const PREVIEW_TOTAL_MAX_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Debug)]
 pub(crate) enum PreviewSelector {
@@ -166,6 +170,113 @@ pub(crate) fn resolve_preview_items(
     }
 
     Ok(items)
+}
+
+pub(crate) struct PreviewResponse {
+    pub manifest: serde_json::Value,
+    pub image_blocks: Vec<Vec<u8>>,
+}
+
+fn base64_encoded_len(raw_len: usize) -> u64 {
+    ((raw_len as u64 + 2) / 3) * 4
+}
+
+/// Apply the payload caps and build the manifest plus the ordered image blocks.
+///
+/// `image_blocks[i]` is the payload advertised by the manifest item whose
+/// `content_index == i`. Once the total budget is exhausted, every remaining
+/// item that would otherwise be `ok` becomes `skipped_budget`.
+pub(crate) fn build_preview_response(
+    items: Vec<PreviewItem>,
+    local: bool,
+    size_requested: u32,
+) -> PreviewResponse {
+    let mut running_budget: u64 = 0;
+    let mut image_blocks: Vec<Vec<u8>> = Vec::new();
+    let mut manifest_items: Vec<serde_json::Value> = Vec::with_capacity(items.len());
+
+    for mut item in items {
+        let mut status = item.status.clone();
+        let mut content_index: Option<usize> = None;
+
+        if status == PreviewStatus::Ok {
+            if local {
+                if item.thumbnail_path.is_none() {
+                    status = PreviewStatus::Missing;
+                }
+            } else {
+                match item.inline_bytes.take() {
+                    Some(bytes) => {
+                        if bytes.len() as u64 > PREVIEW_PER_IMAGE_MAX_BYTES {
+                            status = PreviewStatus::SkippedTooLarge;
+                        } else {
+                            let encoded = base64_encoded_len(bytes.len());
+                            if running_budget + encoded > PREVIEW_TOTAL_MAX_BYTES {
+                                status = PreviewStatus::SkippedBudget;
+                            } else {
+                                running_budget += encoded;
+                                content_index = Some(image_blocks.len());
+                                image_blocks.push(bytes);
+                            }
+                        }
+                    }
+                    None => status = PreviewStatus::Missing,
+                }
+            }
+        }
+
+        let mut value = serde_json::json!({
+            "image_id": item.image_id,
+            "status": status.as_str(),
+        });
+
+        match status {
+            PreviewStatus::Ok => {
+                if let Some(size) = item.thumbnail_size {
+                    value["thumbnail_size"] = serde_json::json!(size);
+                }
+                if let Some(width) = item.width {
+                    value["width"] = serde_json::json!(width);
+                }
+                if let Some(height) = item.height {
+                    value["height"] = serde_json::json!(height);
+                }
+                if let Some(bytes) = item.bytes {
+                    value["bytes"] = serde_json::json!(bytes);
+                }
+                if local {
+                    if let Some(path) = &item.thumbnail_path {
+                        value["thumbnail_path"] = serde_json::json!(path);
+                    }
+                } else if let Some(index) = content_index {
+                    value["content_index"] = serde_json::json!(index);
+                }
+            }
+            PreviewStatus::SkippedTooLarge | PreviewStatus::SkippedBudget => {
+                if let Some(size) = item.thumbnail_size {
+                    value["thumbnail_size"] = serde_json::json!(size);
+                }
+                if let Some(bytes) = item.bytes {
+                    value["bytes"] = serde_json::json!(bytes);
+                }
+            }
+            PreviewStatus::Missing | PreviewStatus::NotFound | PreviewStatus::Unavailable => {}
+        }
+
+        manifest_items.push(value);
+    }
+
+    let manifest = serde_json::json!({
+        "size_requested": size_requested,
+        "transport": if local { "local_paths" } else { "inline_base64" },
+        "count": manifest_items.len(),
+        "items": manifest_items,
+    });
+
+    PreviewResponse {
+        manifest,
+        image_blocks,
+    }
 }
 
 /// Normalize and validate `get_image_previews` params into a selector and a
@@ -682,5 +793,151 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let items = resolve_preview_items(&db, tmp.path(), &None, true, &[], 256).unwrap();
         assert!(items.is_empty());
+    }
+
+    fn ok_local_item(image_id: &str) -> PreviewItem {
+        PreviewItem {
+            image_id: image_id.to_string(),
+            status: PreviewStatus::Ok,
+            thumbnail_size: Some(256),
+            width: Some(8),
+            height: Some(8),
+            bytes: Some(123),
+            thumbnail_path: Some("/app/thumbnails/x_256.jpg".to_string()),
+            inline_bytes: None,
+        }
+    }
+
+    fn ok_inline_item(image_id: &str, raw_bytes: usize) -> PreviewItem {
+        PreviewItem {
+            image_id: image_id.to_string(),
+            status: PreviewStatus::Ok,
+            thumbnail_size: Some(256),
+            width: Some(8),
+            height: Some(8),
+            bytes: Some(raw_bytes as u64),
+            thumbnail_path: None,
+            inline_bytes: Some(vec![0u8; raw_bytes]),
+        }
+    }
+
+    #[test]
+    fn response_local_manifest_carries_paths_and_no_image_blocks() {
+        let response = build_preview_response(vec![ok_local_item("a")], true, 256);
+
+        assert!(response.image_blocks.is_empty());
+        assert_eq!(response.manifest["transport"], "local_paths");
+        assert_eq!(response.manifest["size_requested"], 256);
+        assert_eq!(response.manifest["count"], 1);
+        assert_eq!(response.manifest["items"][0]["status"], "ok");
+        assert_eq!(
+            response.manifest["items"][0]["thumbnail_path"],
+            "/app/thumbnails/x_256.jpg"
+        );
+        assert!(response.manifest["items"][0].get("content_index").is_none());
+    }
+
+    #[test]
+    fn response_authenticated_manifest_never_leaks_paths_or_block_payloads() {
+        // Deliberately poison the item with a path AND an inline payload, so it
+        // resolves to `ok` and the manifest must still drop the path.
+        let poisoned = PreviewItem {
+            image_id: "a".to_string(),
+            status: PreviewStatus::Ok,
+            thumbnail_size: Some(256),
+            width: Some(8),
+            height: Some(8),
+            bytes: Some(32),
+            thumbnail_path: Some("/app/thumbnails/x_256.jpg".to_string()),
+            inline_bytes: Some(vec![0u8; 32]),
+        };
+        let response = build_preview_response(vec![poisoned], false, 256);
+
+        let json = response.manifest.to_string();
+        assert_eq!(response.manifest["transport"], "inline_base64");
+        assert_eq!(response.manifest["items"][0]["status"], "ok");
+        assert_eq!(response.manifest["items"][0]["content_index"], 0);
+        assert_eq!(response.image_blocks.len(), 1);
+        assert!(response.manifest["items"][0]
+            .get("thumbnail_path")
+            .is_none());
+        assert!(!json.contains("/app/thumbnails"), "leaked a path: {json}");
+        assert!(!json.contains("x_256.jpg"), "leaked a filename: {json}");
+    }
+
+    #[test]
+    fn response_links_blocks_to_items_by_content_index() {
+        let items = vec![ok_inline_item("a", 32), ok_inline_item("b", 32)];
+        let response = build_preview_response(items, false, 256);
+
+        assert_eq!(response.image_blocks.len(), 2);
+        assert_eq!(response.manifest["items"][0]["content_index"], 0);
+        assert_eq!(response.manifest["items"][1]["content_index"], 1);
+    }
+
+    #[test]
+    fn response_marks_oversized_images_as_skipped_too_large() {
+        let huge = PREVIEW_PER_IMAGE_MAX_BYTES as usize + 1;
+        let response = build_preview_response(vec![ok_inline_item("huge", huge)], false, 256);
+
+        assert!(response.image_blocks.is_empty());
+        assert_eq!(response.manifest["items"][0]["status"], "skipped_too_large");
+        assert_eq!(
+            response.manifest["items"][0]["bytes"],
+            PREVIEW_PER_IMAGE_MAX_BYTES + 1
+        );
+    }
+
+    #[test]
+    fn response_enforces_the_total_budget_deterministically() {
+        // 1_800_000 raw bytes -> 2_400_000 base64 bytes each; the fourth item
+        // would push the running total past the 8 MB budget.
+        let raw = 1_800_000usize;
+        let items = vec![
+            ok_inline_item("a", raw),
+            ok_inline_item("b", raw),
+            ok_inline_item("c", raw),
+            ok_inline_item("d", raw),
+        ];
+        let response = build_preview_response(items, false, 256);
+
+        assert_eq!(response.image_blocks.len(), 3);
+        assert_eq!(response.manifest["items"][0]["status"], "ok");
+        assert_eq!(response.manifest["items"][2]["status"], "ok");
+        assert_eq!(response.manifest["items"][3]["status"], "skipped_budget");
+        assert!(response.manifest["items"][3].get("content_index").is_none());
+    }
+
+    #[test]
+    fn response_keeps_non_ok_statuses_when_the_budget_is_exhausted() {
+        let raw = 1_800_000usize;
+        let items = vec![
+            ok_inline_item("a", raw),
+            ok_inline_item("b", raw),
+            ok_inline_item("c", raw),
+            PreviewItem::unresolved("missing_one", PreviewStatus::Missing),
+            ok_inline_item("d", raw),
+        ];
+        let response = build_preview_response(items, false, 256);
+
+        assert_eq!(response.manifest["items"][3]["status"], "missing");
+        assert_eq!(response.manifest["items"][4]["status"], "skipped_budget");
+    }
+
+    #[test]
+    fn response_downgrades_an_ok_item_without_payload_to_missing() {
+        let broken = PreviewItem {
+            image_id: "broken".to_string(),
+            status: PreviewStatus::Ok,
+            thumbnail_size: Some(256),
+            width: None,
+            height: None,
+            bytes: None,
+            thumbnail_path: None,
+            inline_bytes: None,
+        };
+        let response = build_preview_response(vec![broken], false, 256);
+        assert_eq!(response.manifest["items"][0]["status"], "missing");
+        assert!(response.image_blocks.is_empty());
     }
 }
