@@ -180,7 +180,7 @@ pub(crate) struct PreviewResponse {
 }
 
 fn base64_encoded_len(raw_len: usize) -> u64 {
-    ((raw_len as u64 + 2) / 3) * 4
+    (raw_len as u64).div_ceil(3) * 4
 }
 
 /// Apply the payload caps and build the manifest plus the ordered image blocks.
