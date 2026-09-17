@@ -790,9 +790,62 @@ mod tests {
             .unwrap();
 
         assert_eq!(items[0].status, PreviewStatus::Ok);
+        // An in-scope row on the authenticated transport must carry the payload
+        // inline and must never carry a filesystem path; pin both positively so
+        // a regression that swaps the transport fields is caught here.
+        assert!(items[0].inline_bytes.is_some());
+        assert!(items[0].thumbnail_path.is_none());
+        assert!(items[0].bytes.is_some());
         assert_eq!(items[1].status, PreviewStatus::Unavailable);
         assert!(items[1].thumbnail_path.is_none());
         assert!(items[1].inline_bytes.is_none());
+    }
+
+    #[test]
+    fn resolve_previews_a_jpeg_raf_pair_without_leaking_source_paths() {
+        // A JPEG/RAF pair is two rows for the "same" logical frame. Both are
+        // previewable from their own generated thumbnails, and the source paths
+        // (including their extensions) must never appear in the response.
+        let db = test_db();
+        let tmp = tempfile::tempdir().unwrap();
+        insert_test_image(&db, "pair_jpg", "/lib/frame.JPG");
+        insert_test_image(&db, "pair_raf", "/lib/frame.RAF");
+        let jpg_thumb = write_thumbnail(tmp.path(), "pair_jpg", 256);
+        let raf_thumb = write_thumbnail(tmp.path(), "pair_raf", 256);
+
+        let ids = vec!["pair_jpg".to_string(), "pair_raf".to_string()];
+        let items = resolve_preview_items(&db, tmp.path(), &None, false, &ids, 256).unwrap();
+
+        assert_eq!(items.len(), 2);
+        for item in &items {
+            assert_eq!(item.status, PreviewStatus::Ok);
+            assert!(item.inline_bytes.is_some());
+            assert!(item.thumbnail_path.is_none());
+        }
+        // Each row serves its own generated thumbnail, not the source image.
+        assert_eq!(
+            items[0].inline_bytes,
+            Some(std::fs::read(&jpg_thumb).unwrap())
+        );
+        assert_eq!(
+            items[1].inline_bytes,
+            Some(std::fs::read(&raf_thumb).unwrap())
+        );
+
+        let response = build_preview_response(items, false, 256);
+        assert_eq!(response.manifest["count"], 2);
+        assert_eq!(response.manifest["items"][0]["status"], "ok");
+        assert_eq!(response.manifest["items"][1]["status"], "ok");
+        assert_eq!(response.manifest["transport"], "inline_base64");
+        assert_eq!(response.image_blocks.len(), 2);
+
+        // The `image/jpeg` mime type is applied as a constant by
+        // `preview_tool_result`, so the authenticated transport contract is
+        // pinned at the handler layer rather than in this resolver test.
+        let json = response.manifest.to_string();
+        for leaked in [".JPG", ".RAF", "frame.JPG", "frame.RAF"] {
+            assert!(!json.contains(leaked), "leaked {leaked} in {json}");
+        }
     }
 
     #[test]
