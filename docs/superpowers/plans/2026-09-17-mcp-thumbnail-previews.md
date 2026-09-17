@@ -319,7 +319,7 @@ pub(crate) fn validate_preview_request(
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `cd src-tauri && cargo test --lib mcp::tools::library`
-Expected: PASS (8 tests).
+Expected: PASS (9 tests).
 
 - [ ] **Step 6: Format and commit**
 
@@ -972,7 +972,7 @@ pub(crate) fn build_preview_response(
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd src-tauri && cargo test --lib mcp::tools::library`
-Expected: PASS (24 tests).
+Expected: PASS (23 tests).
 
 - [ ] **Step 5: Format and commit**
 
@@ -1120,7 +1120,7 @@ Run: `cd src-tauri && cargo test --lib mcp::`
 Expected: PASS, including `test_thumbnail_preview_tool_is_read_only_and_viewer_accessible`, `test_all_defined_tools_have_explicit_capability_mapping`, and the viewer/curator/operator/admin matrices.
 
 Run: `cd src-tauri && cargo test --lib mcp::tools::library`
-Expected: PASS (24 tests).
+Expected: PASS (23 tests).
 
 - [ ] **Step 5: Document the contract in `docs/agents.md`**
 
