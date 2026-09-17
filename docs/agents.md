@@ -196,16 +196,19 @@ re-encoded, resized, copied, or read from an original.
 | Image blocks | none | one `image/jpeg` block per preview |
 | Source paths (original / RAW) | never present | never present |
 
-An authenticated caller gets the manifest as the first content block and one
-image block per returned preview, linked by `content_index`. Paths are never
-sent to an authenticated caller — including an admin token.
+An authenticated caller gets the manifest as the first content block, followed
+by one image block per returned preview. `content_index` is 0-based over the
+image blocks only, so an image's actual position in `content` is
+`content_index + 1`. Paths are never sent to an authenticated caller — including
+an admin token.
 
 ### Bounds
 
 - At most **20** previews per call. More than 20 distinct `image_ids` is an
   error, not a silent truncation.
-- At most **2 MB** per generated thumbnail file; larger files are reported as
-  `skipped_too_large`.
+- At most **2 MB** per generated thumbnail in an **authenticated** response;
+  larger files are reported as `skipped_too_large`. Local stdio callers receive
+  only a generated file path and no payload, so this cap does not apply to them.
 - At most **8 MB** of base64 payload per authenticated response; once the budget
   is spent, that item and every later `ok` item are reported as
   `skipped_budget`.
@@ -218,7 +221,7 @@ sent to an authenticated caller — including an admin token.
 | `missing` | Image is authorized and present, but has no generated thumbnail |
 | `not_found` | Unknown image ID (local stdio only) |
 | `unavailable` | Unknown **or** outside the token scope (authenticated only) |
-| `skipped_too_large` | Thumbnail exceeds the 2 MB per-image cap |
+| `skipped_too_large` | Thumbnail exceeds the 2 MB per-image cap (authenticated responses only) |
 | `skipped_budget` | The 8 MB response budget was already spent |
 
 One bad item never fails the call; the rest are returned normally. `unavailable`

@@ -169,7 +169,7 @@ are not part of the preview contract under any transport.
 | `missing` | The image is authorized and present, but no generated thumbnail file exists. |
 | `not_found` | The requested ID is not in the library. Local transport only. |
 | `unavailable` | The ID is unknown **or** outside the token scope. Authenticated transport only. |
-| `skipped_too_large` | The generated thumbnail file exceeds the 2 MB per-image cap (raw file bytes). |
+| `skipped_too_large` | The generated thumbnail file exceeds the 2 MB per-image cap (raw file bytes) (authenticated only). |
 | `skipped_budget` | The 8 MB authenticated payload budget was already exhausted. |
 
 `unavailable` deliberately does not distinguish unknown from out-of-scope, so a
@@ -210,8 +210,9 @@ the manifest or the blocks.
 
 - Maximum 20 items per call (both modes). An explicit over-limit `image_ids`
   request is an error rather than a silent truncation.
-- Per-image cap 2 MB of **raw file bytes**. A larger generated file becomes
-  `skipped_too_large`.
+- Per-image cap 2 MB of **raw file bytes** for **authenticated** responses. A
+  larger generated file becomes `skipped_too_large`. Local transports carry no
+  payload, so the cap does not apply to them.
 - Authenticated total budget 8 MB of **base64-encoded** payload. Once an `ok`
   item would exceed the budget, that item and every remaining item that would
   otherwise be `ok` become `skipped_budget`. Items already resolved to

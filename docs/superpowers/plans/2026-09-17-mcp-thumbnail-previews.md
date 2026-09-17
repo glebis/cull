@@ -881,6 +881,7 @@ pub(crate) fn build_preview_response(
     size_requested: u32,
 ) -> PreviewResponse {
     let mut running_budget: u64 = 0;
+    let mut budget_exhausted = false;
     let mut image_blocks: Vec<Vec<u8>> = Vec::new();
     let mut manifest_items: Vec<serde_json::Value> = Vec::with_capacity(items.len());
 
@@ -900,7 +901,12 @@ pub(crate) fn build_preview_response(
                             status = PreviewStatus::SkippedTooLarge;
                         } else {
                             let encoded = base64_encoded_len(bytes.len());
-                            if running_budget + encoded > PREVIEW_TOTAL_MAX_BYTES {
+                            if budget_exhausted
+                                || running_budget + encoded > PREVIEW_TOTAL_MAX_BYTES
+                            {
+                                // Latch: the first overflow ends payload backfill, so
+                                // later smaller images are never admitted either.
+                                budget_exhausted = true;
                                 status = PreviewStatus::SkippedBudget;
                             } else {
                                 running_budget += encoded;
