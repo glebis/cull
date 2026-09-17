@@ -3,6 +3,8 @@ use super::*;
 use base64::Engine as _;
 use std::path::Path;
 
+use rmcp::model::{CallToolResult, ContentBlock};
+
 use crate::db_core::db::Database;
 use crate::db_core::models::TokenScope;
 use crate::db_core::thumbnails;
@@ -496,6 +498,74 @@ impl CullMcp {
             Err(e) => format!("Error: {}", e),
         }
     }
+
+    #[tool(
+        description = "Return bounded preview thumbnails for explicit image IDs (max 20, deduplicated) or a bounded folder page. Local stdio returns generated thumbnail file paths; authenticated callers receive inline base64 image/jpeg blocks with no filesystem paths. Sizes: 64, 128, 256 (default), 800. Never exposes originals or RAW files."
+    )]
+    fn get_image_previews(
+        &self,
+        Parameters(params): Parameters<GetImagePreviewsParams>,
+    ) -> CallToolResult {
+        let (selector, size) = match validate_preview_request(&params) {
+            Ok(valid) => valid,
+            Err(e) => return preview_error(&e),
+        };
+
+        let state = self.app_handle.state::<AppState>();
+        let local = matches!(self.auth, AuthContext::Local);
+        // `token_scope()` is `None` for local callers, so `local == true`
+        // implies `scope == None`; the two must stay in sync.
+        let scope = self.token_scope();
+
+        let image_ids: Vec<String> = match selector {
+            PreviewSelector::Ids(ids) => ids,
+            PreviewSelector::Folder {
+                path,
+                offset,
+                limit,
+            } => {
+                // A folder outside the token scope is an explicit error; the
+                // per-image scope check below stays the single source of truth
+                // for item authorization in both modes.
+                if !tokens::folder_in_scope(&scope, &path) {
+                    return preview_error("folder is not available in this token scope");
+                }
+                match state.db.list_images_by_folder(&path, limit, offset) {
+                    Ok(images) => images.into_iter().map(|image| image.image.id).collect(),
+                    Err(e) => return preview_error(&e.to_string()),
+                }
+            }
+        };
+
+        let items = match resolve_preview_items(
+            &state.db,
+            &state.app_data_dir,
+            &scope,
+            local,
+            &image_ids,
+            size,
+        ) {
+            Ok(items) => items,
+            Err(e) => return preview_error(&e),
+        };
+
+        preview_tool_result(build_preview_response(items, local, size))
+    }
+}
+
+fn preview_error(message: &str) -> CallToolResult {
+    CallToolResult::error(vec![ContentBlock::text(format!("Error: {}", message))])
+}
+
+fn preview_tool_result(response: PreviewResponse) -> CallToolResult {
+    let mut content = vec![ContentBlock::text(response.manifest.to_string())];
+    content.extend(response.image_blocks.iter().map(|bytes| {
+        ContentBlock::image(
+            base64::engine::general_purpose::STANDARD.encode(bytes),
+            "image/jpeg",
+        )
+    }));
+    CallToolResult::success(content)
 }
 
 pub(super) fn router() -> super::ToolRouter<super::CullMcp> {
