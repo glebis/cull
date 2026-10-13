@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",
-    "@vercel/blob": "^2.8.0",
+    "@vercel/blob": "^2.8.1",
     "resend": "^6.26.0"
   },
   "devDependencies": {
