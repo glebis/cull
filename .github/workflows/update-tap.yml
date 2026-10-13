@@ -84,12 +84,14 @@ jobs:
           expected_provenance="https://github.com/$REPOSITORY/releases/download/v$VERSION/release-provenance.json"
           test "$PROVENANCE_URL" = "$expected_provenance"
 
-          failure_code=MISSING_PROVENANCE
+          failure_code=MISSING_RELEASE
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             "https://api.github.com/repos/$REPOSITORY/releases/tags/v$VERSION" \
             --output "$RUNNER_TEMP/public-release.json"
+          failure_code=MISSING_PROVENANCE
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             "$PROVENANCE_URL" --output "$RUNNER_TEMP/release-provenance.json"
+          failure_code=MISSING_CHECKSUMS
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             "https://github.com/$REPOSITORY/releases/download/v$VERSION/checksums.txt" \
             --output "$RUNNER_TEMP/checksums.txt"
@@ -140,12 +142,13 @@ jobs:
             const provenanceAsset = provenance.assets[name];
             const publicAsset = release.assets.find((asset) => asset.name === name);
             const expectedUrl = `https://github.com/${process.env.REPOSITORY}/releases/download/v${process.env.VERSION}/${name}`;
-            if (!provenanceAsset || !/^[0-9a-f]{64}$/.test(provenanceAsset.sha256) ||
+            const fail = !provenanceAsset || !/^[0-9a-f]{64}$/.test(provenanceAsset.sha256) ||
                 !Number.isSafeInteger(provenanceAsset.size) || provenanceAsset.size < 1 ||
                 !publicAsset || publicAsset.state !== 'uploaded' ||
                 publicAsset.size !== provenanceAsset.size ||
                 publicAsset.digest !== `sha256:${provenanceAsset.sha256}` ||
-                publicAsset.browser_download_url !== expectedUrl) process.exit(2);
+                publicAsset.browser_download_url !== expectedUrl;
+            if (fail) process.exit(2);
           }
           const checksumLines = fs.readFileSync(process.env.CHECKSUMS, 'utf8').trim().split('\n');
           if (checksumLines.length !== expectedAssets.length) process.exit(2);
@@ -164,7 +167,6 @@ jobs:
                 publicAsset.digest !== `sha256:${digest}`) process.exit(4);
           }
           const digest = provenance.assets[dmgName]?.sha256;
-          console.error(`DEBUG digest="${digest}" expected="${process.env.EXPECTED_SHA}" equal=${digest === process.env.EXPECTED_SHA}`);
           if (process.env.EXPECTED_SHA && digest !== process.env.EXPECTED_SHA) process.exit(3);
           const publicDmg = release.assets.find(({ name }) => name === dmgName);
           if (!publicDmg || publicDmg.state !== 'uploaded' || publicDmg.size !== provenance.assets[dmgName].size ||
@@ -286,6 +288,7 @@ jobs:
           VERSION: ${{ steps.verified.outputs.version }}
           DMG_SHA256: ${{ steps.verified.outputs.dmg_sha256 }}
           CHECKOUT_OUTCOME: ${{ steps.checkout_tap.outcome }}
+          HOMEBREW_DEVELOPER: "1"
         run: |
           set -euo pipefail
           evidence="$RUNNER_TEMP/homebrew-promotion.json"
