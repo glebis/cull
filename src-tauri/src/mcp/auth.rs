@@ -96,6 +96,7 @@ mod tests {
         "list_folders",
         "list_collections",
         "list_folder_images",
+        "get_image_previews",
         "list_session_canvases",
         "get_canvas_layout",
         "set_rating",
@@ -172,6 +173,7 @@ mod tests {
         "list_folders",
         "list_collections",
         "list_folder_images",
+        "get_image_previews",
         "list_session_canvases",
         "get_canvas_layout",
         "get_detections",
@@ -281,6 +283,17 @@ mod tests {
                 tool
             );
         }
+    }
+
+    #[test]
+    fn test_thumbnail_preview_tool_is_read_only_and_viewer_accessible() {
+        assert!(ALL_TOOLS.contains(&"get_image_previews"));
+        assert!(READ_TOOLS.contains(&"get_image_previews"));
+        assert_eq!(
+            tokens::tool_capability("get_image_previews"),
+            "library:read"
+        );
+        assert!(require_capability(&viewer_auth(), "get_image_previews").is_ok());
     }
 
     #[test]

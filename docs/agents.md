@@ -155,6 +155,84 @@ select_images_in_view           -> drive the live grid selection
 get_audit_log                   -> confirm what the agent did
 ```
 
+## 6. Thumbnail previews (evidence-led shortlisting)
+
+`get_image_previews` gives an agent a bounded visual view of candidates from
+Cull's own generated thumbnails, without a UI snapshot and without access to
+originals. Use it after `list_folder_images` to shortlist, then act with
+`set_rating` / `set_decision`.
+
+```jsonc
+// MCP call_tool: get_image_previews — explicit IDs
+{ "image_ids": ["img_a", "img_b"], "size": 256 }
+
+// MCP call_tool: get_image_previews — a bounded folder page
+{ "folder_path": "/Users/me/renders", "offset": 0, "limit": 20, "size": 256 }
+```
+
+Exactly one of `image_ids` / `folder_path` per call. `offset` and `limit` apply
+to folder pages only and are ignored for `image_ids`.
+
+### Sizes
+
+| `size` | Longest edge | Notes |
+| --- | --- | --- |
+| 64 | 64 px | cheapest |
+| 128 | 128 px | coarse comparison |
+| 256 | 256 px | **default** |
+| 800 | 800 px | best fidelity, largest payload |
+
+Only these already-generated sizes are served (JPEG, quality 90). If the
+requested size is absent, the next larger generated size is served and the
+manifest reports the real one in `thumbnail_size`. No thumbnail is ever
+re-encoded, resized, copied, or read from an original.
+
+### Transport contract
+
+| | Local stdio | Authenticated (HTTP/token, any role) |
+| --- | --- | --- |
+| `transport` | `local_paths` | `inline_base64` |
+| `thumbnail_path` | absolute path to the generated file | never present |
+| Image blocks | none | one `image/jpeg` block per preview |
+| Source paths (original / RAW) | never present | never present |
+
+An authenticated caller gets the manifest as the first content block, followed
+by one image block per returned preview. `content_index` is 0-based over the
+image blocks only, so an image's actual position in `content` is
+`content_index + 1`. Paths are never sent to an authenticated caller — including
+an admin token.
+
+### Bounds
+
+- At most **20** previews per call. More than 20 distinct `image_ids` is an
+  error, not a silent truncation.
+- At most **2 MB** per generated thumbnail in an **authenticated** response;
+  larger files are reported as `skipped_too_large`. Local stdio callers receive
+  only a generated file path and no payload, so this cap does not apply to them.
+- At most **8 MB** of base64 payload per authenticated response; once the budget
+  is spent, that item and every later `ok` item are reported as
+  `skipped_budget`.
+
+### Per-image statuses
+
+| `status` | Meaning |
+| --- | --- |
+| `ok` | Generated thumbnail found and returned |
+| `missing` | Image is authorized and present, but has no generated thumbnail |
+| `not_found` | Unknown image ID (local stdio only) |
+| `unavailable` | Unknown **or** outside the token scope (authenticated only) |
+| `skipped_too_large` | Thumbnail exceeds the 2 MB per-image cap (authenticated responses only) |
+| `skipped_budget` | The 8 MB response budget was already spent |
+
+One bad item never fails the call; the rest are returned normally. `unavailable`
+deliberately does not distinguish unknown from out-of-scope, so a scoped token
+cannot probe library existence by ID. A RAF file previews from its generated
+JPEG thumbnail like any other image.
+
+`get_image_previews` is scope-authorized and audit-logged like every other tool
+(see `get_audit_log`). It is **MCP-only**: it is not part of the headless CLI
+slice, so `cull --json call_tool get_image_previews` reports it as unsupported.
+
 ## Launch demo (the keep-anyway loop)
 
 A stranger with an admin token can run the differentiator end to end:

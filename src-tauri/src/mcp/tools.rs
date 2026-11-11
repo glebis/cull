@@ -641,6 +641,28 @@ pub struct ListFolderImagesParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct GetImagePreviewsParams {
+    #[schemars(
+        description = "Explicit image IDs to preview (1-20 distinct, deduplicated). Mutually exclusive with folder_path. Ignored offset/limit fields are allowed."
+    )]
+    pub image_ids: Option<Vec<String>>,
+    #[schemars(
+        description = "Folder path to preview a bounded page from. Mutually exclusive with image_ids."
+    )]
+    pub folder_path: Option<String>,
+    #[schemars(
+        description = "Page offset for folder_path mode (default 0, ignored for image_ids)"
+    )]
+    pub offset: Option<u32>,
+    #[schemars(
+        description = "Page size for folder_path mode (1-20, default 20, ignored for image_ids)"
+    )]
+    pub limit: Option<u32>,
+    #[schemars(description = "Thumbnail size in px: 64, 128, 256 (default), or 800")]
+    pub size: Option<u32>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SetDecisionParams {
     #[schemars(description = "The image ID")]
     pub image_id: String,

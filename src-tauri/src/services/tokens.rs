@@ -73,6 +73,7 @@ pub fn tool_capability(tool_name: &str) -> &'static str {
         | "get_image"
         | "list_folders"
         | "list_folder_images"
+        | "get_image_previews"
         | "list_collections"
         | "list_collection_images"
         | "list_session_canvases"
