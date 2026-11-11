@@ -133,7 +133,7 @@ jobs:
       - name: Install cargo-deny and cargo-audit
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny,cargo-audit
+          tool: cargo-deny@0.20.2,cargo-audit@0.22.2
 
       - name: Supply-chain audit
         run: bash scripts/supply-chain-audit.sh check
